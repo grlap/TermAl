@@ -175,6 +175,8 @@ import {
 } from "./state-adoption";
 import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
 import { appTestHooks, setAppTestHooksForTests } from "./app-test-hooks";
+import { ProjectListSection } from "./ProjectListSection";
+import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
 
 import {
   CodexPromptSettingsCard,
@@ -479,24 +481,6 @@ type PendingSessionRename = {
   clientY: number;
   sessionId: string;
 };
-type ProjectContextMenu = {
-  clientX: number;
-  clientY: number;
-  paneId: string | null;
-  projectId: string;
-};
-type ProjectListSectionProps = {
-  paneId: string;
-  projectSessionCounts: ReadonlyMap<string, number>;
-  projects: Project[];
-  remoteLookup: ReadonlyMap<string, RemoteConfig>;
-  selectedProjectId: string;
-  sessionCount: number;
-  onProjectScopeChange: (projectId: string) => void;
-  onRemoveProject: (project: Project) => void;
-  onStartSession: (paneId: string | null, projectId: string) => void;
-};
-
 const PENDING_KILL_CLOSE_DELAY_MS = 180;
 const PENDING_SESSION_RENAME_CLOSE_DELAY_MS = 300;
 
@@ -525,7 +509,6 @@ const NEW_SESSION_AGENT_OPTIONS_EXHAUSTIVE: ExhaustiveValueCoverage<
   AgentType,
   typeof NEW_SESSION_AGENT_OPTIONS
 > = true;
-const ALL_PROJECTS_FILTER_ID = "__all__";
 const CREATE_SESSION_WORKSPACE_ID = "__workspace__";
 type StandaloneControlSurfaceViewState = {
   projectId?: string;
@@ -8534,235 +8517,6 @@ export default function App() {
         </SettingsDialogShell>
       ) : null}
     </div>
-  );
-}
-
-function ProjectListSection({
-  paneId,
-  projectSessionCounts,
-  projects,
-  remoteLookup,
-  selectedProjectId,
-  sessionCount,
-  onProjectScopeChange,
-  onRemoveProject,
-  onStartSession,
-}: ProjectListSectionProps) {
-  const [contextMenu, setContextMenu] = useState<ProjectContextMenu | null>(
-    null,
-  );
-  const [contextMenuStyle, setContextMenuStyle] =
-    useState<CSSProperties | null>(null);
-  const contextMenuRef = useRef<HTMLDivElement | null>(null);
-  const contextMenuProject = contextMenu
-    ? (projects.find((project) => project.id === contextMenu.projectId) ?? null)
-    : null;
-
-  function closeContextMenu() {
-    setContextMenu(null);
-    setContextMenuStyle(null);
-  }
-
-  function updateContextMenuPosition(
-    menu = contextMenu,
-    node = contextMenuRef.current,
-  ) {
-    if (!menu) {
-      setContextMenuStyle(null);
-      return;
-    }
-
-    if (!node || typeof window === "undefined") {
-      setContextMenuStyle({
-        left: menu.clientX,
-        top: menu.clientY,
-      });
-      return;
-    }
-
-    const menuRect = node.getBoundingClientRect();
-    const viewportPadding = 12;
-    const left = clamp(
-      menu.clientX,
-      viewportPadding,
-      window.innerWidth - menuRect.width - viewportPadding,
-    );
-    const top = clamp(
-      menu.clientY,
-      viewportPadding,
-      window.innerHeight - menuRect.height - viewportPadding,
-    );
-
-    setContextMenuStyle({
-      left,
-      top,
-    });
-  }
-
-  function openContextMenu(
-    event: ReactMouseEvent<HTMLButtonElement>,
-    project: Project,
-  ) {
-    event.preventDefault();
-    event.stopPropagation();
-    setContextMenu({
-      clientX: event.clientX,
-      clientY: event.clientY,
-      paneId,
-      projectId: project.id,
-    });
-    setContextMenuStyle({
-      left: event.clientX,
-      top: event.clientY,
-    });
-  }
-
-  useEffect(() => {
-    if (!contextMenu) {
-      return;
-    }
-
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (target instanceof Node && contextMenuRef.current?.contains(target)) {
-        return;
-      }
-
-      closeContextMenu();
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeContextMenu();
-      }
-    }
-
-    function handleViewportChange() {
-      closeContextMenu();
-    }
-
-    window.addEventListener("pointerdown", handlePointerDown, true);
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", handleViewportChange);
-    window.addEventListener("scroll", handleViewportChange, true);
-
-    return () => {
-      window.removeEventListener("pointerdown", handlePointerDown, true);
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", handleViewportChange);
-      window.removeEventListener("scroll", handleViewportChange, true);
-    };
-  }, [contextMenu]);
-
-  useEffect(() => {
-    if (!contextMenu || contextMenuProject) {
-      return;
-    }
-
-    closeContextMenu();
-  }, [contextMenu, contextMenuProject]);
-
-  useLayoutEffect(() => {
-    if (!contextMenu) {
-      setContextMenuStyle(null);
-      return;
-    }
-
-    updateContextMenuPosition();
-  }, [contextMenu]);
-
-  return (
-    <section className="control-panel-section-stack" aria-label="Projects">
-      <section className="project-controls" aria-label="Projects">
-        <div className="project-controls-header">
-          <div className="session-control-label">Projects</div>
-          <span className="project-count-badge">{projects.length}</span>
-        </div>
-        <div className="project-list" role="list">
-          <button
-            className={`project-row ${selectedProjectId === ALL_PROJECTS_FILTER_ID ? "selected" : ""}`}
-            type="button"
-            onClick={() => onProjectScopeChange(ALL_PROJECTS_FILTER_ID)}
-          >
-            <span className="project-row-copy">
-              <strong>All projects</strong>
-              <span className="project-row-path">
-                Show every session in this window.
-              </span>
-            </span>
-            <span className="project-row-count">{sessionCount}</span>
-          </button>
-          {projects.map((project) => {
-            const isSelected = project.id === selectedProjectId;
-
-            return (
-              <button
-                key={project.id}
-                className={`project-row ${isSelected ? "selected" : ""}`}
-                type="button"
-                onClick={() => onProjectScopeChange(project.id)}
-                onContextMenu={(event) => openContextMenu(event, project)}
-                aria-haspopup="menu"
-                aria-expanded={
-                  contextMenu?.projectId === project.id ? "true" : undefined
-                }
-              >
-                <span className="project-row-copy">
-                  <strong>{project.name}</strong>
-                  <span className="project-row-path">
-                    {describeProjectScope(project, remoteLookup)}
-                  </span>
-                </span>
-                <span className="project-row-count">
-                  {projectSessionCounts.get(project.id) ?? 0}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-      {contextMenu && contextMenuProject && typeof document !== "undefined"
-        ? createPortal(
-            <div
-              ref={contextMenuRef}
-              className="pane-tab-context-menu panel project-context-menu"
-              role="menu"
-              aria-label={`${contextMenuProject.name} project actions`}
-              style={
-                contextMenuStyle ?? {
-                  left: contextMenu.clientX,
-                  top: contextMenu.clientY,
-                }
-              }
-            >
-              <button
-                className="pane-tab-context-menu-item"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  closeContextMenu();
-                  onStartSession(contextMenu.paneId, contextMenu.projectId);
-                }}
-              >
-                Start new session
-              </button>
-              <button
-                className="pane-tab-context-menu-item pane-tab-context-menu-item-danger"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  closeContextMenu();
-                  onRemoveProject(contextMenuProject);
-                }}
-              >
-                Remove project
-              </button>
-            </div>,
-            document.body,
-          )
-        : null}
-    </section>
   );
 }
 
