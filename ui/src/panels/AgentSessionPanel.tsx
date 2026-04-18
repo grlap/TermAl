@@ -1486,9 +1486,7 @@ function ConversationMessageList({
   conversationSearchActiveItemKey: string | null;
   onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
 }) {
-  const hasConversationSearch = conversationSearchQuery.trim().length > 0;
-
-  if (hasConversationSearch || messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
+  if (messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
     return (
       <>
         {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
@@ -1522,11 +1520,15 @@ function ConversationMessageList({
       sessionId={sessionId}
       messages={messages}
       scrollContainerRef={scrollContainerRef}
-          onApprovalDecision={onApprovalDecision}
-          onUserInputSubmit={onUserInputSubmit}
-          onMcpElicitationSubmit={onMcpElicitationSubmit}
-          onCodexAppRequestSubmit={onCodexAppRequestSubmit}
-        />
+      conversationSearchQuery={conversationSearchQuery}
+      conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
+      conversationSearchActiveItemKey={conversationSearchActiveItemKey}
+      onConversationSearchItemMount={onConversationSearchItemMount}
+      onApprovalDecision={onApprovalDecision}
+      onUserInputSubmit={onUserInputSubmit}
+      onMcpElicitationSubmit={onMcpElicitationSubmit}
+      onCodexAppRequestSubmit={onCodexAppRequestSubmit}
+    />
   );
 }
 
@@ -1536,6 +1538,10 @@ export function VirtualizedConversationMessageList({
   sessionId,
   messages,
   scrollContainerRef,
+  conversationSearchQuery = "",
+  conversationSearchMatchedItemKeys = EMPTY_MATCHED_ITEM_KEYS,
+  conversationSearchActiveItemKey = null,
+  onConversationSearchItemMount = () => {},
   onApprovalDecision,
   onUserInputSubmit,
   onMcpElicitationSubmit,
@@ -1546,11 +1552,20 @@ export function VirtualizedConversationMessageList({
   sessionId: string;
   messages: Message[];
   scrollContainerRef: RefObject<HTMLElement | null>;
+  conversationSearchQuery?: string;
+  conversationSearchMatchedItemKeys?: ReadonlySet<string>;
+  conversationSearchActiveItemKey?: string | null;
+  onConversationSearchItemMount?: (itemKey: string, node: HTMLElement | null) => void;
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
   onUserInputSubmit: UserInputSubmitHandler;
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
 }) {
+  const hasConversationSearch = conversationSearchQuery.trim().length > 0;
+  const activeConversationSearchMessageId =
+    conversationSearchActiveItemKey?.startsWith("message:")
+      ? conversationSearchActiveItemKey.slice("message:".length)
+      : null;
   const messageHeightsRef = useRef<Record<string, number>>({});
   // Expected behavior: when the viewport is already at the latest message,
   // virtualized height measurements should keep the viewport pinned there.
@@ -1577,9 +1592,9 @@ export function VirtualizedConversationMessageList({
   );
   const wasActiveRef = useRef(isActive);
 
-  // Render window: only keep the last N messages in the layout to avoid
-  // computing positions for thousands of off-screen items. Older messages
-  // are loaded on scroll-up.
+  // Render window: normally only keep the last N messages in the layout.
+  // Session find temporarily keeps all messages in the layout so the active
+  // hit can be positioned, while still rendering only the visible rows.
   const [renderWindowSize, setRenderWindowSize] = useState(
     Math.min(RENDER_WINDOW_INITIAL_SIZE, messages.length),
   );
@@ -1597,7 +1612,9 @@ export function VirtualizedConversationMessageList({
   }
   prevMessageCountRef.current = messages.length;
 
-  const windowStartIndex = Math.max(0, messages.length - renderWindowSize);
+  const windowStartIndex = hasConversationSearch
+    ? 0
+    : Math.max(0, messages.length - renderWindowSize);
   const windowedMessages = useMemo(
     () => messages.slice(windowStartIndex),
     [messages, windowStartIndex],
@@ -1624,7 +1641,25 @@ export function VirtualizedConversationMessageList({
       ? activeViewport.clientHeight
       : viewport.height;
   const viewportScrollTop = activeViewport ? activeViewport.scrollTop : viewport.scrollTop;
-  const visibleRange = useMemo(
+  const activeConversationSearchMessageIndex =
+    activeConversationSearchMessageId !== null
+      ? messageIndexById.get(activeConversationSearchMessageId)
+      : undefined;
+  const activeConversationSearchScrollTop =
+    hasConversationSearch && activeConversationSearchMessageIndex !== undefined
+      ? Math.max(
+          (layout.tops[activeConversationSearchMessageIndex] ?? 0) -
+            Math.max(
+              (viewportHeight -
+                (messageHeights[activeConversationSearchMessageIndex] ??
+                  DEFAULT_ESTIMATED_MESSAGE_HEIGHT)) /
+                2,
+              0,
+            ),
+          0,
+        )
+      : null;
+  const viewportVisibleRange = useMemo(
     () =>
       findVirtualizedMessageRange(
         layout.tops,
@@ -1635,6 +1670,48 @@ export function VirtualizedConversationMessageList({
       ),
     [layout.tops, messageHeights, viewportHeight, viewportScrollTop],
   );
+  const activeConversationSearchVisibleRange = useMemo(
+    () =>
+      activeConversationSearchScrollTop === null
+        ? null
+        : findVirtualizedMessageRange(
+            layout.tops,
+            messageHeights,
+            activeConversationSearchScrollTop,
+            viewportHeight,
+            VIRTUALIZED_MESSAGE_OVERSCAN_PX,
+          ),
+    [
+      activeConversationSearchScrollTop,
+      layout.tops,
+      messageHeights,
+      viewportHeight,
+    ],
+  );
+  const visibleRanges = useMemo(() => {
+    const ranges = [viewportVisibleRange];
+    if (activeConversationSearchVisibleRange) {
+      ranges.push(activeConversationSearchVisibleRange);
+    }
+
+    const sortedRanges = ranges
+      .filter((range) => range.endIndex > range.startIndex)
+      .map((range) => ({ ...range }))
+      .sort((first, second) => first.startIndex - second.startIndex);
+    const mergedRanges: { startIndex: number; endIndex: number }[] = [];
+
+    for (const range of sortedRanges) {
+      const lastRange = mergedRanges[mergedRanges.length - 1];
+      if (!lastRange || range.startIndex > lastRange.endIndex) {
+        mergedRanges.push(range);
+        continue;
+      }
+
+      lastRange.endIndex = Math.max(lastRange.endIndex, range.endIndex);
+    }
+
+    return mergedRanges.length > 0 ? mergedRanges : [{ startIndex: 0, endIndex: 0 }];
+  }, [activeConversationSearchVisibleRange, viewportVisibleRange]);
 
   useEffect(() => {
     messageHeightsRef.current = Object.fromEntries(
@@ -1643,6 +1720,45 @@ export function VirtualizedConversationMessageList({
         .map((message) => [message.id, messageHeightsRef.current[message.id] as number]),
     );
   }, [windowedMessages]);
+
+  useLayoutEffect(() => {
+    if (
+      !isActive ||
+      !hasConversationSearch ||
+      activeConversationSearchMessageIndex === undefined ||
+      activeConversationSearchScrollTop === null
+    ) {
+      return;
+    }
+
+    const node = scrollContainerRef.current;
+    if (!node) {
+      return;
+    }
+
+    const nextViewportHeight =
+      node.clientHeight > 0 ? node.clientHeight : DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT;
+    const nextScrollTop = activeConversationSearchScrollTop;
+
+    shouldKeepBottomAfterLayoutRef.current = false;
+    if (Math.abs(node.scrollTop - nextScrollTop) >= 1) {
+      node.scrollTop = nextScrollTop;
+    }
+    setViewport((current) =>
+      current.height === nextViewportHeight && current.scrollTop === nextScrollTop
+        ? current
+        : {
+            height: nextViewportHeight,
+            scrollTop: nextScrollTop,
+          },
+    );
+  }, [
+    activeConversationSearchMessageIndex,
+    activeConversationSearchScrollTop,
+    hasConversationSearch,
+    isActive,
+    scrollContainerRef,
+  ]);
 
   // Enter the measuring phase on inactive → active transitions while
   // mounted. The initial mount case is handled by the `useState`
@@ -1685,9 +1801,8 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
-    const visibleMessages = windowedMessages.slice(
-      visibleRange.startIndex,
-      visibleRange.endIndex,
+    const visibleMessages = visibleRanges.flatMap((range) =>
+      windowedMessages.slice(range.startIndex, range.endIndex),
     );
     if (visibleMessages.length === 0) {
       setIsMeasuringPostActivation(false);
@@ -1962,7 +2077,7 @@ export function VirtualizedConversationMessageList({
       className={`virtualized-message-list${isMeasuringPostActivation ? " is-measuring-post-activation" : ""}`}
       style={{ height: layout.totalHeight }}
     >
-      {hasOlderMessages && visibleRange.startIndex === 0 && (
+      {hasOlderMessages && viewportVisibleRange.startIndex === 0 && (
         <div
           className="load-earlier-messages"
           style={{ position: "absolute", top: 0, left: 0, right: 0 }}
@@ -1981,26 +2096,32 @@ export function VirtualizedConversationMessageList({
           </button>
         </div>
       )}
-      {windowedMessages
-        .slice(visibleRange.startIndex, visibleRange.endIndex)
-        .map((message, visibleIndex) => {
-          const messageIndex = visibleRange.startIndex + visibleIndex;
-          return (
-            <MeasuredMessageCard
-              key={message.id}
-              isActive={isActive}
-              renderMessageCard={renderMessageCard}
-              message={message}
-              preferImmediateHeavyRender={isActive && messageIndex >= windowedMessages.length - 2}
-              top={layout.tops[messageIndex] ?? 0}
-              onApprovalDecision={boundApprovalDecision}
-              onUserInputSubmit={boundUserInputSubmit}
-              onMcpElicitationSubmit={boundMcpElicitationSubmit}
-              onCodexAppRequestSubmit={boundCodexAppRequestSubmit}
-              onHeightChange={handleHeightChange}
-            />
-          );
-        })}
+      {visibleRanges.flatMap((range) =>
+        windowedMessages
+          .slice(range.startIndex, range.endIndex)
+          .map((message, visibleIndex) => {
+            const messageIndex = range.startIndex + visibleIndex;
+            return (
+              <MeasuredMessageCard
+                key={message.id}
+                isActive={isActive}
+                renderMessageCard={renderMessageCard}
+                message={message}
+                itemKey={isActive ? `message:${message.id}` : undefined}
+                isSearchMatch={conversationSearchMatchedItemKeys.has(`message:${message.id}`)}
+                isSearchActive={conversationSearchActiveItemKey === `message:${message.id}`}
+                preferImmediateHeavyRender={isActive && messageIndex >= windowedMessages.length - 2}
+                top={layout.tops[messageIndex] ?? 0}
+                onSearchItemMount={onConversationSearchItemMount}
+                onApprovalDecision={boundApprovalDecision}
+                onUserInputSubmit={boundUserInputSubmit}
+                onMcpElicitationSubmit={boundMcpElicitationSubmit}
+                onCodexAppRequestSubmit={boundCodexAppRequestSubmit}
+                onHeightChange={handleHeightChange}
+              />
+            );
+          }),
+      )}
     </div>
   );
 }
@@ -2009,7 +2130,11 @@ const MeasuredMessageCard = memo(function MeasuredMessageCard({
   isActive,
   renderMessageCard,
   message,
+  itemKey,
+  isSearchMatch,
+  isSearchActive,
   preferImmediateHeavyRender,
+  onSearchItemMount,
   onApprovalDecision,
   onUserInputSubmit,
   onMcpElicitationSubmit,
@@ -2020,7 +2145,11 @@ const MeasuredMessageCard = memo(function MeasuredMessageCard({
   isActive: boolean;
   renderMessageCard: RenderMessageCard;
   message: Message;
+  itemKey?: string;
+  isSearchMatch: boolean;
+  isSearchActive: boolean;
   preferImmediateHeavyRender: boolean;
+  onSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
   onUserInputSubmit: BoundUserInputSubmitHandler;
   onMcpElicitationSubmit: BoundMcpElicitationSubmitHandler;
@@ -2066,14 +2195,21 @@ const MeasuredMessageCard = memo(function MeasuredMessageCard({
 
   return (
     <div ref={slotRef} className="virtualized-message-slot" style={{ top }}>
-      {renderMessageCard(
-        message,
-        preferImmediateHeavyRender,
-        onApprovalDecision,
-        onUserInputSubmit,
-        onMcpElicitationSubmit,
-        onCodexAppRequestSubmit,
-      )}
+      <MessageSlot
+        itemKey={itemKey}
+        isSearchMatch={isSearchMatch}
+        isSearchActive={isSearchActive}
+        onSearchItemMount={onSearchItemMount}
+      >
+        {renderMessageCard(
+          message,
+          preferImmediateHeavyRender,
+          onApprovalDecision,
+          onUserInputSubmit,
+          onMcpElicitationSubmit,
+          onCodexAppRequestSubmit,
+        )}
+      </MessageSlot>
     </div>
   );
 });

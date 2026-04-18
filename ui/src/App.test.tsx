@@ -1243,6 +1243,36 @@ describe("App", () => {
     });
   });
 
+  it("opens session find on Ctrl+F even when focused session controls stop propagation", async () => {
+    await withSuppressedActWarnings(async () => {
+      const context = await renderAppWithProjectAndSession();
+      const composer = await screen.findByLabelText("Message Session 1");
+      const stopPropagation = (event: KeyboardEvent) => {
+        event.stopPropagation();
+      };
+      composer.addEventListener("keydown", stopPropagation);
+
+      try {
+        await act(async () => {
+          fireEvent.keyDown(composer, {
+            key: "f",
+            code: "KeyF",
+            ctrlKey: true,
+          });
+        });
+        await settleAsyncUi();
+
+        expect(
+          screen.getByRole("search", { name: "Find in session" }),
+        ).toBeInTheDocument();
+        expect(screen.getByPlaceholderText("Find in session")).toHaveFocus();
+      } finally {
+        composer.removeEventListener("keydown", stopPropagation);
+        context.cleanup();
+      }
+    });
+  });
+
   it("applies the active combobox option on space without closing the menu", () => {
     const onChange = vi.fn();
     const scrollIntoViewSpy = vi

@@ -103,6 +103,57 @@ describe("AgentSessionPanel conversation caching", () => {
     ).toBeNull();
   });
 
+  it("keeps long session find virtualized while typing a query", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    const scrollNode = document.createElement("section");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      queueMicrotask(() => callback(0));
+      return 1;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
+
+    try {
+      const messages = makeTextMessages(180);
+      const activeSession = makeSession("session-a", { messages });
+      const matchedKeys = new Set(messages.map((message) => `message:${message.id}`));
+
+      const { container } = renderSessionPanelWithDefaults({
+        activeSession,
+        mountedSessions: [activeSession],
+        scrollContainerRef: {
+          current: scrollNode,
+        } as RefObject<HTMLElement | null>,
+        conversationSearchQuery: "Message",
+        conversationSearchMatchedItemKeys: matchedKeys,
+        conversationSearchActiveItemKey: "message:message-150",
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("message-150")).toBeInTheDocument();
+      });
+
+      expect(container.querySelectorAll(".message-card").length).toBeLessThan(80);
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
   it("keeps the bottom pin across successive virtualized height commits", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
