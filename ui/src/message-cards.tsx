@@ -1018,22 +1018,25 @@ const TERMAL_MERMAID_THEME_CSS = `
 .label {
   line-height: 1.2;
 }
+/* Edge-label pill shape. Mermaid renders the actual background as
+   either a child rect or a labelBkg div (varies by renderer
+   + html-labels setting), sized to fit the text. Padding on the
+   outer edgeLabel pushes text AWAY from that background and
+   produces a weird narrow-tall ghost shape. Apply the border-
+   radius to all Mermaid-generated inner wrappers AND to the SVG
+   rect so whichever element carries the background gets the rounded
+   corners. No padding — Mermaid's built-in label sizing is already
+   generous enough at 12px. */
 .edgeLabel,
 .edgeLabel .label,
 .edgeLabel span,
 .edgeLabel p,
-.edgeLabel div {
-  border-radius: 24px;
-}
-/* Edge labels ("yes"/"no" pills on decision arrows) match the node
-   font size (12px from \`themeVariables.fontSize\`) and get a uniform
-   8px square padding so the existing 24px border-radius renders as
-   a proper pill bubble. Padding is applied to the outer
-   \`.edgeLabel\` only so it doesn't compound through nested
-   elements (Mermaid wraps pill content in label → span → p → div
-   depending on the renderer). */
-.edgeLabel {
-  padding: 8px;
+.edgeLabel div,
+.edgeLabel .labelBkg,
+.edgeLabel rect {
+  border-radius: 6px;
+  rx: 6;
+  ry: 6;
 }
 .nodeLabel p,
 .edgeLabel p,

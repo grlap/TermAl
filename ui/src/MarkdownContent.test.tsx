@@ -185,7 +185,7 @@ describe("MarkdownContent Mermaid diagrams", () => {
       securityLevel: "strict",
       startOnLoad: false,
       theme: "dark",
-      themeCSS: expect.stringContaining("border-radius: 24px"),
+      themeCSS: expect.stringContaining("border-radius: 6px"),
       themeVariables: { fontSize: "12px" },
     });
     expect(mermaidInitializeMock).toHaveBeenNthCalledWith(2, {
@@ -201,7 +201,7 @@ describe("MarkdownContent Mermaid diagrams", () => {
       htmlLabels: true,
       securityLevel: "strict",
       startOnLoad: false,
-      themeCSS: expect.stringContaining("border-radius: 24px"),
+      themeCSS: expect.stringContaining("border-radius: 6px"),
       themeVariables: { fontSize: "12px" },
     });
     expect(mermaidRenderMock).toHaveBeenCalledWith(
