@@ -186,10 +186,8 @@ import {
   ControlPanelConnectionIndicator,
   WorkspaceSwitcher,
 } from "./workspace-shell-controls";
-import {
-  RuntimeActionButton,
-  type RuntimeAction,
-} from "./runtime-action-button";
+import type { RuntimeAction } from "./runtime-action-button";
+import { OrchestratorRuntimeActionButton } from "./OrchestratorRuntimeActionButton";
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
@@ -12365,46 +12363,3 @@ function EmptyState({ title, body }: { title: string; body: string }) {
   );
 }
 
-function OrchestratorRuntimeActionButton({
-  action,
-  orchestratorId,
-  isPending,
-  disabled,
-  onClick,
-}: {
-  action: "pause" | "resume" | "stop";
-  orchestratorId: string;
-  isPending: boolean;
-  disabled: boolean;
-  onClick: () => void;
-}) {
-  const label =
-    action === "pause"
-      ? `Pause orchestration ${orchestratorId}`
-      : action === "resume"
-        ? `Resume orchestration ${orchestratorId}`
-        : `Stop orchestration ${orchestratorId}`;
-  const title = isPending
-    ? action === "pause"
-      ? "Pausing orchestration"
-      : action === "resume"
-        ? "Resuming orchestration"
-        : "Stopping orchestration"
-    : action === "pause"
-      ? "Pause orchestration"
-      : action === "resume"
-        ? "Resume orchestration"
-        : "Stop orchestration";
-
-  return (
-    <RuntimeActionButton
-      action={action}
-      ariaLabel={label}
-      title={title}
-      classNamePrefix="session-orchestrator-group-action"
-      isPending={isPending}
-      disabled={disabled}
-      onClick={onClick}
-    />
-  );
-}
