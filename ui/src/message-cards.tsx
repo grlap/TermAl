@@ -880,13 +880,17 @@ function getMermaidDiagramFrameStyle(svg: string): CSSProperties {
     // Buffer detail: Mermaid's SVG viewBox is measured in a temp-DOM
     // that doesn't necessarily use the same font metrics as the
     // iframe, so the html-labels foreignObject text can render a
-    // couple of pixels taller. We add 8 px of vertical slack (rather
-    // than the original 2) so the iframe comfortably contains the
-    // actual rendered diagram. The srcDoc CSS also sets
-    // `html { overflow: hidden }` as a belt-and-suspenders guard in
-    // case the slack is ever insufficient.
+    // couple of pixels taller. The srcDoc CSS sets
+    // `html { overflow-x: auto; overflow-y: hidden }` so wide
+    // diagrams can scroll horizontally inside the iframe — but that
+    // horizontal scrollbar eats ~16 px of vertical space at the
+    // bottom of the frame, so we reserve that room in the iframe
+    // height even when no scrollbar is showing. Cheaper than
+    // detecting overflow: a narrow diagram loses 16 px of empty
+    // space; a wide one doesn't clip its bottom row behind the
+    // scrollbar chrome.
     height: `${clampMermaidDiagramExtent(
-      Math.ceil(dimensions.height) + 8,
+      Math.ceil(dimensions.height) + 24,
       60,
       MERMAID_DIAGRAM_FRAME_MAX_HEIGHT,
     )}px`,
