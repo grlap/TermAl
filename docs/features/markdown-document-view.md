@@ -212,6 +212,10 @@ Do not render raw unified diff text as Markdown.
 The rendered Markdown diff editor optimizes for review usability over perfect source fidelity. It
 lets the user make small documentation fixes while staying in the readable rendered view.
 
+In-flight editor state (scroll, cursor, undo history) is expected to survive reloads and
+app restarts; see [Editor Buffer Persistence](./editor-buffer-persistence.md) for the cross-editor
+contract this editor participates in.
+
 ### Editability Rules
 
 Rendered Markdown sections are editable only when all of these are true:

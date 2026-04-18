@@ -26,6 +26,7 @@ design decisions, and future plans.
 ## Planned Or Exploratory Briefs
 
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
+- [Editor Buffer Persistence](./editor-buffer-persistence.md)
 - [Instruction Debugger](./instruction-debugger.md)
 - [Source Renderers](./source-renderers.md)
 - [Territory Visualization](./territory-visualization.md)

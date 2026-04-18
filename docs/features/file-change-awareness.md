@@ -22,6 +22,12 @@ The risk is worse when the user is also editing the same file:
 TermAl needs a file-change awareness layer between the agent, disk, editor, and
 git state.
 
+Related: [Editor Buffer Persistence](./editor-buffer-persistence.md) describes
+how an in-flight editor buffer (scroll, cursor, undo history) survives reloads
+and tab switches. When a persisted buffer is rehydrated, the rebase / conflict
+semantics described in this document are what decide how that buffer meets the
+current on-disk version.
+
 ## Goals
 
 - Surface agent file edits as soon as they happen.

@@ -311,6 +311,13 @@ Rules:
   operations.
 - The mode switcher should appear for Markdown files and for other files only
   when the renderer registry detects at least one renderable region.
+- Scroll offset, cursor position, and undo history in Monaco must survive the
+  remount / rehydrate cycle described in
+  [Editor Buffer Persistence](./editor-buffer-persistence.md). Inline view
+  zones complicate scroll restoration because the outer pixel height depends
+  on an async-measured inner height — the persistence layer has to re-apply
+  `scrollTop` after the first post-rehydrate view-zone measurement settles,
+  otherwise the caret lands on the wrong rendered block.
 
 ## Diff Panel Behavior
 
