@@ -5,6 +5,97 @@ and cleanup notes do not belong here.
 
 ## Active Repo Bugs
 
+## Missing error boundary around portal `render()` in MonacoCodeEditor
+
+**Severity:** Medium - `ui/src/MonacoCodeEditor.tsx:651-657` invokes `host.zone.render()` inline with no error boundary. The `render` callback in `SourcePanel` returns `<MarkdownContent>`, which in turn runs Mermaid/KaTeX detection. If anything inside that subtree throws during render (a malformed fence, a KaTeX parse failure that slips past `throwOnError: false`, a Mermaid render-time exception), the entire `MonacoCodeEditor` component errors and React unmounts the Monaco editor along with the inline zones — losing whatever the user had in their buffer.
+
+**Current behavior:**
+- `createPortal(host.zone.render(), host.node, host.id)` runs unprotected.
+- A single bad fence in a file can take down the whole editor.
+- Save-buffer loss is user-visible and irrecoverable without the autosave mechanism (which doesn't exist in Phase 1).
+
+**Proposal:**
+- Wrap each portal's children in a small error boundary component, e.g. `<InlineZoneErrorBoundary>{host.zone.render()}</InlineZoneErrorBoundary>`.
+- Fallback UI: "Diagram failed to render — view the source below for details." The source stays visible in Monaco regardless.
+- Add a Vitest case that passes a `render` callback throwing synchronously and asserts the editor remains mounted.
+
+## `setInlineZoneHostState` writes fresh state on every keystroke
+
+**Severity:** Medium - `ui/src/MonacoCodeEditor.tsx:354-361` calls `setInlineZoneHostState` with a fresh array on every `inlineZones` prop change. Since `SourcePanel` rebuilds `inlineZones` on every keystroke (the `renderableRegions` memo depends on `editorValue`), the zone-host state is written unconditionally even when the zone set is structurally unchanged.
+
+This cascades through the ResizeObserver effect (whose dep is `inlineZoneHostState`), disconnecting and reconnecting the observer on every keystroke. The diagram DOM survives via stable zone ids + portal key, so correctness is intact — but the per-keystroke work is O(zones) observer setup + O(zones) re-observe calls.
+
+**Current behavior:**
+- `useEffect([inlineZones])` writes `setInlineZoneHostState(fresh-array)` every time `inlineZones` identity changes (every keystroke).
+- The `[inlineZoneHostState]` observer effect disconnects and re-creates the ResizeObserver on every re-render.
+- Symptom-free today; performance degrades linearly with zone count.
+
+**Proposal:**
+- Shallow-compare the new zone set against the current state before calling `setInlineZoneHostState` (same ids in same order + same inner-node refs → no-op).
+- Or move the ResizeObserver setup into the zone-registry effect, observing/unobserving specific nodes incrementally rather than recreating the observer.
+
+## Rendered-diff fallback uses worktree content for staged diffs
+
+**Severity:** Medium - `ui/src/panels/DiffPanel.tsx:556-567` defines `renderedDiffAfterContent` as `documentContent?.after?.content ?? latestFile.content`. For a **staged** diff when `documentContent` is missing (large file, unsupported binary, read error), the fallback uses `latestFile.content` — which is always the worktree (from `fetchFile` on the current working file). That can contain unstaged edits unrelated to the staged diff, so the Rendered view misrepresents the index side.
+
+The UI labels this "Patch-only rendering: best-effort approximation" so reviewers are warned, but the sibling `buildMarkdownDiffPreview` fallback for Markdown uses `preview.modifiedText` (derived from the patch itself), which is more faithful. The Rendered view's fallback is less accurate than its label admits.
+
+**Current behavior:**
+- Staged diff + missing `documentContent` + worktree carries unstaged edits → Rendered view shows the worktree (unstaged) version, not the index.
+- "Patch-only" label is correct but understates the divergence.
+- Test at `DiffPanel.test.tsx:430-466` only exercises the unstaged path where worktree == "after side" anyway, so the bug isn't caught by coverage.
+
+**Proposal:**
+- Derive the rendered-view fallback from `buildDiffPreviewModel(diff, changeType).modifiedText` (same source the Markdown fallback uses) so staged/unstaged side semantics are preserved by construction.
+- OR suppress the "Rendered" button entirely when `documentContent` is missing AND `gitSectionId === "staged"`.
+- Add a Vitest case: staged diff, no `documentContent`, worktree contains different content than the patch's after-side → the Rendered view matches the patch, not the worktree.
+
+## `remote_sync.rs` diagram + prose had three factual errors (now fixed)
+
+**Severity:** Medium - not a live bug anymore but worth recording for posterity. The Mermaid flowchart I added to `sync_remote_state_inner` in commit 10a2515 claimed the function "upserts remote projects" (it doesn't — project state is managed elsewhere), placed `retain_sessions` AFTER the orchestrator sync (the real order runs retain BEFORE session updates), and attributed `note_remote_applied_revision` to this function (callers do it — the revision gate lives in the wrapper). The original prose at the top of the function had the same "upserts every remote project" error, so the diagram just codified an existing mistake more visibly.
+
+Fixed in this review cycle: the diagram now shows the correct broad-sync flow (Capture → BuildMap read-only → Retain → SessionUpdates → OrchestratorSync → Restore-on-failure), the focused-path capture timing (AFTER session updates), and drops the `NoteRevision` node entirely. The prose paragraphs were rewritten to match the mutation contract that's enforced by `RemoteSyncRollback`.
+
+**Current behavior:**
+- Diagram and prose now match the code.
+- Mutation contract comment (lines 130-140 of `remote_sync.rs`) continues to enumerate exactly the fields `RemoteSyncRollback::capture` covers, and the diagram no longer contradicts it.
+
+## Inline-zone id stability not exercised by tests
+
+**Severity:** Medium - the mock in `ui/src/panels/SourcePanel.test.tsx:32-34` exposes a `data-inline-zone-ids` attribute (comma-joined zone ids) but no test asserts against it. The whole point of stable ids is that the portal DOM node survives keystrokes outside the fence — Mermaid iframe stays initialized, KaTeX output isn't re-parsed. But nothing pins that contract. A regression that re-hashes the id on every call would pass all current tests.
+
+**Current behavior:**
+- Mock surfaces the attribute; tests assert `data-inline-zone-count` and `data-inline-zone-first-after-line` only.
+- Particularly relevant because `detectWholeFileMermaidRegion` hashes the entire content (`mermaid-file:${quickHash(context.content)}`), so `.mmd` file ids WILL change on edits — the stability contract only applies to Markdown files with fence-scoped ids.
+
+**Proposal:**
+- Add a Vitest case: capture `data-inline-zone-ids` before an edit, type a line above the fence (outside all regions) in a Markdown file with a Mermaid fence, assert the first zone's id is unchanged.
+- Document the `.mmd` file exception explicitly (whole-file regions hash the whole content, so ids do shift on any edit).
+
+## "Patch-only absence" not asserted on the complete-document path
+
+**Severity:** Medium - `ui/src/panels/DiffPanel.test.tsx:370-428` asserts the "Rendered" button appears when `documentContent.isCompleteDocument: true`, but never asserts the Patch-only banner is **absent**. The paired test at line 465 asserts presence when `documentContent` is missing. A regression that flipped the gating logic (e.g., rendering the banner unconditionally) would pass both tests.
+
+**Current behavior:**
+- Only positive assertion is "Patch-only" appears when `documentContent` is missing.
+- No negative assertion for the complete-document path.
+
+**Proposal:**
+- In the complete-document test at line 370, after `await clickAndSettle(renderedButton)`, add: `expect(screen.queryByText(/Patch-only rendering/i)).not.toBeInTheDocument();`.
+
+## Math-counter boundary cases missing
+
+**Severity:** Medium - `ui/src/source-renderers.test.ts` covers `countMathExpressions` for inline math and single-line `$$...$$`, but misses three boundary scenarios that the production code specifically handles:
+
+- Two consecutive multi-line `$$...$$` blocks separated by a blank line. The state-machine toggle at `source-renderers.ts:133-139` is subtle — a trailing `$$` that closes a block followed by a new opening `$$` must count as 2. No test pins this.
+- `$$` inside a fenced code block. The existing `does not count $ inside fenced code` test uses only single-`$` variables; `$$` in a code fence is NOT asserted.
+- Same-line `$$...$$` pairs. The `sameLineBlocks` branch at line 144 has no direct test coverage.
+
+**Proposal:** Three short cases in the `source-renderers: count helpers` block:
+- `countMathExpressions("$$\nx=1\n$$\n\n$$\ny=2\n$$")` returns 2.
+- `countMathExpressions("\`\`\`\n$$\nnot math\n$$\n\`\`\`")` returns 0.
+- `countMathExpressions("Block: $$x=1$$ and $$y=2$$ both.")` returns 2.
+
 ## Stale send responses skip the active-prompt recovery poll
 
 **Severity:** High - a successful `sendMessage` whose returned `StateResponse` is rejected as stale clears the draft and returns before arming the active-prompt safety-net poll.

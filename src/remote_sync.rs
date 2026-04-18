@@ -66,17 +66,24 @@ impl RemoteSyncRollback {
 ///   function first captures a rollback shape of sessions,
 ///   orchestrators, session numbering, and queued session-delete
 ///   tombstones so a mid-apply failure can restore the pre-sync view;
-///   then it upserts every remote project, every
-///   remote session (via `localize_remote_session` +
-///   `upsert_remote_proxy_session_record`), and every remote
-///   orchestrator instance, each translated from remote ids to their
-///   local proxy ids. Sessions that exist locally but no longer
-///   appear in the remote snapshot are tombstoned via
-///   `record_removed_session` so the delta persist path deletes them.
+///   builds a read-only remote→local project id lookup map (it does
+///   NOT mutate `inner.projects` — project rows are managed by the
+///   project-create/delete API paths); runs `retain_sessions` to
+///   drop local proxies not in the snapshot and tombstone them via
+///   `record_removed_session`; updates every remaining remote
+///   session via `session_mut_by_index` +
+///   `apply_remote_session_to_record`; then syncs every remote
+///   orchestrator instance via `sync_remote_orchestrators_inner`,
+///   each id translated from remote to local proxy ids. A failure
+///   inside orchestrator sync triggers `rollback.restore(inner)`
+///   so partial writes do not ship.
 /// - **Focused sync** (`focus = Some(remote_session_id)`): only the
-///   single session is updated. No orchestrator state is touched and
-///   no tombstones are issued — other local sessions for this remote
-///   stay as-is even if they were dropped from this response.
+///   single session is updated. No `retain_sessions` (other local
+///   sessions for this remote stay as-is even if they were dropped
+///   from this response). Rollback is still captured — AFTER the
+///   session update but BEFORE the orchestrator sync — so a
+///   per-session 404-retry path can roll back its own apply if the
+///   orchestrator sync fails.
 ///
 /// **Revision gate.** This function does not check revisions itself;
 /// callers should first test via
@@ -103,24 +110,34 @@ impl RemoteSyncRollback {
 /// `remote_create_proxies.rs`, and
 /// `sync_remote_state_for_target` in `remote_routes.rs`.
 ///
-/// Broad-sync with rollback:
+/// Control flow with rollback:
 ///
 /// ```mermaid
 /// flowchart TD
 ///   Start([sync_remote_state_inner]) --> Focus{focus_remote_session_id?}
-///   Focus -- Some --> FocusedSync[update one session;<br/>no orchestrators, no tombstones]
-///   FocusedSync --> End([return])
-///   Focus -- None --> Capture[RemoteSyncRollback::capture<br/>sessions + orchestrators +<br/>next_session_number + removed_session_ids]
-///   Capture --> Projects[upsert remote projects]
-///   Projects --> Sessions[upsert remote sessions<br/>via localize_remote_session]
-///   Sessions --> Orchestrators[upsert remote orchestrator instances]
-///   Orchestrators --> LocalizeError{localization failure?}
-///   LocalizeError -- yes --> Restore[rollback.restore:<br/>restore all captured fields]
-///   Restore --> End
-///   LocalizeError -- no --> Retain[retain_sessions: drop local proxies<br/>not in snapshot, queue tombstones]
-///   Retain --> NoteRevision[note_remote_applied_revision]
-///   NoteRevision --> End
+///   Focus -- None --> PreCapture[RemoteSyncRollback::capture<br/>sessions + orchestrators +<br/>next_session_number + removed_session_ids<br/>BEFORE retain_sessions writes tombstones]
+///   Focus -- Some --> BuildMap
+///   PreCapture --> BuildMap[build remote→local project id map<br/>read-only scan of inner.projects]
+///   BuildMap --> BroadRetain{broad-sync?}
+///   BroadRetain -- yes --> Retain[retain_sessions: drop local proxies<br/>not in snapshot, queue tombstones]
+///   BroadRetain -- no --> SessionUpdates[two-phase session updates:<br/>collect indexes, then<br/>session_mut_by_index + apply_remote_session_to_record]
+///   Retain --> SessionUpdates
+///   SessionUpdates --> FocusedCapture{focused path?}
+///   FocusedCapture -- yes --> PostCapture[RemoteSyncRollback::capture<br/>AFTER session updates]
+///   FocusedCapture -- no --> OrchestratorSync
+///   PostCapture --> OrchestratorSync[sync_remote_orchestrators_inner]
+///   OrchestratorSync --> OrchestratorResult{localization failure?}
+///   OrchestratorResult -- yes --> Restore[rollback.restore:<br/>restore captured fields]
+///   OrchestratorResult -- no --> End
+///   Restore --> End([return])
 /// ```
+///
+/// The project-id map build is intentionally read-only — this
+/// function does NOT upsert `inner.projects`; see the "Mutation
+/// contract" comment in the function body for the exact set of
+/// mutated fields. `note_remote_applied_revision` is the caller's
+/// job (the revision gate lives in
+/// [`apply_remote_state_if_newer_locked`]).
 fn sync_remote_state_inner(
     inner: &mut StateInner,
     remote_id: &str,
