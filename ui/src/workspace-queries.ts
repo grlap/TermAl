@@ -32,6 +32,11 @@
 //     control-panel and standalone-control-surface minimum widths
 //     by reading their CSS variables via
 //     `resolveRootCssLengthPx`.
+//   - `resolveWorkspaceTabProjectId` — given a workspace tab and a
+//     session lookup, returns the project id the tab is scoped to.
+//     Handles session tabs (direct `sessionId` lookup) and
+//     surface tabs (falls back to `originProjectId` on the tab,
+//     then to the origin session's project).
 //
 // What this file does NOT own:
 //   - Workspace tree mutations (split, close, move tab, reconcile) —
@@ -57,6 +62,7 @@ import {
   STANDALONE_CONTROL_SURFACE_PANE_MIN_WIDTH_FALLBACK_PX,
   resolveRootCssLengthPx,
 } from "./control-panel-layout";
+import type { Session } from "./types";
 import {
   CONTROL_SURFACE_KINDS,
   type WorkspaceNode,
@@ -246,4 +252,27 @@ export function getWorkspaceSplitResizeBounds(
     minRatio: constrainedRatio,
     maxRatio: constrainedRatio,
   };
+}
+
+export function resolveWorkspaceTabProjectId(
+  tab: WorkspaceTab | undefined,
+  sessionLookup: Map<string, Session>,
+): string | null {
+  if (!tab) {
+    return null;
+  }
+
+  if (tab.kind === "session") {
+    return sessionLookup.get(tab.sessionId)?.projectId ?? null;
+  }
+
+  const originSession =
+    "originSessionId" in tab && tab.originSessionId
+      ? (sessionLookup.get(tab.originSessionId) ?? null)
+      : null;
+  return (
+    ("originProjectId" in tab ? tab.originProjectId : null) ??
+    originSession?.projectId ??
+    null
+  );
 }

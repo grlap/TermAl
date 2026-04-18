@@ -138,6 +138,7 @@ import {
 } from "./control-panel-layout";
 import {
   getWorkspaceSplitResizeBounds,
+  resolveWorkspaceTabProjectId,
   workspaceContainsOnlyControlPanel,
   workspaceNodeContainsControlPanel,
   workspaceNodeUsesStandaloneControlSurfaceMinWidth,
@@ -12692,27 +12693,5 @@ function OrchestratorRuntimeActionButton({
       disabled={disabled}
       onClick={onClick}
     />
-  );
-}
-function resolveWorkspaceTabProjectId(
-  tab: WorkspaceTab | undefined,
-  sessionLookup: Map<string, Session>,
-): string | null {
-  if (!tab) {
-    return null;
-  }
-
-  if (tab.kind === "session") {
-    return sessionLookup.get(tab.sessionId)?.projectId ?? null;
-  }
-
-  const originSession =
-    "originSessionId" in tab && tab.originSessionId
-      ? (sessionLookup.get(tab.originSessionId) ?? null)
-      : null;
-  return (
-    ("originProjectId" in tab ? tab.originProjectId : null) ??
-    originSession?.projectId ??
-    null
   );
 }
