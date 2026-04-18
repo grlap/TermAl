@@ -49,11 +49,9 @@
 //     composes them.
 //
 // Split out of `ui/src/App.tsx`. Same function signatures and
-// behaviour as the inline definitions they replaced. Two exports
-// (`formatSessionOrchestratorGroupName`,
-// `buildControlSurfaceSessionListEntries`) remain visible from the
-// App entry point via a re-export there so App.test.tsx's existing
-// imports continue to work.
+// behaviour as the inline definitions they replaced; consumers
+// (including `App.test.tsx`) import from here directly — App.tsx
+// does not re-export these symbols.
 
 import type { ControlPanelSectionId } from "./panels/ControlPanelSurface";
 import { reconcileSessions } from "./session-reconcile";

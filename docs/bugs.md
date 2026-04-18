@@ -18,6 +18,12 @@ succeed. Full Vitest suite is 887/888 green; the single remaining
 failure is the pre-existing flaky Git-diff test unrelated to this
 work.
 
+Also fixed in the current tree: the provenance header in
+`ui/src/control-surface-state.ts` no longer claims its exports are
+visible through an `App.tsx` re-export. The last paragraph now
+correctly states that consumers (including `App.test.tsx`) import
+directly from the new module, matching what the code actually does.
+
 ## Missing error boundary around portal `render()` in MonacoCodeEditor
 
 **Severity:** Medium - `ui/src/MonacoCodeEditor.tsx:651-657` invokes `host.zone.render()` inline with no error boundary. The `render` callback in `SourcePanel` returns `<MarkdownContent>`, which in turn runs Mermaid/KaTeX detection. If anything inside that subtree throws during render (a malformed fence, a KaTeX parse failure that slips past `throwOnError: false`, a Mermaid render-time exception), the entire `MonacoCodeEditor` component errors and React unmounts the Monaco editor along with the inline zones — losing whatever the user had in their buffer.
@@ -735,6 +741,54 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   like `expect(screen.queryByText("message-5")).toBeNull()` so a
   regression where the merged range falls back to `{0, messages.length}`
   fails loudly.
+- [ ] P2: Add focused coverage for `control-surface-state.ts`:
+  six of eight exports currently have no targeted tests. Add a
+  co-located `control-surface-state.test.ts` covering:
+  `createControlPanelSectionLauncherTab` for the five `sectionId`
+  branches + blank-root null-gating on `files` / `git`;
+  `resolveWorkspaceScopedProjectId` three-way precedence
+  (explicit origin project → origin session's project → null) plus
+  trim semantics; `resolveWorkspaceScopedSessionId` precedence
+  (preferred session → active session → first-in-project → null);
+  `buildControlSurfaceSessionListState` no-search fast-path vs
+  search-result-map branch; `mergeOrchestratorDeltaSessions`
+  dedup + append-unknowns + `reconcileSessions` identity.
+- [ ] P2: Add focused coverage for `git-diff-refresh.ts`:
+  `collectGitDiffPreviewRefreshes` has no targeted test. Add a
+  co-located `git-diff-refresh.test.ts` that builds a tiny
+  `WorkspaceState` with mixed tab kinds (`diffPreview`, others)
+  plus a `WorkspaceFilesChangedEvent` and asserts the returned
+  refresh list against the four skip conditions (non-diffPreview
+  kind, missing `gitDiffRequestKey`, missing `gitDiffRequest`,
+  touch-predicate short-circuit). Mirror fixture style from the
+  `collectRestoredGitDiffDocumentContentRefreshes` test at
+  `App.test.tsx:1489`.
+- [ ] P2: Add focused coverage for `source-file-state.ts`:
+  both exports untested. `sourceFileStateFromResponse` — assert
+  the 13-field state-object mapping against a full `FileResponse`
+  and against one with optional fields omitted, including `status`
+  and `language`.
+  `isSourceFileMissingError` — assert `true` for
+  `new Error("File Not Found")`, `new Error("thing was not FOUND")`,
+  and a plain `"file not found"` string; `false` for other
+  messages.
+- [ ] P2: Pin the pending-state tooltip copy for
+  `OrchestratorRuntimeActionButton`:
+  aria-label regex matchers in `App.test.tsx` cover the three
+  labels, but the `isPending: true` `title` tooltips
+  (`"Pausing orchestration"` / `"Resuming orchestration"` /
+  `"Stopping orchestration"`) are not asserted anywhere. Add one
+  assertion per action variant while `isPending: true` to pin the
+  copy so it cannot silently regress.
+- [ ] P2: Cover the `restartRequired` branch of
+  `describeBackendConnectionIssueDetail`:
+  `BACKEND_UNAVAILABLE_ISSUE_DETAIL` is already asserted
+  indirectly in `backend-connection.test.tsx`, but the
+  `isBackendUnavailableError && error.restartRequired` branch —
+  which surfaces the server's restart-required message verbatim
+  instead of the generic copy — is not confirmed tested. Add a
+  small unit test covering all three branches (`restartRequired`
+  true, `restartRequired` false, non-backend-unavailable error).
 - [ ] P2: Add normal-size Mermaid iframe height reserve coverage:
   add a deterministic Mermaid SVG/viewBox case in
   `ui/src/MarkdownContent.test.tsx` proving the `+24` vertical slack is
