@@ -22,8 +22,6 @@ import App, {
   ThemedCombobox,
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
-  resolveRecoveredWorkspaceLayoutRequestError,
-  resolveAdoptedStateSlices,
   resolveControlPanelWorkspaceRoot,
   describeUnknownSessionModelWarning,
   resolveUnknownSessionModelSendAttempt,
@@ -39,6 +37,10 @@ import {
   resolveSettledScrollMinimumAttempts,
   syncMessageStackScrollPosition,
 } from "./scroll-position";
+import {
+  resolveAdoptedStateSlices,
+  resolveRecoveredWorkspaceLayoutRequestError,
+} from "./state-adoption";
 import {
   getWorkspaceSplitResizeBounds,
   resolveControlSurfaceSectionIdForWorkspaceTab,

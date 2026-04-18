@@ -169,6 +169,10 @@ import {
   resolveSettledScrollMinimumAttempts,
   syncMessageStackScrollPosition,
 } from "./scroll-position";
+import {
+  resolveAdoptedStateSlices,
+  resolveRecoveredWorkspaceLayoutRequestError,
+} from "./state-adoption";
 
 import {
   CodexPromptSettingsCard,
@@ -453,19 +457,6 @@ const LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS = 1000;
 
 const WORKSPACE_LAYOUT_PERSIST_DELAY_MS = 150;
 
-export function resolveRecoveredWorkspaceLayoutRequestError(
-  currentRequestError: string | null,
-  workspaceLayoutRestartErrorMessage: string | null,
-) {
-  if (workspaceLayoutRestartErrorMessage === null) {
-    return currentRequestError;
-  }
-
-  return currentRequestError === workspaceLayoutRestartErrorMessage
-    ? null
-    : currentRequestError;
-}
-
 // Re-exported from ./types for backward compatibility
 export type { SessionSettingsField, SessionSettingsValue } from "./types";
 type SessionErrorMap = Record<string, string | undefined>;
@@ -550,40 +541,6 @@ type StandaloneControlSurfaceViewState = {
   sessionListFilter?: SessionListFilter;
   sessionListSearchQuery?: string;
 };
-
-export function resolveAdoptedStateSlices(
-  current: {
-    codex: CodexState;
-    agentReadiness: AgentReadiness[];
-    projects: Project[];
-    orchestrators: OrchestratorInstance[];
-    workspaces: WorkspaceLayoutSummary[];
-  },
-  nextState: Partial<
-    Pick<
-      StateResponse,
-      "codex" | "agentReadiness" | "projects" | "orchestrators" | "workspaces"
-    >
-  >,
-) {
-  return {
-    codex: nextState.codex !== undefined ? nextState.codex : current.codex,
-    agentReadiness:
-      nextState.agentReadiness !== undefined
-        ? nextState.agentReadiness
-        : current.agentReadiness,
-    projects:
-      nextState.projects !== undefined ? nextState.projects : current.projects,
-    orchestrators:
-      nextState.orchestrators !== undefined
-        ? nextState.orchestrators
-        : current.orchestrators,
-    workspaces:
-      nextState.workspaces !== undefined
-        ? nextState.workspaces
-        : current.workspaces,
-  };
-}
 
 export type AppTestHooks = {
   onDeleteProjectPostAwaitPath?: (path: "resolve" | "reject") => void;
