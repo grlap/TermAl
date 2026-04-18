@@ -1,5 +1,4 @@
-# TermAl Roadmap
-
+# TermAl Roadmaps
 This document tracks product phases. It is intentionally separate from the `P0` / `P1` / `P2`
 implementation backlog in [`bugs.md`](./bugs.md).
 
@@ -82,6 +81,21 @@ Recent Phase 1 work has improved the local supervision loop in concrete ways:
 - Filesystem and git status rows can open source or diff views in a brand-new pane via modifier-click.
 - Backend connection state is now clearer at a glance with a compact status chip.
 - UI test coverage now includes the new pane-opening behavior in filesystem, git status, and workspace helpers.
+- Rendered Markdown diffs now preview the after side with Mermaid
+  flowcharts and KaTeX math inline, not just the raw fenced source —
+  a structured review surface neither VS Code nor the agent CLIs
+  expose. See
+  [`docs/features/markdown-document-view.md`](./features/markdown-document-view.md)
+  and [`docs/features/source-renderers.md`](./features/source-renderers.md).
+- Monaco source editing now hosts inline rendered regions (Mermaid /
+  KaTeX) as view zones alongside editable source in the same pane,
+  so Rust doc-comment diagrams and LaTeX math render next to the
+  code they describe. See
+  [`docs/features/source-renderers.md`](./features/source-renderers.md).
+- SQLite session storage replaces the single `~/.termal/sessions.json`
+  blob, with lazy message hydration and lightweight app-state
+  snapshots. See
+  [`docs/features/sqlite-session-storage.md`](./features/sqlite-session-storage.md).
 
 ### Not in scope
 
@@ -230,7 +244,7 @@ access patterns from Phase 3.
 - Review comments and agent replies support multi-user collaboration cleanly
 - Approval flows make it clear who approved, rejected, or delegated an action
 - The collaboration model feels purpose-built for AI-assisted pair programming, not like a thin
-  screen-share replacement
+screen-share replacement
 
 ## Ordering Rules
 
@@ -239,9 +253,9 @@ These rules prevent roadmap drift:
 1. Do not start relay-first work before the local product is dependable.
 2. Do not start mobile-specific polish before remote PC access is stable.
 3. Keep the message model, session model, and review model transport-agnostic so Phase 2 and Phase
-   3 add connectivity, not a second product.
+3 add connectivity, not a second product.
 4. Do not treat Phase 4 as generic collaboration bolted onto the side; it should deepen the
-   agent-native workflow rather than dilute it.
+agent-native workflow rather than dilute it.
 
 ## Mapping Current Work To Phases
 
@@ -273,4 +287,9 @@ actions.
 
 The remaining Phase 1 work is mostly polish and coverage: deeper integration
 tests around scroll behavior and model controls, clearer test-only type
-surfaces, remote readiness refinement, and continued reliability hardening.
+surfaces, remote readiness refinement, and continued reliability hardening
+
+.ala mka
+hello
+
+hello

@@ -18,6 +18,9 @@ design decisions, and future plans.
 - [Diff Review Workflow](./diff-review-workflow.md)
 - [File Change Awareness](./file-change-awareness.md)
 - [Markdown Document View](./markdown-document-view.md)
+- [Source Renderers](./source-renderers.md)
+- [Instruction Debugger](./instruction-debugger.md)
+- [SQLite Session Storage](./sqlite-session-storage.md)
 - [Agent Integration Comparison](./agent-integration-comparison.md)
 - [Orchestration](./orchestration.md)
 - [Multi-Browser Workspaces](./multi-browser-workspaces.md)
@@ -27,7 +30,5 @@ design decisions, and future plans.
 
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Editor Buffer Persistence](./editor-buffer-persistence.md)
-- [Instruction Debugger](./instruction-debugger.md)
-- [Source Renderers](./source-renderers.md)
 - [Territory Visualization](./territory-visualization.md)
 - [WhatsApp Integration](./whatsapp-integration.md)

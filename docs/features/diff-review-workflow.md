@@ -4,6 +4,16 @@ Backlog source: [`docs/bugs.md`](../bugs.md)
 
 The detailed diff-preview and review-plan content below was moved out of `docs/bugs.md`.
 
+Related:
+- [Markdown Document View](./markdown-document-view.md) — rendered
+  Markdown diff editor underneath this workflow, with inline
+  Mermaid / KaTeX rendering for review sessions.
+- [Editor Buffer Persistence](./editor-buffer-persistence.md) — durable
+  in-flight state (scroll, cursor, undo history) for review-mode edits
+  that survive reloads and tab switches.
+- [File Change Awareness](./file-change-awareness.md) — stale-save,
+  rebase, and conflict semantics the review editor reuses unchanged.
+
 ## Agent replies in diff review comments
 
 **Severity:** Medium â€” closes the review feedback loop.

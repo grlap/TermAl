@@ -622,11 +622,20 @@ All agent integrations normalize into the same TermAl message model. Some varian
 - **React 18** with hooks, transitions, and refs for performance
 - **TypeScript** for type safety
 - **Custom CSS** with CSS variables for theming (not Tailwind)
-- **Monaco Editor** for source viewing, editing, and diff preview
+- **Monaco Editor** for source viewing, editing, and diff preview,
+  including inline rendered regions (Mermaid / KaTeX) as view zones
 - **highlight.js** for syntax highlighting in message cards
 - **react-markdown** + remark-gfm for markdown rendering
+- **rehype-katex** + **remark-math** for `$...$` inline and `$$...$$`
+  block math
+- **mermaid** for fenced ```` ```mermaid ```` flowcharts and diagrams,
+  rendered inside a sandboxed iframe per diagram
 - **Vite** for dev server and build
 - **Vitest** for tests
+
+Feature-level behaviour for these renderers is captured in
+[`features/source-renderers.md`](./features/source-renderers.md) and
+[`features/markdown-document-view.md`](./features/markdown-document-view.md).
 
 ### Component Structure
 
