@@ -128,8 +128,19 @@ import {
   CURSOR_MODE_OPTIONS,
   GEMINI_APPROVAL_OPTIONS,
 } from "./preferences-panels";
+import { SettingsDialogShell } from "./preferences/SettingsDialogShell";
 import { SettingsTabBar } from "./preferences/SettingsTabBar";
 import type { PreferencesTabId } from "./preferences/preferences-tabs";
+import {
+  CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX,
+  CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX,
+  DEFAULT_SPLIT_MAX_RATIO,
+  DEFAULT_SPLIT_MIN_RATIO,
+  STANDALONE_CONTROL_SURFACE_PANE_MIN_WIDTH_FALLBACK_PX,
+  hydrateControlPanelLayout,
+  resolveRootCssLengthPx,
+  resolveStandaloneControlPanelDockWidthRatio,
+} from "./control-panel-layout";
 
 import {
   CodexPromptSettingsCard,
@@ -603,14 +614,6 @@ function isSourceFileMissingError(error: unknown) {
 
 const PENDING_KILL_CLOSE_DELAY_MS = 180;
 const PENDING_SESSION_RENAME_CLOSE_DELAY_MS = 300;
-const DEFAULT_SPLIT_MIN_RATIO = 0.22;
-const DEFAULT_SPLIT_MAX_RATIO = 0.78;
-// 40rem is the minimum acceptable docked control-panel width. Keep these
-// fallbacks aligned with the CSS dock width/min-width so saved layouts do not
-// permit a narrower manual resize that later snaps back.
-const CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX = 40 * 16;
-const STANDALONE_CONTROL_SURFACE_PANE_MIN_WIDTH_FALLBACK_PX = 16 * 16;
-const CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX = 40 * 16;
 
 type SessionConversationItem =
   | {
@@ -967,67 +970,6 @@ let appTestHooks: AppTestHooks | null = null;
 // arguments so the production export cannot expose user content if imported.
 export function setAppTestHooksForTests(hooks: AppTestHooks | null) {
   appTestHooks = hooks;
-}
-
-function getDockedControlPanelWidthRatioForWorkspace(
-  workspace: WorkspaceState,
-): number | null {
-  const controlPanelPaneId =
-    workspace.panes.find((pane) =>
-      pane.tabs.some((tab) => tab.kind === "controlPanel"),
-    )?.id ?? null;
-  if (
-    !controlPanelPaneId ||
-    !workspace.root ||
-    workspace.root.type !== "split" ||
-    workspace.root.direction !== "row"
-  ) {
-    return null;
-  }
-
-  if (
-    workspace.root.first.type === "pane" &&
-    workspace.root.first.paneId === controlPanelPaneId
-  ) {
-    return workspace.root.ratio;
-  }
-
-  if (
-    workspace.root.second.type === "pane" &&
-    workspace.root.second.paneId === controlPanelPaneId
-  ) {
-    return 1 - workspace.root.ratio;
-  }
-
-  return null;
-}
-
-function resolvePreferredControlPanelWidthRatio(
-  workspace: WorkspaceState,
-): number {
-  const minimumWidthRatio = resolveStandaloneControlPanelDockWidthRatio(
-    DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
-  );
-  const currentWidthRatio =
-    getDockedControlPanelWidthRatioForWorkspace(workspace);
-
-  return currentWidthRatio === null
-    ? minimumWidthRatio
-    : Math.max(currentWidthRatio, minimumWidthRatio);
-}
-
-function hydrateControlPanelLayout(
-  workspace: WorkspaceState,
-  side: ControlPanelSide,
-): WorkspaceState {
-  const workspaceWithControlPanel =
-    ensureControlPanelInWorkspaceState(workspace);
-
-  return dockControlPanelAtWorkspaceEdge(
-    workspaceWithControlPanel,
-    side,
-    resolvePreferredControlPanelWidthRatio(workspaceWithControlPanel),
-  );
 }
 
 function createInitialWorkspaceBootstrap(workspaceViewId: string) {
@@ -8989,134 +8931,93 @@ export default function App() {
         </div>
       ) : null}
       {isSettingsOpen ? (
-        <div
-          className="dialog-backdrop"
-          onMouseDown={() => {
-            setIsSettingsOpen(false);
-          }}
-        >
-          <section
-            id="settings-dialog"
-            className="dialog-card panel settings-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="settings-dialog-title"
-            onMouseDown={(event) => {
-              event.stopPropagation();
-            }}
+        <SettingsDialogShell onClose={() => setIsSettingsOpen(false)}>
+          <SettingsTabBar
+            activeTabId={settingsTab}
+            onSelectTab={setSettingsTab}
+          />
+
+          <div
+            id={`settings-panel-${settingsTab}`}
+            className={`settings-tab-panel ${settingsTab === "themes" || settingsTab === "markdown" ? "theme-settings-panel" : ""}`.trim()}
+            role="tabpanel"
+            aria-labelledby={`settings-tab-${settingsTab}`}
           >
-            <div className="settings-dialog-header">
-              <div>
-                <div className="card-label">Preferences</div>
-                <h2 id="settings-dialog-title">Settings</h2>
-                <p className="dialog-copy settings-dialog-copy">
-                  Tune the interface and manage reusable orchestrator templates
-                  without disturbing active sessions.
-                </p>
-              </div>
-
-              <button
-                className="ghost-button settings-dialog-close"
-                type="button"
-                aria-label="Close dialog"
-                title="Close"
-                onClick={() => {
-                  setIsSettingsOpen(false);
-                }}
-              >
-                <DialogCloseIcon />
-              </button>
-            </div>
-
-            <div className="settings-dialog-body">
-              <SettingsTabBar
-                activeTabId={settingsTab}
-                onSelectTab={setSettingsTab}
+            {settingsTab === "themes" ? (
+              <ThemePreferencesPanel
+                activeStyle={activeStyle}
+                activeTheme={activeTheme}
+                styleId={styleId}
+                themeId={themeId}
+                onSelectStyle={setStyleId}
+                onSelectTheme={setThemeId}
               />
-
-              <div
-                id={`settings-panel-${settingsTab}`}
-                className={`settings-tab-panel ${settingsTab === "themes" || settingsTab === "markdown" ? "theme-settings-panel" : ""}`.trim()}
-                role="tabpanel"
-                aria-labelledby={`settings-tab-${settingsTab}`}
-              >
-                {settingsTab === "themes" ? (
-                  <ThemePreferencesPanel
-                    activeStyle={activeStyle}
-                    activeTheme={activeTheme}
-                    styleId={styleId}
-                    themeId={themeId}
-                    onSelectStyle={setStyleId}
-                    onSelectTheme={setThemeId}
-                  />
-                ) : settingsTab === "markdown" ? (
-                  <MarkdownPreferencesPanel
-                    activeMarkdownTheme={activeMarkdownTheme}
-                    activeMarkdownStyle={activeMarkdownStyle}
-                    markdownThemeId={markdownThemeId}
-                    markdownStyleId={markdownStyleId}
-                    diagramThemeOverrideMode={diagramThemeOverrideMode}
-                    diagramLook={diagramLook}
-                    diagramPalette={diagramPalette}
-                    onSelectMarkdownTheme={setMarkdownThemeId}
-                    onSelectMarkdownStyle={setMarkdownStyleId}
-                    onSelectDiagramThemeOverrideMode={setDiagramThemeOverrideMode}
-                    onSelectDiagramLook={setDiagramLook}
-                    onSelectDiagramPalette={setDiagramPalette}
-                  />
-                ) : settingsTab === "appearance" ? (
-                  <AppearancePreferencesPanel
-                    densityPercent={densityPercent}
-                    editorFontSizePx={editorFontSizePx}
-                    fontSizePx={fontSizePx}
-                    onSelectDensity={(nextValue) =>
-                      setDensityPercent(clampDensityPreference(nextValue))
-                    }
-                    onSelectEditorFontSize={(nextValue) =>
-                      setEditorFontSizePx(
-                        clampEditorFontSizePreference(nextValue),
-                      )
-                    }
-                    onSelectFontSize={(nextValue) =>
-                      setFontSizePx(clampFontSizePreference(nextValue))
-                    }
-                  />
-                ) : settingsTab === "remotes" ? (
-                  <RemotePreferencesPanel
-                    remotes={remoteConfigs}
-                    onSaveRemotes={(nextRemotes) => {
-                      void persistAppPreferences({ remotes: nextRemotes });
-                    }}
-                  />
-                ) : settingsTab === "orchestrators" ? (
-                  <OrchestratorTemplatesPanel
-                    projects={projects}
-                    sessions={sessions}
-                    onStateUpdated={handleOrchestratorStateUpdated}
-                  />
-                ) : settingsTab === "codex-prompts" ? (
-                  <CodexPromptPreferencesPanel
-                    defaultApprovalPolicy={defaultCodexApprovalPolicy}
-                    defaultReasoningEffort={defaultCodexReasoningEffort}
-                    defaultSandboxMode={defaultCodexSandboxMode}
-                    onSelectApprovalPolicy={setDefaultCodexApprovalPolicy}
-                    onSelectReasoningEffort={
-                      handleDefaultCodexReasoningEffortChange
-                    }
-                    onSelectSandboxMode={setDefaultCodexSandboxMode}
-                  />
-                ) : (
-                  <ClaudeApprovalsPreferencesPanel
-                    defaultClaudeApprovalMode={defaultClaudeApprovalMode}
-                    defaultClaudeEffort={defaultClaudeEffort}
-                    onSelectEffort={handleDefaultClaudeEffortChange}
-                    onSelectMode={handleDefaultClaudeApprovalModeChange}
-                  />
-                )}
-              </div>
-            </div>
-          </section>
-        </div>
+            ) : settingsTab === "markdown" ? (
+              <MarkdownPreferencesPanel
+                activeMarkdownTheme={activeMarkdownTheme}
+                activeMarkdownStyle={activeMarkdownStyle}
+                markdownThemeId={markdownThemeId}
+                markdownStyleId={markdownStyleId}
+                diagramThemeOverrideMode={diagramThemeOverrideMode}
+                diagramLook={diagramLook}
+                diagramPalette={diagramPalette}
+                onSelectMarkdownTheme={setMarkdownThemeId}
+                onSelectMarkdownStyle={setMarkdownStyleId}
+                onSelectDiagramThemeOverrideMode={setDiagramThemeOverrideMode}
+                onSelectDiagramLook={setDiagramLook}
+                onSelectDiagramPalette={setDiagramPalette}
+              />
+            ) : settingsTab === "appearance" ? (
+              <AppearancePreferencesPanel
+                densityPercent={densityPercent}
+                editorFontSizePx={editorFontSizePx}
+                fontSizePx={fontSizePx}
+                onSelectDensity={(nextValue) =>
+                  setDensityPercent(clampDensityPreference(nextValue))
+                }
+                onSelectEditorFontSize={(nextValue) =>
+                  setEditorFontSizePx(
+                    clampEditorFontSizePreference(nextValue),
+                  )
+                }
+                onSelectFontSize={(nextValue) =>
+                  setFontSizePx(clampFontSizePreference(nextValue))
+                }
+              />
+            ) : settingsTab === "remotes" ? (
+              <RemotePreferencesPanel
+                remotes={remoteConfigs}
+                onSaveRemotes={(nextRemotes) => {
+                  void persistAppPreferences({ remotes: nextRemotes });
+                }}
+              />
+            ) : settingsTab === "orchestrators" ? (
+              <OrchestratorTemplatesPanel
+                projects={projects}
+                sessions={sessions}
+                onStateUpdated={handleOrchestratorStateUpdated}
+              />
+            ) : settingsTab === "codex-prompts" ? (
+              <CodexPromptPreferencesPanel
+                defaultApprovalPolicy={defaultCodexApprovalPolicy}
+                defaultReasoningEffort={defaultCodexReasoningEffort}
+                defaultSandboxMode={defaultCodexSandboxMode}
+                onSelectApprovalPolicy={setDefaultCodexApprovalPolicy}
+                onSelectReasoningEffort={
+                  handleDefaultCodexReasoningEffortChange
+                }
+                onSelectSandboxMode={setDefaultCodexSandboxMode}
+              />
+            ) : (
+              <ClaudeApprovalsPreferencesPanel
+                defaultClaudeApprovalMode={defaultClaudeApprovalMode}
+                defaultClaudeEffort={defaultClaudeEffort}
+                onSelectEffort={handleDefaultClaudeEffortChange}
+                onSelectMode={handleDefaultClaudeApprovalModeChange}
+              />
+            )}
+          </div>
+        </SettingsDialogShell>
       ) : null}
     </div>
   );
@@ -12832,117 +12733,6 @@ function workspaceContainsOnlyControlPanel(workspace: WorkspaceState) {
     workspace.panes[0]?.tabs.length === 1 &&
     workspace.panes[0]?.tabs[0]?.kind === "controlPanel"
   );
-}
-
-export function resolveStandaloneControlPanelDockWidthRatio(
-  fallbackRatio: number,
-): number {
-  if (typeof document === "undefined") {
-    return fallbackRatio;
-  }
-
-  const workspaceStage =
-    document.querySelector(
-      ".workspace-stage.workspace-stage-control-panel-only",
-    ) ?? document.querySelector(".workspace-stage");
-  const stageWidth =
-    workspaceStage instanceof HTMLElement && workspaceStage.clientWidth > 0
-      ? workspaceStage.clientWidth
-      : (document.documentElement?.clientWidth ??
-        (typeof window !== "undefined" ? window.innerWidth : 0));
-  if (stageWidth <= 0) {
-    return fallbackRatio;
-  }
-
-  const controlPanelWidthRatio =
-    resolveRootCssLengthPx(
-      "--control-panel-pane-width",
-      CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX,
-    ) / stageWidth;
-  const controlPanelMinRatio = clamp(
-    resolveRootCssLengthPx(
-      "--control-panel-pane-min-width",
-      CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX,
-    ) / stageWidth,
-    0,
-    1,
-  );
-  const sessionMinRatio = DEFAULT_SPLIT_MIN_RATIO;
-  const maxRatio = 1 - sessionMinRatio;
-
-  if (controlPanelMinRatio <= maxRatio) {
-    return clamp(controlPanelWidthRatio, controlPanelMinRatio, maxRatio);
-  }
-
-  return clamp(
-    controlPanelMinRatio /
-      Math.max(controlPanelMinRatio + sessionMinRatio, Number.EPSILON),
-    0,
-    1,
-  );
-}
-
-function resolveRootCssLengthPx(
-  cssVariableName: string,
-  fallbackPx: number,
-): number {
-  if (typeof window === "undefined" || typeof document === "undefined") {
-    return fallbackPx;
-  }
-
-  const rootStyle = window.getComputedStyle(document.documentElement);
-  const rawValue = rootStyle.getPropertyValue(cssVariableName).trim();
-  if (!rawValue) {
-    return fallbackPx;
-  }
-
-  const rootFontSizePx = Number.parseFloat(rootStyle.fontSize);
-  const resolvedValue = rawValue.replace(
-    /var\((--[\w-]+)\)/g,
-    (_, variableName: string) =>
-      rootStyle.getPropertyValue(variableName).trim() || "0",
-  );
-  const convertLengthToPx = (value: string): number | null => {
-    const numericValue = Number.parseFloat(value);
-    if (!Number.isFinite(numericValue)) {
-      return null;
-    }
-
-    if (value.endsWith("rem")) {
-      return (
-        numericValue * (Number.isFinite(rootFontSizePx) ? rootFontSizePx : 16)
-      );
-    }
-
-    if (value.endsWith("px") || /^-?\d*\.?\d+$/.test(value)) {
-      return numericValue;
-    }
-
-    return null;
-  };
-  const directLengthPx = convertLengthToPx(resolvedValue);
-  if (directLengthPx !== null) {
-    return directLengthPx;
-  }
-
-  const calcMultiplicationMatch = resolvedValue.match(
-    /^calc\(\s*([^)]+?)\s*\*\s*([^)]+?)\s*\)$/i,
-  );
-  if (calcMultiplicationMatch) {
-    const left = convertLengthToPx(calcMultiplicationMatch[1].trim());
-    const right = Number.parseFloat(calcMultiplicationMatch[2].trim());
-    if (left !== null && Number.isFinite(right)) {
-      return left * right;
-    }
-
-    const rightLengthPx = convertLengthToPx(calcMultiplicationMatch[2].trim());
-    const leftScalar = Number.parseFloat(calcMultiplicationMatch[1].trim());
-    if (rightLengthPx !== null && Number.isFinite(leftScalar)) {
-      return leftScalar * rightLengthPx;
-    }
-  }
-
-  return fallbackPx;
 }
 
 export function getWorkspaceSplitResizeBounds(

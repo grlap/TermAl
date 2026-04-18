@@ -10,6 +10,14 @@ now staged (both `SettingsTabBar.tsx` and `preferences-tabs.ts`) so the
 tab-bar extraction no longer leaves App.tsx importing untracked files;
 a clean checkout will type-check.
 
+Also fixed in the current tree: four `App.test.tsx` preference tests
+(at lines 15177, 15347, 15830, 15891) now query the shortened tab
+labels — `Codex`, `Claude`, `Editor & UI` — instead of the
+pre-shortening names, so the `getByRole("tab", { name: ... })` lookups
+succeed. Full Vitest suite is 887/888 green; the single remaining
+failure is the pre-existing flaky Git-diff test unrelated to this
+work.
+
 ## Missing error boundary around portal `render()` in MonacoCodeEditor
 
 **Severity:** Medium - `ui/src/MonacoCodeEditor.tsx:651-657` invokes `host.zone.render()` inline with no error boundary. The `render` callback in `SourcePanel` returns `<MarkdownContent>`, which in turn runs Mermaid/KaTeX detection. If anything inside that subtree throws during render (a malformed fence, a KaTeX parse failure that slips past `throwOnError: false`, a Mermaid render-time exception), the entire `MonacoCodeEditor` component errors and React unmounts the Monaco editor along with the inline zones — losing whatever the user had in their buffer.
@@ -100,21 +108,6 @@ Fixed in this review cycle: the diagram now shows the correct broad-sync flow (C
 - `countMathExpressions("$$\nx=1\n$$\n\n$$\ny=2\n$$")` returns 2.
 - `countMathExpressions("\`\`\`\n$$\nnot math\n$$\n\`\`\`")` returns 0.
 - `countMathExpressions("Block: $$x=1$$ and $$y=2$$ both.")` returns 2.
-
-## Preferences tab extraction leaves App tests querying stale names
-
-**Severity:** High - three existing `App.test.tsx` preference tests fail because the extracted tab labels are `Editor & UI`, `Codex`, and `Claude`, while the tests still query `Editor & UI appearance`, `Codex defaults`, and `Claude defaults`.
-
-The frontend type-check passes, but targeted Vitest is red. The failing queries are user-facing accessible-name assertions, so the tree needs to choose whether the shorter extracted labels or the longer previous labels are the intended contract.
-
-**Current behavior:**
-- `npx vitest run src/App.test.tsx -t "applies the configured Codex reasoning effort to new Codex sessions|applies the configured Claude effort to new Claude sessions|separates theme selection from editor and UI appearance controls in preferences"` fails 3 selected tests.
-- Failing queries live at `ui/src/App.test.tsx:15177`, `ui/src/App.test.tsx:15347`, `ui/src/App.test.tsx:15830`, and `ui/src/App.test.tsx:15891`.
-- The rendered tabs expose `Codex`, `Claude`, and `Editor & UI`.
-
-**Proposal:**
-- Update the tests to query the actual tab names if the shorter labels are intentional.
-- Or restore the longer tab labels in `preferences-tabs.ts` if those names are the intended accessible contract.
 
 ## Mermaid demo contains stray placeholder paragraphs
 
@@ -667,13 +660,6 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
-- [ ] P2: Update preference-tab App tests after the SettingsTabBar split:
-  adjust the role queries at `ui/src/App.test.tsx:15177`,
-  `ui/src/App.test.tsx:15347`, `ui/src/App.test.tsx:15830`, and
-  `ui/src/App.test.tsx:15891` to match the intended tab labels. If
-  `Editor & UI`, `Codex`, and `Claude` are the new user-facing names,
-  query those; otherwise restore the longer labels in
-  `preferences-tabs.ts`.
 - [ ] P2: Add normal-size Mermaid iframe height reserve coverage:
   add a deterministic Mermaid SVG/viewBox case in
   `ui/src/MarkdownContent.test.tsx` proving the `+24` vertical slack is

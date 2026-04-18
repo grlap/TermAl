@@ -31,12 +31,12 @@ import App, {
   resolveControlPanelWorkspaceRoot,
   resolveControlSurfaceSectionIdForWorkspaceTab,
   resolveSettledScrollMinimumAttempts,
-  resolveStandaloneControlPanelDockWidthRatio,
   describeUnknownSessionModelWarning,
   resolveUnknownSessionModelSendAttempt,
   setAppTestHooksForTests,
   syncMessageStackScrollPosition,
 } from "./App";
+import { resolveStandaloneControlPanelDockWidthRatio } from "./control-panel-layout";
 import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
   LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
@@ -15174,7 +15174,7 @@ describe("App", () => {
           await screen.findByRole("button", { name: "Open preferences" }),
         );
         await clickAndSettle(
-          screen.getByRole("tab", { name: "Codex defaults" }),
+          screen.getByRole("tab", { name: "Codex" }),
         );
         await selectComboboxOption("Default reasoning effort", /high/i);
         await waitFor(() => {
@@ -15344,7 +15344,7 @@ describe("App", () => {
           await screen.findByRole("button", { name: "Open preferences" }),
         );
         await clickAndSettle(
-          screen.getByRole("tab", { name: "Claude defaults" }),
+          screen.getByRole("tab", { name: "Claude" }),
         );
         await selectComboboxOption("Default Claude effort", /max/i);
         await waitFor(() => {
@@ -15827,7 +15827,7 @@ describe("App", () => {
       ).not.toBeInTheDocument();
 
       await clickAndSettle(
-        screen.getByRole("tab", { name: "Editor & UI appearance" }),
+        screen.getByRole("tab", { name: "Editor & UI" }),
       );
 
       expect(
@@ -15888,7 +15888,7 @@ describe("App", () => {
         await screen.findByRole("button", { name: "Open preferences" }),
       );
       await clickAndSettle(
-        screen.getByRole("tab", { name: "Editor & UI appearance" }),
+        screen.getByRole("tab", { name: "Editor & UI" }),
       );
 
       const densitySlider = screen.getByRole("slider", { name: "UI density" });
