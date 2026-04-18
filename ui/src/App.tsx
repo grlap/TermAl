@@ -174,6 +174,7 @@ import {
   resolveRecoveredWorkspaceLayoutRequestError,
 } from "./state-adoption";
 import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
+import { appTestHooks, setAppTestHooksForTests } from "./app-test-hooks";
 
 import {
   CodexPromptSettingsCard,
@@ -531,21 +532,6 @@ type StandaloneControlSurfaceViewState = {
   sessionListFilter?: SessionListFilter;
   sessionListSearchQuery?: string;
 };
-
-export type AppTestHooks = {
-  onDeleteProjectPostAwaitPath?: (path: "resolve" | "reject") => void;
-  onRestoredGitDiffDocumentContentUpdate?: (
-    status: "success" | "error",
-  ) => void;
-};
-
-let appTestHooks: AppTestHooks | null = null;
-
-// Keep App test hooks observer-only. Hook fields must use non-sensitive label
-// arguments so the production export cannot expose user content if imported.
-export function setAppTestHooksForTests(hooks: AppTestHooks | null) {
-  appTestHooks = hooks;
-}
 
 export default function App() {
   const [workspaceViewId] = useState(() => ensureWorkspaceViewId());

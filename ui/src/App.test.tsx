@@ -25,8 +25,8 @@ import App, {
   resolveControlPanelWorkspaceRoot,
   describeUnknownSessionModelWarning,
   resolveUnknownSessionModelSendAttempt,
-  setAppTestHooksForTests,
 } from "./App";
+import { setAppTestHooksForTests } from "./app-test-hooks";
 import { resolveStandaloneControlPanelDockWidthRatio } from "./control-panel-layout";
 import {
   buildControlSurfaceSessionListEntries,
