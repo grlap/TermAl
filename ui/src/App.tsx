@@ -143,6 +143,15 @@ import {
   workspaceNodeContainsControlPanel,
   workspaceNodeUsesStandaloneControlSurfaceMinWidth,
 } from "./workspace-queries";
+import {
+  buildControlSurfaceSessionListEntries,
+  buildControlSurfaceSessionListState,
+  createControlPanelSectionLauncherTab,
+  formatSessionOrchestratorGroupName,
+  mergeOrchestratorDeltaSessions,
+  resolveWorkspaceScopedProjectId,
+  resolveWorkspaceScopedSessionId,
+} from "./control-surface-state";
 
 import {
   CodexPromptSettingsCard,
@@ -245,11 +254,6 @@ import {
   activatePane,
   closeWorkspaceTab,
   CONTROL_SURFACE_KINDS,
-  createFilesystemTab,
-  createGitStatusTab,
-  createOrchestratorListTab,
-  createProjectListTab,
-  createSessionListTab,
   DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
   dockControlPanelAtWorkspaceEdge,
   ensureControlPanelInWorkspaceState,
@@ -707,227 +711,6 @@ export function resolveAdoptedStateSlices(
         ? nextState.workspaces
         : current.workspaces,
   };
-}
-
-function createControlPanelSectionLauncherTab(
-  sectionId: ControlPanelSectionId,
-  options: {
-    filesystemRoot: string | null;
-    gitWorkdir: string | null;
-    originProjectId: string | null;
-    originSessionId: string | null;
-  },
-): WorkspaceTab | null {
-  const { filesystemRoot, gitWorkdir, originProjectId, originSessionId } =
-    options;
-  switch (sectionId) {
-    case "files":
-      return (filesystemRoot?.trim() ?? "")
-        ? createFilesystemTab(filesystemRoot, originSessionId, originProjectId)
-        : null;
-    case "git":
-      return (gitWorkdir?.trim() ?? "")
-        ? createGitStatusTab(gitWorkdir, originSessionId, originProjectId)
-        : null;
-    case "projects":
-      return createProjectListTab(originSessionId, originProjectId);
-    case "sessions":
-      return createSessionListTab(originSessionId, originProjectId);
-    case "orchestrators":
-      return createOrchestratorListTab(originSessionId, originProjectId);
-  }
-}
-
-function resolveWorkspaceScopedProjectId(
-  originProjectId: string | null,
-  originSessionId: string | null,
-  sessionLookup: ReadonlyMap<string, Session>,
-  projectLookup: ReadonlyMap<string, Project>,
-) {
-  const normalizedOriginProjectId = originProjectId?.trim() ?? "";
-  if (
-    normalizedOriginProjectId &&
-    projectLookup.has(normalizedOriginProjectId)
-  ) {
-    return normalizedOriginProjectId;
-  }
-
-  const originSessionProjectId = originSessionId
-    ? (sessionLookup.get(originSessionId)?.projectId?.trim() ?? "")
-    : "";
-  return originSessionProjectId && projectLookup.has(originSessionProjectId)
-    ? originSessionProjectId
-    : null;
-}
-
-function resolveWorkspaceScopedSessionId(
-  projectId: string,
-  preferredSessionId: string | null,
-  activeSession: Session | null,
-  sessions: readonly Session[],
-  sessionLookup: ReadonlyMap<string, Session>,
-) {
-  const preferredSession = preferredSessionId
-    ? (sessionLookup.get(preferredSessionId) ?? null)
-    : null;
-  if (preferredSession?.projectId === projectId) {
-    return preferredSession.id;
-  }
-
-  if (activeSession?.projectId === projectId) {
-    return activeSession.id;
-  }
-
-  return (
-    sessions.find((session) => session.projectId === projectId)?.id ?? null
-  );
-}
-
-function buildControlSurfaceSessionListState(
-  sessions: readonly Session[],
-  selectedProject: Project | null,
-  sessionListFilter: SessionListFilter,
-  sessionListSearchQuery: string,
-) {
-  const projectScopedSessions = selectedProject
-    ? sessions.filter((session) => session.projectId === selectedProject.id)
-    : sessions;
-  const mutableProjectScopedSessions = [...projectScopedSessions];
-  const sessionFilterCounts = countSessionsByFilter(
-    mutableProjectScopedSessions,
-  );
-  const statusFilteredSessions = filterSessionsByListFilter(
-    mutableProjectScopedSessions,
-    sessionListFilter,
-  );
-  const trimmedSearchQuery = sessionListSearchQuery.trim();
-  const hasSessionListSearch = trimmedSearchQuery.length > 0;
-
-  if (!hasSessionListSearch) {
-    return {
-      projectScopedSessions,
-      sessionFilterCounts,
-      hasSessionListSearch,
-      sessionListSearchResults: new Map<string, SessionListSearchResult>(),
-      filteredSessions: statusFilteredSessions,
-    };
-  }
-
-  const sessionListSearchResults = new Map(
-    statusFilteredSessions.flatMap((session) => {
-      const result = buildSessionListSearchResultFromIndex(
-        buildSessionSearchIndex(session),
-        trimmedSearchQuery,
-      );
-      return result ? ([[session.id, result]] as const) : [];
-    }),
-  );
-
-  return {
-    projectScopedSessions,
-    sessionFilterCounts,
-    hasSessionListSearch,
-    sessionListSearchResults,
-    filteredSessions: statusFilteredSessions.filter((session) =>
-      sessionListSearchResults.has(session.id),
-    ),
-  };
-}
-
-type ControlSurfaceSessionListEntry =
-  | { kind: "session"; session: Session }
-  | {
-      kind: "orchestratorGroup";
-      orchestrator: OrchestratorInstance;
-      sessions: Session[];
-    };
-
-export function formatSessionOrchestratorGroupName(
-  orchestrator: OrchestratorInstance,
-) {
-  const trimmedName = orchestrator.templateSnapshot.name.trim();
-  return trimmedName.length > 0 ? trimmedName : orchestrator.templateId;
-}
-
-export function buildControlSurfaceSessionListEntries(
-  sessions: readonly Session[],
-  orchestrators: readonly OrchestratorInstance[],
-): ControlSurfaceSessionListEntry[] {
-  if (!sessions.length) {
-    return [];
-  }
-
-  if (!orchestrators.length) {
-    return sessions.map((session) => ({ kind: "session", session }));
-  }
-
-  const sessionOrchestrators = new Map<string, OrchestratorInstance>();
-  const orderedOrchestrators = [...orchestrators].sort((left, right) =>
-    right.createdAt.localeCompare(left.createdAt),
-  );
-
-  for (const orchestrator of orderedOrchestrators) {
-    for (const sessionInstance of orchestrator.sessionInstances) {
-      if (!sessionOrchestrators.has(sessionInstance.sessionId)) {
-        sessionOrchestrators.set(sessionInstance.sessionId, orchestrator);
-      }
-    }
-  }
-
-  const groupedSessionsByOrchestratorId = new Map<string, Session[]>();
-  const entries: ControlSurfaceSessionListEntry[] = [];
-
-  for (const session of sessions) {
-    const orchestrator = sessionOrchestrators.get(session.id);
-
-    if (!orchestrator) {
-      entries.push({ kind: "session", session });
-      continue;
-    }
-
-    const groupedSessions = groupedSessionsByOrchestratorId.get(
-      orchestrator.id,
-    );
-    if (groupedSessions) {
-      groupedSessions.push(session);
-      continue;
-    }
-
-    const nextGroupedSessions = [session];
-    groupedSessionsByOrchestratorId.set(orchestrator.id, nextGroupedSessions);
-    entries.push({
-      kind: "orchestratorGroup",
-      orchestrator,
-      sessions: nextGroupedSessions,
-    });
-  }
-
-  return entries;
-}
-
-function mergeOrchestratorDeltaSessions(
-  previousSessions: Session[],
-  deltaSessions: Session[] | undefined,
-) {
-  if (!deltaSessions?.length) {
-    return previousSessions;
-  }
-
-  const deltaSessionsById = new Map(
-    deltaSessions.map((session) => [session.id, session]),
-  );
-  const nextSessions = previousSessions.map(
-    (session) => deltaSessionsById.get(session.id) ?? session,
-  );
-  const knownSessionIds = new Set(nextSessions.map((session) => session.id));
-  for (const session of deltaSessions) {
-    if (!knownSessionIds.has(session.id)) {
-      nextSessions.push(session);
-      knownSessionIds.add(session.id);
-    }
-  }
-
-  return reconcileSessions(previousSessions, nextSessions);
 }
 
 export function syncMessageStackScrollPosition(

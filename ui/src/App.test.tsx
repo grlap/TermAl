@@ -18,11 +18,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
 import App, {
-  buildControlSurfaceSessionListEntries,
   collectRestoredGitDiffDocumentContentRefreshes,
   MarkdownContent,
   ThemedCombobox,
-  formatSessionOrchestratorGroupName,
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
   resolveRecoveredWorkspaceLayoutRequestError,
@@ -36,6 +34,10 @@ import App, {
   syncMessageStackScrollPosition,
 } from "./App";
 import { resolveStandaloneControlPanelDockWidthRatio } from "./control-panel-layout";
+import {
+  buildControlSurfaceSessionListEntries,
+  formatSessionOrchestratorGroupName,
+} from "./control-surface-state";
 import { getWorkspaceSplitResizeBounds } from "./workspace-queries";
 import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
