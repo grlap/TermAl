@@ -1,4 +1,13 @@
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import type {
   IDisposable,
   editor as MonacoEditor,
@@ -11,6 +20,27 @@ import {
   type MonacoAppearance,
   type MonacoModule,
 } from "./monaco";
+
+/**
+ * Inline rendered region used by Monaco view zones. The caller
+ * produces a stable `id` so re-renders don't thrash the zone set,
+ * a line number where the rendered output should appear (the zone
+ * is inserted AFTER this line), and the React node to render into
+ * the zone's DOM host (typically via
+ * `MarkdownContent` with a synthetic fence).
+ *
+ * The zone's height is measured via `ResizeObserver` after mount
+ * and the zone re-added with the measured height — Monaco's view
+ * zone API does not support in-place height updates, so we
+ * remove/re-add when content grows or shrinks. The brief flicker
+ * on first paint is a deliberate trade for the simplicity of
+ * React portals rendering into a plain DOM node.
+ */
+export type MonacoInlineZone = {
+  id: string;
+  afterLineNumber: number;
+  render: () => ReactNode;
+};
 
 export type MonacoCodeEditorStatus = {
   line: number;
@@ -32,6 +62,18 @@ type MonacoCodeEditorProps = {
   highlightedColumnNumber?: number | null;
   highlightedLineNumber?: number | null;
   highlightToken?: string | null;
+  /**
+   * Optional inline-rendered view zones keyed by stable id. When
+   * supplied, the editor reserves vertical space for each zone
+   * after its `afterLineNumber`, renders the React output into a
+   * portal-hosted DOM node, and re-layouts whenever the content
+   * height changes. Zones whose id disappears are removed; zones
+   * whose `afterLineNumber` shifts are moved (via remove + re-add);
+   * unchanged zones keep their position and portal continues to
+   * render without remounting. Pass an empty array (or omit) to
+   * use Monaco without inline renders.
+   */
+  inlineZones?: MonacoInlineZone[];
   language?: string | null;
   path?: string | null;
   readOnly?: boolean;
@@ -41,6 +83,8 @@ type MonacoCodeEditorProps = {
   onStatusChange?: (status: MonacoCodeEditorStatus) => void;
 };
 
+const DEFAULT_INLINE_ZONES: MonacoInlineZone[] = [];
+
 export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEditorProps>(function MonacoCodeEditor({
   appearance,
   ariaLabel,
@@ -48,6 +92,7 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
   highlightedColumnNumber = null,
   highlightedLineNumber = null,
   highlightToken = null,
+  inlineZones = DEFAULT_INLINE_ZONES,
   language,
   path,
   readOnly = false,
@@ -71,6 +116,27 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
   const modelDescriptorRef = useRef("");
   const highlightDecorationIdsRef = useRef<string[]>([]);
   const lastHighlightDescriptorRef = useRef("");
+  // Inline view-zone state. `inlineZoneHostsRef` is the source of
+  // truth for the editor-side zone registry (zone id → DOM node +
+  // last-known line number + last-known height). The React state
+  // mirror (`inlineZoneHostState`) triggers portal rerenders when
+  // the zone set changes — using only the ref would mean React
+  // never knows to render new portals.
+  const inlineZoneHostsRef = useRef<
+    Map<
+      string,
+      {
+        zoneId: string;
+        node: HTMLDivElement;
+        afterLineNumber: number;
+        lastHeightPx: number;
+      }
+    >
+  >(new Map());
+  const [inlineZoneHostState, setInlineZoneHostState] = useState<
+    Array<{ id: string; node: HTMLDivElement; zone: MonacoInlineZone }>
+  >([]);
+  const inlineZoneResizeObserverRef = useRef<ResizeObserver | null>(null);
 
   changeHandlerRef.current = onChange;
   saveHandlerRef.current = onSave;
@@ -157,6 +223,13 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
       cursorSubscriptionRef.current = null;
       modelSubscriptionRef.current?.dispose();
       modelSubscriptionRef.current = null;
+      inlineZoneResizeObserverRef.current?.disconnect();
+      inlineZoneResizeObserverRef.current = null;
+      // Inline zone DOM nodes are owned by Monaco (via addZone).
+      // Disposing the editor tears them down automatically; we
+      // just drop our ref map so a remount doesn't reuse stale
+      // zone ids.
+      inlineZoneHostsRef.current.clear();
       clearHighlightDecorations();
       editorRef.current?.dispose();
       editorRef.current = null;
@@ -178,6 +251,150 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
     layoutEditor();
     emitStatus();
   }, [appearance]);
+
+  // Inline view zones: add/move/remove to match the current
+  // `inlineZones` prop. A stable `id` keeps the DOM node (and its
+  // React portal) across re-renders so the rendered Mermaid diagram
+  // does NOT unmount and re-render on every keystroke. The zone is
+  // only removed-and-re-added when `afterLineNumber` actually
+  // changes (Monaco lacks an "update zone position" API), and the
+  // portal re-runs only if the React element identity changes.
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco) {
+      return;
+    }
+
+    const nextIds = new Set(inlineZones.map((zone) => zone.id));
+    const hosts = inlineZoneHostsRef.current;
+
+    editor.changeViewZones((accessor) => {
+      // Drop zones whose id has disappeared from the prop.
+      for (const [id, host] of hosts.entries()) {
+        if (!nextIds.has(id)) {
+          accessor.removeZone(host.zoneId);
+          host.node.remove();
+          hosts.delete(id);
+        }
+      }
+
+      // Add new zones, and re-add existing zones whose
+      // `afterLineNumber` shifted (e.g. the user added lines above
+      // the fence).
+      for (const zone of inlineZones) {
+        const existing = hosts.get(zone.id);
+        if (existing && existing.afterLineNumber === zone.afterLineNumber) {
+          continue;
+        }
+        if (existing) {
+          accessor.removeZone(existing.zoneId);
+          existing.node.remove();
+          hosts.delete(zone.id);
+        }
+        const node = document.createElement("div");
+        node.className = "monaco-inline-render-zone";
+        // Initial height estimate. The ResizeObserver below
+        // measures the actual content height after the portal
+        // renders and re-adds the zone with the measured value.
+        const initialHeight = existing?.lastHeightPx ?? 240;
+        const zoneId = accessor.addZone({
+          afterLineNumber: zone.afterLineNumber,
+          heightInPx: initialHeight,
+          domNode: node,
+        });
+        hosts.set(zone.id, {
+          zoneId,
+          node,
+          afterLineNumber: zone.afterLineNumber,
+          lastHeightPx: initialHeight,
+        });
+      }
+    });
+
+    // Publish the current zone set to React state so portals render
+    // into each zone's DOM node.
+    setInlineZoneHostState(
+      inlineZones.map((zone) => ({
+        id: zone.id,
+        node: hosts.get(zone.id)?.node ?? document.createElement("div"),
+        zone,
+      })),
+    );
+  }, [inlineZones]);
+
+  // ResizeObserver watches each zone's DOM node and re-adds the
+  // zone with the measured height whenever the rendered content
+  // grows or shrinks (e.g. a Mermaid diagram finishing its async
+  // render, the user editing the fence body to change the
+  // diagram's size). Monaco does not support in-place height
+  // updates on a view zone, so we remove-and-re-add — the zone id
+  // changes but the DOM node + its React portal stay the same, so
+  // the rendered content does not flicker.
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco || inlineZoneHostState.length === 0) {
+      inlineZoneResizeObserverRef.current?.disconnect();
+      inlineZoneResizeObserverRef.current = null;
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const editorAlive = editorRef.current;
+      if (!editorAlive) {
+        return;
+      }
+      const hosts = inlineZoneHostsRef.current;
+      const pendingUpdates: Array<{ id: string; heightPx: number }> = [];
+      for (const entry of entries) {
+        const target = entry.target as HTMLDivElement;
+        for (const [id, host] of hosts.entries()) {
+          if (host.node !== target) {
+            continue;
+          }
+          const nextHeight = Math.max(
+            Math.ceil(entry.contentRect.height),
+            40,
+          );
+          if (Math.abs(nextHeight - host.lastHeightPx) < 2) {
+            continue;
+          }
+          pendingUpdates.push({ id, heightPx: nextHeight });
+        }
+      }
+      if (pendingUpdates.length === 0) {
+        return;
+      }
+      editorAlive.changeViewZones((accessor) => {
+        for (const update of pendingUpdates) {
+          const host = hosts.get(update.id);
+          if (!host) {
+            continue;
+          }
+          accessor.removeZone(host.zoneId);
+          host.lastHeightPx = update.heightPx;
+          host.zoneId = accessor.addZone({
+            afterLineNumber: host.afterLineNumber,
+            heightInPx: update.heightPx,
+            domNode: host.node,
+          });
+        }
+      });
+    });
+
+    for (const { node } of inlineZoneHostState) {
+      observer.observe(node);
+    }
+    inlineZoneResizeObserverRef.current = observer;
+
+    return () => {
+      observer.disconnect();
+      if (inlineZoneResizeObserverRef.current === observer) {
+        inlineZoneResizeObserverRef.current = null;
+      }
+    };
+  }, [inlineZoneHostState]);
 
   useEffect(() => {
     const monaco = monacoRef.current;
@@ -385,7 +602,17 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
     emitStatus();
   }
 
-  return <div ref={containerRef} className="monaco-code-editor" />;
+  return (
+    <>
+      <div ref={containerRef} className="monaco-code-editor" />
+      {/* Inline zones: each host DOM node lives inside Monaco's
+          view-zone slot (managed by the editor). The React portal
+          renders the caller-provided content into that slot. Keyed
+          by zone id so the portal stays mounted across re-renders
+          when only the line number or height changes. */}
+      {inlineZoneHostState.map((host) => createPortal(host.zone.render(), host.node, host.id))}
+    </>
+  );
 });
 
 function buildModelUri(monaco: MonacoModule, path: string | null | undefined, baseUri: string) {

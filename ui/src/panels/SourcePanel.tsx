@@ -2,7 +2,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { copyTextToClipboard } from "../clipboard";
 import { MarkdownDocumentView } from "../MarkdownDocumentView";
 import { MarkdownContent, type MarkdownFileLinkTarget } from "../message-cards";
-import type { MonacoCodeEditorStatus } from "../MonacoCodeEditor";
+import type { MonacoCodeEditorStatus, MonacoInlineZone } from "../MonacoCodeEditor";
 import { resolveMonacoLanguage, type MonacoAppearance } from "../monaco";
 import {
   detectRenderableRegions,
@@ -50,7 +50,7 @@ const LANGUAGE_LABELS: Record<string, string> = {
 
 const MAX_REBASE_DIFF_CELLS = 4_000_000;
 
-type SourceDocumentMode = "code" | "inline" | "preview" | "split";
+type SourceDocumentMode = "code" | "preview" | "split";
 
 export type SourceFileState = {
   status: "idle" | "loading" | "ready" | "error";
@@ -161,6 +161,32 @@ export function SourcePanel({
   // (`.mmd`) surface a whole-file region, so they get the switcher.
   const canShowRendererPreview =
     fileState.status === "ready" && (isMarkdownSource || renderableRegions.length > 0);
+  // Inline Monaco view zones: each detected renderable region gets a
+  // zone pinned AFTER its last source line, hosting a portal that
+  // renders the region's display text via MarkdownContent. Keyed by
+  // the region's stable id so React keeps the portal mounted as the
+  // user types — a mid-edit fence change shifts the line number
+  // (Monaco removes + re-adds the zone) but the diagram DOM node
+  // survives, preventing the Mermaid iframe from unmounting and
+  // reinitializing on every keystroke. Empty when the registry
+  // detects no regions, so non-renderable files pay zero cost.
+  const inlineZones = useMemo<MonacoInlineZone[]>(() => {
+    if (renderableRegions.length === 0) {
+      return [];
+    }
+    return renderableRegions.map((region) => ({
+      id: region.id,
+      afterLineNumber: region.sourceEndLine,
+      render: () => (
+        <MarkdownContent
+          appearance={editorAppearance}
+          documentPath={fileState.path}
+          markdown={composeInlineRegionFence(region)}
+          workspaceRoot={workspaceRoot}
+        />
+      ),
+    }));
+  }, [editorAppearance, fileState.path, renderableRegions, workspaceRoot]);
   const setEditorValueState = (nextValue: string) => {
     editorValueRef.current = nextValue;
     setEditorValue(nextValue);
@@ -503,13 +529,6 @@ export function SourcePanel({
                 selected={documentMode === "code"}
                 onClick={() => setDocumentMode("code")}
               />
-              {renderableRegions.length > 0 ? (
-                <SourceDocumentModeButton
-                  label="Inline"
-                  selected={documentMode === "inline"}
-                  onClick={() => setDocumentMode("inline")}
-                />
-              ) : null}
               <SourceDocumentModeButton
                 label="Preview"
                 selected={documentMode === "preview"}
@@ -641,16 +660,6 @@ export function SourcePanel({
                   />
                 </Suspense>
               </>
-            ) : canShowRendererPreview && documentMode === "inline" && renderableRegions.length > 0 ? (
-              <InlineSourceView
-                appearance={editorAppearance}
-                content={editorValue}
-                documentPath={fileState.path}
-                language={fileState.language}
-                onOpenSourceLink={onOpenSourceLink}
-                renderableRegions={renderableRegions}
-                workspaceRoot={workspaceRoot}
-              />
             ) : canShowRendererPreview && documentMode === "preview" ? (
               <RendererPreviewPane
                 appearance={editorAppearance}
@@ -702,6 +711,7 @@ export function SourcePanel({
                   highlightedColumnNumber={sourceFocus?.column ?? null}
                   highlightedLineNumber={sourceFocus?.line ?? null}
                   highlightToken={sourceFocus?.token ?? null}
+                  inlineZones={inlineZones}
                   language={fileState.language}
                   path={fileState.path}
                   value={editorValue}
@@ -936,101 +946,14 @@ function isStaleFileSaveError(message: string) {
   return message.toLowerCase().includes("file changed on disk before save");
 }
 
-// Renders the source code with detected renderable regions replaced
-// by their rendered output at their original line positions —
-// read-only, but the surrounding source remains visible so the
-// user reads "code + diagrams + code" in document order. The
-// editable surface stays in Code/Split mode; this view is for
-// reading, not editing (matches the spec's "Monaco owns the source
-// editing" rule in `docs/features/source-renderers.md` §Product
-// Model).
-//
-// Implementation composes one synthetic Markdown document that
-// intersperses ` ```<lang> ``` ` fenced code blocks (for source
-// sections outside regions) with the region's rendered form
-// (` ```mermaid ``` ` or `$$...$$`). `MarkdownContent` already
-// handles both — syntax-highlights the code blocks via highlight.js
-// and renders Mermaid/math through the Phase 1 pipeline with the
-// safe `contentEditable={false}` + `data-markdown-serialization="skip"`
-// wrappers. No new renderer needed.
-function InlineSourceView({
-  appearance,
-  content,
-  documentPath,
-  language,
-  onOpenSourceLink,
-  renderableRegions,
-  workspaceRoot,
-}: {
-  appearance: MonacoAppearance;
-  content: string;
-  documentPath: string;
-  language: string | null;
-  onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
-  renderableRegions: SourceRenderableRegion[];
-  workspaceRoot: string | null;
-}) {
-  const syntheticMarkdown = useMemo(
-    () => composeInlineSourceMarkdown(content, language, renderableRegions),
-    [content, language, renderableRegions],
-  );
-  return (
-    <div className="source-inline-view" aria-label="Inline rendered source">
-      <MarkdownContent
-        appearance={appearance}
-        documentPath={documentPath}
-        markdown={syntheticMarkdown}
-        onOpenSourceLink={onOpenSourceLink}
-        workspaceRoot={workspaceRoot}
-      />
-    </div>
-  );
-}
-
-// Composes the synthetic Markdown the Inline view renders. The
-// algorithm: walk sorted regions left-to-right, emitting a source
-// block for any lines between the cursor and the region's start,
-// then the region itself, then advancing the cursor past the
-// region. After the loop, any trailing source is emitted as a
-// final code block. Empty source gaps (adjacent regions) are
-// skipped so the rendered output doesn't show empty code fences.
-function composeInlineSourceMarkdown(
-  content: string,
-  language: string | null,
-  regions: SourceRenderableRegion[],
-): string {
-  const lines = content.split(/\r?\n/);
-  const fenceLang = resolveInlineFenceLanguage(language);
-  const chunks: string[] = [];
-  let cursor = 0; // 0-based line index
-
-  const emitSourceRange = (startZero: number, endZero: number) => {
-    if (endZero <= startZero) {
-      return;
-    }
-    const source = lines.slice(startZero, endZero).join("\n");
-    if (source.length === 0) {
-      return;
-    }
-    chunks.push("```" + fenceLang + "\n" + source + "\n```");
-  };
-
-  for (const region of regions) {
-    const regionStartZero = region.sourceStartLine - 1;
-    const regionEndZeroExclusive = region.sourceEndLine; // inclusive → exclusive for slice
-    if (regionStartZero > cursor) {
-      emitSourceRange(cursor, regionStartZero);
-    }
-    chunks.push(composeInlineRegionFence(region));
-    cursor = Math.max(cursor, regionEndZeroExclusive);
-  }
-  if (cursor < lines.length) {
-    emitSourceRange(cursor, lines.length);
-  }
-
-  return chunks.join("\n\n");
-}
-
+// Builds the synthetic Markdown fence that a Monaco view zone uses
+// to render a single region inline. The Source panel (Code + Split
+// modes) passes this into `MonacoCodeEditor`'s `inlineZones` prop;
+// the Monaco view-zone machinery portals a `<MarkdownContent>` into
+// a zone positioned after the region's last source line, reusing
+// the Phase 1 Mermaid/KaTeX pipeline without a second renderer.
+// Markdown-renderer regions (future Phase 6+) pass their body
+// through as-is so `MarkdownContent` parses it.
 function composeInlineRegionFence(region: SourceRenderableRegion): string {
   if (region.renderer === "mermaid") {
     return "```mermaid\n" + region.displayText.replace(/\s+$/, "") + "\n```";
@@ -1038,38 +961,7 @@ function composeInlineRegionFence(region: SourceRenderableRegion): string {
   if (region.renderer === "math") {
     return "$$\n" + region.displayText.replace(/\s+$/, "") + "\n$$";
   }
-  // Markdown-renderer regions (future, Phase 6+) render their body
-  // as-is so MarkdownContent parses it.
   return region.displayText;
-}
-
-// Maps the caller's language hint (Monaco language, detected ext,
-// etc.) into a fenced-code-block language tag that highlight.js
-// recognizes. Falls back to an empty tag when unknown so the code
-// still renders as a pre/code block without highlighting.
-function resolveInlineFenceLanguage(language: string | null): string {
-  if (!language) {
-    return "";
-  }
-  const normalized = language.trim().toLowerCase();
-  if (!normalized) {
-    return "";
-  }
-  // Map a few common Monaco language ids that differ from
-  // highlight.js's. The list is intentionally short — anything not
-  // mapped is passed through, which usually works since
-  // highlight.js shares most language slugs with Monaco.
-  switch (normalized) {
-    case "plaintext":
-      return "";
-    case "shell":
-    case "shellscript":
-      return "bash";
-    case "objective-c":
-      return "objectivec";
-    default:
-      return normalized;
-  }
 }
 
 // Preview pane for source files that have at least one renderable

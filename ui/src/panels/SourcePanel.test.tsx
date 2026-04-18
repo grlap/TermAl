@@ -12,18 +12,26 @@ vi.mock("../clipboard", () => ({
   copyTextToClipboard: vi.fn(),
 }));
 
+// Mock Monaco as a textarea. `inlineZones` is surfaced as a data
+// attribute (count + first-zone line) so tests can assert zones were
+// passed without spinning up a real editor with view-zone machinery.
 vi.mock("../MonacoCodeEditor", () => ({
   MonacoCodeEditor: ({
     ariaLabel,
+    inlineZones,
     onChange,
     value,
   }: {
     ariaLabel: string;
+    inlineZones?: Array<{ id: string; afterLineNumber: number }>;
     onChange: (nextValue: string) => void;
     value: string;
   }) => (
     <textarea
       aria-label={ariaLabel}
+      data-inline-zone-count={inlineZones?.length ?? 0}
+      data-inline-zone-first-after-line={inlineZones?.[0]?.afterLineNumber ?? ""}
+      data-inline-zone-ids={inlineZones?.map((zone) => zone.id).join(",") ?? ""}
       onChange={(event) => onChange(event.currentTarget.value)}
       value={value}
     />
@@ -405,12 +413,14 @@ describe("SourcePanel", () => {
     expect(screen.getByText("Mermaid")).toHaveClass("chip");
   });
 
-  // Inline mode (follow-up to Phase 5): source stays visible as
-  // syntax-highlighted code, detected renderable regions render
-  // in-place at their original line positions. Read-only — this is
-  // a reading view, editing still lives in Code/Split.
-  it("exposes Inline mode when renderable regions are detected and renders source with the diagram inline", async () => {
-    const { container } = render(
+  // Inline rendering is now directly part of Code mode: the Source
+  // panel hands detected renderable regions to `MonacoCodeEditor`
+  // as `inlineZones`, which renders each diagram via a view zone
+  // pinned after the region's last source line. No separate mode
+  // toggle — the diagrams appear alongside the editable source
+  // whenever regions exist.
+  it("passes inline zones to the Code-mode Monaco editor when renderable regions are detected", async () => {
+    render(
       <SourcePanel
         editorAppearance={editorAppearance}
         editorFontSizePx={14}
@@ -433,53 +443,75 @@ describe("SourcePanel", () => {
       />,
     );
 
-    // Inline button appears because the registry detected a Mermaid
-    // region inside the `///` doc-comment block.
-    const inlineButton = await screen.findByRole("button", { name: "Inline" });
-    fireEvent.click(inlineButton);
-
-    // After switching, the inline view shows the pre-fence Rust
-    // source as a syntax-highlighted code block, the Mermaid
-    // rendered inline (via the registry → MarkdownContent pipeline),
-    // and the post-fence `pub fn example()` source as another code
-    // block.
-    await waitFor(() => {
-      // Check the inline view container is rendered.
-      const inlineView = container.querySelector(".source-inline-view");
-      expect(inlineView).not.toBeNull();
-    });
-    // The source-outside-fence content reaches the DOM (the `pub fn
-    // example()` line). `highlight.js` wraps it in spans, so we
-    // search by text content rather than exact DOM shape.
-    expect(
-      container.textContent?.includes("pub fn example()"),
-    ).toBe(true);
-    // The prose doc-comment lines also stay visible as source
-    // (the `///` prefix is part of the code, not stripped).
-    expect(container.textContent?.includes("/// Architecture:")).toBe(true);
+    const editor = await screen.findByLabelText(
+      "Source editor for /repo/src/architecture.rs",
+    );
+    // Exactly one inline zone — the Mermaid fence in the `///` doc
+    // comment. Pinned after line 6 (the closing ``` marker).
+    expect(editor).toHaveAttribute("data-inline-zone-count", "1");
+    expect(editor).toHaveAttribute("data-inline-zone-first-after-line", "6");
   });
 
-  it("does not expose Inline mode for files with no renderable regions", async () => {
+  it("passes zero inline zones for files with no renderable regions", async () => {
     render(
       <SourcePanel
         editorAppearance={editorAppearance}
         editorFontSizePx={14}
         fileState={{
           ...readyFileState,
-          path: "/repo/docs/readme.md",
-          content: "# Plain heading\n\nNo diagrams here.\n",
-          language: "markdown",
+          path: "/repo/src/plain.rs",
+          content: "fn add(a: i32, b: i32) -> i32 { a + b }\n",
+          language: "rust",
         }}
-        sourcePath="/repo/docs/readme.md"
+        sourcePath="/repo/src/plain.rs"
         onSaveFile={vi.fn()}
       />,
     );
 
-    // Markdown files with zero renderable regions get Preview/Split
-    // (Markdown always gets them) but NOT Inline — Inline only
-    // makes sense when there's something to splice inline.
-    await screen.findByRole("button", { name: "Preview" });
-    expect(screen.queryByRole("button", { name: "Inline" })).not.toBeInTheDocument();
+    const editor = await screen.findByLabelText(
+      "Source editor for /repo/src/plain.rs",
+    );
+    // Non-renderable file: zero zones, zero first-line value.
+    expect(editor).toHaveAttribute("data-inline-zone-count", "0");
+  });
+
+  it("recomputes inline zones from the CURRENT edit buffer, not the saved file content", async () => {
+    const { rerender } = render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/diagrams/flow.mmd",
+          content: "flowchart TD\n  A --> B\n",
+          language: null,
+        }}
+        sourcePath="/repo/diagrams/flow.mmd"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    const editor = await screen.findByLabelText(
+      "Source editor for /repo/diagrams/flow.mmd",
+    );
+    expect(editor).toHaveAttribute("data-inline-zone-count", "1");
+    // Whole-file `.mmd` region ends at line 3 (trailing newline
+    // creates a third line in `content.split(/\r?\n/)`), so the
+    // zone is pinned after line 3.
+    expect(editor).toHaveAttribute("data-inline-zone-first-after-line", "3");
+
+    // User types an additional flowchart node — the fence body
+    // grows, and the zone's afterLineNumber shifts.
+    fireEvent.change(editor, {
+      target: { value: "flowchart TD\n  A --> B\n  B --> C\n" },
+    });
+
+    await waitFor(() => {
+      expect(editor).toHaveAttribute(
+        "data-inline-zone-first-after-line",
+        "4",
+      );
+    });
   });
 
   // Edits that ADD renderable content (e.g., user types a Mermaid

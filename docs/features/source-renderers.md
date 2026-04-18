@@ -2,7 +2,12 @@
 
 ## Status
 
-Phases 1-5 shipped. Phase 6 (additional renderers beyond Mermaid/math) planned.
+Phases 1-5 shipped plus an Inline-zones enhancement that merges the
+read-only "Inline" preview into the editable Code mode: when a file
+has renderable regions, `MonacoCodeEditor` hosts view zones that
+render each diagram inline after its last source line, alongside the
+editable source. No separate mode toggle. Phase 6 (additional
+renderers beyond Mermaid/math) planned.
 
 This document defines a shared renderer model for source-backed previews. It
 extends the Markdown document work into a more general capability: render
@@ -113,6 +118,42 @@ views.
   additional SourcePanel integration test exercises the end-to-end
   Preview/Split exposure for Rust files with doc-comment Mermaid
   fences.
+
+### Inline zones shipped (post-Phase-5 enhancement)
+
+Diagrams now render in-place WITHIN the editable Code view, not just
+in a separate Preview/Split pane. The earlier read-only "Inline"
+mode was dropped — feedback was that mode toggles were friction
+("separate modes are not that useful").
+
+- `MonacoCodeEditor` gained an optional `inlineZones` prop:
+  `Array<{ id, afterLineNumber, render }>`. The editor manages a
+  view-zone registry keyed by zone id, using `changeViewZones` to
+  add/remove/move zones in response to prop changes, and portals
+  the caller's React output into each zone's DOM node.
+- Stable zone ids (from the registry's `SourceRenderableRegion.id`)
+  keep the portal DOM node mounted across keystrokes. A mid-edit
+  fence change shifts the zone's `afterLineNumber` (triggering
+  remove + re-add in Monaco, because the view-zone API has no
+  "update position" primitive), but the diagram host DOM node
+  survives — the Mermaid iframe doesn't re-initialize and the
+  KaTeX output doesn't re-parse on every keystroke.
+- Content-height tracking via `ResizeObserver`: each zone's DOM
+  node is watched, and when the rendered diagram finishes
+  async-rendering (or the fence body changes to produce a
+  different-sized diagram), the zone is removed and re-added with
+  the measured height. The brief flicker on first paint is the
+  cost of Monaco's "fixed height" view-zone API.
+- `SourcePanel` computes `inlineZones` via `useMemo` over
+  `renderableRegions` and passes them to Monaco in both Code mode
+  and Split mode's editor pane. Empty arrays for non-renderable
+  files incur zero zone overhead.
+- Three SourcePanel Vitest cases (via a textarea Monaco mock that
+  surfaces `inlineZones.length` + `afterLineNumber` as data
+  attributes): zones passed for a Rust file with a `///` Mermaid
+  fence, zero zones for a plain Rust file, and live-recompute when
+  the user types to grow the fence body (zone's `afterLineNumber`
+  shifts from 3 to 4 as a line is added).
 
 ## Problem
 
