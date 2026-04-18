@@ -132,15 +132,15 @@ import { SettingsDialogShell } from "./preferences/SettingsDialogShell";
 import { SettingsTabBar } from "./preferences/SettingsTabBar";
 import type { PreferencesTabId } from "./preferences/preferences-tabs";
 import {
-  CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX,
-  CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX,
-  DEFAULT_SPLIT_MAX_RATIO,
-  DEFAULT_SPLIT_MIN_RATIO,
-  STANDALONE_CONTROL_SURFACE_PANE_MIN_WIDTH_FALLBACK_PX,
   hydrateControlPanelLayout,
-  resolveRootCssLengthPx,
   resolveStandaloneControlPanelDockWidthRatio,
 } from "./control-panel-layout";
+import {
+  getWorkspaceSplitResizeBounds,
+  workspaceContainsOnlyControlPanel,
+  workspaceNodeContainsControlPanel,
+  workspaceNodeUsesStandaloneControlSurfaceMinWidth,
+} from "./workspace-queries";
 
 import {
   CodexPromptSettingsCard,
@@ -10420,6 +10420,9 @@ function SessionPaneView({
   const [sessionFindQuery, setSessionFindQuery] = useState("");
   const [sessionFindActiveIndex, setSessionFindActiveIndex] = useState(0);
   const sessionFindInputRef = useRef<HTMLInputElement>(null);
+  const [sessionFindFocusRequest, setSessionFindFocusRequest] = useState<{
+    selectAll: boolean;
+  } | null>(null);
   const sessionSearchItemRefsRef = useRef<Record<string, HTMLElement | null>>(
     {},
   );
@@ -10757,16 +10760,8 @@ function SessionPaneView({
   }
 
   function focusSessionFindInput(selectAll = false) {
-    window.requestAnimationFrame(() => {
-      const input = sessionFindInputRef.current;
-      if (!input) {
-        return;
-      }
-
-      input.focus();
-      if (selectAll) {
-        input.select();
-      }
+    setSessionFindFocusRequest({
+      selectAll,
     });
   }
 
@@ -10955,6 +10950,28 @@ function SessionPaneView({
     setSessionFindActiveIndex(0);
   }, [sessionFindQuery]);
 
+  useLayoutEffect(() => {
+    if (!isSessionFindOpen || !sessionFindFocusRequest) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const input = sessionFindInputRef.current;
+      if (!input) {
+        return;
+      }
+
+      input.focus();
+      if (sessionFindFocusRequest.selectAll) {
+        input.select();
+      }
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [isSessionFindOpen, sessionFindFocusRequest]);
+
   useEffect(() => {
     if (!isActive || !canFindInSession) {
       return;
@@ -10977,9 +10994,9 @@ function SessionPaneView({
       openSessionFind();
     }
 
-    window.addEventListener("keydown", handleWindowKeyDown);
+    window.addEventListener("keydown", handleWindowKeyDown, true);
     return () => {
-      window.removeEventListener("keydown", handleWindowKeyDown);
+      window.removeEventListener("keydown", handleWindowKeyDown, true);
     };
   }, [canFindInSession, isActive]);
 
@@ -12632,189 +12649,6 @@ function EmptyState({ title, body }: { title: string; body: string }) {
       <p>{body}</p>
     </article>
   );
-}
-
-function workspaceNodeContainsControlPanel(
-  node: WorkspaceNode,
-  paneLookup: Map<string, WorkspacePane>,
-): boolean {
-  if (node.type === "pane") {
-    return (
-      paneLookup
-        .get(node.paneId)
-        ?.tabs.some((tab) => tab.kind === "controlPanel") ?? false
-    );
-  }
-
-  return (
-    workspaceNodeContainsControlPanel(node.first, paneLookup) ||
-    workspaceNodeContainsControlPanel(node.second, paneLookup)
-  );
-}
-
-function getActiveWorkspacePaneTab(pane: WorkspacePane): WorkspaceTab | null {
-  return (
-    pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null
-  );
-}
-
-function paneHasActiveStandaloneControlSurface(pane: WorkspacePane): boolean {
-  const activeTab = getActiveWorkspacePaneTab(pane);
-  return Boolean(
-    activeTab &&
-    activeTab.kind !== "controlPanel" &&
-    CONTROL_SURFACE_KINDS.has(activeTab.kind),
-  );
-}
-
-function workspaceNodeContainsStandaloneControlSurface(
-  node: WorkspaceNode,
-  paneLookup: Map<string, WorkspacePane>,
-): boolean {
-  if (node.type === "pane") {
-    const pane = paneLookup.get(node.paneId);
-    return pane ? paneHasActiveStandaloneControlSurface(pane) : false;
-  }
-
-  return (
-    workspaceNodeContainsStandaloneControlSurface(node.first, paneLookup) ||
-    workspaceNodeContainsStandaloneControlSurface(node.second, paneLookup)
-  );
-}
-
-function workspaceNodeContainsNonControlSurfacePane(
-  node: WorkspaceNode,
-  paneLookup: Map<string, WorkspacePane>,
-): boolean {
-  if (node.type === "pane") {
-    const pane = paneLookup.get(node.paneId);
-    const activeTab = pane ? getActiveWorkspacePaneTab(pane) : null;
-    return activeTab ? !CONTROL_SURFACE_KINDS.has(activeTab.kind) : false;
-  }
-
-  return (
-    workspaceNodeContainsNonControlSurfacePane(node.first, paneLookup) ||
-    workspaceNodeContainsNonControlSurfacePane(node.second, paneLookup)
-  );
-}
-
-function workspaceNodeUsesStandaloneControlSurfaceMinWidth(
-  node: WorkspaceNode,
-  paneLookup: Map<string, WorkspacePane>,
-): boolean {
-  return (
-    !workspaceNodeContainsControlPanel(node, paneLookup) &&
-    !workspaceNodeContainsNonControlSurfacePane(node, paneLookup) &&
-    workspaceNodeContainsStandaloneControlSurface(node, paneLookup)
-  );
-}
-
-function findWorkspaceSplitNode(
-  node: WorkspaceNode | null,
-  splitId: string,
-): Extract<WorkspaceNode, { type: "split" }> | null {
-  if (!node || node.type === "pane") {
-    return null;
-  }
-
-  if (node.id === splitId) {
-    return node;
-  }
-
-  return (
-    findWorkspaceSplitNode(node.first, splitId) ??
-    findWorkspaceSplitNode(node.second, splitId)
-  );
-}
-
-function workspaceContainsOnlyControlPanel(workspace: WorkspaceState) {
-  return (
-    workspace.panes.length === 1 &&
-    workspace.panes[0]?.tabs.length === 1 &&
-    workspace.panes[0]?.tabs[0]?.kind === "controlPanel"
-  );
-}
-
-export function getWorkspaceSplitResizeBounds(
-  root: WorkspaceNode | null,
-  splitId: string,
-  direction: "row" | "column",
-  size: number,
-  paneLookup: Map<string, WorkspacePane>,
-): { minRatio: number; maxRatio: number } {
-  if (direction !== "row" || size <= 0) {
-    return {
-      minRatio: DEFAULT_SPLIT_MIN_RATIO,
-      maxRatio: DEFAULT_SPLIT_MAX_RATIO,
-    };
-  }
-
-  const splitNode = findWorkspaceSplitNode(root, splitId);
-  if (!splitNode) {
-    return {
-      minRatio: DEFAULT_SPLIT_MIN_RATIO,
-      maxRatio: DEFAULT_SPLIT_MAX_RATIO,
-    };
-  }
-
-  const controlPanelMinRatio = clamp(
-    resolveRootCssLengthPx(
-      "--control-panel-pane-min-width",
-      CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX,
-    ) / size,
-    0,
-    1,
-  );
-  const standaloneControlSurfaceMinRatio = clamp(
-    resolveRootCssLengthPx(
-      "--standalone-control-surface-pane-min-width",
-      STANDALONE_CONTROL_SURFACE_PANE_MIN_WIDTH_FALLBACK_PX,
-    ) / size,
-    0,
-    1,
-  );
-  const firstMinRatio = workspaceNodeContainsControlPanel(
-    splitNode.first,
-    paneLookup,
-  )
-    ? controlPanelMinRatio
-    : workspaceNodeUsesStandaloneControlSurfaceMinWidth(
-          splitNode.first,
-          paneLookup,
-        )
-      ? standaloneControlSurfaceMinRatio
-      : DEFAULT_SPLIT_MIN_RATIO;
-  const secondMinRatio = workspaceNodeContainsControlPanel(
-    splitNode.second,
-    paneLookup,
-  )
-    ? controlPanelMinRatio
-    : workspaceNodeUsesStandaloneControlSurfaceMinWidth(
-          splitNode.second,
-          paneLookup,
-        )
-      ? standaloneControlSurfaceMinRatio
-      : DEFAULT_SPLIT_MIN_RATIO;
-  const minRatio = firstMinRatio;
-  const maxRatio = 1 - secondMinRatio;
-
-  if (minRatio <= maxRatio) {
-    return {
-      minRatio,
-      maxRatio,
-    };
-  }
-
-  const constrainedRatio = clamp(
-    firstMinRatio / Math.max(firstMinRatio + secondMinRatio, Number.EPSILON),
-    0,
-    1,
-  );
-
-  return {
-    minRatio: constrainedRatio,
-    maxRatio: constrainedRatio,
-  };
 }
 
 function OrchestratorRuntimeActionButton({

@@ -25,7 +25,6 @@ import App, {
   formatSessionOrchestratorGroupName,
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
-  getWorkspaceSplitResizeBounds,
   resolveRecoveredWorkspaceLayoutRequestError,
   resolveAdoptedStateSlices,
   resolveControlPanelWorkspaceRoot,
@@ -37,6 +36,7 @@ import App, {
   syncMessageStackScrollPosition,
 } from "./App";
 import { resolveStandaloneControlPanelDockWidthRatio } from "./control-panel-layout";
+import { getWorkspaceSplitResizeBounds } from "./workspace-queries";
 import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
   LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
