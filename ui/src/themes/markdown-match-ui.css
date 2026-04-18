@@ -1,0 +1,20 @@
+/*
+ * Markdown theme: Match UI.
+ *
+ * Phase 1 placeholder. This file exists so the registry entry has
+ * something to land against and the CSS import chain is complete;
+ * it is intentionally empty at this stage because no Markdown
+ * rendering surface currently reads `--markdown-*` variables yet.
+ *
+ * Later phases of the Markdown-themes feature
+ * (docs/features/markdown-themes-and-styles.md) will:
+ *   1. introduce `--markdown-*` variable names on
+ *      `[data-markdown-theme="match-ui"]` that alias existing UI
+ *      theme variables (so "Match UI" keeps the current look);
+ *   2. add concrete preset files (github-light, github-dark, etc.)
+ *      under sibling `markdown-<id>.css` paths that override the
+ *      same variables scoped to their own data-attribute selector.
+ *
+ * Keeping this file in tree from Phase 1 means later phases only
+ * need to fill in rules, not restructure the theme loader.
+ */

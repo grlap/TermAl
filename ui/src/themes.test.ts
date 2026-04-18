@@ -2,11 +2,17 @@ import {
   DEFAULT_DENSITY_PERCENT,
   DEFAULT_EDITOR_FONT_SIZE_PX,
   DEFAULT_FONT_SIZE_PX,
+  DEFAULT_MARKDOWN_STYLE_ID,
+  DEFAULT_MARKDOWN_THEME_ID,
   DEFAULT_STYLE_ID,
   DEFAULT_THEME_ID,
   DENSITY_STORAGE_KEY,
   EDITOR_FONT_SIZE_STORAGE_KEY,
   FONT_SIZE_STORAGE_KEY,
+  MARKDOWN_STYLES,
+  MARKDOWN_STYLE_STORAGE_KEY,
+  MARKDOWN_THEMES,
+  MARKDOWN_THEME_STORAGE_KEY,
   MAX_DENSITY_PERCENT,
   MAX_EDITOR_FONT_SIZE_PX,
   MAX_FONT_SIZE_PX,
@@ -19,6 +25,8 @@ import {
   THEMES,
   applyDensityPreference,
   applyFontSizePreference,
+  applyMarkdownStylePreference,
+  applyMarkdownThemePreference,
   applyStylePreference,
   applyThemePreference,
   clampDensityPreference,
@@ -27,13 +35,19 @@ import {
   getStoredDensityPreference,
   getStoredEditorFontSizePreference,
   getStoredFontSizePreference,
+  getStoredMarkdownStylePreference,
+  getStoredMarkdownThemePreference,
   getStoredStylePreference,
   getStoredThemePreference,
+  isMarkdownStyleId,
+  isMarkdownThemeId,
   isStyleId,
   isThemeId,
   persistDensityPreference,
   persistEditorFontSizePreference,
   persistFontSizePreference,
+  persistMarkdownStylePreference,
+  persistMarkdownThemePreference,
   persistStylePreference,
   persistThemePreference,
 } from "./themes";
@@ -43,6 +57,8 @@ describe("theme helpers", () => {
     window.localStorage.clear();
     document.documentElement.removeAttribute("data-theme");
     document.documentElement.removeAttribute("data-ui-style");
+    document.documentElement.removeAttribute("data-markdown-theme");
+    document.documentElement.removeAttribute("data-markdown-style");
     document.documentElement.style.removeProperty("font-size");
     document.documentElement.style.removeProperty("--density-scale");
   });
@@ -150,5 +166,57 @@ describe("theme helpers", () => {
     expect(themeIds.every((themeId) => isThemeId(themeId))).toBe(true);
     expect(styleIds).toContain(DEFAULT_STYLE_ID);
     expect(styleIds.every((styleId) => isStyleId(styleId))).toBe(true);
+  });
+
+  it("returns the default markdown theme and style when storage is empty or invalid", () => {
+    expect(getStoredMarkdownThemePreference()).toBe(DEFAULT_MARKDOWN_THEME_ID);
+    expect(getStoredMarkdownStylePreference()).toBe(DEFAULT_MARKDOWN_STYLE_ID);
+
+    window.localStorage.setItem(MARKDOWN_THEME_STORAGE_KEY, "not-a-markdown-theme");
+    window.localStorage.setItem(MARKDOWN_STYLE_STORAGE_KEY, "not-a-markdown-style");
+    expect(getStoredMarkdownThemePreference()).toBe(DEFAULT_MARKDOWN_THEME_ID);
+    expect(getStoredMarkdownStylePreference()).toBe(DEFAULT_MARKDOWN_STYLE_ID);
+  });
+
+  it("reads and persists valid markdown theme / style preferences", () => {
+    persistMarkdownThemePreference(DEFAULT_MARKDOWN_THEME_ID);
+    persistMarkdownStylePreference(DEFAULT_MARKDOWN_STYLE_ID);
+    expect(window.localStorage.getItem(MARKDOWN_THEME_STORAGE_KEY)).toBe(
+      DEFAULT_MARKDOWN_THEME_ID,
+    );
+    expect(window.localStorage.getItem(MARKDOWN_STYLE_STORAGE_KEY)).toBe(
+      DEFAULT_MARKDOWN_STYLE_ID,
+    );
+    expect(getStoredMarkdownThemePreference()).toBe(DEFAULT_MARKDOWN_THEME_ID);
+    expect(getStoredMarkdownStylePreference()).toBe(DEFAULT_MARKDOWN_STYLE_ID);
+  });
+
+  it("applies the selected markdown theme and style to the document root", () => {
+    applyMarkdownThemePreference(DEFAULT_MARKDOWN_THEME_ID);
+    applyMarkdownStylePreference(DEFAULT_MARKDOWN_STYLE_ID);
+    expect(document.documentElement.dataset.markdownTheme).toBe(
+      DEFAULT_MARKDOWN_THEME_ID,
+    );
+    expect(document.documentElement.dataset.markdownStyle).toBe(
+      DEFAULT_MARKDOWN_STYLE_ID,
+    );
+  });
+
+  it("keeps the markdown theme and style registries aligned with the runtime guards", () => {
+    const markdownThemeIds = MARKDOWN_THEMES.map((theme) => theme.id);
+    const markdownStyleIds = MARKDOWN_STYLES.map((style) => style.id);
+
+    expect(markdownThemeIds).toContain(DEFAULT_MARKDOWN_THEME_ID);
+    expect(markdownThemeIds.every((themeId) => isMarkdownThemeId(themeId))).toBe(
+      true,
+    );
+    expect(markdownStyleIds).toContain(DEFAULT_MARKDOWN_STYLE_ID);
+    expect(markdownStyleIds.every((styleId) => isMarkdownStyleId(styleId))).toBe(
+      true,
+    );
+    // Phase 1 ships only the `match-ui` entries; sentinel so later
+    // phases consciously update the test when real presets land.
+    expect(markdownThemeIds).toEqual(["match-ui"]);
+    expect(markdownStyleIds).toEqual(["match-ui"]);
   });
 });

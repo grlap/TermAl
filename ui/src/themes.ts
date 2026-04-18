@@ -1,5 +1,7 @@
 export const THEME_STORAGE_KEY = "termal-ui-theme";
 export const STYLE_STORAGE_KEY = "termal-ui-style";
+export const MARKDOWN_THEME_STORAGE_KEY = "termal-markdown-theme";
+export const MARKDOWN_STYLE_STORAGE_KEY = "termal-markdown-style";
 export const FONT_SIZE_STORAGE_KEY = "termal-ui-font-size";
 export const EDITOR_FONT_SIZE_STORAGE_KEY = "termal-editor-font-size";
 export const DENSITY_STORAGE_KEY = "termal-ui-density";
@@ -161,12 +163,63 @@ export type ThemeId = (typeof THEMES)[number]["id"];
 
 export const DEFAULT_THEME_ID: ThemeId = "warm-light";
 
+// Markdown theme / Markdown style are two axes that apply specifically
+// to rendered-Markdown surfaces (message cards, rendered diff preview,
+// source-panel preview, Mermaid / KaTeX rendering). They sit alongside
+// the UI theme + UI style axes above — a user can keep a light
+// workspace chrome while rendering Markdown with a GitHub-like or
+// newspaper-like preset. See
+// `docs/features/markdown-themes-and-styles.md` for the full brief.
+//
+// Phase 1 (this commit): the infrastructure is present but ships only
+// the `match-ui` entry, which explicitly means "inherit from the active
+// UI theme / UI style". This makes Phase 1 visually a no-op; real
+// presets land in later phases.
+export const MARKDOWN_THEMES = [
+  {
+    id: "match-ui",
+    name: "Match UI",
+    description:
+      "Inherit Markdown colors, typography, and Mermaid / KaTeX theming from the active UI theme.",
+    swatches: ["inherit", "inherit", "inherit"] as const,
+  },
+] as const;
+
+export type MarkdownThemeId = (typeof MARKDOWN_THEMES)[number]["id"];
+
+export const DEFAULT_MARKDOWN_THEME_ID: MarkdownThemeId = "match-ui";
+
+export const MARKDOWN_STYLES = [
+  {
+    id: "match-ui",
+    name: "Match UI",
+    description:
+      "Use the typography and spacing treatment bundled with the active UI style.",
+  },
+] as const;
+
+export type MarkdownStyleId = (typeof MARKDOWN_STYLES)[number]["id"];
+
+export const DEFAULT_MARKDOWN_STYLE_ID: MarkdownStyleId = "match-ui";
+
 export function isStyleId(value: string | null | undefined): value is StyleId {
   return STYLES.some((style) => style.id === value);
 }
 
 export function isThemeId(value: string | null | undefined): value is ThemeId {
   return THEMES.some((theme) => theme.id === value);
+}
+
+export function isMarkdownThemeId(
+  value: string | null | undefined,
+): value is MarkdownThemeId {
+  return MARKDOWN_THEMES.some((theme) => theme.id === value);
+}
+
+export function isMarkdownStyleId(
+  value: string | null | undefined,
+): value is MarkdownStyleId {
+  return MARKDOWN_STYLES.some((style) => style.id === value);
 }
 
 export function getStoredThemePreference(): ThemeId {
@@ -217,6 +270,56 @@ export function applyStylePreference(styleId: StyleId) {
   }
 
   document.documentElement.dataset.uiStyle = styleId;
+}
+
+export function getStoredMarkdownThemePreference(): MarkdownThemeId {
+  if (typeof window === "undefined") {
+    return DEFAULT_MARKDOWN_THEME_ID;
+  }
+
+  const stored = window.localStorage.getItem(MARKDOWN_THEME_STORAGE_KEY);
+  return isMarkdownThemeId(stored) ? stored : DEFAULT_MARKDOWN_THEME_ID;
+}
+
+export function getStoredMarkdownStylePreference(): MarkdownStyleId {
+  if (typeof window === "undefined") {
+    return DEFAULT_MARKDOWN_STYLE_ID;
+  }
+
+  const stored = window.localStorage.getItem(MARKDOWN_STYLE_STORAGE_KEY);
+  return isMarkdownStyleId(stored) ? stored : DEFAULT_MARKDOWN_STYLE_ID;
+}
+
+export function persistMarkdownThemePreference(markdownThemeId: MarkdownThemeId) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(MARKDOWN_THEME_STORAGE_KEY, markdownThemeId);
+}
+
+export function persistMarkdownStylePreference(markdownStyleId: MarkdownStyleId) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(MARKDOWN_STYLE_STORAGE_KEY, markdownStyleId);
+}
+
+export function applyMarkdownThemePreference(markdownThemeId: MarkdownThemeId) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  document.documentElement.dataset.markdownTheme = markdownThemeId;
+}
+
+export function applyMarkdownStylePreference(markdownStyleId: MarkdownStyleId) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  document.documentElement.dataset.markdownStyle = markdownStyleId;
 }
 
 export function clampFontSizePreference(value: number): number {

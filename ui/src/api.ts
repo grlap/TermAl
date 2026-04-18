@@ -100,6 +100,8 @@ export type WorkspaceLayoutDocument = {
   controlPanelSide: "left" | "right";
   themeId?: string;
   styleId?: string;
+  markdownThemeId?: string;
+  markdownStyleId?: string;
   fontSizePx?: number;
   editorFontSizePx?: number;
   densityPercent?: number;
@@ -470,6 +472,8 @@ export function saveWorkspaceLayout(
     controlPanelSide: "left" | "right";
     themeId?: string;
     styleId?: string;
+    markdownThemeId?: string;
+    markdownStyleId?: string;
     fontSizePx?: number;
     editorFontSizePx?: number;
     densityPercent?: number;

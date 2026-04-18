@@ -1,5 +1,10 @@
-import type { StyleId, ThemeId } from "./themes";
-import { isStyleId, isThemeId } from "./themes";
+import type { MarkdownStyleId, MarkdownThemeId, StyleId, ThemeId } from "./themes";
+import {
+  isMarkdownStyleId,
+  isMarkdownThemeId,
+  isStyleId,
+  isThemeId,
+} from "./themes";
 import {
   normalizeWorkspaceStatePaths,
   stripDiffPreviewDocumentContentFromWorkspaceState,
@@ -23,6 +28,8 @@ export type StoredWorkspaceLayout = {
   controlPanelSide: ControlPanelSide;
   themeId?: ThemeId;
   styleId?: StyleId;
+  markdownThemeId?: MarkdownThemeId;
+  markdownStyleId?: MarkdownStyleId;
   fontSizePx?: number;
   editorFontSizePx?: number;
   densityPercent?: number;
@@ -121,6 +128,18 @@ function isStoredWorkspaceLayout(value: unknown): value is StoredWorkspaceLayout
     return false;
   }
   if (value.styleId !== undefined && !isStyleId(value.styleId as string)) {
+    return false;
+  }
+  if (
+    value.markdownThemeId !== undefined &&
+    !isMarkdownThemeId(value.markdownThemeId as string)
+  ) {
+    return false;
+  }
+  if (
+    value.markdownStyleId !== undefined &&
+    !isMarkdownStyleId(value.markdownStyleId as string)
+  ) {
     return false;
   }
 

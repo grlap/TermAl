@@ -308,6 +308,8 @@ import {
   THEMES,
   applyDensityPreference,
   applyFontSizePreference,
+  applyMarkdownStylePreference,
+  applyMarkdownThemePreference,
   applyStylePreference,
   applyThemePreference,
   clampDensityPreference,
@@ -316,13 +318,19 @@ import {
   getStoredDensityPreference,
   getStoredEditorFontSizePreference,
   getStoredFontSizePreference,
+  getStoredMarkdownStylePreference,
+  getStoredMarkdownThemePreference,
   getStoredStylePreference,
   getStoredThemePreference,
   persistDensityPreference,
   persistEditorFontSizePreference,
   persistFontSizePreference,
+  persistMarkdownStylePreference,
+  persistMarkdownThemePreference,
   persistStylePreference,
   persistThemePreference,
+  type MarkdownStyleId,
+  type MarkdownThemeId,
   type StyleId,
   type ThemeId,
 } from "./themes";
@@ -445,6 +453,8 @@ type WorkspaceLayoutPersistencePayload = {
   fontSizePx: number;
   styleId: StyleId;
   themeId: ThemeId;
+  markdownStyleId: MarkdownStyleId;
+  markdownThemeId: MarkdownThemeId;
   workspace: WorkspaceState;
 };
 type PendingWorkspaceLayoutSave = {
@@ -1022,6 +1032,10 @@ function createInitialWorkspaceBootstrap(workspaceViewId: string) {
     storedLayout?.controlPanelSide ?? "left";
   const themeId: ThemeId = storedLayout?.themeId ?? getStoredThemePreference();
   const styleId: StyleId = storedLayout?.styleId ?? getStoredStylePreference();
+  const markdownThemeId: MarkdownThemeId =
+    storedLayout?.markdownThemeId ?? getStoredMarkdownThemePreference();
+  const markdownStyleId: MarkdownStyleId =
+    storedLayout?.markdownStyleId ?? getStoredMarkdownStylePreference();
   const fontSizePx = storedLayout?.fontSizePx ?? getStoredFontSizePreference();
   const editorFontSizePx =
     storedLayout?.editorFontSizePx ?? getStoredEditorFontSizePreference();
@@ -1040,6 +1054,8 @@ function createInitialWorkspaceBootstrap(workspaceViewId: string) {
     controlPanelSide,
     themeId,
     styleId,
+    markdownThemeId,
+    markdownStyleId,
     fontSizePx,
     editorFontSizePx,
     densityPercent,
@@ -1172,6 +1188,12 @@ export default function App() {
   );
   const [styleId, setStyleId] = useState<StyleId>(
     initialWorkspaceBootstrap.styleId,
+  );
+  const [markdownThemeId, setMarkdownThemeId] = useState<MarkdownThemeId>(
+    initialWorkspaceBootstrap.markdownThemeId,
+  );
+  const [markdownStyleId, setMarkdownStyleId] = useState<MarkdownStyleId>(
+    initialWorkspaceBootstrap.markdownStyleId,
   );
   const [fontSizePx, setFontSizePx] = useState<number>(
     initialWorkspaceBootstrap.fontSizePx,
@@ -3825,6 +3847,16 @@ export default function App() {
   }, [styleId]);
 
   useLayoutEffect(() => {
+    applyMarkdownThemePreference(markdownThemeId);
+    persistMarkdownThemePreference(markdownThemeId);
+  }, [markdownThemeId]);
+
+  useLayoutEffect(() => {
+    applyMarkdownStylePreference(markdownStyleId);
+    persistMarkdownStylePreference(markdownStyleId);
+  }, [markdownStyleId]);
+
+  useLayoutEffect(() => {
     applyFontSizePreference(fontSizePx);
     persistFontSizePreference(fontSizePx);
   }, [fontSizePx]);
@@ -3856,6 +3888,8 @@ export default function App() {
                 controlPanelSide: response.layout.controlPanelSide,
                 themeId: response.layout.themeId,
                 styleId: response.layout.styleId,
+                markdownThemeId: response.layout.markdownThemeId,
+                markdownStyleId: response.layout.markdownStyleId,
                 fontSizePx: response.layout.fontSizePx,
                 editorFontSizePx: response.layout.editorFontSizePx,
                 densityPercent: response.layout.densityPercent,
@@ -3878,6 +3912,12 @@ export default function App() {
           }
           if (nextLayout.styleId) {
             setStyleId(nextLayout.styleId);
+          }
+          if (nextLayout.markdownThemeId) {
+            setMarkdownThemeId(nextLayout.markdownThemeId);
+          }
+          if (nextLayout.markdownStyleId) {
+            setMarkdownStyleId(nextLayout.markdownStyleId);
           }
           if (nextLayout.fontSizePx !== undefined) {
             setFontSizePx(nextLayout.fontSizePx);
@@ -3955,6 +3995,8 @@ export default function App() {
       controlPanelSide,
       themeId,
       styleId,
+      markdownThemeId,
+      markdownStyleId,
       fontSizePx,
       editorFontSizePx,
       densityPercent,
@@ -3983,6 +4025,8 @@ export default function App() {
     editorFontSizePx,
     fontSizePx,
     isWorkspaceLayoutReady,
+    markdownStyleId,
+    markdownThemeId,
     styleId,
     themeId,
     workspace,
