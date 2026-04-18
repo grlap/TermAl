@@ -23,6 +23,7 @@ import {
   DEFAULT_EDITOR_FONT_SIZE_PX,
   DEFAULT_FONT_SIZE_PX,
   DIAGRAM_LOOKS,
+  DIAGRAM_PALETTES,
   MARKDOWN_STYLES,
   MARKDOWN_THEMES,
   MAX_DENSITY_PERCENT,
@@ -34,6 +35,7 @@ import {
   STYLES,
   THEMES,
   type DiagramLook,
+  type DiagramPalette,
   type DiagramThemeOverrideMode,
   type MarkdownStyleId,
   type MarkdownThemeId,
@@ -440,10 +442,12 @@ export function MarkdownPreferencesPanel({
   markdownStyleId,
   diagramThemeOverrideMode,
   diagramLook,
+  diagramPalette,
   onSelectMarkdownTheme,
   onSelectMarkdownStyle,
   onSelectDiagramThemeOverrideMode,
   onSelectDiagramLook,
+  onSelectDiagramPalette,
 }: {
   activeMarkdownTheme: (typeof MARKDOWN_THEMES)[number];
   activeMarkdownStyle: (typeof MARKDOWN_STYLES)[number];
@@ -451,14 +455,19 @@ export function MarkdownPreferencesPanel({
   markdownStyleId: MarkdownStyleId;
   diagramThemeOverrideMode: DiagramThemeOverrideMode;
   diagramLook: DiagramLook;
+  diagramPalette: DiagramPalette;
   onSelectMarkdownTheme: (id: MarkdownThemeId) => void;
   onSelectMarkdownStyle: (id: MarkdownStyleId) => void;
   onSelectDiagramThemeOverrideMode: (mode: DiagramThemeOverrideMode) => void;
   onSelectDiagramLook: (look: DiagramLook) => void;
+  onSelectDiagramPalette: (palette: DiagramPalette) => void;
 }) {
   const activeDiagramLook =
     DIAGRAM_LOOKS.find((option) => option.id === diagramLook) ??
     DIAGRAM_LOOKS[0];
+  const activeDiagramPalette =
+    DIAGRAM_PALETTES.find((option) => option.id === diagramPalette) ??
+    DIAGRAM_PALETTES[0];
   const diagramOverrideOptions: ReadonlyArray<{
     id: DiagramThemeOverrideMode;
     name: string;
@@ -639,6 +648,44 @@ export function MarkdownPreferencesPanel({
                   aria-checked={isSelected}
                   title={option.description}
                   onClick={() => onSelectDiagramLook(option.id)}
+                >
+                  <span className="theme-option-main">
+                    <span className="theme-option-title-row">
+                      <strong className="theme-option-title">{option.name}</strong>
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="theme-panel style-panel style-panel-compact">
+        <div className="theme-panel-header">
+          <div>
+            <p className="session-control-label">Diagram palette</p>
+            <p className="theme-panel-copy">{activeDiagramPalette.description}</p>
+          </div>
+        </div>
+
+        <div className="theme-option-list-shell">
+          <div
+            className="theme-option-list style-option-list style-option-list-compact"
+            role="radiogroup"
+            aria-label="Diagram palette"
+          >
+            {DIAGRAM_PALETTES.map((option) => {
+              const isSelected = option.id === diagramPalette;
+              return (
+                <button
+                  key={option.id}
+                  className={`theme-option ${isSelected ? "selected" : ""}`}
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  title={option.description}
+                  onClick={() => onSelectDiagramPalette(option.id)}
                 >
                   <span className="theme-option-main">
                     <span className="theme-option-title-row">

@@ -89,9 +89,12 @@ import {
 import type { MonacoAppearance } from "./monaco";
 import {
   DEFAULT_DIAGRAM_LOOK,
+  DEFAULT_DIAGRAM_PALETTE,
   DIAGRAM_HAND_DRAWN_SEED,
   isDiagramLook,
+  isDiagramPalette,
   type DiagramLook,
+  type DiagramPalette,
 } from "./themes";
 
 const DEFERRED_RENDER_ROOT_MARGIN_PX = 960;
@@ -1236,12 +1239,24 @@ function renderTermalMermaidDiagram(
 
 function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidConfigInput {
   const isDark = appearance === "dark";
-  const markdownOverrides = buildMarkdownThemeVariables();
   const look = readActiveDiagramLook();
+  const palette = readActiveDiagramPalette();
+
+  // Palette policy: when the user has picked a specific Mermaid
+  // preset (anything other than `match`), force that preset and
+  // skip our Markdown-theme palette overrides so they see the
+  // preset cleanly. `match` keeps the current behaviour: derive
+  // the theme from Monaco appearance and layer the Markdown theme
+  // on top via `themeVariables`.
+  const theme: "default" | "dark" | "forest" | "neutral" | "base" =
+    palette === "match" ? (isDark ? "dark" : "default") : palette;
+  const markdownOverrides =
+    palette === "match" ? buildMarkdownThemeVariables() : {};
+
   return {
     ...TERMAL_MERMAID_BASE_CONFIG,
     darkMode: isDark,
-    theme: isDark ? "dark" : "default",
+    theme,
     // Render aesthetic. `handDrawn` routes through Mermaid's rough.js
     // integration; `neo` is Mermaid's newer sharp look; `classic` is
     // the long-standing default. We also pin `handDrawnSeed` so the
@@ -1253,10 +1268,10 @@ function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidConfigIn
     // Re-apply the theme variables AFTER theme selection. Mermaid's
     // theme presets set their own `fontSize` defaults; spreading our
     // overrides last keeps the tighter 12px in force regardless of
-    // which theme the diagram ends up in. Markdown-theme-specific
-    // palette overrides follow the font override so a non-match-ui
-    // preset can replace node / edge / border colors while preserving
-    // the font size.
+    // which theme the diagram ends up in. Markdown-theme palette
+    // overrides apply only when palette is `match` — other presets
+    // render with their own colors so the user sees the preset
+    // honestly.
     themeVariables: {
       ...TERMAL_MERMAID_THEME_VARIABLES,
       ...markdownOverrides,
@@ -1270,6 +1285,14 @@ function readActiveDiagramLook(): DiagramLook {
   }
   const stored = document.documentElement.dataset.diagramLook;
   return isDiagramLook(stored) ? stored : DEFAULT_DIAGRAM_LOOK;
+}
+
+function readActiveDiagramPalette(): DiagramPalette {
+  if (typeof document === "undefined") {
+    return DEFAULT_DIAGRAM_PALETTE;
+  }
+  const stored = document.documentElement.dataset.diagramPalette;
+  return isDiagramPalette(stored) ? stored : DEFAULT_DIAGRAM_PALETTE;
 }
 
 // Mermaid fence detection, math expression counting, and render-

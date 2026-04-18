@@ -311,6 +311,7 @@ import {
   THEMES,
   applyDensityPreference,
   applyDiagramLookPreference,
+  applyDiagramPalettePreference,
   applyDiagramThemeOverridePreference,
   applyFontSizePreference,
   applyMarkdownStylePreference,
@@ -322,6 +323,7 @@ import {
   clampFontSizePreference,
   getStoredDensityPreference,
   getStoredDiagramLookPreference,
+  getStoredDiagramPalettePreference,
   getStoredDiagramThemeOverridePreference,
   getStoredEditorFontSizePreference,
   getStoredFontSizePreference,
@@ -331,6 +333,7 @@ import {
   getStoredThemePreference,
   persistDensityPreference,
   persistDiagramLookPreference,
+  persistDiagramPalettePreference,
   persistDiagramThemeOverridePreference,
   persistEditorFontSizePreference,
   persistFontSizePreference,
@@ -339,6 +342,7 @@ import {
   persistStylePreference,
   persistThemePreference,
   type DiagramLook,
+  type DiagramPalette,
   type DiagramThemeOverrideMode,
   type MarkdownStyleId,
   type MarkdownThemeId,
@@ -468,6 +472,7 @@ type WorkspaceLayoutPersistencePayload = {
   markdownThemeId: MarkdownThemeId;
   diagramThemeOverrideMode: DiagramThemeOverrideMode;
   diagramLook: DiagramLook;
+  diagramPalette: DiagramPalette;
   workspace: WorkspaceState;
 };
 type PendingWorkspaceLayoutSave = {
@@ -1056,6 +1061,8 @@ function createInitialWorkspaceBootstrap(workspaceViewId: string) {
     getStoredDiagramThemeOverridePreference();
   const diagramLook: DiagramLook =
     storedLayout?.diagramLook ?? getStoredDiagramLookPreference();
+  const diagramPalette: DiagramPalette =
+    storedLayout?.diagramPalette ?? getStoredDiagramPalettePreference();
   const fontSizePx = storedLayout?.fontSizePx ?? getStoredFontSizePreference();
   const editorFontSizePx =
     storedLayout?.editorFontSizePx ?? getStoredEditorFontSizePreference();
@@ -1078,6 +1085,7 @@ function createInitialWorkspaceBootstrap(workspaceViewId: string) {
     markdownStyleId,
     diagramThemeOverrideMode,
     diagramLook,
+    diagramPalette,
     fontSizePx,
     editorFontSizePx,
     densityPercent,
@@ -1223,6 +1231,9 @@ export default function App() {
     );
   const [diagramLook, setDiagramLook] = useState<DiagramLook>(
     initialWorkspaceBootstrap.diagramLook,
+  );
+  const [diagramPalette, setDiagramPalette] = useState<DiagramPalette>(
+    initialWorkspaceBootstrap.diagramPalette,
   );
   const [fontSizePx, setFontSizePx] = useState<number>(
     initialWorkspaceBootstrap.fontSizePx,
@@ -3902,6 +3913,11 @@ export default function App() {
   }, [diagramLook]);
 
   useLayoutEffect(() => {
+    applyDiagramPalettePreference(diagramPalette);
+    persistDiagramPalettePreference(diagramPalette);
+  }, [diagramPalette]);
+
+  useLayoutEffect(() => {
     applyFontSizePreference(fontSizePx);
     persistFontSizePreference(fontSizePx);
   }, [fontSizePx]);
@@ -3937,6 +3953,7 @@ export default function App() {
                 markdownStyleId: response.layout.markdownStyleId,
                 diagramThemeOverrideMode: response.layout.diagramThemeOverrideMode,
                 diagramLook: response.layout.diagramLook,
+                diagramPalette: response.layout.diagramPalette,
                 fontSizePx: response.layout.fontSizePx,
                 editorFontSizePx: response.layout.editorFontSizePx,
                 densityPercent: response.layout.densityPercent,
@@ -3971,6 +3988,9 @@ export default function App() {
           }
           if (nextLayout.diagramLook) {
             setDiagramLook(nextLayout.diagramLook);
+          }
+          if (nextLayout.diagramPalette) {
+            setDiagramPalette(nextLayout.diagramPalette);
           }
           if (nextLayout.fontSizePx !== undefined) {
             setFontSizePx(nextLayout.fontSizePx);
@@ -4052,6 +4072,7 @@ export default function App() {
       markdownStyleId,
       diagramThemeOverrideMode,
       diagramLook,
+      diagramPalette,
       fontSizePx,
       editorFontSizePx,
       densityPercent,
@@ -4078,6 +4099,7 @@ export default function App() {
     controlPanelSide,
     densityPercent,
     diagramLook,
+    diagramPalette,
     diagramThemeOverrideMode,
     editorFontSizePx,
     fontSizePx,
@@ -9071,10 +9093,12 @@ export default function App() {
                     markdownStyleId={markdownStyleId}
                     diagramThemeOverrideMode={diagramThemeOverrideMode}
                     diagramLook={diagramLook}
+                    diagramPalette={diagramPalette}
                     onSelectMarkdownTheme={setMarkdownThemeId}
                     onSelectMarkdownStyle={setMarkdownStyleId}
                     onSelectDiagramThemeOverrideMode={setDiagramThemeOverrideMode}
                     onSelectDiagramLook={setDiagramLook}
+                    onSelectDiagramPalette={setDiagramPalette}
                   />
                 ) : settingsTab === "appearance" ? (
                   <AppearancePreferencesPanel

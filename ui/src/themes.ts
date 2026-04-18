@@ -4,6 +4,7 @@ export const MARKDOWN_THEME_STORAGE_KEY = "termal-markdown-theme";
 export const MARKDOWN_STYLE_STORAGE_KEY = "termal-markdown-style";
 export const DIAGRAM_THEME_OVERRIDE_STORAGE_KEY = "termal-diagram-theme-override";
 export const DIAGRAM_LOOK_STORAGE_KEY = "termal-diagram-look";
+export const DIAGRAM_PALETTE_STORAGE_KEY = "termal-diagram-palette";
 export const FONT_SIZE_STORAGE_KEY = "termal-ui-font-size";
 export const EDITOR_FONT_SIZE_STORAGE_KEY = "termal-editor-font-size";
 export const DENSITY_STORAGE_KEY = "termal-ui-density";
@@ -284,6 +285,57 @@ export const DEFAULT_DIAGRAM_LOOK: DiagramLook = "classic";
 // Mermaid's config.type.d.ts.
 export const DIAGRAM_HAND_DRAWN_SEED = 42;
 
+// Mermaid ships five built-in theme presets and auto-picks between
+// `default` (light) and `dark` from the `darkMode` flag. When the
+// user wants a specific preset (e.g. forest) independent of their
+// Markdown theme colors or Monaco appearance, they pick it here.
+//
+// `match` (default) = keep the current behaviour: let TermAl derive
+//   Mermaid's theme from the Monaco appearance and layer the
+//   Markdown-theme palette overrides on top.
+// `default` / `dark` / `forest` / `neutral` / `base` = force
+//   Mermaid's named preset regardless of Monaco appearance, and
+//   skip the Markdown-theme palette overrides so the user sees the
+//   preset's colors cleanly.
+export const DIAGRAM_PALETTES = [
+  {
+    id: "match",
+    name: "Match Markdown theme",
+    description:
+      "Follow the active Markdown theme's palette overrides. Best pick when prose and diagrams should share a look.",
+  },
+  {
+    id: "default",
+    name: "Default",
+    description: "Mermaid's standard light palette — blue accents on a neutral surface.",
+  },
+  {
+    id: "dark",
+    name: "Dark",
+    description: "Mermaid's standard dark palette — cool accents on a charcoal surface.",
+  },
+  {
+    id: "forest",
+    name: "Forest",
+    description: "Green, nature-inspired palette with warm edge lines.",
+  },
+  {
+    id: "neutral",
+    name: "Neutral",
+    description: "Grayscale palette — no hue emphasis, readable against any Markdown theme.",
+  },
+  {
+    id: "base",
+    name: "Base",
+    description:
+      "Mermaid's neutral starting point, intended for per-diagram customization through themeVariables.",
+  },
+] as const;
+
+export type DiagramPalette = (typeof DIAGRAM_PALETTES)[number]["id"];
+
+export const DEFAULT_DIAGRAM_PALETTE: DiagramPalette = "match";
+
 export function isStyleId(value: string | null | undefined): value is StyleId {
   return STYLES.some((style) => style.id === value);
 }
@@ -312,6 +364,12 @@ export function isDiagramThemeOverrideMode(
 
 export function isDiagramLook(value: string | null | undefined): value is DiagramLook {
   return DIAGRAM_LOOKS.some((look) => look.id === value);
+}
+
+export function isDiagramPalette(
+  value: string | null | undefined,
+): value is DiagramPalette {
+  return DIAGRAM_PALETTES.some((palette) => palette.id === value);
 }
 
 export function getStoredThemePreference(): ThemeId {
@@ -464,6 +522,31 @@ export function applyDiagramLookPreference(look: DiagramLook) {
   }
 
   document.documentElement.dataset.diagramLook = look;
+}
+
+export function getStoredDiagramPalettePreference(): DiagramPalette {
+  if (typeof window === "undefined") {
+    return DEFAULT_DIAGRAM_PALETTE;
+  }
+
+  const stored = window.localStorage.getItem(DIAGRAM_PALETTE_STORAGE_KEY);
+  return isDiagramPalette(stored) ? stored : DEFAULT_DIAGRAM_PALETTE;
+}
+
+export function persistDiagramPalettePreference(palette: DiagramPalette) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(DIAGRAM_PALETTE_STORAGE_KEY, palette);
+}
+
+export function applyDiagramPalettePreference(palette: DiagramPalette) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  document.documentElement.dataset.diagramPalette = palette;
 }
 
 export function clampFontSizePreference(value: number): number {

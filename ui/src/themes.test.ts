@@ -1,6 +1,7 @@
 import {
   DEFAULT_DENSITY_PERCENT,
   DEFAULT_DIAGRAM_LOOK,
+  DEFAULT_DIAGRAM_PALETTE,
   DEFAULT_DIAGRAM_THEME_OVERRIDE_MODE,
   DEFAULT_EDITOR_FONT_SIZE_PX,
   DEFAULT_FONT_SIZE_PX,
@@ -11,6 +12,8 @@ import {
   DENSITY_STORAGE_KEY,
   DIAGRAM_LOOKS,
   DIAGRAM_LOOK_STORAGE_KEY,
+  DIAGRAM_PALETTES,
+  DIAGRAM_PALETTE_STORAGE_KEY,
   DIAGRAM_THEME_OVERRIDE_STORAGE_KEY,
   EDITOR_FONT_SIZE_STORAGE_KEY,
   FONT_SIZE_STORAGE_KEY,
@@ -30,6 +33,7 @@ import {
   THEMES,
   applyDensityPreference,
   applyDiagramLookPreference,
+  applyDiagramPalettePreference,
   applyDiagramThemeOverridePreference,
   applyFontSizePreference,
   applyMarkdownStylePreference,
@@ -41,6 +45,7 @@ import {
   clampFontSizePreference,
   getStoredDensityPreference,
   getStoredDiagramLookPreference,
+  getStoredDiagramPalettePreference,
   getStoredDiagramThemeOverridePreference,
   getStoredEditorFontSizePreference,
   getStoredFontSizePreference,
@@ -49,6 +54,7 @@ import {
   getStoredStylePreference,
   getStoredThemePreference,
   isDiagramLook,
+  isDiagramPalette,
   isDiagramThemeOverrideMode,
   isMarkdownStyleId,
   isMarkdownThemeId,
@@ -56,6 +62,7 @@ import {
   isThemeId,
   persistDensityPreference,
   persistDiagramLookPreference,
+  persistDiagramPalettePreference,
   persistDiagramThemeOverridePreference,
   persistEditorFontSizePreference,
   persistFontSizePreference,
@@ -74,6 +81,7 @@ describe("theme helpers", () => {
     document.documentElement.removeAttribute("data-markdown-style");
     document.documentElement.removeAttribute("data-diagram-theme-override");
     document.documentElement.removeAttribute("data-diagram-look");
+    document.documentElement.removeAttribute("data-diagram-palette");
     document.documentElement.style.removeProperty("font-size");
     document.documentElement.style.removeProperty("--density-scale");
   });
@@ -311,5 +319,45 @@ describe("theme helpers", () => {
     expect(ids).toEqual(["classic", "handDrawn", "neo"]);
     expect(isDiagramLook("sketchy")).toBe(false);
     expect(isDiagramLook(null)).toBe(false);
+  });
+
+  it("returns the default diagram palette when storage is empty or invalid", () => {
+    expect(getStoredDiagramPalettePreference()).toBe(DEFAULT_DIAGRAM_PALETTE);
+    expect(DEFAULT_DIAGRAM_PALETTE).toBe("match");
+
+    window.localStorage.setItem(DIAGRAM_PALETTE_STORAGE_KEY, "midnight");
+    expect(getStoredDiagramPalettePreference()).toBe(DEFAULT_DIAGRAM_PALETTE);
+  });
+
+  it("reads, persists, and applies the diagram palette", () => {
+    persistDiagramPalettePreference("forest");
+    expect(window.localStorage.getItem(DIAGRAM_PALETTE_STORAGE_KEY)).toBe("forest");
+    expect(getStoredDiagramPalettePreference()).toBe("forest");
+
+    applyDiagramPalettePreference("forest");
+    expect(document.documentElement.dataset.diagramPalette).toBe("forest");
+
+    persistDiagramPalettePreference("neutral");
+    applyDiagramPalettePreference("neutral");
+    expect(window.localStorage.getItem(DIAGRAM_PALETTE_STORAGE_KEY)).toBe("neutral");
+    expect(document.documentElement.dataset.diagramPalette).toBe("neutral");
+  });
+
+  it("keeps the diagram-palette registry aligned with the runtime guard", () => {
+    const ids = DIAGRAM_PALETTES.map((entry) => entry.id);
+    expect(ids).toContain(DEFAULT_DIAGRAM_PALETTE);
+    expect(ids.every((id) => isDiagramPalette(id))).toBe(true);
+    // Sentinel list — `match` is TermAl's own "follow Markdown
+    // theme" default; the rest are Mermaid's 5 built-in presets.
+    expect(ids).toEqual([
+      "match",
+      "default",
+      "dark",
+      "forest",
+      "neutral",
+      "base",
+    ]);
+    expect(isDiagramPalette("midnight")).toBe(false);
+    expect(isDiagramPalette(null)).toBe(false);
   });
 });

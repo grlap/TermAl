@@ -2,25 +2,29 @@
 
 ## Status
 
-Phases 1–4 plus diagram-theme Override mode plus Diagram look
-selection shipped. The Settings panel exposes a "Markdown" tab
-with four rows: Markdown theme, Markdown style, Diagram theme
-override (`on` / `off`), and Diagram look
-(`classic` / `handDrawn` / `neo`). Selections persist across
-reloads (localStorage) and follow the same layout persistence
-pipeline as the UI theme preferences. Three Markdown themes
-(`github-light`, `github-dark`, `terminal`) and two Markdown
-styles (`document`, `compact`) ship alongside the `match-ui`
-default. Mermaid's `themeVariables` palette is routed through
-the active Markdown theme; when the Override toggle is on
-(default), author `%%{init: …}%%` directives and YAML frontmatter
-theme keys are stripped at render time so the Markdown theme
-wins uniformly. When the toggle is off, author choices pass
-through unchanged. The Diagram look preference maps directly to
-Mermaid's top-level `look` config field, with a fixed
-`handDrawnSeed` so the rough.js sketch is deterministic across
-re-renders. Complements the existing app-wide theme system
-described in [`../themes.md`](../themes.md).
+Phases 1–4 plus diagram-theme Override mode, Diagram look
+selection, and Diagram palette selection shipped. The Settings
+panel exposes a "Markdown" tab with five rows: Markdown theme,
+Markdown style, Diagram theme override (`on` / `off`), Diagram
+look (`classic` / `handDrawn` / `neo`), and Diagram palette
+(`match` plus Mermaid's five built-in presets — `default` /
+`dark` / `forest` / `neutral` / `base`). Selections persist
+across reloads (localStorage) and follow the same layout
+persistence pipeline as the UI theme preferences. Three Markdown
+themes (`github-light`, `github-dark`, `terminal`) and two
+Markdown styles (`document`, `compact`) ship alongside the
+`match-ui` default. Mermaid's `themeVariables` palette is routed
+through the active Markdown theme when the palette is `match`;
+picking a specific Mermaid preset switches Mermaid's `theme`
+field directly and skips TermAl's overrides so the user sees the
+preset cleanly. When Override is on (default), author
+`%%{init: …}%%` directives and YAML frontmatter theme keys are
+stripped at render time so the user's picks win uniformly. The
+Diagram look preference maps directly to Mermaid's top-level
+`look` config field, with a fixed `handDrawnSeed` so the
+rough.js sketch is deterministic across re-renders. Complements
+the existing app-wide theme system described in
+[`../themes.md`](../themes.md).
 
 ## Problem
 
@@ -291,6 +295,41 @@ YAML frontmatter fence) and is unit-tested in
 scalars) is explicitly out of scope for V1; if someone lands a
 diagram that exercises one of those we can swap in a real YAML
 parser.
+
+### Diagram palette
+
+Mermaid ships five built-in theme presets:
+
+- `default` — light palette with blue accents
+- `dark` — dark palette with cool accents
+- `forest` — green / nature
+- `neutral` — grayscale
+- `base` — neutral starting point, intended for per-diagram
+  customization via `themeVariables`
+
+TermAl's previous behaviour auto-picked between `default` and
+`dark` based on Monaco appearance and layered Markdown-theme
+palette overrides on top. The new Diagram palette preference
+adds an explicit escape hatch:
+
+- `match` (default) — keep the previous behaviour. Mermaid's
+  theme follows the Monaco appearance and the Markdown-theme
+  palette overrides apply on top. Best when prose and diagrams
+  should share a look.
+- `default` / `dark` / `forest` / `neutral` / `base` — force
+  Mermaid's named preset regardless of Monaco appearance, and
+  **skip** the Markdown-theme palette overrides entirely so the
+  user sees the preset honestly. Best when the reader wants a
+  specific Mermaid look orthogonal to the prose theme (e.g.
+  keep `github-light` for writing while rendering diagrams in
+  `forest`).
+
+The preference is keyed on `termal-diagram-palette` in
+localStorage, persisted through the workspace-layout save path,
+applied as `data-diagram-palette` on `<html>`, and read in
+`message-cards.tsx::readActiveDiagramPalette` at render time.
+The palette + look + theme-override + Markdown-theme axes are
+all orthogonal — any combination composes cleanly.
 
 ### Diagram look
 
