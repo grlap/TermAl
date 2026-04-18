@@ -122,12 +122,27 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
   // mirror (`inlineZoneHostState`) triggers portal rerenders when
   // the zone set changes — using only the ref would mean React
   // never knows to render new portals.
+  // Each zone owns TWO DOM nodes:
+  //   - `outerNode`: what Monaco positions inside its view-zone
+  //     layer. Monaco freezes this element's height at the value
+  //     we pass to `addZone({ heightInPx })`. Measuring it with a
+  //     ResizeObserver would just report the frozen height — it
+  //     never reflects the diagram's actual content extent.
+  //   - `innerNode`: the React portal target. `height: auto`, so
+  //     it grows to fit the Mermaid iframe / KaTeX output.
+  //     `ResizeObserver` on this node fires whenever the rendered
+  //     content's size settles (async Mermaid render, user-edited
+  //     fence body) and we re-add the zone with the matched height.
+  // The outer node has `overflow: hidden` so the brief moment
+  // between initial add and first measured re-add does not spill
+  // content over the code below.
   const inlineZoneHostsRef = useRef<
     Map<
       string,
       {
         zoneId: string;
-        node: HTMLDivElement;
+        outerNode: HTMLDivElement;
+        innerNode: HTMLDivElement;
         afterLineNumber: number;
         lastHeightPx: number;
       }
@@ -270,42 +285,63 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
     const hosts = inlineZoneHostsRef.current;
 
     editor.changeViewZones((accessor) => {
-      // Drop zones whose id has disappeared from the prop.
+      // Drop zones whose id has disappeared from the prop. The
+      // outer node is owned by Monaco — removeZone detaches it
+      // from the view-zone layer on its own. The inner node is a
+      // child of the outer node, so it disappears with it; no
+      // explicit remove() is needed (and calling .remove() on a
+      // node Monaco has already detached would throw).
       for (const [id, host] of hosts.entries()) {
         if (!nextIds.has(id)) {
           accessor.removeZone(host.zoneId);
-          host.node.remove();
           hosts.delete(id);
         }
       }
 
       // Add new zones, and re-add existing zones whose
       // `afterLineNumber` shifted (e.g. the user added lines above
-      // the fence).
+      // the fence). Zones with just a React-element identity
+      // change (same id + same line) are left alone so the portal
+      // content updates in place without removing the zone.
       for (const zone of inlineZones) {
         const existing = hosts.get(zone.id);
         if (existing && existing.afterLineNumber === zone.afterLineNumber) {
           continue;
         }
+        // Preserve the outer + inner nodes across line-number
+        // changes so the portal content (and any async Mermaid
+        // iframe state) survives the remove-and-re-add.
+        let outerNode = existing?.outerNode;
+        let innerNode = existing?.innerNode;
         if (existing) {
           accessor.removeZone(existing.zoneId);
-          existing.node.remove();
           hosts.delete(zone.id);
         }
-        const node = document.createElement("div");
-        node.className = "monaco-inline-render-zone";
-        // Initial height estimate. The ResizeObserver below
-        // measures the actual content height after the portal
-        // renders and re-adds the zone with the measured value.
-        const initialHeight = existing?.lastHeightPx ?? 240;
+        if (!outerNode || !innerNode) {
+          outerNode = document.createElement("div");
+          outerNode.className = "monaco-inline-render-zone";
+          // Clip during the brief window before the first
+          // ResizeObserver tick so unmeasured content does not
+          // spill over the code below.
+          outerNode.style.overflow = "hidden";
+          innerNode = document.createElement("div");
+          innerNode.className = "monaco-inline-render-zone-content";
+          // `height: auto` is the default on a div, but spelling
+          // it out here pins the contract that ResizeObserver
+          // measures the CONTENT size of this inner box.
+          innerNode.style.height = "auto";
+          outerNode.appendChild(innerNode);
+        }
+        const initialHeight = existing?.lastHeightPx ?? 40;
         const zoneId = accessor.addZone({
           afterLineNumber: zone.afterLineNumber,
           heightInPx: initialHeight,
-          domNode: node,
+          domNode: outerNode,
         });
         hosts.set(zone.id, {
           zoneId,
-          node,
+          outerNode,
+          innerNode,
           afterLineNumber: zone.afterLineNumber,
           lastHeightPx: initialHeight,
         });
@@ -313,24 +349,31 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
     });
 
     // Publish the current zone set to React state so portals render
-    // into each zone's DOM node.
+    // into the INNER node (which sizes to content). Monaco owns the
+    // outer node's layout.
     setInlineZoneHostState(
       inlineZones.map((zone) => ({
         id: zone.id,
-        node: hosts.get(zone.id)?.node ?? document.createElement("div"),
+        node:
+          hosts.get(zone.id)?.innerNode ?? document.createElement("div"),
         zone,
       })),
     );
   }, [inlineZones]);
 
-  // ResizeObserver watches each zone's DOM node and re-adds the
-  // zone with the measured height whenever the rendered content
-  // grows or shrinks (e.g. a Mermaid diagram finishing its async
-  // render, the user editing the fence body to change the
-  // diagram's size). Monaco does not support in-place height
-  // updates on a view zone, so we remove-and-re-add — the zone id
-  // changes but the DOM node + its React portal stay the same, so
-  // the rendered content does not flicker.
+  // ResizeObserver watches each zone's INNER content wrapper — the
+  // `height: auto` node the React portal renders into. When a
+  // diagram finishes its async Mermaid render or the user edits
+  // the fence body to change the diagram size, the inner node's
+  // height changes; we then remove-and-re-add the outer Monaco
+  // zone with the matched `heightInPx` so the editor's layout
+  // reserves exactly the right amount of vertical space.
+  //
+  // Watching the OUTER node would be a dead end: Monaco freezes
+  // its height at the `heightInPx` we pass to `addZone`, so its
+  // size never reflects the true content extent. That's the root
+  // cause of the "diagram overlaps source below" symptom the
+  // previous implementation produced.
   useEffect(() => {
     const editor = editorRef.current;
     const monaco = monacoRef.current;
@@ -350,7 +393,7 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
       for (const entry of entries) {
         const target = entry.target as HTMLDivElement;
         for (const [id, host] of hosts.entries()) {
-          if (host.node !== target) {
+          if (host.innerNode !== target) {
             continue;
           }
           const nextHeight = Math.max(
@@ -377,14 +420,14 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
           host.zoneId = accessor.addZone({
             afterLineNumber: host.afterLineNumber,
             heightInPx: update.heightPx,
-            domNode: host.node,
+            domNode: host.outerNode,
           });
         }
       });
     });
 
-    for (const { node } of inlineZoneHostState) {
-      observer.observe(node);
+    for (const host of inlineZoneHostsRef.current.values()) {
+      observer.observe(host.innerNode);
     }
     inlineZoneResizeObserverRef.current = observer;
 

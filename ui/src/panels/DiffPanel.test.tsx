@@ -393,8 +393,8 @@ describe("DiffPanel", () => {
               source: "worktree",
             },
             isCompleteDocument: true,
-            can_edit: true,
-            edit_blocked_reason: null,
+            canEdit: true,
+            editBlockedReason: null,
             note: null,
           }}
           gitSectionId="unstaged"
