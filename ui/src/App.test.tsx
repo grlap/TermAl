@@ -25,7 +25,6 @@ import App, {
   resolveRecoveredWorkspaceLayoutRequestError,
   resolveAdoptedStateSlices,
   resolveControlPanelWorkspaceRoot,
-  resolveControlSurfaceSectionIdForWorkspaceTab,
   describeUnknownSessionModelWarning,
   resolveUnknownSessionModelSendAttempt,
   setAppTestHooksForTests,
@@ -40,7 +39,10 @@ import {
   resolveSettledScrollMinimumAttempts,
   syncMessageStackScrollPosition,
 } from "./scroll-position";
-import { getWorkspaceSplitResizeBounds } from "./workspace-queries";
+import {
+  getWorkspaceSplitResizeBounds,
+  resolveControlSurfaceSectionIdForWorkspaceTab,
+} from "./workspace-queries";
 import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
   LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,

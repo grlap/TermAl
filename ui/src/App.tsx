@@ -137,6 +137,7 @@ import {
 } from "./control-panel-layout";
 import {
   getWorkspaceSplitResizeBounds,
+  resolveControlSurfaceSectionIdForWorkspaceTab,
   resolveWorkspaceTabProjectId,
   workspaceContainsOnlyControlPanel,
   workspaceNodeContainsControlPanel,
@@ -549,32 +550,6 @@ type StandaloneControlSurfaceViewState = {
   sessionListFilter?: SessionListFilter;
   sessionListSearchQuery?: string;
 };
-
-export function resolveControlSurfaceSectionIdForWorkspaceTab(
-  tab: WorkspaceTab,
-): ControlPanelSectionId | null {
-  switch (tab.kind) {
-    case "filesystem":
-      return "files";
-    case "gitStatus":
-      return "git";
-    case "orchestratorList":
-      return "orchestrators";
-    case "projectList":
-      return "projects";
-    case "sessionList":
-      return "sessions";
-    case "session":
-    case "source":
-    case "controlPanel":
-    case "canvas":
-    case "orchestratorCanvas":
-    case "terminal":
-    case "instructionDebugger":
-    case "diffPreview":
-      return null;
-  }
-}
 
 export function resolveAdoptedStateSlices(
   current: {

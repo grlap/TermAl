@@ -32,6 +32,12 @@
 //     control-panel and standalone-control-surface minimum widths
 //     by reading their CSS variables via
 //     `resolveRootCssLengthPx`.
+//   - `resolveControlSurfaceSectionIdForWorkspaceTab` — maps a
+//     workspace tab to the `ControlPanelSectionId` it represents
+//     (`files`/`git`/`projects`/`sessions`/`orchestrators`) or
+//     `null` when the tab isn't a control-surface tab. Exhaustive
+//     switch over `tab.kind`; new tab kinds have to opt in
+//     explicitly.
 //   - `resolveWorkspaceTabProjectId` — given a workspace tab and a
 //     session lookup, returns the project id the tab is scoped to.
 //     Handles session tabs (direct `sessionId` lookup) and
@@ -62,6 +68,7 @@ import {
   STANDALONE_CONTROL_SURFACE_PANE_MIN_WIDTH_FALLBACK_PX,
   resolveRootCssLengthPx,
 } from "./control-panel-layout";
+import type { ControlPanelSectionId } from "./panels/ControlPanelSurface";
 import type { Session } from "./types";
 import {
   CONTROL_SURFACE_KINDS,
@@ -252,6 +259,32 @@ export function getWorkspaceSplitResizeBounds(
     minRatio: constrainedRatio,
     maxRatio: constrainedRatio,
   };
+}
+
+export function resolveControlSurfaceSectionIdForWorkspaceTab(
+  tab: WorkspaceTab,
+): ControlPanelSectionId | null {
+  switch (tab.kind) {
+    case "filesystem":
+      return "files";
+    case "gitStatus":
+      return "git";
+    case "orchestratorList":
+      return "orchestrators";
+    case "projectList":
+      return "projects";
+    case "sessionList":
+      return "sessions";
+    case "session":
+    case "source":
+    case "controlPanel":
+    case "canvas":
+    case "orchestratorCanvas":
+    case "terminal":
+    case "instructionDebugger":
+    case "diffPreview":
+      return null;
+  }
 }
 
 export function resolveWorkspaceTabProjectId(
