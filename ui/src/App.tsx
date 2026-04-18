@@ -637,11 +637,11 @@ const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> =
   [
     { id: "themes", label: "Themes" },
     { id: "markdown", label: "Markdown" },
-    { id: "appearance", label: "Editor & UI appearance" },
+    { id: "appearance", label: "Editor & UI" },
     { id: "remotes", label: "Remotes" },
     { id: "orchestrators", label: "Orchestrators" },
-    { id: "codex-prompts", label: "Codex defaults" },
-    { id: "claude-approvals", label: "Claude defaults" },
+    { id: "codex-prompts", label: "Codex" },
+    { id: "claude-approvals", label: "Claude" },
   ];
 const ALL_PROJECTS_FILTER_ID = "__all__";
 const CREATE_SESSION_WORKSPACE_ID = "__workspace__";
