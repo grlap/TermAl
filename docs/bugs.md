@@ -139,6 +139,38 @@ This is a pre-existing gap — the inline tab-bar JSX the component replaced had
 - Keep `Enter` / `Space` / click unchanged — they already work via native button semantics.
 - Add a Vitest case that renders the component, focuses the active tab, sends ArrowRight, and asserts the next tab is both selected and focused.
 
+## Settings dialog shell imports its close icon from message rendering
+
+**Severity:** Low - `ui/src/preferences/SettingsDialogShell.tsx:29` imports `DialogCloseIcon` from `../message-cards`, tying the preferences dialog shell to the Markdown/agent message-card module.
+
+This is not a runtime behavior bug, but it weakens the new preferences extraction boundary. Future message-card refactors or lazy-loading work would still have to preserve a general-purpose dialog icon export from the message-rendering module.
+
+**Current behavior:**
+- `SettingsDialogShell` reaches into `message-cards` for a generic close icon.
+- The preferences UI now depends on a module whose primary ownership is message rendering.
+- There is no small shared UI/icon module for reusable dialog icons.
+
+**Proposal:**
+- Move `DialogCloseIcon` into a small shared UI/icon module.
+- Import that shared icon from both `message-cards` and `SettingsDialogShell`.
+- Keep message-card ownership focused on message rendering rather than generic preferences chrome.
+
+## Settings dialog backdrop dismisses on any mouse button
+
+**Severity:** Low - `ui/src/preferences/SettingsDialogShell.tsx:41` attaches the close handler to `onMouseDown` without guarding the button code. Middle-click (auto-scroll on Windows/Linux) and right-click (context menu on any platform) both fire `mousedown` with `event.button !== 0`, so landing the context menu on the backdrop instead of the dialog body closes the dialog before the menu can open. Same applies to middle-click paste on Linux.
+
+This is a pre-existing shape — the inline JSX the shell replaced had the same handler — not a regression introduced by the split. The split just makes it a clean one-line fix in a focused file.
+
+**Current behavior:**
+- `onMouseDown={() => { onClose(); }}` on the backdrop fires for all three primary buttons.
+- Right-click on the backdrop closes the dialog and the context menu never appears.
+- Middle-click on the backdrop closes the dialog with no scroll affordance.
+
+**Proposal:**
+- Switch to `onClick` (which only fires on primary-button click/tap) or guard with `event.button === 0` inside `onMouseDown`.
+- Keep the `onMouseDown` + `stopPropagation` on the inner `<section>` so inside-the-card interactions are still protected from the outer handler.
+- Add a Vitest case: render the shell, fire `mouseDown({ button: 2 })` on the backdrop, assert `onClose` is not called.
+
 ## Mermaid iframe scrollbar reserve lacks focused regression coverage
 
 **Severity:** Low - `ui/src/message-cards.tsx` changed Mermaid iframe height slack from `viewBox height + 8` to `viewBox height + 24`, but no focused test asserts the new normal-size height reserve.
@@ -152,6 +184,23 @@ Existing coverage checks pathological max-height clamping, so a regression back 
 **Proposal:**
 - Add a normal-size Mermaid SVG/viewBox test, for example an `80px` viewBox height rendering to a `104px` iframe height.
 - Keep the existing huge-viewBox clamp test for the upper-bound security/layout guard.
+
+## Session-find active-hit scroll can fight a user who scrolls away
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1724-1761` adds a `useLayoutEffect` that writes `node.scrollTop = activeConversationSearchScrollTop` whenever `activeConversationSearchMessageIndex` or `activeConversationSearchScrollTop` changes. Its deps do not include the user's current `node.scrollTop`, so after the initial scroll-to-hit a later measurement commit that changes `layout.tops[activeIdx]` or `messageHeights[activeIdx]` re-runs the effect and snaps the viewport back to the hit — even if the user has since manually scrolled to inspect context around the match.
+
+In practice measurement convergence is fast for visible items, but with measurement churn after a user-initiated scroll-away the hit can snap back for one or two commits. The same effect also unconditionally clears `shouldKeepBottomAfterLayoutRef.current = false`, so once search closes the ref stays `false` and the user has to nudge the viewport before `syncViewport` / `isScrollContainerNearBottom` self-heals sticky-bottom.
+
+**Current behavior:**
+- The scroll-to-hit write runs whenever `activeConversationSearchScrollTop` recomputes (layout churn, message-height churn, active-item id change).
+- There is no "is the user still near the target" guard before writing `scrollTop`.
+- `shouldKeepBottomAfterLayoutRef.current = false` fires on every invocation regardless of whether the effect actually overrides the pin.
+
+**Proposal:**
+- Track the last written scroll-top in a ref and only write again if `node.scrollTop` is within a small delta of it (the user hasn't scrolled away).
+- Or: only run the pin when `activeConversationSearchMessageId` changes — keep a ref of the last handled active id and compare before writing.
+- Move the `shouldKeepBottomAfterLayoutRef.current = false` assignment inside the `Math.abs(...) >= 1` guard so it only fires when the scroll write actually happens.
+- Add a Vitest case: open session find, scroll the viewport away from the active hit, trigger a measurement-height change, and assert `scrollTop` is unchanged.
 
 ## Stale send responses skip the active-prompt recovery poll
 
@@ -660,6 +709,32 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
+- [ ] P2: Add focused control-panel-layout.ts coverage:
+  add `ui/src/control-panel-layout.test.ts` covering the four currently
+  untested exports. Cases worth pinning:
+  `getDockedControlPanelWidthRatioForWorkspace` with the control panel on
+  left, on right, and with a non-split workspace root;
+  `resolvePreferredControlPanelWidthRatio` with a saved ratio above the
+  CSS-derived minimum (both first-pane and second-pane placement);
+  `hydrateControlPanelLayout` for left vs right side, empty workspace, and
+  a workspace that already has a dock; and `resolveRootCssLengthPx` with
+  `calc(40 * 1rem)` and `calc(1rem * 40)`, `rem`-to-px conversion, and a
+  `var(--fallback-chain)` resolution case.
+- [ ] P2: Add focused `SettingsDialogShell` coverage:
+  render the shell with children, fire `mouseDown` on the backdrop and
+  inside the dialog, and assert only the backdrop path calls `onClose`.
+  Keep a close-button assertion. Include a right-click backdrop case when
+  the mouse-button guard is fixed. Also snapshot the ARIA wiring
+  (`role="dialog"`, `aria-modal="true"`, `aria-labelledby`, id
+  `settings-dialog`, `<h2 id="settings-dialog-title">`).
+- [ ] P2: Tighten the session-find virtualization test:
+  `ui/src/panels/AgentSessionPanel.test.tsx` asserts fewer than 80 cards
+  render for 180 messages during search, which is correct but loose. The
+  working range is closer to 14-28 cards given viewport=500 / overscan=960
+  / default-height=180. Tighten to `< 40` and add an exclusion assertion
+  like `expect(screen.queryByText("message-5")).toBeNull()` so a
+  regression where the merged range falls back to `{0, messages.length}`
+  fails loudly.
 - [ ] P2: Add normal-size Mermaid iframe height reserve coverage:
   add a deterministic Mermaid SVG/viewBox case in
   `ui/src/MarkdownContent.test.tsx` proving the `+24` vertical slack is
