@@ -1,0 +1,59 @@
+/*
+ * Markdown style: Document.
+ * Wider prose measure, generous line height, larger heading
+ * margins. Orthogonal to the Markdown theme — the style layer
+ * controls spacing / rhythm / typography density; the theme
+ * layer controls colors and structural decoration.
+ */
+
+[data-markdown-style="document"] .markdown-copy,
+[data-markdown-style="document"] .markdown-card {
+  line-height: 1.7;
+}
+
+[data-markdown-style="document"] .markdown-copy p,
+[data-markdown-style="document"] .markdown-card p {
+  margin-top: 1.1em;
+  margin-bottom: 1.1em;
+}
+
+[data-markdown-style="document"] .markdown-copy h1,
+[data-markdown-style="document"] .markdown-card h1 {
+  margin-top: 2em;
+  margin-bottom: 0.9em;
+  font-size: 1.75em;
+}
+
+[data-markdown-style="document"] .markdown-copy h2,
+[data-markdown-style="document"] .markdown-card h2 {
+  margin-top: 1.6em;
+  margin-bottom: 0.7em;
+  font-size: 1.45em;
+}
+
+[data-markdown-style="document"] .markdown-copy h3,
+[data-markdown-style="document"] .markdown-card h3 {
+  margin-top: 1.4em;
+  margin-bottom: 0.6em;
+  font-size: 1.2em;
+}
+
+[data-markdown-style="document"] .markdown-copy ul,
+[data-markdown-style="document"] .markdown-copy ol,
+[data-markdown-style="document"] .markdown-card ul,
+[data-markdown-style="document"] .markdown-card ol {
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+
+[data-markdown-style="document"] .markdown-copy li,
+[data-markdown-style="document"] .markdown-card li {
+  margin-top: 0.3em;
+  margin-bottom: 0.3em;
+}
+
+[data-markdown-style="document"] .markdown-copy blockquote,
+[data-markdown-style="document"] .markdown-card blockquote {
+  margin-top: 1.3em;
+  margin-bottom: 1.3em;
+}

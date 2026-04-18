@@ -1,0 +1,64 @@
+/*
+ * Markdown style: Compact.
+ * Tighter heading margins and denser tables for review-heavy
+ * sessions where vertical real estate matters more than
+ * generous reading rhythm.
+ */
+
+[data-markdown-style="compact"] .markdown-copy,
+[data-markdown-style="compact"] .markdown-card {
+  line-height: 1.4;
+}
+
+[data-markdown-style="compact"] .markdown-copy p,
+[data-markdown-style="compact"] .markdown-card p {
+  margin-top: 0.55em;
+  margin-bottom: 0.55em;
+}
+
+[data-markdown-style="compact"] .markdown-copy h1,
+[data-markdown-style="compact"] .markdown-card h1 {
+  margin-top: 1em;
+  margin-bottom: 0.45em;
+  font-size: 1.35em;
+}
+
+[data-markdown-style="compact"] .markdown-copy h2,
+[data-markdown-style="compact"] .markdown-card h2 {
+  margin-top: 0.9em;
+  margin-bottom: 0.4em;
+  font-size: 1.2em;
+}
+
+[data-markdown-style="compact"] .markdown-copy h3,
+[data-markdown-style="compact"] .markdown-card h3 {
+  margin-top: 0.8em;
+  margin-bottom: 0.35em;
+  font-size: 1.08em;
+}
+
+[data-markdown-style="compact"] .markdown-copy ul,
+[data-markdown-style="compact"] .markdown-copy ol,
+[data-markdown-style="compact"] .markdown-card ul,
+[data-markdown-style="compact"] .markdown-card ol {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+[data-markdown-style="compact"] .markdown-copy li,
+[data-markdown-style="compact"] .markdown-card li {
+  margin-top: 0.1em;
+  margin-bottom: 0.1em;
+}
+
+[data-markdown-style="compact"] .markdown-copy table,
+[data-markdown-style="compact"] .markdown-card table {
+  font-size: 0.92em;
+}
+
+[data-markdown-style="compact"] .markdown-copy th,
+[data-markdown-style="compact"] .markdown-copy td,
+[data-markdown-style="compact"] .markdown-card th,
+[data-markdown-style="compact"] .markdown-card td {
+  padding: 0.25em 0.5em;
+}

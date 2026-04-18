@@ -1123,6 +1123,63 @@ const TERMAL_MERMAID_THEME_VARIABLES = {
   fontSize: "11px",
 } as const;
 
+// Per-Markdown-theme Mermaid palette overrides. The active Markdown
+// theme id is read from `document.documentElement.dataset.markdownTheme`
+// at render time (applied by `applyMarkdownThemePreference` in
+// `ui/src/themes.ts`). The lookup is a plain object keyed on the
+// Markdown theme id so adding a new preset in the registry only
+// requires a new entry here — no plumbing through React props.
+//
+// `match-ui` passes through: no overrides, so Mermaid keeps the
+// (Monaco-appearance-derived) default/dark theme plus our font-size
+// override. Other entries shift the core palette variables so
+// flowcharts match the prose theme instead of the workspace chrome.
+const TERMAL_MERMAID_THEME_VARIABLES_BY_MARKDOWN_THEME: Record<
+  string,
+  Readonly<Record<string, string>>
+> = {
+  "match-ui": {},
+  "github-light": {
+    background: "#ffffff",
+    primaryColor: "#dbe8f7",
+    primaryTextColor: "#24292f",
+    primaryBorderColor: "#0969da",
+    secondaryColor: "#f6f8fa",
+    lineColor: "#57606a",
+    tertiaryColor: "#f6f8fa",
+  },
+  "github-dark": {
+    background: "#0d1117",
+    primaryColor: "#1f2933",
+    primaryTextColor: "#c9d1d9",
+    primaryBorderColor: "#58a6ff",
+    secondaryColor: "#161b22",
+    lineColor: "#8b949e",
+    tertiaryColor: "#161b22",
+  },
+  terminal: {
+    background: "#0a120d",
+    primaryColor: "#112618",
+    primaryTextColor: "#c8e3cc",
+    primaryBorderColor: "#5ccf86",
+    secondaryColor: "#0e1a12",
+    lineColor: "#7fa48a",
+    tertiaryColor: "#0e1a12",
+  },
+};
+
+function readActiveMarkdownThemeId(): string {
+  if (typeof document === "undefined") {
+    return "match-ui";
+  }
+  return document.documentElement.dataset.markdownTheme ?? "match-ui";
+}
+
+function buildMarkdownThemeVariables(): Readonly<Record<string, string>> {
+  const id = readActiveMarkdownThemeId();
+  return TERMAL_MERMAID_THEME_VARIABLES_BY_MARKDOWN_THEME[id] ?? {};
+}
+
 const TERMAL_MERMAID_BASE_CONFIG = {
   flowchart: {
     ...TERMAL_MERMAID_FLOWCHART_CONFIG,
@@ -1165,6 +1222,7 @@ function renderTermalMermaidDiagram(
 
 function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidConfigInput {
   const isDark = appearance === "dark";
+  const markdownOverrides = buildMarkdownThemeVariables();
   return {
     ...TERMAL_MERMAID_BASE_CONFIG,
     darkMode: isDark,
@@ -1172,9 +1230,13 @@ function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidConfigIn
     // Re-apply the theme variables AFTER theme selection. Mermaid's
     // theme presets set their own `fontSize` defaults; spreading our
     // overrides last keeps the tighter 12px in force regardless of
-    // which theme the diagram ends up in.
+    // which theme the diagram ends up in. Markdown-theme-specific
+    // palette overrides follow the font override so a non-match-ui
+    // preset can replace node / edge / border colors while preserving
+    // the font size.
     themeVariables: {
       ...TERMAL_MERMAID_THEME_VARIABLES,
+      ...markdownOverrides,
     },
   };
 }

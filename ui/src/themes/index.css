@@ -22,3 +22,8 @@
 @import "./style-terminal.css";
 @import "./style-blueprint.css";
 @import "./markdown-match-ui.css";
+@import "./markdown-github-light.css";
+@import "./markdown-github-dark.css";
+@import "./markdown-terminal.css";
+@import "./markdown-style-document.css";
+@import "./markdown-style-compact.css";

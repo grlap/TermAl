@@ -2,9 +2,16 @@
 
 ## Status
 
-Design — not yet implemented. Complements the existing app-wide theme
-system described in [`../themes.md`](../themes.md) by carving out
-Markdown rendering as a separately-themable surface.
+Phases 1–4 shipped. The Settings panel exposes a "Markdown" tab with
+a Markdown-theme picker and a Markdown-style picker; selections
+persist across reloads (localStorage) and follow the same layout
+persistence pipeline as the UI theme preferences. Three Markdown
+themes (`github-light`, `github-dark`, `terminal`) and two Markdown
+styles (`document`, `compact`) ship alongside the `match-ui` default.
+Mermaid's `themeVariables` palette is routed through the active
+Markdown theme so flowcharts follow the reading theme rather than
+the workspace chrome. Complements the existing app-wide theme system
+described in [`../themes.md`](../themes.md).
 
 ## Problem
 

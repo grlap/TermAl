@@ -1,0 +1,99 @@
+/*
+ * Markdown theme: GitHub Dark.
+ * Dark companion palette to github-light. Same structural rules;
+ * variable values flipped to GitHub's dark document surface.
+ */
+
+[data-markdown-theme="github-dark"] .markdown-copy,
+[data-markdown-theme="github-dark"] .markdown-card {
+  --md-github-dark-fg: #c9d1d9;
+  --md-github-dark-muted: #8b949e;
+  --md-github-dark-link: #58a6ff;
+  --md-github-dark-link-hover: #79c0ff;
+  --md-github-dark-code-bg: rgba(110, 118, 129, 0.4);
+  --md-github-dark-code-block-bg: #161b22;
+  --md-github-dark-quote-border: #30363d;
+  --md-github-dark-table-border: #30363d;
+  --md-github-dark-table-header-bg: #161b22;
+}
+
+[data-markdown-theme="github-dark"] .markdown-copy,
+[data-markdown-theme="github-dark"] .markdown-card {
+  color: var(--md-github-dark-fg);
+}
+
+[data-markdown-theme="github-dark"] .markdown-copy h1,
+[data-markdown-theme="github-dark"] .markdown-copy h2,
+[data-markdown-theme="github-dark"] .markdown-copy h3,
+[data-markdown-theme="github-dark"] .markdown-copy h4,
+[data-markdown-theme="github-dark"] .markdown-copy h5,
+[data-markdown-theme="github-dark"] .markdown-copy h6,
+[data-markdown-theme="github-dark"] .markdown-card h1,
+[data-markdown-theme="github-dark"] .markdown-card h2,
+[data-markdown-theme="github-dark"] .markdown-card h3,
+[data-markdown-theme="github-dark"] .markdown-card h4,
+[data-markdown-theme="github-dark"] .markdown-card h5,
+[data-markdown-theme="github-dark"] .markdown-card h6 {
+  color: var(--md-github-dark-fg);
+  font-weight: 600;
+}
+
+[data-markdown-theme="github-dark"] .markdown-copy h1,
+[data-markdown-theme="github-dark"] .markdown-card h1,
+[data-markdown-theme="github-dark"] .markdown-copy h2,
+[data-markdown-theme="github-dark"] .markdown-card h2 {
+  border-bottom: 1px solid var(--md-github-dark-quote-border);
+  padding-bottom: 0.3em;
+}
+
+[data-markdown-theme="github-dark"] .markdown-copy a,
+[data-markdown-theme="github-dark"] .markdown-card a {
+  color: var(--md-github-dark-link);
+  text-decoration: none;
+}
+
+[data-markdown-theme="github-dark"] .markdown-copy a:hover,
+[data-markdown-theme="github-dark"] .markdown-card a:hover {
+  color: var(--md-github-dark-link-hover);
+  text-decoration: underline;
+}
+
+[data-markdown-theme="github-dark"] .markdown-copy :not(pre) > code,
+[data-markdown-theme="github-dark"] .markdown-card :not(pre) > code {
+  background: var(--md-github-dark-code-bg);
+  border-radius: 6px;
+  padding: 0.2em 0.4em;
+  font-size: 0.9em;
+}
+
+[data-markdown-theme="github-dark"] .markdown-copy pre,
+[data-markdown-theme="github-dark"] .markdown-card pre {
+  background: var(--md-github-dark-code-block-bg);
+  border-radius: 6px;
+}
+
+[data-markdown-theme="github-dark"] .markdown-copy blockquote,
+[data-markdown-theme="github-dark"] .markdown-card blockquote {
+  border-left: 3px solid var(--md-github-dark-quote-border);
+  color: var(--md-github-dark-muted);
+  padding-left: 1em;
+}
+
+[data-markdown-theme="github-dark"] .markdown-copy table,
+[data-markdown-theme="github-dark"] .markdown-card table {
+  border-collapse: collapse;
+}
+
+[data-markdown-theme="github-dark"] .markdown-copy th,
+[data-markdown-theme="github-dark"] .markdown-copy td,
+[data-markdown-theme="github-dark"] .markdown-card th,
+[data-markdown-theme="github-dark"] .markdown-card td {
+  border: 1px solid var(--md-github-dark-table-border);
+  padding: 0.4em 0.75em;
+}
+
+[data-markdown-theme="github-dark"] .markdown-copy th,
+[data-markdown-theme="github-dark"] .markdown-card th {
+  background: var(--md-github-dark-table-header-bg);
+  font-weight: 600;
+}

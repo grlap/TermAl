@@ -22,6 +22,8 @@ import {
   DEFAULT_DENSITY_PERCENT,
   DEFAULT_EDITOR_FONT_SIZE_PX,
   DEFAULT_FONT_SIZE_PX,
+  MARKDOWN_STYLES,
+  MARKDOWN_THEMES,
   MAX_DENSITY_PERCENT,
   MAX_EDITOR_FONT_SIZE_PX,
   MAX_FONT_SIZE_PX,
@@ -30,6 +32,8 @@ import {
   MIN_FONT_SIZE_PX,
   STYLES,
   THEMES,
+  type MarkdownStyleId,
+  type MarkdownThemeId,
   type StyleId,
   type ThemeId,
 } from "./themes";
@@ -422,6 +426,115 @@ export function StylePicker({
           })}
         </div>
       </div>
+    </section>
+  );
+}
+
+export function MarkdownPreferencesPanel({
+  activeMarkdownTheme,
+  activeMarkdownStyle,
+  markdownThemeId,
+  markdownStyleId,
+  onSelectMarkdownTheme,
+  onSelectMarkdownStyle,
+}: {
+  activeMarkdownTheme: (typeof MARKDOWN_THEMES)[number];
+  activeMarkdownStyle: (typeof MARKDOWN_STYLES)[number];
+  markdownThemeId: MarkdownThemeId;
+  markdownStyleId: MarkdownStyleId;
+  onSelectMarkdownTheme: (id: MarkdownThemeId) => void;
+  onSelectMarkdownStyle: (id: MarkdownStyleId) => void;
+}) {
+  return (
+    <section className="settings-panel-stack theme-preferences-layout">
+      <section className="theme-panel style-panel style-panel-compact">
+        <div className="theme-panel-header">
+          <div>
+            <p className="session-control-label">Markdown style</p>
+            <p className="theme-panel-copy">{activeMarkdownStyle.description}</p>
+          </div>
+        </div>
+
+        <div className="theme-option-list-shell">
+          <div
+            className="theme-option-list style-option-list style-option-list-compact"
+            role="radiogroup"
+            aria-label="Markdown style"
+          >
+            {MARKDOWN_STYLES.map((style) => {
+              const isSelected = style.id === markdownStyleId;
+              return (
+                <button
+                  key={style.id}
+                  className={`theme-option ${isSelected ? "selected" : ""}`}
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  title={style.description}
+                  onClick={() => onSelectMarkdownStyle(style.id)}
+                >
+                  <span className="theme-option-main">
+                    <span className="theme-option-title-row">
+                      <strong className="theme-option-title">{style.name}</strong>
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="theme-panel">
+        <div className="theme-panel-header">
+          <div>
+            <p className="session-control-label">Markdown theme</p>
+            <p className="theme-panel-copy">{activeMarkdownTheme.description}</p>
+          </div>
+        </div>
+
+        <div className="theme-option-list-shell">
+          <div
+            className="theme-option-list"
+            role="radiogroup"
+            aria-label="Markdown theme"
+          >
+            {MARKDOWN_THEMES.map((theme) => {
+              const isSelected = theme.id === markdownThemeId;
+              return (
+                <button
+                  key={theme.id}
+                  className={`theme-option ${isSelected ? "selected" : ""}`}
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  onClick={() => onSelectMarkdownTheme(theme.id)}
+                >
+                  <span className="theme-option-main">
+                    <span className="theme-option-title-row">
+                      <strong className="theme-option-title">{theme.name}</strong>
+                    </span>
+                    <span className="theme-option-copy">{theme.description}</span>
+                  </span>
+                  <span className="theme-option-preview" aria-hidden="true">
+                    {theme.swatches.map((swatch, swatchIndex) => (
+                      <span
+                        key={`${theme.id}-${swatchIndex}-${swatch}`}
+                        className="theme-option-swatch"
+                        style={
+                          swatch === "inherit"
+                            ? { background: "transparent", border: "1px dashed currentColor" }
+                            : { background: swatch }
+                        }
+                      />
+                    ))}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
     </section>
   );
 }

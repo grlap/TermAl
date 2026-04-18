@@ -120,6 +120,7 @@ export { MessageCard, MarkdownContent } from "./message-cards";
 import {
   ThemePreferencesPanel,
   AppearancePreferencesPanel,
+  MarkdownPreferencesPanel,
   RemotePreferencesPanel,
   ClaudeApprovalsPreferencesPanel,
   CodexPromptPreferencesPanel,
@@ -298,6 +299,8 @@ import {
   DEFAULT_DENSITY_PERCENT,
   DEFAULT_EDITOR_FONT_SIZE_PX,
   DEFAULT_FONT_SIZE_PX,
+  MARKDOWN_STYLES,
+  MARKDOWN_THEMES,
   MAX_DENSITY_PERCENT,
   MAX_EDITOR_FONT_SIZE_PX,
   MAX_FONT_SIZE_PX,
@@ -464,6 +467,7 @@ type PendingWorkspaceLayoutSave = {
 type OrchestratorRuntimeAction = RuntimeAction;
 type PreferencesTabId =
   | "themes"
+  | "markdown"
   | "appearance"
   | "remotes"
   | "orchestrators"
@@ -627,6 +631,7 @@ const NEW_SESSION_AGENT_OPTIONS_EXHAUSTIVE: ExhaustiveValueCoverage<
 const PREFERENCES_TABS: ReadonlyArray<{ id: PreferencesTabId; label: string }> =
   [
     { id: "themes", label: "Themes" },
+    { id: "markdown", label: "Markdown" },
     { id: "appearance", label: "Editor & UI appearance" },
     { id: "remotes", label: "Remotes" },
     { id: "orchestrators", label: "Orchestrators" },
@@ -1878,6 +1883,12 @@ export default function App() {
   }, [sessions]);
   const activeTheme = THEMES.find((theme) => theme.id === themeId) ?? THEMES[0];
   const activeStyle = STYLES.find((style) => style.id === styleId) ?? STYLES[0];
+  const activeMarkdownTheme =
+    MARKDOWN_THEMES.find((theme) => theme.id === markdownThemeId) ??
+    MARKDOWN_THEMES[0];
+  const activeMarkdownStyle =
+    MARKDOWN_STYLES.find((style) => style.id === markdownStyleId) ??
+    MARKDOWN_STYLES[0];
   const editorAppearance: MonacoAppearance = isHexColorDark(
     activeTheme.swatches[0],
   )
@@ -8993,7 +9004,7 @@ export default function App() {
 
               <div
                 id={`settings-panel-${settingsTab}`}
-                className={`settings-tab-panel ${settingsTab === "themes" ? "theme-settings-panel" : ""}`.trim()}
+                className={`settings-tab-panel ${settingsTab === "themes" || settingsTab === "markdown" ? "theme-settings-panel" : ""}`.trim()}
                 role="tabpanel"
                 aria-labelledby={`settings-tab-${settingsTab}`}
               >
@@ -9005,6 +9016,15 @@ export default function App() {
                     themeId={themeId}
                     onSelectStyle={setStyleId}
                     onSelectTheme={setThemeId}
+                  />
+                ) : settingsTab === "markdown" ? (
+                  <MarkdownPreferencesPanel
+                    activeMarkdownTheme={activeMarkdownTheme}
+                    activeMarkdownStyle={activeMarkdownStyle}
+                    markdownThemeId={markdownThemeId}
+                    markdownStyleId={markdownStyleId}
+                    onSelectMarkdownTheme={setMarkdownThemeId}
+                    onSelectMarkdownStyle={setMarkdownStyleId}
                   />
                 ) : settingsTab === "appearance" ? (
                   <AppearancePreferencesPanel

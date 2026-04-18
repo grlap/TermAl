@@ -214,9 +214,17 @@ describe("theme helpers", () => {
     expect(markdownStyleIds.every((styleId) => isMarkdownStyleId(styleId))).toBe(
       true,
     );
-    // Phase 1 ships only the `match-ui` entries; sentinel so later
-    // phases consciously update the test when real presets land.
-    expect(markdownThemeIds).toEqual(["match-ui"]);
-    expect(markdownStyleIds).toEqual(["match-ui"]);
+    // Sentinel list: Phase 3 shipped the `github-light`,
+    // `github-dark`, and `terminal` themes plus the `document` and
+    // `compact` styles on top of the `match-ui` default. Update
+    // this expectation when later phases add more presets so the
+    // registry change shows up intentionally in review diffs.
+    expect(markdownThemeIds).toEqual([
+      "match-ui",
+      "github-light",
+      "github-dark",
+      "terminal",
+    ]);
+    expect(markdownStyleIds).toEqual(["match-ui", "document", "compact"]);
   });
 });

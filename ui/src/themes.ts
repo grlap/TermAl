@@ -170,11 +170,6 @@ export const DEFAULT_THEME_ID: ThemeId = "warm-light";
 // workspace chrome while rendering Markdown with a GitHub-like or
 // newspaper-like preset. See
 // `docs/features/markdown-themes-and-styles.md` for the full brief.
-//
-// Phase 1 (this commit): the infrastructure is present but ships only
-// the `match-ui` entry, which explicitly means "inherit from the active
-// UI theme / UI style". This makes Phase 1 visually a no-op; real
-// presets land in later phases.
 export const MARKDOWN_THEMES = [
   {
     id: "match-ui",
@@ -182,6 +177,27 @@ export const MARKDOWN_THEMES = [
     description:
       "Inherit Markdown colors, typography, and Mermaid / KaTeX theming from the active UI theme.",
     swatches: ["inherit", "inherit", "inherit"] as const,
+  },
+  {
+    id: "github-light",
+    name: "GitHub Light",
+    description:
+      "GitHub-style document rendering with blue links, neutral code blocks, and crisp table lines.",
+    swatches: ["#ffffff", "#0969da", "#24292f"] as const,
+  },
+  {
+    id: "github-dark",
+    name: "GitHub Dark",
+    description:
+      "Dark companion to GitHub Light — deep panels with bright cyan links and soft grey prose.",
+    swatches: ["#0d1117", "#58a6ff", "#c9d1d9"] as const,
+  },
+  {
+    id: "terminal",
+    name: "Terminal",
+    description:
+      "Monospace-first reading style with phosphor green prose and amber headings on a dark canvas.",
+    swatches: ["#0a120d", "#5ccf86", "#d7c46a"] as const,
   },
 ] as const;
 
@@ -195,6 +211,18 @@ export const MARKDOWN_STYLES = [
     name: "Match UI",
     description:
       "Use the typography and spacing treatment bundled with the active UI style.",
+  },
+  {
+    id: "document",
+    name: "Document",
+    description:
+      "Generous line height and heading margins for longer-form reading passes.",
+  },
+  {
+    id: "compact",
+    name: "Compact",
+    description:
+      "Tighter heading margins and denser tables for review-heavy sessions.",
   },
 ] as const;
 

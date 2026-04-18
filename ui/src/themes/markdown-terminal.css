@@ -1,0 +1,115 @@
+/*
+ * Markdown theme: Terminal.
+ * Monospace-first reading style: phosphor greens on a dark canvas
+ * with amber headings. Pairs with the "Terminal" UI theme but can
+ * also be used over any workspace palette.
+ */
+
+[data-markdown-theme="terminal"] .markdown-copy,
+[data-markdown-theme="terminal"] .markdown-card {
+  --md-terminal-bg: #0a120d;
+  --md-terminal-fg: #c8e3cc;
+  --md-terminal-muted: #7fa48a;
+  --md-terminal-heading: #d7c46a;
+  --md-terminal-link: #5ccf86;
+  --md-terminal-link-hover: #8ae6a6;
+  --md-terminal-code-bg: rgba(92, 207, 134, 0.12);
+  --md-terminal-code-block-bg: #0e1a12;
+  --md-terminal-quote-border: #3f6b4b;
+  --md-terminal-table-border: #3f6b4b;
+}
+
+[data-markdown-theme="terminal"] .markdown-copy,
+[data-markdown-theme="terminal"] .markdown-card {
+  color: var(--md-terminal-fg);
+  font-family:
+    "JetBrains Mono", "Fira Code", "Source Code Pro", ui-monospace,
+    SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+[data-markdown-theme="terminal"] .markdown-copy h1,
+[data-markdown-theme="terminal"] .markdown-copy h2,
+[data-markdown-theme="terminal"] .markdown-copy h3,
+[data-markdown-theme="terminal"] .markdown-copy h4,
+[data-markdown-theme="terminal"] .markdown-copy h5,
+[data-markdown-theme="terminal"] .markdown-copy h6,
+[data-markdown-theme="terminal"] .markdown-card h1,
+[data-markdown-theme="terminal"] .markdown-card h2,
+[data-markdown-theme="terminal"] .markdown-card h3,
+[data-markdown-theme="terminal"] .markdown-card h4,
+[data-markdown-theme="terminal"] .markdown-card h5,
+[data-markdown-theme="terminal"] .markdown-card h6 {
+  color: var(--md-terminal-heading);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+[data-markdown-theme="terminal"] .markdown-copy h1::before,
+[data-markdown-theme="terminal"] .markdown-card h1::before {
+  content: "# ";
+  color: var(--md-terminal-muted);
+}
+
+[data-markdown-theme="terminal"] .markdown-copy h2::before,
+[data-markdown-theme="terminal"] .markdown-card h2::before {
+  content: "## ";
+  color: var(--md-terminal-muted);
+}
+
+[data-markdown-theme="terminal"] .markdown-copy h3::before,
+[data-markdown-theme="terminal"] .markdown-card h3::before {
+  content: "### ";
+  color: var(--md-terminal-muted);
+}
+
+[data-markdown-theme="terminal"] .markdown-copy a,
+[data-markdown-theme="terminal"] .markdown-card a {
+  color: var(--md-terminal-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+[data-markdown-theme="terminal"] .markdown-copy a:hover,
+[data-markdown-theme="terminal"] .markdown-card a:hover {
+  color: var(--md-terminal-link-hover);
+}
+
+[data-markdown-theme="terminal"] .markdown-copy :not(pre) > code,
+[data-markdown-theme="terminal"] .markdown-card :not(pre) > code {
+  background: var(--md-terminal-code-bg);
+  border-radius: 3px;
+  padding: 0.15em 0.35em;
+}
+
+[data-markdown-theme="terminal"] .markdown-copy pre,
+[data-markdown-theme="terminal"] .markdown-card pre {
+  background: var(--md-terminal-code-block-bg);
+  border: 1px solid var(--md-terminal-quote-border);
+  border-radius: 3px;
+}
+
+[data-markdown-theme="terminal"] .markdown-copy blockquote,
+[data-markdown-theme="terminal"] .markdown-card blockquote {
+  border-left: 2px solid var(--md-terminal-quote-border);
+  color: var(--md-terminal-muted);
+  padding-left: 1em;
+}
+
+[data-markdown-theme="terminal"] .markdown-copy table,
+[data-markdown-theme="terminal"] .markdown-card table {
+  border-collapse: collapse;
+}
+
+[data-markdown-theme="terminal"] .markdown-copy th,
+[data-markdown-theme="terminal"] .markdown-copy td,
+[data-markdown-theme="terminal"] .markdown-card th,
+[data-markdown-theme="terminal"] .markdown-card td {
+  border: 1px solid var(--md-terminal-table-border);
+  padding: 0.3em 0.6em;
+}
+
+[data-markdown-theme="terminal"] .markdown-copy th,
+[data-markdown-theme="terminal"] .markdown-card th {
+  color: var(--md-terminal-heading);
+  font-weight: 600;
+}
