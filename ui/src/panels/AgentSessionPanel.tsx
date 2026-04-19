@@ -20,6 +20,15 @@ import {
   type SlashPaletteItem,
 } from "./session-slash-palette";
 import {
+  MessageAttachmentList,
+  MessageMeta,
+  MessageSlot,
+  PanelEmptyState,
+  collectUserPromptHistory,
+  imageAttachmentSummaryLabel,
+  promptCommandMetaLabel,
+} from "./session-message-leaves";
+import {
   DEFAULT_ESTIMATED_MESSAGE_HEIGHT,
   DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
   VIRTUALIZED_MESSAGE_GAP_PX,
@@ -2484,130 +2493,3 @@ const PendingPromptCard = memo(function PendingPromptCard({
   previous.searchQuery === next.searchQuery &&
   previous.searchHighlightTone === next.searchHighlightTone
 );
-
-function promptCommandMetaLabel(text: string, expandedText?: string | null) {
-  return expandedText && text.trim().startsWith("/") ? "Command" : null;
-}
-
-function MessageMeta({
-  author,
-  timestamp,
-  trailing,
-}: {
-  author: string;
-  timestamp: string;
-  trailing?: ReactNode;
-}) {
-  const isUser = author === "you";
-
-  return (
-    <div className="message-meta">
-      <span
-        className={`message-meta-author ${isUser ? "message-meta-author-user" : "message-meta-author-agent"}`}
-      >
-        {isUser ? "You" : "Agent"}
-      </span>
-      <span className="message-meta-end">
-        {trailing}
-        <span>{timestamp}</span>
-      </span>
-    </div>
-  );
-}
-
-function MessageAttachmentList({
-  attachments,
-  searchQuery = "",
-  searchHighlightTone = "match",
-}: {
-  attachments: ImageAttachment[];
-  searchQuery?: string;
-  searchHighlightTone?: SearchHighlightTone;
-}) {
-  return (
-    <div className="message-attachment-list">
-      {attachments.map((attachment, index) => (
-        <div
-          key={`${attachment.fileName}-${attachment.byteSize}-${index}`}
-          className="message-attachment-chip"
-        >
-          <strong className="message-attachment-name">
-            {renderHighlightedText(attachment.fileName, searchQuery, searchHighlightTone)}
-          </strong>
-          <span className="message-attachment-meta">
-            {formatByteSize(attachment.byteSize)} |{" "}
-            {renderHighlightedText(attachment.mediaType, searchQuery, searchHighlightTone)}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function MessageSlot({
-  children,
-  itemKey,
-  isSearchMatch = false,
-  isSearchActive = false,
-  onSearchItemMount,
-}: {
-  children: ReactNode;
-  itemKey?: string;
-  isSearchMatch?: boolean;
-  isSearchActive?: boolean;
-  onSearchItemMount?: (itemKey: string, node: HTMLElement | null) => void;
-}) {
-  if (!itemKey) {
-    return <>{children}</>;
-  }
-
-  return (
-    <div
-      className={`message-slot${isSearchMatch ? " session-search-hit" : ""}${isSearchActive ? " session-search-hit-active" : ""}`}
-      data-session-search-item-key={itemKey}
-      ref={(node) => {
-        onSearchItemMount?.(itemKey, node);
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function PanelEmptyState({ title, body }: { title: string; body: string }) {
-  return (
-    <article className="empty-state">
-      <div className="card-label">Live State</div>
-      <h3>{title}</h3>
-      <p>{body}</p>
-    </article>
-  );
-}
-
-
-function collectUserPromptHistory(session: Session) {
-  return session.messages.flatMap((message) => {
-    if (message.type !== "text" || message.author !== "you") {
-      return [];
-    }
-
-    const prompt = message.text.trim();
-    return prompt ? [prompt] : [];
-  });
-}
-
-function imageAttachmentSummaryLabel(count: number) {
-  return count === 1 ? "1 image attached" : `${count} images attached`;
-}
-
-function formatByteSize(byteSize: number) {
-  if (byteSize < 1024) {
-    return `${byteSize} B`;
-  }
-
-  if (byteSize < 1024 * 1024) {
-    return `${(byteSize / 1024).toFixed(1)} KB`;
-  }
-
-  return `${(byteSize / (1024 * 1024)).toFixed(1)} MB`;
-}
