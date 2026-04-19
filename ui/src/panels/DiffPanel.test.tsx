@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchFile, fetchReviewDocument, saveReviewDocument } from "../api";
 import { copyTextToClipboard } from "../clipboard";
-import { DiffPanel, hasOverlappingMarkdownCommitRanges } from "./DiffPanel";
+import { DiffPanel } from "./DiffPanel";
+import { hasOverlappingMarkdownCommitRanges } from "./markdown-commit-ranges";
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual<typeof import("../api")>("../api");

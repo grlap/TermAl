@@ -41,6 +41,15 @@ import {
 import { rebaseContentOntoDisk, type SourceSaveOptions } from "./SourcePanel";
 import { StructuredDiffView } from "./StructuredDiffView";
 import {
+  findClosestMarkdownRange,
+  hasOverlappingMarkdownCommitRanges,
+  mapMarkdownRangeAcrossContentChange,
+  markdownRangeMatches,
+  resolveRenderedMarkdownCommitRange,
+  type MarkdownDocumentRange,
+  type RenderedMarkdownSectionCommit,
+} from "./markdown-commit-ranges";
+import {
   AllLinesIcon,
   ChangedOnlyIcon,
   CheckIcon,
@@ -103,18 +112,6 @@ type ReviewOriginContext = {
   workdir: string | null;
 };
 
-type RenderedMarkdownSectionCommit = {
-  currentSegment: MarkdownDiffDocumentSegment;
-  segment: MarkdownDiffDocumentSegment;
-  nextMarkdown: string;
-  sourceContent: string;
-};
-
-type MarkdownDocumentRange = {
-  end: number;
-  start: number;
-};
-
 type MarkdownDiffSaveHandler = () => Promise<void> | void;
 
 type EditableMarkdownFocusSnapshot = {
@@ -149,170 +146,6 @@ function createInitialDiffViewScrollPositions(): DiffViewScrollPositions {
     rendered: 0,
     raw: 0,
   };
-}
-
-function resolveRenderedMarkdownCommitRange(
-  currentContent: string,
-  commit: RenderedMarkdownSectionCommit,
-): MarkdownDocumentRange | null {
-  const originalRange = {
-    start: commit.segment.afterStartOffset,
-    end: commit.segment.afterEndOffset,
-  };
-  if (markdownRangeMatches(currentContent, originalRange, commit.segment.markdown)) {
-    return originalRange;
-  }
-
-  const mappedRange = mapMarkdownRangeAcrossContentChange(
-    commit.sourceContent,
-    currentContent,
-    originalRange,
-  );
-  if (mappedRange && markdownRangeMatches(currentContent, mappedRange, commit.segment.markdown)) {
-    return mappedRange;
-  }
-
-  const searchedRange = findClosestMarkdownRange(
-    currentContent,
-    commit.segment.markdown,
-    mappedRange?.start ?? originalRange.start,
-  );
-  if (searchedRange) {
-    return searchedRange;
-  }
-
-  const currentRange = {
-    start: commit.currentSegment.afterStartOffset,
-    end: commit.currentSegment.afterEndOffset,
-  };
-  if (markdownRangeMatches(currentContent, currentRange, commit.currentSegment.markdown)) {
-    return currentRange;
-  }
-
-  return null;
-}
-
-function markdownRangeMatches(
-  content: string,
-  range: MarkdownDocumentRange,
-  expected: string,
-) {
-  return (
-    range.start >= 0 &&
-    range.end >= range.start &&
-    range.end <= content.length &&
-    content.slice(range.start, range.end) === expected
-  );
-}
-
-export function hasOverlappingMarkdownCommitRanges(
-  commits: Array<{
-    commit: RenderedMarkdownSectionCommit;
-    range: MarkdownDocumentRange;
-  }>,
-) {
-  const sortedRanges = [...commits].sort((left, right) => left.range.start - right.range.start);
-  for (let index = 1; index < sortedRanges.length; index += 1) {
-    const previous = sortedRanges[index - 1];
-    const current = sortedRanges[index];
-    if (!previous || !current) {
-      continue;
-    }
-    // Strict `<` flags non-adjacent overlap for non-empty ranges. The
-    // additional `<=` branch rejects two zero-length ranges that share
-    // an insertion point (e.g., both resolve to `[10, 10)`), and
-    // rejects a zero-length range that touches a non-empty sibling —
-    // in both cases the subsequent descending-by-start splice would
-    // apply both writes at the same offset in unspecified order and
-    // silently garble the document.
-    const isZeroLengthTouch =
-      current.range.start === previous.range.end &&
-      (current.range.start === current.range.end || previous.range.start === previous.range.end);
-    if (current.range.start < previous.range.end || isZeroLengthTouch) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function mapMarkdownRangeAcrossContentChange(
-  sourceContent: string,
-  currentContent: string,
-  range: MarkdownDocumentRange,
-): MarkdownDocumentRange | null {
-  if (sourceContent === currentContent) {
-    return range;
-  }
-
-  let prefixLength = 0;
-  const sharedLength = Math.min(sourceContent.length, currentContent.length);
-  while (
-    prefixLength < sharedLength &&
-    sourceContent.charCodeAt(prefixLength) === currentContent.charCodeAt(prefixLength)
-  ) {
-    prefixLength += 1;
-  }
-
-  let sourceSuffixStart = sourceContent.length;
-  let currentSuffixStart = currentContent.length;
-  while (
-    sourceSuffixStart > prefixLength &&
-    currentSuffixStart > prefixLength &&
-    sourceContent.charCodeAt(sourceSuffixStart - 1) ===
-      currentContent.charCodeAt(currentSuffixStart - 1)
-  ) {
-    sourceSuffixStart -= 1;
-    currentSuffixStart -= 1;
-  }
-
-  if (range.end <= prefixLength) {
-    return range;
-  }
-
-  if (range.start >= sourceSuffixStart) {
-    const delta = currentSuffixStart - sourceSuffixStart;
-    return {
-      start: range.start + delta,
-      end: range.end + delta,
-    };
-  }
-
-  return null;
-}
-
-function findClosestMarkdownRange(
-  content: string,
-  markdown: string,
-  preferredStart: number,
-): MarkdownDocumentRange | null {
-  if (markdown.length === 0) {
-    return null;
-  }
-
-  let bestStart: number | null = null;
-  let searchStart = 0;
-  while (searchStart <= content.length) {
-    const foundStart = content.indexOf(markdown, searchStart);
-    if (foundStart === -1) {
-      break;
-    }
-
-    if (
-      bestStart === null ||
-      Math.abs(foundStart - preferredStart) < Math.abs(bestStart - preferredStart)
-    ) {
-      bestStart = foundStart;
-    }
-    searchStart = foundStart + Math.max(markdown.length, 1);
-  }
-
-  return bestStart === null
-    ? null
-    : {
-        start: bestStart,
-        end: bestStart + markdown.length,
-      };
 }
 
 const LANGUAGE_LABELS: Record<string, string> = {
