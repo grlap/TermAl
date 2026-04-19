@@ -356,78 +356,30 @@ import {
 import {
   mergeWorkspaceFilesChangedEvents,
 } from "./workspace-file-events";
-
-const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
-const RECONNECT_STATE_RESYNC_DELAY_MS = 400;
-const RECONNECT_STATE_RESYNC_MAX_DELAY_MS = 5000;
-const LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS = 1000;
-
-const WORKSPACE_LAYOUT_PERSIST_DELAY_MS = 150;
+import {
+  CREATE_SESSION_WORKSPACE_ID,
+  LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,
+  NEW_SESSION_AGENT_OPTIONS,
+  NEW_SESSION_AGENT_OPTIONS_EXHAUSTIVE,
+  PENDING_KILL_CLOSE_DELAY_MS,
+  PENDING_SESSION_RENAME_CLOSE_DELAY_MS,
+  RECONNECT_STATE_RESYNC_DELAY_MS,
+  RECONNECT_STATE_RESYNC_MAX_DELAY_MS,
+  TAB_DRAG_STALE_TIMEOUT_MS,
+  WORKSPACE_LAYOUT_PERSIST_DELAY_MS,
+  type OrchestratorRuntimeAction,
+  type PendingSessionRename,
+  type PendingWorkspaceLayoutSave,
+  type SessionConversationItem,
+  type SessionErrorMap,
+  type SessionNoticeMap,
+  type StandaloneControlSurfaceViewState,
+  type StateEventPayload,
+  type WorkspaceLayoutPersistencePayload,
+} from "./app-shell-internals";
 
 // Re-exported from ./types for backward compatibility
 export type { SessionSettingsField, SessionSettingsValue } from "./types";
-type SessionErrorMap = Record<string, string | undefined>;
-type StateEventPayload = StateResponse & {
-  _sseFallback?: boolean;
-};
-type SessionNoticeMap = Record<string, string | undefined>;
-type WorkspaceLayoutPersistencePayload = {
-  controlPanelSide: ControlPanelSide;
-  densityPercent: number;
-  editorFontSizePx: number;
-  fontSizePx: number;
-  styleId: StyleId;
-  themeId: ThemeId;
-  markdownStyleId: MarkdownStyleId;
-  markdownThemeId: MarkdownThemeId;
-  diagramThemeOverrideMode: DiagramThemeOverrideMode;
-  diagramLook: DiagramLook;
-  diagramPalette: DiagramPalette;
-  workspace: WorkspaceState;
-};
-type PendingWorkspaceLayoutSave = {
-  layout: WorkspaceLayoutPersistencePayload;
-  workspaceId: string;
-};
-type OrchestratorRuntimeAction = RuntimeAction;
-type PendingSessionRename = {
-  clientX: number;
-  clientY: number;
-  sessionId: string;
-};
-const PENDING_KILL_CLOSE_DELAY_MS = 180;
-const PENDING_SESSION_RENAME_CLOSE_DELAY_MS = 300;
-
-type SessionConversationItem =
-  | {
-      author: Message["author"];
-      id: string;
-      kind: "message";
-      message: Message;
-    }
-  | {
-      author: "you";
-      id: string;
-      kind: "pendingPrompt";
-      prompt: PendingPrompt;
-    };
-
-const NEW_SESSION_AGENT_OPTIONS = [
-  { label: "Claude", value: "Claude" },
-  { label: "Codex", value: "Codex" },
-  { label: "Cursor", value: "Cursor" },
-  { label: "Gemini", value: "Gemini" },
-] as const satisfies ReadonlyArray<{ label: string; value: AgentType }>;
-const NEW_SESSION_AGENT_OPTIONS_EXHAUSTIVE: ExhaustiveValueCoverage<
-  AgentType,
-  typeof NEW_SESSION_AGENT_OPTIONS
-> = true;
-const CREATE_SESSION_WORKSPACE_ID = "__workspace__";
-type StandaloneControlSurfaceViewState = {
-  projectId?: string;
-  sessionListFilter?: SessionListFilter;
-  sessionListSearchQuery?: string;
-};
 
 export default function App() {
   const [workspaceViewId] = useState(() => ensureWorkspaceViewId());
