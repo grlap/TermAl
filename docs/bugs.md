@@ -30,6 +30,10 @@ readable:
   capture, read-only map build, retain, session updates, orchestrator sync, and
   rollback on failure. The incorrect project-upsert, retain-order, and revision
   attribution claims were removed.
+- Successful send responses that arrive with a stale same-instance snapshot now
+  still arm the active-prompt recovery poll, so an SSE stream that stalls after
+  echoing the user's prompt can be recovered by the authoritative `/api/state`
+  safety net.
 
 ## `markdown-diff-edit-pipeline` paste sanitizer has no direct unit tests
 
@@ -271,22 +275,6 @@ In practice measurement convergence is fast for visible items, but with measurem
 - Or: only run the pin when `activeConversationSearchMessageId` changes — keep a ref of the last handled active id and compare before writing.
 - Move the `shouldKeepBottomAfterLayoutRef.current = false` assignment inside the `Math.abs(...) >= 1` guard so it only fires when the scroll write actually happens.
 - Add a Vitest case: open session find, scroll the viewport away from the active hit, trigger a measurement-height change, and assert `scrollTop` is unchanged.
-
-## Stale send responses skip the active-prompt recovery poll
-
-**Severity:** High - a successful `sendMessage` whose returned `StateResponse` is rejected as stale clears the draft and returns before arming the active-prompt safety-net poll.
-
-This happens when SSE has already delivered the user's prompt at a newer same-instance revision before the POST response resolves. The prompt is visible, but if the SSE stream stalls before the first assistant delta, the newly-added early return skips the fallback poll that is supposed to recover missing assistant output.
-
-**Current behavior:**
-- `handleSend` calls `adoptState(state)` after `sendMessage` resolves.
-- If adoption returns `false`, the branch releases attachments, clears the request error, and returns.
-- The active-prompt `/api/state` poll is only scheduled after the adopted branch.
-
-**Proposal:**
-- Treat "POST accepted but response snapshot stale" as a successful send for poll scheduling.
-- Factor the active-prompt poll setup into a helper and call it after every successful `sendMessage` response while the session is still active.
-- Keep the draft-clearing behavior so stale successful responses do not reinsert already-sent text.
 
 ## Restart detection accepts late responses from old server instances
 
@@ -955,6 +943,21 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   at 760/851/852) plus a few unused imports. The extraction's
   provenance header explicitly notes a follow-up is expected;
   schedule the second pass once the component stops moving.
+- [ ] P2: Harden the new active-prompt stale-send-recovery test:
+  `ui/src/App.test.tsx` "arms the active-prompt poll when a
+  successful send response is stale" has two soft assertions worth
+  tightening. First, the rev-2 SSE advance assertion
+  `screen.getAllByText("Recover this prompt").length > 0` can pass
+  even if adoption never rendered the transcript, because the
+  composer textarea still holds the typed value — scope the check
+  to the message-list container (`within(messageList).getByText(...)`)
+  or assert `length > 1` so both the composer echo and the transcript
+  copy must be present. Second, the test advances timers once and
+  asserts a single `/api/state` call, but does not prove the chain
+  stops after the session goes idle — add a second
+  `advanceTimers(ACTIVE_PROMPT_POLL_INTERVAL_MS)` and assert
+  `fetchMock` is still at 1 call so a regression that leaves the
+  poll running after idle would fail loudly.
 - [ ] P2: Add normal-size Mermaid iframe height reserve coverage:
   add a deterministic Mermaid SVG/viewBox case in
   `ui/src/MarkdownContent.test.tsx` proving the `+24` vertical slack is
@@ -999,11 +1002,6 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   the workspace layout has no positive test for the restart-rewind
   branch yet. Pair with a same-instance stale response that must preserve
   newer SSE state, and cover both create and fork callers.
-- [ ] P2: Add App coverage for successful-send stale response recovery:
-  have SSE advance the active session to a newer same-instance revision
-  before `sendMessage` resolves with an older `StateResponse`, then assert
-  the prompt remains visible, the draft/attachments stay cleared, and the
-  active-prompt safety-net poll is armed.
 - [ ] P2: Add stale old-server-instance coverage for snapshot adoption:
   adopt instance A, then a lower-revision snapshot from new instance B,
   then resolve a late response from already-seen instance A. Assert the

@@ -17,6 +17,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
+import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App, {
   MarkdownContent,
   ThemedCombobox,
@@ -1277,6 +1278,205 @@ describe("App", () => {
       } finally {
         composer.removeEventListener("keydown", stopPropagation);
         context.cleanup();
+      }
+    });
+  });
+
+  it("arms the active-prompt poll when a successful send response is stale", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalFetch = globalThis.fetch;
+      const project = {
+        id: "project-termal",
+        name: "TermAl",
+        rootPath: "/projects/termal",
+      };
+      const session = makeSession("session-1", {
+        name: "Session 1",
+        projectId: project.id,
+        workdir: project.rootPath,
+      });
+      const initialState = makeStateResponse({
+        revision: 1,
+        projects: [project],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [session],
+      });
+      const pollState = makeStateResponse({
+        revision: 3,
+        projects: [project],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Session 1",
+            projectId: project.id,
+            workdir: project.rootPath,
+            status: "idle",
+            preview: "Recovered assistant response",
+            messages: [
+              {
+                id: "message-1",
+                timestamp: "2026-04-19T10:00:00Z",
+                author: "you",
+                type: "text",
+                text: "Recover this prompt",
+              },
+              {
+                id: "message-2",
+                timestamp: "2026-04-19T10:00:01Z",
+                author: "assistant",
+                type: "text",
+                text: "Recovered assistant response",
+              },
+            ],
+          }),
+        ],
+      });
+      const sendMessageDeferred = createDeferred<Response>();
+      let stateResponse = initialState;
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse(stateResponse);
+          }
+
+          if (
+            requestUrl.pathname === "/api/sessions/session-1/messages" &&
+            (init?.method ?? "GET").toUpperCase() === "POST"
+          ) {
+            return sendMessageDeferred.promise;
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(eventSource, initialState);
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        const sessionRowLabel = await within(sessionList).findByText(
+          "Session 1",
+        );
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+
+        await clickAndSettle(sessionRowButton);
+        const composer = await screen.findByLabelText("Message Session 1");
+        await act(async () => {
+          fireEvent.change(composer, {
+            target: { value: "Recover this prompt" },
+          });
+        });
+        await settleAsyncUi();
+        vi.useFakeTimers();
+        await clickAndSettle(screen.getByRole("button", { name: "Send" }));
+
+        expect(
+          fetchMock.mock.calls.some(([input, init]) => {
+            const requestUrl = new URL(String(input), "http://localhost");
+            return (
+              requestUrl.pathname === "/api/sessions/session-1/messages" &&
+              (init?.method ?? "GET").toUpperCase() === "POST" &&
+              init?.body ===
+                JSON.stringify({
+                  text: "Recover this prompt",
+                  attachments: [],
+                  expandedText: null,
+                })
+            );
+          }),
+        ).toBe(true);
+
+        await dispatchStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 2,
+            projects: [project],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Session 1",
+                projectId: project.id,
+                workdir: project.rootPath,
+                status: "active",
+                preview: "Recover this prompt",
+                messages: [
+                  {
+                    id: "message-1",
+                    timestamp: "2026-04-19T10:00:00Z",
+                    author: "you",
+                    type: "text",
+                    text: "Recover this prompt",
+                  },
+                ],
+              }),
+            ],
+          }),
+        );
+        expect(
+          screen.getAllByText("Recover this prompt").length,
+        ).toBeGreaterThan(0);
+
+        stateResponse = pollState;
+        fetchMock.mockClear();
+
+        await act(async () => {
+          sendMessageDeferred.resolve(
+            jsonResponse(
+              makeStateResponse({
+                revision: 1,
+                projects: [project],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [session],
+              }),
+            ),
+          );
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        expect(composer).toHaveValue("");
+        expect(fetchMock).not.toHaveBeenCalled();
+
+        await advanceTimers(ACTIVE_PROMPT_POLL_INTERVAL_MS);
+        await settleAsyncUi();
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/state");
+        expect(
+          screen.getAllByText("Recovered assistant response").length,
+        ).toBeGreaterThan(0);
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
       }
     });
   });

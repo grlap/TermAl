@@ -4045,6 +4045,41 @@ export default function App() {
     };
   }, []);
 
+  function startActivePromptRecoveryPoll(sessionId: string) {
+    // Safety net: if the SSE stream is dead (e.g. after a server
+    // restart the proxy may not forward the connection close), the
+    // agent's response would never arrive via deltas. Chain a
+    // `setTimeout` poll of the authoritative snapshot until the
+    // session is no longer active. If SSE is healthy, the polls are
+    // no-ops (same revision) and stop once the turn completes. See
+    // `startActivePromptPoll` in `active-prompt-poll.ts` for the
+    // chain + deadline contract.
+    //
+    // Clear any previous safety-net poll so rapid prompts don't
+    // stack independent timers.
+    activePromptPollCancelRef.current?.();
+    activePromptPollCancelRef.current = startActivePromptPoll({
+      fetchState,
+      isMounted: () => isMountedRef.current,
+      onState: (freshState) => {
+        // The server-instance-id check inside `adoptState` now
+        // detects server restarts deterministically via
+        // `nextState.serverInstanceId`, so the poll no longer needs
+        // `force + allowRevisionDowngrade` to recover from a restart.
+        // Adopt with default flags: a stale poll response (server still
+        // running, SSE already delivered a newer revision) becomes a
+        // silent no-op, and a genuine restart is still accepted because
+        // the instance id changed.
+        adoptState(freshState);
+        // Return `true` to stop the chain once the session is no longer
+        // active.
+        return !freshState.sessions?.some(
+          (session) => session.id === sessionId && session.status === "active",
+        );
+      },
+    });
+  }
+
   function handleSend(
     sessionId: string,
     draftTextOverride?: string,
@@ -4119,6 +4154,9 @@ export default function App() {
           normalizedExpandedText,
         );
         const adopted = adoptState(state);
+        releaseDraftAttachments(attachments);
+        setRequestError(null);
+        startActivePromptRecoveryPoll(sessionId);
         if (!adopted) {
           // adoptState returns false when the response is stale
           // against the current in-memory revision AND the server
@@ -4127,54 +4165,16 @@ export default function App() {
           // delivered a newer revision for this session — the user's
           // prompt is already visible via the SSE delta).
           //
-          // Even though the prompt is already on screen via SSE, the
-          // safety-net poll + error-catch paths both need to know we
-          // are past the POST round-trip — so clear the sending flag
-          // and drop the attachments the same way the success path
-          // would. Do NOT restore the draft: the prompt HAS been
-          // accepted by the server (the POST succeeded with 202),
-          // restoring would re-insert the just-sent text into an
-          // empty box and let the user accidentally send it twice.
-          releaseDraftAttachments(attachments);
-          setRequestError(null);
+          // The post-POST side effects (attachment release, error
+          // clear, safety-net poll arm) already ran above the guard,
+          // so this branch only has to skip the success-path
+          // fall-through and return. Do NOT restore the draft here:
+          // the prompt HAS been accepted by the server (the POST
+          // succeeded with 202), restoring would re-insert the
+          // just-sent text into an empty box and let the user
+          // accidentally send it twice.
           return;
         }
-        releaseDraftAttachments(attachments);
-        setRequestError(null);
-        // Safety net: if the SSE stream is dead (e.g. after a server
-        // restart the proxy may not forward the connection close), the
-        // agent's response would never arrive via deltas. Chain a
-        // `setTimeout` poll of the authoritative snapshot until the
-        // session is no longer active. If SSE is healthy, the polls are
-        // no-ops (same revision) and stop once the turn completes. See
-        // `startActivePromptPoll` in `active-prompt-poll.ts` for the
-        // chain + deadline contract.
-        //
-        // Clear any previous safety-net poll so rapid prompts don't
-        // stack independent timers.
-        activePromptPollCancelRef.current?.();
-        activePromptPollCancelRef.current = startActivePromptPoll({
-          fetchState,
-          isMounted: () => isMountedRef.current,
-          onState: (freshState) => {
-            // The server-instance-id check inside `adoptState` now
-            // detects server restarts deterministically via
-            // `nextState.serverInstanceId`, so the poll no longer
-            // needs `force + allowRevisionDowngrade` to recover from
-            // a restart. Adopt with default flags: a stale poll
-            // response (server still running, SSE already delivered
-            // a newer revision) becomes a silent no-op, and a genuine
-            // restart is still accepted because the instance id
-            // changed.
-            adoptState(freshState);
-            // Return `true` to stop the chain once the session is no
-            // longer active.
-            return !freshState.sessions?.some(
-              (session) =>
-                session.id === sessionId && session.status === "active",
-            );
-          },
-        });
       } catch (error) {
         let restoredDraft = false;
         let restoredAttachments = false;
