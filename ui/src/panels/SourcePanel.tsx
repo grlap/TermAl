@@ -1,6 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { copyTextToClipboard } from "../clipboard";
-import { MarkdownDocumentView } from "../MarkdownDocumentView";
 import { MarkdownContent, type MarkdownFileLinkTarget } from "../message-cards";
 import type { MonacoCodeEditorStatus, MonacoInlineZone } from "../MonacoCodeEditor";
 import { resolveMonacoLanguage, type MonacoAppearance } from "../monaco";
@@ -15,6 +14,11 @@ import {
   rebaseContentOntoDisk,
   type ContentRebaseResult,
 } from "./content-rebase";
+import {
+  RendererPreviewPane,
+  composeInlineRegionFence,
+  describeRenderableKinds,
+} from "./source-renderer-preview";
 
 const MonacoCodeEditor = lazy(() =>
   import("../MonacoCodeEditor").then(({ MonacoCodeEditor }) => ({ default: MonacoCodeEditor })),
@@ -51,7 +55,6 @@ const LANGUAGE_LABELS: Record<string, string> = {
   xml: "XML",
   yaml: "YAML",
 };
-
 
 type SourceDocumentMode = "code" | "preview" | "split";
 
@@ -739,146 +742,8 @@ export function SourcePanel({
   );
 }
 
-
 function isStaleFileSaveError(message: string) {
   return message.toLowerCase().includes("file changed on disk before save");
-}
-
-// Builds the synthetic Markdown fence that a Monaco view zone uses
-// to render a single region inline. The Source panel (Code + Split
-// modes) passes this into `MonacoCodeEditor`'s `inlineZones` prop;
-// the Monaco view-zone machinery portals a `<MarkdownContent>` into
-// a zone positioned after the region's last source line, reusing
-// the Phase 1 Mermaid/KaTeX pipeline without a second renderer.
-// Markdown-renderer regions (future Phase 6+) pass their body
-// through as-is so `MarkdownContent` parses it.
-function composeInlineRegionFence(region: SourceRenderableRegion): string {
-  if (region.renderer === "mermaid") {
-    return "```mermaid\n" + region.displayText.replace(/\s+$/, "") + "\n```";
-  }
-  if (region.renderer === "math") {
-    return "$$\n" + region.displayText.replace(/\s+$/, "") + "\n$$";
-  }
-  return region.displayText;
-}
-
-// Preview pane for source files that have at least one renderable
-// region (Phase 3 of `docs/features/source-renderers.md`). For
-// Markdown files, delegates to `MarkdownDocumentView` so all the
-// existing Markdown chrome (headings, table-of-contents, link
-// handling) stays intact. For non-Markdown files the detected
-// regions are composed into a synthetic Markdown fragment that
-// `MarkdownContent` already knows how to render — reuses the
-// Mermaid / KaTeX paths already wired in Phase 1 without a second
-// renderer implementation.
-//
-// Layout rules:
-//
-// - Dedicated whole-file renderers (e.g. `.mmd` files) compose to a
-//   single fence spanning the whole file; `MarkdownContent` picks it
-//   up via the Mermaid code-block branch.
-// - Mixed-content files (hypothetical — Rust in Phase 5) interleave
-//   recognized regions with plain text showing the intervening
-//   source; this Phase 3 implementation keeps it simple and shows
-//   only the recognized regions with small source line headers so
-//   the user can cross-reference them against the Monaco editor in
-//   Split mode.
-function RendererPreviewPane({
-  appearance,
-  content,
-  documentPath,
-  isMarkdownSource,
-  onOpenSourceLink,
-  renderableRegions,
-  workspaceRoot,
-}: {
-  appearance: MonacoAppearance;
-  content: string;
-  documentPath: string;
-  isMarkdownSource: boolean;
-  onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
-  renderableRegions: SourceRenderableRegion[];
-  workspaceRoot: string | null;
-}) {
-  if (isMarkdownSource) {
-    return (
-      <MarkdownDocumentView
-        appearance={appearance}
-        documentPath={documentPath}
-        markdown={content}
-        onOpenSourceLink={onOpenSourceLink}
-        workspaceRoot={workspaceRoot}
-      />
-    );
-  }
-  // Non-Markdown files: compose the renderable regions into a
-  // synthetic Markdown fragment. Each region becomes either a fenced
-  // block (Mermaid / math fence) or an `$$...$$` math block,
-  // prefaced by a subtle "Lines X-Y" label so the user can navigate
-  // back to Monaco. `MarkdownContent` handles the rendering safely
-  // (sandboxed Mermaid iframe, KaTeX output with
-  // contentEditable={false} + data-markdown-serialization="skip").
-  const synthetic = composeRendererPreviewMarkdown(renderableRegions);
-  return (
-    <div className="source-renderer-preview" aria-label="Rendered preview">
-      <MarkdownContent
-        appearance={appearance}
-        documentPath={documentPath}
-        markdown={synthetic}
-        onOpenSourceLink={onOpenSourceLink}
-        workspaceRoot={workspaceRoot}
-      />
-    </div>
-  );
-}
-
-function composeRendererPreviewMarkdown(
-  regions: SourceRenderableRegion[],
-): string {
-  if (regions.length === 0) {
-    return "";
-  }
-  return regions
-    .map((region) => {
-      const header = `**Lines ${region.sourceStartLine}–${region.sourceEndLine}**`;
-      const body = composeRendererPreviewRegion(region);
-      return `${header}\n\n${body}`;
-    })
-    .join("\n\n");
-}
-
-function composeRendererPreviewRegion(region: SourceRenderableRegion): string {
-  if (region.renderer === "mermaid") {
-    return ["```mermaid", region.displayText.replace(/\s+$/, ""), "```"].join("\n");
-  }
-  if (region.renderer === "math") {
-    const trimmed = region.displayText.replace(/\s+$/, "");
-    // Block math rendered via `$$...$$` so `remark-math` tokenizes it
-    // without the code-block path. Inline math would be awkward in a
-    // preview pane, so we promote inline regions to block form too.
-    return `$$\n${trimmed}\n$$`;
-  }
-  // Markdown-renderer region (Phase 5 Rust doc comments) lands here
-  // as prose — emit the body directly so `MarkdownContent` parses it.
-  return region.displayText;
-}
-
-function describeRenderableKinds(regions: SourceRenderableRegion[]): string {
-  if (regions.length === 0) {
-    return "Document";
-  }
-  const kinds = new Set<string>();
-  for (const region of regions) {
-    if (region.renderer === "mermaid") {
-      kinds.add("Mermaid");
-    } else if (region.renderer === "math") {
-      kinds.add("Math");
-    } else if (region.renderer === "markdown") {
-      kinds.add("Markdown");
-    }
-  }
-  const ordered = Array.from(kinds).sort();
-  return ordered.join(" + ");
 }
 
 function SourceDocumentModeButton({
