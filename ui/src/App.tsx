@@ -8,23 +8,12 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type ClipboardEvent as ReactClipboardEvent,
   type DragEvent as ReactDragEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
-  type ReactNode,
-  type RefObject,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { createPortal, flushSync } from "react-dom";
 import {
-  CommandCard,
   DialogCloseIcon,
-  DiffCard,
-  MessageCard,
-  MarkdownContent,
-  type MarkdownFileLinkTarget,
 } from "./message-cards";
 import {
   archiveCodexThread,
@@ -35,7 +24,6 @@ import {
   deleteProject,
   deleteWorkspaceLayout,
   fetchAgentCommands,
-  fetchFile,
   fetchGitDiff,
   fetchGitStatus,
   fetchSession,
@@ -52,7 +40,6 @@ import {
   stopOrchestratorInstance,
   renameSession,
   rollbackCodexThread,
-  saveFile,
   saveWorkspaceLayout,
   sendMessage,
   stopSession,
@@ -130,7 +117,6 @@ import {
 import { SettingsDialogShell } from "./preferences/SettingsDialogShell";
 import { SettingsTabBar } from "./preferences/SettingsTabBar";
 import type { PreferencesTabId } from "./preferences/preferences-tabs";
-import { SessionFindBar } from "./SessionFindBar";
 import {
   hydrateControlPanelLayout,
   resolveStandaloneControlPanelDockWidthRatio,
@@ -140,8 +126,6 @@ import {
   resolveControlSurfaceSectionIdForWorkspaceTab,
   resolveWorkspaceTabProjectId,
   workspaceContainsOnlyControlPanel,
-  workspaceNodeContainsControlPanel,
-  workspaceNodeUsesStandaloneControlSurfaceMinWidth,
 } from "./workspace-queries";
 import {
   buildControlSurfaceSessionListEntries,
@@ -149,43 +133,26 @@ import {
   createControlPanelSectionLauncherTab,
   formatSessionOrchestratorGroupName,
   mergeOrchestratorDeltaSessions,
-  resolveWorkspaceScopedProjectId,
-  resolveWorkspaceScopedSessionId,
 } from "./control-surface-state";
 import {
   collectGitDiffPreviewRefreshes,
   collectRestoredGitDiffDocumentContentRefreshes,
 } from "./git-diff-refresh";
 import {
-  isSourceFileMissingError,
-  sourceFileStateFromResponse,
-} from "./source-file-state";
-import {
   BACKEND_UNAVAILABLE_ISSUE_DETAIL,
   describeBackendConnectionIssueDetail,
   type BackendConnectionState,
 } from "./backend-connection";
 import {
-  resolveSettledScrollMinimumAttempts,
-  syncMessageStackScrollPosition,
-} from "./scroll-position";
-import {
   resolveAdoptedStateSlices,
   resolveRecoveredWorkspaceLayoutRequestError,
 } from "./state-adoption";
 import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
-import { appTestHooks, setAppTestHooksForTests } from "./app-test-hooks";
+import { appTestHooks } from "./app-test-hooks";
 import { ProjectListSection } from "./ProjectListSection";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
 import { EmptyState } from "./EmptyState";
 import { WorkspaceNodeView } from "./WorkspaceNodeView";
-
-import {
-  CodexPromptSettingsCard,
-  ClaudePromptSettingsCard,
-  CursorPromptSettingsCard,
-  GeminiPromptSettingsCard,
-} from "./prompt-settings-cards";
 
 export { ThemedCombobox } from "./preferences-panels";
 export {
@@ -195,7 +162,6 @@ export {
   GeminiPromptSettingsCard,
 } from "./prompt-settings-cards";
 
-import { normalizeDisplayPath } from "./path-display";
 import {
   LOCAL_REMOTE_ID,
   createBuiltinLocalRemote,
@@ -204,7 +170,6 @@ import {
   remoteDisplayName,
   resolveProjectRemoteId,
 } from "./remotes";
-import { resolvePaneScrollCommand } from "./pane-keyboard";
 import {
   ControlPanelConnectionIndicator,
   WorkspaceSwitcher,
@@ -212,48 +177,29 @@ import {
 import type { RuntimeAction } from "./runtime-action-button";
 import { OrchestratorRuntimeActionButton } from "./OrchestratorRuntimeActionButton";
 import {
-  AgentSessionPanel,
-  AgentSessionPanelFooter,
-} from "./panels/AgentSessionPanel";
-import {
-  ControlPanelSectionIcon,
   ControlPanelSurface,
   type ControlPanelSectionId,
   type ControlPanelSurfaceHandle,
 } from "./panels/ControlPanelSurface";
-import { DiffPanel } from "./panels/DiffPanel";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
-import { InstructionDebuggerPanel } from "./panels/InstructionDebuggerPanel";
 import { OrchestratorTemplateLibraryPanel } from "./panels/OrchestratorTemplateLibraryPanel";
-import { PaneTabs, type PaneTabDecoration } from "./panels/PaneTabs";
 import { OrchestratorTemplatesPanel } from "./panels/OrchestratorTemplatesPanel";
-import { SessionCanvasPanel } from "./panels/SessionCanvasPanel";
 import {
-  TerminalPanel,
   pruneTerminalPanelHistory,
 } from "./panels/TerminalPanel";
 import {
-  SourcePanel,
-  type SourceFileState,
-  type SourceSaveOptions,
-} from "./panels/SourcePanel";
-import {
   buildSessionListSearchResultFromIndex,
   buildSessionSearchIndex,
-  buildSessionSearchMatchesFromIndex,
   type SessionListSearchResult,
 } from "./session-find";
 import type {
-  AppPreferences,
   ApprovalDecision,
   ApprovalPolicy,
-  AgentCommand,
   AgentReadiness,
   AgentType,
   ClaudeApprovalMode,
   ClaudeEffortLevel,
-  CommandMessage,
   CodexReasoningEffort,
   CodexState,
   CursorMode,
@@ -270,7 +216,6 @@ import type {
   RemoteConfig,
   SandboxMode,
   Session,
-  SessionModelOption,
   SessionSettingsField,
   SessionSettingsValue,
   WorkspaceFilesChangedEvent,
@@ -313,11 +258,8 @@ import {
   updateGitDiffPreviewTabInWorkspaceState,
   updateSplitRatio,
   upsertCanvasSessionCard,
-  type PaneViewMode,
   type SessionPaneViewMode,
   type TabDropPlacement,
-  type WorkspaceNode,
-  type WorkspacePane,
   type WorkspaceState,
   type WorkspaceTab,
 } from "./workspace";
@@ -333,22 +275,11 @@ import {
 import { reconcileSessions } from "./session-reconcile";
 import {
   attachSessionDragData,
-  dataTransferHasSessionDragType,
   readSessionDragData,
 } from "./session-drag";
 import {
-  DENSITY_STEP_PERCENT,
-  DEFAULT_DENSITY_PERCENT,
-  DEFAULT_EDITOR_FONT_SIZE_PX,
-  DEFAULT_FONT_SIZE_PX,
   MARKDOWN_STYLES,
   MARKDOWN_THEMES,
-  MAX_DENSITY_PERCENT,
-  MAX_EDITOR_FONT_SIZE_PX,
-  MAX_FONT_SIZE_PX,
-  MIN_DENSITY_PERCENT,
-  MIN_EDITOR_FONT_SIZE_PX,
-  MIN_FONT_SIZE_PX,
   STYLES,
   THEMES,
   applyDensityPreference,
@@ -394,7 +325,6 @@ import {
 } from "./state-revision";
 import {
   TAB_DRAG_CHANNEL_NAME,
-  TAB_DRAG_MIME_TYPE,
   attachWorkspaceTabDragData,
   createWorkspaceTabDrag,
   isWorkspaceTabDragChannelMessage,
@@ -403,25 +333,10 @@ import {
   type WorkspaceTabDragChannelMessage,
 } from "./tab-drag";
 import {
-  canNestedScrollableConsumeWheel,
   clamp,
   buildGitDiffPreviewRequestKey,
-  buildMessageListSignature,
-  buildSessionConversationSignature,
-  collectCandidateSourcePaths,
-  collectClipboardImageFiles,
-  createDraftAttachmentsFromFiles,
-  dropLabelForPlacement,
-  findLastUserPrompt,
-  formatByteSize,
   getErrorMessage,
   isHexColorDark,
-  isPointerWithinPaneTopArea,
-  labelForPaneViewMode,
-  labelForStatus,
-  MAX_PASTED_IMAGE_BYTES,
-  messageChangeMarker,
-  normalizeWheelDelta,
   pendingGitDiffPreviewChangeType,
   pendingGitDiffPreviewSummary,
   primaryModifierLabel,
@@ -433,16 +348,13 @@ import {
   readNavigatorOnline,
   releaseDraftAttachments,
   removeQueuedPromptFromSessions,
-  resolvePaneDropPlacementFromPointer,
   setSessionFlag,
-  SUPPORTED_PASTED_IMAGE_TYPES,
   type DraftImageAttachment,
   type SessionAgentCommandMap,
   type SessionFlagMap,
 } from "./app-utils";
 import {
   mergeWorkspaceFilesChangedEvents,
-  workspaceFilesChangedEventChangeForPath,
 } from "./workspace-file-events";
 
 const TAB_DRAG_STALE_TIMEOUT_MS = 15000;

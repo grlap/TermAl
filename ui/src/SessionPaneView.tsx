@@ -31,108 +31,30 @@
 // being a moving target.
 
 import {
-  startTransition,
-  useCallback,
-  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type ClipboardEvent as ReactClipboardEvent,
-  type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent,
-  type ReactNode,
-  type RefObject,
   type WheelEvent as ReactWheelEvent,
 } from "react";
-import { createPortal, flushSync } from "react-dom";
 import {
   CommandCard,
-  DialogCloseIcon,
   DiffCard,
   MessageCard,
-  MarkdownContent,
-  type MarkdownFileLinkTarget,
 } from "./message-cards";
 import {
-  archiveCodexThread,
-  cancelQueuedPrompt,
-  compactCodexThread,
-  createProject,
-  createSession,
-  deleteProject,
-  deleteWorkspaceLayout,
-  fetchAgentCommands,
   fetchFile,
-  fetchGitDiff,
-  fetchGitStatus,
-  fetchSession,
-  fetchState,
-  fetchWorkspaceLayout,
-  fetchWorkspaceLayouts,
-  forkCodexThread,
-  isBackendUnavailableError,
-  killSession,
-  pauseOrchestratorInstance,
-  pickProjectRoot,
-  refreshSessionModelOptions,
-  resumeOrchestratorInstance,
-  stopOrchestratorInstance,
-  renameSession,
-  rollbackCodexThread,
   saveFile,
-  saveWorkspaceLayout,
-  sendMessage,
-  stopSession,
-  submitApproval,
-  submitCodexAppRequest,
-  submitMcpElicitation,
-  submitUserInput,
-  type CreateSessionResponse,
   type GitDiffRequestPayload,
   type GitDiffSection,
   type OpenPathOptions,
   type StateResponse,
-  type WorkspaceLayoutSummary,
-  unarchiveCodexThread,
-  updateAppSettings,
-  updateSessionSettings,
 } from "./api";
-import { AgentIcon } from "./agent-icon";
 import {
-  LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
-  LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,
-  applyDeltaToSessions,
-  pruneLiveTransportActivitySessions,
-  sessionHasPotentiallyStaleTransport,
-} from "./live-updates";
-import {
-  areRemoteConfigsEqual,
-  createSessionModelHint,
-  DEFAULT_CLAUDE_EFFORT,
-  DEFAULT_CLAUDE_APPROVAL_MODE,
-  DEFAULT_CODEX_REASONING_EFFORT,
-  defaultNewSessionModel,
-  describeCodexModelAdjustmentNotice,
-  describeProjectScope,
-  describeSessionModelRefreshError,
-  describeUnknownSessionModelWarning,
-  normalizedCodexReasoningEffort,
-  normalizedRequestedSessionModel,
-  resolveAppPreferences,
   resolveControlPanelWorkspaceRoot,
-  resolveRemoteConfig,
-  resolveUnknownSessionModelSendAttempt,
-  remoteBadgeLabel,
-  unknownSessionModelConfirmationKey,
-  usesSessionModelPicker,
-  CLAUDE_EFFORT_OPTIONS,
-  CODEX_REASONING_EFFORT_OPTIONS,
-  NEW_SESSION_MODEL_OPTIONS,
   type ComboboxOption,
 } from "./session-model-utils";
 
@@ -149,67 +71,24 @@ export {
 export { MessageCard, MarkdownContent } from "./message-cards";
 
 import {
-  ThemePreferencesPanel,
-  AppearancePreferencesPanel,
-  MarkdownPreferencesPanel,
-  RemotePreferencesPanel,
-  ClaudeApprovalsPreferencesPanel,
-  CodexPromptPreferencesPanel,
   ThemedCombobox,
-  CURSOR_MODE_OPTIONS,
-  GEMINI_APPROVAL_OPTIONS,
 } from "./preferences-panels";
-import { SettingsDialogShell } from "./preferences/SettingsDialogShell";
-import { SettingsTabBar } from "./preferences/SettingsTabBar";
-import type { PreferencesTabId } from "./preferences/preferences-tabs";
 import { SessionFindBar } from "./SessionFindBar";
 import {
-  hydrateControlPanelLayout,
-  resolveStandaloneControlPanelDockWidthRatio,
-} from "./control-panel-layout";
-import {
-  getWorkspaceSplitResizeBounds,
-  resolveControlSurfaceSectionIdForWorkspaceTab,
-  resolveWorkspaceTabProjectId,
-  workspaceContainsOnlyControlPanel,
-  workspaceNodeContainsControlPanel,
-  workspaceNodeUsesStandaloneControlSurfaceMinWidth,
-} from "./workspace-queries";
-import {
-  buildControlSurfaceSessionListEntries,
-  buildControlSurfaceSessionListState,
-  createControlPanelSectionLauncherTab,
-  formatSessionOrchestratorGroupName,
-  mergeOrchestratorDeltaSessions,
   resolveWorkspaceScopedProjectId,
   resolveWorkspaceScopedSessionId,
 } from "./control-surface-state";
-import {
-  collectGitDiffPreviewRefreshes,
-  collectRestoredGitDiffDocumentContentRefreshes,
-} from "./git-diff-refresh";
 import {
   isSourceFileMissingError,
   sourceFileStateFromResponse,
 } from "./source-file-state";
 import {
-  BACKEND_UNAVAILABLE_ISSUE_DETAIL,
-  describeBackendConnectionIssueDetail,
   type BackendConnectionState,
 } from "./backend-connection";
 import {
   resolveSettledScrollMinimumAttempts,
   syncMessageStackScrollPosition,
 } from "./scroll-position";
-import {
-  resolveAdoptedStateSlices,
-  resolveRecoveredWorkspaceLayoutRequestError,
-} from "./state-adoption";
-import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
-import { appTestHooks, setAppTestHooksForTests } from "./app-test-hooks";
-import { ProjectListSection } from "./ProjectListSection";
-import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
-import { EmptyState } from "./EmptyState";
 
 import {
   CodexPromptSettingsCard,
@@ -227,42 +106,23 @@ export {
 } from "./prompt-settings-cards";
 
 import { normalizeDisplayPath } from "./path-display";
-import {
-  LOCAL_REMOTE_ID,
-  createBuiltinLocalRemote,
-  isLocalRemoteId,
-  remoteConnectionLabel,
-  remoteDisplayName,
-  resolveProjectRemoteId,
-} from "./remotes";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
-import {
-  ControlPanelConnectionIndicator,
-  WorkspaceSwitcher,
-} from "./workspace-shell-controls";
-import type { RuntimeAction } from "./runtime-action-button";
-import { OrchestratorRuntimeActionButton } from "./OrchestratorRuntimeActionButton";
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
 } from "./panels/AgentSessionPanel";
 import {
-  ControlPanelSectionIcon,
-  ControlPanelSurface,
   type ControlPanelSectionId,
-  type ControlPanelSurfaceHandle,
 } from "./panels/ControlPanelSurface";
 import { DiffPanel } from "./panels/DiffPanel";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { InstructionDebuggerPanel } from "./panels/InstructionDebuggerPanel";
-import { OrchestratorTemplateLibraryPanel } from "./panels/OrchestratorTemplateLibraryPanel";
 import { PaneTabs, type PaneTabDecoration } from "./panels/PaneTabs";
 import { OrchestratorTemplatesPanel } from "./panels/OrchestratorTemplatesPanel";
 import { SessionCanvasPanel } from "./panels/SessionCanvasPanel";
 import {
   TerminalPanel,
-  pruneTerminalPanelHistory,
 } from "./panels/TerminalPanel";
 import {
   SourcePanel,
@@ -270,173 +130,41 @@ import {
   type SourceSaveOptions,
 } from "./panels/SourcePanel";
 import {
-  buildSessionListSearchResultFromIndex,
   buildSessionSearchIndex,
   buildSessionSearchMatchesFromIndex,
-  type SessionListSearchResult,
 } from "./session-find";
 import type {
-  AppPreferences,
   ApprovalDecision,
-  ApprovalPolicy,
   AgentCommand,
-  AgentReadiness,
-  AgentType,
-  ClaudeApprovalMode,
-  ClaudeEffortLevel,
   CommandMessage,
-  CodexReasoningEffort,
   CodexState,
-  CursorMode,
-  DeltaEvent,
   DiffMessage,
-  ExhaustiveValueCoverage,
-  GeminiApprovalMode,
   JsonValue,
-  Message,
   McpElicitationAction,
-  PendingPrompt,
-  OrchestratorInstance,
   Project,
   RemoteConfig,
-  SandboxMode,
   Session,
-  SessionModelOption,
   SessionSettingsField,
   SessionSettingsValue,
   WorkspaceFilesChangedEvent,
 } from "./types";
 import {
-  activatePane,
-  closeWorkspaceTab,
-  CONTROL_SURFACE_KINDS,
-  DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
-  dockControlPanelAtWorkspaceEdge,
-  ensureControlPanelInWorkspaceState,
-  findNearestControlSurfacePaneId,
-  findNearestSessionPaneId,
-  findWorkspacePaneIdForSession,
-  getSplitRatio,
-  openCanvasInWorkspaceState,
-  openDiffPreviewInWorkspaceState,
-  openFilesystemInWorkspaceState,
-  openGitStatusInWorkspaceState,
-  openInstructionDebuggerInWorkspaceState,
-  openOrchestratorCanvasInWorkspaceState,
-  openOrchestratorListInWorkspaceState,
-  openProjectListInWorkspaceState,
-  openSessionInWorkspaceState,
-  openSessionListInWorkspaceState,
-  openSourceInWorkspaceState,
-  openTerminalInWorkspaceState,
-  placeSessionDropInWorkspaceState,
-  placeDraggedTab,
-  placeExternalTab,
-  reconcileWorkspaceState,
-  removeCanvasSessionCard,
-  rescopeControlSurfacePane,
-  setCanvasZoom,
-  setPaneSourcePath,
-  setPaneViewMode,
-  splitPane,
-  stripDiffPreviewDocumentContentFromWorkspaceState,
-  stripLoadingGitDiffPreviewTabsFromWorkspaceState,
-  updateGitDiffPreviewTabInWorkspaceState,
-  updateSplitRatio,
-  upsertCanvasSessionCard,
-  type PaneViewMode,
   type SessionPaneViewMode,
   type TabDropPlacement,
-  type WorkspaceNode,
   type WorkspacePane,
-  type WorkspaceState,
-  type WorkspaceTab,
 } from "./workspace";
 import {
-  createWorkspaceViewId,
-  deleteStoredWorkspaceLayout,
-  ensureWorkspaceViewId,
-  parseStoredWorkspaceLayout,
-  persistWorkspaceLayout,
-  type ControlPanelSide,
-  WORKSPACE_VIEW_QUERY_PARAM,
-} from "./workspace-storage";
-import { reconcileSessions } from "./session-reconcile";
-import {
-  attachSessionDragData,
   dataTransferHasSessionDragType,
-  readSessionDragData,
 } from "./session-drag";
-import {
-  DENSITY_STEP_PERCENT,
-  DEFAULT_DENSITY_PERCENT,
-  DEFAULT_EDITOR_FONT_SIZE_PX,
-  DEFAULT_FONT_SIZE_PX,
-  MARKDOWN_STYLES,
-  MARKDOWN_THEMES,
-  MAX_DENSITY_PERCENT,
-  MAX_EDITOR_FONT_SIZE_PX,
-  MAX_FONT_SIZE_PX,
-  MIN_DENSITY_PERCENT,
-  MIN_EDITOR_FONT_SIZE_PX,
-  MIN_FONT_SIZE_PX,
-  STYLES,
-  THEMES,
-  applyDensityPreference,
-  applyDiagramLookPreference,
-  applyDiagramPalettePreference,
-  applyDiagramThemeOverridePreference,
-  applyFontSizePreference,
-  applyMarkdownStylePreference,
-  applyMarkdownThemePreference,
-  applyStylePreference,
-  applyThemePreference,
-  clampDensityPreference,
-  clampEditorFontSizePreference,
-  clampFontSizePreference,
-  persistDensityPreference,
-  persistDiagramLookPreference,
-  persistDiagramPalettePreference,
-  persistDiagramThemeOverridePreference,
-  persistEditorFontSizePreference,
-  persistFontSizePreference,
-  persistMarkdownStylePreference,
-  persistMarkdownThemePreference,
-  persistStylePreference,
-  persistThemePreference,
-  type DiagramLook,
-  type DiagramPalette,
-  type DiagramThemeOverrideMode,
-  type MarkdownStyleId,
-  type MarkdownThemeId,
-  type StyleId,
-  type ThemeId,
-} from "./themes";
 import type { MonacoAppearance } from "./monaco";
 import {
-  countSessionsByFilter,
-  filterSessionsByListFilter,
-  type SessionListFilter,
-} from "./session-list-filter";
-import { startActivePromptPoll } from "./active-prompt-poll";
-import {
-  decideDeltaRevisionAction,
-  shouldAdoptSnapshotRevision,
-} from "./state-revision";
-import {
-  TAB_DRAG_CHANNEL_NAME,
   TAB_DRAG_MIME_TYPE,
-  attachWorkspaceTabDragData,
-  createWorkspaceTabDrag,
-  isWorkspaceTabDragChannelMessage,
   readWorkspaceTabDragData,
   type WorkspaceTabDrag,
-  type WorkspaceTabDragChannelMessage,
 } from "./tab-drag";
 import {
   canNestedScrollableConsumeWheel,
   clamp,
-  buildGitDiffPreviewRequestKey,
   buildMessageListSignature,
   buildSessionConversationSignature,
   collectCandidateSourcePaths,
@@ -446,33 +174,15 @@ import {
   findLastUserPrompt,
   formatByteSize,
   getErrorMessage,
-  isHexColorDark,
   isPointerWithinPaneTopArea,
   labelForPaneViewMode,
-  labelForStatus,
-  MAX_PASTED_IMAGE_BYTES,
-  messageChangeMarker,
   normalizeWheelDelta,
-  pendingGitDiffPreviewChangeType,
-  pendingGitDiffPreviewSummary,
   primaryModifierLabel,
-  pruneSessionAttachmentValues,
-  pruneSessionCommandValues,
   pruneSessionFlags,
-  pruneSessionFlagsWithInvalidation,
-  pruneSessionValues,
-  readNavigatorOnline,
-  releaseDraftAttachments,
-  removeQueuedPromptFromSessions,
   resolvePaneDropPlacementFromPointer,
-  setSessionFlag,
-  SUPPORTED_PASTED_IMAGE_TYPES,
   type DraftImageAttachment,
-  type SessionAgentCommandMap,
-  type SessionFlagMap,
 } from "./app-utils";
 import {
-  mergeWorkspaceFilesChangedEvents,
   workspaceFilesChangedEventChangeForPath,
 } from "./workspace-file-events";
 
