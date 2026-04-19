@@ -182,15 +182,45 @@ This is a pre-existing gap — the inline tab-bar JSX the component replaced had
 
 This is not a runtime behavior bug, but it weakens the new preferences extraction boundary. Future message-card refactors or lazy-loading work would still have to preserve a general-purpose dialog icon export from the message-rendering module.
 
+`ui/src/message-card-icons.tsx` now exists and owns all six message-card SVG icons including `DialogCloseIcon`; `message-cards.tsx` re-exports it only for backwards compatibility. The clean fix is now a one-line import rewrite.
+
 **Current behavior:**
 - `SettingsDialogShell` reaches into `message-cards` for a generic close icon.
 - The preferences UI now depends on a module whose primary ownership is message rendering.
-- There is no small shared UI/icon module for reusable dialog icons.
+- `message-card-icons.tsx` already exists and is the correct source.
 
 **Proposal:**
-- Move `DialogCloseIcon` into a small shared UI/icon module.
+- Change the `SettingsDialogShell.tsx:29` import to `import { DialogCloseIcon } from "../message-card-icons";` and drop the re-export line from `message-cards.tsx`.
 - Import that shared icon from both `message-cards` and `SettingsDialogShell`.
 - Keep message-card ownership focused on message rendering rather than generic preferences chrome.
+
+## Extracted component files carry dead re-export blocks from App.tsx
+
+**Severity:** Low - `ui/src/SessionPaneView.tsx:62-71, 100-106` and `ui/src/WorkspaceNodeView.tsx:40-50, 61-67` each carry `export { ... } from "..."` blocks that were copied verbatim from App.tsx's import/export surface during the SessionPaneView and WorkspaceNodeView extractions. No test or consumer imports these symbols through the new modules — the tests and production callers go through `./App` (which already re-exports the same names from their true-source modules).
+
+`WorkspaceNodeView.tsx`'s blocks are especially egregious: the re-exported symbols (`describeCodexModelAdjustmentNotice`, `MessageCard`, `ThemedCombobox`, the four `*PromptSettingsCard`s) aren't even referenced inside the component body itself (grep confirms zero usage matches outside the import/export header). They're pure module-surface clones with no consumer.
+
+**Current behavior:**
+- `SessionPaneView.tsx` re-exports 12 symbols from 4 source modules. None are imported via `./SessionPaneView` anywhere.
+- `WorkspaceNodeView.tsx` re-exports the same 12 symbols. None are imported via `./WorkspaceNodeView`, and the component body doesn't reference them either.
+- The `./App` re-exports remain the canonical test-facing surface; these new surfaces just shadow them.
+
+**Proposal:**
+- Delete the `export { ... } from "..."` blocks at the top of `SessionPaneView.tsx` (lines 62-71 and 100-106) and `WorkspaceNodeView.tsx` (lines 40-50 and 61-67). Keep the `import` forms for the symbols each file actually uses internally.
+- Verify `tsc --noEmit` stays clean and no test imports break.
+
+## `ConnectionRetryCard` null `attemptLabel` fallback untested
+
+**Severity:** Low - the two new Vitest cases in `ui/src/MessageCard.test.tsx` pin the `"attempt N of M"` happy path for both live and resolved states, but the fallback path where `parseConnectionRetryNotice` returns `attemptLabel: null` (e.g., a backend that omits the `Retrying automatically (attempt N of M)` suffix) has no assertion.
+
+The fallback path controls two visible behaviors: the attempt chip disappears (`notice.attemptLabel ? chip : null`) and the resolved detail copy switches to a generic fallback (`notice.attemptLabel ? "...after <lowercased-label>." : "Connection dropped briefly; the turn continued after an automatic retry."`). A regression that swapped the fallback copy or rendered an empty chip would pass both existing tests.
+
+**Current behavior:**
+- Tests cover the attempt-label branches of the live and resolved renders.
+- The null-`attemptLabel` path for both renders is unexercised.
+
+**Proposal:**
+- Add a third case in `MessageCard.test.tsx`: render with `text: "Connection dropped before the response finished."` (no attempt suffix) on both `isLatestAssistantMessage={true}` and `={false}` branches, assert `screen.queryByText(/Attempt \d+ of \d+/)` is null, and pin the fallback detail copy verbatim.
 
 ## Settings dialog backdrop dismisses on any mouse button
 
@@ -828,6 +858,50 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   instead of the generic copy — is not confirmed tested. Add a
   small unit test covering all three branches (`restartRequired`
   true, `restartRequired` false, non-backend-unavailable error).
+- [ ] P2: Add focused coverage for `markdown-links.ts`:
+  the 20+ helpers moved out of `message-cards.tsx` have subtle
+  regex/path edges (UNC root restoration, loopback `[::1]`,
+  `/C:/` drive-letter-after-slash, `#L42C3` fragment parsing,
+  trailing-dot guard for `foo.tex.#L63`). Indirect coverage via
+  `MarkdownContent.test.tsx` is thin. Add `markdown-links.test.ts`
+  covering: UNC restoration, loopback `http://localhost/Users/...`,
+  `file:///C:/...`, `/C:/` drive-letter, `#L42C3` + `#L42`,
+  line-suffix stripping `path:42:5`, trailing-dot guard, and
+  `isExternalMarkdownHref` for `//cdn.example/x.md`.
+- [ ] P2: Add focused coverage for `deferred-render.ts`:
+  the seven pure helpers moved out of `message-cards.tsx` include
+  `buildMarkdownPreviewText` which strips code fences / link
+  syntax / headings / blockquotes / list bullets / backticks via
+  regex and produces user-visible preview text. Add
+  `deferred-render.test.ts` covering: `buildMarkdownPreviewText`
+  (fenced code replaced, links flattened, headings stripped),
+  `buildDeferredPreviewText` (line + char limit + ellipsis
+  handling), `measureTextBlock` (empty string counts as one
+  line), and the min-height clamps in `estimateCodeBlockHeight` /
+  `estimateMarkdownBlockHeight`.
+- [ ] P2: Add focused coverage for `mermaid-render.ts`:
+  the module-level `mermaidRenderQueue` Promise singleton
+  serializes Mermaid `initialize`/`render`/reset cycles so
+  concurrent renders cannot leak config through Mermaid's
+  module-level singleton. This invariant is invisible to
+  integration tests (they render one diagram at a time). Add
+  `mermaid-render.test.ts` with at minimum a queue-serialization
+  test (spy on a fake `mermaid.initialize`/`render`, fire two
+  concurrent `renderTermalMermaidDiagram` calls, assert
+  initialize-order matches render-completion order and the base
+  config is restored between renders), plus pure-helper coverage
+  for `clampMermaidDiagramExtent`, `readMermaidSvgDimensions`
+  (well-formed / malformed / negative viewBox),
+  `getMermaidDiagramFrameStyle` clamp caps, and
+  `buildTermalMermaidConfig` palette-vs-match branches.
+- [ ] P2: Second import-prune pass over `SessionPaneView.tsx`:
+  the first pass (`7e84fe1`) pruned the bulk of unused imports
+  from App.tsx / SessionPaneView / WorkspaceNodeView, but
+  SessionPaneView still carries three unused locals
+  (`pendingPrompts`, `composerInputDisabled`, `composerSendDisabled`
+  at 760/851/852) plus a few unused imports. The extraction's
+  provenance header explicitly notes a follow-up is expected;
+  schedule the second pass once the component stops moving.
 - [ ] P2: Add normal-size Mermaid iframe height reserve coverage:
   add a deterministic Mermaid SVG/viewBox case in
   `ui/src/MarkdownContent.test.tsx` proving the `+24` vertical slack is
