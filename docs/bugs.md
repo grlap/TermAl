@@ -89,21 +89,6 @@ Between `removeEventListener` and `addEventListener` there is a short window whe
 - Introduce `viewportVisibleRangeRef` next to `messagesRef` / `messageIndexByIdRef` (updated every render), and read `viewportVisibleRangeRef.current.startIndex` inside the handler instead of via closure.
 - Drop `viewportVisibleRange.startIndex` from the effect deps so it rebinds only on `isActive` / `hasOlderMessages` / `sessionId` transitions.
 
-## `AgentSessionPanel.tsx` is past the 2k-line TSX threshold and growing
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx` is now 2557 lines (+246 in the most recent scroll/flicker batch, up from ~2311 before). CLAUDE.md is explicit: "the project has a few very large files already and we are actively splitting them smaller, not larger." The `.claude/reviewers/architecture.md` TSX size threshold (>2000) applies here because this is not `App.tsx` / `main.rs` — the known-large exception does not cover it.
-
-A natural extraction boundary now exists. The inner `VirtualizedConversationMessageList` component (roughly lines 788-1520) owns six `useEffect`/`useLayoutEffect` hooks that braid scroll/anchor/measurement/pin/loading concerns via three refs (`shouldKeepBottomAfterLayoutRef`, `pendingLoadMoreAnchorRef`, `lastUserScrollInputTimeRef`). Lifting it into a sibling file plus a `useConversationScrollAnchor` hook would make the pin-vs-anchor interaction legible on its own and bring the parent back under the size threshold.
-
-**Current behavior:**
-- Single `AgentSessionPanel.tsx` owns the session pane shell, conversation rendering, virtualized list, measurement state, scroll anchor state, user-scroll cooldown, and composer — 2557 lines.
-- Every new scroll/measurement fix lands in the same file, compounding complexity.
-
-**Proposal:**
-- Extract `VirtualizedConversationMessageList` (plus `MeasuredMessageCard`) to `ui/src/panels/VirtualizedConversationMessageList.tsx`.
-- Extract the scroll-pin / anchor / cooldown machinery into a `useConversationScrollAnchor` hook in the same file or a dedicated module.
-- Keep the code-move pure per CLAUDE.md (no behaviour changes, provenance header on each new file).
-
 ## Native message-stack wheel handling lacks regression coverage
 
 **Severity:** Medium - `ui/src/SessionPaneView.tsx` moved message-stack wheel handling from React's `onWheel` prop to a native `addEventListener("wheel", ..., { passive: false })` registration, but there is no focused test pinning the non-passive listener or the cancelable wheel behavior.
