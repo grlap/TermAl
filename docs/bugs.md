@@ -39,6 +39,24 @@ with no "(attempt N of M)" suffix on both `isLatestAssistantMessage`
 branches, asserts the attempt chip is absent on each, and pins
 the generic past-tense fallback copy verbatim.
 
+## `markdown-diff-edit-pipeline` paste sanitizer has no direct unit tests
+
+**Severity:** Medium - `ui/src/panels/markdown-diff-edit-pipeline.ts::isSafePastedMarkdownHref` (line 216) and `ui/src/panels/markdown-diff-edit-pipeline.ts::sanitizePastedMarkdownFragment` (line 161) are the security boundary for paste-into-Markdown. Neither has any direct Vitest coverage, and no integration test in `DiffPanel.test.tsx` exercises these two functions end-to-end.
+
+`isSafePastedMarkdownHref` has four branches (empty-string rejection, drive-letter allowlist, no-colon relative-path allowance, and the `http` / `https` / `mailto` protocol allowlist) plus a control-character stripper (`/[\u0000-\u001F\u007F\s]+/g`) that runs before protocol extraction. A regression that flipped `protocol === "http"` to include `"javascript"`, or weakened the control-char filter (so `java\u0000script:` slipped past the protocol check), would ship silently — nothing else in the repo references these symbols.
+
+`sanitizePastedMarkdownFragment` has three guards (HTML namespace, 23-element drop set, 32-element allow set) and an attribute-stripping pass that keeps only `href` on anchors (gated by `isSafePastedMarkdownHref`) and `class` on code (gated by `normalizePastedMarkdownCodeClass`). A set membership regression (e.g., accidentally removing `button` from the drop set, or adding `svg` to the allow set) would ship silently.
+
+**Current behavior:**
+- Both helpers exist as extracted pure functions in `./markdown-diff-edit-pipeline`.
+- Neither has a `markdown-diff-edit-pipeline.test.ts`.
+- `DiffPanel.test.tsx` does not exercise a paste flow that would stress the sanitizer.
+
+**Proposal:**
+- Add `ui/src/panels/markdown-diff-edit-pipeline.test.ts` with table-driven cases for `isSafePastedMarkdownHref`: `javascript:`, `data:`, `vbscript:`, `JAVASCRIPT:`, `java\u0000script:`, `  javascript:` (leading whitespace), `C:\foo`, `c:/foo`, `http://a`, `https://a`, `mailto:a@b`, `./relative`, `#anchor`, empty string, whitespace-only.
+- Pair with sanitizer tests that take a `template` fragment containing `<a onclick="x">`, `<iframe>`, `<svg>`, `<script>`, `<button>`, `<code class="language-py bad">`, and assert the post-sanitize DOM shape: removed elements gone, unwanted attributes stripped, `language-py` kept on `<code>`.
+- Include a regression guard on the `<template>`-content sanitize-before-insert ordering (verify no `<script>` fetch fires before `sanitizePastedMarkdownFragment` runs).
+
 ## Missing error boundary around portal `render()` in MonacoCodeEditor
 
 **Severity:** Medium - `ui/src/MonacoCodeEditor.tsx:651-657` invokes `host.zone.render()` inline with no error boundary. The `render` callback in `SourcePanel` returns `<MarkdownContent>`, which in turn runs Mermaid/KaTeX detection. If anything inside that subtree throws during render (a malformed fence, a KaTeX parse failure that slips past `throwOnError: false`, a Mermaid render-time exception), the entire `MonacoCodeEditor` component errors and React unmounts the Monaco editor along with the inline zones — losing whatever the user had in their buffer.
@@ -148,16 +166,16 @@ That is too coarse for the transcript and lifecycle model. If a session leaves t
 
 ## Mermaid demo contains stray placeholder paragraphs
 
-**Severity:** Low - `docs/mermaid-demo.md` now has two standalone `a` paragraphs after the Mermaid fenced code block.
+**Severity:** Low - `docs/mermaid-demo.md` now has stray placeholder lines after the Mermaid fenced code block.
 
 This looks like accidental placeholder text and makes the demo document noisier for Markdown/Mermaid validation.
 
 **Current behavior:**
-- The Mermaid demo fence is followed by `a`, a blank line, and another `a`.
-- The extra paragraphs are outside the code fence and render as visible Markdown content.
+- The Mermaid demo fence is followed by `a`, a blank line, `2`, and `a2`.
+- The extra lines are outside the code fence and render as visible Markdown content.
 
 **Proposal:**
-- Remove the two stray `a` paragraphs unless they are intentional fixtures.
+- Remove the stray placeholder lines unless they are intentional fixtures.
 
 ## Resolved retry notice text diverges from session find indexing
 
@@ -845,6 +863,38 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   instead of the generic copy — is not confirmed tested. Add a
   small unit test covering all three branches (`restartRequired`
   true, `restartRequired` false, non-backend-unavailable error).
+- [ ] P2: Add focused coverage for
+  `markdown-diff-segment-stability.ts`:
+  the greedy matcher + FNV-1a hash are untested. Distance
+  tiebreaks, context-score weights (8 for immediate neighbours, 2
+  for second-degree), and collision resolution via
+  `getAvailableMarkdownDiffSegmentId` are exactly the invariants
+  that regress silently under refactoring. Construct two near-
+  identical candidate ranges with deliberately colliding FNV
+  hashes and verify tiebreak order by distance / context score,
+  plus a collision test that drives the `:stable-N` suffix path.
+- [ ] P2: Add focused coverage for `markdown-commit-ranges.ts`:
+  4 of 5 exports are untested (`resolveRenderedMarkdownCommitRange`,
+  `markdownRangeMatches`, `mapMarkdownRangeAcrossContentChange`,
+  `findClosestMarkdownRange`). The existing
+  `hasOverlappingMarkdownCommitRanges` tests in
+  `DiffPanel.test.tsx:4798` already pull the module in, so sibling
+  tests can sit in the same `describe` block. Cases worth pinning:
+  4-strategy resolver happy paths + `null` return when nothing
+  matches; bounds-check rejection in `markdownRangeMatches`;
+  prefix / suffix diff shift cases + straddling-change `null`
+  return in `mapMarkdownRangeAcrossContentChange`; and nearest-
+  neighbour tiebreak in `findClosestMarkdownRange`.
+- [ ] P2: Add focused coverage for `session-slash-palette.ts`:
+  25+ exports with no dedicated tests. Heavy integration coverage
+  already exists (~14 slash-palette flows in
+  `AgentSessionPanel.test.tsx:691-1489`), so this is the lowest
+  urgency of the test-coverage tasks, but a pure-function unit
+  test of `buildSlashPaletteState` per (agent, commandId) tuple
+  would localise failures better than debugging through React
+  rendering. Add `panels/session-slash-palette.test.ts` feeding
+  canned tuples through `buildSlashPaletteState` and snapshotting
+  the item list.
 - [ ] P2: Add focused coverage for `markdown-links.ts`:
   the 20+ helpers moved out of `message-cards.tsx` have subtle
   regex/path edges (UNC root restoration, loopback `[::1]`,
