@@ -6008,6 +6008,16 @@ export default function App() {
     const currentVersion =
       (gitDiffPreviewRefreshVersionsRef.current.get(requestKey) ?? 0) + 1;
     gitDiffPreviewRefreshVersionsRef.current.set(requestKey, currentVersion);
+    // Tell the restore-from-persisted-layout useEffect that this
+    // requestKey is being handled manually. Without this, the moment
+    // the manual fetch resolves with `documentContent === null` and
+    // `isLoading === false`, the restore useEffect sees a freshly
+    // created tab that looks like one restored from persisted
+    // layout without documentContent and fires a duplicate
+    // fetchGitDiff — which races the in-flight manual fetch and, in
+    // tests, overflows the mockImplementationOnce queue into a
+    // backend-unavailable error.
+    attemptedGitDiffDocumentContentRestoreKeysRef.current.add(requestKey);
     const gitSectionId = options?.sectionId ?? request.sectionId;
     const pendingTab = {
       changeType: pendingGitDiffPreviewChangeType(request.statusCode),
