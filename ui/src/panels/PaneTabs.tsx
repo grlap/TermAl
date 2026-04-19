@@ -31,6 +31,18 @@ import {
   formatVisibleTabLabel,
 } from "./pane-tab-labels";
 import {
+  buildFileTabContextMenu,
+  buildGitTabContextMenu,
+  canPushGitTabContextMenu,
+  canSyncGitTabContextMenu,
+  formatGitTabBranchMenuLabel,
+  formatGitTabContextMenuError,
+  formatGitTabUpstreamMenuLabel,
+  formatGitTabWorktreeMenuLabel,
+  type GitTabContextMenuAction,
+  type GitTabContextMenuState,
+} from "./pane-tab-context-menus";
+import {
   createBuiltinLocalRemote,
   isLocalRemoteId,
   remoteConnectionLabel,
@@ -64,21 +76,6 @@ type FileTabContextMenuState = {
   tabId: string;
 };
 
-type GitTabContextMenuAction = "push" | "sync";
-
-type GitTabContextMenuState = {
-  clientX: number;
-  clientY: number;
-  isLoadingStatus: boolean;
-  pendingAction: GitTabContextMenuAction | null;
-  projectId: string | null;
-  sessionId: string | null;
-  status: GitStatusResponse | null;
-  statusError: string | null;
-  statusMessage: string | null;
-  tabId: string;
-  workdir: string;
-};
 
 export type PaneTabDecoration = {
   label: string;
@@ -1463,206 +1460,6 @@ function formatRateLimitResetLabel(resetsAt: number | null, label: string) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
-}
-
-
-function formatGitTabContextMenuError(error: unknown) {
-  if (error instanceof Error) {
-    const message = error.message.trim();
-    if (message) {
-      return message;
-    }
-  }
-
-  return "Git action failed.";
-}
-
-function formatGitTabBranchMenuLabel(
-  status: GitStatusResponse | null,
-  isLoadingStatus: boolean,
-) {
-  if (isLoadingStatus && !status) {
-    return "Branch: Loading...";
-  }
-
-  if (!status) {
-    return "Branch: Unavailable";
-  }
-
-  const branch = status.branch?.trim();
-  return `Branch: ${branch || "Detached HEAD"}`;
-}
-
-function formatGitTabUpstreamMenuLabel(
-  status: GitStatusResponse | null,
-  isLoadingStatus: boolean,
-) {
-  if (isLoadingStatus && !status) {
-    return "Upstream: Loading...";
-  }
-
-  if (!status) {
-    return "Upstream: Unavailable";
-  }
-
-  const upstream = status.upstream?.trim();
-  if (!upstream) {
-    return "Upstream: Not tracking";
-  }
-
-  const position: string[] = [];
-  if (status.ahead > 0) {
-    position.push(`ahead ${status.ahead}`);
-  }
-  if (status.behind > 0) {
-    position.push(`behind ${status.behind}`);
-  }
-
-  const suffix = position.length > 0 ? ` (${position.join(", ")})` : " (up to date)";
-  return `Upstream: ${upstream}${suffix}`;
-}
-
-function formatGitTabWorktreeMenuLabel(
-  status: GitStatusResponse | null,
-  isLoadingStatus: boolean,
-) {
-  if (isLoadingStatus && !status) {
-    return "Status: Loading...";
-  }
-
-  if (!status) {
-    return "Status: Unavailable";
-  }
-
-  if (status.isClean) {
-    return "Status: Clean";
-  }
-
-  const count = status.files.length;
-  return `Status: ${count} changed ${count === 1 ? "file" : "files"}`;
-}
-
-function canPushGitTabContextMenu(menu: GitTabContextMenuState | null) {
-  return Boolean(
-    menu &&
-      !menu.isLoadingStatus &&
-      !menu.pendingAction &&
-      menu.status?.branch?.trim(),
-  );
-}
-
-function canSyncGitTabContextMenu(menu: GitTabContextMenuState | null) {
-  return Boolean(
-    menu &&
-      !menu.isLoadingStatus &&
-      !menu.pendingAction &&
-      menu.status?.upstream?.trim(),
-  );
-}
-
-function buildGitTabContextMenu(
-  tab: WorkspaceTab,
-  sessionLookup: ReadonlyMap<string, Session>,
-  projectLookup: ReadonlyMap<string, Project>,
-) {
-  if (tab.kind !== "gitStatus") {
-    return null;
-  }
-
-  const workdir = tab.workdir?.trim() || resolveGitTabWorkspaceRoot(tab, sessionLookup, projectLookup);
-  if (!workdir) {
-    return null;
-  }
-
-  const originSession =
-    tab.originSessionId ? (sessionLookup.get(tab.originSessionId) ?? null) : null;
-  const projectId = tab.originProjectId ?? originSession?.projectId ?? null;
-  return {
-    projectId,
-    sessionId: tab.originSessionId ?? null,
-    workdir,
-  };
-}
-
-function resolveGitTabWorkspaceRoot(
-  tab: WorkspaceGitStatusTab,
-  sessionLookup: ReadonlyMap<string, Session>,
-  projectLookup: ReadonlyMap<string, Project>,
-) {
-  const originSession =
-    tab.originSessionId ? (sessionLookup.get(tab.originSessionId) ?? null) : null;
-  if (originSession?.workdir) {
-    return originSession.workdir;
-  }
-
-  const originProjectId = tab.originProjectId ?? originSession?.projectId ?? null;
-  return originProjectId ? (projectLookup.get(originProjectId)?.rootPath ?? null) : null;
-}
-
-function buildFileTabContextMenu(
-  tab: WorkspaceTab,
-  sessionLookup: ReadonlyMap<string, Session>,
-  projectLookup: ReadonlyMap<string, Project>,
-) {
-  const path = getFileTabPath(tab);
-  if (!path) {
-    return null;
-  }
-
-  const workspaceRoot = resolveFileTabWorkspaceRoot(tab, sessionLookup, projectLookup);
-  return {
-    path,
-    relativePath: resolveRelativeTabPath(path, workspaceRoot),
-  };
-}
-
-function getFileTabPath(tab: WorkspaceTab) {
-  if (tab.kind === "source") {
-    return tab.path?.trim() || null;
-  }
-
-  if (tab.kind === "diffPreview") {
-    return tab.filePath?.trim() || null;
-  }
-
-  return null;
-}
-
-function resolveFileTabWorkspaceRoot(
-  tab: WorkspaceTab,
-  sessionLookup: ReadonlyMap<string, Session>,
-  projectLookup: ReadonlyMap<string, Project>,
-) {
-  if (tab.kind !== "source" && tab.kind !== "diffPreview") {
-    return null;
-  }
-
-  const originSession =
-    tab.originSessionId ? (sessionLookup.get(tab.originSessionId) ?? null) : null;
-  if (originSession?.workdir) {
-    return originSession.workdir;
-  }
-
-  const originProjectId = tab.originProjectId ?? originSession?.projectId ?? null;
-  return originProjectId ? (projectLookup.get(originProjectId)?.rootPath ?? null) : null;
-}
-
-function resolveRelativeTabPath(path: string, workspaceRoot: string | null) {
-  const trimmedPath = path.trim();
-  if (!trimmedPath) {
-    return null;
-  }
-
-  if (!looksLikeAbsoluteDisplayPath(trimmedPath)) {
-    return normalizeDisplayPath(trimmedPath);
-  }
-
-  if (!workspaceRoot) {
-    return null;
-  }
-
-  const relativePath = relativizePathToWorkspace(trimmedPath, workspaceRoot);
-  return relativePath === trimmedPath ? null : relativePath;
 }
 
 function TabKindIcon({ kind }: { kind: string }) {
