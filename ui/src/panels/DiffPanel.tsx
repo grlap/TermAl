@@ -73,6 +73,7 @@ import {
   getMarkdownDiffSegmentLineNumber,
   type DiffViewMode,
 } from "./diff-panel-helpers";
+import { RawPatchView } from "./raw-patch-view";
 import { StructuredDiffView } from "./StructuredDiffView";
 import {
   findClosestMarkdownRange,
@@ -1779,66 +1780,6 @@ function renderEditFileView({
       </Suspense>
     </div>
   );
-}
-
-function RawPatchView({
-  diff,
-  scrollRef,
-}: {
-  diff: string;
-  scrollRef?: { current: HTMLDivElement | null };
-}) {
-  const lines = diff.split("\n");
-
-  return (
-    <div className="diff-editor-shell diff-preview-raw-shell" ref={scrollRef}>
-      <div className="diff-preview-raw" role="table" aria-label="Raw patch preview">
-        {lines.map((line, index) => (
-          <div
-            key={`${index}:${line}`}
-            className={`diff-preview-raw-line ${rawDiffLineClassName(line)}`}
-            role="row"
-          >
-            <span className="diff-preview-raw-line-number" aria-hidden="true">
-              {index + 1}
-            </span>
-            <span className="diff-preview-raw-line-content" role="cell">
-              {line || " "}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function rawDiffLineClassName(line: string) {
-  if (line.startsWith("@@")) {
-    return "diff-preview-raw-line-hunk";
-  }
-
-  if (
-    line.startsWith("diff --git ") ||
-    line.startsWith("index ") ||
-    line.startsWith("--- ") ||
-    line.startsWith("+++ ")
-  ) {
-    return "diff-preview-raw-line-meta";
-  }
-
-  if (line === "\\ No newline at end of file") {
-    return "diff-preview-raw-line-note";
-  }
-
-  if (line.startsWith("+") && !line.startsWith("+++ ")) {
-    return "diff-preview-raw-line-added";
-  }
-
-  if (line.startsWith("-") && !line.startsWith("--- ")) {
-    return "diff-preview-raw-line-removed";
-  }
-
-  return "diff-preview-raw-line-context";
 }
 
 function buildMarkdownDiffPreview(
