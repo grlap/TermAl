@@ -60,22 +60,6 @@ The current staged cooldown tracks recent wheel, touch, and keyboard scroll inpu
 - Add a regression test that dispatches a wheel-up while still within the near-bottom band, triggers a streaming height measurement, and asserts the viewport is not re-pinned during the cooldown.
 - Either way, the fix is detect-user-scroll, not threshold-tune.
 
-## `pendingLoadMoreAnchorRef` can strand across a no-op `setRenderWindowSize`
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx` auto-load-older-messages scroll handler captures `pendingLoadMoreAnchorRef.current = { anchorMessageId, anchorOffsetInViewport }` immediately before calling `setRenderWindowSize((prev) => Math.min(prev + RENDER_WINDOW_LOAD_MORE, messages.length))`. If `prev` is already `messages.length` (all older messages already loaded, or the "load more" guard `hasOlderMessages` is racey with the ref set), the functional updater returns `prev` unchanged; React bails out with no commit, so the consuming `useLayoutEffect([renderWindowSize, scrollContainerRef])` never fires and the ref is left populated.
-
-Later, when `renderWindowSize` changes for an unrelated reason — the render-window auto-growth on new streaming messages at lines 898-905 is the obvious trigger — that useLayoutEffect wakes up, finds the stale anchor, and writes `scrollTop` based on a viewport offset captured during a scroll gesture that may have happened many deltas ago. The visible symptom is a surprise scroll jump after a streaming message arrives.
-
-**Current behavior:**
-- Scroll handler unconditionally writes `pendingLoadMoreAnchorRef.current` before `setRenderWindowSize`.
-- Only the "success" path in the consuming `useLayoutEffect` clears the ref; the `!node` / `newIndex === undefined` / `!anchor` early returns leave it populated.
-- A no-op `setRenderWindowSize` never schedules the commit that would drain the ref.
-
-**Proposal:**
-- Clear `pendingLoadMoreAnchorRef.current = null` in every early-return branch of the consuming `useLayoutEffect`.
-- Or gate the anchor write inside the scroll handler on whether growth will actually occur (read `renderWindowSize < messages.length` through a ref before the setState call).
-- Or both — belt-and-suspenders is cheap here because this path already captures per-scroll state.
-
 ## Load earlier messages button bypasses the prepend anchor
 
 **Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx` now captures `pendingLoadMoreAnchorRef` before the near-top auto-load path grows the render window, but the explicit "Load earlier messages" button still calls `setRenderWindowSize` directly.
@@ -164,20 +148,6 @@ The branch solves a real scroll-height jump, but it makes a reusable message ren
 **Proposal:**
 - Thread an explicit `preferImmediateHeavyRender` style prop or provide a small React context from the virtualized list.
 - Add a regression test that renders heavy content inside a virtualized wrapper and asserts the real content appears immediately without the deferred placeholder.
-
-## Generated Vitest cache is dirty in the working tree
-
-**Severity:** Note - `node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json` is modified in the unstaged diff and records local test-run state with many failed entries and durations.
-
-This generated cache is not source code or executable coverage. Keeping it in review diffs makes the real frontend changes harder to audit, and accidentally staging it would add machine-local churn.
-
-**Current behavior:**
-- The Vitest cache file is tracked by the current working tree diff.
-- The cache content changes with local test execution details.
-
-**Proposal:**
-- Do not stage or commit the generated cache change.
-- If this path is tracked unintentionally, remove it from version control and ignore Vite/Vitest cache output.
 
 ## `dialog-backdrop-dismiss` platform fallback is untested
 

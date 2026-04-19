@@ -826,6 +826,13 @@ export function VirtualizedConversationMessageList({
   const pendingLoadMoreAnchorRef = useRef<{
     anchorMessageId: string;
     anchorOffsetInViewport: number;
+    // Render-window size this anchor was captured for. The consuming
+    // `useLayoutEffect` only applies the anchor when the current
+    // `renderWindowSize` matches this value, so an auto-grow on a
+    // streaming-delta render (lines 898-905) that bumps
+    // `renderWindowSize` by a single message cannot silently pick up
+    // a stale anchor captured during an earlier scroll gesture.
+    expectedRenderWindowSize: number;
   } | null>(null);
   // Timestamp of the user's last direct-scroll input (wheel, touch-drag,
   // or keyboard PageUp/PageDown/arrow/Home/End). Measurement-driven
@@ -1290,6 +1297,17 @@ export function VirtualizedConversationMessageList({
         return;
       }
 
+      // Compute the next window size synchronously against
+      // `renderWindowSizeRef.current` so we can bail early if there is
+      // nothing to load (the functional-updater would otherwise return
+      // `prev` unchanged and React would skip the commit, stranding
+      // the anchor ref across unrelated future renders).
+      const currentSize = renderWindowSizeRef.current;
+      const nextSize = Math.min(currentSize + RENDER_WINDOW_LOAD_MORE, messages.length);
+      if (nextSize === currentSize) {
+        return;
+      }
+
       // Capture the first visible message as the anchor. `firstVisibleIndex`
       // comes from the current `viewportVisibleRange`, which is already
       // in sync with `node.scrollTop` via `syncViewport`. The index is
@@ -1304,10 +1322,9 @@ export function VirtualizedConversationMessageList({
       pendingLoadMoreAnchorRef.current = {
         anchorMessageId: anchorMessage.id,
         anchorOffsetInViewport: anchorTop - node.scrollTop,
+        expectedRenderWindowSize: nextSize,
       };
-      setRenderWindowSize((prev) =>
-        Math.min(prev + RENDER_WINDOW_LOAD_MORE, messages.length),
-      );
+      setRenderWindowSize(nextSize);
     }
 
     node.addEventListener("scroll", handleScroll, { passive: true });
@@ -1328,16 +1345,37 @@ export function VirtualizedConversationMessageList({
   messagesRef.current = windowedMessages;
   const messageIndexByIdRef = useRef(messageIndexById);
   messageIndexByIdRef.current = messageIndexById;
+  // Current render-window size, updated every render so the scroll-up
+  // auto-load handler can compute the exact next value synchronously.
+  // Storing the computed `nextSize` in `pendingLoadMoreAnchorRef` lets
+  // the consuming `useLayoutEffect` distinguish "our grow landed"
+  // from "some other code path bumped renderWindowSize" (e.g. the
+  // new-message auto-grow during streaming at lines 898-905).
+  const renderWindowSizeRef = useRef(renderWindowSize);
+  renderWindowSizeRef.current = renderWindowSize;
 
   // Apply the pending scroll anchor right after `setRenderWindowSize`
   // commits the grown layout — synchronously before paint. See the
   // scroll-up auto-load `useEffect` above for rationale.
+  //
+  // The anchor is only applied when the current `renderWindowSize`
+  // matches the `expectedRenderWindowSize` captured at scroll-handler
+  // time. If those disagree, this effect fired for a different reason
+  // (e.g. the new-message auto-grow at lines 898-905 bumped
+  // `renderWindowSize` by +1 during streaming) and the anchor is
+  // stale from an earlier scroll gesture. Clearing the ref in that
+  // case prevents a surprise scroll jump when a streaming delta
+  // arrives after the user scrolled up but didn't actually trigger
+  // the load-more path.
   useLayoutEffect(() => {
     const anchor = pendingLoadMoreAnchorRef.current;
     if (!anchor) {
       return;
     }
     pendingLoadMoreAnchorRef.current = null;
+    if (anchor.expectedRenderWindowSize !== renderWindowSize) {
+      return;
+    }
     const node = scrollContainerRef.current;
     if (!node) {
       return;
