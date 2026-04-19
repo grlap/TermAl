@@ -79,6 +79,7 @@ import {
   buildMarkdownDiffPreview,
 } from "./rendered-diff-view";
 import { StructuredDiffView } from "./StructuredDiffView";
+import { useStableEvent } from "./use-stable-event";
 import {
   findClosestMarkdownRange,
   hasOverlappingMarkdownCommitRanges,
@@ -112,19 +113,6 @@ import {
   MarkdownModeIcon,
   RawPatchIcon,
 } from "./DiffPanelIcons";
-
-function useStableEvent<TArgs extends unknown[], TResult>(
-  callback: (...args: TArgs) => TResult,
-) {
-  const callbackRef = useRef(callback);
-  // Some callers invoke the stable wrapper from flushSync-driven event paths,
-  // so publish the latest callback before layout-phase work can run.
-  useLayoutEffect(() => {
-    callbackRef.current = callback;
-  });
-
-  return useCallback((...args: TArgs) => callbackRef.current(...args), []);
-}
 
 const MonacoCodeEditor = lazy(() =>
   import("../MonacoCodeEditor").then(({ MonacoCodeEditor }) => ({ default: MonacoCodeEditor })),
