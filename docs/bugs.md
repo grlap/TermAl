@@ -69,6 +69,22 @@ consolidation into a shared helper is a deliberate future pass.
 The stray `a` / `2` / `a2` placeholder lines after the Mermaid
 fence in `docs/mermaid-demo.md` are also removed.
 
+## `LatestFileState.contentHash` type still optional despite normalised producers
+
+**Severity:** Note - `ui/src/panels/diff-latest-file-state.ts:43` still declares `contentHash?: string | null` (optional) even though both producers — `createInitialLatestFileState` (as of `9a51113`) and `toLatestFileState` — now unconditionally write `null`. No in-tree caller emits `undefined`.
+
+Cleared by three reviewers in the Tier 0 cycle as a type-drift risk: a future consumer could add a dead narrowing branch for `undefined`, or a future producer could legitimately reintroduce `undefined` on the grounds that the type allows it. Tightening to `contentHash: string | null` (non-optional) would make the module invariant load-bearing rather than advisory.
+
+**Current behavior:**
+- `LatestFileState.contentHash?: string | null` at `diff-latest-file-state.ts:43`.
+- Both creators write `null`; no caller reads `undefined`.
+- `SourcePanel.tsx:62` declares a parallel `contentHash?: string | null` that would need to tighten in the same pass.
+
+**Proposal:**
+- Make `contentHash: string | null` (non-optional) on `LatestFileState`.
+- Tighten `SourcePanel`'s parallel shape at the same time.
+- Verify `SessionPaneView.tsx:955`'s `options?.baseHash !== undefined` (a different surface) is unaffected.
+
 ## `markdown-diff-edit-pipeline` paste sanitizer has no direct unit tests
 
 **Severity:** Medium - `ui/src/panels/markdown-diff-edit-pipeline.ts::isSafePastedMarkdownHref` (line 216) and `ui/src/panels/markdown-diff-edit-pipeline.ts::sanitizePastedMarkdownFragment` (line 161) are the security boundary for paste-into-Markdown. Neither has any direct Vitest coverage, and no integration test in `DiffPanel.test.tsx` exercises these two functions end-to-end.
@@ -798,6 +814,15 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
+- [ ] P2: Add focused `diff-latest-file-state.ts` coverage:
+  the module has zero dedicated tests after the Tier 0 split. Add
+  a short `diff-latest-file-state.test.ts` covering both branches
+  of `createInitialLatestFileState` (null vs. non-null `filePath`,
+  asserting `contentHash === null` on each), `toLatestFileState`
+  against a full `FileResponse` plus one with `contentHash` /
+  `language` omitted (asserting the `?? null` defaulting), and
+  `isStaleFileSaveError` for case-insensitive substring matches
+  on both hit and miss patterns.
 - [ ] P2: Add focused control-panel-layout.ts coverage:
   add `ui/src/control-panel-layout.test.ts` covering the four currently
   untested exports. Cases worth pinning:
