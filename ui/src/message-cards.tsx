@@ -92,20 +92,26 @@ import type {
   UserInputRequestMessage,
 } from "./types";
 import {
-  DEFERRED_PREVIEW_CHARACTER_LIMIT,
-  DEFERRED_PREVIEW_LINE_LIMIT,
   formatByteSize,
   getErrorMessage,
   imageAttachmentSummaryLabel,
   mapCommandStatus,
-  MAX_DEFERRED_PLACEHOLDER_HEIGHT,
   parseConnectionRetryNotice,
   renderDecision,
   type ConnectionRetryNotice,
 } from "./app-utils";
+import {
+  DEFERRED_RENDER_ROOT_MARGIN_PX,
+  buildDeferredPreviewText,
+  buildMarkdownPreviewText,
+  estimateCodeBlockHeight,
+  estimateMarkdownBlockHeight,
+  isElementNearRenderViewport,
+  measureTextBlock,
+  resolveDeferredRenderRoot,
+} from "./deferred-render";
 import type { MonacoAppearance } from "./monaco";
 
-const DEFERRED_RENDER_ROOT_MARGIN_PX = 960;
 const HEAVY_CODE_CHARACTER_THRESHOLD = 1400;
 const HEAVY_CODE_LINE_THRESHOLD = 28;
 const HEAVY_MARKDOWN_CHARACTER_THRESHOLD = 1800;
@@ -3256,60 +3262,3 @@ export function areMarkdownLineMarkersEqual(
 }
 
 
-function resolveDeferredRenderRoot(node: Element) {
-  const root = node.closest(".message-stack");
-  return root instanceof Element ? root : null;
-}
-
-function isElementNearRenderViewport(
-  node: Element,
-  root: Element | null,
-  marginPx: number,
-) {
-  const nodeRect = node.getBoundingClientRect();
-  const rootRect = root?.getBoundingClientRect() ?? {
-    top: 0,
-    bottom: window.innerHeight,
-  };
-
-  return nodeRect.bottom >= rootRect.top - marginPx && nodeRect.top <= rootRect.bottom + marginPx;
-}
-
-function measureTextBlock(text: string) {
-  return {
-    lineCount: text.length === 0 ? 1 : text.split("\n").length,
-  };
-}
-
-function estimateCodeBlockHeight(lineCount: number) {
-  return Math.min(MAX_DEFERRED_PLACEHOLDER_HEIGHT, Math.max(120, lineCount * 20 + 48));
-}
-
-function estimateMarkdownBlockHeight(lineCount: number) {
-  return Math.min(MAX_DEFERRED_PLACEHOLDER_HEIGHT, Math.max(140, lineCount * 28 + 56));
-}
-
-function buildDeferredPreviewText(text: string) {
-  const preview = text
-    .split("\n")
-    .slice(0, DEFERRED_PREVIEW_LINE_LIMIT)
-    .join("\n")
-    .slice(0, DEFERRED_PREVIEW_CHARACTER_LIMIT)
-    .trimEnd();
-
-  return preview.length < text.length ? `${preview}\n\u2026` : preview;
-}
-
-function buildMarkdownPreviewText(markdown: string) {
-  const preview = markdown
-    .replace(/```[\s\S]*?```/g, "[code block]")
-    .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/^>\s?/gm, "")
-    .replace(/^[*-]\s+/gm, "")
-    .replace(/`/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-
-  return buildDeferredPreviewText(preview);
-}

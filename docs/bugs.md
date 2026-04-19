@@ -115,6 +115,22 @@ Fixed in this review cycle: the diagram now shows the correct broad-sync flow (C
 - `countMathExpressions("\`\`\`\n$$\nnot math\n$$\n\`\`\`")` returns 0.
 - `countMathExpressions("Block: $$x=1$$ and $$y=2$$ both.")` returns 2.
 
+## Retry notice liveness ignores session lifecycle and retry sequencing
+
+**Severity:** Medium - `ui/src/SessionPaneView.tsx:900-913` derives connection-retry notice liveness only from whether the message is the latest assistant-authored message.
+
+That is too coarse for the transcript and lifecycle model. If a session leaves the active turn without later assistant output, the retry notice still renders as live with a spinner and `aria-live="polite"`. If one retry notice is followed by another retry notice, the older attempt renders as "Connection recovered" while the newer attempt still renders as "Reconnecting", which presents contradictory connection state.
+
+**Current behavior:**
+- The latest assistant-authored message is treated as the only live retry notice.
+- Session status is not considered when deciding whether a retry notice is still live.
+- Later retry notices are treated the same as later non-retry assistant output, so older retry attempts look resolved while the retry is still in progress.
+
+**Proposal:**
+- Derive retry display state from both session lifecycle and subsequent assistant message type.
+- Keep the latest retry notice live only while the owning session is active or otherwise busy.
+- Treat older retry attempts as superseded while a later retry notice is still the newest assistant output, and mark retry notices resolved only after later non-retry assistant output exists.
+
 ## Mermaid demo contains stray placeholder paragraphs
 
 **Severity:** Low - `docs/mermaid-demo.md` now has two standalone `a` paragraphs after the Mermaid fenced code block.
@@ -127,6 +143,21 @@ This looks like accidental placeholder text and makes the demo document noisier 
 
 **Proposal:**
 - Remove the two stray `a` paragraphs unless they are intentional fixtures.
+
+## Resolved retry notice text diverges from session find indexing
+
+**Severity:** Low - `ui/src/message-cards.tsx:397` renders synthesized resolved-copy for connection retry notices while session find still indexes the stored `message.text`.
+
+Searching for stored retry notice text such as "response finished" or "Retrying automatically" can navigate to the resolved retry card without showing matching highlighted text in the card. That makes find look broken even though the match target is technically correct.
+
+**Current behavior:**
+- Session find indexes the persisted retry notice text.
+- The resolved retry card replaces that detail with synthesized past-tense copy.
+- Search can land on a resolved retry notice that does not visibly contain the searched words.
+
+**Proposal:**
+- Keep rendered and searchable text aligned by including the original retry detail in the resolved card.
+- Or update the session-find index to use the same derived display text and add coverage for resolved retry notices.
 
 ## Settings tab bar missing WAI-ARIA tablist keyboard pattern
 
@@ -741,6 +772,14 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   like `expect(screen.queryByText("message-5")).toBeNull()` so a
   regression where the merged range falls back to `{0, messages.length}`
   fails loudly.
+- [ ] P2: Add `SessionPaneView` retry-notice state coverage:
+  exercise the real session rendering path, not just direct
+  `MessageCard` props. Use rerendered session messages for retry notice
+  -> user message -> later retry notice -> later non-retry assistant output,
+  and assert the notice remains live only when appropriate, superseded retry
+  attempts do not claim recovery, resolved notices drop the spinner and use
+  `aria-live="off"`, and terminal session states do not leave a retry notice
+  spinning forever.
 - [ ] P2: Add focused coverage for `control-surface-state.ts`:
   six of eight exports currently have no targeted tests. Add a
   co-located `control-surface-state.test.ts` covering:
