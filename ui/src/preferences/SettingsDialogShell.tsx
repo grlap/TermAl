@@ -26,6 +26,7 @@
 // same element ids, same copy.
 
 import type { ReactNode } from "react";
+import { isDialogBackdropDismissMouseDown } from "../dialog-backdrop-dismiss";
 import { DialogCloseIcon } from "../message-card-icons";
 
 export function SettingsDialogShell({
@@ -39,14 +40,13 @@ export function SettingsDialogShell({
     <div
       className="dialog-backdrop"
       onMouseDown={(event) => {
-        // Primary-button only. Middle-click (button 1) on Linux opens
-        // the paste-buffer scroll anchor, and right-click (button 2)
-        // on all platforms opens the native context menu — firing
-        // `onClose` on either swallows the gesture before the browser
-        // can handle it, so the user loses paste / context-menu
-        // affordances just by landing the mouse outside the dialog
-        // body.
-        if (event.button !== 0) {
+        // `isDialogBackdropDismissMouseDown` filters non-primary
+        // buttons (middle-click paste on Linux, right-click context
+        // menu on every platform) and macOS Ctrl-click, which fires
+        // as a primary-button mousedown but the OS escalates to a
+        // context-menu gesture. Firing `onClose` on any of these
+        // swallows the gesture before the browser can handle it.
+        if (!isDialogBackdropDismissMouseDown(event.nativeEvent)) {
           return;
         }
         onClose();

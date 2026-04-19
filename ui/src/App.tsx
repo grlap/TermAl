@@ -12,6 +12,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal, flushSync } from "react-dom";
+import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
 import { DialogCloseIcon } from "./message-card-icons";
 import {
   archiveCodexThread,
@@ -7862,7 +7863,14 @@ export default function App() {
       {isCreateSessionOpen ? (
         <div
           className="dialog-backdrop"
-          onMouseDown={() => {
+          onMouseDown={(event) => {
+            // Primary-button only (+ macOS Ctrl-click guard). See
+            // `./dialog-backdrop-dismiss.ts` for the rationale —
+            // middle-click / right-click / mac-secondary-click must
+            // not swallow the native gesture by closing the dialog.
+            if (!isDialogBackdropDismissMouseDown(event.nativeEvent)) {
+              return;
+            }
             if (!isCreating) {
               setRequestError(null);
               setIsCreateSessionOpen(false);
@@ -8155,7 +8163,12 @@ export default function App() {
       {isCreateProjectOpen ? (
         <div
           className="dialog-backdrop"
-          onMouseDown={() => {
+          onMouseDown={(event) => {
+            // Primary-button only (+ macOS Ctrl-click guard). See
+            // `./dialog-backdrop-dismiss.ts` for the rationale.
+            if (!isDialogBackdropDismissMouseDown(event.nativeEvent)) {
+              return;
+            }
             if (!isCreatingProject) {
               setRequestError(null);
               setIsCreateProjectOpen(false);
