@@ -56,6 +56,12 @@ import {
   formatLanguageLabel,
   isMarkdownDocument,
 } from "./diff-editor-status-labels";
+import {
+  createInitialLatestFileState,
+  isStaleFileSaveError,
+  toLatestFileState,
+  type LatestFileState,
+} from "./diff-latest-file-state";
 import { StructuredDiffView } from "./StructuredDiffView";
 import {
   findClosestMarkdownRange,
@@ -119,15 +125,6 @@ type DiffViewMode =
   | "edit"
   | "raw";
 type DiffViewScrollPositions = Record<DiffViewMode, number>;
-
-type LatestFileState = {
-  status: "idle" | "loading" | "ready" | "error";
-  path: string;
-  content: string;
-  contentHash?: string | null;
-  error: string | null;
-  language: string | null;
-};
 
 type ReviewState = {
   status: "idle" | "loading" | "ready" | "error";
@@ -2950,42 +2947,6 @@ function defaultDiffViewMode(
 
   return hasFilePath ? "edit" : "raw";
 }
-
-function createInitialLatestFileState(filePath: string | null): LatestFileState {
-  if (!filePath) {
-    return {
-      status: "idle",
-      path: "",
-      content: "",
-      error: null,
-      language: null,
-    };
-  }
-
-  return {
-    status: "loading",
-    path: filePath,
-    content: "",
-    error: null,
-    language: null,
-  };
-}
-
-function toLatestFileState(response: FileResponse): LatestFileState {
-  return {
-    status: "ready",
-    path: response.path,
-    content: response.content,
-    contentHash: response.contentHash ?? null,
-    error: null,
-    language: response.language ?? null,
-  };
-}
-
-function isStaleFileSaveError(message: string) {
-  return message.toLowerCase().includes("file changed on disk before save");
-}
-
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) {
