@@ -216,6 +216,16 @@ export function EditableRenderedMarkdownSection({
     }
 
     if (hasUncommittedUserEditRef.current) {
+      // External concurrent change (e.g. file watcher during a
+      // typing session). Only reset if the DOM already agrees with
+      // the new segment — otherwise keep the user's in-progress
+      // edits so a mid-air file refresh doesn't stomp typed content.
+      // (The commit-coming-back case is already handled directly in
+      // `collectSectionEdit`, which clears draft state + bumps
+      // `renderResetVersion` at the moment the commit is handed off.
+      // By the time the save pipeline re-renders segments back into
+      // this component, `hasUncommittedUserEditRef` is already false
+      // and we take the reset path below.)
       const section = sectionRef.current;
       const editedMarkdown = section
         ? normalizeEditedMarkdownSection(
@@ -291,6 +301,24 @@ export function EditableRenderedMarkdownSection({
     const nextMarkdown = readEditedMarkdown(section, commitSegment.markdown);
     const sourceAtDraftStart = draftSourceContentRef.current ?? sourceContent;
     if (nextMarkdown !== commitSegment.markdown) {
+      // Hand-off — clear the draft state + bump `renderResetVersion`
+      // so the content-wrapper div remounts and the contentEditable
+      // DOM snaps back to the current `segment.markdown`. The parent
+      // will re-parse the committed text into new segments (the
+      // typed portion usually pops out as a fresh added segment);
+      // this component's own `segment.markdown` prop often won't
+      // change (the neutral prefix is unchanged — only the boundary
+      // shifts), so the reset useEffect below wouldn't fire. Bumping
+      // here is what prevents the "typed text lingers in the neutral
+      // section after save until I reopen the tab" symptom. If the
+      // parent ultimately rejects the commit (conflict / resolution
+      // failure) the user sees the pre-edit state + a save error —
+      // which matches the state they'd end up in if they re-opened
+      // the tab anyway, so it's an acceptable degenerate path.
+      hasUncommittedUserEditRef.current = false;
+      draftSegmentRef.current = null;
+      draftSourceContentRef.current = null;
+      setRenderResetVersion((current) => current + 1);
       return {
         currentSegment: segment,
         nextMarkdown,
