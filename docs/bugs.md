@@ -5,35 +5,52 @@ and cleanup notes do not belong here.
 
 ## Active Repo Bugs
 
-Recently fixed in the current tree, summarized so the active bug list stays
-readable:
+Also fixed in the current tree: the dialog backdrop mouse-button contract now
+runs through `isDialogBackdropDismissMouseDown` for Settings, create-session,
+and create-project dialogs. Middle-click, physical right-click, and macOS
+Ctrl-click no longer dismiss those backdrops before the browser can handle the
+native paste/context-menu gesture.
 
-- Preferences extraction cleanup: the preferences modules are tracked, shortened
-  tab-label tests pass, provenance comments point at direct imports, and dead
-  copied re-export blocks were removed.
-- `ConnectionRetryCard` now covers the null-`attemptLabel` fallback.
-- Manual Git diff opens now mark their request key as attempted, preventing the
-  restored-layout effect from firing a duplicate fetch.
-- Tier 0 cleanup batch: removed the dead DiffPanel Monaco lazy wrapper, tightened
-  SourcePanel imports, normalized `LatestFileState.contentHash`, corrected the
-  rendered-diff-view ownership note, and removed stray Mermaid-demo placeholder
-  lines.
-- `MermaidDiagram` memoizes iframe `srcDoc` and `style`, keeping the iframe
-  stable across unrelated parent renders.
-- `LatestFileState.contentHash` and `SourceFileState.contentHash` are now
-  explicit `string | null` frontend state values.
-- `DialogCloseIcon` is imported directly from `message-card-icons.tsx`; the
-  message rendering module no longer re-exports it for preferences UI.
-- Settings dialog backdrop dismissal is primary-button-only, with coverage for
-  middle click, right click, body click containment, and close-button behavior.
-- `remote_sync.rs` diagram and prose now match the actual remote-sync flow:
-  capture, read-only map build, retain, session updates, orchestrator sync, and
-  rollback on failure. The incorrect project-upsert, retain-order, and revision
-  attribution claims were removed.
-- Successful send responses that arrive with a stale same-instance snapshot now
-  still arm the active-prompt recovery poll, so an SSE stream that stalls after
-  echoing the user's prompt can be recovered by the authoritative `/api/state`
-  safety net.
+Also fixed in the current tree: the Settings dialog shell tests now locate the
+backdrop through `screen.getByRole("dialog").parentElement` instead of repeated
+raw `.dialog-backdrop` selectors, and they cover macOS Ctrl-click, plain macOS
+primary click, and non-Apple Ctrl+primary behavior.
+
+Also fixed in the current tree: rendered-diff complete-document coverage now
+asserts that the "Patch-only rendering" banner is absent, source-renderer math
+counter coverage now includes consecutive multiline `$$` blocks, `$$` inside
+fenced code, and same-line `$$...$$` pairs, and Mermaid diagram tests now cover
+normal-size scrollbar slack plus negative/zero viewBox lower-bound clamping.
+
+## `dialog-backdrop-dismiss` platform fallback is untested
+
+**Severity:** Medium - `ui/src/dialog-backdrop-dismiss.ts` explicitly falls back from `navigator.userAgentData?.platform` to `navigator.platform`, but `ui/src/dialog-backdrop-dismiss.test.ts` sets both values in every platform stub.
+
+That leaves the Safari/Firefox-style branch unpinned. A future edit could break the fallback-only path while all current helper tests continue to pass through the `userAgentData.platform` branch.
+
+**Current behavior:**
+- `stubPlatform()` writes both `navigator.platform` and `navigator.userAgentData.platform`.
+- The suite checks userAgentData precedence, but not userAgentData absence.
+- The production helper still depends on the fallback for browsers without `navigator.userAgentData`.
+
+**Proposal:**
+- Add a test that deletes or omits `navigator.userAgentData`, stubs only `navigator.platform = "MacIntel"`, and asserts Ctrl+primary returns `false`.
+- Add a paired non-Apple fallback case if useful, e.g. `navigator.platform = "Linux x86_64"` returns `true` for Ctrl+primary.
+
+## App-owned dialog backdrop integrations lack coverage
+
+**Severity:** Medium - `ui/src/App.tsx` now uses `isDialogBackdropDismissMouseDown` in the create-session and create-project dialog backdrops, but the tests only cover the shared predicate and the Settings dialog shell.
+
+The App-owned handlers also gate dismissal on `!isCreating` and `!isCreatingProject`. A wiring regression in those inline modals could bypass the helper, close while a create action is pending, or fail to close on a valid primary-button backdrop click without being caught by the current test suite.
+
+**Current behavior:**
+- `dialog-backdrop-dismiss.test.ts` covers the pure predicate.
+- `SettingsDialogShell.test.tsx` covers the Settings shell integration.
+- `App.test.tsx` has create-dialog open/button-close coverage, but no backdrop-dismiss assertions for create-session or create-project.
+
+**Proposal:**
+- Add App-level tests for create-session and create-project backdrop mousedown behavior: primary closes when not creating; middle/right/macOS Ctrl-click do not.
+- If practical in the existing harness, also assert the creating-state guard leaves the dialog open when the action is pending.
 
 ## `markdown-diff-edit-pipeline` paste sanitizer has no direct unit tests
 
@@ -127,30 +144,6 @@ This is especially noticeable because the same diff tab already has change navig
 - Add a Vitest case: capture `data-inline-zone-ids` before an edit, type a line above the fence (outside all regions) in a Markdown file with a Mermaid fence, assert the first zone's id is unchanged.
 - Document the `.mmd` file exception explicitly (whole-file regions hash the whole content, so ids do shift on any edit).
 
-## "Patch-only absence" not asserted on the complete-document path
-
-**Severity:** Medium - `ui/src/panels/DiffPanel.test.tsx:370-428` asserts the "Rendered" button appears when `documentContent.isCompleteDocument: true`, but never asserts the Patch-only banner is **absent**. The paired test at line 465 asserts presence when `documentContent` is missing. A regression that flipped the gating logic (e.g., rendering the banner unconditionally) would pass both tests.
-
-**Current behavior:**
-- Only positive assertion is "Patch-only" appears when `documentContent` is missing.
-- No negative assertion for the complete-document path.
-
-**Proposal:**
-- In the complete-document test at line 370, after `await clickAndSettle(renderedButton)`, add: `expect(screen.queryByText(/Patch-only rendering/i)).not.toBeInTheDocument();`.
-
-## Math-counter boundary cases missing
-
-**Severity:** Medium - `ui/src/source-renderers.test.ts` covers `countMathExpressions` for inline math and single-line `$$...$$`, but misses three boundary scenarios that the production code specifically handles:
-
-- Two consecutive multi-line `$$...$$` blocks separated by a blank line. The state-machine toggle at `source-renderers.ts:133-139` is subtle — a trailing `$$` that closes a block followed by a new opening `$$` must count as 2. No test pins this.
-- `$$` inside a fenced code block. The existing `does not count $ inside fenced code` test uses only single-`$` variables; `$$` in a code fence is NOT asserted.
-- Same-line `$$...$$` pairs. The `sameLineBlocks` branch at line 144 has no direct test coverage.
-
-**Proposal:** Three short cases in the `source-renderers: count helpers` block:
-- `countMathExpressions("$$\nx=1\n$$\n\n$$\ny=2\n$$")` returns 2.
-- `countMathExpressions("\`\`\`\n$$\nnot math\n$$\n\`\`\`")` returns 0.
-- `countMathExpressions("Block: $$x=1$$ and $$y=2$$ both.")` returns 2.
-
 ## Retry notice liveness ignores session lifecycle and retry sequencing
 
 **Severity:** Medium - `ui/src/SessionPaneView.tsx:900-913` derives connection-retry notice liveness only from whether the message is the latest assistant-authored message.
@@ -199,65 +192,20 @@ This is a pre-existing gap — the inline tab-bar JSX the component replaced had
 - Keep `Enter` / `Space` / click unchanged — they already work via native button semantics.
 - Add a Vitest case that renders the component, focuses the active tab, sends ArrowRight, and asserts the next tab is both selected and focused.
 
-## Settings dialog backdrop still swallows macOS Ctrl-click context menus
+## Dialog platform stubs can leak between tests
 
-**Severity:** Low - `ui/src/preferences/SettingsDialogShell.tsx:41` now guards the backdrop dismiss handler with `event.button !== 0`, which fixes middle-click and physical right-click. macOS Ctrl-click still reports as a primary-button `mousedown` (`button === 0`) while requesting a secondary-click context menu, so the dialog can close before the browser opens that menu.
+**Severity:** Low - `ui/src/dialog-backdrop-dismiss.test.ts` and `ui/src/preferences/SettingsDialogShell.test.tsx` restore `navigator.platform` only when `Object.getOwnPropertyDescriptor(navigator, "platform")` returns a descriptor.
 
-This leaves a platform-specific gap in the intended context-menu preservation fix. Windows, macOS, and Linux are P0 platforms, and Ctrl-click is a common macOS secondary-click gesture.
-
-**Current behavior:**
-- Middle-click (`button === 1`) and physical right-click (`button === 2`) on the backdrop return before `onClose`.
-- macOS Ctrl-click reaches the same handler with `button === 0` and `ctrlKey === true`, so it still calls `onClose`.
-- The existing Settings dialog shell tests cover non-primary button suppression, but not Ctrl-click with `button === 0`.
-
-**Proposal:**
-- Treat `event.ctrlKey && event.button === 0` as non-dismissal in the backdrop `onMouseDown` handler.
-- Keep ordinary primary-button backdrop clicks closing the dialog.
-- Add a Vitest case that fires `mouseDown` on the backdrop with `{ button: 0, ctrlKey: true }` and asserts `onClose` is not called.
-
-## Create-session and create-project dialog backdrops still dismiss on any mouse button
-
-**Severity:** Medium - `ui/src/App.tsx:7865` and `ui/src/App.tsx:8158` still attach `onMouseDown={() => onClose()}` to their `.dialog-backdrop` divs without a button-code guard. The Settings dialog shell fix (primary-button-only dismiss) does not cover these two siblings, so middle-click paste on Linux and right-click context-menu on every platform still get swallowed by the create-session and create-project dialogs before the browser can handle the gesture.
-
-The `dialog-backdrop` dismiss contract is now "primary-button only" — pinned by `SettingsDialogShell.test.tsx` — but these two inline dialogs in `App.tsx` still use the naive pre-fix shape. A future developer reading `App.tsx` might copy the existing naive pattern into a new dialog, silently regressing the Settings fix's contract.
+In jsdom, `navigator.platform` is commonly inherited from the prototype. When there is no original own descriptor, `stubPlatform()` creates an own property and `afterEach` leaves it behind, so later tests in the same worker can inherit the previous platform stub and become order-dependent.
 
 **Current behavior:**
-- Create-session dialog backdrop: `onMouseDown={() => onClose()}` closes on any button (buttons 0, 1, 2).
-- Create-project dialog backdrop: same pattern at line 8158.
-- Settings dialog uses the new guarded shape after the Tier A fix.
+- `originalPlatform` can be `undefined` when `platform` is inherited.
+- `stubPlatform()` then creates an own `navigator.platform` property.
+- `afterEach` restores only the descriptor-present path; it does not delete the created own property when `originalPlatform` was absent.
 
 **Proposal:**
-- Apply the same `event.button !== 0` guard inline to both `App.tsx` backdrops.
-- Follow-up candidate: extract a shared `<DialogBackdrop onClose>` primitive (or a tiny `handleBackdropMouseDown` helper) so all three dialogs route through one place and the guard lives in exactly one location.
-
-## `SettingsDialogShell.test.tsx` backdrop selector has inconsistent null-guards
-
-**Severity:** Low - the new test file at `ui/src/preferences/SettingsDialogShell.test.tsx` uses `document.querySelector(".dialog-backdrop")` in four places. Only the first case (primary-button test) asserts `expect(backdrop).not.toBeNull()` before casting with `as Element`; the three other cases (middle-button, right-button, inside-body) cast without the guard.
-
-If the `.dialog-backdrop` class is ever renamed (likely, given the module split history of this area), three of the four cases throw an opaque `TypeError` at `fireEvent.mouseDown` with no hint that the selector went stale. The project review convention also prefers `screen.getByRole` / `getByTestId` over raw `querySelector` for brittleness reasons.
-
-**Current behavior:**
-- `SettingsDialogShell.test.tsx:24-27` has the null-guard.
-- Lines 40-41 and 54-55 cast `as Element` directly.
-- All four cases currently pass because the classname is stable.
-
-**Proposal:**
-- Either copy the `expect(backdrop).not.toBeNull()` assertion into the middle-button, right-button, and inside-body cases, or locate the backdrop via `screen.getByRole("dialog").parentElement` (the dialog `<section>` is nested inside the backdrop `<div>` in this shell).
-- No behavior change; pure test robustness against a future classname rename.
-
-## Mermaid iframe scrollbar reserve lacks focused regression coverage
-
-**Severity:** Low - `ui/src/message-cards.tsx` changed Mermaid iframe height slack from `viewBox height + 8` to `viewBox height + 24`, but no focused test asserts the new normal-size height reserve.
-
-Existing coverage checks pathological max-height clamping, so a regression back to `+ 8` would still pass. The scrollbar-reserve behavior should be pinned with a normal deterministic SVG.
-
-**Current behavior:**
-- Production code uses `Math.ceil(dimensions.height) + 24`.
-- `MarkdownContent.test.tsx` only asserts that a huge `viewBox` remains capped at the upper bound.
-
-**Proposal:**
-- Add a normal-size Mermaid SVG/viewBox test, for example an `80px` viewBox height rendering to a `104px` iframe height.
-- Keep the existing huge-viewBox clamp test for the upper-bound security/layout guard.
+- Mirror the `userAgentData` cleanup: when there was no original own `platform` descriptor, delete the stubbed own property in `afterEach`.
+- Apply the fix to both `dialog-backdrop-dismiss.test.ts` and `SettingsDialogShell.test.tsx`.
 
 ## Session-find active-hit scroll can fight a user who scrolls away
 
@@ -488,19 +436,6 @@ At `src/api.rs:2797`, the diff dropped the `-l` flag. `sh -c` runs in non-login 
 **Proposal:**
 - Restore `sh -lc` unless there is a documented reason (e.g., the login-shell init was measurably slow and intentionally removed).
 - If the removal was intentional, add a comment explaining why and document the expectation that `PATH` must be set at the parent-process level.
-
-## Mermaid dimension cap missing negative/zero test coverage
-
-**Severity:** Medium - `clampMermaidDiagramExtent` regex accepts `[-+]?` signed values, and `readMermaidSvgDimensions` only rejects non-finite numbers. The existing "huge viewBox" test covers the upper clamp; nothing covers the lower clamp.
-
-A hostile or buggy agent output can produce `viewBox="0 0 -50 -50"` or `viewBox="0 0 0 0"`. The current test in `ui/src/MarkdownContent.test.tsx:320-347` asserts only that a 10,000×10,000 viewBox is clamped to the upper bound. A regression that drops `Math.max(lowerBound, …)` from `clampMermaidDiagramExtent` would pass the current tests.
-
-**Current behavior:**
-- Upper bound is tested (10,000 → 4096).
-- Lower bound is untested. Negative or zero input behavior depends on `Math.min(Math.max(lowerBound, value), upperBound)` still being intact in production code.
-
-**Proposal:**
-- Add two tests: `viewBox="0 0 -100 -100"` (negative → clamp to lower bound) and `viewBox="0 0 0 0"` (zero → clamp to lower bound). Assert the rendered widthPx/heightPx stay in `[lowerBound, upperBound]`.
 
 ## `MessageCard` default-prop inline arrows defeat memoization
 
@@ -767,10 +702,20 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
-- [ ] P2: Add SettingsDialogShell macOS Ctrl-click coverage:
-  fire `mouseDown` on the backdrop with `{ button: 0, ctrlKey: true }`
-  and assert `onClose` is not called, while preserving the existing
-  primary-button close case.
+- [ ] P2: Add `dialog-backdrop-dismiss` navigator.platform fallback tests:
+  cover the Safari/Firefox-style path where `navigator.userAgentData`
+  is absent and only `navigator.platform` is available. Assert macOS
+  Ctrl+primary is suppressed and a non-Apple Ctrl+primary still dismisses.
+- [ ] P2: Add App-level backdrop integration tests for create dialogs:
+  exercise create-session and create-project `.dialog-backdrop`
+  `mouseDown` behavior through `App.test.tsx`, including primary close,
+  non-primary/macOS-Ctrl non-dismissal, and the pending-create guard if
+  the harness can put the dialog into a creating state.
+- [ ] P2: Fix dialog test platform-stub cleanup:
+  in both `dialog-backdrop-dismiss.test.ts` and
+  `SettingsDialogShell.test.tsx`, delete the own `navigator.platform`
+  property in `afterEach` when there was no original own descriptor,
+  matching the existing `userAgentData` cleanup path.
 - [ ] P2: Add focused `diff-latest-file-state.ts` coverage:
   the module has zero dedicated tests after the Tier 0 split. Add
   a short `diff-latest-file-state.test.ts` covering both branches
@@ -935,6 +880,30 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   (well-formed / malformed / negative viewBox),
   `getMermaidDiagramFrameStyle` clamp caps, and
   `buildTermalMermaidConfig` palette-vs-match branches.
+- [ ] P2: Consolidate Apple-platform detection helpers:
+  the tree now has three near-duplicate platform sniffers —
+  `ui/src/pane-keyboard.ts:122-136` and
+  `ui/src/dialog-backdrop-dismiss.ts:62-76` both read
+  `navigator.userAgentData?.platform ?? navigator.platform` and regex
+  for `mac|iphone|ipad|ipod`, while `ui/src/app-utils.ts:197-203`
+  still uses the older `navigator.platform.toLowerCase().includes("mac")`
+  form that misses reduced-UA Chromium. Extract a shared
+  `ui/src/platform.ts` exposing `detectPlatform()` +
+  `isApplePlatform(platform?)` and retire the three local copies in
+  one mechanical commit. Fixes the latent `primaryModifierLabel`
+  gap as a side-effect.
+- [ ] P2: Extract a shared `<DialogBackdrop>` primitive:
+  `isDialogBackdropDismissMouseDown` is now consolidated, but the
+  wiring (`onMouseDown={(event) => { if (!isDialogBackdropDismissMouseDown(event.nativeEvent)) return; ... }}`
+  is replicated verbatim at three sites —
+  `ui/src/preferences/SettingsDialogShell.tsx:49`,
+  `ui/src/App.tsx:~7871`, and `ui/src/App.tsx:~8169` — along with
+  the sibling `onMouseDown={(event) => event.stopPropagation()}` on
+  each dialog body `<section>`. A `<DialogBackdrop onDismiss>`
+  component that internalizes both patterns would retire ~30 lines
+  of JSX per site and keep the dismiss contract in one place.
+  Worth attempting once the App.tsx dialog-markup split continues
+  so the extraction boundary is obvious.
 - [ ] P2: Second import-prune pass over `SessionPaneView.tsx`:
   the first pass (`7e84fe1`) pruned the bulk of unused imports
   from App.tsx / SessionPaneView / WorkspaceNodeView, but
@@ -958,11 +927,6 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   `advanceTimers(ACTIVE_PROMPT_POLL_INTERVAL_MS)` and assert
   `fetchMock` is still at 1 call so a regression that leaves the
   poll running after idle would fail loudly.
-- [ ] P2: Add normal-size Mermaid iframe height reserve coverage:
-  add a deterministic Mermaid SVG/viewBox case in
-  `ui/src/MarkdownContent.test.tsx` proving the `+24` vertical slack is
-  applied (for example, an `80px` viewBox height yields a `104px`
-  iframe height). Keep the existing huge-viewBox max-height clamp test.
 - [ ] P2: Add regression coverage for the delta-persist tombstone restore
   path. The production persist thread lives under `#[cfg(not(test))]` so
   the error-injection test needs either a `#[cfg(test)]` seam in
