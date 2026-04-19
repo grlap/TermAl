@@ -70,14 +70,23 @@ import {
   isPersistedSessionTemplate,
   isTransitionTemplate,
 } from "./orchestrator-template-persistence-schema";
+import {
+  STATE_KEY_PREFIX,
+  buildOrchestratorModelOptionsByAgent,
+  emptyDraft,
+  finalizePanelState,
+  orchestratorSessionModelOptions,
+  readState,
+  resolveInitialState,
+  templateToDraft,
+  type PanelState,
+} from "./orchestrator-template-panel-state";
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
 const DEFAULT_ZOOM = 1;
 const WHEEL_ZOOM_SENSITIVITY = 0.002;
 const PAN_CONTEXT_MENU_SUPPRESS_THRESHOLD_PX = 4;
-const STATE_KEY_PREFIX = "termal-orchestrator-panel-state:";
-
 function clampZoom(value: number): number {
   return (
     Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value)) * 1000) / 1000
@@ -154,16 +163,6 @@ type ConnectionDragState = {
     fixedSessionId: string;
     fixedAnchor: AnchorSide;
   };
-};
-
-type PanelState = {
-  draft: OrchestratorTemplateDraft;
-  selectedNodeId: string | null;
-  selectedTemplateId: string | null;
-};
-
-type InitialPanelState = PanelState & {
-  savedDraft: OrchestratorTemplateDraft;
 };
 
 type PendingPanelPersistence = {
@@ -2006,292 +2005,6 @@ export function OrchestratorTemplatesPanel({
       </div>
     </section>
   );
-}
-
-function emptyDraft(): OrchestratorTemplateDraft {
-  return {
-    name: "",
-    description: "",
-    projectId: null,
-    sessions: [],
-    transitions: [],
-  };
-}
-
-function orchestratorSessionModelOptions(
-  agent: AgentType,
-  model?: string | null,
-  modelOptionsByAgent: ReadonlyMap<AgentType, readonly ComboboxOption[]> = EMPTY_ORCHESTRATOR_MODEL_OPTIONS,
-): ComboboxOption[] {
-  const normalizedModel = model?.trim() ?? "";
-  const liveOptions = modelOptionsByAgent.get(agent) ?? [];
-  const sourceOptions = liveOptions.length
-    ? liveOptions
-    : NEW_SESSION_MODEL_OPTIONS[agent];
-  const options: ComboboxOption[] = [];
-  const seenValues = new Set<string>();
-  const pushOption = (option: ComboboxOption) => {
-    const normalizedValue = option.value.trim().toLowerCase();
-    const isDefaultLike =
-      normalizedValue === "" ||
-      (normalizedValue === "default" &&
-        option.label.trim().toLowerCase() === "default");
-    const key = isDefaultLike ? "__default__" : normalizedValue;
-    if (seenValues.has(key)) {
-      return;
-    }
-
-    seenValues.add(key);
-    options.push(option);
-  };
-
-  pushOption(
-    {
-      label: "Default",
-      value: "",
-      description: "Use this assistant's default model",
-    },
-  );
-  for (const option of sourceOptions) {
-    pushOption(option);
-  }
-
-  if (
-    normalizedModel &&
-    !options.some(
-      (option) =>
-        option.value.trim().toLowerCase() === normalizedModel.toLowerCase(),
-    )
-  ) {
-    pushOption({
-      label: formatSessionModelOptionLabel(normalizedModel),
-      value: normalizedModel,
-    });
-  }
-
-  return options;
-}
-
-const EMPTY_ORCHESTRATOR_MODEL_OPTIONS = new Map<
-  AgentType,
-  readonly ComboboxOption[]
->();
-
-function buildOrchestratorModelOptionsByAgent(
-  sessions: readonly Session[],
-): ReadonlyMap<AgentType, readonly ComboboxOption[]> {
-  const optionsByAgent = new Map<AgentType, ComboboxOption[]>();
-
-  for (const session of sessions) {
-    if (!session.modelOptions?.length) {
-      continue;
-    }
-
-    const agentOptions = optionsByAgent.get(session.agent) ?? [];
-    const seenValues = new Set(agentOptions.map((option) => option.value));
-
-    for (const option of session.modelOptions) {
-      if (seenValues.has(option.value)) {
-        continue;
-      }
-
-      seenValues.add(option.value);
-      agentOptions.push({
-        label: option.label,
-        value: option.value,
-        description: option.description ?? undefined,
-        badges: option.badges?.length ? option.badges : undefined,
-      });
-    }
-
-    optionsByAgent.set(session.agent, agentOptions);
-  }
-
-  return optionsByAgent;
-}
-
-function templateToDraft(
-  template: OrchestratorTemplate,
-): OrchestratorTemplateDraft {
-  return {
-    name: template.name,
-    description: template.description,
-    projectId: template.projectId ?? null,
-    sessions: template.sessions.map((session) => ({
-      ...session,
-      model: session.model ?? "",
-      position: { ...session.position },
-    })),
-    transitions: template.transitions.map((transition) => ({
-      ...transition,
-      promptTemplate: transition.promptTemplate ?? "",
-    })),
-  };
-}
-
-function resolveInitialState(
-  templates: OrchestratorTemplate[],
-  initialTemplateId: string | null,
-  restored: PanelState | null,
-  startMode: "browse" | "edit" | "new",
-): InitialPanelState {
-  if (restored) {
-    const restoredTemplateId =
-      typeof restored.selectedTemplateId === "string"
-        ? restored.selectedTemplateId
-        : null;
-    const selectedTemplateId =
-      restoredTemplateId &&
-      templates.some((template) => template.id === restoredTemplateId)
-        ? restoredTemplateId
-        : null;
-    if (restoredTemplateId && !selectedTemplateId) {
-      const savedDraft = emptyDraft();
-      return {
-        ...finalizePanelState(restored.draft, null, restored.selectedNodeId),
-        savedDraft,
-      };
-    }
-    const panelState = finalizePanelState(
-      restored.draft,
-      selectedTemplateId,
-      restored.selectedNodeId,
-    );
-    return {
-      ...panelState,
-      savedDraft: savedDraftForTemplateId(templates, selectedTemplateId),
-    };
-  }
-
-  if (startMode === "new") {
-    const draft = emptyDraft();
-    return { ...finalizePanelState(draft, null, null), savedDraft: draft };
-  }
-
-  const selectedTemplate =
-    (initialTemplateId
-      ? templates.find((template) => template.id === initialTemplateId)
-      : null) ??
-    templates[0] ??
-    null;
-
-  if (!selectedTemplate) {
-    const draft = emptyDraft();
-    return { ...finalizePanelState(draft, null, null), savedDraft: draft };
-  }
-
-  const savedDraft = templateToDraft(selectedTemplate);
-  return {
-    ...finalizePanelState(
-      savedDraft,
-      selectedTemplate.id,
-      selectedTemplate.sessions[0]?.id ?? null,
-    ),
-    savedDraft,
-  };
-}
-
-function savedDraftForTemplateId(
-  templates: OrchestratorTemplate[],
-  selectedTemplateId: string | null,
-): OrchestratorTemplateDraft {
-  if (!selectedTemplateId) {
-    return emptyDraft();
-  }
-
-  const selectedTemplate = templates.find(
-    (template) => template.id === selectedTemplateId,
-  );
-  return selectedTemplate ? templateToDraft(selectedTemplate) : emptyDraft();
-}
-
-function finalizePanelState(
-  draft: OrchestratorTemplateDraft,
-  selectedTemplateId: string | null,
-  selectedNodeId: string | null,
-): PanelState {
-  const nextSelectedNodeId =
-    selectedNodeId &&
-    draft.sessions.some((session) => session.id === selectedNodeId)
-      ? selectedNodeId
-      : (draft.sessions[0]?.id ?? null);
-
-  return {
-    draft,
-    selectedNodeId: nextSelectedNodeId,
-    selectedTemplateId,
-  };
-}
-
-function readState(stateKey: string): PanelState | null {
-  try {
-    const raw = window.localStorage.getItem(stateKey);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as Partial<PanelState>;
-    if (!parsed.draft || typeof parsed.draft !== "object") {
-      return null;
-    }
-
-    const draft = parsed.draft as Partial<OrchestratorTemplateDraft>;
-    if (
-      typeof draft.name !== "string" ||
-      typeof draft.description !== "string" ||
-      !Array.isArray(draft.sessions) ||
-      !Array.isArray(draft.transitions)
-    ) {
-      return null;
-    }
-
-    if (
-      !draft.sessions.every(isPersistedSessionTemplate) ||
-      !draft.transitions.every(isTransitionTemplate)
-    ) {
-      return null;
-    }
-
-    return finalizePanelState(
-      {
-        name: draft.name,
-        description: draft.description,
-        projectId:
-          typeof draft.projectId === "string" && draft.projectId.trim()
-            ? draft.projectId
-            : null,
-        sessions: draft.sessions.map((session) => ({
-          id: session.id,
-          name: session.name,
-          agent: session.agent,
-          model: session.model ?? "",
-          instructions: session.instructions,
-          autoApprove: session.autoApprove,
-          inputMode: session.inputMode,
-          position: clampPosition(session.position.x, session.position.y),
-        })),
-        transitions: draft.transitions.map((transition) => ({
-          id: transition.id,
-          fromSessionId: transition.fromSessionId,
-          toSessionId: transition.toSessionId,
-          trigger: transition.trigger,
-          resultMode: transition.resultMode,
-          promptTemplate: transition.promptTemplate ?? "",
-          ...(transition.fromAnchor != null
-            ? { fromAnchor: transition.fromAnchor }
-            : {}),
-          ...(transition.toAnchor != null
-            ? { toAnchor: transition.toAnchor }
-            : {}),
-        })),
-      },
-      typeof parsed.selectedTemplateId === "string"
-        ? parsed.selectedTemplateId
-        : null,
-      typeof parsed.selectedNodeId === "string" ? parsed.selectedNodeId : null,
-    );
-  } catch {
-    return null;
-  }
 }
 
 function TransitionNoteIcon() {
