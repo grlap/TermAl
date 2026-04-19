@@ -36,19 +36,6 @@ import {
   type OpenPathOptions,
   type StateResponse,
 } from "./api";
-
-// Re-export public API used by test files
-export {
-  describeCodexModelAdjustmentNotice,
-  describeSessionModelRefreshError,
-  describeUnknownSessionModelWarning,
-  resolveControlPanelWorkspaceRoot,
-  resolveUnknownSessionModelSendAttempt,
-  type ComboboxOption,
-} from "./session-model-utils";
-
-export { MessageCard, MarkdownContent } from "./message-cards";
-
 import {
   workspaceNodeContainsControlPanel,
   workspaceNodeUsesStandaloneControlSurfaceMinWidth,
@@ -57,14 +44,6 @@ import {
   type BackendConnectionState,
 } from "./backend-connection";
 import { SessionPaneView } from "./SessionPaneView";
-
-export { ThemedCombobox } from "./preferences-panels";
-export {
-  CodexPromptSettingsCard,
-  ClaudePromptSettingsCard,
-  CursorPromptSettingsCard,
-  GeminiPromptSettingsCard,
-} from "./prompt-settings-cards";
 
 import {
   type ControlPanelSectionId,

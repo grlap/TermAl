@@ -57,19 +57,6 @@ import {
   resolveControlPanelWorkspaceRoot,
   type ComboboxOption,
 } from "./session-model-utils";
-
-// Re-export public API used by test files
-export {
-  describeCodexModelAdjustmentNotice,
-  describeSessionModelRefreshError,
-  describeUnknownSessionModelWarning,
-  resolveControlPanelWorkspaceRoot,
-  resolveUnknownSessionModelSendAttempt,
-  type ComboboxOption,
-} from "./session-model-utils";
-
-export { MessageCard, MarkdownContent } from "./message-cards";
-
 import {
   ThemedCombobox,
 } from "./preferences-panels";
@@ -91,14 +78,6 @@ import {
 } from "./scroll-position";
 
 import {
-  CodexPromptSettingsCard,
-  ClaudePromptSettingsCard,
-  CursorPromptSettingsCard,
-  GeminiPromptSettingsCard,
-} from "./prompt-settings-cards";
-
-export { ThemedCombobox } from "./preferences-panels";
-export {
   CodexPromptSettingsCard,
   ClaudePromptSettingsCard,
   CursorPromptSettingsCard,
