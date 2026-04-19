@@ -20,7 +20,7 @@ import { MarkdownContent, type MarkdownFileLinkTarget } from "../message-cards";
 import type { MonacoCodeEditorHandle, MonacoCodeEditorStatus } from "../MonacoCodeEditor";
 import type { MonacoDiffEditorHandle, MonacoDiffEditorStatus } from "../MonacoDiffEditor";
 import { buildDiffPreviewModel } from "../diff-preview";
-import { resolveMonacoLanguage, type MonacoAppearance } from "../monaco";
+import type { MonacoAppearance } from "../monaco";
 import { normalizeDisplayPath, relativizePathToWorkspace } from "../path-display";
 import type { DiffMessage, WorkspaceFilesChangedEvent } from "../types";
 import { workspaceFilesChangedEventChangeForPath } from "../workspace-file-events";
@@ -47,6 +47,15 @@ import {
   ensureReviewFiles,
   type ReviewOriginContext,
 } from "./diff-review-document";
+import {
+  DEFAULT_DIFF_EDITOR_STATUS,
+  DEFAULT_EDITOR_STATUS,
+  createEditorStatusSnapshot,
+  formatChangeNavigationLabel,
+  formatIndentationLabel,
+  formatLanguageLabel,
+  isMarkdownDocument,
+} from "./diff-editor-status-labels";
 import { StructuredDiffView } from "./StructuredDiffView";
 import {
   findClosestMarkdownRange,
@@ -129,21 +138,6 @@ type ReviewState = {
 
 type MarkdownDiffSaveHandler = () => Promise<void> | void;
 
-
-const DEFAULT_EDITOR_STATUS: MonacoCodeEditorStatus = {
-  line: 1,
-  column: 1,
-  tabSize: 2,
-  insertSpaces: true,
-  endOfLine: "LF",
-};
-
-const DEFAULT_DIFF_EDITOR_STATUS: MonacoDiffEditorStatus = {
-  ...DEFAULT_EDITOR_STATUS,
-  changeCount: 0,
-  currentChange: 0,
-};
-
 function createInitialDiffViewScrollPositions(): DiffViewScrollPositions {
   return {
     all: 0,
@@ -154,27 +148,6 @@ function createInitialDiffViewScrollPositions(): DiffViewScrollPositions {
     raw: 0,
   };
 }
-
-const LANGUAGE_LABELS: Record<string, string> = {
-  bash: "Shell Script",
-  css: "CSS",
-  dockerfile: "Dockerfile",
-  go: "Go",
-  html: "HTML",
-  ini: "INI",
-  javascript: "JavaScript",
-  json: "JSON",
-  markdown: "Markdown",
-  plaintext: "Plain Text",
-  powershell: "PowerShell",
-  python: "Python",
-  rust: "Rust",
-  shell: "Shell Script",
-  sql: "SQL",
-  typescript: "TypeScript",
-  xml: "XML",
-  yaml: "YAML",
-};
 
 export function DiffPanel({
   appearance,
@@ -3013,41 +2986,6 @@ function isStaleFileSaveError(message: string) {
   return message.toLowerCase().includes("file changed on disk before save");
 }
 
-function createEditorStatusSnapshot(content: string): MonacoCodeEditorStatus {
-  return {
-    ...DEFAULT_EDITOR_STATUS,
-    endOfLine: content.includes("\r\n") ? "CRLF" : "LF",
-  };
-}
-
-function formatChangeNavigationLabel(status: MonacoDiffEditorStatus) {
-  if (status.changeCount === 0) {
-    return "No changes";
-  }
-
-  return `Change ${Math.max(status.currentChange, 1)} of ${status.changeCount}`;
-}
-
-function formatIndentationLabel(status: MonacoCodeEditorStatus) {
-  return status.insertSpaces ? `Spaces: ${status.tabSize}` : `Tab Size: ${status.tabSize}`;
-}
-
-function formatLanguageLabel(language: string | null | undefined, path: string | null | undefined) {
-  const resolved = resolveMonacoLanguage(language ?? null, path ?? null);
-  const normalizedPath = path?.trim().toLowerCase() ?? "";
-  if (resolved === "typescript" && normalizedPath.endsWith(".tsx")) {
-    return "TypeScript JSX";
-  }
-  if (resolved === "javascript" && normalizedPath.endsWith(".jsx")) {
-    return "JavaScript JSX";
-  }
-
-  return LANGUAGE_LABELS[resolved] ?? resolved.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function isMarkdownDocument(language: string | null | undefined, path: string | null | undefined) {
-  return resolveMonacoLanguage(language ?? null, path ?? null) === "markdown";
-}
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) {
