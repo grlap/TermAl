@@ -732,4 +732,55 @@ describe("MessageCard", () => {
       screen.getByText(/the turn continued after attempt 2 of 5\.$/),
     ).toBeInTheDocument();
   });
+
+  it("hides the attempt chip and uses the generic copy when the retry notice omits the attempt suffix", () => {
+    // Legacy / fallback backend path: `summarize_retryable_connectivity_error`
+    // emits `"Connection dropped before the response finished. Retrying automatically."`
+    // (no parenthesized attempt counter), so `parseConnectionRetryNotice`
+    // returns `attemptLabel: null`. Both the chip and the past-tense
+    // attempt-specific detail must be absent on the resolved render, and
+    // likewise the attempt chip on the live render.
+    const message: TextMessage = {
+      id: "message-retry-no-attempt",
+      type: "text",
+      author: "assistant",
+      timestamp: "15:47:58",
+      text: "Connection dropped before the response finished. Retrying automatically.",
+    };
+
+    const { rerender, container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        isLatestAssistantMessage
+      />,
+    );
+
+    // Live render: spinner + present-tense heading, but no attempt chip.
+    expect(
+      screen.getByRole("heading", { name: "Reconnecting to continue this turn" }),
+    ).toBeInTheDocument();
+    expect(container.querySelector(".connection-notice-spinner")).not.toBeNull();
+    expect(screen.queryByText(/^Attempt \d+ of \d+$/)).toBeNull();
+
+    rerender(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        isLatestAssistantMessage={false}
+      />,
+    );
+
+    // Resolved render: generic past-tense detail, no attempt chip.
+    expect(screen.getByRole("heading", { name: "Connection recovered" })).toBeInTheDocument();
+    expect(container.querySelector(".connection-notice-spinner")).toBeNull();
+    expect(screen.queryByText(/^Attempt \d+ of \d+$/)).toBeNull();
+    expect(
+      screen.getByText(
+        "Connection dropped briefly; the turn continued after an automatic retry.",
+      ),
+    ).toBeInTheDocument();
+  });
 });

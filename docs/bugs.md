@@ -24,6 +24,21 @@ visible through an `App.tsx` re-export. The last paragraph now
 correctly states that consumers (including `App.test.tsx`) import
 directly from the new module, matching what the code actually does.
 
+Also fixed in the current tree: the dead `export { ... } from
+"..."` re-export blocks that `SessionPaneView.tsx` and
+`WorkspaceNodeView.tsx` had cloned verbatim from App.tsx's
+surface during the extractions are gone. No test or consumer
+imported those symbols through the new modules; `App.tsx` already
+re-exports the same names from their true-source modules.
+Type-check stays clean.
+
+Also fixed in the current tree: the `ConnectionRetryCard`
+null-`attemptLabel` fallback path now has a Vitest assertion.
+`MessageCard.test.tsx` gained a third case that renders a notice
+with no "(attempt N of M)" suffix on both `isLatestAssistantMessage`
+branches, asserts the attempt chip is absent on each, and pins
+the generic past-tense fallback copy verbatim.
+
 ## Missing error boundary around portal `render()` in MonacoCodeEditor
 
 **Severity:** Medium - `ui/src/MonacoCodeEditor.tsx:651-657` invokes `host.zone.render()` inline with no error boundary. The `render` callback in `SourcePanel` returns `<MarkdownContent>`, which in turn runs Mermaid/KaTeX detection. If anything inside that subtree throws during render (a malformed fence, a KaTeX parse failure that slips past `throwOnError: false`, a Mermaid render-time exception), the entire `MonacoCodeEditor` component errors and React unmounts the Monaco editor along with the inline zones — losing whatever the user had in their buffer.
@@ -193,34 +208,6 @@ This is not a runtime behavior bug, but it weakens the new preferences extractio
 - Change the `SettingsDialogShell.tsx:29` import to `import { DialogCloseIcon } from "../message-card-icons";` and drop the re-export line from `message-cards.tsx`.
 - Import that shared icon from both `message-cards` and `SettingsDialogShell`.
 - Keep message-card ownership focused on message rendering rather than generic preferences chrome.
-
-## Extracted component files carry dead re-export blocks from App.tsx
-
-**Severity:** Low - `ui/src/SessionPaneView.tsx:62-71, 100-106` and `ui/src/WorkspaceNodeView.tsx:40-50, 61-67` each carry `export { ... } from "..."` blocks that were copied verbatim from App.tsx's import/export surface during the SessionPaneView and WorkspaceNodeView extractions. No test or consumer imports these symbols through the new modules — the tests and production callers go through `./App` (which already re-exports the same names from their true-source modules).
-
-`WorkspaceNodeView.tsx`'s blocks are especially egregious: the re-exported symbols (`describeCodexModelAdjustmentNotice`, `MessageCard`, `ThemedCombobox`, the four `*PromptSettingsCard`s) aren't even referenced inside the component body itself (grep confirms zero usage matches outside the import/export header). They're pure module-surface clones with no consumer.
-
-**Current behavior:**
-- `SessionPaneView.tsx` re-exports 12 symbols from 4 source modules. None are imported via `./SessionPaneView` anywhere.
-- `WorkspaceNodeView.tsx` re-exports the same 12 symbols. None are imported via `./WorkspaceNodeView`, and the component body doesn't reference them either.
-- The `./App` re-exports remain the canonical test-facing surface; these new surfaces just shadow them.
-
-**Proposal:**
-- Delete the `export { ... } from "..."` blocks at the top of `SessionPaneView.tsx` (lines 62-71 and 100-106) and `WorkspaceNodeView.tsx` (lines 40-50 and 61-67). Keep the `import` forms for the symbols each file actually uses internally.
-- Verify `tsc --noEmit` stays clean and no test imports break.
-
-## `ConnectionRetryCard` null `attemptLabel` fallback untested
-
-**Severity:** Low - the two new Vitest cases in `ui/src/MessageCard.test.tsx` pin the `"attempt N of M"` happy path for both live and resolved states, but the fallback path where `parseConnectionRetryNotice` returns `attemptLabel: null` (e.g., a backend that omits the `Retrying automatically (attempt N of M)` suffix) has no assertion.
-
-The fallback path controls two visible behaviors: the attempt chip disappears (`notice.attemptLabel ? chip : null`) and the resolved detail copy switches to a generic fallback (`notice.attemptLabel ? "...after <lowercased-label>." : "Connection dropped briefly; the turn continued after an automatic retry."`). A regression that swapped the fallback copy or rendered an empty chip would pass both existing tests.
-
-**Current behavior:**
-- Tests cover the attempt-label branches of the live and resolved renders.
-- The null-`attemptLabel` path for both renders is unexercised.
-
-**Proposal:**
-- Add a third case in `MessageCard.test.tsx`: render with `text: "Connection dropped before the response finished."` (no attempt suffix) on both `isLatestAssistantMessage={true}` and `={false}` branches, assert `screen.queryByText(/Attempt \d+ of \d+/)` is null, and pin the fallback detail copy verbatim.
 
 ## Settings dialog backdrop dismisses on any mouse button
 
