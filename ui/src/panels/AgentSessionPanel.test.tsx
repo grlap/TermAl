@@ -7,10 +7,12 @@ import {
   AgentSessionPanelFooter,
   RunningIndicator,
   VirtualizedConversationMessageList,
+} from "./AgentSessionPanel";
+import {
   getAdjustedVirtualizedScrollTopForHeightChange,
   getScrollContainerBottomGap,
   isScrollContainerNearBottom,
-} from "./AgentSessionPanel";
+} from "./conversation-virtualization";
 import type { Message, Session } from "../types";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
