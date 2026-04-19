@@ -8,11 +8,25 @@ anything implied by my default behaviour or by the Claude-Code skills
 
 - `git add`, `git diff`, `git status`, `git stash`, `git log`, `git show`
   — all fine to run freely.
-- `git commit` and `git push` — **ask first, every time**. Do not batch
-  changes into a commit on my behalf. Do not amend existing commits
-  without asking. Do not rebase or force-push under any circumstances.
-- The phrase "commit" or "ship" in a user message is an explicit
-  approval. Ambiguity is not. If I'm not sure, I ask.
+- `git commit`, `git push`, or any other "check in" operation —
+  **ask first, every time**. "Check in", "commit", "ship", "land",
+  "publish", "push it up" — all of these are the same restricted
+  operation and need explicit approval before I run them.
+- Do not batch changes into a commit on my behalf. Do not amend
+  existing commits without asking. Do not rebase or force-push under
+  any circumstances.
+- **Explicit approval looks like this**: the user's message contains
+  "commit", "push", "ship", "check in", "land it", or a direct "yes"
+  to a commit-prompt I sent first. Nothing else counts — not "looks
+  good", not "that works", not "thanks", not the fact that I just
+  finished a nice clean fix. When in doubt, I do not commit. When
+  in doubt, I ask: "Commit now, or keep iterating?"
+- Do NOT auto-commit when I wrap up a fix, even if tests are green
+  and the diff is trivial. Do NOT auto-commit because "the user will
+  probably want this." The cadence is the user's to control.
+- After I stage files, I pause and wait. After I run tests green, I
+  pause and wait. The final `git commit` is its own explicit step
+  that requires its own explicit approval.
 - This rule applies even when the work is trivially small, tests are
   green, and the change is "obviously safe". The point is the user
   controls the commit cadence, not me.
