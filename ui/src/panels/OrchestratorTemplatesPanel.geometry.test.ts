@@ -15,7 +15,7 @@ import {
   nearestAnchorPosition,
   nearestAnchorSide,
   perpendicularOffsetPoint,
-} from "./OrchestratorTemplatesPanel";
+} from "./orchestrator-board-geometry";
 
 function makeSession(
   overrides: Partial<OrchestratorSessionTemplate> = {},
