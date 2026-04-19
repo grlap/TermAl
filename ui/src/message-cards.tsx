@@ -145,6 +145,7 @@ export const MessageCard = memo(function MessageCard({
   onCodexAppRequestSubmit = () => {},
   searchQuery = "",
   searchHighlightTone = "match",
+  isLatestAssistantMessage = true,
   workspaceRoot = null,
 }: {
   appearance?: MonacoAppearance;
@@ -162,6 +163,11 @@ export const MessageCard = memo(function MessageCard({
   onCodexAppRequestSubmit?: (messageId: string, result: JsonValue) => void;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
+  // When false, `ConnectionRetryCard` renders the resolved (static, past-tense)
+  // variant because later assistant output exists and the reconnect obviously
+  // succeeded. Defaults to true so tests and callers that have not opted in
+  // keep the pre-existing "live spinner" behaviour.
+  isLatestAssistantMessage?: boolean;
   workspaceRoot?: string | null;
 }) {
   switch (message.type) {
@@ -180,6 +186,7 @@ export const MessageCard = memo(function MessageCard({
             notice={connectionRetryNotice}
             searchQuery={searchQuery}
             searchHighlightTone={searchHighlightTone}
+            isLive={isLatestAssistantMessage}
           />
         );
       }
@@ -359,6 +366,7 @@ export const MessageCard = memo(function MessageCard({
   previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
   previous.searchQuery === next.searchQuery &&
   previous.searchHighlightTone === next.searchHighlightTone &&
+  previous.isLatestAssistantMessage === next.isLatestAssistantMessage &&
   previous.workspaceRoot === next.workspaceRoot
 );
 
@@ -371,27 +379,53 @@ function ConnectionRetryCard({
   notice,
   searchQuery,
   searchHighlightTone,
+  isLive,
 }: {
   message: TextMessage;
   notice: ConnectionRetryNotice;
   searchQuery: string;
   searchHighlightTone: SearchHighlightTone;
+  // True while this retry notice is still the last assistant-authored message
+  // in the session. Flipping to false means later assistant output exists, so
+  // the reconnect obviously succeeded — the spinner stops and the copy moves
+  // to past tense.
+  isLive: boolean;
 }) {
+  const heading = isLive
+    ? "Reconnecting to continue this turn"
+    : "Connection recovered";
+  const detail = isLive
+    ? notice.detail
+    : notice.attemptLabel
+      ? `Connection dropped briefly; the turn continued after ${notice.attemptLabel.toLowerCase()}.`
+      : "Connection dropped briefly; the turn continued after an automatic retry.";
+  const chipClassName = isLive
+    ? "chip chip-status chip-status-active"
+    : "chip chip-status";
+  const cardClassName = isLive
+    ? "message-card connection-notice-card"
+    : "message-card connection-notice-card connection-notice-card-resolved";
   return (
-    <article className="message-card connection-notice-card" role="status" aria-live="polite">
+    <article
+      className={cardClassName}
+      role="status"
+      aria-live={isLive ? "polite" : "off"}
+    >
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="connection-notice-body">
-        <div className="activity-spinner connection-notice-spinner" aria-hidden="true" />
+        {isLive ? (
+          <div className="activity-spinner connection-notice-spinner" aria-hidden="true" />
+        ) : null}
         <div className="connection-notice-copy">
           <div className="card-label">Connection</div>
           <div className="connection-notice-heading">
-            <h3>Reconnecting to continue this turn</h3>
+            <h3>{heading}</h3>
             {notice.attemptLabel ? (
-              <span className="chip chip-status chip-status-active">{notice.attemptLabel}</span>
+              <span className={chipClassName}>{notice.attemptLabel}</span>
             ) : null}
           </div>
           <p className="connection-notice-detail">
-            {renderHighlightedText(notice.detail, searchQuery, searchHighlightTone)}
+            {renderHighlightedText(detail, searchQuery, searchHighlightTone)}
           </p>
         </div>
       </div>

@@ -894,6 +894,19 @@ export function SessionPaneView({
         : visibleMessages[visibleMessages.length - 1]?.author,
     [activeSession, pane.viewMode, visibleMessages],
   );
+  // Newest assistant message id, used by `ConnectionRetryCard` to tell whether
+  // a retry notice is still the live one (keep spinning) or historical (the
+  // reconnect obviously succeeded because later assistant output exists).
+  const latestAssistantMessageId = useMemo(() => {
+    const sessionMessages = activeSession?.messages ?? [];
+    for (let index = sessionMessages.length - 1; index >= 0; index -= 1) {
+      const candidate = sessionMessages[index];
+      if (candidate && candidate.author === "assistant") {
+        return candidate.id;
+      }
+    }
+    return null;
+  }, [activeSession?.messages]);
   const showNewResponseIndicator = Boolean(
     newResponseIndicatorByKey[scrollStateKey],
   );
@@ -2801,6 +2814,9 @@ export function SessionPaneView({
                   activeSessionSearchMatch?.itemKey === `message:${message.id}`
                     ? "active"
                     : "match"
+                }
+                isLatestAssistantMessage={
+                  message.id === latestAssistantMessageId
                 }
                 workspaceRoot={activeSession?.workdir ?? null}
               />

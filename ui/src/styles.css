@@ -4114,6 +4114,19 @@ textarea {
   border-color: var(--activity-border);
 }
 
+.connection-notice-card-resolved {
+  /* Historical retries: keep the "Connection" label / timestamp legible but
+     drop the active-tone accent so a later reader doesn't mistake the card
+     for the current connection state. */
+  background: color-mix(in srgb, var(--activity-bg) 55%, transparent);
+  border-color: color-mix(in srgb, var(--activity-border) 60%, transparent);
+}
+
+.connection-notice-card-resolved .connection-notice-detail,
+.connection-notice-card-resolved .connection-notice-heading h3 {
+  color: var(--muted);
+}
+
 .connection-notice-body {
   display: flex;
   align-items: flex-start;

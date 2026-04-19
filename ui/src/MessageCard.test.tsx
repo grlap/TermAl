@@ -669,4 +669,67 @@ describe("MessageCard", () => {
       openInNewTab: false,
     });
   });
+
+  it("renders a live connection-retry notice with spinner and present-tense heading", () => {
+    const message: TextMessage = {
+      id: "message-retry-live",
+      type: "text",
+      author: "assistant",
+      timestamp: "15:47:58",
+      text: "Connection dropped before the response finished. Retrying automatically (attempt 2 of 5).",
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        isLatestAssistantMessage
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Reconnecting to continue this turn" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Attempt 2 of 5")).toBeInTheDocument();
+    expect(container.querySelector(".connection-notice-spinner")).not.toBeNull();
+    const card = container.querySelector(".connection-notice-card");
+    expect(card?.classList.contains("connection-notice-card-resolved")).toBe(false);
+    expect(card?.getAttribute("aria-live")).toBe("polite");
+  });
+
+  it("renders a resolved connection-retry notice without spinner when later assistant output exists", () => {
+    const message: TextMessage = {
+      id: "message-retry-resolved",
+      type: "text",
+      author: "assistant",
+      timestamp: "15:47:58",
+      text: "Connection dropped before the response finished. Retrying automatically (attempt 2 of 5).",
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        isLatestAssistantMessage={false}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Connection recovered" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Reconnecting to continue this turn" }),
+    ).not.toBeInTheDocument();
+    expect(container.querySelector(".connection-notice-spinner")).toBeNull();
+    expect(
+      container.querySelector(".connection-notice-card-resolved"),
+    ).not.toBeNull();
+    expect(
+      container.querySelector(".connection-notice-card")?.getAttribute("aria-live"),
+    ).toBe("off");
+    // Past-tense detail copy references the attempt the retry recovered from.
+    expect(
+      screen.getByText(/the turn continued after attempt 2 of 5\.$/),
+    ).toBeInTheDocument();
+  });
 });
