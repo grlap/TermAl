@@ -69,6 +69,18 @@ consolidation into a shared helper is a deliberate future pass.
 The stray `a` / `2` / `a2` placeholder lines after the Mermaid
 fence in `docs/mermaid-demo.md` are also removed.
 
+Also fixed in the current tree: `MermaidDiagram` in
+`ui/src/message-cards.tsx` now memoises the iframe's `srcDoc` and
+`style` via `useMemo` keyed on the rendered SVG. Previously
+`buildMermaidDiagramFrameSrcDoc(renderState.svg)` returned a
+fresh string on every render, so any parent re-render (e.g. a
+post-save diff-view refresh) gave the iframe a new `srcDoc`
+identity and the browser reloaded the iframe from scratch —
+visible as the rendered-Markdown diff's "whole thing flickers"
+symptom after saving an edit. The memo keeps the iframe DOM
+node stable across unrelated parent re-renders; only an actual
+diagram change forces a reload.
+
 ## `LatestFileState.contentHash` type still optional despite normalised producers
 
 **Severity:** Note - `ui/src/panels/diff-latest-file-state.ts:43` still declares `contentHash?: string | null` (optional) even though both producers — `createInitialLatestFileState` (as of `9a51113`) and `toLatestFileState` — now unconditionally write `null`. No in-tree caller emits `undefined`.
@@ -1277,12 +1289,6 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   fix at `App.tsx:6020` actually provides — today the Monaco-content
   assertion is satisfied by the separate version-counter guard and
   would still pass even if the dedupe fix regressed.
-- [ ] P2: Memoize `srcDoc` in `MermaidDiagram`
-  (`ui/src/message-cards.tsx`): `buildMermaidDiagramFrameSrcDoc(renderState.svg)`
-  returns a new string on every render. Any parent re-render reloads
-  the iframe because React sees a new `srcDoc` prop identity. Wrap the
-  computation in `useMemo` keyed on `renderState.svg` so the iframe is
-  stable across unrelated parent re-renders.
 - [ ] P2: Short-circuit the restored-document-content scan in
   `ui/src/App.tsx:3906-4015` when every `diffPreview` tab already has
   `documentContent`. The scan now runs on every `workspace.panes`

@@ -827,6 +827,30 @@ function MermaidDiagram({
     };
   }, [appearance, code]);
 
+  // Memoise the iframe's srcDoc and style so unrelated parent
+  // re-renders (e.g. a post-save diff-view refresh) don't reload the
+  // iframe. `buildMermaidDiagramFrameSrcDoc` returns a fresh string
+  // every call, so without this memo React sees a new `srcDoc` prop
+  // identity on every render and the browser reloads the iframe —
+  // a full re-parse and re-paint that visibly flickers the diagram
+  // even when the SVG content is unchanged. Keyed on the SVG string
+  // so an actual re-render (different diagram) still propagates.
+  //
+  // These useMemo hooks sit BEFORE the error-branch early return so
+  // they run in the same order on every render (rules of hooks); the
+  // value is null/undefined when no SVG is available and the
+  // ready-branch JSX below guards on `iframeSrcDoc !== null` before
+  // mounting the iframe.
+  const readySvg = renderState.status === "ready" ? renderState.svg : null;
+  const iframeSrcDoc = useMemo(
+    () => (readySvg === null ? null : buildMermaidDiagramFrameSrcDoc(readySvg)),
+    [readySvg],
+  );
+  const iframeStyle = useMemo(
+    () => (readySvg === null ? undefined : getMermaidDiagramFrameStyle(readySvg)),
+    [readySvg],
+  );
+
   if (renderState.status === "error") {
     return (
       <div className="mermaid-diagram-fallback" contentEditable={false} data-markdown-serialization="skip">
@@ -853,13 +877,13 @@ function MermaidDiagram({
       role="img"
       aria-label="Mermaid diagram"
     >
-      {renderState.status === "ready" ? (
+      {iframeSrcDoc !== null ? (
         <iframe
           className="mermaid-diagram-frame"
           data-testid="mermaid-frame"
           sandbox=""
-          srcDoc={buildMermaidDiagramFrameSrcDoc(renderState.svg)}
-          style={getMermaidDiagramFrameStyle(renderState.svg)}
+          srcDoc={iframeSrcDoc}
+          style={iframeStyle}
           title="Mermaid diagram preview"
         />
       ) : (
