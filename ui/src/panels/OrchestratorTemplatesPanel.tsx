@@ -28,14 +28,12 @@ import {
 } from "../session-model-utils";
 import type {
   AgentType,
-  ExhaustiveValueCoverage,
   OrchestratorNodePosition,
   OrchestratorSessionInputMode,
   OrchestratorSessionTemplate,
   OrchestratorTemplate,
   OrchestratorTemplateDraft,
   OrchestratorTemplateTransition,
-  OrchestratorTransitionAnchor,
   OrchestratorTransitionResultMode,
   Project,
   Session,
@@ -89,60 +87,15 @@ import {
   templateToDraft,
   type PanelState,
 } from "./orchestrator-template-panel-state";
-
-const AGENT_OPTIONS = [
-  { label: "Claude", value: "Claude" },
-  { label: "Codex", value: "Codex" },
-  { label: "Cursor", value: "Cursor" },
-  { label: "Gemini", value: "Gemini" },
-] as const satisfies ReadonlyArray<{ label: string; value: AgentType }>;
-const AGENT_OPTIONS_EXHAUSTIVE: ExhaustiveValueCoverage<
-  AgentType,
-  typeof AGENT_OPTIONS
-> = true;
-
-const INPUT_MODE_OPTIONS: ReadonlyArray<{
-  label: string;
-  value: OrchestratorSessionInputMode;
-}> = [
-  { label: "Queue", value: "queue" },
-  { label: "Consolidate", value: "consolidate" },
-];
-const RESULT_MODE_OPTIONS: ReadonlyArray<{
-  label: string;
-  value: OrchestratorTransitionResultMode;
-}> = [
-  { label: "Last response", value: "lastResponse" },
-  { label: "Summary", value: "summary" },
-  { label: "Summary + last response", value: "summaryAndLastResponse" },
-  { label: "No result", value: "none" },
-];
-
-type DragState = {
-  nodeId: string;
-  pointerId: number;
-  originX: number;
-  originY: number;
-  deltaX: number;
-  deltaY: number;
-  startClientX: number;
-  startClientY: number;
-};
-
-type ConnectionDragState = {
-  fromSessionId: string;
-  anchorSide: AnchorSide;
-  pointerId: number;
-  cursorX: number;
-  cursorY: number;
-  /** When reconnecting an existing transition, tracks which end is fixed. */
-  reconnect?: {
-    transitionId: string;
-    movingEnd: "from" | "to";
-    fixedSessionId: string;
-    fixedAnchor: AnchorSide;
-  };
-};
+import {
+  AGENT_OPTIONS,
+  INPUT_MODE_OPTIONS,
+  RESULT_MODE_OPTIONS,
+} from "./orchestrator-template-form-options";
+import type {
+  ConnectionDragState,
+  DragState,
+} from "./orchestrator-board-drag-state";
 
 type PendingPanelPersistence = {
   stateKey: string;
