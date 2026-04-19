@@ -62,6 +62,10 @@ import {
   toLatestFileState,
   type LatestFileState,
 } from "./diff-latest-file-state";
+import {
+  getMarkdownCaretNavigationDirection,
+  redirectCaretOutOfRemovedMarkdownSection,
+} from "./markdown-diff-caret-navigation";
 import { StructuredDiffView } from "./StructuredDiffView";
 import {
   findClosestMarkdownRange,
@@ -2825,88 +2829,6 @@ function EditableRenderedMarkdownSection({
       </div>
     </section>
   );
-}
-
-function getMarkdownCaretNavigationDirection(event: KeyboardEvent<HTMLElement>) {
-  if (event.altKey || event.ctrlKey || event.metaKey) {
-    return null;
-  }
-
-  if (event.key === "ArrowDown" || event.key === "ArrowRight" || event.key === "PageDown") {
-    return 1;
-  }
-
-  if (event.key === "ArrowUp" || event.key === "ArrowLeft" || event.key === "PageUp") {
-    return -1;
-  }
-
-  return null;
-}
-
-function redirectCaretOutOfRemovedMarkdownSection(
-  event: KeyboardEvent<HTMLElement>,
-  scrollRegion: HTMLElement | null,
-  direction: -1 | 1,
-) {
-  if (!scrollRegion) {
-    return false;
-  }
-
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) {
-    return false;
-  }
-
-  const range = selection.getRangeAt(0);
-  const removedSection = closestElementFromNode(
-    range.startContainer,
-    ".markdown-diff-rendered-section-removed",
-  );
-  if (!removedSection || !scrollRegion.contains(removedSection)) {
-    return false;
-  }
-
-  const targetSection = findAdjacentMarkdownCaretSection(scrollRegion, removedSection, direction)
-    ?? findAdjacentMarkdownCaretSection(scrollRegion, removedSection, direction > 0 ? -1 : 1);
-  if (!targetSection) {
-    return false;
-  }
-
-  event.preventDefault();
-  event.stopPropagation();
-  placeCaretInEditableMarkdownSection(targetSection, direction > 0 ? "start" : "end");
-  targetSection.scrollIntoView?.({ block: "nearest" });
-  return true;
-}
-
-function findAdjacentMarkdownCaretSection(
-  scrollRegion: HTMLElement,
-  origin: HTMLElement,
-  direction: -1 | 1,
-) {
-  const caretSections = Array.from(
-    scrollRegion.querySelectorAll<HTMLElement>("[data-markdown-caret='true']"),
-  );
-
-  if (direction > 0) {
-    return caretSections.find((section) =>
-      Boolean(origin.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING),
-    ) ?? null;
-  }
-
-  for (let index = caretSections.length - 1; index >= 0; index -= 1) {
-    const section = caretSections[index];
-    if (section && Boolean(origin.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_PRECEDING)) {
-      return section;
-    }
-  }
-
-  return null;
-}
-
-function closestElementFromNode(node: Node, selector: string) {
-  const element = node instanceof Element ? node : node.parentElement;
-  return element?.closest<HTMLElement>(selector) ?? null;
 }
 
 function getMarkdownDiffSegmentLineNumber(segment: MarkdownDiffDocumentSegment) {
