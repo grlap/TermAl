@@ -66,6 +66,13 @@ import {
   getMarkdownCaretNavigationDirection,
   redirectCaretOutOfRemovedMarkdownSection,
 } from "./markdown-diff-caret-navigation";
+import {
+  defaultDiffViewMode,
+  formatMarkdownSideSource,
+  getErrorMessage,
+  getMarkdownDiffSegmentLineNumber,
+  type DiffViewMode,
+} from "./diff-panel-helpers";
 import { StructuredDiffView } from "./StructuredDiffView";
 import {
   findClosestMarkdownRange,
@@ -121,13 +128,6 @@ const MonacoDiffEditor = lazy(() =>
   import("../MonacoDiffEditor").then(({ MonacoDiffEditor }) => ({ default: MonacoDiffEditor })),
 );
 
-type DiffViewMode =
-  | "all"
-  | "changes"
-  | "markdown"
-  | "rendered"
-  | "edit"
-  | "raw";
 type DiffViewScrollPositions = Record<DiffViewMode, number>;
 
 type ReviewState = {
@@ -2829,51 +2829,4 @@ function EditableRenderedMarkdownSection({
       </div>
     </section>
   );
-}
-
-function getMarkdownDiffSegmentLineNumber(segment: MarkdownDiffDocumentSegment) {
-  return segment.kind === "removed"
-    ? segment.oldStart ?? segment.newStart ?? null
-    : segment.newStart ?? segment.oldStart ?? null;
-}
-
-
-
-function formatMarkdownSideSource(source: MarkdownDiffPreviewSideSource) {
-  switch (source) {
-    case "head":
-      return "HEAD";
-    case "index":
-      return "Index";
-    case "worktree":
-      return "Worktree";
-    case "empty":
-      return "Empty";
-    case "patch":
-      return "Patch";
-  }
-}
-
-function defaultDiffViewMode(
-  hasStructuredPreview: boolean,
-  hasFilePath: boolean,
-  preferMarkdownView = false,
-): DiffViewMode {
-  if (preferMarkdownView) {
-    return "markdown";
-  }
-
-  if (hasStructuredPreview) {
-    return "all";
-  }
-
-  return hasFilePath ? "edit" : "raw";
-}
-
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "The request failed.";
 }
