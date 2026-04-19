@@ -25,10 +25,8 @@ import type {
   OrchestratorTemplateTransition,
   Session,
 } from "../types";
-import {
-  objectHasOwnWithFallback,
-  OrchestratorTemplatesPanel,
-} from "./OrchestratorTemplatesPanel";
+import { objectHasOwnWithFallback } from "./orchestrator-template-persistence-schema";
+import { OrchestratorTemplatesPanel } from "./OrchestratorTemplatesPanel";
 
 vi.mock("../api", () => ({
   createOrchestratorInstance: vi.fn(),

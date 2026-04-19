@@ -66,6 +66,10 @@ import {
   getOrchestratorTemplateTransitionLimitError,
   validateDraft,
 } from "./orchestrator-template-edits";
+import {
+  isPersistedSessionTemplate,
+  isTransitionTemplate,
+} from "./orchestrator-template-persistence-schema";
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
@@ -160,17 +164,6 @@ type PanelState = {
 
 type InitialPanelState = PanelState & {
   savedDraft: OrchestratorTemplateDraft;
-};
-
-// Keep isPersistedSessionTemplate in sync with every validated
-// OrchestratorSessionTemplate field restored from localStorage.
-type PersistedOrchestratorSessionTemplate = OrchestratorSessionTemplate;
-type PersistedOrchestratorTemplateTransition = Omit<
-  OrchestratorTemplateTransition,
-  "fromAnchor" | "toAnchor"
-> & {
-  fromAnchor?: OrchestratorTransitionAnchor | null;
-  toAnchor?: OrchestratorTransitionAnchor | null;
 };
 
 type PendingPanelPersistence = {
@@ -2300,92 +2293,6 @@ function readState(stateKey: string): PanelState | null {
     return null;
   }
 }
-
-const SUPPORTED_PERSISTED_TEMPLATE_AGENTS = {
-  Claude: true,
-  Codex: true,
-  Cursor: true,
-  Gemini: true,
-} satisfies Record<AgentType, true>;
-
-export function objectHasOwnWithFallback(target: object, key: PropertyKey) {
-  const objectWithHasOwn = Object as ObjectConstructor & {
-    hasOwn?: (target: object, key: PropertyKey) => boolean;
-  };
-  return (
-    objectWithHasOwn.hasOwn?.(target, key) ??
-    Object.prototype.hasOwnProperty.call(target, key)
-  );
-}
-
-function isSupportedPersistedTemplateAgent(value: unknown): value is AgentType {
-  return (
-    typeof value === "string" &&
-    objectHasOwnWithFallback(SUPPORTED_PERSISTED_TEMPLATE_AGENTS, value)
-  );
-}
-
-function isPersistedSessionTemplate(
-  value: unknown,
-): value is PersistedOrchestratorSessionTemplate {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as Partial<PersistedOrchestratorSessionTemplate>;
-  return (
-    typeof candidate.id === "string" &&
-    typeof candidate.name === "string" &&
-    isSupportedPersistedTemplateAgent(candidate.agent) &&
-    (candidate.model === undefined ||
-      candidate.model === null ||
-      typeof candidate.model === "string") &&
-    typeof candidate.instructions === "string" &&
-    typeof candidate.autoApprove === "boolean" &&
-    (candidate.inputMode === "queue" ||
-      candidate.inputMode === "consolidate") &&
-    candidate.position !== null &&
-    candidate.position !== undefined &&
-    typeof candidate.position === "object" &&
-    !Array.isArray(candidate.position) &&
-    Number.isFinite(candidate.position.x) &&
-    Number.isFinite(candidate.position.y)
-  );
-}
-
-function isTransitionTemplate(
-  value: unknown,
-): value is PersistedOrchestratorTemplateTransition {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as Partial<PersistedOrchestratorTemplateTransition>;
-  return (
-    typeof candidate.id === "string" &&
-    typeof candidate.fromSessionId === "string" &&
-    typeof candidate.toSessionId === "string" &&
-    (candidate.promptTemplate === undefined ||
-      candidate.promptTemplate === null ||
-      typeof candidate.promptTemplate === "string") &&
-    (candidate.fromAnchor === undefined ||
-      candidate.fromAnchor === null ||
-      isValidAnchor(candidate.fromAnchor)) &&
-    (candidate.toAnchor === undefined ||
-      candidate.toAnchor === null ||
-      isValidAnchor(candidate.toAnchor)) &&
-    candidate.trigger === "onCompletion" &&
-    (candidate.resultMode === "none" ||
-      candidate.resultMode === "lastResponse" ||
-      candidate.resultMode === "summary" ||
-      candidate.resultMode === "summaryAndLastResponse")
-  );
-}
-
-
-
-
-
-
-
 
 function TransitionNoteIcon() {
   return (
