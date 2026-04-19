@@ -40,6 +40,13 @@ import {
 } from "../source-renderers";
 import { type SourceSaveOptions } from "./SourcePanel";
 import { rebaseContentOntoDisk } from "./content-rebase";
+import {
+  buildReviewHandoffPrompt,
+  createReviewComment,
+  ensureReviewDocument,
+  ensureReviewFiles,
+  type ReviewOriginContext,
+} from "./diff-review-document";
 import { StructuredDiffView } from "./StructuredDiffView";
 import {
   findClosestMarkdownRange,
@@ -118,13 +125,6 @@ type ReviewState = {
   review: ReviewDocument | null;
   reviewFilePath: string | null;
   error: string | null;
-};
-
-type ReviewOriginContext = {
-  agentName: string | null;
-  messageId: string;
-  sessionId: string | null;
-  workdir: string | null;
 };
 
 type MarkdownDiffSaveHandler = () => Promise<void> | void;
@@ -2976,74 +2976,6 @@ function defaultDiffViewMode(
   }
 
   return hasFilePath ? "edit" : "raw";
-}
-
-function ensureReviewDocument(
-  review: ReviewDocument | null,
-  changeSetId: string,
-  context: {
-    changeType: DiffMessage["changeType"];
-    filePath: string | null;
-    origin: ReviewOriginContext;
-  },
-): ReviewDocument {
-  if (review) {
-    return {
-      ...review,
-      files: ensureReviewFiles(review.files ?? [], context.filePath, context.changeType),
-      threads: review.threads ?? [],
-    };
-  }
-
-  return {
-    version: 1,
-    revision: 0,
-    changeSetId,
-    origin:
-      context.origin.sessionId &&
-      context.origin.workdir &&
-      context.origin.agentName
-        ? {
-            sessionId: context.origin.sessionId,
-            messageId: context.origin.messageId,
-            agent: context.origin.agentName,
-            workdir: context.origin.workdir,
-            createdAt: new Date().toISOString(),
-          }
-        : null,
-    files: ensureReviewFiles([], context.filePath, context.changeType),
-    threads: [],
-  };
-}
-
-function ensureReviewFiles(
-  files: NonNullable<ReviewDocument["files"]>,
-  filePath: string | null,
-  changeType: DiffMessage["changeType"],
-) {
-  if (!filePath || files.some((file) => file.filePath === filePath)) {
-    return files;
-  }
-
-  return [...files, { filePath, changeType }];
-}
-
-function createReviewComment(body: string): ReviewComment {
-  const timestamp = new Date().toISOString();
-  return {
-    id: `comment-${crypto.randomUUID()}`,
-    author: "user",
-    body: body.trim(),
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  };
-}
-
-function buildReviewHandoffPrompt(reviewFilePath: string, threads: ReviewThread[]) {
-  const openThreads = threads.filter((thread) => thread.status === "open").length;
-  return openThreads > 0
-    ? `Please address the ${openThreads} open review thread${openThreads === 1 ? "" : "s"} in ${reviewFilePath}. Reply in each thread and resolve threads you have handled.`
-    : `Review file: ${reviewFilePath}`;
 }
 
 function createInitialLatestFileState(filePath: string | null): LatestFileState {
