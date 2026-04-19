@@ -20,14 +20,14 @@ import {
   type SlashPaletteItem,
 } from "./session-slash-palette";
 import {
-  MessageAttachmentList,
-  MessageMeta,
   MessageSlot,
   PanelEmptyState,
   collectUserPromptHistory,
-  imageAttachmentSummaryLabel,
-  promptCommandMetaLabel,
 } from "./session-message-leaves";
+import {
+  PendingPromptCard,
+  RunningIndicator,
+} from "./session-activity-cards";
 import {
   DEFAULT_ESTIMATED_MESSAGE_HEIGHT,
   DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
@@ -2394,102 +2394,4 @@ const SessionComposer = memo(function SessionComposer({
   previous.isRefreshingAgentCommands === next.isRefreshingAgentCommands &&
   previous.agentCommandsError === next.agentCommandsError &&
   previous.showNewResponseIndicator === next.showNewResponseIndicator
-);
-
-export function RunningIndicator({
-  agent,
-  lastPrompt,
-}: {
-  agent: Session["agent"];
-  lastPrompt: string | null;
-}) {
-  const isCommand = Boolean(lastPrompt?.trim().startsWith("/"));
-
-  return (
-    <article
-      className={`activity-card activity-card-live ${lastPrompt ? "has-tooltip" : ""}`}
-      role="status"
-      aria-live="polite"
-    >
-      <div className="activity-spinner" aria-hidden="true" />
-      <div className="activity-card-copy">
-        <div className="activity-card-heading">
-          <div className="card-label">Live turn</div>
-          {isCommand ? <span className="message-meta-tag">Command</span> : null}
-        </div>
-        <h3>{agent} is working</h3>
-        <p>{isCommand ? "Executing a command..." : "Waiting for the next chunk of output..."}</p>
-      </div>
-      {lastPrompt ? (
-        <div className="activity-tooltip" role="tooltip">
-          <div className="activity-tooltip-label">{isCommand ? "Command" : "Last prompt"}</div>
-          <p>{lastPrompt}</p>
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
-const PendingPromptCard = memo(function PendingPromptCard({
-  prompt,
-  onCancel,
-  searchQuery = "",
-  searchHighlightTone = "match",
-}: {
-  prompt: PendingPrompt;
-  onCancel: () => void;
-  searchQuery?: string;
-  searchHighlightTone?: SearchHighlightTone;
-}) {
-  const commandLabel = promptCommandMetaLabel(prompt.text, prompt.expandedText);
-
-  return (
-    <article className="message-card bubble bubble-you pending-prompt-card">
-      <div className="pending-prompt-header">
-        <MessageMeta
-          author="you"
-          timestamp={prompt.timestamp}
-          trailing={
-            commandLabel ? <span className="message-meta-tag">{commandLabel}</span> : undefined
-          }
-        />
-        <button
-          className="pending-prompt-dismiss"
-          type="button"
-          onClick={onCancel}
-          aria-label="Cancel queued prompt"
-          title="Cancel queued prompt"
-        >
-          x
-        </button>
-      </div>
-      {prompt.attachments && prompt.attachments.length > 0 ? (
-        <MessageAttachmentList
-          attachments={prompt.attachments}
-          searchQuery={searchQuery}
-          searchHighlightTone={searchHighlightTone}
-        />
-      ) : null}
-      {prompt.text ? (
-        <>
-          <p className="plain-text-copy">
-            {renderHighlightedText(prompt.text, searchQuery, searchHighlightTone)}
-          </p>
-          {prompt.expandedText ? (
-            <ExpandedPromptPanel
-              expandedText={prompt.expandedText}
-              searchQuery={searchQuery}
-              searchHighlightTone={searchHighlightTone}
-            />
-          ) : null}
-        </>
-      ) : (
-        <p className="support-copy">{imageAttachmentSummaryLabel(prompt.attachments?.length ?? 0)}</p>
-      )}
-    </article>
-  );
-}, (previous, next) =>
-  previous.prompt === next.prompt &&
-  previous.searchQuery === next.searchQuery &&
-  previous.searchHighlightTone === next.searchHighlightTone
 );

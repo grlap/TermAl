@@ -5,9 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
-  RunningIndicator,
   VirtualizedConversationMessageList,
 } from "./AgentSessionPanel";
+import { RunningIndicator } from "./session-activity-cards";
 import {
   getAdjustedVirtualizedScrollTopForHeightChange,
   getScrollContainerBottomGap,
