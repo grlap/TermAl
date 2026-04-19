@@ -17,7 +17,8 @@ import {
 import { copyTextToClipboard } from "../clipboard";
 import { SESSION_DRAG_MIME_TYPE } from "../session-drag";
 import type { WorkspaceTabDrag } from "../tab-drag";
-import { PaneTabs, formatVisibleTabLabel, type PaneTabDecoration } from "./PaneTabs";
+import { PaneTabs, type PaneTabDecoration } from "./PaneTabs";
+import { formatVisibleTabLabel } from "./pane-tab-labels";
 import type { CodexState, Project, RemoteConfig, Session } from "../types";
 import type { WorkspaceTab } from "../workspace";
 

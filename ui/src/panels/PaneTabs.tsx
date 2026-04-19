@@ -26,6 +26,11 @@ import {
   relativizePathToWorkspace,
 } from "../path-display";
 import {
+  formatPathTabLabel,
+  formatTabLabel,
+  formatVisibleTabLabel,
+} from "./pane-tab-labels";
+import {
   createBuiltinLocalRemote,
   isLocalRemoteId,
   remoteConnectionLabel,
@@ -1429,88 +1434,6 @@ function CodexRateLimitMeter({
       </div>
     </div>
   );
-}
-
-export function formatVisibleTabLabel(tab: WorkspaceTab, session: Session | null) {
-  if (tab.kind === "filesystem") {
-    return formatPathTabLabel(tab.rootPath, "Workspace");
-  }
-
-  if (tab.kind === "gitStatus") {
-    return formatPathTabLabel(tab.workdir, "Workspace");
-  }
-
-  if (tab.kind === "terminal") {
-    return formatPathTabLabel(tab.workdir, "Terminal");
-  }
-
-  return formatTabLabel(tab, session);
-}
-
-function formatTabLabel(tab: WorkspaceTab, session: Session | null) {
-  if (tab.kind === "session") {
-    return session?.name ?? tab.sessionId;
-  }
-
-  if (tab.kind === "source") {
-    return formatPathTabLabel(tab.path, "Open file");
-  }
-
-  if (tab.kind === "filesystem") {
-    return `Files: ${formatPathTabLabel(tab.rootPath, "Workspace")}`;
-  }
-
-  if (tab.kind === "gitStatus") {
-    return `Git status: ${formatPathTabLabel(tab.workdir, "Workspace")}`;
-  }
-
-  if (tab.kind === "terminal") {
-    return `Terminal: ${formatPathTabLabel(tab.workdir, "Workspace")}`;
-  }
-
-  if (tab.kind === "controlPanel") {
-    return "Control panel";
-  }
-
-  if (tab.kind === "orchestratorList") {
-    return "Orchestrators";
-  }
-
-  if (tab.kind === "canvas") {
-    return "Canvas";
-  }
-
-  if (tab.kind === "orchestratorCanvas") {
-    return tab.templateId ? `Orchestration: ${tab.templateId}` : "New orchestration";
-  }
-
-  if (tab.kind === "sessionList") {
-    return "Sessions";
-  }
-
-  if (tab.kind === "projectList") {
-    return "Projects";
-  }
-
-  if (tab.kind === "instructionDebugger") {
-    return `Instructions: ${formatPathTabLabel(tab.workdir, "Workspace")}`;
-  }
-
-  return `Diff: ${formatPathTabLabel(tab.filePath, "Preview")}`;
-}
-
-function formatPathTabLabel(path: string | null, fallback: string) {
-  const trimmed = path?.trim();
-  if (!trimmed) {
-    return fallback;
-  }
-
-  const segments = trimmed.split(/[/\\]+/).filter(Boolean);
-  if (segments.length === 0) {
-    return trimmed;
-  }
-
-  return segments[segments.length - 1] ?? trimmed;
 }
 
 function formatRateLimitResetLabel(resetsAt: number | null, label: string) {
