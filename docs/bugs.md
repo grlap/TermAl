@@ -51,54 +51,23 @@ another fetch and fired a duplicate request. Fix in
 skips it. Full vitest suite is now 46 files / 893 tests, 0
 failures.
 
-## Dead `lazy(MonacoCodeEditor)` handle in `DiffPanel.tsx`
-
-**Severity:** Low - `ui/src/panels/DiffPanel.tsx:122-124` still declares `const MonacoCodeEditor = lazy(() => import("../MonacoCodeEditor")...)` after commit `3d89d02` moved the `renderEditFileView` JSX out to `./render-edit-file-view.tsx`. The DiffPanel body now only references the type aliases (`MonacoCodeEditorHandle`, `MonacoCodeEditorStatus`) and the ref; nothing uses the lazy wrapper as JSX. The new module (`render-edit-file-view.tsx`) has its own identical lazy handle, and its file header explicitly documents the paired-lazy choice. But DiffPanel's copy is now inert — tree-shakable in the bundle, but a red herring in the source.
-
-**Current behavior:**
-- DiffPanel declares `const MonacoCodeEditor = lazy(...)` at lines 122-124.
-- No JSX reference to that symbol remains in DiffPanel.tsx.
-- The sibling `render-edit-file-view.tsx` declares a separate `lazy()` handle that is the one actually rendered.
-
-**Proposal:**
-- Delete `const MonacoCodeEditor = lazy(...)` from DiffPanel.tsx.
-- If `lazy` / `Suspense` become unused in DiffPanel after the deletion, drop them from the `react` import on line 1 as well.
-
-## Unused `type ContentRebaseResult` import in `SourcePanel.tsx`
-
-**Severity:** Low - `ui/src/panels/SourcePanel.tsx:15` imports `type ContentRebaseResult` from `./content-rebase`, but after the rebase-helpers extraction only `rebaseContentOntoDisk` is referenced at runtime. The type alias moved with the function but the import was not pruned.
-
-**Current behavior:**
-- `import { rebaseContentOntoDisk, type ContentRebaseResult } from "./content-rebase";` at SourcePanel.tsx:14-17.
-- `ContentRebaseResult` is never referenced in SourcePanel.tsx.
-- `tsc --noEmit` passes because `noUnusedLocals` is not enabled in the tsconfig.
-
-**Proposal:**
-- Drop `type ContentRebaseResult` from the import; keep `rebaseContentOntoDisk`.
-
-## `LatestFileState.contentHash` inconsistent between creators
-
-**Severity:** Low - `ui/src/panels/diff-latest-file-state.ts:43` declares `contentHash?: string | null;` (optional). `toLatestFileState` always writes `contentHash: response.contentHash ?? null`. `createInitialLatestFileState` omits the field entirely. The two creation paths therefore disagree on whether `contentHash === undefined` vs `=== null` for a just-opened tab. This is byte-identical to the pre-extraction behaviour in DiffPanel.tsx — inherited, not introduced by the split — but the inconsistency is now isolated in one focused module, making it a clean one-line fix.
-
-**Current behavior:**
-- Idle / loading state has `contentHash` absent.
-- Ready state has `contentHash: string | null`.
-- Any caller that distinguishes `undefined` vs `null` would see different values for the two origin paths.
-
-**Proposal:**
-- Set `contentHash: null` in `createInitialLatestFileState` for both the idle and loading branches, or tighten the type to `contentHash: string | null` (non-optional) so the omission is a compile error.
-
-## `rendered-diff-view.tsx` header comment doesn't match the code
-
-**Severity:** Note - the "What this file does NOT own" block in `ui/src/panels/rendered-diff-view.tsx` claims the diff panel and source panel "compose their synthetic Markdown slightly differently (the source pane joins regions with a plain separator; the diff pane shares the same region-header format but stays a distinct consumer)." In practice both modules (`composeRenderedDiffMarkdown` in `rendered-diff-view.tsx`, `composeRendererPreviewMarkdown` in `source-renderer-preview.tsx`) join regions with `"\n\n"` and emit the same `**Lines N–M**` header followed by an identical fence body. The implementations are near-identical.
-
-**Current behavior:**
-- Header comment describes a distinction the code does not make.
-- A future reader could rely on the note and introduce a real behavioural divergence, or spend time hunting for the described difference.
-
-**Proposal:**
-- Update the header note to accurately describe the near-duplicated behaviour (e.g., "Kept separate from `./source-renderer-preview`'s near-identical `composeRendererPreviewMarkdown` / `composeRendererPreviewRegion` because the two panels were not unified in the split batch; consider consolidating into a shared helper in a future pass.").
-- Or: extract a shared `panels/synthetic-rendered-markdown.ts` helper that both consumers import.
+Also fixed in the current tree (Tier 0 cleanup batch): the four
+review-cycle findings from the previous batch (dead
+`lazy(MonacoCodeEditor)` wrapper in `DiffPanel.tsx`, unused
+`type ContentRebaseResult` import in `SourcePanel.tsx`,
+`LatestFileState.contentHash` mismatch between the idle/loading
+creator and the ready creator, and the inaccurate
+`rendered-diff-view.tsx` "owns/does not own" header note) are all
+cleared. The lazy wrapper is gone from DiffPanel (the sibling
+`render-edit-file-view.tsx` keeps its own); SourcePanel's import
+is tight; `createInitialLatestFileState` now sets
+`contentHash: null` on both branches so callers never see
+`undefined` drift; and the `rendered-diff-view.tsx` header
+accurately describes the near-identical `composeRenderedDiffMarkdown`
+/ `composeRendererPreviewMarkdown` pair and notes that
+consolidation into a shared helper is a deliberate future pass.
+The stray `a` / `2` / `a2` placeholder lines after the Mermaid
+fence in `docs/mermaid-demo.md` are also removed.
 
 ## `markdown-diff-edit-pipeline` paste sanitizer has no direct unit tests
 
@@ -224,19 +193,6 @@ That is too coarse for the transcript and lifecycle model. If a session leaves t
 - Derive retry display state from both session lifecycle and subsequent assistant message type.
 - Keep the latest retry notice live only while the owning session is active or otherwise busy.
 - Treat older retry attempts as superseded while a later retry notice is still the newest assistant output, and mark retry notices resolved only after later non-retry assistant output exists.
-
-## Mermaid demo contains stray placeholder paragraphs
-
-**Severity:** Low - `docs/mermaid-demo.md` now has stray placeholder lines after the Mermaid fenced code block.
-
-This looks like accidental placeholder text and makes the demo document noisier for Markdown/Mermaid validation.
-
-**Current behavior:**
-- The Mermaid demo fence is followed by `a`, a blank line, `2`, and `a2`.
-- The extra lines are outside the code fence and render as visible Markdown content.
-
-**Proposal:**
-- Remove the stray placeholder lines unless they are intentional fixtures.
 
 ## Resolved retry notice text diverges from session find indexing
 
