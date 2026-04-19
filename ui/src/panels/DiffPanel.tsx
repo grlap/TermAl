@@ -74,6 +74,10 @@ import {
   type DiffViewMode,
 } from "./diff-panel-helpers";
 import { RawPatchView } from "./raw-patch-view";
+import {
+  RenderedDiffView,
+  buildMarkdownDiffPreview,
+} from "./rendered-diff-view";
 import { StructuredDiffView } from "./StructuredDiffView";
 import {
   findClosestMarkdownRange,
@@ -1782,127 +1786,6 @@ function renderEditFileView({
   );
 }
 
-function buildMarkdownDiffPreview(
-  documentContent: GitDiffDocumentContent | null | undefined,
-  documentEnrichmentNote: string | null | undefined,
-  preview: ReturnType<typeof buildDiffPreviewModel>,
-  changeType: DiffMessage["changeType"],
-): MarkdownDiffPreviewModel | null {
-  if (documentContent) {
-    const completeness: MarkdownDocumentCompleteness = documentContent.isCompleteDocument ? "full" : "patch";
-    return {
-      before: {
-        ...documentContent.before,
-        completeness,
-        note: documentContent.note ?? null,
-      },
-      after: {
-        ...documentContent.after,
-        completeness,
-        note: documentContent.note ?? null,
-      },
-    };
-  }
-
-  if (!preview.hasStructuredPreview) {
-    return null;
-  }
-
-  const completeness: MarkdownDocumentCompleteness = "patch";
-  const note = documentEnrichmentNote ?? preview.note ?? null;
-  return {
-    before: {
-      content: changeType === "create" ? "" : preview.originalText,
-      source: "patch",
-      completeness,
-      note,
-    },
-    after: {
-      content: preview.modifiedText,
-      source: "patch",
-      completeness,
-      note,
-    },
-  };
-}
-
-// Read-only renderer preview for non-Markdown diff targets (Phase 4
-// of `docs/features/source-renderers.md`). Composes each detected
-// renderable region into a synthetic Markdown fragment (same
-// strategy as `SourcePanel`'s `RendererPreviewPane`) and routes
-// through `MarkdownContent` so the existing safe Mermaid/KaTeX
-// wiring handles the actual rendering. Edits for the file's
-// underlying source stay in Monaco's Edit mode — this view is
-// intentionally display-only.
-//
-// Incomplete-document (patch-only) guard: when the backend returned
-// a diff without `documentContent` (large files, unsupported binary
-// types, read errors), the detected regions come from the
-// after-side content we DO have — which might be the local worktree
-// rather than the correct staged/unstaged side. We label the
-// preview "Patch-only" so reviewers know the rendering is a best-
-// effort approximation and can fall back to the raw diff for
-// authoritative review.
-function RenderedDiffView({
-  appearance,
-  documentPath,
-  isCompleteDocument,
-  regions,
-  workspaceRoot,
-}: {
-  appearance: MonacoAppearance;
-  documentPath: string | null;
-  isCompleteDocument: boolean;
-  regions: SourceRenderableRegion[];
-  workspaceRoot: string | null;
-}) {
-  const syntheticMarkdown = useMemo(
-    () => composeRenderedDiffMarkdown(regions),
-    [regions],
-  );
-  return (
-    <div
-      className="diff-rendered-view"
-      aria-label="Rendered diff preview"
-    >
-      {!isCompleteDocument ? (
-        <p className="support-copy diff-preview-note">
-          Patch-only rendering: the backend did not supply the full
-          document, so the preview is a best-effort approximation
-          from the raw diff. Use the Raw patch view for authoritative
-          review.
-        </p>
-      ) : null}
-      <MarkdownContent
-        appearance={appearance}
-        documentPath={documentPath}
-        markdown={syntheticMarkdown}
-        workspaceRoot={workspaceRoot}
-      />
-    </div>
-  );
-}
-
-function composeRenderedDiffMarkdown(
-  regions: SourceRenderableRegion[],
-): string {
-  if (regions.length === 0) {
-    return "";
-  }
-  return regions
-    .map((region) => {
-      const header = `**Lines ${region.sourceStartLine}–${region.sourceEndLine}**`;
-      if (region.renderer === "mermaid") {
-        return `${header}\n\n\`\`\`mermaid\n${region.displayText.replace(/\s+$/, "")}\n\`\`\``;
-      }
-      if (region.renderer === "math") {
-        return `${header}\n\n$$\n${region.displayText.replace(/\s+$/, "")}\n$$`;
-      }
-      return `${header}\n\n${region.displayText}`;
-    })
-    .join("\n\n");
-}
-
 function MarkdownDiffView({
   appearance,
   canEdit,
@@ -2050,7 +1933,6 @@ function MarkdownDiffView({
     </div>
   );
 }
-
 
 function MarkdownDiffDocument({
   allowReadOnlyCaret,
