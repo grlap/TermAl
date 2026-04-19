@@ -419,6 +419,16 @@ describe("DiffPanel", () => {
 
     await clickAndSettle(renderedButton);
 
+    // The complete-document path must NOT label the preview
+    // "Patch-only rendering". That banner is reserved for the
+    // fallback case at line ~431 where `documentContent` is
+    // missing. A regression that flipped the gating logic (e.g.,
+    // rendering the banner unconditionally) would pass the
+    // positive assertion in the sibling test without this
+    // negative assertion here.
+    expect(
+      screen.queryByText(/Patch-only rendering/i),
+    ).not.toBeInTheDocument();
     // The view renders a synthetic Markdown fragment; the regions'
     // line-range header should appear.
     expect(screen.getByText(/Lines 1[–-]3/)).toBeInTheDocument();

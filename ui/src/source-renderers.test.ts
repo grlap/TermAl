@@ -101,6 +101,35 @@ describe("source-renderers: count helpers", () => {
     expect(countMathExpressions(md)).toBe(0);
   });
 
+  it("counts two consecutive multi-line `$$...$$` blocks separated by a blank line", () => {
+    // Pins the state-machine toggle in `countMathExpressions`: a
+    // trailing `$$` that closes a block, followed by a new opening
+    // `$$` on a later line, must re-open the counter so the two
+    // blocks land as 2. A regression that left the state "inside
+    // block" after the close would report 1 (one long block) or 0
+    // (ignored second opener).
+    const md = ["$$", "x = 1", "$$", "", "$$", "y = 2", "$$"].join("\n");
+    expect(countMathExpressions(md)).toBe(2);
+  });
+
+  it("does not count `$$` inside a fenced code block as math", () => {
+    // Complements the single-`$` inside-fence test above: the existing
+    // coverage only proves bash-style variables are ignored. A
+    // regression that special-cased double-dollar before consulting
+    // the fence state would incorrectly count these as block math.
+    const md = ["```", "$$", "not math", "$$", "```"].join("\n");
+    expect(countMathExpressions(md)).toBe(0);
+  });
+
+  it("counts same-line `$$...$$` pairs as block math", () => {
+    // Pins the `sameLineBlocks` branch — both `$$` openers and
+    // closers appear on a single prose line, so the counter picks
+    // them up outside the multi-line block path.
+    expect(
+      countMathExpressions("Block: $$x=1$$ and $$y=2$$ both."),
+    ).toBe(2);
+  });
+
   it("returns zero for documents with no math or fences", () => {
     expect(countMathExpressions("A plain paragraph.")).toBe(0);
     expect(countMermaidFences("A plain paragraph.")).toBe(0);

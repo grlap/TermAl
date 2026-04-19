@@ -349,6 +349,86 @@ describe("MarkdownContent Mermaid diagrams", () => {
     // container did not propagate the runaway SVG dimensions.
     expect(container.querySelector(".mermaid-diagram-frame")).toBe(frame);
   });
+
+  it("reserves a 24-px vertical slack for the horizontal scrollbar on normal-size Mermaid diagrams", async () => {
+    // The iframe srcDoc CSS uses `overflow-x: auto; overflow-y: hidden`
+    // so wide diagrams can scroll horizontally inside the iframe, but
+    // the horizontal scrollbar eats ~16 px at the bottom of the frame.
+    // The production code in `getMermaidDiagramFrameStyle` reserves
+    // `Math.ceil(dimensions.height) + 24` to prevent the scrollbar
+    // chrome from clipping the last row (and to absorb a few pixels
+    // of render drift from the temp-DOM's font metrics). An earlier
+    // version used `+ 8`; this test pins the `+ 24` contract so a
+    // regression back to `+ 8` fails here instead of silently shipping
+    // a diagram that looks one row short.
+    mermaidRenderMock.mockResolvedValueOnce({
+      diagramType: "flowchart",
+      svg: '<svg data-testid="mermaid-svg" viewBox="0 0 300 80"><text>ok</text></svg>',
+    });
+
+    render(
+      <MarkdownContent
+        markdown={["```mermaid", "flowchart TD", "  A --> B", "```"].join("\n")}
+      />,
+    );
+
+    const frame = await screen.findByTestId("mermaid-frame");
+    const heightPx = Number.parseInt(frame.style.height, 10);
+    const widthPx = Number.parseInt(frame.style.width, 10);
+    // viewBox height 80 + 24 slack = 104; within [60, 4096] so not clamped.
+    expect(heightPx).toBe(104);
+    // viewBox width 300 + 2 = 302; within [180, 4096] so not clamped.
+    expect(widthPx).toBe(302);
+  });
+
+  it("clamps Mermaid iframe dimensions up to the lower bound when the viewBox is negative", async () => {
+    // `readMermaidSvgDimensions` accepts signed values via its
+    // `[-+]?` regex and `Number.isFinite` check, so a negative
+    // viewBox threads through to the clamp. The clamp's lower bound
+    // (180 width, 60 height) keeps the frame legible even when the
+    // SVG reports nonsense. Protects against hostile or buggy agent
+    // output producing `viewBox="0 0 -W -H"`.
+    mermaidRenderMock.mockResolvedValueOnce({
+      diagramType: "flowchart",
+      svg: '<svg data-testid="mermaid-svg" viewBox="0 0 -100 -100"><text>negative</text></svg>',
+    });
+
+    render(
+      <MarkdownContent
+        markdown={["```mermaid", "flowchart TD", "  A --> B", "```"].join("\n")}
+      />,
+    );
+
+    const frame = await screen.findByTestId("mermaid-frame");
+    const widthPx = Number.parseInt(frame.style.width, 10);
+    const heightPx = Number.parseInt(frame.style.height, 10);
+    expect(widthPx).toBe(180);
+    expect(heightPx).toBe(60);
+  });
+
+  it("clamps Mermaid iframe dimensions up to the lower bound when the viewBox is zero", async () => {
+    // Similar lower-clamp case but with a `0 0` viewBox — this can
+    // happen when Mermaid renders an empty or failed diagram whose
+    // temp-DOM reports zero dimensions. The frame must still be
+    // visible at the lower-bound size so the rendered content (or
+    // the Mermaid error overlay) is reachable.
+    mermaidRenderMock.mockResolvedValueOnce({
+      diagramType: "flowchart",
+      svg: '<svg data-testid="mermaid-svg" viewBox="0 0 0 0"><text>zero</text></svg>',
+    });
+
+    render(
+      <MarkdownContent
+        markdown={["```mermaid", "flowchart TD", "  A --> B", "```"].join("\n")}
+      />,
+    );
+
+    const frame = await screen.findByTestId("mermaid-frame");
+    const widthPx = Number.parseInt(frame.style.width, 10);
+    const heightPx = Number.parseInt(frame.style.height, 10);
+    expect(widthPx).toBe(180);
+    expect(heightPx).toBe(60);
+  });
 });
 
 describe("MessageCard memoization", () => {
