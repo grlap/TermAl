@@ -171,7 +171,20 @@ export function isExternalMarkdownHref(href: string) {
 }
 
 export function transformMarkdownLinkUri(href: string) {
-  return isExternalMarkdownHref(href) ? uriTransformer(href) : href;
+  if (!isExternalMarkdownHref(href)) {
+    return href;
+  }
+  const transformed = uriTransformer(href);
+  // `react-markdown`'s `uriTransformer` neutralizes dangerous
+  // protocols (`javascript:`, `vbscript:`, most `data:` URIs) by
+  // substituting the literal string `"javascript:void(0)"`. React
+  // ≥18.3 emits a console warning every time that string reaches
+  // the DOM and is slated to block it entirely in a future version.
+  // Swap the placeholder for an empty string so React doesn't see a
+  // `javascript:` URL at all; the `a` renderer in `./message-cards`
+  // renders an empty href as a plain `<span>` so there's no inert
+  // same-page-navigate behaviour either.
+  return transformed === "javascript:void(0)" ? "" : transformed;
 }
 
 export function safeDecodeMarkdownHref(href: string) {

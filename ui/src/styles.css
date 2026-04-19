@@ -3849,15 +3849,6 @@ textarea {
   min-height: 1px;
 }
 
-/* Hide the wrapper (but keep its children in the DOM so ResizeObserver
-   can measure them) during the brief post-activation measurement phase.
-   `visibility: hidden` is deliberate: `display: none` would prevent
-   child layout/measurement, and `opacity: 0` would still let the
-   browser paint the intermediate wrong-position state. */
-.virtualized-message-list.is-measuring-post-activation {
-  visibility: hidden;
-}
-
 .load-earlier-messages {
   display: flex;
   justify-content: center;
@@ -3881,8 +3872,21 @@ textarea {
   pointer-events: auto;
 }
 
+/* Force `content-visibility: visible` on everything inside the
+   active conversation page. The per-element `content-visibility: auto`
+   rules above are meant to skip layout/paint for off-screen messages
+   in *inactive* cached pages; for the active page the virtualized
+   list already handles that by only rendering cards in the overscan
+   window, so leaving `content-visibility: auto` on in-view slots is
+   pure cost. Worse, each off-screen→on-screen transition as the user
+   scrolls re-measures the card, fires `ResizeObserver`, and triggers
+   a layout rebuild + `scrollTop` adjustment — the exact flicker the
+   user sees mid-scroll. `.message-slot` was previously missing from
+   this override, so every card wrapper inside the active page still
+   got the auto-skip behaviour. */
 .session-conversation-page.is-active,
 .session-conversation-page.is-active .message-card,
+.session-conversation-page.is-active .message-slot,
 .session-conversation-page.is-active .thread-notice,
 .session-conversation-page.is-active .empty-state {
   content-visibility: visible;

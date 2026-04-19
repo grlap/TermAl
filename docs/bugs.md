@@ -22,6 +22,163 @@ counter coverage now includes consecutive multiline `$$` blocks, `$$` inside
 fenced code, and same-line `$$...$$` pairs, and Mermaid diagram tests now cover
 normal-size scrollbar slack plus negative/zero viewBox lower-bound clamping.
 
+## Conversation cards overlap for one frame during scroll through long messages
+
+**Severity:** Medium - `estimateConversationMessageHeight` in `ui/src/panels/conversation-virtualization.ts` produces an initial height for unmeasured cards using a per-line pixel heuristic with line-count caps (`Math.min(outputLineCount, 14)` for `command`, `Math.min(diffLineCount, 20)` for `diff`) and overall ceilings of 1400/1500/1600/1800/900 px. For heavy messages — review-tool output, build logs, large patches — the estimate is 20×-40× under the rendered height, so `layout.tops[index]` for cards below an under-priced neighbour places them inside the neighbour's rendered area. The user sees the cards painted on top of each other for one frame, until the `ResizeObserver` measurement lands and `setLayoutVersion` rebuilds the layout.
+
+An initial attempt to fix this by raising estimates to a single 40k px cap (and adding `visibility: hidden` per-card until measured) was reverted after it introduced two worse regressions: (1) per-card `visibility: hidden` combined with the wrapper's `is-measuring-post-activation` hide left the whole transcript empty for a frame whenever the virtualization window shifted before measurements landed; (2) raising the cap made the `getAdjustedVirtualizedScrollTopForHeightChange` shrink-adjustment huge (40k estimate → 8k actual = −32k scrollTop jump), so slow wheel-scrolling through heavy transcripts caused visible scroll jumps of tens of thousands of pixels. The revert restores the one-frame overlap as the known limitation.
+
+**Current behavior:**
+- Initial layout uses estimates that badly under-price long commands / diffs.
+- First paint places subsequent cards overlapping the under-priced one for one frame.
+- Next frame, `ResizeObserver` fires, `setLayoutVersion` rebuilds, positions correct.
+- Visible to the user as a brief "jumble" during scroll.
+
+**Proposal:**
+- Proper fix likely needs off-screen pre-measurement (render the card in a hidden measure-only tree, read `getBoundingClientRect` height, then place in the layout) rather than a formula-based estimate. This is a bigger change than a single pure-function tweak.
+- Alternative: batch-measurement pass when the virtualization window shifts — hide the wrapper briefly, mount the newly-entering cards, wait for all their measurements, then reveal.
+- Not: raise the estimator cap. Large overshoots trade one visible artifact for a worse one.
+
+## Near-bottom streaming re-pins the viewport and fights user scroll-up
+
+**Severity:** High - `ui/src/panels/AgentSessionPanel.tsx::handleHeightChange` pins `scrollTop` to the bottom on every measurement while `shouldKeepBottomAfterLayoutRef.current || isScrollContainerNearBottom(node)` is true. The near-bottom threshold is 72 px (from `isScrollContainerNearBottom`). During active streaming, when `ResizeObserver` fires dozens of times per second as the streaming message's height grows, any user wheel-up that moves the viewport less than 72 px above the bottom leaves `isScrollContainerNearBottom` true, so the next measurement snaps the scroll back to the bottom before the user can reach 73+ px.
+
+The effect is oscillation: the user wheels up 50 px, a streaming tick pins them back, they wheel up again, snap back again. They can't escape the 72 px band while streaming is active.
+
+The current staged cooldown tracks recent wheel, touch, and keyboard scroll input, but only checks that signal in the non-bottom height-adjustment branch. The sticky-bottom branch runs first, so the reviewed change still re-pins the exact near-bottom case it was meant to fix.
+
+**Current behavior:**
+- `syncViewport` only clears `shouldKeepBottomAfterLayoutRef.current` when `!isScrollContainerNearBottom(node)`, so the near-bottom threshold gates the clear.
+- `handleHeightChange`'s `shouldKeepBottom = refValue || nearBottom` re-pins on every measurement while either is true.
+- The current cooldown skips only the non-bottom `getAdjustedVirtualizedScrollTopForHeightChange` write; it does not suppress bottom writes while the user is still inside the near-bottom band.
+- During streaming measurements fire frequently enough that the pin effectively wins any slow wheel scroll.
+
+**Proposal:**
+- Distinguish user-initiated scrolls from programmatic `scrollTop` writes. Track a "last programmatic scrollTop" and treat any `scrollTop` that doesn't match it as a user scroll → clear the pin immediately, regardless of the 72 px threshold.
+- Or: add a "user recently scrolled" debounce ref that wins over measurement-driven pinning for a few hundred ms after each scroll event.
+- Ensure recent direct input also clears or suppresses the sticky-bottom branch before it writes `scrollTop` back to the bottom.
+- Add a regression test that dispatches a wheel-up while still within the near-bottom band, triggers a streaming height measurement, and asserts the viewport is not re-pinned during the cooldown.
+- Either way, the fix is detect-user-scroll, not threshold-tune.
+
+## `pendingLoadMoreAnchorRef` can strand across a no-op `setRenderWindowSize`
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx` auto-load-older-messages scroll handler captures `pendingLoadMoreAnchorRef.current = { anchorMessageId, anchorOffsetInViewport }` immediately before calling `setRenderWindowSize((prev) => Math.min(prev + RENDER_WINDOW_LOAD_MORE, messages.length))`. If `prev` is already `messages.length` (all older messages already loaded, or the "load more" guard `hasOlderMessages` is racey with the ref set), the functional updater returns `prev` unchanged; React bails out with no commit, so the consuming `useLayoutEffect([renderWindowSize, scrollContainerRef])` never fires and the ref is left populated.
+
+Later, when `renderWindowSize` changes for an unrelated reason — the render-window auto-growth on new streaming messages at lines 898-905 is the obvious trigger — that useLayoutEffect wakes up, finds the stale anchor, and writes `scrollTop` based on a viewport offset captured during a scroll gesture that may have happened many deltas ago. The visible symptom is a surprise scroll jump after a streaming message arrives.
+
+**Current behavior:**
+- Scroll handler unconditionally writes `pendingLoadMoreAnchorRef.current` before `setRenderWindowSize`.
+- Only the "success" path in the consuming `useLayoutEffect` clears the ref; the `!node` / `newIndex === undefined` / `!anchor` early returns leave it populated.
+- A no-op `setRenderWindowSize` never schedules the commit that would drain the ref.
+
+**Proposal:**
+- Clear `pendingLoadMoreAnchorRef.current = null` in every early-return branch of the consuming `useLayoutEffect`.
+- Or gate the anchor write inside the scroll handler on whether growth will actually occur (read `renderWindowSize < messages.length` through a ref before the setState call).
+- Or both — belt-and-suspenders is cheap here because this path already captures per-scroll state.
+
+## Load earlier messages button bypasses the prepend anchor
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx` now captures `pendingLoadMoreAnchorRef` before the near-top auto-load path grows the render window, but the explicit "Load earlier messages" button still calls `setRenderWindowSize` directly.
+
+That leaves two paths for the same prepend lifecycle: scroll-triggered load preserves the first visible message's viewport offset, while button-triggered load can still paint the grown document at the old `scrollTop`. The new comments also claim the anchor covers the explicit button, so the code and contract are currently out of sync.
+
+**Current behavior:**
+- The near-top scroll handler captures an anchor message id and offset before `setRenderWindowSize`.
+- The explicit load-earlier button bypasses that anchor capture and mutates `renderWindowSize` directly.
+- No test clicks the button and asserts the visible message offset is preserved.
+
+**Proposal:**
+- Extract the anchored window-growth logic into a shared helper used by both the near-top auto-load handler and the explicit button.
+- Add a test that clicks "Load earlier messages" with a controlled `scrollTop` and verifies the first visible message keeps the same viewport offset after prepending.
+
+## Auto-load-older-messages effect re-subscribes its scroll listener every tick
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx` new-auto-load effect depends on `viewportVisibleRange.startIndex`, which is derived from the `viewport.scrollTop` React state updated by `syncViewport`. That state updates on every scroll event (guarded by `setViewport` equality but still fires constantly during wheel-scroll). Each dep change runs the effect cleanup (`removeEventListener`) and then re-runs the effect body (`addEventListener`). The listener churn is dozens of rebinds per second during active scroll.
+
+Between `removeEventListener` and `addEventListener` there is a short window where no scroll listener is bound; a wheel event landing exactly in that window is dropped. Even when the scheduling lines up, the constant churn wastes CPU on event-listener bookkeeping.
+
+**Current behavior:**
+- `useEffect(() => { ... }, [hasOlderMessages, isActive, messages.length, scrollContainerRef, viewportVisibleRange.startIndex])` rebinds per scroll tick.
+- Handler closure already reads `messagesRef.current` and `layoutTopsRef.current` to avoid staleness for those fields; `viewportVisibleRange.startIndex` is the one piece of data still threaded through the dep array.
+
+**Proposal:**
+- Introduce `viewportVisibleRangeRef` next to `messagesRef` / `messageIndexByIdRef` (updated every render), and read `viewportVisibleRangeRef.current.startIndex` inside the handler instead of via closure.
+- Drop `viewportVisibleRange.startIndex` from the effect deps so it rebinds only on `isActive` / `hasOlderMessages` / `sessionId` transitions.
+
+## `AgentSessionPanel.tsx` is past the 2k-line TSX threshold and growing
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx` is now 2557 lines (+246 in the most recent scroll/flicker batch, up from ~2311 before). CLAUDE.md is explicit: "the project has a few very large files already and we are actively splitting them smaller, not larger." The `.claude/reviewers/architecture.md` TSX size threshold (>2000) applies here because this is not `App.tsx` / `main.rs` — the known-large exception does not cover it.
+
+A natural extraction boundary now exists. The inner `VirtualizedConversationMessageList` component (roughly lines 788-1520) owns six `useEffect`/`useLayoutEffect` hooks that braid scroll/anchor/measurement/pin/loading concerns via three refs (`shouldKeepBottomAfterLayoutRef`, `pendingLoadMoreAnchorRef`, `lastUserScrollInputTimeRef`). Lifting it into a sibling file plus a `useConversationScrollAnchor` hook would make the pin-vs-anchor interaction legible on its own and bring the parent back under the size threshold.
+
+**Current behavior:**
+- Single `AgentSessionPanel.tsx` owns the session pane shell, conversation rendering, virtualized list, measurement state, scroll anchor state, user-scroll cooldown, and composer — 2557 lines.
+- Every new scroll/measurement fix lands in the same file, compounding complexity.
+
+**Proposal:**
+- Extract `VirtualizedConversationMessageList` (plus `MeasuredMessageCard`) to `ui/src/panels/VirtualizedConversationMessageList.tsx`.
+- Extract the scroll-pin / anchor / cooldown machinery into a `useConversationScrollAnchor` hook in the same file or a dedicated module.
+- Keep the code-move pure per CLAUDE.md (no behaviour changes, provenance header on each new file).
+
+## Native message-stack wheel handling lacks regression coverage
+
+**Severity:** Medium - `ui/src/SessionPaneView.tsx` moved message-stack wheel handling from React's `onWheel` prop to a native `addEventListener("wheel", ..., { passive: false })` registration, but there is no focused test pinning the non-passive listener or the cancelable wheel behavior.
+
+The behavior depends on `preventDefault()` taking effect before the handler manually writes `scrollTop`. If this regresses back to React's passive wheel handling, browser native scrolling and custom scrolling can both run for the same wheel tick.
+
+**Current behavior:**
+- The message stack registers a native wheel listener with `{ passive: false }`.
+- The JSX `onWheel` prop was removed.
+- No test asserts the listener options, `defaultPrevented`, or the single-scroll outcome.
+
+**Proposal:**
+- Add a focused test that spies on `addEventListener` for the message stack and verifies `{ passive: false }`.
+- Or dispatch a cancelable `WheelEvent` and assert `defaultPrevented` plus the expected single `scrollTop` update.
+
+## Dangerous Markdown link neutralization lacks direct coverage
+
+**Severity:** Medium - `ui/src/markdown-links.ts::transformMarkdownLinkUri` now converts `react-markdown`'s neutralized `"javascript:void(0)"` sentinel to an empty string, and `MarkdownContent` renders empty hrefs as plain text instead of anchors. The dangerous-protocol cases are not directly covered.
+
+This change prevents React warnings and keeps `javascript:` placeholders out of the DOM. Without tests for `javascript:`, `vbscript:`, and disallowed `data:` links, a future change could accidentally reintroduce an inert anchor, a `javascript:void(0)` href, or a React warning.
+
+**Current behavior:**
+- Unsafe external Markdown hrefs are transformed to `""`.
+- The Markdown anchor renderer treats falsy hrefs as plain `<span>` content.
+- Existing Markdown link tests cover workspace/file links but not dangerous URI neutralization.
+
+**Proposal:**
+- Add unit tests for `transformMarkdownLinkUri("javascript:alert(1)") === ""` and similar dangerous-protocol cases.
+- Add a `MarkdownContent` render test proving `[x](javascript:alert(1))` produces visible text with no link and no `href="javascript:void(0)"`.
+
+## Deferred heavy content virtualization relies on CSS ancestry
+
+**Severity:** Low - `ui/src/message-cards.tsx::DeferredHeavyContent` now checks `node.closest(".virtualized-message-list")` to decide whether heavy content should activate immediately inside virtualized conversations.
+
+The branch solves a real scroll-height jump, but it makes a reusable message renderer depend on a parent panel's CSS class. A class rename, alternate virtualizer, or reuse in another virtualized surface could silently change deferred-render behavior. The new branch is also untested.
+
+**Current behavior:**
+- Heavy content activates immediately when an ancestor has `.virtualized-message-list`.
+- The rendering policy is implicit in DOM ancestry instead of an explicit prop or context.
+- No test stubs `IntersectionObserver` and proves virtualized heavy content renders immediately.
+
+**Proposal:**
+- Thread an explicit `preferImmediateHeavyRender` style prop or provide a small React context from the virtualized list.
+- Add a regression test that renders heavy content inside a virtualized wrapper and asserts the real content appears immediately without the deferred placeholder.
+
+## Generated Vitest cache is dirty in the working tree
+
+**Severity:** Note - `node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json` is modified in the unstaged diff and records local test-run state with many failed entries and durations.
+
+This generated cache is not source code or executable coverage. Keeping it in review diffs makes the real frontend changes harder to audit, and accidentally staging it would add machine-local churn.
+
+**Current behavior:**
+- The Vitest cache file is tracked by the current working tree diff.
+- The cache content changes with local test execution details.
+
+**Proposal:**
+- Do not stage or commit the generated cache change.
+- If this path is tracked unintentionally, remove it from version control and ignore Vite/Vitest cache output.
+
 ## `dialog-backdrop-dismiss` platform fallback is untested
 
 **Severity:** Medium - `ui/src/dialog-backdrop-dismiss.ts` explicitly falls back from `navigator.userAgentData?.platform` to `navigator.platform`, but `ui/src/dialog-backdrop-dismiss.test.ts` sets both values in every platform stub.
@@ -702,6 +859,45 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
+- [ ] P2: Add anchor-stabilized load-earlier coverage:
+  exercise both the scroll-near-top auto-load path and the explicit
+  "Load earlier messages" button in `VirtualizedConversationMessageList`.
+  Drive `scrollTop = 0` with `hasOlderMessages = true`, trigger the
+  follow-up render that applies the anchor via `useLayoutEffect`, and
+  assert the viewport offset of the anchor message is preserved across
+  the prepend. Include the button path and a no-op case where
+  `renderWindowSize` is already at `messages.length` so the anchor ref
+  cannot strand.
+- [ ] P2: Add near-bottom user-scroll cooldown coverage for `handleHeightChange`:
+  fire a wheel-up event on the virtualization scroll container while it
+  is still inside the 72 px near-bottom band, then drive a streaming
+  `ResizeObserver` measurement via the existing test harness's
+  `resizeCallbacks.get(slot)?.(...)` pattern and assert `scrollWrites`
+  is empty during the cooldown window. Pair with a no-cooldown case
+  that passes `performance.now()` past the 200 ms threshold and asserts
+  the write still happens, pinning both branches of the gate.
+- [ ] P2: Add `DeferredHeavyContent` virtualized fast-path coverage:
+  render a `<DeferredMarkdownContent>` or `<DeferredHighlightedCodeBlock>`
+  inside a wrapper with class `"virtualized-message-list"` and assert
+  the real-content markup is present on the first render (no
+  `deferred-code-placeholder` class). Pair with the outside-virtualizer
+  case that still shows the placeholder until the intersection observer
+  activates.
+- [ ] P2: Add `transformMarkdownLinkUri` + `a`-as-span coverage:
+  new co-located `ui/src/markdown-links.test.ts` (or equivalent) with
+  table-driven cases for `javascript:`, `JavaScript:`, `vbscript:`,
+  `data:text/html,...`, `https://...` (unchanged), `./relative` (unchanged),
+  `#anchor` (unchanged). Pair with a `MarkdownContent.test.tsx` case that
+  feeds markdown `"[click](javascript:alert(1))"` and asserts
+  `screen.queryByRole("link")` is null while the text "click" is still
+  rendered.
+- [ ] P2: Add message-stack non-passive wheel listener coverage:
+  dispatch a cancelable `WheelEvent` on the `.message-stack` `<section>`
+  in `SessionPaneView.test.tsx`, assert `event.defaultPrevented === true`
+  after the handler runs, and assert the handler's computed `scrollTop`
+  was written exactly once (no double-scroll from the browser's
+  preventDefault-failure fallback). Protects against a future React
+  / DOM-abstraction change re-introducing the passive default.
 - [ ] P2: Add `dialog-backdrop-dismiss` navigator.platform fallback tests:
   cover the Safari/Firefox-style path where `navigator.userAgentData`
   is absent and only `navigator.platform` is available. Assert macOS

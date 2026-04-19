@@ -38,7 +38,6 @@ import {
   useState,
   type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
 import {
   CommandCard,
@@ -1169,7 +1168,25 @@ export function SessionPaneView({
     }
   }
 
-  function handleMessageStackWheel(event: ReactWheelEvent<HTMLElement>) {
+  // The message-stack wheel handler used to be wired via the React
+  // `onWheel` prop on the `<section>` below. React attaches `wheel`
+  // listeners as `{ passive: true }` by default (since React 17), so
+  // the `event.preventDefault()` call inside this handler silently
+  // failed with an `Unable to preventDefault inside passive event
+  // listener invocation` warning spammed to the console on every
+  // wheel tick. The browser's native scroll then executed alongside
+  // this handler's custom `node.scrollTop = nextScrollTop` write —
+  // two scrolls per tick, producing the jagged scroll-up experience
+  // users reported.
+  //
+  // We fix this by registering the listener ourselves via
+  // `addEventListener(..., { passive: false })`, which lets
+  // `preventDefault` take effect and keeps the custom scroll as the
+  // single source of truth. A ref indirection keeps the listener
+  // registration stable across renders while the closure picks up
+  // fresh state every render.
+  const handleMessageStackWheelRef = useRef<((event: WheelEvent) => void) | null>(null);
+  handleMessageStackWheelRef.current = function handleMessageStackWheel(event: WheelEvent) {
     if (event.defaultPrevented || event.ctrlKey) {
       return;
     }
@@ -1209,7 +1226,21 @@ export function SessionPaneView({
     if (shouldStick) {
       setNewResponseIndicator(scrollStateKey, false);
     }
-  }
+  };
+
+  useEffect(() => {
+    const node = messageStackRef.current;
+    if (!node) {
+      return;
+    }
+    const listener = (event: WheelEvent) => {
+      handleMessageStackWheelRef.current?.(event);
+    };
+    node.addEventListener("wheel", listener, { passive: false });
+    return () => {
+      node.removeEventListener("wheel", listener);
+    };
+  }, []);
 
   useEffect(() => {
     if (canFindInSession) {
@@ -2256,7 +2287,6 @@ export function SessionPaneView({
       <section
         ref={messageStackRef}
         className={`message-stack${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}${activeTerminalTab ? " terminal-panel-stack" : ""}`}
-        onWheel={handleMessageStackWheel}
         onScroll={(event) => {
           const node = event.currentTarget;
           const { shouldStick } = syncMessageStackScrollPosition(

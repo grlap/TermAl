@@ -519,6 +519,23 @@ function DeferredHeavyContent({
       return;
     }
 
+    // Inside a virtualized conversation list the outer virtualizer
+    // (`VirtualizedConversationMessageList`) already limits mount to
+    // cards within its overscan window. Deferring heavy content on
+    // top of that just introduces a placeholder-to-real-content
+    // height jump when the IntersectionObserver below eventually
+    // fires, and that jump cascades into the layout:
+    // `ResizeObserver` on the virtualized slot → `handleHeightChange`
+    // → `setLayoutVersion` → tops recomputed for every sibling →
+    // scroll-position-visible cards shift under the user's cursor.
+    // Activate immediately when we can detect we're inside the
+    // virtualized wrapper so the card renders at its real height on
+    // the very first paint.
+    if (node.closest(".virtualized-message-list")) {
+      setIsActivated(true);
+      return;
+    }
+
     const root = resolveDeferredRenderRoot(node);
     if (isElementNearRenderViewport(node, root, DEFERRED_RENDER_ROOT_MARGIN_PX)) {
       setIsActivated(true);
@@ -2833,6 +2850,22 @@ export function MarkdownContent({
             const isExternalLink = isExternalMarkdownHref(href ?? "");
             const fileLinkTarget = resolveMarkdownFileLinkTarget(href, workspaceRoot, documentPath);
             const displayLabel = buildMarkdownHrefDisplayLabel(href, children, workspaceRoot, documentPath);
+            // `transformMarkdownLinkUri` returns "" for URIs that
+            // `react-markdown` would otherwise neutralize to
+            // `javascript:void(0)` (the placeholder React now warns
+            // about + plans to block). Render those as a plain
+            // `<span>` so the content is still shown but there is
+            // no inert same-page-navigate anchor and no
+            // `javascript:` URL reaching the DOM.
+            if (!href) {
+              return (
+                <span className={props.className}>
+                  <MarkdownLinkContext.Provider value>
+                    {highlightChildren(displayLabel ?? children)}
+                  </MarkdownLinkContext.Provider>
+                </span>
+              );
+            }
             const handleClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
               props.onClick?.(event);
               if (event.defaultPrevented || !fileLinkTarget || !onOpenSourceLinkRef.current) {
