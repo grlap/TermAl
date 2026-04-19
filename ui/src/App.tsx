@@ -177,6 +177,7 @@ import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
 import { appTestHooks, setAppTestHooksForTests } from "./app-test-hooks";
 import { ProjectListSection } from "./ProjectListSection";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
+import { EmptyState } from "./EmptyState";
 
 import {
   CodexPromptSettingsCard,
@@ -11906,16 +11907,6 @@ function SessionPaneView({
         />
       )}
     </section>
-  );
-}
-
-function EmptyState({ title, body }: { title: string; body: string }) {
-  return (
-    <article className="empty-state">
-      <div className="card-label">Live State</div>
-      <h3>{title}</h3>
-      <p>{body}</p>
-    </article>
   );
 }
 
