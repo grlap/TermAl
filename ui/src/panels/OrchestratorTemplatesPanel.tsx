@@ -71,6 +71,14 @@ import {
   isTransitionTemplate,
 } from "./orchestrator-template-persistence-schema";
 import {
+  DEFAULT_ZOOM,
+  PAN_CONTEXT_MENU_SUPPRESS_THRESHOLD_PX,
+  WHEEL_ZOOM_SENSITIVITY,
+  clampZoom,
+  type PanDragState,
+  type ZoomAnchor,
+} from "./orchestrator-board-interaction";
+import {
   STATE_KEY_PREFIX,
   buildOrchestratorModelOptionsByAgent,
   emptyDraft,
@@ -82,35 +90,6 @@ import {
   type PanelState,
 } from "./orchestrator-template-panel-state";
 
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 2;
-const DEFAULT_ZOOM = 1;
-const WHEEL_ZOOM_SENSITIVITY = 0.002;
-const PAN_CONTEXT_MENU_SUPPRESS_THRESHOLD_PX = 4;
-function clampZoom(value: number): number {
-  return (
-    Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value)) * 1000) / 1000
-  );
-}
-type ZoomAnchor = {
-  canvasX: number;
-  canvasY: number;
-  clientOffsetX: number;
-  clientOffsetY: number;
-  scrollContainer: HTMLElement;
-  scrollLeft: number;
-  scrollTop: number;
-};
-
-type PanDragState = {
-  hasMoved: boolean;
-  originScrollLeft: number;
-  originScrollTop: number;
-  pointerId: number;
-  scrollContainer: HTMLElement;
-  startClientX: number;
-  startClientY: number;
-};
 const AGENT_OPTIONS = [
   { label: "Claude", value: "Claude" },
   { label: "Codex", value: "Codex" },
