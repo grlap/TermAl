@@ -55,6 +55,17 @@ import {
   type AnchorSide,
   type TransitionGeometry,
 } from "./orchestrator-board-geometry";
+import {
+  MAX_ORCHESTRATOR_TEMPLATE_SESSIONS,
+  MAX_ORCHESTRATOR_TEMPLATE_TRANSITIONS,
+  clampPosition,
+  createSession,
+  createTransition,
+  createTransitionBetween,
+  getOrchestratorTemplateSessionLimitError,
+  getOrchestratorTemplateTransitionLimitError,
+  validateDraft,
+} from "./orchestrator-template-edits";
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
@@ -62,16 +73,6 @@ const DEFAULT_ZOOM = 1;
 const WHEEL_ZOOM_SENSITIVITY = 0.002;
 const PAN_CONTEXT_MENU_SUPPRESS_THRESHOLD_PX = 4;
 const STATE_KEY_PREFIX = "termal-orchestrator-panel-state:";
-const MAX_ORCHESTRATOR_TEMPLATE_SESSIONS = 50;
-const MAX_ORCHESTRATOR_TEMPLATE_TRANSITIONS = 200;
-
-function getOrchestratorTemplateSessionLimitError() {
-  return `Orchestrator templates support at most ${MAX_ORCHESTRATOR_TEMPLATE_SESSIONS} sessions.`;
-}
-
-function getOrchestratorTemplateTransitionLimitError() {
-  return `Orchestrator templates support at most ${MAX_ORCHESTRATOR_TEMPLATE_TRANSITIONS} transitions.`;
-}
 
 function clampZoom(value: number): number {
   return (
@@ -2379,150 +2380,11 @@ function isTransitionTemplate(
   );
 }
 
-function createSession(
-  existingSessions: OrchestratorSessionTemplate[],
-): OrchestratorSessionTemplate {
-  const nextNumber = nextSequenceNumber(
-    existingSessions.map((session) => session.id),
-    "session-",
-  );
-  const nextX = BOARD_MARGIN + (existingSessions.length % 4) * 380;
-  const nextY = 140 + Math.floor(existingSessions.length / 4) * 250;
 
-  return {
-    id: `session-${nextNumber}`,
-    name: `Session ${nextNumber}`,
-    agent: "Codex",
-    model: "",
-    instructions: "",
-    autoApprove: false,
-    inputMode: "queue",
-    position: clampPosition(nextX, nextY),
-  };
-}
 
-function createTransition(
-  sessions: OrchestratorSessionTemplate[],
-  existingTransitions: OrchestratorTemplateTransition[],
-): OrchestratorTemplateTransition {
-  const nextNumber = nextSequenceNumber(
-    existingTransitions.map((transition) => transition.id),
-    "transition-",
-  );
-  const fromSession = sessions[0];
-  const toSession = sessions[1] ?? sessions[0];
 
-  return {
-    id: `transition-${nextNumber}`,
-    fromSessionId: fromSession?.id ?? "",
-    toSessionId: toSession?.id ?? "",
-    trigger: "onCompletion",
-    resultMode: "lastResponse",
-    promptTemplate: "Continue with:\n{{result}}",
-  };
-}
 
-function createTransitionBetween(
-  fromSessionId: string,
-  toSessionId: string,
-  fromAnchor: AnchorSide,
-  toAnchor: AnchorSide,
-  existingTransitions: OrchestratorTemplateTransition[],
-): OrchestratorTemplateTransition {
-  const nextNumber = nextSequenceNumber(
-    existingTransitions.map((transition) => transition.id),
-    "transition-",
-  );
-  return {
-    id: `transition-${nextNumber}`,
-    fromSessionId,
-    toSessionId,
-    fromAnchor,
-    toAnchor,
-    trigger: "onCompletion",
-    resultMode: "lastResponse",
-    promptTemplate: "Continue with:\n{{result}}",
-  };
-}
 
-function nextSequenceNumber(values: string[], prefix: string) {
-  let next = 1;
-  const seen = new Set(values);
-  while (seen.has(`${prefix}${next}`)) {
-    next += 1;
-  }
-  return next;
-}
-
-function validateDraft(draft: OrchestratorTemplateDraft) {
-  if (!draft.name.trim()) {
-    return "Template name cannot be empty.";
-  }
-
-  if (draft.sessions.length === 0) {
-    return "Add at least one session before saving.";
-  }
-
-  if (draft.sessions.length > MAX_ORCHESTRATOR_TEMPLATE_SESSIONS) {
-    return getOrchestratorTemplateSessionLimitError();
-  }
-
-  if (draft.transitions.length > MAX_ORCHESTRATOR_TEMPLATE_TRANSITIONS) {
-    return getOrchestratorTemplateTransitionLimitError();
-  }
-
-  const sessionIds = new Set<string>();
-  for (const session of draft.sessions) {
-    if (!session.id.trim()) {
-      return "Session id cannot be empty.";
-    }
-    if (!session.name.trim()) {
-      return "Session name cannot be empty.";
-    }
-    if (sessionIds.has(session.id.trim())) {
-      return `Duplicate session id \`${session.id.trim()}\`.`;
-    }
-    sessionIds.add(session.id.trim());
-    if (
-      !Number.isFinite(session.position.x) ||
-      !Number.isFinite(session.position.y)
-    ) {
-      return `Session \`${session.id.trim()}\` has an invalid canvas position.`;
-    }
-  }
-
-  const transitionIds = new Set<string>();
-  for (const transition of draft.transitions) {
-    if (!transition.id.trim()) {
-      return "Transition id cannot be empty.";
-    }
-    if (transitionIds.has(transition.id.trim())) {
-      return `Duplicate transition id \`${transition.id.trim()}\`.`;
-    }
-    transitionIds.add(transition.id.trim());
-    if (!sessionIds.has(transition.fromSessionId)) {
-      return `Transition \`${transition.id.trim()}\` references an unknown source session.`;
-    }
-    if (!sessionIds.has(transition.toSessionId)) {
-      return `Transition \`${transition.id.trim()}\` references an unknown destination session.`;
-    }
-  }
-
-  return null;
-}
-
-function clampPosition(x: number, y: number): OrchestratorNodePosition {
-  return {
-    x: Math.max(
-      BOARD_MARGIN,
-      Math.min(BOARD_WIDTH - CARD_WIDTH - BOARD_MARGIN, Math.round(x)),
-    ),
-    y: Math.max(
-      BOARD_MARGIN,
-      Math.min(BOARD_HEIGHT - CARD_HEIGHT - BOARD_MARGIN, Math.round(y)),
-    ),
-  };
-}
 
 
 function TransitionNoteIcon() {
