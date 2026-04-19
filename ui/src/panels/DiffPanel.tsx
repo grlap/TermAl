@@ -78,6 +78,7 @@ import {
   RenderedDiffView,
   buildMarkdownDiffPreview,
 } from "./rendered-diff-view";
+import { renderEditFileView } from "./render-edit-file-view";
 import { StructuredDiffView } from "./StructuredDiffView";
 import { useStableEvent } from "./use-stable-event";
 import {
@@ -1706,71 +1707,6 @@ function DiffPreviewToggleButton({
     >
       {children}
     </button>
-  );
-}
-
-function renderEditFileView({
-  appearance,
-  editValue,
-  editorRef,
-  fontSizePx,
-  filePath,
-  language,
-  latestFile,
-  onChange,
-  onSave,
-  onStatusChange,
-}: {
-  appearance: MonacoAppearance;
-  editValue: string;
-  editorRef: { current: MonacoCodeEditorHandle | null };
-  fontSizePx: number;
-  filePath: string | null;
-  language?: string | null;
-  latestFile: LatestFileState;
-  onChange: (value: string) => void;
-  onSave: () => Promise<void>;
-  onStatusChange: (status: MonacoCodeEditorStatus) => void;
-}) {
-  if (!filePath) {
-    return (
-      <article className="thread-notice">
-        <div className="card-label">Edit mode</div>
-        <p>This diff does not include a file path, so there is no file to edit.</p>
-      </article>
-    );
-  }
-
-  if (latestFile.status === "loading" || latestFile.status === "idle") {
-    return <div className="source-editor-loading">Loading latest file...</div>;
-  }
-
-  if (latestFile.status === "error") {
-    return (
-      <article className="thread-notice">
-        <div className="card-label">Edit mode</div>
-        <p>{latestFile.error}</p>
-      </article>
-    );
-  }
-
-  return (
-    <div className="source-editor-shell source-editor-shell-with-statusbar">
-      <Suspense fallback={<div className="source-editor-loading">Loading editor...</div>}>
-        <MonacoCodeEditor
-          ref={editorRef}
-          appearance={appearance}
-          ariaLabel={`Edit mode for ${latestFile.path}`}
-          fontSizePx={fontSizePx}
-          language={latestFile.language ?? language ?? null}
-          path={latestFile.path}
-          value={editValue}
-          onChange={onChange}
-          onSave={() => void onSave()}
-          onStatusChange={onStatusChange}
-        />
-      </Suspense>
-    </div>
   );
 }
 
