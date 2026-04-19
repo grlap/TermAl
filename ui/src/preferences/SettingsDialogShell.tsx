@@ -26,7 +26,7 @@
 // same element ids, same copy.
 
 import type { ReactNode } from "react";
-import { DialogCloseIcon } from "../message-cards";
+import { DialogCloseIcon } from "../message-card-icons";
 
 export function SettingsDialogShell({
   onClose,
@@ -38,7 +38,17 @@ export function SettingsDialogShell({
   return (
     <div
       className="dialog-backdrop"
-      onMouseDown={() => {
+      onMouseDown={(event) => {
+        // Primary-button only. Middle-click (button 1) on Linux opens
+        // the paste-buffer scroll anchor, and right-click (button 2)
+        // on all platforms opens the native context menu — firing
+        // `onClose` on either swallows the gesture before the browser
+        // can handle it, so the user loses paste / context-menu
+        // affordances just by landing the mouse outside the dialog
+        // body.
+        if (event.button !== 0) {
+          return;
+        }
         onClose();
       }}
     >

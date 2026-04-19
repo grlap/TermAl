@@ -59,7 +59,7 @@ export type SourceFileState = {
   status: "idle" | "loading" | "ready" | "error";
   path: string;
   content: string;
-  contentHash?: string | null;
+  contentHash: string | null;
   mtimeMs?: number | null;
   sizeBytes?: number | null;
   staleOnDisk?: boolean;

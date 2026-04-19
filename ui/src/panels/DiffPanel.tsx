@@ -576,6 +576,7 @@ export function DiffPanel({
         status: "error",
         path: filePath,
         content: "",
+        contentHash: null,
         error: "This diff preview is no longer associated with a live session or project.",
         language: language ?? null,
       });
@@ -589,6 +590,7 @@ export function DiffPanel({
       status: "loading",
       path: filePath,
       content: "",
+      contentHash: null,
       error: null,
       language: language ?? null,
     });
@@ -616,6 +618,7 @@ export function DiffPanel({
           status: "error",
           path: filePath,
           content: "",
+          contentHash: null,
           error: getErrorMessage(error),
           language: language ?? null,
         });
@@ -804,6 +807,7 @@ export function DiffPanel({
         status: "error",
         path: filePath,
         content: "",
+        contentHash: null,
         error: "File was deleted on disk.",
         language: language ?? null,
       });

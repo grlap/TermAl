@@ -5,97 +5,31 @@ and cleanup notes do not belong here.
 
 ## Active Repo Bugs
 
-Also fixed in the current tree: the `ui/src/preferences/` directory is
-now staged (both `SettingsTabBar.tsx` and `preferences-tabs.ts`) so the
-tab-bar extraction no longer leaves App.tsx importing untracked files;
-a clean checkout will type-check.
+Recently fixed in the current tree, summarized so the active bug list stays
+readable:
 
-Also fixed in the current tree: four `App.test.tsx` preference tests
-(at lines 15177, 15347, 15830, 15891) now query the shortened tab
-labels — `Codex`, `Claude`, `Editor & UI` — instead of the
-pre-shortening names, so the `getByRole("tab", { name: ... })` lookups
-succeed.
-
-Also fixed in the current tree: the provenance header in
-`ui/src/control-surface-state.ts` no longer claims its exports are
-visible through an `App.tsx` re-export. The last paragraph now
-correctly states that consumers (including `App.test.tsx`) import
-directly from the new module, matching what the code actually does.
-
-Also fixed in the current tree: the dead `export { ... } from
-"..."` re-export blocks that `SessionPaneView.tsx` and
-`WorkspaceNodeView.tsx` had cloned verbatim from App.tsx's
-surface during the extractions are gone. No test or consumer
-imported those symbols through the new modules; `App.tsx` already
-re-exports the same names from their true-source modules.
-Type-check stays clean.
-
-Also fixed in the current tree: the `ConnectionRetryCard`
-null-`attemptLabel` fallback path now has a Vitest assertion.
-`MessageCard.test.tsx` gained a third case that renders a notice
-with no "(attempt N of M)" suffix on both `isLatestAssistantMessage`
-branches, asserts the attempt chip is absent on each, and pins
-the generic past-tense fallback copy verbatim.
-
-Also fixed in the current tree: the pre-existing `App.test.tsx`
-"ignores stale manual Git diff responses after reopening the
-same request key" failure (present since commit `00f3390` when
-the test was first introduced) is green. Root cause was a
-deterministic race: `handleOpenGitStatusDiffPreviewTab` scheduled
-its own `fetchGitDiff` and wrote the result back with
-`documentContent: null`; the restore-from-persisted-layout
-useEffect then treated the manually-loaded tab as a stub needing
-another fetch and fired a duplicate request. Fix in
-`App.tsx:6020` marks the `requestKey` as attempted at the top of
-`handleOpenGitStatusDiffPreviewTab` so the restore useEffect
-skips it. Full vitest suite is now 46 files / 893 tests, 0
-failures.
-
-Also fixed in the current tree (Tier 0 cleanup batch): the four
-review-cycle findings from the previous batch (dead
-`lazy(MonacoCodeEditor)` wrapper in `DiffPanel.tsx`, unused
-`type ContentRebaseResult` import in `SourcePanel.tsx`,
-`LatestFileState.contentHash` mismatch between the idle/loading
-creator and the ready creator, and the inaccurate
-`rendered-diff-view.tsx` "owns/does not own" header note) are all
-cleared. The lazy wrapper is gone from DiffPanel (the sibling
-`render-edit-file-view.tsx` keeps its own); SourcePanel's import
-is tight; `createInitialLatestFileState` now sets
-`contentHash: null` on both branches so callers never see
-`undefined` drift; and the `rendered-diff-view.tsx` header
-accurately describes the near-identical `composeRenderedDiffMarkdown`
-/ `composeRendererPreviewMarkdown` pair and notes that
-consolidation into a shared helper is a deliberate future pass.
-The stray `a` / `2` / `a2` placeholder lines after the Mermaid
-fence in `docs/mermaid-demo.md` are also removed.
-
-Also fixed in the current tree: `MermaidDiagram` in
-`ui/src/message-cards.tsx` now memoises the iframe's `srcDoc` and
-`style` via `useMemo` keyed on the rendered SVG. Previously
-`buildMermaidDiagramFrameSrcDoc(renderState.svg)` returned a
-fresh string on every render, so any parent re-render (e.g. a
-post-save diff-view refresh) gave the iframe a new `srcDoc`
-identity and the browser reloaded the iframe from scratch —
-visible as the rendered-Markdown diff's "whole thing flickers"
-symptom after saving an edit. The memo keeps the iframe DOM
-node stable across unrelated parent re-renders; only an actual
-diagram change forces a reload.
-
-## `LatestFileState.contentHash` type still optional despite normalised producers
-
-**Severity:** Note - `ui/src/panels/diff-latest-file-state.ts:43` still declares `contentHash?: string | null` (optional) even though both producers — `createInitialLatestFileState` (as of `9a51113`) and `toLatestFileState` — now unconditionally write `null`. No in-tree caller emits `undefined`.
-
-Cleared by three reviewers in the Tier 0 cycle as a type-drift risk: a future consumer could add a dead narrowing branch for `undefined`, or a future producer could legitimately reintroduce `undefined` on the grounds that the type allows it. Tightening to `contentHash: string | null` (non-optional) would make the module invariant load-bearing rather than advisory.
-
-**Current behavior:**
-- `LatestFileState.contentHash?: string | null` at `diff-latest-file-state.ts:43`.
-- Both creators write `null`; no caller reads `undefined`.
-- `SourcePanel.tsx:62` declares a parallel `contentHash?: string | null` that would need to tighten in the same pass.
-
-**Proposal:**
-- Make `contentHash: string | null` (non-optional) on `LatestFileState`.
-- Tighten `SourcePanel`'s parallel shape at the same time.
-- Verify `SessionPaneView.tsx:955`'s `options?.baseHash !== undefined` (a different surface) is unaffected.
+- Preferences extraction cleanup: the preferences modules are tracked, shortened
+  tab-label tests pass, provenance comments point at direct imports, and dead
+  copied re-export blocks were removed.
+- `ConnectionRetryCard` now covers the null-`attemptLabel` fallback.
+- Manual Git diff opens now mark their request key as attempted, preventing the
+  restored-layout effect from firing a duplicate fetch.
+- Tier 0 cleanup batch: removed the dead DiffPanel Monaco lazy wrapper, tightened
+  SourcePanel imports, normalized `LatestFileState.contentHash`, corrected the
+  rendered-diff-view ownership note, and removed stray Mermaid-demo placeholder
+  lines.
+- `MermaidDiagram` memoizes iframe `srcDoc` and `style`, keeping the iframe
+  stable across unrelated parent renders.
+- `LatestFileState.contentHash` and `SourceFileState.contentHash` are now
+  explicit `string | null` frontend state values.
+- `DialogCloseIcon` is imported directly from `message-card-icons.tsx`; the
+  message rendering module no longer re-exports it for preferences UI.
+- Settings dialog backdrop dismissal is primary-button-only, with coverage for
+  middle click, right click, body click containment, and close-button behavior.
+- `remote_sync.rs` diagram and prose now match the actual remote-sync flow:
+  capture, read-only map build, retain, session updates, orchestrator sync, and
+  rollback on failure. The incorrect project-upsert, retain-order, and revision
+  attribution claims were removed.
 
 ## `markdown-diff-edit-pipeline` paste sanitizer has no direct unit tests
 
@@ -160,15 +94,22 @@ The UI labels this "Patch-only rendering: best-effort approximation" so reviewer
 - OR suppress the "Rendered" button entirely when `documentContent` is missing AND `gitSectionId === "staged"`.
 - Add a Vitest case: staged diff, no `documentContent`, worktree contains different content than the patch's after-side → the Rendered view matches the patch, not the worktree.
 
-## `remote_sync.rs` diagram + prose had three factual errors (now fixed)
+## Rendered Markdown diff view cannot jump between changes
 
-**Severity:** Medium - not a live bug anymore but worth recording for posterity. The Mermaid flowchart I added to `sync_remote_state_inner` in commit 10a2515 claimed the function "upserts remote projects" (it doesn't — project state is managed elsewhere), placed `retain_sessions` AFTER the orchestrator sync (the real order runs retain BEFORE session updates), and attributed `note_remote_applied_revision` to this function (callers do it — the revision gate lives in the wrapper). The original prose at the top of the function had the same "upserts every remote project" error, so the diagram just codified an existing mistake more visibly.
+**Severity:** Medium - regular file diffs expose previous/next change navigation, but the rendered Markdown diff view does not, so reviewing a long Markdown document requires manual scrolling and visual scanning.
 
-Fixed in this review cycle: the diagram now shows the correct broad-sync flow (Capture → BuildMap read-only → Retain → SessionUpdates → OrchestratorSync → Restore-on-failure), the focused-path capture timing (AFTER session updates), and drops the `NoteRevision` node entirely. The prose paragraphs were rewritten to match the mutation contract that's enforced by `RemoteSyncRollback`.
+This is especially noticeable because the same diff tab already has change navigation for the Monaco file-diff view. Switching to the rendered Markdown view removes that workflow even though the rendered segments already know which sections are added, deleted, or changed.
 
 **Current behavior:**
-- Diagram and prose now match the code.
-- Mutation contract comment (lines 130-140 of `remote_sync.rs`) continues to enumerate exactly the fields `RemoteSyncRollback::capture` covers, and the diagram no longer contradicts it.
+- Monaco file diff shows change navigation controls and a `Change X of Y` counter.
+- Rendered Markdown diff view shows highlighted added/deleted/changed sections, but does not expose next/previous change controls.
+- Keyboard or toolbar navigation cannot jump between rendered Markdown change sections.
+
+**Proposal:**
+- Build a rendered-Markdown change index from the same segment model used to paint added/deleted/changed sections.
+- Add previous/next controls and a `Change X of Y` counter for rendered Markdown mode, matching the regular diff affordance.
+- Keep per-view scroll position stable when jumping or switching between Monaco and rendered Markdown diff views.
+- Add coverage that rendered Markdown diff mode focuses/scrolls to the next and previous changed section without leaving the rendered view.
 
 ## Inline-zone id stability not exercised by tests
 
@@ -254,39 +195,51 @@ This is a pre-existing gap — the inline tab-bar JSX the component replaced had
 - Keep `Enter` / `Space` / click unchanged — they already work via native button semantics.
 - Add a Vitest case that renders the component, focuses the active tab, sends ArrowRight, and asserts the next tab is both selected and focused.
 
-## Settings dialog shell imports its close icon from message rendering
+## Settings dialog backdrop still swallows macOS Ctrl-click context menus
 
-**Severity:** Low - `ui/src/preferences/SettingsDialogShell.tsx:29` imports `DialogCloseIcon` from `../message-cards`, tying the preferences dialog shell to the Markdown/agent message-card module.
+**Severity:** Low - `ui/src/preferences/SettingsDialogShell.tsx:41` now guards the backdrop dismiss handler with `event.button !== 0`, which fixes middle-click and physical right-click. macOS Ctrl-click still reports as a primary-button `mousedown` (`button === 0`) while requesting a secondary-click context menu, so the dialog can close before the browser opens that menu.
 
-This is not a runtime behavior bug, but it weakens the new preferences extraction boundary. Future message-card refactors or lazy-loading work would still have to preserve a general-purpose dialog icon export from the message-rendering module.
-
-`ui/src/message-card-icons.tsx` now exists and owns all six message-card SVG icons including `DialogCloseIcon`; `message-cards.tsx` re-exports it only for backwards compatibility. The clean fix is now a one-line import rewrite.
+This leaves a platform-specific gap in the intended context-menu preservation fix. Windows, macOS, and Linux are P0 platforms, and Ctrl-click is a common macOS secondary-click gesture.
 
 **Current behavior:**
-- `SettingsDialogShell` reaches into `message-cards` for a generic close icon.
-- The preferences UI now depends on a module whose primary ownership is message rendering.
-- `message-card-icons.tsx` already exists and is the correct source.
+- Middle-click (`button === 1`) and physical right-click (`button === 2`) on the backdrop return before `onClose`.
+- macOS Ctrl-click reaches the same handler with `button === 0` and `ctrlKey === true`, so it still calls `onClose`.
+- The existing Settings dialog shell tests cover non-primary button suppression, but not Ctrl-click with `button === 0`.
 
 **Proposal:**
-- Change the `SettingsDialogShell.tsx:29` import to `import { DialogCloseIcon } from "../message-card-icons";` and drop the re-export line from `message-cards.tsx`.
-- Import that shared icon from both `message-cards` and `SettingsDialogShell`.
-- Keep message-card ownership focused on message rendering rather than generic preferences chrome.
+- Treat `event.ctrlKey && event.button === 0` as non-dismissal in the backdrop `onMouseDown` handler.
+- Keep ordinary primary-button backdrop clicks closing the dialog.
+- Add a Vitest case that fires `mouseDown` on the backdrop with `{ button: 0, ctrlKey: true }` and asserts `onClose` is not called.
 
-## Settings dialog backdrop dismisses on any mouse button
+## Create-session and create-project dialog backdrops still dismiss on any mouse button
 
-**Severity:** Low - `ui/src/preferences/SettingsDialogShell.tsx:41` attaches the close handler to `onMouseDown` without guarding the button code. Middle-click (auto-scroll on Windows/Linux) and right-click (context menu on any platform) both fire `mousedown` with `event.button !== 0`, so landing the context menu on the backdrop instead of the dialog body closes the dialog before the menu can open. Same applies to middle-click paste on Linux.
+**Severity:** Medium - `ui/src/App.tsx:7865` and `ui/src/App.tsx:8158` still attach `onMouseDown={() => onClose()}` to their `.dialog-backdrop` divs without a button-code guard. The Settings dialog shell fix (primary-button-only dismiss) does not cover these two siblings, so middle-click paste on Linux and right-click context-menu on every platform still get swallowed by the create-session and create-project dialogs before the browser can handle the gesture.
 
-This is a pre-existing shape — the inline JSX the shell replaced had the same handler — not a regression introduced by the split. The split just makes it a clean one-line fix in a focused file.
+The `dialog-backdrop` dismiss contract is now "primary-button only" — pinned by `SettingsDialogShell.test.tsx` — but these two inline dialogs in `App.tsx` still use the naive pre-fix shape. A future developer reading `App.tsx` might copy the existing naive pattern into a new dialog, silently regressing the Settings fix's contract.
 
 **Current behavior:**
-- `onMouseDown={() => { onClose(); }}` on the backdrop fires for all three primary buttons.
-- Right-click on the backdrop closes the dialog and the context menu never appears.
-- Middle-click on the backdrop closes the dialog with no scroll affordance.
+- Create-session dialog backdrop: `onMouseDown={() => onClose()}` closes on any button (buttons 0, 1, 2).
+- Create-project dialog backdrop: same pattern at line 8158.
+- Settings dialog uses the new guarded shape after the Tier A fix.
 
 **Proposal:**
-- Switch to `onClick` (which only fires on primary-button click/tap) or guard with `event.button === 0` inside `onMouseDown`.
-- Keep the `onMouseDown` + `stopPropagation` on the inner `<section>` so inside-the-card interactions are still protected from the outer handler.
-- Add a Vitest case: render the shell, fire `mouseDown({ button: 2 })` on the backdrop, assert `onClose` is not called.
+- Apply the same `event.button !== 0` guard inline to both `App.tsx` backdrops.
+- Follow-up candidate: extract a shared `<DialogBackdrop onClose>` primitive (or a tiny `handleBackdropMouseDown` helper) so all three dialogs route through one place and the guard lives in exactly one location.
+
+## `SettingsDialogShell.test.tsx` backdrop selector has inconsistent null-guards
+
+**Severity:** Low - the new test file at `ui/src/preferences/SettingsDialogShell.test.tsx` uses `document.querySelector(".dialog-backdrop")` in four places. Only the first case (primary-button test) asserts `expect(backdrop).not.toBeNull()` before casting with `as Element`; the three other cases (middle-button, right-button, inside-body) cast without the guard.
+
+If the `.dialog-backdrop` class is ever renamed (likely, given the module split history of this area), three of the four cases throw an opaque `TypeError` at `fireEvent.mouseDown` with no hint that the selector went stale. The project review convention also prefers `screen.getByRole` / `getByTestId` over raw `querySelector` for brittleness reasons.
+
+**Current behavior:**
+- `SettingsDialogShell.test.tsx:24-27` has the null-guard.
+- Lines 40-41 and 54-55 cast `as Element` directly.
+- All four cases currently pass because the classname is stable.
+
+**Proposal:**
+- Either copy the `expect(backdrop).not.toBeNull()` assertion into the middle-button, right-button, and inside-body cases, or locate the backdrop via `screen.getByRole("dialog").parentElement` (the dialog `<section>` is nested inside the backdrop `<div>` in this shell).
+- No behavior change; pure test robustness against a future classname rename.
 
 ## Mermaid iframe scrollbar reserve lacks focused regression coverage
 
@@ -826,6 +779,10 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
+- [ ] P2: Add SettingsDialogShell macOS Ctrl-click coverage:
+  fire `mouseDown` on the backdrop with `{ button: 0, ctrlKey: true }`
+  and assert `onClose` is not called, while preserving the existing
+  primary-button close case.
 - [ ] P2: Add focused `diff-latest-file-state.ts` coverage:
   the module has zero dedicated tests after the Tier 0 split. Add
   a short `diff-latest-file-state.test.ts` covering both branches
@@ -846,13 +803,18 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   a workspace that already has a dock; and `resolveRootCssLengthPx` with
   `calc(40 * 1rem)` and `calc(1rem * 40)`, `rem`-to-px conversion, and a
   `var(--fallback-chain)` resolution case.
-- [ ] P2: Add focused `SettingsDialogShell` coverage:
-  render the shell with children, fire `mouseDown` on the backdrop and
-  inside the dialog, and assert only the backdrop path calls `onClose`.
-  Keep a close-button assertion. Include a right-click backdrop case when
-  the mouse-button guard is fixed. Also snapshot the ARIA wiring
-  (`role="dialog"`, `aria-modal="true"`, `aria-labelledby`, id
-  `settings-dialog`, `<h2 id="settings-dialog-title">`).
+- [ ] P2: Add focused `DiffPanel` `!hasScope` branch coverage:
+  the error branch at `DiffPanel.tsx:571-582` (which sets
+  `status: "error"` and the "no longer associated with a live
+  session or project" copy) has no dedicated test. Existing
+  `DiffPanel.test.tsx` cases cover the happy-path fetch, the
+  fetchFile rejection path, the watcher-deleted path, and the
+  save flow — but not the scope-missing case. Render the panel
+  with `sessionId={null}`, `projectId={null}`, and a non-null
+  `filePath`, then assert the specific error copy appears. The
+  recently-landed `contentHash: null` tightening of `LatestFileState`
+  makes this branch's contract load-bearing at the type level,
+  but the behavioral assertion is still missing.
 - [ ] P2: Tighten the session-find virtualization test:
   `ui/src/panels/AgentSessionPanel.test.tsx` asserts fewer than 80 cards
   render for 180 messages during search, which is correct but loose. The

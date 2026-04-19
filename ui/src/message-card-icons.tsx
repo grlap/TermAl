@@ -23,10 +23,9 @@
 //     close-dialog). This file is purely presentational SVG.
 //
 // Split out of `ui/src/message-cards.tsx`. Same SVG markup, same
-// `command-icon` classNames, same ARIA wiring; consumers import
-// from here directly. `DialogCloseIcon` stays re-exported from
-// `./message-cards` so existing callers (`SettingsDialogShell`)
-// keep working without an import path change.
+// `command-icon` classNames, same ARIA wiring; consumers (both
+// `message-cards` itself and generic dialog shells such as
+// `preferences/SettingsDialogShell`) import from here directly.
 
 export function CopyIcon() {
   return (

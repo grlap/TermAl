@@ -1478,8 +1478,6 @@ function fileChangeKindLabel(kind: FileChangesMessage["files"][number]["kind"]) 
   }
 }
 
-export { DialogCloseIcon } from "./message-card-icons";
-
 function MarkdownCard({
   appearance = "dark",
   message,

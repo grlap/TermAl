@@ -4,9 +4,12 @@
 // build or translate a `LatestFileState` record.
 //
 // What this file owns:
-//   - `LatestFileState` — the `{ status, path, content, contentHash?,
+//   - `LatestFileState` — the `{ status, path, content, contentHash,
 //     error, language }` record that represents what the panel last
-//     read from disk for the file under review. The `status` field
+//     read from disk for the file under review. `contentHash` is
+//     `string | null` (non-optional) so every producer has to make a
+//     conscious choice between "no hash yet" (`null`) and a real
+//     hash; no code path may leave it `undefined`. The `status` field
 //     is `"idle" | "loading" | "ready" | "error"`.
 //   - `createInitialLatestFileState` — builds the initial record
 //     for a given file path: `idle` with an empty path when there's
@@ -40,7 +43,7 @@ export type LatestFileState = {
   status: "idle" | "loading" | "ready" | "error";
   path: string;
   content: string;
-  contentHash?: string | null;
+  contentHash: string | null;
   error: string | null;
   language: string | null;
 };

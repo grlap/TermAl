@@ -12,9 +12,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal, flushSync } from "react-dom";
-import {
-  DialogCloseIcon,
-} from "./message-cards";
+import { DialogCloseIcon } from "./message-card-icons";
 import {
   archiveCodexThread,
   cancelQueuedPrompt,
