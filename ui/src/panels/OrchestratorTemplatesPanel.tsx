@@ -42,6 +42,9 @@ import type {
 } from "../types";
 import {
   ANCHOR_SIDES,
+  BOARD_HEIGHT,
+  BOARD_MARGIN,
+  BOARD_WIDTH,
   CARD_HEIGHT,
   CARD_WIDTH,
   anchorPosition,
@@ -53,9 +56,6 @@ import {
   type TransitionGeometry,
 } from "./orchestrator-board-geometry";
 
-const BOARD_WIDTH = 2560;
-const BOARD_HEIGHT = 1600;
-const BOARD_MARGIN = 32;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
 const DEFAULT_ZOOM = 1;

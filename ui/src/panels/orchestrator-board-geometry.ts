@@ -3,6 +3,9 @@
 // construction, and self-loop curve math.
 //
 // What this file owns:
+//   - Board dimensions + pan/zoom padding: `BOARD_WIDTH`,
+//     `BOARD_HEIGHT`, `BOARD_MARGIN`. The board frame, pan / zoom
+//     math, and node-position clamping all share these numbers.
 //   - Per-card dimensions: `CARD_WIDTH` / `CARD_HEIGHT`. The
 //     board / panel layout also references these — they live
 //     here because anchor-position math and transition geometry
@@ -67,6 +70,9 @@ import type {
   OrchestratorTransitionAnchor,
 } from "../types";
 
+export const BOARD_WIDTH = 2560;
+export const BOARD_HEIGHT = 1600;
+export const BOARD_MARGIN = 32;
 export const CARD_WIDTH = 320;
 export const CARD_HEIGHT = 176;
 export const SELF_LOOP_CONTROL_DISTANCE = 120;
