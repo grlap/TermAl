@@ -6,6 +6,6 @@ flowchart TD
   Detect -- yes --> Render[Render diagram]
   Detect -- no --> Code[Show normal code block]
   Render --> Edit[Edit source in Markdown diff editor]
-  Code --> End([Done])
+  Code --> End2([Done])
   Edit --> Stop
 ```

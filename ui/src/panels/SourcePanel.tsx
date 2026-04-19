@@ -10,10 +10,7 @@ import {
   type SourceRenderableRegion,
 } from "../source-renderers";
 import type { WorkspaceFileChangeKind } from "../types";
-import {
-  rebaseContentOntoDisk,
-  type ContentRebaseResult,
-} from "./content-rebase";
+import { rebaseContentOntoDisk } from "./content-rebase";
 import {
   RendererPreviewPane,
   composeInlineRegionFence,

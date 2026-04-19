@@ -116,9 +116,6 @@ import {
   RawPatchIcon,
 } from "./DiffPanelIcons";
 
-const MonacoCodeEditor = lazy(() =>
-  import("../MonacoCodeEditor").then(({ MonacoCodeEditor }) => ({ default: MonacoCodeEditor })),
-);
 const MonacoDiffEditor = lazy(() =>
   import("../MonacoDiffEditor").then(({ MonacoDiffEditor }) => ({ default: MonacoDiffEditor })),
 );

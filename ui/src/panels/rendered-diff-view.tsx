@@ -38,11 +38,16 @@
 //   - The source-panel preview cluster
 //     (`RendererPreviewPane` / `composeRendererPreviewMarkdown`
 //     / `describeRenderableKinds`) — lives in
-//     `./source-renderer-preview.tsx`. Kept separate because the
-//     source panel and diff panel compose their synthetic
-//     Markdown slightly differently (the source pane joins
-//     regions with a plain separator; the diff pane shares the
-//     same region-header format but stays a distinct consumer).
+//     `./source-renderer-preview.tsx`. The two sibling helpers
+//     (`composeRenderedDiffMarkdown` here vs.
+//     `composeRendererPreviewMarkdown` there) are currently
+//     near-identical: both produce the same `**Lines N-M**`
+//     header followed by a fenced body and join regions with
+//     `"\n\n"`. They were extracted as distinct consumers
+//     because the source-panel and diff-panel preview chrome
+//     differ (preview-pane vs. full diff shell with a Patch-only
+//     disclaimer), and consolidating into a shared helper is a
+//     future cleanup pass, not a pure code move.
 //
 // Split out of `ui/src/panels/DiffPanel.tsx`. Same completeness
 // strings ("full" / "patch"), same "Patch-only rendering"

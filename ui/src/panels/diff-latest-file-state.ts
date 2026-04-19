@@ -51,6 +51,7 @@ export function createInitialLatestFileState(filePath: string | null): LatestFil
       status: "idle",
       path: "",
       content: "",
+      contentHash: null,
       error: null,
       language: null,
     };
@@ -60,6 +61,7 @@ export function createInitialLatestFileState(filePath: string | null): LatestFil
     status: "loading",
     path: filePath,
     content: "",
+    contentHash: null,
     error: null,
     language: null,
   };
