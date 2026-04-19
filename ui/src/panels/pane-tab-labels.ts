@@ -20,10 +20,11 @@
 //   - The tab chip itself or its context menu — those live in
 //     `./PaneTabs.tsx`.
 //   - Session-level tooltip rows (model / project / etc.) — those
-//     stay with `SessionTabStatusTooltip` in `./PaneTabs.tsx`.
+//     live with `SessionTabStatusTooltip` in
+//     `./session-tab-status-tooltip.tsx`.
 //   - Rate-limit or status-indicator formatting — unrelated
-//     concern that stays alongside the rate-limit meter in the
-//     panel.
+//     concern that lives alongside the rate-limit meter in
+//     `./session-tab-status-tooltip.tsx`.
 //
 // Split out of `ui/src/panels/PaneTabs.tsx`. Same function
 // bodies, same prefixes, same fallbacks; consumers import
