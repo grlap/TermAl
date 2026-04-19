@@ -359,6 +359,120 @@ describe("AgentSessionPanel conversation caching", () => {
       Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     }
   });
+
+  it("arms post-activation measuring synchronously on inactive -> active transitions (no visible pre-measure paint)", async () => {
+    // Regression guard for the "shows messages, then empty" flicker on
+    // tab switch. The previous `useLayoutEffect`-based transition left
+    // a render frame where `isActive=true` was committed with
+    // `measuring=false`, allowing the browser to paint message cards
+    // at mis-estimated positions before the effect re-hid them for
+    // re-measurement. After the fix, the transition is detected during
+    // render so `measuring=true` commits in the SAME render as
+    // `isActive=true`.
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalGetBoundingClientRect =
+      Element.prototype.getBoundingClientRect;
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => 0,
+      set: () => {},
+    });
+
+    window.ResizeObserver =
+      ResizeObserverMock as unknown as typeof ResizeObserver;
+    // Intentionally never resolve measurements: that keeps the list in
+    // the measuring phase across the whole test, so the assertion below
+    // pins "class present immediately after the transition" rather than
+    // "class present at some later settled state".
+    Element.prototype.getBoundingClientRect =
+      function getBoundingClientRectMock() {
+        return {
+          bottom: 0,
+          height: 0,
+          left: 0,
+          right: 0,
+          top: 0,
+          width: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      };
+
+    try {
+      const scrollContainerRef = {
+        current: scrollNode,
+      } as RefObject<HTMLElement | null>;
+
+      // Mount inactive with messages already present, matching the
+      // cached-but-not-focused tab shape.
+      const { container, rerender } = render(
+        <VirtualizedConversationMessageList
+          isActive={false}
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={makeTextMessages(120)}
+          scrollContainerRef={scrollContainerRef}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      // While inactive, no measuring.
+      const preList = container.querySelector(".virtualized-message-list");
+      expect(preList).not.toHaveClass("is-measuring-post-activation");
+
+      // Flip to active — the "tab switch" scenario.
+      rerender(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={makeTextMessages(120)}
+          scrollContainerRef={scrollContainerRef}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      // The list must carry the measuring class IMMEDIATELY after the
+      // rerender — no intermediate frame with isActive=true but
+      // measuring=false. testing-library's `rerender` is synchronous;
+      // if the transition were detected in a useLayoutEffect instead
+      // of during render, React would still commit one DOM state
+      // without the class before the effect set it. The querySelector
+      // here reads the DOM after the transition commit completes.
+      const postList = container.querySelector(".virtualized-message-list");
+      expect(postList).not.toBeNull();
+      expect(postList).toHaveClass("is-measuring-post-activation");
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
 });
 
 function renderFooter({

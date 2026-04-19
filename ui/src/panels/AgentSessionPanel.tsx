@@ -823,7 +823,22 @@ export function VirtualizedConversationMessageList({
   const [isMeasuringPostActivation, setIsMeasuringPostActivation] = useState(
     () => isActive && messages.length > 0,
   );
-  const wasActiveRef = useRef(isActive);
+  // Detect inactive → active transitions during render so measuring=true
+  // commits in the SAME render phase as isActive=true. An earlier
+  // `useLayoutEffect`-based version let the first render with
+  // isActive=true paint with measuring=false, which briefly revealed
+  // messages at mis-estimated positions before the effect fired and
+  // re-hid the wrapper for re-measurement — the "shows messages, then
+  // empty" flicker. Setting state during render is React's officially-
+  // blessed pattern for derived-from-props state; React replays the
+  // render synchronously so the DOM never sees the intermediate state.
+  const [prevIsActive, setPrevIsActive] = useState(isActive);
+  if (prevIsActive !== isActive) {
+    setPrevIsActive(isActive);
+    if (!prevIsActive && isActive && messages.length > 0) {
+      setIsMeasuringPostActivation(true);
+    }
+  }
 
   // Render window: normally only keep the last N messages in the layout.
   // Session find temporarily keeps all messages in the layout so the active
@@ -992,17 +1007,6 @@ export function VirtualizedConversationMessageList({
     isActive,
     scrollContainerRef,
   ]);
-
-  // Enter the measuring phase on inactive → active transitions while
-  // mounted. The initial mount case is handled by the `useState`
-  // initializer above; this effect covers the case where the same
-  // instance is flipped inactive → active as the user switches tabs.
-  useLayoutEffect(() => {
-    if (!wasActiveRef.current && isActive && messages.length > 0) {
-      setIsMeasuringPostActivation(true);
-    }
-    wasActiveRef.current = isActive;
-  }, [isActive, messages.length]);
 
   // Arm the bottom-pin flag while measuring so the existing re-pin
   // `useLayoutEffect` (declared below) writes the correct scrollTop
