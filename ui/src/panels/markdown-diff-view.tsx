@@ -386,6 +386,20 @@ function renderMarkdownDiffSegments({
 
     const changedSegments = [segment];
     while (segments[index + 1]?.kind !== "normal" && segments[index + 1] != null) {
+      // Break the change-block at a pure-add → removed transition.
+      // `pushChangedRange` in `./markdown-diff-segments.ts` emits
+      // pre-fence pure additions BEFORE the paired removed+added
+      // fence replacement, so this transition marks the boundary
+      // between "text typed before a fence change" and "the fence
+      // replacement itself". Keeping them in one change-block smears
+      // the two unrelated changes visually; breaking here renders
+      // the pure add in its own green block and the fence removal +
+      // fence addition as a separate red→green pair below it.
+      const current = changedSegments[changedSegments.length - 1];
+      const next = segments[index + 1];
+      if (current?.kind === "added" && next?.kind === "removed") {
+        break;
+      }
       changedSegments.push(segments[index + 1]!);
       index += 1;
     }

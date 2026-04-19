@@ -270,6 +270,89 @@ describe("markdown diff segments", () => {
     ).toBe(false);
   });
 
+  it("separates text added before a changed Mermaid fence from the fence replacement", () => {
+    // Regression guard for the "typed text smeared into the Mermaid
+    // 'added' block" bug. Before the opening-marker-anchor fix, every
+    // anchor inside the fence was dropped (interior text differs between
+    // sides), leaving the LCS with no way to pin the fence position —
+    // so paragraphs inserted BEFORE the fence got lumped into the same
+    // "added" segment as the new fence, rendering the typed text twice
+    // (once in the normal position where the user typed it, once again
+    // inside the green "added" block with the new diagram).
+    const segments = buildFullMarkdownDiffDocumentSegments(
+      [
+        "# Mermaid Demo",
+        "",
+        "```mermaid",
+        "flowchart TD",
+        "  Start --> End",
+        "```",
+        "",
+      ].join("\n"),
+      [
+        "# Mermaid Demo",
+        "",
+        "for claude and codex",
+        "for claude and codex",
+        "",
+        "```mermaid",
+        "flowchart TD",
+        "  Start --> Stop",
+        "```",
+        "",
+      ].join("\n"),
+    );
+
+    // There must be an added segment that contains the new paragraph
+    // text but NOT the fence interior. The old behaviour put both in
+    // the same added segment — the user's typed paragraph ended up
+    // smeared into the fence's green/added block.
+    const prefixAddedSegment = segments.find(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.markdown.includes("for claude and codex"),
+    );
+    expect(prefixAddedSegment).toBeDefined();
+    expect(prefixAddedSegment?.markdown).not.toContain("```mermaid");
+    expect(prefixAddedSegment?.markdown).not.toContain("flowchart TD");
+
+    // The fence interior replacement is its own removed + added pair,
+    // with no "for claude and codex" bleed.
+    const fenceRemoved = segments.find(
+      (segment) =>
+        segment.kind === "removed" &&
+        segment.markdown.includes("Start --> End"),
+    );
+    const fenceAdded = segments.find(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.markdown.includes("Start --> Stop"),
+    );
+    expect(fenceRemoved?.markdown).not.toContain("for claude and codex");
+    expect(fenceAdded?.markdown).not.toContain("for claude and codex");
+    // And both ends of the fence replacement carry the full atomic
+    // fence block (opening + interior + closing), matching the
+    // existing "changed fence kept as whole old/new block" semantic.
+    expect(fenceRemoved?.markdown).toContain("```mermaid");
+    expect(fenceAdded?.markdown).toContain("```mermaid");
+    expect(fenceRemoved?.markdown.endsWith("```\n")).toBe(true);
+    expect(fenceAdded?.markdown.endsWith("```\n")).toBe(true);
+
+    // Segment order: the pure-add text must come BEFORE the paired
+    // removed+added fence replacement. That order is what lets the
+    // renderer's change-block grouping break at an added→removed
+    // transition, so the typed text lands in its own green block and
+    // the fence replacement is a separate red→green pair below it.
+    const orderedKinds = segments.map((segment) => segment.kind);
+    const prefixAddedIndex = segments.indexOf(prefixAddedSegment!);
+    const fenceRemovedIndex = segments.indexOf(fenceRemoved!);
+    const fenceAddedIndex = segments.indexOf(fenceAdded!);
+    expect(prefixAddedIndex).toBeLessThan(fenceRemovedIndex);
+    expect(fenceRemovedIndex).toBeLessThan(fenceAddedIndex);
+    // No "removed" segment appears before the prefix added one.
+    expect(orderedKinds.slice(0, prefixAddedIndex)).not.toContain("removed");
+  });
+
   it("treats Markdown table separator formatting as unchanged", () => {
     const segments = buildFullMarkdownDiffDocumentSegments(
       [

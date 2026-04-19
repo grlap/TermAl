@@ -104,15 +104,61 @@ export function buildFullMarkdownDiffDocumentSegments(
     const expandedBeforeEnd = expandedRange.beforeEnd;
     const expandedAfterEnd = expandedRange.afterEnd;
 
+    // When the removed range starts with a fence and the added range
+    // has non-fence content before its first fence, emit the pre-fence
+    // added content as its own pure-add segment BEFORE the removed
+    // segment. That way the renderer's change-block grouping (which
+    // walks consecutive non-normal segments) can break between the
+    // pure-add and the removed-add fence pair — so a paragraph the
+    // user typed before a changed fence renders in its own green block,
+    // not visually lumped with the fence replacement below.
+    //
+    // Heuristic boundary: "first fence start in the added range". Only
+    // applies when the removed range's first chunk starts at a fence
+    // opener — otherwise the removed side isn't a clean fence-replace
+    // and we keep the existing remove-then-add order.
+    const firstFenceStartInAfter = findFirstFenceStartInRange(
+      afterLines,
+      afterCursor,
+      expandedAfterEnd,
+    );
+    const removedStartsWithFence =
+      beforeCursor < expandedBeforeEnd &&
+      beforeLines[beforeCursor]?.fenceBlock?.start === beforeCursor;
+    const hasPreFenceAdded =
+      firstFenceStartInAfter !== null &&
+      firstFenceStartInAfter > afterCursor &&
+      removedStartsWithFence;
+
+    if (hasPreFenceAdded) {
+      pushMarkdownDiffLineRangeSegments({
+        isInAfterDocument: true,
+        kind: "added",
+        lines: afterLines,
+        newStartForChunk: (chunkStart) => chunkStart + 1,
+        oldStartForChunk: () => beforeCursor + 1,
+        rangeEnd: firstFenceStartInAfter,
+        rangeStart: afterCursor,
+        segments,
+        afterOffsetsForChunk: (chunkStart, chunkEnd) => {
+          const startOffset = afterLines[chunkStart]?.start ?? afterContent.length;
+          return {
+            afterEndOffset: afterLines[chunkEnd - 1]?.end ?? startOffset,
+            afterStartOffset: startOffset,
+          };
+        },
+      });
+    }
+
     if (beforeCursor < expandedBeforeEnd) {
-      const insertionOffset = afterLines[afterCursor]?.start ?? afterContent.length;
+      const insertionOffset = afterLines[hasPreFenceAdded ? firstFenceStartInAfter : afterCursor]?.start ?? afterContent.length;
       pushMarkdownDiffLineRangeSegments({
         afterEndOffset: insertionOffset,
         afterStartOffset: insertionOffset,
         isInAfterDocument: false,
         kind: "removed",
         lines: beforeLines,
-        newStartForChunk: () => afterCursor + 1,
+        newStartForChunk: () => (hasPreFenceAdded ? firstFenceStartInAfter : afterCursor) + 1,
         oldStartForChunk: (chunkStart) => chunkStart + 1,
         rangeEnd: expandedBeforeEnd,
         rangeStart: beforeCursor,
@@ -120,7 +166,8 @@ export function buildFullMarkdownDiffDocumentSegments(
       });
     }
 
-    if (afterCursor < expandedAfterEnd) {
+    const remainingAddedStart = hasPreFenceAdded ? firstFenceStartInAfter : afterCursor;
+    if (remainingAddedStart < expandedAfterEnd) {
       pushMarkdownDiffLineRangeSegments({
         isInAfterDocument: true,
         kind: "added",
@@ -128,7 +175,7 @@ export function buildFullMarkdownDiffDocumentSegments(
         newStartForChunk: (chunkStart) => chunkStart + 1,
         oldStartForChunk: () => beforeCursor + 1,
         rangeEnd: expandedAfterEnd,
-        rangeStart: afterCursor,
+        rangeStart: remainingAddedStart,
         segments,
         afterOffsetsForChunk: (chunkStart, chunkEnd) => {
           const startOffset = afterLines[chunkStart]?.start ?? afterContent.length;
@@ -686,6 +733,20 @@ export function buildGreedyMarkdownLineAnchors(
   return anchors;
 }
 
+function findFirstFenceStartInRange(
+  lines: MarkdownDocumentLine[],
+  rangeStart: number,
+  rangeEnd: number,
+): number | null {
+  for (let index = rangeStart; index < rangeEnd; index += 1) {
+    const block = lines[index]?.fenceBlock;
+    if (block && block.start === index) {
+      return index;
+    }
+  }
+  return null;
+}
+
 function expandChangedRangeToMarkdownFenceBlocks(
   beforeLines: MarkdownDocumentLine[],
   afterLines: MarkdownDocumentLine[],
@@ -877,6 +938,17 @@ function buildMarkdownLineRangeChunks(
 
     const openingFence = parseOpeningMarkdownFenceLine(lineText);
     if (openingFence) {
+      // When a fence starts inside a changed range, flush any accumulated
+      // non-fence content (e.g. paragraph text the user typed before the
+      // fence) as its own chunk. Without this split, text adjacent to a
+      // changed fence smears into the same removed/added segment as the
+      // fence interior — the rendered-Markdown diff then shows the user's
+      // typed text twice (once at its true position, once again inside
+      // the fence's atomic add/remove block).
+      if (hasContent && chunkStart < index) {
+        chunks.push([chunkStart, index]);
+        chunkStart = index;
+      }
       activeFence = openingFence;
       hasContent = true;
       continue;
