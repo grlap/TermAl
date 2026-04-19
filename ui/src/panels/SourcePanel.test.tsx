@@ -4,9 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { copyTextToClipboard } from "../clipboard";
 import {
   SourcePanel,
-  rebaseContentOntoDisk,
   type SourceFileState,
 } from "./SourcePanel";
+import { rebaseContentOntoDisk } from "./content-rebase";
 
 vi.mock("../clipboard", () => ({
   copyTextToClipboard: vi.fn(),

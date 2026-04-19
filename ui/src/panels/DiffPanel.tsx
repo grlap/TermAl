@@ -38,7 +38,8 @@ import {
   detectRenderableRegions,
   type SourceRenderableRegion,
 } from "../source-renderers";
-import { rebaseContentOntoDisk, type SourceSaveOptions } from "./SourcePanel";
+import { type SourceSaveOptions } from "./SourcePanel";
+import { rebaseContentOntoDisk } from "./content-rebase";
 import { StructuredDiffView } from "./StructuredDiffView";
 import {
   findClosestMarkdownRange,
