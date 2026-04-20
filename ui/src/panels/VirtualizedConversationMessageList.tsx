@@ -240,6 +240,39 @@ export function VirtualizedConversationMessageList({
     height: DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
     scrollTop: 0,
   });
+  const syncViewportFromScrollNode = useCallback((node: HTMLElement) => {
+    const nextState = {
+      height: node.clientHeight > 0 ? node.clientHeight : DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
+      scrollTop: node.scrollTop,
+    };
+
+    setViewport((current) =>
+      current.height === nextState.height && current.scrollTop === nextState.scrollTop
+        ? current
+        : nextState,
+    );
+  }, []);
+  const writeScrollTopAndSyncViewport = useCallback(
+    (node: HTMLElement, nextScrollTop: number) => {
+      const targetScrollTop = Number.isFinite(nextScrollTop) ? Math.max(nextScrollTop, 0) : 0;
+      if (Math.abs(node.scrollTop - targetScrollTop) >= 1) {
+        node.scrollTop = targetScrollTop;
+      }
+      // Programmatic scroll writes can paint before the browser emits
+      // a scroll event. Sync the virtualizer's viewport state
+      // immediately so the rendered window matches the new scrollTop
+      // in the same commit. The sync fires unconditionally — even when
+      // the `>= 1` guard above skipped the write — because a prior
+      // native scroll event may not have propagated to `viewport`
+      // state yet (event queue latency, React batching) and the
+      // viewport shape still needs to catch up before the next render
+      // computes the window. The `setViewport` call inside
+      // `syncViewportFromScrollNode` short-circuits on equality, so a
+      // truly-redundant sync is free.
+      syncViewportFromScrollNode(node);
+    },
+    [syncViewportFromScrollNode],
+  );
   const [layoutVersion, setLayoutVersion] = useState(0);
   // Post-activation measurement phase: when the list transitions from
   // inactive to active (or mounts directly in the active state with
@@ -448,8 +481,6 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
-    const nextViewportHeight =
-      node.clientHeight > 0 ? node.clientHeight : DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT;
     const nextScrollTop = activeConversationSearchScrollTop;
 
     if (Math.abs(node.scrollTop - nextScrollTop) >= 1) {
@@ -462,18 +493,10 @@ export function VirtualizedConversationMessageList({
       // `isScrollContainerNearBottom` could self-heal sticky
       // bottom after search closed.
       shouldKeepBottomAfterLayoutRef.current = false;
-      node.scrollTop = nextScrollTop;
     }
+    writeScrollTopAndSyncViewport(node, nextScrollTop);
     lastPinnedConversationSearchIdRef.current =
       activeConversationSearchMessageId;
-    setViewport((current) =>
-      current.height === nextViewportHeight && current.scrollTop === nextScrollTop
-        ? current
-        : {
-            height: nextViewportHeight,
-            scrollTop: nextScrollTop,
-          },
-    );
   }, [
     // `activeConversationSearchMessageId` is the hit IDENTITY —
     // the gate that distinguishes "user navigated to a new hit"
@@ -488,6 +511,7 @@ export function VirtualizedConversationMessageList({
     hasConversationSearch,
     isActive,
     scrollContainerRef,
+    writeScrollTopAndSyncViewport,
   ]);
 
   // Arm the bottom-pin flag while measuring so the existing re-pin
@@ -538,9 +562,7 @@ export function VirtualizedConversationMessageList({
     const node = scrollContainerRef.current;
     if (node) {
       const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-      if (Math.abs(node.scrollTop - target) >= 1) {
-        node.scrollTop = target;
-      }
+      writeScrollTopAndSyncViewport(node, target);
     }
     setIsMeasuringPostActivation(false);
   });
@@ -558,9 +580,7 @@ export function VirtualizedConversationMessageList({
       const node = scrollContainerRef.current;
       if (node) {
         const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-        if (Math.abs(node.scrollTop - target) >= 1) {
-          node.scrollTop = target;
-        }
+        writeScrollTopAndSyncViewport(node, target);
       }
       shouldKeepBottomAfterLayoutRef.current = true;
       setIsMeasuringPostActivation(false);
@@ -569,7 +589,7 @@ export function VirtualizedConversationMessageList({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [isMeasuringPostActivation, scrollContainerRef]);
+  }, [isMeasuringPostActivation, scrollContainerRef, writeScrollTopAndSyncViewport]);
 
   useLayoutEffect(() => {
     if (!isActive || !shouldKeepBottomAfterLayoutRef.current) {
@@ -630,10 +650,8 @@ export function VirtualizedConversationMessageList({
     // nothing instead of writing a value the browser would round to the
     // same integer anyway.
     const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-    if (Math.abs(node.scrollTop - target) >= 1) {
-      node.scrollTop = target;
-    }
-  }, [isActive, layout.totalHeight, scrollContainerRef]);
+    writeScrollTopAndSyncViewport(node, target);
+  }, [isActive, layout.totalHeight, scrollContainerRef, writeScrollTopAndSyncViewport]);
 
   useLayoutEffect(() => {
     if (!isActive) {
@@ -646,16 +664,16 @@ export function VirtualizedConversationMessageList({
     }
 
     const syncViewport = () => {
-      const nextState = {
-        height: node.clientHeight > 0 ? node.clientHeight : DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
-        scrollTop: node.scrollTop,
-      };
-
-      setViewport((current) =>
-        current.height === nextState.height && current.scrollTop === nextState.scrollTop
-          ? current
-          : nextState,
-      );
+      // Route through the shared helper so the viewport-from-node
+      // contract (clientHeight fallback, scrollTop capture, equality
+      // short-circuit in `setViewport`) stays in one place. A
+      // previous revision inlined the same logic here and the two
+      // copies were drifting — e.g. the helper's `Math.max(target, 0)`
+      // clamp lived only on the programmatic-write path while this
+      // listener path had no clamp, which is safe for native scroll
+      // events (browsers already clamp) but confusing for future
+      // readers.
+      syncViewportFromScrollNode(node);
 
       // Clear the pin flag once the user has scrolled away from
       // near-bottom. Mirrors `TerminalPanel.shouldStickToBottomRef`'s
@@ -666,6 +684,9 @@ export function VirtualizedConversationMessageList({
       // above intentionally leaves it set so a single measurement
       // growth can survive the same-commit `setLayoutVersion` →
       // follow-up-commit re-render without tearing down the pin.
+      // This side effect is specific to the native-scroll-event path
+      // and does NOT belong inside `syncViewportFromScrollNode`
+      // (programmatic writes shouldn't auto-clear the pin).
       if (
         shouldKeepBottomAfterLayoutRef.current &&
         !isScrollContainerNearBottom(node)
@@ -702,7 +723,7 @@ export function VirtualizedConversationMessageList({
       node.removeEventListener("keydown", markUserScroll);
       resizeObserver.disconnect();
     };
-  }, [isActive, scrollContainerRef, sessionId]);
+  }, [isActive, scrollContainerRef, sessionId, syncViewportFromScrollNode]);
 
   // Stabilize handler references so MeasuredMessageCard memo can skip
   // re-renders for messages whose data and position haven't changed,
@@ -873,10 +894,8 @@ export function VirtualizedConversationMessageList({
     }
     const newAnchorTop = layoutTopsRef.current[newIndex] ?? 0;
     const nextScrollTop = Math.max(newAnchorTop - anchor.anchorOffsetInViewport, 0);
-    if (Math.abs(node.scrollTop - nextScrollTop) >= 1) {
-      node.scrollTop = nextScrollTop;
-    }
-  }, [renderWindowSize, scrollContainerRef]);
+    writeScrollTopAndSyncViewport(node, nextScrollTop);
+  }, [renderWindowSize, scrollContainerRef, writeScrollTopAndSyncViewport]);
 
   const handleHeightChange = useCallback((messageId: string, nextHeight: number) => {
     if (!Number.isFinite(nextHeight) || nextHeight <= 0) {
@@ -949,9 +968,7 @@ export function VirtualizedConversationMessageList({
           // the previous pin target cannot trigger an extra scroll event +
           // reflow + ResizeObserver re-fire cycle.
           const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-          if (Math.abs(node.scrollTop - target) >= 1) {
-            node.scrollTop = target;
-          }
+          writeScrollTopAndSyncViewport(node, target);
         }
       } else if (inUserScrollCooldown) {
         // Defer the anchor-preserving `scrollTop` write for the same
@@ -973,14 +990,12 @@ export function VirtualizedConversationMessageList({
           nextHeight: roundedHeight,
           previousHeight,
         });
-        if (Math.abs(nextScrollTop - node.scrollTop) >= 1) {
-          node.scrollTop = nextScrollTop;
-        }
+        writeScrollTopAndSyncViewport(node, nextScrollTop);
       }
     }
 
     setLayoutVersion((current) => current + 1);
-  }, [isActive, scrollContainerRef]);
+  }, [isActive, scrollContainerRef, writeScrollTopAndSyncViewport]);
 
   const boundApprovalDecision = useCallback(
     (messageId: string, decision: ApprovalDecision) => onApprovalDecision(sessionId, messageId, decision),

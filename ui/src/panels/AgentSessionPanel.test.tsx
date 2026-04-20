@@ -9,6 +9,8 @@ import {
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { RunningIndicator } from "./session-activity-cards";
 import {
+  buildVirtualizedMessageLayout,
+  estimateConversationMessageHeight,
   getAdjustedVirtualizedScrollTopForHeightChange,
   getScrollContainerBottomGap,
   isScrollContainerNearBottom,
@@ -153,6 +155,96 @@ describe("AgentSessionPanel conversation caching", () => {
       window.ResizeObserver = OriginalResizeObserver;
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
+  it("renders the bottom window immediately after a virtualized bottom-pin scroll write", () => {
+    // Regression guard for the "half screen, then blank" failure: the
+    // virtualizer rendered rows for the old viewport, a layout effect wrote
+    // `scrollTop` to the bottom, and the browser could paint before a native
+    // scroll event caused the virtualizer to render rows for the new viewport.
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalGetBoundingClientRect =
+      Element.prototype.getBoundingClientRect;
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    const messages = makeTextMessages(120);
+    const estimatedLayout = buildVirtualizedMessageLayout(
+      messages.map(estimateConversationMessageHeight),
+    );
+    const clientHeight = 500;
+    let scrollTop = 0;
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => clientHeight,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => estimatedLayout.totalHeight,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
+    window.ResizeObserver =
+      ResizeObserverMock as unknown as typeof ResizeObserver;
+    // Keep first measurements unresolved so the only state update that can
+    // move the rendered window is the immediate viewport sync after the
+    // programmatic bottom scroll.
+    Element.prototype.getBoundingClientRect =
+      function getBoundingClientRectMock() {
+        const element = this as HTMLElement;
+        const height = element.classList.contains("virtualized-message-slot")
+          ? 0
+          : clientHeight;
+        return {
+          bottom: height,
+          height,
+          left: 0,
+          right: 100,
+          top: 0,
+          width: 100,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      };
+
+    try {
+      render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={messages}
+          scrollContainerRef={{
+            current: scrollNode,
+          } as RefObject<HTMLElement | null>}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      expect(scrollTop).toBe(estimatedLayout.totalHeight - clientHeight);
+      expect(screen.queryByText("message-120")).toBeInTheDocument();
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     }
   });
 
