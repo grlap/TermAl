@@ -1453,10 +1453,34 @@ export default function App() {
     );
   }
 
+  // Outcome of `adoptCreatedSessionResponse`:
+  //   - "adopted":    session inserted into `sessionsRef` and the
+  //                   workspace pane opened. Nothing for the caller
+  //                   to do.
+  //   - "stale":      revision gate rejected the write because a
+  //                   newer snapshot already landed. The session
+  //                   was NOT inserted here but an earlier delta
+  //                   already saw it (that's how the revision got
+  //                   ahead), so `sessionsRef` does contain
+  //                   `created.sessionId`. The caller may still
+  //                   open the workspace pane as a safe fallback.
+  //   - "recovering": wire-contract violation
+  //                   (`session.id !== sessionId`) — a resync was
+  //                   scheduled and the caller MUST NOT open a
+  //                   workspace pane for the mismatched id. That
+  //                   id was never inserted into `sessionsRef`,
+  //                   so opening it would leave a phantom pane
+  //                   that persists until the resync reconciles.
+  //
+  // A plain boolean could not carry the "stale vs recovering"
+  // distinction, so the call-site fallback (`if (!adopted) { open
+  // workspace pane }`) opened a phantom on protocol mismatch.
+  type AdoptCreatedSessionOutcome = "adopted" | "stale" | "recovering";
+
   function adoptCreatedSessionResponse(
     created: CreateSessionResponse,
     options?: { openSessionId?: string; paneId?: string | null },
-  ) {
+  ): AdoptCreatedSessionOutcome {
     if (created.session.id !== created.sessionId) {
       // Wire contract guarantees `session.id === sessionId`; a mismatch
       // means protocol drift. Trigger a recovery resync so the client
@@ -1464,7 +1488,7 @@ export default function App() {
       // workspace pane for a session that was never inserted into
       // `sessionsRef`. Mirrors the sibling path in `adoptFetchedSession`.
       requestActionRecoveryResyncRef.current();
-      return false;
+      return "recovering";
     }
 
     // Route the session write through the same revision-gate that
@@ -1491,7 +1515,7 @@ export default function App() {
         },
       )
     ) {
-      return false;
+      return "stale";
     }
 
     const previousSessions = sessionsRef.current;
@@ -1519,9 +1543,22 @@ export default function App() {
         ),
       ),
     );
-    return true;
+    return "adopted";
   }
 
+  // Returns `boolean` rather than the sibling
+  // `AdoptCreatedSessionOutcome` discriminated union because the
+  // wire-contract-mismatch branch for this path is hoisted to
+  // the call site in the hydration effect below (see
+  // `fetchSession` catch branch: it checks
+  // `response.session.id !== sessionId` and triggers recovery
+  // BEFORE reaching this function). The two `false` outcomes
+  // here — unknown session id (deleted during fetch) and
+  // revision gate rejection — both collapse to the same caller
+  // behaviour: don't mark as hydrated, let the next SSE delta
+  // or action-recovery resync reconcile. A three-way
+  // discrimination would be useful only if those two cases
+  // ever needed divergent callback treatment.
   function adoptFetchedSession(
     session: Session,
     revision: number,
@@ -4483,7 +4520,16 @@ export default function App() {
         openSessionId: created.sessionId,
         paneId: targetPaneId,
       });
-      if (!adopted) {
+      // "stale" is a safe fallback — an earlier delta already
+      // raised the revision past the POST response, which means
+      // the session is already in `sessionsRef`; opening the
+      // workspace pane points at a real session.
+      //
+      // "recovering" must NOT fall through — the id came from a
+      // wire-contract-violating response and is not in
+      // `sessionsRef`. Opening would leave a phantom pane until
+      // the scheduled resync reconciles.
+      if (adopted === "stale") {
         setWorkspace((current) =>
           applyControlPanelLayout(
             openSessionInWorkspaceState(
@@ -4957,7 +5003,10 @@ export default function App() {
         openSessionId: created.sessionId,
         paneId: targetPaneId,
       });
-      if (!adopted) {
+      // See call-site above for the adopt-outcome rationale:
+      // only "stale" falls through to the workspace fallback;
+      // "recovering" skips it to avoid a phantom pane.
+      if (adopted === "stale") {
         setWorkspace((current) =>
           applyControlPanelLayout(
             openSessionInWorkspaceState(
@@ -5280,7 +5329,13 @@ export default function App() {
         openSessionId: created.sessionId,
         paneId: preferredPaneId,
       });
-      if (!adopted) {
+      // Only "stale" falls through to the workspace fallback
+      // (session is in `sessionsRef` via an earlier delta, safe
+      // to open). "recovering" must skip — mismatched
+      // `sessionId` is not in `sessionsRef` and opening would
+      // leave a phantom pane until the scheduled resync
+      // reconciles.
+      if (adopted === "stale") {
         setWorkspace((current) =>
           applyControlPanelLayout(
             openSessionInWorkspaceState(
