@@ -476,6 +476,76 @@ describe("DiffPanel", () => {
     expect(screen.getByText(/Patch-only rendering/i)).toBeInTheDocument();
   });
 
+  // Regression guard for the "Rendered-diff fallback uses worktree
+  // content for staged diffs" bug in docs/bugs.md. Before the fix,
+  // `renderedDiffAfterContent` fell back to `latestFile.content`
+  // (the current worktree) when `documentContent` was missing,
+  // regardless of whether `gitSectionId` was "staged" or "unstaged".
+  // On a staged diff whose worktree had unrelated unstaged edits,
+  // the Rendered view showed the WORKTREE — not the index — which
+  // silently misrepresented the side under review. The fix derives
+  // the fallback from a patch-only `buildDiffPreviewModel` call so
+  // the Rendered preview always matches the hunk's after-side.
+  it("renders the staged after-side from the patch when documentContent is missing", async () => {
+    // Worktree carries an unrelated unstaged edit ("flowchart TD /
+    // X --> Y") that the diff does NOT describe. The diff's
+    // staged after-side is a single line "flowchart LR". Before
+    // the fix the Rendered view would feed Mermaid the full
+    // worktree; with the fix it feeds the patch's after-side.
+    fetchFileMock.mockResolvedValue({
+      content: "flowchart TD\n  X --> Y\n",
+      language: null,
+      path: "/repo/diagrams/flow.mmd",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={["@@ -1 +1 @@", "-flowchart OLD", "+flowchart LR"].join("\n")}
+          diffMessageId="diff-mmd-staged-patch-fallback"
+          filePath="/repo/diagrams/flow.mmd"
+          // No documentContent — backend didn't enrich the diff.
+          gitSectionId="staged"
+          language={null}
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Staged Mermaid update"
+        />,
+      );
+    });
+
+    const renderedButton = await screen.findByRole("button", { name: "Rendered" });
+    await clickAndSettle(renderedButton);
+    // Patch-only banner still appears because documentContent was
+    // missing — the fix preserves the "best-effort" framing, it
+    // just makes the best-effort faithful to the patch instead of
+    // leaking the worktree.
+    expect(screen.getByText(/Patch-only rendering/i)).toBeInTheDocument();
+    // The mermaid renderer was called with the patch-derived
+    // after-side, not the worktree. `flattenPreviewText` joins
+    // hunk-right lines; a single `+flowchart LR` hunk → exactly
+    // `"flowchart LR"` (no trailing newline). The worktree's
+    // `"X --> Y"` token must NOT appear in any render call.
+    await waitFor(() => {
+      expect(mermaidRenderMock).toHaveBeenCalled();
+    });
+    const renderedSources = mermaidRenderMock.mock.calls.map(([, source]) => source);
+    expect(renderedSources.some((source) => source.includes("flowchart LR"))).toBe(
+      true,
+    );
+    expect(renderedSources.every((source) => !source.includes("X --> Y"))).toBe(
+      true,
+    );
+    expect(renderedSources.every((source) => !source.includes("flowchart TD"))).toBe(
+      true,
+    );
+  });
+
   it("renders staged Markdown from the index document side instead of the worktree file", async () => {
     fetchFileMock.mockResolvedValue({
       content: "# Worktree document\n\nThis is not staged.\n",
@@ -4529,6 +4599,167 @@ describe("DiffPanel", () => {
     expect(
       screen.getByText("Your diff edits were applied on top of the disk version."),
     ).toBeInTheDocument();
+  });
+
+  // Regression guard for the new `commitRenderedMarkdownDrafts`
+  // return-boolean plumbing in
+  // `handleApplyDiffEditsToDiskVersion`. Before the fix the
+  // handler called `flushSync(() => commitRenderedMarkdownDrafts())`
+  // and discarded the result; on a failing commit the rebase
+  // would silently continue. The fix captures the boolean and
+  // short-circuits with an explicit `externalFileNotice`.
+  //
+  // What this test PINS (limited but useful):
+  //   - The empty-commits early-return in
+  //     `commitRenderedMarkdownDrafts` returns `true` (not
+  //     `undefined`/`false`), so `handleApplyDiffEditsToDiskVersion`
+  //     does NOT spuriously short-circuit on the conflict-notice
+  //     branch when there's nothing to flush. The full
+  //     apply-to-disk-version flow continues through `fetchFile`
+  //     and the rebase to its success notice.
+  //   - A regression that inverted the boolean polarity, or that
+  //     changed the empty-commits path to `return` (undefined),
+  //     would cause this test to fail: either the
+  //     "Resolve rendered Markdown conflicts..." notice would
+  //     appear, or the success notice would never show.
+  //
+  // What this test does NOT pin (tracked as P2 in docs/bugs.md):
+  //   - The `handleRenderedMarkdownSectionCommits(commits) → true`
+  //     branch of `commitRenderedMarkdownDrafts`. `handleSave`
+  //     synchronously commits drafts BEFORE `onSaveFile` rejects,
+  //     so by the time this test clicks apply-to-disk-version the
+  //     committers return `null` and the flushSync takes the
+  //     `commits.length === 0` path. Re-editing a section AFTER
+  //     the failed save to produce a fresh dirty draft doesn't
+  //     reliably land on the success branch either — the
+  //     post-first-commit source buffer already advanced past
+  //     the re-edited segment's original markdown, so the
+  //     resolver fails and the commit returns false.
+  //   - The conflict-short-circuit path. The P2 task enumerates
+  //     two alternative approaches: extracting
+  //     `handleRenderedMarkdownSectionCommits` into a pure helper,
+  //     or mocking `hasOverlappingMarkdownCommitRanges` via
+  //     `vi.mock` to force a deterministic failure.
+  it("keeps apply-to-disk-version flowing when `commitRenderedMarkdownDrafts` has nothing to flush", async () => {
+    fetchFileMock
+      .mockResolvedValueOnce({
+        content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+        contentHash: "sha256:base",
+        language: "markdown",
+        path: "/repo/README.md",
+      })
+      .mockResolvedValueOnce({
+        content: "Shared intro.\n# Draft document\nShared middle.\nReady to ship.\nShared outro.\n",
+        contentHash: "sha256:disk",
+        language: "markdown",
+        path: "/repo/README.md",
+      });
+    const onSaveFile = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("file changed on disk before save"));
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " Shared intro.",
+            "-# Base document",
+            "+# Draft document",
+            " Shared middle.",
+            "-Committed text.",
+            "+Ready to commit.",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "Shared intro.\n# Base document\nShared middle.\nCommitted text.\nShared outro.\n",
+              source: "index",
+            },
+            after: {
+              content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-apply-disk-rendered-markdown"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={onSaveFile}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    await waitFor(() => {
+      expect(
+        document.querySelectorAll(".markdown-diff-rendered-section-added").length,
+      ).toBe(2);
+    });
+
+    const addedSections = document.querySelectorAll<HTMLElement>(
+      ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+    );
+    const readyToCommitSection = Array.from(addedSections).find((section) =>
+      (section.textContent ?? "").includes("Ready to commit."),
+    );
+    expect(readyToCommitSection).toBeDefined();
+    if (!readyToCommitSection) {
+      return;
+    }
+
+    // Edit the section, Save it (which commits the draft
+    // synchronously via `handleSave`'s own
+    // `commitRenderedMarkdownDrafts()` call and then rejects on
+    // the network), arm the apply-to-disk-version button.
+    editRenderedMarkdownSection(
+      readyToCommitSection,
+      "<p>Ready to ship.</p>",
+    );
+    await clickAndSettle(screen.getByRole("button", { name: "Save Markdown" }));
+
+    const applyButton = await screen.findByRole("button", {
+      name: "Apply my edits to disk version",
+    });
+
+    // At this point, `hasUncommittedUserEditRef` on every
+    // committer is false (Save's internal flush cleared them).
+    // Clicking apply-to-disk-version hits the `commits.length ===
+    // 0` empty-path in `commitRenderedMarkdownDrafts`, which
+    // must return `true` so
+    // `handleApplyDiffEditsToDiskVersion` does NOT set the
+    // conflict notice and DOES proceed to `fetchFile` + rebase.
+    await clickAndSettle(applyButton);
+
+    // Pin the rebase fetch by path + scope, not by count delta,
+    // so a future watcher-tick refactor doesn't leak into the
+    // assertion.
+    await waitFor(() => {
+      expect(fetchFileMock).toHaveBeenLastCalledWith(
+        "/repo/README.md",
+        expect.objectContaining({ sessionId: "session-1" }),
+      );
+    });
+    expect(
+      await screen.findByText("Your diff edits were applied on top of the disk version."),
+    ).toBeInTheDocument();
+    // Negative control: the conflict-short-circuit notice must
+    // NOT appear when the empty-commits path correctly returns
+    // `true`. A regression that flipped the polarity to `false`
+    // on empty commits would trip this.
+    expect(
+      screen.queryByText(
+        "Resolve rendered Markdown conflicts before applying edits to the disk version.",
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it("reloads stale diff edits from disk on request", async () => {

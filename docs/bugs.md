@@ -48,6 +48,45 @@ pairs feeds Markdown like `[click me](javascript:alert(1))` through the full
 render pipeline and asserts no `<a>` role, no `href="javascript:void(0)"`,
 and the link text still renders as plain content.
 
+Also fixed in the current tree: the Rendered-diff fallback for
+staged diffs no longer leaks worktree content when the backend
+didn't supply `documentContent`. `renderedDiffAfterContent` in
+`DiffPanel.tsx` now derives its fallback from a patch-only
+`buildDiffPreviewModel(diff, changeType)` call (no `latestFileContent`
+argument, so the `expandDiffPreviewToWholeFile` expansion is
+skipped and `modifiedText` is built from the hunk rows alone). The
+Rendered preview's "Patch-only rendering" banner still warns that
+the view is a best-effort approximation, but the content is now
+faithful to the patch's after-side regardless of whether the
+worktree carries unrelated unstaged edits. A new Vitest case pins
+this: a staged diff whose worktree (via `fetchFileMock`) contains
+an unrelated `X --> Y` mermaid node, where the patch's after-side
+is `flowchart LR`, asserts the mermaid renderer saw only
+`flowchart LR` and never `X --> Y` or the worktree's `flowchart TD`.
+
+Also fixed in the current tree: `handleApplyDiffEditsToDiskVersion`
+no longer silently continues past a failed rendered-Markdown draft
+commit. `commitRenderedMarkdownDrafts` now returns a boolean
+(`true` when the flushed drafts were applied cleanly or when there
+was nothing to flush; `false` when `handleRenderedMarkdownSectionCommits`
+rejected the batch for unresolvable or overlapping commits), and the
+apply-to-disk handler captures that via
+`flushSync(() => commitRenderedMarkdownDrafts())` and short-circuits
+with a dedicated `externalFileNotice("Resolve rendered Markdown
+conflicts before applying edits to the disk version.")` before
+touching `fetchFile` or rebase. Callers that ignore the new boolean
+(Save / reload / navigation flows) continue to treat the function
+as a best-effort flush and surface errors through the existing
+`saveError` banner — backward compatible. A new Vitest case pins
+the empty-commits `return true` path (verified load-bearing by
+flipping it to `false` and watching the test fail): a
+rendered-Markdown save-then-apply-to-disk-version scenario where
+`handleSave`'s own internal commit already drained the draft so
+the apply-time flushSync has no work. The
+success-with-commits and conflict-short-circuit branches are
+tracked as a P2 task below — engineering those states reliably
+through a React integration test is non-trivial.
+
 Also fixed in the current tree: the `isSafePastedMarkdownHref`
 Windows drive-letter exception is removed. Paste-sanitize no longer
 short-circuits `/^[a-zA-Z]:[\\/]/` to `true`; drive-letter hrefs now
@@ -100,6 +139,37 @@ case loads a CRLF README, edits a rendered section, saves, and asserts the
 detection (pure LF, pure CRLF, mixed CRLF/LF dominant, ties → LF, bare
 `\r` legacy Mac ignored) and application (empty strings, LF identity,
 CRLF expansion, round-trip invariant) contracts.
+
+## DiffPanel conflict-gate comment points at a removed bug heading
+
+**Severity:** Low - a new source comment documents an important rendered-Markdown commit invariant by pointing at a `docs/bugs.md` issue title that the same change moves out of the active bug list.
+
+The `commitRenderedMarkdownDrafts` comment in `DiffPanel.tsx` correctly explains why `handleApplyDiffEditsToDiskVersion` must stop when rendered-Markdown drafts fail to commit. The problem is the cross-reference: it names the active bug heading that was resolved and removed from the active section, so future readers can follow the pointer and fail to find the referenced section.
+
+**Current behavior:**
+- `DiffPanel.tsx` references the old `docs/bugs.md` heading for the apply-to-disk rendered-Markdown conflict bug.
+- The reviewed `docs/bugs.md` change moves that issue into the fixed preamble instead of keeping it as an active heading.
+- The local invariant explanation remains useful, but the issue-title reference is brittle.
+
+**Proposal:**
+- Keep the source comment's invariant explanation.
+- Remove the direct `docs/bugs.md` issue-title reference, or reword it as a historical note that does not depend on an active bug heading.
+
+## Demo Markdown files contain unrelated scratch edits
+
+**Severity:** Note - visual demo fixtures have small content edits that appear unrelated to the DiffPanel behavior fixes and bug-tracker update.
+
+`docs/math-demo.md` and `docs/mermaid-demo.md` are demo/smoke-test fixtures for rendered Markdown behavior. The current diff changes their visible content, but the rest of the change set is focused on staged rendered-diff fallback behavior and rendered-Markdown apply-to-disk conflict handling.
+
+**Current behavior:**
+- `docs/math-demo.md` changes the heading from `Math Demo` to `Math Demo2`.
+- `docs/mermaid-demo.md` removes blank lines and changes a Mermaid edge target from `Stop2` to `Stop`.
+- The diff does not explain why those fixture changes are part of the same behavior fix.
+
+**Proposal:**
+- Keep the demo-doc edits only if they are intentional fixture updates.
+- Otherwise leave them out of the change set before staging/committing.
+- If intentional, document the reason in the commit or PR notes so reviewers know they are not scratch edits.
 
 ## Rendered Markdown commit fallback path can disagree on offsets for CRLF files
 
@@ -254,22 +324,6 @@ This cascades through the ResizeObserver effect (whose dep is `inlineZoneHostSta
 **Proposal:**
 - Shallow-compare the new zone set against the current state before calling `setInlineZoneHostState` (same ids in same order + same inner-node refs → no-op).
 - Or move the ResizeObserver setup into the zone-registry effect, observing/unobserving specific nodes incrementally rather than recreating the observer.
-
-## Rendered-diff fallback uses worktree content for staged diffs
-
-**Severity:** Medium - `ui/src/panels/DiffPanel.tsx:556-567` defines `renderedDiffAfterContent` as `documentContent?.after?.content ?? latestFile.content`. For a **staged** diff when `documentContent` is missing (large file, unsupported binary, read error), the fallback uses `latestFile.content` — which is always the worktree (from `fetchFile` on the current working file). That can contain unstaged edits unrelated to the staged diff, so the Rendered view misrepresents the index side.
-
-The UI labels this "Patch-only rendering: best-effort approximation" so reviewers are warned, but the sibling `buildMarkdownDiffPreview` fallback for Markdown uses `preview.modifiedText` (derived from the patch itself), which is more faithful. The Rendered view's fallback is less accurate than its label admits.
-
-**Current behavior:**
-- Staged diff + missing `documentContent` + worktree carries unstaged edits → Rendered view shows the worktree (unstaged) version, not the index.
-- "Patch-only" label is correct but understates the divergence.
-- Test at `DiffPanel.test.tsx:430-466` only exercises the unstaged path where worktree == "after side" anyway, so the bug isn't caught by coverage.
-
-**Proposal:**
-- Derive the rendered-view fallback from `buildDiffPreviewModel(diff, changeType).modifiedText` (same source the Markdown fallback uses) so staged/unstaged side semantics are preserved by construction.
-- OR suppress the "Rendered" button entirely when `documentContent` is missing AND `gitSectionId === "staged"`.
-- Add a Vitest case: staged diff, no `documentContent`, worktree contains different content than the patch's after-side → the Rendered view matches the patch, not the worktree.
 
 ## Rendered Markdown diff view cannot jump between changes
 
@@ -809,23 +863,42 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 **Proposal:**
 - Special-case 404 on `fetchSession` to call `requestActionRecoveryResyncRef.current()` without `reportRequestError`, similar to how `fetchWorkspaceLayout` treats 404.
 
-## `handleApplyDiffEditsToDiskVersion` silently continues when rendered Markdown commit batch conflicts
-
-**Severity:** Medium - the apply-to-disk-version button can silently no-op or rebase against stale state when an unmappable rendered Markdown draft is in the batch.
-
-`handleApplyDiffEditsToDiskVersion` now calls `flushSync(() => commitRenderedMarkdownDrafts())` at the top to capture active DOM drafts before rebasing. When the batch contains an unmappable or overlapping section, `handleRenderedMarkdownSectionCommits` sets a `setSaveError(...)` banner and returns `false`, leaving the drafts dirty. The handler does not inspect the commit result: it proceeds to read `editValueRef.current`, which may still be the pre-flush value, and either short-circuits via the `currentEditValue === currentFile.content` path or rebases with stale content. The user clicks a specific button and gets only the commit error banner; the apply-to-disk-version action itself appears to have done nothing.
-
-**Current behavior:**
-- `flushSync(() => commitRenderedMarkdownDrafts())` runs at the top of the handler.
-- `commitRenderedMarkdownDrafts` → `handleRenderedMarkdownSectionCommits` returns `false` for a conflict but the caller discards the return value.
-- The rebase path then proceeds, may silently return via the early shortcut, and the user has no dedicated notice for the apply-to-disk-version action.
-
-**Proposal:**
-- Capture the `flushSync`'d commit result and, when drafts were not applied cleanly, short-circuit with an explicit notice (e.g., `setExternalFileNotice("Resolve rendered Markdown conflicts before applying edits to the disk version.")`) before touching `fetchFile` / rebase.
-- Add coverage where a rendered Markdown section cannot be mapped and the user clicks apply-to-disk-version, asserting the specific notice is shown and `fetchFile` is not called.
-
 ## Implementation Tasks
 
+- [ ] P2: Broaden `handleApplyDiffEditsToDiskVersion` rendered-
+  Markdown commit coverage beyond the empty-commits path:
+  `DiffPanel.test.tsx::"keeps apply-to-disk-version flowing when
+  \`commitRenderedMarkdownDrafts\` has nothing to flush"`
+  currently pins the `commits.length === 0 → return true` path
+  (verified load-bearing by temporarily flipping the production
+  return to `false` — the test fails, confirming the empty-path
+  plumbing is protected against that regression). Two branches
+  remain uncovered:
+  (A) Success-with-commits
+      (`handleRenderedMarkdownSectionCommits(commits) → true`):
+      `handleSave` synchronously commits drafts BEFORE
+      `onSaveFile` rejects, so by the time a rendered-Markdown
+      integration test clicks apply-to-disk-version the
+      committers return `null` and the flushSync takes the
+      empty-path. Re-editing a section after the failed save
+      doesn't help — the post-first-commit source buffer
+      already advanced past the re-edited segment's original
+      markdown, so the resolver fails and the commit returns
+      `false` (the opposite of what we want to pin).
+  (B) Failure
+      (`handleRenderedMarkdownSectionCommits(commits) → false`):
+      the conflict-short-circuit path where
+      `externalFileNotice` is set and `fetchFile` is NOT called.
+  Two cheap alternatives to integration testing:
+  (a) extract `handleRenderedMarkdownSectionCommits` into a pure
+      helper with injectable dependencies and unit-test the
+      boolean-return contract directly (cleanest, strongest
+      coverage, also makes the helper reusable).
+  (b) `vi.mock("./markdown-commit-ranges", ...)` to force
+      `hasOverlappingMarkdownCommitRanges` to return `true`,
+      which makes `handleRenderedMarkdownSectionCommits` reject
+      the batch deterministically without needing to engineer
+      real overlap (~30-40 lines of test, low refactor cost).
 - [ ] P2: Extend paste-sanitizer test coverage with obfuscation and
   encoding variants:
   a few Note-level gaps remain worth tracking for future

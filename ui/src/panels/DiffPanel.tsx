@@ -299,15 +299,31 @@ export function DiffPanel({
       .filter((commit): commit is RenderedMarkdownSectionCommit => commit != null);
   }
 
-  function commitRenderedMarkdownDrafts() {
+  // Returns `true` when the flushed drafts were applied cleanly
+  // (or when there was nothing to flush), and `false` when
+  // `handleRenderedMarkdownSectionCommits` rejected the batch for
+  // unresolvable or overlapping commits. Callers that gate their
+  // next side effect on a clean commit (notably
+  // `handleApplyDiffEditsToDiskVersion`) capture this return so
+  // they don't proceed to `fetchFile` / rebase against a buffer
+  // whose drafts are still dirty — see docs/bugs.md →
+  // "handleApplyDiffEditsToDiskVersion silently continues when
+  // rendered Markdown commit batch conflicts". Callers that
+  // ignore the return (the Save / reload / navigation paths)
+  // continue to treat the function as a best-effort flush; they
+  // already surface the commit error through the `saveError`
+  // banner.
+  function commitRenderedMarkdownDrafts(): boolean {
     const commits = collectRenderedMarkdownCommits();
     if (commits.length === 0) {
       clearRenderedMarkdownDraftSegments();
-      return;
+      return true;
     }
     if (handleRenderedMarkdownSectionCommits(commits)) {
       clearRenderedMarkdownDraftSegments();
+      return true;
     }
+    return false;
   }
 
   function commitRenderedMarkdownSectionDraft(commit: RenderedMarkdownSectionCommit) {
@@ -378,11 +394,37 @@ export function DiffPanel({
     if (documentContent?.after?.content) {
       return documentContent.after.content;
     }
-    if (latestFile.status === "ready") {
-      return latestFile.content;
+    // Fallback when the backend didn't supply `documentContent`
+    // (large files, unsupported binary types, read errors).
+    //
+    // Previously this fell back to `latestFile.content`, which is
+    // always the CURRENT WORKTREE content regardless of whether
+    // the diff is `staged` or `unstaged`. For a staged diff whose
+    // worktree carries unrelated unstaged edits, that meant the
+    // Rendered view showed the worktree instead of the index —
+    // the exact side the user is reviewing as "staged".
+    //
+    // We now derive the fallback from a patch-only
+    // `buildDiffPreviewModel` call (no `latestFileContent`
+    // argument, so `expandDiffPreviewToWholeFile` is skipped and
+    // `modifiedText` is built from the hunk rows alone). The
+    // resulting content is an approximation — only lines touched
+    // by the patch appear, matching what the `Markdown` view's
+    // fallback already does in `buildMarkdownDiffPreview`. The
+    // existing "Patch-only rendering" banner already warns
+    // reviewers that this is a best-effort preview.
+    //
+    // Note: `buildDiffPreviewModel(diff, changeType)` is a pure
+    // function over `(diff, changeType)`; the enclosing useMemo
+    // caches the result so we only reparse the diff when those
+    // inputs change. `latestFile` is no longer a dependency —
+    // correctness no longer needs worktree content here.
+    const patchOnlyPreview = buildDiffPreviewModel(diff, changeType);
+    if (patchOnlyPreview.hasStructuredPreview) {
+      return patchOnlyPreview.modifiedText;
     }
     return null;
-  }, [documentContent?.after?.content, isMarkdownTarget, latestFile]);
+  }, [changeType, diff, documentContent?.after?.content, isMarkdownTarget]);
   const renderedDiffRegions = useMemo<SourceRenderableRegion[]>(() => {
     if (renderedDiffAfterContent === null || !filePath) {
       return [];
@@ -1119,7 +1161,29 @@ export function DiffPanel({
   }
 
   async function handleApplyDiffEditsToDiskVersion() {
-    flushSync(() => commitRenderedMarkdownDrafts());
+    // Flush any in-flight rendered-Markdown DOM drafts BEFORE
+    // reading the edit buffer: the apply-to-disk-version rebase
+    // uses `editValueRef.current` as the "my edits" side, and
+    // active drafts in the rendered view are not reflected there
+    // until the section commits fire.
+    //
+    // If the commit batch rejected any section (unresolvable
+    // offset or overlapping range), `commitRenderedMarkdownDrafts`
+    // returns false and the commit handler has already set a
+    // `saveError` banner explaining why. Short-circuit here with
+    // a dedicated `externalFileNotice` so the user knows the
+    // apply-to-disk-version action itself was aborted: without
+    // this early return the function would continue to `fetchFile`
+    // and rebase, either silently no-op (if the current edit
+    // value happens to equal the loaded content) or rebase
+    // against a buffer whose rendered drafts are still dirty.
+    const draftsApplied = flushSync(() => commitRenderedMarkdownDrafts());
+    if (!draftsApplied) {
+      setExternalFileNotice(
+        "Resolve rendered Markdown conflicts before applying edits to the disk version.",
+      );
+      return;
+    }
     const currentFile = latestFileRef.current;
     const currentEditValue = editValueRef.current;
     if (
