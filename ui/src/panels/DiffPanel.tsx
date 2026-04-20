@@ -25,7 +25,9 @@ import { normalizeDisplayPath, relativizePathToWorkspace } from "../path-display
 import type { DiffMessage, WorkspaceFilesChangedEvent } from "../types";
 import { workspaceFilesChangedEventChangeForPath } from "../workspace-file-events";
 import {
+  applyMarkdownDocumentEolStyle,
   buildMarkdownDiffDocumentSegments,
+  detectMarkdownDocumentEolStyle,
   normalizeEditedMarkdownSection,
   normalizeMarkdownDocumentLineEndings,
   replaceMarkdownDocumentRange,
@@ -983,20 +985,32 @@ export function DiffPanel({
       return false;
     }
 
+    // Capture the un-normalized source FIRST so we can detect the
+    // original EOL style (CRLF vs LF). The segment math runs on
+    // LF-normalized content (offsets recorded in
+    // `buildFullMarkdownDiffDocumentSegments` are LF-only), but the
+    // resulting `nextDocumentContent` needs to be written back to the
+    // edit buffer in the ORIGINAL convention so a subsequent save to
+    // disk does not silently convert a CRLF file to LF. See
+    // `docs/bugs.md` → "Silent CRLF→LF conversion on rendered-Markdown
+    // save" for the prior bug; without the round-trip, the first
+    // rendered-Markdown commit on a CRLF-on-disk document (common on
+    // Windows with `core.autocrlf=true`) rewrites the whole buffer as
+    // LF and `handleSave` persists that LF version.
+    const rawSourceContent =
+      markdownEditContentRef.current ??
+      (latestFileRef.current.status === "ready" &&
+      editValueRef.current !== latestFileRef.current.content
+        ? editValueRef.current
+        : markdownPreview.after.content);
+    const originalEolStyle = detectMarkdownDocumentEolStyle(rawSourceContent);
     // Normalize to LF so segment offsets (also LF-normalized in
     // `buildFullMarkdownDiffDocumentSegments`) line up with slices of
-    // `sourceContent`. Without this, CRLF-on-disk documents (common on
-    // Windows with `core.autocrlf=true`) made the resolver's
-    // `sourceContent.slice(start, end) === segment.markdown` check fail by
-    // every `\r` character, surfacing as an unresolvable commit and the
-    // "Rendered Markdown edit could not be applied" error.
-    const sourceContent = normalizeMarkdownDocumentLineEndings(
-      markdownEditContentRef.current ??
-        (latestFileRef.current.status === "ready" &&
-        editValueRef.current !== latestFileRef.current.content
-          ? editValueRef.current
-          : markdownPreview.after.content),
-    );
+    // `sourceContent`. Without this, CRLF-on-disk documents made the
+    // resolver's `sourceContent.slice(start, end) === segment.markdown`
+    // check fail by every `\r` character, surfacing as an unresolvable
+    // commit and the "Rendered Markdown edit could not be applied" error.
+    const sourceContent = normalizeMarkdownDocumentLineEndings(rawSourceContent);
     const resolvedCommits = commits
       .map((commit) => ({
         commit,
@@ -1019,7 +1033,7 @@ export function DiffPanel({
       return false;
     }
 
-    const nextDocumentContent = validResolvedCommits
+    const nextDocumentContentLf = validResolvedCommits
       .sort((left, right) => right.range.start - left.range.start)
       .reduce(
         (currentContent, { commit, range }) =>
@@ -1031,12 +1045,22 @@ export function DiffPanel({
         ),
         sourceContent,
       );
-    if (nextDocumentContent === sourceContent) {
+    if (nextDocumentContentLf === sourceContent) {
       for (const commit of commits) {
         setRenderedMarkdownDraftSegmentActive(commit.segment.id, false);
       }
       return true;
     }
+
+    // Re-apply the original EOL style before handing the result back to
+    // the edit buffer. The segment math above treats the document as a
+    // flat byte stream of LF-only lines; the saver downstream writes
+    // `editValue` verbatim to disk, so this is the single spot where
+    // CRLF preservation lives for the rendered-Markdown path.
+    const nextDocumentContent = applyMarkdownDocumentEolStyle(
+      nextDocumentContentLf,
+      originalEolStyle,
+    );
 
     for (const commit of commits) {
       setRenderedMarkdownDraftSegmentActive(commit.segment.id, false);

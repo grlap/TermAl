@@ -1037,6 +1037,77 @@ export function normalizeMarkdownDocumentLineEndings(content: string) {
   return content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
+/**
+ * End-of-line conventions the rendered-Markdown edit pipeline preserves
+ * on save. `crlf` covers files that Git, Windows editors, or
+ * `core.autocrlf=true` typically produce; `lf` covers everything else
+ * (Unix-style, the default for new Markdown files, and the internal
+ * working form inside the segment math).
+ *
+ * Legacy CR-only (classic Mac) files are coerced to `lf` — they were
+ * already coerced pre-fix by `normalizeMarkdownDocumentLineEndings`, and
+ * the rendered-Markdown edit pipeline has never been plausibly used on
+ * such files in this project.
+ */
+export type MarkdownDocumentEolStyle = "crlf" | "lf";
+
+/**
+ * Returns the dominant EOL style of the document. We count CRLF
+ * occurrences and standalone-LF occurrences (newlines not preceded by a
+ * carriage return) and pick the winner; ties fall back to `lf`.
+ *
+ * Exported so the commit handler in `DiffPanel.tsx` can capture the
+ * original style at the source-content boundary BEFORE it
+ * LF-normalizes for segment math, then re-apply that style when
+ * writing `nextDocumentContent` back into the edit buffer. Without
+ * that round-trip, the first rendered-Markdown commit would silently
+ * overwrite a CRLF-on-disk document with its LF-normalized form on
+ * the next save.
+ */
+export function detectMarkdownDocumentEolStyle(content: string): MarkdownDocumentEolStyle {
+  let crlfCount = 0;
+  let lfCount = 0;
+  for (let index = 0; index < content.length; index += 1) {
+    const ch = content.charCodeAt(index);
+    if (ch === 0x0d /* \r */) {
+      if (content.charCodeAt(index + 1) === 0x0a /* \n */) {
+        crlfCount += 1;
+        index += 1;
+      }
+      // Bare CR: intentionally ignored — see `MarkdownDocumentEolStyle` doc.
+      continue;
+    }
+    if (ch === 0x0a /* \n */) {
+      lfCount += 1;
+    }
+  }
+  return crlfCount > lfCount ? "crlf" : "lf";
+}
+
+/**
+ * Re-applies the original EOL convention to an LF-normalized document.
+ *
+ * The rendered-Markdown commit pipeline keeps internal segment math on
+ * LF (positions-in-bytes are easier to reason about with a single
+ * one-byte line terminator), then passes the resulting
+ * `nextDocumentContent` through this helper so the on-disk form round-
+ * trips: `detectMarkdownDocumentEolStyle(X) → apply → setEditValueState`
+ * preserves the original CRLF/LF mix.
+ *
+ * For `lf` this is the identity. For `crlf` we replace every `\n`
+ * with `\r\n` — safe because the input is guaranteed LF-normalized;
+ * any `\r` that existed was removed upstream.
+ */
+export function applyMarkdownDocumentEolStyle(
+  content: string,
+  style: MarkdownDocumentEolStyle,
+): string {
+  if (style === "lf") {
+    return content;
+  }
+  return content.replace(/\n/g, "\r\n");
+}
+
 function isMarkdownTableSeparatorLine(line: string) {
   return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
 }

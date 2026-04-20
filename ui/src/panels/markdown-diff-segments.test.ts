@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyMarkdownDocumentEolStyle,
   buildFullMarkdownDiffDocumentSegments,
   buildGreedyMarkdownLineAnchors,
   buildMarkdownLineDiffAnchors,
+  detectMarkdownDocumentEolStyle,
   normalizeMarkdownDocumentLineEndings,
   splitMarkdownDocumentLinesWithOffsets,
 } from "./markdown-diff-segments";
@@ -612,5 +614,112 @@ describe("markdown diff segments", () => {
     expect(sliced).toBe(headingSegment.markdown);
     // And segment.markdown itself must be LF, not raw CRLF.
     expect(headingSegment.markdown).not.toContain("\r");
+  });
+});
+
+describe("detectMarkdownDocumentEolStyle", () => {
+  // Pins the EOL-detection contract used by the rendered-Markdown
+  // commit pipeline. The commit handler captures the source's EOL
+  // style BEFORE normalizing to LF for segment math, then re-applies
+  // the detected style to `nextDocumentContent` before writing it back
+  // to the edit buffer. Ties fall back to `lf` so Unix files and new
+  // buffers stay on LF, and so a brand-new empty document has a
+  // defined shape.
+  it("returns `lf` for an empty document", () => {
+    expect(detectMarkdownDocumentEolStyle("")).toBe("lf");
+  });
+
+  it("returns `lf` for a document with no line endings at all", () => {
+    expect(detectMarkdownDocumentEolStyle("a single line")).toBe("lf");
+  });
+
+  it("returns `lf` for a pure-LF document", () => {
+    expect(detectMarkdownDocumentEolStyle("line1\nline2\nline3\n")).toBe("lf");
+  });
+
+  it("returns `crlf` for a pure-CRLF document", () => {
+    expect(detectMarkdownDocumentEolStyle("line1\r\nline2\r\nline3\r\n")).toBe("crlf");
+  });
+
+  it("picks the dominant style in a mixed document (CRLF wins)", () => {
+    // Two CRLF line endings + one LF → CRLF is dominant.
+    expect(
+      detectMarkdownDocumentEolStyle("line1\r\nline2\r\nline3\nline4"),
+    ).toBe("crlf");
+  });
+
+  it("picks the dominant style in a mixed document (LF wins)", () => {
+    // One CRLF + two LF → LF is dominant.
+    expect(
+      detectMarkdownDocumentEolStyle("line1\r\nline2\nline3\nline4"),
+    ).toBe("lf");
+  });
+
+  it("breaks ties in favour of `lf`", () => {
+    // Exactly one CRLF and one LF — equal counts → LF default.
+    expect(detectMarkdownDocumentEolStyle("line1\r\nline2\nline3")).toBe("lf");
+  });
+
+  it("ignores bare `\\r` (legacy Mac) when counting", () => {
+    // A bare CR is not followed by LF; it's neither a CRLF nor an LF,
+    // so it does not contribute to either counter. A single \n still
+    // wins, producing `lf`. This matches the project policy that
+    // CR-only files are coerced to LF by
+    // `normalizeMarkdownDocumentLineEndings`.
+    expect(detectMarkdownDocumentEolStyle("line1\rline2\n")).toBe("lf");
+  });
+
+  it("counts CRLF correctly when followed by another CR", () => {
+    // `\r\n\r` — the first two chars are a CRLF, the trailing bare
+    // `\r` is ignored. One CRLF, zero LF → CRLF wins.
+    expect(detectMarkdownDocumentEolStyle("line1\r\n\r")).toBe("crlf");
+  });
+});
+
+describe("applyMarkdownDocumentEolStyle", () => {
+  // Pins the "re-apply original EOL" half of the round-trip used by
+  // the rendered-Markdown commit pipeline. Input is always
+  // LF-normalized (the segment math keeps internal state on LF); the
+  // helper returns either the input unchanged (`lf`) or every `\n`
+  // replaced with `\r\n` (`crlf`).
+  it("returns LF input unchanged when the style is `lf`", () => {
+    const input = "line1\nline2\nline3\n";
+    expect(applyMarkdownDocumentEolStyle(input, "lf")).toBe(input);
+  });
+
+  it("is identity on an empty string for both styles", () => {
+    expect(applyMarkdownDocumentEolStyle("", "lf")).toBe("");
+    expect(applyMarkdownDocumentEolStyle("", "crlf")).toBe("");
+  });
+
+  it("converts every `\\n` to `\\r\\n` when the style is `crlf`", () => {
+    expect(applyMarkdownDocumentEolStyle("line1\nline2\nline3\n", "crlf")).toBe(
+      "line1\r\nline2\r\nline3\r\n",
+    );
+  });
+
+  it("returns content with no newlines unchanged for both styles", () => {
+    expect(applyMarkdownDocumentEolStyle("no newline here", "lf")).toBe(
+      "no newline here",
+    );
+    expect(applyMarkdownDocumentEolStyle("no newline here", "crlf")).toBe(
+      "no newline here",
+    );
+  });
+
+  it("round-trips: detect → normalize → apply reproduces the original CRLF document", () => {
+    // Load-bearing invariant for the rendered-Markdown commit path:
+    // the composition `apply(normalize(x), detect(x)) === x` for any
+    // well-formed CRLF or LF document. If this breaks, the commit
+    // handler's CRLF preservation breaks in the same shape.
+    const crlfDocument = "# Title\r\n\r\nBody line 1.\r\nBody line 2.\r\n";
+    const normalized = normalizeMarkdownDocumentLineEndings(crlfDocument);
+    const style = detectMarkdownDocumentEolStyle(crlfDocument);
+    expect(applyMarkdownDocumentEolStyle(normalized, style)).toBe(crlfDocument);
+
+    const lfDocument = "# Title\n\nBody line 1.\nBody line 2.\n";
+    const lfNormalized = normalizeMarkdownDocumentLineEndings(lfDocument);
+    const lfStyle = detectMarkdownDocumentEolStyle(lfDocument);
+    expect(applyMarkdownDocumentEolStyle(lfNormalized, lfStyle)).toBe(lfDocument);
   });
 });

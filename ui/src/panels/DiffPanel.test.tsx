@@ -2081,6 +2081,103 @@ describe("DiffPanel", () => {
     expect(addedSections[0]).not.toHaveTextContent("Task Management");
   });
 
+  // Regression guard for "Silent CRLF→LF conversion on rendered-Markdown
+  // save" in docs/bugs.md. Before the fix, a CRLF-on-disk document
+  // edited through the rendered-Markdown path would be silently
+  // rewritten as LF on the first commit: the commit handler
+  // LF-normalized `sourceContent` for segment math and then wrote the
+  // LF-normalized `nextDocumentContent` back into the edit buffer via
+  // `setEditValueState`, and the next `handleSave` persisted that LF
+  // version. The fix captures the original EOL style at the source-
+  // content boundary and re-applies it after the segment math, so the
+  // save sees CRLF going out as CRLF.
+  it("preserves CRLF line endings when saving a rendered Markdown edit on a CRLF file", async () => {
+    const crlfDiskContent =
+      "Shared intro.\r\n# Draft document\r\nShared middle.\r\nReady to commit.\r\nShared outro.\r\n";
+    const expectedSavedContent =
+      "Shared intro.\r\n# Draft document\r\nShared middle.\r\nReady to ship.\r\nShared outro.\r\n";
+    fetchFileMock.mockResolvedValue({
+      content: crlfDiskContent,
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+    const onSaveFile = vi.fn().mockResolvedValue({
+      content: expectedSavedContent,
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " Shared intro.",
+            " # Draft document",
+            " Shared middle.",
+            "-Committed text.",
+            "+Ready to commit.",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content:
+                "Shared intro.\r\n# Draft document\r\nShared middle.\r\nCommitted text.\r\nShared outro.\r\n",
+              source: "index",
+            },
+            after: {
+              content: crlfDiskContent,
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-crlf-preservation"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={onSaveFile}
+          summary="Updated README (CRLF)"
+        />,
+      );
+    });
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".markdown-diff-rendered-section-added").length).toBeGreaterThan(0);
+    });
+
+    const editableAddedSections = document.querySelectorAll<HTMLElement>(
+      ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+    );
+    const targetSection = Array.from(editableAddedSections).find((section) =>
+      (section.textContent ?? "").includes("Ready to commit."),
+    );
+    expect(targetSection).toBeDefined();
+    if (!targetSection) {
+      return;
+    }
+
+    editRenderedMarkdownSection(targetSection, "<p>Ready to ship.</p>");
+    fireEvent.blur(targetSection);
+
+    await clickAndSettle(screen.getByRole("button", { name: "Save Markdown" }));
+
+    // The saved payload must preserve CRLF — no `\n` that isn't part
+    // of a `\r\n`, and the expected full document reassembled with
+    // CRLF separators reaches the save handler verbatim.
+    expect(onSaveFile).toHaveBeenCalledTimes(1);
+    const [, persistedContent] = onSaveFile.mock.calls[0];
+    expect(persistedContent).toBe(expectedSavedContent);
+    expect(persistedContent).toContain("\r\n");
+    expect(persistedContent).not.toMatch(/(?<!\r)\n/);
+  });
+
   it("renders Markdown link-only changes instead of hiding normalized matches", async () => {
     fetchFileMock.mockResolvedValue({
       content: "# Task Management2\n\n- [`lib/models/task_definition.dart`](lib/models/task_definition.dart) - TaskDefinition model\n\n## Overview\n",

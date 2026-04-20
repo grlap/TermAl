@@ -48,6 +48,66 @@ pairs feeds Markdown like `[click me](javascript:alert(1))` through the full
 render pipeline and asserts no `<a>` role, no `href="javascript:void(0)"`,
 and the link text still renders as plain content.
 
+Also fixed in the current tree: rendered-Markdown commits on CRLF-on-disk
+documents no longer silently convert the whole buffer to LF on save. Two
+new helpers (`detectMarkdownDocumentEolStyle` and
+`applyMarkdownDocumentEolStyle`) in `ui/src/panels/markdown-diff-segments.ts`
+capture the original EOL style at the source-content boundary and re-apply
+it after the segment math runs on LF, so `handleRenderedMarkdownSectionCommits`
+now round-trips CRLF → LF → CRLF transparently. A new Vitest integration
+case loads a CRLF README, edits a rendered section, saves, and asserts the
+`onSaveFile` payload still has CRLF everywhere; unit tests pin the
+detection (pure LF, pure CRLF, mixed CRLF/LF dominant, ties → LF, bare
+`\r` legacy Mac ignored) and application (empty strings, LF identity,
+CRLF expansion, round-trip invariant) contracts.
+
+## Rendered Markdown commit fallback path can disagree on offsets for CRLF files
+
+**Severity:** Low - `ui/src/panels/markdown-diff-change-section.tsx::326` captures `commit.sourceContent` from the draft's rendered preview — which on a CRLF-on-disk document is the CRLF form (`markdownPreview.after.content`). `ui/src/panels/DiffPanel.tsx::handleRenderedMarkdownSectionCommits` then passes the LF-normalized `sourceContent` to `resolveRenderedMarkdownCommitRange`, whose fallback path calls `mapMarkdownRangeAcrossContentChange(commit.sourceContent, currentContent, ...)` with mismatched line-ending shapes.
+
+In the happy path (strategy 1: the segment's original offsets still slice cleanly from `currentContent`), the mismatch is invisible because the fallback never runs. But when the user edits, saves, re-edits in the same session, or the watcher rebases mid-edit, the fallback path is the winning strategy — and on CRLF files it can compute the wrong character offsets, surfacing as "Rendered Markdown edit could not be applied" even when the change is benign.
+
+**Current behavior:**
+- `commit.sourceContent` carries CRLF for a CRLF-on-disk file.
+- `handleRenderedMarkdownSectionCommits`'s `sourceContent` is LF-normalized.
+- The offset-mapping fallback receives one CRLF input and one LF input and its `indexOf` / line-matching math drifts by one character per CRLF boundary that falls before the commit range.
+
+**Proposal:**
+- Normalize `commit.sourceContent` to LF before constructing the commit record (or at the call site where the fallback consumes it), so both arguments share the same line-ending shape.
+- Add a Vitest case that exercises strategy 2 (`mapMarkdownRangeAcrossContentChange`) on a CRLF document: edit a rendered section, apply an unrelated watcher rebase that shifts the anchor, commit again, and assert the commit lands without "could not be applied".
+- Surfaced by the CRLF-preservation review; out of scope for that change, tracked here as a follow-up.
+
+## Markdown EOL helper contract overstates mixed-line-ending preservation
+
+**Severity:** Low - exported helper comments imply exact original newline preservation for mixed-EOL documents, but the implementation preserves only a detected document convention.
+
+The rendered-Markdown save path now correctly avoids silently converting pure CRLF files to LF. The helper contract is still easy to misread: `detectMarkdownDocumentEolStyle` chooses between LF and CRLF based on the dominant newline style, while `applyMarkdownDocumentEolStyle` rewrites every normalized LF newline to that selected style.
+
+That is the right shape for the current fix, but it is not an exact round-trip for documents that intentionally mix CRLF and LF line endings.
+
+**Current behavior:**
+- `detectMarkdownDocumentEolStyle` returns CRLF only when CRLF newlines outnumber standalone LF newlines; ties and LF-majority documents return LF.
+- `applyMarkdownDocumentEolStyle` leaves LF documents unchanged or converts every `\n` to `\r\n` for CRLF documents.
+- Helper comments and test descriptions can be read as preserving the original CRLF/LF mix rather than the detected dominant convention.
+
+**Proposal:**
+- Reword the helper comments to say they preserve the detected or dominant document EOL convention.
+- Explicitly document that mixed-EOL documents are normalized to the detected style unless future work tracks per-line newline markers.
+
+## Generated Vitest cache is dirty in the working tree
+
+**Severity:** Note - local test-run metadata from `node_modules/.vite/vitest` is present in the unstaged diff and can add noise or accidental commits.
+
+The current working tree includes a modified Vite/Vitest results cache file. It records local test status and timing metadata, not source behavior, so it should not travel with the rendered-Markdown CRLF fix.
+
+**Current behavior:**
+- `node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json` appears in the unstaged changes.
+- The file contains generated local test cache metadata.
+
+**Proposal:**
+- Do not stage or commit the generated cache file with source changes.
+- If this path is tracked by git, remove it from version control and keep the Vite/Vitest cache ignored.
+
 ## Conversation cards overlap for one frame during scroll through long messages
 
 **Severity:** Medium - `estimateConversationMessageHeight` in `ui/src/panels/conversation-virtualization.ts` produces an initial height for unmeasured cards using a per-line pixel heuristic with line-count caps (`Math.min(outputLineCount, 14)` for `command`, `Math.min(diffLineCount, 20)` for `diff`) and overall ceilings of 1400/1500/1600/1800/900 px. For heavy messages — review-tool output, build logs, large patches — the estimate is 20×-40× under the rendered height, so `layout.tops[index]` for cards below an under-priced neighbour places them inside the neighbour's rendered area. The user sees the cards painted on top of each other for one frame, until the `ResizeObserver` measurement lands and `setLayoutVersion` rebuilds the layout.
@@ -346,23 +406,6 @@ Only the `uses an injectable now()` test at line 394 actually isolates line 125 
 - Rename the main test to `hard-cap \`stopped\` flag bails an in-flight await when setTimeout cap fires` (matches what it really proves).
 - Move the "post-await deadline check" claim from the main docstring to the injectable-now test's docstring (it is the actual regression gate).
 - Optionally: add a third test that uses a large `maxDurationMs` in real time + injected `now()` that advances past the deadline, so the hard-cap setTimeout never fires during the advance and the post-await deadline line is the only defense. Would cover both belt-and-suspenders and deadline-check paths independently.
-
-## Silent CRLF→LF conversion on rendered-Markdown save
-
-**Severity:** Medium - the CRLF save fix (`ui/src/panels/markdown-diff-segments.ts` + `ui/src/panels/DiffPanel.tsx`) normalizes `sourceContent` to LF before the resolver runs, then `setEditValueState(nextDocumentContent)` persists that LF-normalized content back into the edit buffer. On a CRLF-on-disk file (common on Windows with `core.autocrlf=true`), the first rendered-Markdown commit silently converts the entire buffer to LF, which gets written to disk on the next save.
-
-Works fine under git `core.autocrlf=true` (git re-applies CRLF on commit), but breaks for users with explicit CRLF-preserving workflows or for files where git is not involved. The `a68091f` commit message acknowledges the trade-off but the UI gives no indication.
-
-**Current behavior:**
-- `handleRenderedMarkdownSectionCommits` reads `sourceContent`, LF-normalizes it, applies the commit, writes the LF result via `setEditValueState(nextDocumentContent)`.
-- `handleSave` later writes that LF buffer to disk via `onSaveFile`.
-- Monaco's source-mode edit path preserves the original line endings; only the rendered-Markdown path does the silent conversion.
-- EOL pill at `DiffPanel.tsx:4085` flips from CRLF to LF silently on first rendered edit.
-
-**Proposal:**
-- Detect the original EOL style at the sourceContent boundary (CRLF vs LF vs mixed). Keep segment offsets + resolver operations on LF internally, but on save re-apply the original convention via `nextDocumentContent.replace(/\n/g, "\r\n")`.
-- Or: add a diff-preview notice when rendered-Markdown mode is active on a CRLF file, making the conversion visible and opt-in.
-- Add a Vitest case that loads CRLF content, edits a rendered section, saves, and asserts the saved content still has CRLF line endings.
 
 ## `saveError` visibility over-gated by informational `externalFileNotice`
 
@@ -776,6 +819,27 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
+- [ ] P2: Tighten the bare-CR detector test:
+  `markdown-diff-segments.test.ts::detectMarkdownDocumentEolStyle`
+  currently asserts `"line1\r\nline2\rline3\n"` picks `crlf` (one
+  CRLF, one LF, one bare CR → CRLF wins via `crlfCount > lfCount`),
+  but wouldn't catch a regression that accidentally counted bare
+  `\r` as a second CRLF — both the correct count (1) and the
+  over-count (2) land on `crlf`. Add a case with multiple bare
+  `\r` and a single `\n` where the correct answer is `lf` but an
+  over-count would flip to `crlf`.
+- [ ] P2: Comment the mixed-doc EOL preservation limit:
+  update the helper comments and the mixed CRLF/LF round-trip test
+  note to explain that rendered Markdown saves preserve the
+  detected dominant document EOL style, not per-line EOL markers.
+- [ ] P2: Add fenced-code-block EOL-detection coverage:
+  `detectMarkdownDocumentEolStyle` treats the document as a flat
+  byte stream — code fences, inline code, comments, etc. do not
+  affect the count. A future refactor might assume CRLF inside a
+  fenced block is "semantic" and skip it. Pin the flat-byte-stream
+  contract with a test that feeds a document where CRLF appears
+  only inside a fenced block and asserts the detector still picks
+  the dominant style based on the total count.
 - [ ] P2: Add anchor-stabilized load-earlier button-path coverage:
   `AgentSessionPanel.test.tsx` now covers the near-bottom cooldown
   on `handleHeightChange` and the no-scroll-tick-resubscribe
