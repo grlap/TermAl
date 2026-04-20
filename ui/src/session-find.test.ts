@@ -229,6 +229,50 @@ describe("session find helpers", () => {
     expect(buildSessionListSearchResult(conversationSession, "missing")).toBeNull();
   });
 
+  it("indexes connection-retry notices so both live and resolved card copy match", () => {
+    // Regression guard for the "resolved retry notice text
+    // diverges from session find indexing" bug. A
+    // `ConnectionRetryCard` renders two distinct text
+    // surfaces depending on whether the turn has resumed:
+    //   - Live      → `notice.detail` (the stored
+    //                 `message.text`).
+    //   - Resolved  → a synthesized "Connection recovered" /
+    //                 "Connection dropped briefly; the turn
+    //                 continued after …" heading + detail.
+    // Before the fix, the search index only carried
+    // `message.text`, so a search for terms visible ONLY in the
+    // resolved card (e.g. "Connection recovered", "the turn
+    // continued") missed the message — and a search for
+    // live-card terms ("Retrying automatically") landed on a
+    // resolved card whose visible copy didn't contain the
+    // query, making search look broken. Include both forms in
+    // the search index for connection-retry notices.
+    const session = createSession({
+      messages: [
+        {
+          id: "message-retry",
+          type: "text",
+          author: "assistant",
+          timestamp: "09:00",
+          text: "Connection dropped before the response finished. Retrying automatically (attempt 2 of 5).",
+        },
+      ],
+    });
+    // Live-card detail text (the raw stored message text).
+    expect(buildSessionSearchMatches(session, "Retrying automatically")).toEqual([
+      expect.objectContaining({ itemId: "message-retry" }),
+    ]);
+    // Resolved-card heading.
+    expect(buildSessionSearchMatches(session, "Connection recovered")).toEqual([
+      expect.objectContaining({ itemId: "message-retry" }),
+    ]);
+    // Resolved-card synthesized detail (past-tense, with the
+    // attempt label lowercased to match the rendered copy).
+    expect(
+      buildSessionSearchMatches(session, "the turn continued after attempt 2 of 5"),
+    ).toEqual([expect.objectContaining({ itemId: "message-retry" })]);
+  });
+
   it("reuses prebuilt indexes for conversation and session-list search", () => {
     const session = createSession({
       name: "Deploy checks",

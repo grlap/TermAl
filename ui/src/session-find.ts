@@ -1,3 +1,4 @@
+import { parseConnectionRetryNotice } from "./app-utils";
 import type {
   ApprovalMessage,
   CommandMessage,
@@ -172,9 +173,30 @@ function createSearchableTextPart(text: string): SearchableTextPart {
 function collectMessageSearchText(message: Message) {
   switch (message.type) {
     case "text":
+      // Connection-retry notices render as TWO distinct cards
+      // depending on whether the retry is still live or the
+      // turn has since resumed:
+      //   - Live  → `notice.detail` (the stored `message.text`).
+      //   - Resolved → a synthesized past-tense summary
+      //     ("Connection dropped briefly; the turn continued
+      //     after …"). The stored text is NOT rendered.
+      // Indexing only `message.text` means a search for terms
+      // that only appear in the resolved card ("Connection
+      // recovered", "the turn continued") misses the match, and
+      // a search for terms that only appear in the live card
+      // ("Retrying automatically", "response finished") lands
+      // on a resolved card whose visible text doesn't contain
+      // the query — both look like broken search to the user.
+      // Include BOTH forms so the index answers "does this
+      // message match?" correctly regardless of which card
+      // variant is currently rendered. Per-card highlight
+      // positions are recomputed at render time against each
+      // card's rendered text, so the card that IS visible
+      // highlights correctly.
       return joinSearchableParts([
         collectAttachmentSearchText(message.attachments),
         message.text,
+        ...collectConnectionRetrySearchText(message.text),
       ]);
     case "thinking":
       return collectThinkingSearchText(message);
@@ -243,6 +265,26 @@ function collectAttachmentSearchText(attachments: ImageAttachment[] | undefined)
   return joinSearchableParts(
     (attachments ?? []).flatMap((attachment) => [attachment.fileName, attachment.mediaType]),
   );
+}
+
+// Returns the searchable text fragments a connection-retry
+// notice RENDERS into when the turn has resumed (the resolved
+// `ConnectionRetryCard` variant in `message-cards.tsx`). Empty
+// when the message text does not parse as a retry notice. The
+// strings here mirror the literals in
+// `message-cards.tsx::ConnectionRetryCard` — keep them in sync
+// with the rendered copy so search-over-resolved-cards stays
+// correct.
+function collectConnectionRetrySearchText(text: string): string[] {
+  const notice = parseConnectionRetryNotice(text);
+  if (!notice) {
+    return [];
+  }
+  const resolvedHeading = "Connection recovered";
+  const resolvedDetail = notice.attemptLabel
+    ? `Connection dropped briefly; the turn continued after ${notice.attemptLabel.toLowerCase()}.`
+    : "Connection dropped briefly; the turn continued after an automatic retry.";
+  return [resolvedHeading, resolvedDetail];
 }
 
 function joinSearchableParts(parts: Array<string | null | undefined>) {
