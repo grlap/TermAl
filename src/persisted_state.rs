@@ -41,6 +41,14 @@ struct PersistedState {
 
 impl PersistedState {
     /// Builds the metadata-only value from inner.
+    ///
+    /// Keep field-list in sync with [`Self::metadata_only`], which
+    /// produces the same shape but clones from an existing
+    /// `PersistedState` rather than a `StateInner`. Adding a new
+    /// top-level field to `PersistedState` requires updating both —
+    /// missing one would silently drop the field from either the
+    /// snapshot-from-inner path or the synchronous persist fallback
+    /// path.
     fn metadata_from_inner(inner: &StateInner) -> Self {
         Self {
             codex: inner.codex.clone(),
@@ -53,6 +61,40 @@ impl PersistedState {
             ignored_discovered_codex_thread_ids: inner.ignored_discovered_codex_thread_ids.clone(),
             orchestrator_instances: inner.orchestrator_instances.clone(),
             workspace_layouts: inner.workspace_layouts.clone(),
+            sessions: Vec::new(),
+        }
+    }
+
+    /// Returns a metadata-only copy of this persisted state with an
+    /// empty `sessions` vec.
+    ///
+    /// Used by the synchronous persist path
+    /// (`persist_persisted_state_to_sqlite`) to serialize the
+    /// `app_state` metadata row without the sessions payload. The
+    /// previous `persisted.clone(); metadata.sessions.clear();`
+    /// pattern deep-cloned every session transcript just to drop the
+    /// clone, which is wasteful for long transcripts. Cloning the
+    /// metadata fields explicitly avoids that waste while keeping the
+    /// call-site shape unchanged.
+    ///
+    /// Keep field-list in sync with [`Self::metadata_from_inner`]
+    /// — the two methods produce the same shape from different
+    /// source types (a `StateInner` vs. a sibling `PersistedState`).
+    /// Adding a new top-level field to `PersistedState` requires
+    /// updating both.
+    #[cfg(not(test))]
+    fn metadata_only(&self) -> Self {
+        Self {
+            codex: self.codex.clone(),
+            preferences: self.preferences.clone(),
+            revision: self.revision,
+            next_project_number: self.next_project_number,
+            next_session_number: self.next_session_number,
+            next_message_number: self.next_message_number,
+            projects: self.projects.clone(),
+            ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids.clone(),
+            orchestrator_instances: self.orchestrator_instances.clone(),
+            workspace_layouts: self.workspace_layouts.clone(),
             sessions: Vec::new(),
         }
     }

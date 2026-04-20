@@ -189,13 +189,23 @@ fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
     let connection = open_sqlite_state_connection(path)?;
     ensure_sqlite_state_schema(&connection)?;
     let session_records = load_session_records_from_sqlite(&connection, path)?;
-    let Some(encoded) = sqlite_app_state_value(&connection, SQLITE_METADATA_KEY, path)?
-        .or(sqlite_app_state_value(
-            &connection,
-            SQLITE_LEGACY_STATE_KEY,
-            path,
-        )?)
-    else {
+    // The legacy lookup is only consulted when the primary key is
+    // missing. `.or(...)` would eagerly run both queries (both sides
+    // of `.or` must be evaluated before the combinator sees them),
+    // which pays for a second `SELECT ... FROM app_state WHERE key = ?`
+    // round-trip against the connection on every startup — silent
+    // but wasteful on the happy path where `SQLITE_METADATA_KEY` is
+    // always present post-migration. Structure as `if let` chains so
+    // the legacy query only runs when the primary returns `None`.
+    let encoded = if let Some(encoded) =
+        sqlite_app_state_value(&connection, SQLITE_METADATA_KEY, path)?
+    {
+        encoded
+    } else if let Some(encoded) =
+        sqlite_app_state_value(&connection, SQLITE_LEGACY_STATE_KEY, path)?
+    {
+        encoded
+    } else {
         return Ok(None);
     };
     let mut persisted: PersistedState = serde_json::from_str(&encoded)
@@ -254,8 +264,7 @@ fn load_session_records_from_sqlite(
 
 #[cfg(not(test))]
 fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) -> Result<()> {
-    let mut metadata = persisted.clone();
-    metadata.sessions.clear();
+    let metadata = persisted.metadata_only();
     persist_state_parts_to_sqlite(path, &metadata, &persisted.sessions, true)
 }
 
