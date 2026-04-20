@@ -1601,6 +1601,36 @@ describe("DiffPanel", () => {
     addedSections[1].innerHTML = "<p>Ready to save.</p>";
     fireEvent.input(addedSections[1]);
 
+    // IMMEDIATE-STATE assertion (load-bearing for the
+    // raw-source-flash fix): the disallowed-input path must NOT
+    // write the segment's raw markdown source into the
+    // contentEditable subtree. The previous implementation ran
+    // `event.currentTarget.textContent = segment.markdown` inline,
+    // snapping the DOM from the user's mutation ("Ready to save.")
+    // to the raw markdown source ("Ready to commit." — identical
+    // shape here because the rendered Markdown source happens to
+    // match the surface text, but structurally it was plain text
+    // replacing the `<p>` wrapper). That write produced a visible
+    // one-frame plain-source flash before the
+    // `readOnlyResetVersion` remount repainted under React.
+    //
+    // The current fix leaves the user's mutation in place and
+    // relies on the follow-up remount to restore the rendered
+    // DOM. Assert that invariant here, BEFORE `waitFor` yields
+    // to React's remount cycle:
+    //   - The user-typed `<p>` wrapper is still present.
+    //   - The section is NOT a plain text node whose textContent
+    //     equals the raw source (the shape the reintroduced
+    //     assignment would leave behind).
+    //
+    // Reverting the fix (restoring the `textContent = segment.
+    // markdown` line in `markdown-diff-change-section.tsx`) makes
+    // the first assertion fail — textContent collapses to the
+    // raw source without the `<p>` wrapper — so this pair is
+    // load-bearing for the exact regression the fix prevents.
+    expect(addedSections[1].querySelector("p")).not.toBeNull();
+    expect(addedSections[1].textContent).toContain("Ready to save.");
+
     // The read-only input handler bumps `readOnlyResetVersion` on
     // the parent, which remounts `MarkdownDiffDocument` via its
     // `key={readOnlyResetVersion}`. After remount, the OLD
