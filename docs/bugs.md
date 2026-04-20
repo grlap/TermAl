@@ -22,6 +22,13 @@ counter coverage now includes consecutive multiline `$$` blocks, `$$` inside
 fenced code, and same-line `$$...$$` pairs, and Mermaid diagram tests now cover
 normal-size scrollbar slack plus negative/zero viewBox lower-bound clamping.
 
+Also fixed in the current tree: virtualized conversation scrolling now gates
+both sticky-bottom and non-bottom height-measurement scroll writes during direct
+user-scroll cooldowns, routes the explicit "Load N earlier messages" button
+through the same anchor-preserving prepend helper as scroll-triggered auto-load,
+and keeps the auto-load scroll listener stable by reading volatile viewport
+state through refs instead of re-subscribing on every scroll tick.
+
 ## Conversation cards overlap for one frame during scroll through long messages
 
 **Severity:** Medium - `estimateConversationMessageHeight` in `ui/src/panels/conversation-virtualization.ts` produces an initial height for unmeasured cards using a per-line pixel heuristic with line-count caps (`Math.min(outputLineCount, 14)` for `command`, `Math.min(diffLineCount, 20)` for `diff`) and overall ceilings of 1400/1500/1600/1800/900 px. For heavy messages — review-tool output, build logs, large patches — the estimate is 20×-40× under the rendered height, so `layout.tops[index]` for cards below an under-priced neighbour places them inside the neighbour's rendered area. The user sees the cards painted on top of each other for one frame, until the `ResizeObserver` measurement lands and `setLayoutVersion` rebuilds the layout.
@@ -39,55 +46,6 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
 - Alternative: batch-measurement pass when the virtualization window shifts — hide the wrapper briefly, mount the newly-entering cards, wait for all their measurements, then reveal.
 - Not: raise the estimator cap. Large overshoots trade one visible artifact for a worse one.
 
-## Near-bottom streaming re-pins the viewport and fights user scroll-up
-
-**Severity:** High - `ui/src/panels/AgentSessionPanel.tsx::handleHeightChange` pins `scrollTop` to the bottom on every measurement while `shouldKeepBottomAfterLayoutRef.current || isScrollContainerNearBottom(node)` is true. The near-bottom threshold is 72 px (from `isScrollContainerNearBottom`). During active streaming, when `ResizeObserver` fires dozens of times per second as the streaming message's height grows, any user wheel-up that moves the viewport less than 72 px above the bottom leaves `isScrollContainerNearBottom` true, so the next measurement snaps the scroll back to the bottom before the user can reach 73+ px.
-
-The effect is oscillation: the user wheels up 50 px, a streaming tick pins them back, they wheel up again, snap back again. They can't escape the 72 px band while streaming is active.
-
-The current staged cooldown tracks recent wheel, touch, and keyboard scroll input, but only checks that signal in the non-bottom height-adjustment branch. The sticky-bottom branch runs first, so the reviewed change still re-pins the exact near-bottom case it was meant to fix.
-
-**Current behavior:**
-- `syncViewport` only clears `shouldKeepBottomAfterLayoutRef.current` when `!isScrollContainerNearBottom(node)`, so the near-bottom threshold gates the clear.
-- `handleHeightChange`'s `shouldKeepBottom = refValue || nearBottom` re-pins on every measurement while either is true.
-- The current cooldown skips only the non-bottom `getAdjustedVirtualizedScrollTopForHeightChange` write; it does not suppress bottom writes while the user is still inside the near-bottom band.
-- During streaming measurements fire frequently enough that the pin effectively wins any slow wheel scroll.
-
-**Proposal:**
-- Distinguish user-initiated scrolls from programmatic `scrollTop` writes. Track a "last programmatic scrollTop" and treat any `scrollTop` that doesn't match it as a user scroll → clear the pin immediately, regardless of the 72 px threshold.
-- Or: add a "user recently scrolled" debounce ref that wins over measurement-driven pinning for a few hundred ms after each scroll event.
-- Ensure recent direct input also clears or suppresses the sticky-bottom branch before it writes `scrollTop` back to the bottom.
-- Add a regression test that dispatches a wheel-up while still within the near-bottom band, triggers a streaming height measurement, and asserts the viewport is not re-pinned during the cooldown.
-- Either way, the fix is detect-user-scroll, not threshold-tune.
-
-## Load earlier messages button bypasses the prepend anchor
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx` now captures `pendingLoadMoreAnchorRef` before the near-top auto-load path grows the render window, but the explicit "Load earlier messages" button still calls `setRenderWindowSize` directly.
-
-That leaves two paths for the same prepend lifecycle: scroll-triggered load preserves the first visible message's viewport offset, while button-triggered load can still paint the grown document at the old `scrollTop`. The new comments also claim the anchor covers the explicit button, so the code and contract are currently out of sync.
-
-**Current behavior:**
-- The near-top scroll handler captures an anchor message id and offset before `setRenderWindowSize`.
-- The explicit load-earlier button bypasses that anchor capture and mutates `renderWindowSize` directly.
-- No test clicks the button and asserts the visible message offset is preserved.
-
-**Proposal:**
-- Extract the anchored window-growth logic into a shared helper used by both the near-top auto-load handler and the explicit button.
-- Add a test that clicks "Load earlier messages" with a controlled `scrollTop` and verifies the first visible message keeps the same viewport offset after prepending.
-
-## Auto-load-older-messages effect re-subscribes its scroll listener every tick
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx` new-auto-load effect depends on `viewportVisibleRange.startIndex`, which is derived from the `viewport.scrollTop` React state updated by `syncViewport`. That state updates on every scroll event (guarded by `setViewport` equality but still fires constantly during wheel-scroll). Each dep change runs the effect cleanup (`removeEventListener`) and then re-runs the effect body (`addEventListener`). The listener churn is dozens of rebinds per second during active scroll.
-
-Between `removeEventListener` and `addEventListener` there is a short window where no scroll listener is bound; a wheel event landing exactly in that window is dropped. Even when the scheduling lines up, the constant churn wastes CPU on event-listener bookkeeping.
-
-**Current behavior:**
-- `useEffect(() => { ... }, [hasOlderMessages, isActive, messages.length, scrollContainerRef, viewportVisibleRange.startIndex])` rebinds per scroll tick.
-- Handler closure already reads `messagesRef.current` and `layoutTopsRef.current` to avoid staleness for those fields; `viewportVisibleRange.startIndex` is the one piece of data still threaded through the dep array.
-
-**Proposal:**
-- Introduce `viewportVisibleRangeRef` next to `messagesRef` / `messageIndexByIdRef` (updated every render), and read `viewportVisibleRangeRef.current.startIndex` inside the handler instead of via closure.
-- Drop `viewportVisibleRange.startIndex` from the effect deps so it rebinds only on `isActive` / `hasOlderMessages` / `sessionId` transitions.
 
 ## Native message-stack wheel handling lacks regression coverage
 
@@ -103,6 +61,21 @@ The behavior depends on `preventDefault()` taking effect before the handler manu
 **Proposal:**
 - Add a focused test that spies on `addEventListener` for the message stack and verifies `{ passive: false }`.
 - Or dispatch a cancelable `WheelEvent` and assert `defaultPrevented` plus the expected single `scrollTop` update.
+
+## Near-bottom cooldown regression test does not prove wheel input
+
+**Severity:** High - `ui/src/panels/AgentSessionPanel.test.tsx` adds a near-bottom cooldown regression test, but the test can pass even if the `wheel` listener never updates the direct-scroll timestamp.
+
+`VirtualizedConversationMessageList` initializes `lastUserScrollInputTimeRef` to `0`, and the test triggers a measurement immediately after mount. In jsdom, `performance.now()` is usually still below the 200 ms cooldown, so `performance.now() - 0 < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS` suppresses the `scrollTop` write even without `fireEvent.wheel(...)` doing anything.
+
+**Current behavior:**
+- The test fires a wheel event, but does not prove that the wheel listener changed `lastUserScrollInputTimeRef`.
+- Time is not controlled, so the component begins inside the cooldown window by default.
+- A broken or unbound wheel listener could still leave the test passing.
+
+**Proposal:**
+- Control `performance.now()` in the test: first set it beyond the cooldown and prove a measurement writes the bottom pin without user input, then fire the wheel event at a later timestamp and prove the next measurement is suppressed.
+- Consider initializing `lastUserScrollInputTimeRef` to `Number.NEGATIVE_INFINITY` so production never treats the first 200 ms after mount as user-scroll cooldown without direct input.
 
 ## Dangerous Markdown link neutralization lacks direct coverage
 
@@ -814,23 +787,36 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
-- [ ] P2: Add anchor-stabilized load-earlier coverage:
-  exercise both the scroll-near-top auto-load path and the explicit
-  "Load earlier messages" button in `VirtualizedConversationMessageList`.
-  Drive `scrollTop = 0` with `hasOlderMessages = true`, trigger the
-  follow-up render that applies the anchor via `useLayoutEffect`, and
-  assert the viewport offset of the anchor message is preserved across
-  the prepend. Include the button path and a no-op case where
-  `renderWindowSize` is already at `messages.length` so the anchor ref
-  cannot strand.
-- [ ] P2: Add near-bottom user-scroll cooldown coverage for `handleHeightChange`:
-  fire a wheel-up event on the virtualization scroll container while it
-  is still inside the 72 px near-bottom band, then drive a streaming
-  `ResizeObserver` measurement via the existing test harness's
-  `resizeCallbacks.get(slot)?.(...)` pattern and assert `scrollWrites`
-  is empty during the cooldown window. Pair with a no-cooldown case
-  that passes `performance.now()` past the 200 ms threshold and asserts
-  the write still happens, pinning both branches of the gate.
+- [ ] P2: Tighten the near-bottom cooldown regression test:
+  mock `performance.now()` so the test starts outside the 200 ms
+  cooldown, assert a no-user-input measurement would write the bottom
+  pin, then fire a wheel event at a later timestamp and assert the next
+  measurement is suppressed. Consider initializing
+  `lastUserScrollInputTimeRef` to `Number.NEGATIVE_INFINITY` so mount
+  time never counts as direct user input.
+- [ ] P2: Add anchor-stabilized load-earlier button-path coverage:
+  `AgentSessionPanel.test.tsx` now covers the near-bottom cooldown
+  on `handleHeightChange` and the no-scroll-tick-resubscribe
+  behaviour of the auto-load effect, but the explicit "Load N
+  earlier messages" button click path has no test. Drive
+  `scrollTop = 0` with `hasOlderMessages = true` so the button is
+  visible, click it, let the consuming `useLayoutEffect` run, and
+  assert the viewport offset of the anchor message is preserved
+  across the prepend. Include a no-op case where
+  `renderWindowSize` is already at `messages.length` so the anchor
+  ref cannot strand.
+- [ ] P2: Add else-branch cooldown coverage for `handleHeightChange`:
+  the shouldKeepBottom branch is now covered by
+  `AgentSessionPanel.test.tsx::"skips the bottom pin write while
+  the user is actively scrolling"`. The else-branch
+  (`getAdjustedVirtualizedScrollTopForHeightChange` call site) is
+  not. Needs a harness that places the viewport far from the
+  bottom so `shouldKeepBottom` is false, fires a wheel event,
+  triggers a measurement that would normally compute a non-zero
+  delta, and asserts `scrollWrites` is empty during the cooldown
+  window. The existing post-activation measurement path writes
+  scrollTop on mount, so the harness also needs to reset
+  scrollWrites after initial settlement.
 - [ ] P2: Add `DeferredHeavyContent` virtualized fast-path coverage:
   render a `<DeferredMarkdownContent>` or `<DeferredHighlightedCodeBlock>`
   inside a wrapper with class `"virtualized-message-list"` and assert

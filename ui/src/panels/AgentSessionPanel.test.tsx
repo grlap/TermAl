@@ -284,6 +284,305 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
+  it("skips the bottom pin write while the user is actively scrolling", async () => {
+    // Regression guard for the "near-bottom streaming re-pins the
+    // viewport and fights user scroll-up" symptom. Inside
+    // `USER_SCROLL_ADJUSTMENT_COOLDOWN_MS` (200 ms) of a `wheel` /
+    // `touchmove` / `keydown` event on the scroll container, a
+    // streaming-driven height measurement must not snap `scrollTop`
+    // back to the bottom — even when the user is still within the
+    // 72 px near-bottom band. After the cooldown expires, normal
+    // pinning resumes.
+    //
+    // Two code paths must honour the cooldown: `handleHeightChange`'s
+    // `shouldKeepBottom` branch (which would `node.scrollTop = target`
+    // inline), AND the separate re-pin `useLayoutEffect` keyed on
+    // `layout.totalHeight` (which fires on the follow-up commit from
+    // `setLayoutVersion` and would otherwise re-pin a frame later).
+    // The harness uses a live `scrollHeight` derived from
+    // `measuredSlotHeight` so both paths see the post-measurement
+    // geometry — reverting either gate reproduces a write we can
+    // assert against.
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
+    let measuredSlotHeight = 180;
+    let scrollTop = 400;
+    const scrollWrites: number[] = [];
+
+    class ResizeObserverMock {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        resizeCallbacks.set(target, this.callback);
+      }
+      disconnect() {}
+    }
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 100,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      // Live `scrollHeight` derived from the current measured slot
+      // height. Matches what real DOM exposes once React commits the
+      // wrapper's `style={{ height: layout.totalHeight }}`: the
+      // measurement updates `messageHeightsRef`, `setLayoutVersion`
+      // fires, `layout.totalHeight` recomputes, the wrapper re-renders
+      // with the new height, and subsequent `scrollHeight` reads
+      // reflect the new geometry. Encoding that dependency directly
+      // here stops the test from accidentally passing against a stale
+      // pre-measurement value.
+      get: () => 500 + (measuredSlotHeight - 180),
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+        scrollWrites.push(nextValue);
+      },
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    let nextFrameId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      queueMicrotask(() => callback(0));
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
+    Element.prototype.getBoundingClientRect = function getBoundingClientRectMock() {
+      const element = this as HTMLElement;
+      const height = element.classList.contains("virtualized-message-slot")
+        ? measuredSlotHeight
+        : 100;
+      return {
+        bottom: height,
+        height,
+        left: 0,
+        right: 100,
+        top: 0,
+        width: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+
+    try {
+      const scrollContainerRef = {
+        current: scrollNode,
+      } as RefObject<HTMLElement | null>;
+      const { container } = render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={makeTextMessages(3)}
+          scrollContainerRef={scrollContainerRef}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      const slot = await waitFor(() => {
+        const candidate = container.querySelector(".virtualized-message-slot");
+        expect(candidate).not.toBeNull();
+        return candidate!;
+      });
+
+      // Simulate the user wheeling up inside the scroll container. The
+      // component's `syncViewport` effect attaches a `wheel` listener
+      // on `scrollNode` that timestamps the last direct-scroll input.
+      fireEvent.wheel(scrollNode, { deltaY: -50 });
+
+      // Trigger a streaming-style height measurement. `scrollTop` is
+      // intentionally at 400 (clientHeight 100 / pre-measurement
+      // scrollHeight 500 → gap 0 → `isScrollContainerNearBottom` is
+      // true, pin heuristic armed). The measurement grows the card
+      // from 180 → 260 px; the live `scrollHeight` getter then
+      // reports 580. Without the cooldown on EITHER the inline
+      // `handleHeightChange` write path OR the follow-up re-pin
+      // `useLayoutEffect`, `scrollTop` would be written to the new
+      // pin target (580 − 100 = 480). The cooldown must suppress
+      // both paths.
+      scrollWrites.length = 0;
+      scrollTop = 400;
+      measuredSlotHeight = 260;
+      await act(async () => {
+        resizeCallbacks.get(slot)?.([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+        await Promise.resolve();
+      });
+
+      expect(scrollWrites).toEqual([]);
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
+  it("keeps the auto-load scroll listener bound across many scroll events", async () => {
+    // Regression guard for the re-subscribe churn in the
+    // auto-load-older-messages effect. Before the fix, the effect
+    // depended on `viewportVisibleRange.startIndex`, which changes on
+    // every scroll event (via `syncViewport` -> `setViewport` ->
+    // `viewportVisibleRange` memo re-run). Each dep change ran the
+    // cleanup (`removeEventListener`) and re-ran the body
+    // (`addEventListener`). Between those two steps a wheel event
+    // could land with no listener bound. After the fix the effect
+    // reads `viewportVisibleRange` through a ref, so the listener is
+    // attached once per `isActive` / `hasOlderMessages` / `sessionId`
+    // transition — and scroll events no longer churn it.
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
+    let scrollTop = 50;
+    const addScrollCalls: Array<{ options?: AddEventListenerOptions | boolean }> = [];
+    const removeScrollCalls: Array<Record<string, never>> = [];
+
+    class ResizeObserverMock {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        resizeCallbacks.set(target, this.callback);
+      }
+      disconnect() {}
+    }
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 2000,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+    // Wrap addEventListener / removeEventListener to count scroll
+    // registrations specifically. Other listeners (wheel, touchmove,
+    // keydown) pass through unchanged.
+    const originalAdd = scrollNode.addEventListener.bind(scrollNode);
+    const originalRemove = scrollNode.removeEventListener.bind(scrollNode);
+    scrollNode.addEventListener = ((
+      event: string,
+      handler: EventListenerOrEventListenerObject,
+      options?: AddEventListenerOptions | boolean,
+    ) => {
+      if (event === "scroll") {
+        addScrollCalls.push({ options });
+      }
+      return originalAdd(event, handler, options);
+    }) as typeof scrollNode.addEventListener;
+    scrollNode.removeEventListener = ((
+      event: string,
+      handler: EventListenerOrEventListenerObject,
+      options?: AddEventListenerOptions | boolean,
+    ) => {
+      if (event === "scroll") {
+        removeScrollCalls.push({});
+      }
+      return originalRemove(event, handler, options);
+    }) as typeof scrollNode.removeEventListener;
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    let nextFrameId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      queueMicrotask(() => callback(0));
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
+    Element.prototype.getBoundingClientRect = function getBoundingClientRectMock() {
+      const element = this as HTMLElement;
+      const height = element.classList.contains("virtualized-message-slot")
+        ? 180
+        : 500;
+      return {
+        bottom: height,
+        height,
+        left: 0,
+        right: 100,
+        top: 0,
+        width: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+
+    try {
+      const scrollContainerRef = {
+        current: scrollNode,
+      } as RefObject<HTMLElement | null>;
+      // 210 messages -> windowStartIndex = 210 - 200 = 10 -> hasOlderMessages = true
+      // triggers the auto-load scroll effect and attaches a listener.
+      render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={makeTextMessages(210)}
+          scrollContainerRef={scrollContainerRef}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      // Let post-activation measurements settle. The scroll listener
+      // should be attached once (the syncViewport effect) plus once
+      // more when the auto-load effect runs (so 2 total).
+      await waitFor(() => {
+        expect(addScrollCalls.length).toBeGreaterThanOrEqual(2);
+      });
+      const baselineAddCount = addScrollCalls.length;
+      const baselineRemoveCount = removeScrollCalls.length;
+
+      // Fire a burst of scroll events that each drive a
+      // `setViewport` -> `viewportVisibleRange` recompute. Before
+      // the fix, each event would churn the auto-load listener
+      // (add + remove). After the fix, the counts stay flat.
+      for (let i = 0; i < 10; i += 1) {
+        scrollTop = 1000 - i * 25;
+        await act(async () => {
+          scrollNode.dispatchEvent(new Event("scroll"));
+          await Promise.resolve();
+        });
+      }
+
+      expect(addScrollCalls.length).toBe(baselineAddCount);
+      expect(removeScrollCalls.length).toBe(baselineRemoveCount);
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
   it("completes post-activation measuring when the first real height matches the estimate", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;

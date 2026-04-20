@@ -510,6 +510,27 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
+    // Honour the user-scroll cooldown here too. `handleHeightChange`
+    // already skips its own `scrollTop` write during the cooldown, but
+    // it still calls `setLayoutVersion((c) => c + 1)`, which triggers
+    // a re-render that commits a new `layout.totalHeight` — and THIS
+    // effect fires on that change. Without the gate the re-pin
+    // would run anyway and snap `scrollTop` back to the bottom, so
+    // the user's wheel-up input is cancelled one commit later. The
+    // net effect is the exact "near-bottom streaming re-pins the
+    // viewport and fights user scroll-up" symptom the cooldown is
+    // supposed to close. Gating the effect on the same cooldown
+    // keeps the scroll-to-bottom handoff working for pure streaming
+    // (no direct-scroll input → `lastUserScrollInputTimeRef` stays
+    // at its init 0 → `performance.now() - 0` always exceeds the
+    // cooldown) while suppressing the re-pin during an active wheel
+    // gesture.
+    const timeSinceUserScroll =
+      performance.now() - lastUserScrollInputTimeRef.current;
+    if (timeSinceUserScroll < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS) {
+      return;
+    }
+
     const node = scrollContainerRef.current;
     if (!node) {
       return;
@@ -616,6 +637,85 @@ export function VirtualizedConversationMessageList({
     };
   }, [isActive, scrollContainerRef, sessionId]);
 
+  // Stabilize handler references so MeasuredMessageCard memo can skip
+  // re-renders for messages whose data and position haven't changed,
+  // and so event handlers inside the `useEffect`s below can read the
+  // latest per-render data (windowed messages, message index map,
+  // current render-window size, current viewport visible range)
+  // without participating in those effects' dependency arrays.
+  const messagesRef = useRef(windowedMessages);
+  messagesRef.current = windowedMessages;
+  const messageIndexByIdRef = useRef(messageIndexById);
+  messageIndexByIdRef.current = messageIndexById;
+  // Current render-window size, updated every render so the scroll-up
+  // auto-load helper can compute the exact next value synchronously.
+  // Storing the computed `nextSize` in `pendingLoadMoreAnchorRef` lets
+  // the consuming `useLayoutEffect` distinguish "our grow landed"
+  // from "some other code path bumped renderWindowSize" (e.g. the
+  // new-message auto-grow during streaming at lines 898-905).
+  const renderWindowSizeRef = useRef(renderWindowSize);
+  renderWindowSizeRef.current = renderWindowSize;
+  // Viewport visible range, mirrored to a ref so the auto-load-older-
+  // messages scroll listener can read the current range without
+  // participating in the effect's dep array. Putting
+  // `viewportVisibleRange.startIndex` in the deps caused the effect
+  // to tear down and re-subscribe the native scroll listener on
+  // every scroll event (that's what updates `viewport.scrollTop` ->
+  // recomputes `viewportVisibleRange`), dropping any wheel event
+  // that landed in the window between `removeEventListener` and the
+  // next `addEventListener`. The ref pattern matches `messagesRef` /
+  // `messageIndexByIdRef` / `renderWindowSizeRef`.
+  const viewportVisibleRangeRef = useRef(viewportVisibleRange);
+  viewportVisibleRangeRef.current = viewportVisibleRange;
+
+  // Shared "prepend older messages + anchor the viewport" helper used
+  // by both the scroll-near-top auto-load effect (below) and the
+  // explicit "Load N earlier messages" button (in the render body).
+  // Both entry points need the same lifecycle — compute the next
+  // render-window size against the current value, bail on no-op,
+  // capture the first visible message as the anchor, write
+  // `pendingLoadMoreAnchorRef`, call `setRenderWindowSize(nextSize)`.
+  // The consuming `useLayoutEffect` then restores the anchor's
+  // viewport offset before paint.
+  //
+  // Previously the button path called `setRenderWindowSize` directly
+  // without the anchor, so clicking it painted the grown document at
+  // the old `scrollTop` for one frame while the scroll-up path was
+  // smooth; routing both sites through this helper makes the button
+  // behave identically.
+  //
+  // `useCallback` with `[scrollContainerRef]` keeps the identity
+  // stable across renders so the auto-load effect doesn't re-subscribe
+  // its listener whenever render state changes. Caller passes the
+  // current full message count; reading `messages.length` through
+  // the outer closure is fine because both call sites re-evaluate it
+  // at invocation time (the effect depends on `messages.length`, so
+  // it re-subscribes when the count changes; the button reads it
+  // from render scope).
+  const loadMoreEarlierMessages = useCallback((fullMessageCount: number) => {
+    const node = scrollContainerRef.current;
+    if (!node) {
+      return;
+    }
+    const currentSize = renderWindowSizeRef.current;
+    const nextSize = Math.min(currentSize + RENDER_WINDOW_LOAD_MORE, fullMessageCount);
+    if (nextSize === currentSize) {
+      return;
+    }
+    const firstVisibleIndex = viewportVisibleRangeRef.current.startIndex;
+    const anchorMessage = messagesRef.current[firstVisibleIndex];
+    if (!anchorMessage) {
+      return;
+    }
+    const anchorTop = layoutTopsRef.current[firstVisibleIndex] ?? 0;
+    pendingLoadMoreAnchorRef.current = {
+      anchorMessageId: anchorMessage.id,
+      anchorOffsetInViewport: anchorTop - node.scrollTop,
+      expectedRenderWindowSize: nextSize,
+    };
+    setRenderWindowSize(nextSize);
+  }, [scrollContainerRef]);
+
   // Auto-load older messages when the scroll container approaches
   // the top of the rendered window. Before calling
   // `setRenderWindowSize` we record an anchor — the id of the first
@@ -659,35 +759,7 @@ export function VirtualizedConversationMessageList({
       if (!node || node.scrollTop > RENDER_WINDOW_LOAD_MORE_THRESHOLD_PX) {
         return;
       }
-
-      // Compute the next window size synchronously against
-      // `renderWindowSizeRef.current` so we can bail early if there is
-      // nothing to load (the functional-updater would otherwise return
-      // `prev` unchanged and React would skip the commit, stranding
-      // the anchor ref across unrelated future renders).
-      const currentSize = renderWindowSizeRef.current;
-      const nextSize = Math.min(currentSize + RENDER_WINDOW_LOAD_MORE, messages.length);
-      if (nextSize === currentSize) {
-        return;
-      }
-
-      // Capture the first visible message as the anchor. `firstVisibleIndex`
-      // comes from the current `viewportVisibleRange`, which is already
-      // in sync with `node.scrollTop` via `syncViewport`. The index is
-      // relative to the *current* `windowedMessages`, so we read through
-      // `messagesRef.current` (declared below and updated every render).
-      const firstVisibleIndex = viewportVisibleRange.startIndex;
-      const anchorMessage = messagesRef.current[firstVisibleIndex];
-      if (!anchorMessage) {
-        return;
-      }
-      const anchorTop = layoutTopsRef.current[firstVisibleIndex] ?? 0;
-      pendingLoadMoreAnchorRef.current = {
-        anchorMessageId: anchorMessage.id,
-        anchorOffsetInViewport: anchorTop - node.scrollTop,
-        expectedRenderWindowSize: nextSize,
-      };
-      setRenderWindowSize(nextSize);
+      loadMoreEarlierMessages(messages.length);
     }
 
     node.addEventListener("scroll", handleScroll, { passive: true });
@@ -697,25 +769,10 @@ export function VirtualizedConversationMessageList({
   }, [
     hasOlderMessages,
     isActive,
+    loadMoreEarlierMessages,
     messages.length,
     scrollContainerRef,
-    viewportVisibleRange.startIndex,
   ]);
-
-  // Stabilize handler references so MeasuredMessageCard memo can skip
-  // re-renders for messages whose data and position haven't changed.
-  const messagesRef = useRef(windowedMessages);
-  messagesRef.current = windowedMessages;
-  const messageIndexByIdRef = useRef(messageIndexById);
-  messageIndexByIdRef.current = messageIndexById;
-  // Current render-window size, updated every render so the scroll-up
-  // auto-load handler can compute the exact next value synchronously.
-  // Storing the computed `nextSize` in `pendingLoadMoreAnchorRef` lets
-  // the consuming `useLayoutEffect` distinguish "our grow landed"
-  // from "some other code path bumped renderWindowSize" (e.g. the
-  // new-message auto-grow during streaming at lines 898-905).
-  const renderWindowSizeRef = useRef(renderWindowSize);
-  renderWindowSizeRef.current = renderWindowSize;
 
   // Apply the pending scroll anchor right after `setRenderWindowSize`
   // commits the grown layout — synchronously before paint. See the
@@ -790,53 +847,67 @@ export function VirtualizedConversationMessageList({
       shouldKeepBottomAfterLayoutRef.current = true;
     }
     if (node && messageIndex !== undefined) {
+      // The user-scroll cooldown gates BOTH branches below. During a
+      // direct-scroll gesture (wheel / touch / key input in the last
+      // `USER_SCROLL_ADJUSTMENT_COOLDOWN_MS`) we never want a streaming
+      // measurement to rewrite `scrollTop` out from under the user —
+      // not even to re-pin the viewport to the bottom. The original
+      // symptom this protects against is "near-bottom streaming
+      // re-pins the viewport and fights user scroll-up": while
+      // streaming, measurements fire dozens of times per second, and
+      // before this gate a user wheeling up within the 72 px
+      // near-bottom band would see the pin snap `scrollTop` back to
+      // the bottom on every measurement, making it nearly impossible
+      // to escape the band by slow wheeling. With the gate, their
+      // wheel motion accumulates until `isScrollContainerNearBottom`
+      // reports false, `syncViewport` clears the pin flag, and the
+      // shouldKeepBottom condition dissolves naturally. When the
+      // cooldown expires (user pauses), the pin resumes — so the
+      // intended "keep me at bottom while I'm just watching new
+      // content arrive" behaviour still works.
+      const timeSinceUserScroll =
+        performance.now() - lastUserScrollInputTimeRef.current;
+      const inUserScrollCooldown =
+        timeSinceUserScroll < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
       if (shouldKeepBottom) {
-        // Skip no-op writes so a measurement whose rounded height matches
-        // the previous pin target cannot trigger an extra scroll event +
-        // reflow + ResizeObserver re-fire cycle.
-        const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-        if (Math.abs(node.scrollTop - target) >= 1) {
-          node.scrollTop = target;
-        }
-      } else {
-        // Defer the anchor-preserving `scrollTop` write while the user
-        // has a direct-scroll gesture in flight (wheel / touch / key
-        // input in the last `USER_SCROLL_ADJUSTMENT_COOLDOWN_MS`). The
-        // `getAdjustedVirtualizedScrollTopForHeightChange` math is
-        // correct in the abstract — for a card above the viewport that
-        // grows by Δ, compensating `scrollTop += Δ` keeps the user's
-        // anchored content in the same viewport position — but during
-        // a wheel-up gesture that Δ is driven by previously-unmeasured
-        // cards coming into view and reporting real heights an order
-        // of magnitude larger than the estimate. Applying the
-        // compensation then fights the user's scroll: each wheel tick
-        // moves the viewport 50-150 px up, the next measurement
-        // rewrites `scrollTop` by +1000-2000 px, and the net visual
-        // motion is downward or a stuttering bounce.
-        //
-        // Layout still rebuilds (the `setLayoutVersion` bump below
-        // runs unconditionally), so freshly-measured cards render at
-        // their real heights and the subsequent paint reflects them.
-        // We just don't move the viewport out from under the user
-        // during their own input. Once the cooldown expires (user
-        // pauses scrolling), the next measurement resumes anchor
-        // preservation, which is what you want for idle-user-looking-
-        // at-content cases (streaming updates, syntax highlighting
-        // completion, image load).
-        const timeSinceUserScroll =
-          performance.now() - lastUserScrollInputTimeRef.current;
-        if (timeSinceUserScroll < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS) {
-          // User is actively scrolling; skip the write, keep layout.
+        if (inUserScrollCooldown) {
+          // User is actively scrolling; do not re-pin to bottom even
+          // though the heuristic still considers them near-bottom.
+          // `shouldKeepBottomAfterLayoutRef` stays set above so the
+          // pin naturally resumes once the cooldown elapses (unless
+          // `syncViewport` clears it first because the user has
+          // scrolled past the 72 px band in the interim).
         } else {
-          const nextScrollTop = getAdjustedVirtualizedScrollTopForHeightChange({
-            currentScrollTop: node.scrollTop,
-            messageTop: layoutTopsRef.current[messageIndex] ?? 0,
-            nextHeight: roundedHeight,
-            previousHeight,
-          });
-          if (Math.abs(nextScrollTop - node.scrollTop) >= 1) {
-            node.scrollTop = nextScrollTop;
+          // Skip no-op writes so a measurement whose rounded height matches
+          // the previous pin target cannot trigger an extra scroll event +
+          // reflow + ResizeObserver re-fire cycle.
+          const target = Math.max(node.scrollHeight - node.clientHeight, 0);
+          if (Math.abs(node.scrollTop - target) >= 1) {
+            node.scrollTop = target;
           }
+        }
+      } else if (inUserScrollCooldown) {
+        // Defer the anchor-preserving `scrollTop` write for the same
+        // reason the pin write is deferred above: during a wheel-up
+        // gesture `getAdjustedVirtualizedScrollTopForHeightChange` is
+        // driven by previously-unmeasured cards reporting real
+        // heights an order of magnitude larger than the estimate, so
+        // the compensation would cancel or reverse the user's scroll
+        // intent. Layout still rebuilds (the `setLayoutVersion` bump
+        // below runs unconditionally), so freshly-measured cards
+        // render at their real heights on the next paint; we just
+        // don't move the viewport. Once the cooldown expires the
+        // anchor-preservation resumes for idle-user cases (streaming
+        // updates, syntax highlighting completion, image load).
+      } else {
+        const nextScrollTop = getAdjustedVirtualizedScrollTopForHeightChange({
+          currentScrollTop: node.scrollTop,
+          messageTop: layoutTopsRef.current[messageIndex] ?? 0,
+          nextHeight: roundedHeight,
+          previousHeight,
+        });
+        if (Math.abs(nextScrollTop - node.scrollTop) >= 1) {
+          node.scrollTop = nextScrollTop;
         }
       }
     }
@@ -879,11 +950,7 @@ export function VirtualizedConversationMessageList({
           <button
             type="button"
             className="ghost-button load-earlier-messages-button"
-            onClick={() =>
-              setRenderWindowSize((prev) =>
-                Math.min(prev + RENDER_WINDOW_LOAD_MORE, messages.length),
-              )
-            }
+            onClick={() => loadMoreEarlierMessages(messages.length)}
           >
             Load {Math.min(RENDER_WINDOW_LOAD_MORE, windowStartIndex)} earlier
             messages ({windowStartIndex} hidden)
