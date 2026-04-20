@@ -48,6 +48,66 @@ pairs feeds Markdown like `[click me](javascript:alert(1))` through the full
 render pipeline and asserts no `<a>` role, no `href="javascript:void(0)"`,
 and the link text still renders as plain content.
 
+Also fixed in the current tree: the duplicated
+`if changed { publish_delta(DeltaEvent::SessionCreated { ... }) }`
+block in `remote_create_proxies.rs` and `remote_codex_proxies.rs`
+now routes through a single shared helper,
+`AppState::announce_remote_session_created_if_changed` in
+`src/sse_broadcast.rs`. Both proxy call sites collapsed from a
+5-line block with a 5-line cross-reference comment to a single
+method call. The helper takes `local_session: &Session` so the
+caller can still move the owned `Session` into its
+`CreateSessionResponse` without an extra clone outside the
+`if changed` branch. The `remote_routes.rs` site that emits a
+`SessionCreated` delta unconditionally was deliberately left
+unchanged — it forwards an incoming SSE delta from a remote
+and must announce even when the local record did not change,
+so it has a different semantic from the two proxy sites. The
+full remote test suite (73 tests) stays green.
+
+Also fixed in the current tree: a 404 on `fetchSession` (the
+lazy session-hydration path in `App.tsx`) no longer surfaces as
+a user-visible request error toast. The hydration effect's
+catch branch now special-cases `ApiRequestError` with
+`status === 404` and calls
+`requestActionRecoveryResyncRef.current()` without
+`reportRequestError(error)` — matching the shape
+`fetchWorkspaceLayout` already uses for 404. 404 is the benign
+race where a session is deleted, hidden, or renumbered between
+a delta event referencing it and the hydration fetch; the
+action-recovery resync repairs the local view on the next SSE
+tick without dropping a toast. The hydration effect only runs
+when the backend emits `session.messagesLoaded === false`,
+which is forward-compat scaffolding today (backend still
+emits full transcripts), so the fix is a pre-landing correctness
+improvement rather than an active-bug repair. A direct Vitest
+test for the new 404 branch is tracked as a P2 task — it needs
+a `messagesLoaded: false` fixture that the rest of the test
+suite does not exercise today.
+
+Also fixed in the current tree: `saveError` visibility is no
+longer over-gated by an informational `externalFileNotice`.
+Previously the "Save failed: <reason>" diagnostic in
+`DiffPanel.tsx` was gated on `!externalFileNotice &&
+!diffEditConflictOnDisk`, so any notice — including purely
+informational ones like "Rendered Markdown edits will save this
+document to the worktree file." or "File reloaded from disk."
+— suppressed the diagnostic. A save failure while such a
+notice was visible produced the "Save failed" pill with no
+explanation, the exact regression the diagnostic was added to
+prevent. The gate is now narrowed to `!diffEditConflictOnDisk`
+— the conflict path still renders its own recovery UI ("Apply
+my edits to disk version" / "Save anyway" / "Reload from disk")
+in place of the raw diagnostic, and the informational notice
+now coexists with the diagnostic (the two stack). A new Vitest
+case (`DiffPanel.test.tsx::"surfaces the save-error diagnostic
+when an informational externalFileNotice is visible"`) pins the
+contract: rendered-Markdown edit → informational notice set →
+save rejects with non-stale error → assert "Save failed: ..."
+diagnostic AND the notice are both present, and the stale-save
+recovery UI is NOT (negative control). Verified load-bearing by
+reverting the gate to the old form and observing the test fail.
+
 Also fixed in the current tree: the only High-severity backend
 bug — `commit_session_created_locked` performing synchronous
 SQLite I/O under the state mutex — now routes through the
@@ -400,14 +460,14 @@ CRLF expansion, round-trip invariant) contracts.
 
 ## Mermaid demo still contains an unrelated edge-target edit
 
-**Severity:** Note - `docs/mermaid-demo.md` still changes the visible demo graph even though the active work is backend persistence and bug-ledger maintenance.
+**Severity:** Note - `docs/mermaid-demo.md` still changes the visible demo graph even though the active work is remote proxy, hydration, DiffPanel, and bug-ledger maintenance.
 
-The current diff changes the Mermaid edge target from `Stop2` to `Stop`. This may be harmless, but the surrounding change set does not explain why the demo fixture should change, and the fixed preamble previously claimed the scratch demo edits had been reverted.
+The current diff changes the Mermaid edge target from `Stop2` to `Stop`. This may be harmless, but the surrounding change set does not explain why the demo fixture should change, and removing the active ledger entry would make the bug list look cleaner than the working tree actually is.
 
 **Current behavior:**
 - `docs/mermaid-demo.md` changes `Edit --> Stop2` to `Edit --> Stop`.
 - The graph has no explicit `Stop` node definition in the fixture.
-- The fixture edit is unrelated to the session-create persistence refactor.
+- The fixture edit is unrelated to the current reviewed behavior changes.
 
 **Proposal:**
 - Revert the fixture edit if it was scratch work.
@@ -655,32 +715,6 @@ If no later state mutation sends another `PersistRequest::Delta`, the restored t
 - Re-arm persistence on failure, preferably with a bounded/backoff retry path inside the persist worker.
 - Keep the watermark unchanged and recollect after restoring tombstones so changed sessions and deletes retry together.
 
-## `saveError` visibility over-gated by informational `externalFileNotice`
-
-**Severity:** Low - the UX fix that landed in `a68091f` renders `saveError` as a diagnostic note, gated by `!externalFileNotice && !diffEditConflictOnDisk`. But `externalFileNotice` is sometimes set to an informational (non-error) string such as `"Rendered Markdown edits will save this document to the worktree file."` (`DiffPanel.tsx:1185`, `1227`). If a save fails while such an informational notice is visible, the user sees the "Save failed" pill with no diagnostic — the exact regression the UX fix was landed to prevent.
-
-**Current behavior:**
-- `saveError` diagnostic note rendered only when `externalFileNotice` AND `diffEditConflictOnDisk` are both falsy.
-- Informational `externalFileNotice` values suppress the diagnostic even though they carry no error semantics.
-
-**Proposal:**
-- Gate only on `diffEditConflictOnDisk` (that branch renders its own recovery UI with "Apply my edits" / "Save anyway" / "Reload from disk" buttons, where the conflict message is obvious from the button labels).
-- Or: render `saveError` unconditionally alongside `externalFileNotice` with a visual distinction (e.g., red border for errors, gray for notices).
-- Add a Vitest case that sets an informational `externalFileNotice`, triggers a save failure, and asserts the saveError text is visible.
-
-## Duplicated `if changed { publish_delta }` block across remote proxy files
-
-**Severity:** Low - `src/remote_create_proxies.rs` and `src/remote_codex_proxies.rs` now have near-identical 40-line blocks with the same `(revision, local_session_id, local_session, changed)` tuple destructure + gated `publish_delta(DeltaEvent::SessionCreated { ... })`. The rationale comment is replicated in both files with "See the identical comment in `remote_create_proxies.rs`". Two sites drifting apart (e.g., one adding a new DeltaEvent variant the other misses) is the kind of subtle inconsistency that's hard to notice during review.
-
-**Current behavior:**
-- Both files duplicate the gated-publish pattern inline.
-- Cross-reference comment is the only guard against drift.
-- No shared helper encapsulating the invariant "announce only when the local record actually changed".
-
-**Proposal:**
-- Extract `AppState::announce_session_created_if_changed(&self, changed: bool, revision: u64, local_session: &Session)` (or a similar signature) that encapsulates the `if changed { publish_delta(&DeltaEvent::SessionCreated { ... }) }` block.
-- Both proxy paths call it. Single source of truth, compile-visible enforcement of the invariant.
-
 ## `shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime` test flake
 
 **Severity:** Low - `tests::shared_codex::shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime` was observed failing intermittently during batched `cargo test --bin termal` runs. Passes when re-run in isolation. The two Gemini-auth siblings (`select_acp_auth_method_ignores_workspace_dotenv_credentials` and `gemini_dotenv_env_pairs_ignore_workspace_env_files`) were fixed by acquiring `TEST_HOME_ENV_MUTEX` and isolating HOME + Gemini/Google env vars; verified via 5 consecutive green `cargo test --bin termal` runs. The shared-codex test did not surface in those 5 runs, so either (a) it is much rarer than the Gemini one, (b) it was indirectly fixed by an unrelated change, or (c) it is still broken but the window is too narrow to hit.
@@ -880,18 +914,6 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
 - Add a `hydrationMismatchSessionIdsRef` (or count attempts) to avoid re-firing after one mismatch until an authoritative state event arrives.
 - Route the existing-session replace branch through `reconcileSession` (or a similar identity-preserving merge) so memoized children keep stable identity.
 
-## 404 on `fetchSession` surfaces as a user-visible request error instead of silent resync
-
-**Severity:** Low - a benign race where a session is deleted or hidden between a delta event and the hydration fetch becomes a toast.
-
-The new hydration effect's error path calls `reportRequestError(error)` on any `fetchSession` failure, including 404 from `find_visible_session_index`. A benign deletion race (session hidden while fetch is in flight) becomes a toast plus inline recovery affordance, instead of a silent state resync.
-
-**Current behavior:**
-- `fetchSession` 404 → `reportRequestError(error)`.
-- User sees an error toast for a race that should be invisible.
-
-**Proposal:**
-- Special-case 404 on `fetchSession` to call `requestActionRecoveryResyncRef.current()` without `reportRequestError`, similar to how `fetchWorkspaceLayout` treats 404.
 
 ## Implementation Tasks
 
@@ -1693,6 +1715,24 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   future edit that throws during installation could leak globals. Move the
   mock installation inside the `try` so `finally` always runs against the
   saved originals.
+- [ ] P2: Pin the `fetchSession` 404 → silent resync branch
+  (`ui/src/App.tsx:1627`):
+  the hydration effect's catch block now routes
+  `ApiRequestError` with `status === 404` through
+  `requestActionRecoveryResyncRef.current()` instead of
+  `reportRequestError(error)`, but no test exercises that
+  branch. The hydration effect only runs when a session has
+  `messagesLoaded === false`, which the backend does not emit
+  today (forward-compat scaffolding), so a test needs to
+  construct a state response with `messagesLoaded: false`,
+  mock `api.fetchSession` to reject with
+  `new ApiRequestError("request-failed", "...", { status: 404 })`,
+  and assert (a) no toast / `reportRequestError` invocation,
+  (b) a subsequent state-resync call, and (c) the session stays
+  in the sessions list (the mismatch branch that causes the
+  recovery reset is a DIFFERENT code path). Pair with a
+  non-404 failure case that DOES call `reportRequestError` to
+  negative-control the branch.
 - [ ] P2: Pin the lazy legacy-key lookup in `load_state_from_sqlite`:
   the `.or(...)` → `if let` refactor in `src/persist.rs` is a
   pure startup-cost optimization — both the eager and lazy
