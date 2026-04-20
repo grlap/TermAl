@@ -12,6 +12,7 @@ import type {
   IDisposable,
   editor as MonacoEditor,
 } from "monaco-editor/esm/vs/editor/editor.api";
+import { InlineZoneErrorBoundary } from "./InlineZoneErrorBoundary";
 import {
   applyMonacoTheme,
   ensureMonacoEnvironment,
@@ -704,8 +705,25 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
           view-zone slot (managed by the editor). The React portal
           renders the caller-provided content into that slot. Keyed
           by zone id so the portal stays mounted across re-renders
-          when only the line number or height changes. */}
-      {inlineZoneHostState.map((host) => createPortal(host.zone.render(), host.node, host.id))}
+          when only the line number or height changes.
+
+          The `InlineZoneErrorBoundary` catches render errors from
+          each zone's subtree in isolation, so a malformed Mermaid
+          fence or a KaTeX parse escape can no longer unmount
+          MonacoCodeEditor (and lose the user's unsaved buffer).
+          See `docs/bugs.md` → "Missing error boundary around
+          portal render() in MonacoCodeEditor". The boundary
+          resets itself on `zoneId` change so a new zone gets a
+          clean render attempt. */}
+      {inlineZoneHostState.map((host) =>
+        createPortal(
+          <InlineZoneErrorBoundary zoneId={host.id}>
+            {host.zone.render()}
+          </InlineZoneErrorBoundary>,
+          host.node,
+          host.id,
+        ),
+      )}
     </>
   );
 });

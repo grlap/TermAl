@@ -48,6 +48,26 @@ pairs feeds Markdown like `[click me](javascript:alert(1))` through the full
 render pipeline and asserts no `<a>` role, no `href="javascript:void(0)"`,
 and the link text still renders as plain content.
 
+Also fixed in the current tree: MonacoCodeEditor inline-zone
+portal children are now wrapped in an `InlineZoneErrorBoundary`
+class component. A throw inside the zone's `render()` callback —
+the common failure modes are a malformed Mermaid fence, a KaTeX
+parse error that escapes `throwOnError: false`, or any other
+synchronous render exception from the MarkdownContent subtree —
+no longer unmounts the whole Monaco editor. The boundary catches
+the error, logs it (with the zone id) to the dev console for
+diagnosability, and renders a compact fallback notice
+("Diagram failed to render — view the source below for details."
+via `role="status"` + `aria-live="polite"`). The source text and
+the rest of the editor stay mounted; the user's unsaved buffer
+is preserved. The boundary resets its error state when the
+portal's `zoneId` changes so a new zone gets a clean render
+attempt. Co-located tests in `ui/src/InlineZoneErrorBoundary.test.tsx`
+cover: happy-path pass-through, catch-then-fallback, error-log
+contract (zoneId + Error instance), sibling-isolation (a bad
+zone does not take down a sibling), zoneId-reset, and "same
+zoneId stays in error state".
+
 Also fixed in the current tree: the Rendered-diff fallback for
 staged diffs no longer leaks worktree content when the backend
 didn't supply `documentContent`. `renderedDiffAfterContent` in
@@ -295,20 +315,6 @@ The App-owned handlers also gate dismissal on `!isCreating` and `!isCreatingProj
 **Proposal:**
 - Add App-level tests for create-session and create-project backdrop mousedown behavior: primary closes when not creating; middle/right/macOS Ctrl-click do not.
 - If practical in the existing harness, also assert the creating-state guard leaves the dialog open when the action is pending.
-
-## Missing error boundary around portal `render()` in MonacoCodeEditor
-
-**Severity:** Medium - `ui/src/MonacoCodeEditor.tsx:651-657` invokes `host.zone.render()` inline with no error boundary. The `render` callback in `SourcePanel` returns `<MarkdownContent>`, which in turn runs Mermaid/KaTeX detection. If anything inside that subtree throws during render (a malformed fence, a KaTeX parse failure that slips past `throwOnError: false`, a Mermaid render-time exception), the entire `MonacoCodeEditor` component errors and React unmounts the Monaco editor along with the inline zones — losing whatever the user had in their buffer.
-
-**Current behavior:**
-- `createPortal(host.zone.render(), host.node, host.id)` runs unprotected.
-- A single bad fence in a file can take down the whole editor.
-- Save-buffer loss is user-visible and irrecoverable without the autosave mechanism (which doesn't exist in Phase 1).
-
-**Proposal:**
-- Wrap each portal's children in a small error boundary component, e.g. `<InlineZoneErrorBoundary>{host.zone.render()}</InlineZoneErrorBoundary>`.
-- Fallback UI: "Diagram failed to render — view the source below for details." The source stays visible in Monaco regardless.
-- Add a Vitest case that passes a `render` callback throwing synchronously and asserts the editor remains mounted.
 
 ## `setInlineZoneHostState` writes fresh state on every keystroke
 
