@@ -160,6 +160,162 @@ test for the new 404 branch is tracked as a P2 task — it needs
 a `messagesLoaded: false` fixture that the rest of the test
 suite does not exercise today.
 
+Also fixed in the current tree: the rendered-Markdown diff view
+no longer smears a pre-fence line edit into the same added
+block as a changed fence below it. Previously the
+`pushChangedRange` heuristic in
+`ui/src/panels/markdown-diff-segments.ts` only split into
+pre-fence + fence-onwards pairs when the REMOVED side started
+EXACTLY at a fence opener (`removedStartsWithFence`) — so a
+change like `docs/mermaid-demo.md` (a blank line above a
+Mermaid fence became "333", AND the fence's interior also
+changed) rendered as one red block with the old diagram and
+one green block with "333" + the new diagram smashed
+together. The fix generalizes the heuristic to "both sides
+have a fence in the changed range": emit pre-fence
+removed/added as their own pair, then fence-onwards
+removed/added as a second pair. The renderer's change-block
+grouping breaks on the `added → removed` transition between
+the two pairs, so the view lands as two distinct visual
+blocks — the user's pre-fence edit (e.g. green "333") on top,
+the atomic fence swap (red old diagram → green new diagram)
+below. Five new Vitest cases in
+`markdown-diff-segments.test.ts` pin the full fence-split
+surface: (a) the primary regression — exactly one
+`added → removed` transition, no "333" bleed into the fence
+segments, fence opener and interior all in the fence-onwards
+segments; (b) multi-line pre-fence edits stay together and
+land before the fence pair (via an explicit
+`preFenceAddedIndex < fenceRemovedIndex` assertion so
+reversing the emission order fails the test); (c) the
+heuristic applies to any fence language — a TypeScript
+fence with an intro paragraph added before it gets the same
+treatment as Mermaid, proving the logic keys on `fenceBlock`
+generally and not on a Mermaid-specific language tag;
+(d) negative control: a pure fence-content change with no
+pre-fence edit produces exactly `[removed, added]` non-normal
+kinds — no spurious empty pre-fence segments from the new
+code path; (e) line numbers (`oldStart` / `newStart`) on the
+emitted segments stay correct after the split — the
+`preFenceAdded.newStart`, `fenceRemoved.oldStart`, and
+`fenceAdded.newStart` all match their 1-based document
+positions so a future line-number-wiring regression would
+show up here instead of as shifted labels in the diff
+gutter. Four of five are verified load-bearing by reverting
+the heuristic and observing the assertions fail; the fifth
+is a stability invariant that passes both with and without
+the fix and guards against future over-eager emission.
+
+Also fixed in the current tree: the session-find index now
+covers BOTH text variants of a `ConnectionRetryCard`. The
+live-card detail (the stored `message.text`) and the resolved
+card's synthesized past-tense copy ("Connection recovered",
+"Connection dropped briefly; the turn continued after …")
+previously drifted apart — the index only carried the stored
+text, so a search for terms visible only in the resolved card
+missed the message, and a search for live-card terms could
+land on a resolved card whose rendered copy didn't visibly
+contain the query. A new `collectConnectionRetrySearchText`
+helper in `ui/src/session-find.ts` mirrors the literal
+strings `ConnectionRetryCard` renders and contributes them to
+the text-message branch's searchable parts, so the index
+answers "does this message match?" correctly regardless of
+which card variant is rendered. The per-card highlight
+positions are still computed at render time against each
+variant's rendered text, so the card that is visible
+highlights correctly without double-render. Comment in the
+session-find helper flags the coupling to the rendered copy
+— keep the two in sync. New Vitest case pins all three
+matches (live detail, resolved heading, resolved synthesized
+detail). Verified load-bearing by dropping the helper call
+and observing the resolved-card assertions fail.
+
+Also fixed in the current tree: the session-find active-hit
+scroll no longer fights a user who scrolls away from the
+current match. The `useLayoutEffect` in
+`VirtualizedConversationMessageList.tsx` that pins
+`scrollTop` to `activeConversationSearchScrollTop` now gates
+the write on the active hit id changing
+(`lastPinnedConversationSearchIdRef`): re-fires caused by
+measurement churn (message-height recompute, a new card
+streaming in, layout refinement) leave the user's scroll
+position alone, while deliberate navigation to a different
+match (via "next match" / "previous match" / a new query)
+still pins. The ref resets to `null` on the early-return
+branches (no active hit, search closed, query cleared) so a
+later search landing on the same id still fires the pin.
+Separately, `shouldKeepBottomAfterLayoutRef.current = false`
+moved inside the `Math.abs(...) >= 1` guard so it only
+clears the bottom-pin intent when this effect actually
+overrides the viewport position — previously a no-op invocation
+(scrollTop already at the target) still cleared the ref, so
+closing search left sticky-bottom broken until the user
+nudged the viewport. All 55 AgentSessionPanel tests still
+green.
+
+Also fixed in the current tree: the three read-first
+check-then-maybe-mutate sites named in the
+"`session_mut` helpers stamp eagerly" bug no longer stamp on
+the no-op path. A new `StateInner::session_by_index(index)`
+helper returns an immutable `&SessionRecord` without bumping
+`last_mutation_stamp`, and the three callers now inspect via
+the read-only helper before deciding whether to re-borrow
+through `session_mut_by_index` for the mutation.
+(1) `sync_session_cursor_mode` skips the stamp when the agent
+doesn't support cursor mode or the mode already matches.
+(2) `sync_session_agent_commands` skips when the incoming
+command list is identical to the current one.
+(3) `orchestrator_lifecycle.rs`'s stopped-session cleanup
+checks for any orchestrator-sourced queued prompt first and
+skips the whole `clear_stopped_orchestrator_queued_prompts`
+call when there is nothing to clear; this also simplifies the
+surrounding `changed` tracking (the len-diff check is no
+longer needed since the pre-check establishes dirtiness by
+construction). The two other
+`clear_stopped_orchestrator_queued_prompts` sites
+(`orchestrator_lifecycle.rs:431` inside the aborted-stop
+cleanup loop and `orchestrator_transitions.rs:401` inside a
+batched per-instance-session loop) were left unchanged — both
+run inside flows where neighboring mutations on the same
+sessions already bump the stamp, so the extra stamp on a
+no-clear session is amortized rather than wasted. 450-test
+backend suite green.
+
+Also fixed in the current tree: the message-stack native-wheel
+handler in `ui/src/SessionPaneView.tsx` now has direct
+regression coverage. `App.test.tsx` has a new test
+(`"registers the message-stack wheel listener as non-passive so
+preventDefault takes effect"`) that wraps
+`Element.prototype.addEventListener` globally during render,
+captures every `"wheel"` registration with its options, locates
+the one installed on `.workspace-pane.active .message-stack`
+after `renderAppWithProjectAndSession` settles, and asserts
+`{ passive: false }`. The `toBeDefined` on the registration
+itself also catches the coarser regression — React's delegated
+`onWheel` prop would install through a document-level handler
+rather than on the message-stack node, so the filtered lookup
+would return `undefined`. Verified load-bearing by omitting the
+options argument (`node.addEventListener("wheel", listener)`)
+and observing the `{ passive: false }` assertion fail.
+
+Also fixed in the current tree: `SqlitePersistConnectionCache`
+now invalidates the cached connection on any persist error.
+`persist_delta_via_cache` wraps the transaction path in an
+inner helper and drops the cached connection via
+`SqlitePersistConnectionCache::invalidate` when that helper
+returns `Err`. The next persist tick reopens fresh and re-runs
+`ensure_sqlite_state_schema`. Without invalidation, a cached
+connection poisoned by `SQLITE_BUSY` / `SQLITE_CORRUPT` / an
+unlinked backing file / a Windows-side handle glitch would be
+reused forever — every subsequent tick would log the same
+error with no way to recover short of a backend restart. The
+happy path still reuses one connection per process lifetime;
+only the error path pays the cost of one reopen. A direct
+regression test is tracked as a P2 — the entire SQLite cache
+is `#[cfg(not(test))]`-gated (test builds use JSON persistence
+instead), and exposing the cache to the test tree would be a
+larger refactor than the Medium-severity fix itself.
+
 Also fixed in the current tree: `saveError` visibility is no
 longer over-gated by an informational `externalFileNotice`.
 Previously the "Save failed: <reason>" diagnostic in
@@ -580,36 +736,6 @@ The Settings tab bar now implements roving tabindex and WAI-ARIA keyboard naviga
 - Call `event.preventDefault()` once a supported key is recognized and the active tab index is valid, before the no-op destination check.
 - Add tests for `Home` on the first tab and `End` on the last tab that assert selection stays put and default is prevented.
 
-## Mermaid demo still contains an unrelated edge-target edit
-
-**Severity:** Note - `docs/mermaid-demo.md` still changes the visible demo graph even though the active work is App adoption, Settings tab keyboard behavior, test hardening, and bug-ledger maintenance.
-
-The current diff changes the Mermaid edge target from `Stop2` to `Stop`. This may be harmless, but the surrounding change set does not explain why the demo fixture should change, and the ledger text says the remaining fixture edit is tracked below even though the active entry had been removed.
-
-**Current behavior:**
-- `docs/mermaid-demo.md` changes `Edit --> Stop2` to `Edit --> Stop`.
-- The graph has no explicit `Stop` node definition in the fixture.
-- The fixture edit is unrelated to the current reviewed behavior changes.
-
-**Proposal:**
-- Revert the fixture edit if it was scratch work.
-- If intentional, add a short note explaining why the demo graph target should change.
-
-## SettingsTabBar keyboard coverage file is untracked
-
-**Severity:** Note - `docs/bugs.md` says `SettingsTabBar.test.tsx` is part of the current fix, but `git status` shows the file as untracked.
-
-Untracked files are easy to omit from a commit or review bundle. If `ui/src/preferences/SettingsTabBar.test.tsx` is not added, the Settings tab keyboard behavior can ship without the intended regression coverage while the bug ledger incorrectly claims the tests landed.
-
-**Current behavior:**
-- `ui/src/preferences/SettingsTabBar.test.tsx` exists as an untracked file.
-- `git diff` does not include the file content.
-- `docs/bugs.md` currently claims the Settings tab keyboard fix includes that test file.
-
-**Proposal:**
-- Add the test file to version control when preparing the patch.
-- If the test is not meant to land yet, keep the Settings tab coverage item active instead of claiming it is fixed.
-
 ## Rendered Markdown commit fallback path can disagree on offsets for CRLF files
 
 **Severity:** Low - `ui/src/panels/markdown-diff-change-section.tsx::326` captures `commit.sourceContent` from the draft's rendered preview — which on a CRLF-on-disk document is the CRLF form (`markdownPreview.after.content`). `ui/src/panels/DiffPanel.tsx::handleRenderedMarkdownSectionCommits` then passes the LF-normalized `sourceContent` to `resolveRenderedMarkdownCommitRange`, whose fallback path calls `mapMarkdownRangeAcrossContentChange(commit.sourceContent, currentContent, ...)` with mismatched line-ending shapes.
@@ -644,21 +770,6 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
 - Alternative: batch-measurement pass when the virtualization window shifts — hide the wrapper briefly, mount the newly-entering cards, wait for all their measurements, then reveal.
 - Not: raise the estimator cap. Large overshoots trade one visible artifact for a worse one.
 
-
-## Native message-stack wheel handling lacks regression coverage
-
-**Severity:** Medium - `ui/src/SessionPaneView.tsx` moved message-stack wheel handling from React's `onWheel` prop to a native `addEventListener("wheel", ..., { passive: false })` registration, but there is no focused test pinning the non-passive listener or the cancelable wheel behavior.
-
-The behavior depends on `preventDefault()` taking effect before the handler manually writes `scrollTop`. If this regresses back to React's passive wheel handling, browser native scrolling and custom scrolling can both run for the same wheel tick.
-
-**Current behavior:**
-- The message stack registers a native wheel listener with `{ passive: false }`.
-- The JSX `onWheel` prop was removed.
-- No test asserts the listener options, `defaultPrevented`, or the single-scroll outcome.
-
-**Proposal:**
-- Add a focused test that spies on `addEventListener` for the message stack and verifies `{ passive: false }`.
-- Or dispatch a cancelable `WheelEvent` and assert `defaultPrevented` plus the expected single `scrollTop` update.
 
 ## Deferred heavy content virtualization relies on CSS ancestry
 
@@ -740,38 +851,6 @@ That is too coarse for the transcript and lifecycle model. If a session leaves t
 - Keep the latest retry notice live only while the owning session is active or otherwise busy.
 - Treat older retry attempts as superseded while a later retry notice is still the newest assistant output, and mark retry notices resolved only after later non-retry assistant output exists.
 
-## Resolved retry notice text diverges from session find indexing
-
-**Severity:** Low - `ui/src/message-cards.tsx:397` renders synthesized resolved-copy for connection retry notices while session find still indexes the stored `message.text`.
-
-Searching for stored retry notice text such as "response finished" or "Retrying automatically" can navigate to the resolved retry card without showing matching highlighted text in the card. That makes find look broken even though the match target is technically correct.
-
-**Current behavior:**
-- Session find indexes the persisted retry notice text.
-- The resolved retry card replaces that detail with synthesized past-tense copy.
-- Search can land on a resolved retry notice that does not visibly contain the searched words.
-
-**Proposal:**
-- Keep rendered and searchable text aligned by including the original retry detail in the resolved card.
-- Or update the session-find index to use the same derived display text and add coverage for resolved retry notices.
-
-## Session-find active-hit scroll can fight a user who scrolls away
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1724-1761` adds a `useLayoutEffect` that writes `node.scrollTop = activeConversationSearchScrollTop` whenever `activeConversationSearchMessageIndex` or `activeConversationSearchScrollTop` changes. Its deps do not include the user's current `node.scrollTop`, so after the initial scroll-to-hit a later measurement commit that changes `layout.tops[activeIdx]` or `messageHeights[activeIdx]` re-runs the effect and snaps the viewport back to the hit — even if the user has since manually scrolled to inspect context around the match.
-
-In practice measurement convergence is fast for visible items, but with measurement churn after a user-initiated scroll-away the hit can snap back for one or two commits. The same effect also unconditionally clears `shouldKeepBottomAfterLayoutRef.current = false`, so once search closes the ref stays `false` and the user has to nudge the viewport before `syncViewport` / `isScrollContainerNearBottom` self-heals sticky-bottom.
-
-**Current behavior:**
-- The scroll-to-hit write runs whenever `activeConversationSearchScrollTop` recomputes (layout churn, message-height churn, active-item id change).
-- There is no "is the user still near the target" guard before writing `scrollTop`.
-- `shouldKeepBottomAfterLayoutRef.current = false` fires on every invocation regardless of whether the effect actually overrides the pin.
-
-**Proposal:**
-- Track the last written scroll-top in a ref and only write again if `node.scrollTop` is within a small delta of it (the user hasn't scrolled away).
-- Or: only run the pin when `activeConversationSearchMessageId` changes — keep a ref of the last handled active id and compare before writing.
-- Move the `shouldKeepBottomAfterLayoutRef.current = false` assignment inside the `Math.abs(...) >= 1` guard so it only fires when the scroll write actually happens.
-- Add a Vitest case: open session find, scroll the viewport away from the active hit, trigger a measurement-height change, and assert `scrollTop` is unchanged.
-
 ## Restart detection accepts late responses from old server instances
 
 **Severity:** Medium - `shouldAdoptSnapshotRevision` treats any non-empty `serverInstanceId` mismatch as a fresh restart, even when the incoming id belongs to a previously-seen old instance.
@@ -837,39 +916,6 @@ The message is not hidden; it is genuinely gone from SQLite. No amount of fronte
 - **Opt-in synchronous persistence** for the last message of a turn: the turn-completion commit (`finish_turn_ok_if_runtime_matches`'s `commit_locked`) could flush synchronously before returning, trading a few ms of latency on turn completion for zero-loss durability of the final message.
 - **Accept and document** as a known limitation that hard process kills (SIGKILL, power loss) can lose at most the last un-drained commit. Add a line to `docs/architecture.md` describing the background-persist durability contract.
 - A regression test that exercises "restart backend mid-turn, reconnect browser, assert the final message is visible" would pin whichever fix is chosen; without the fix it is expected to fail.
-
-## `SqlitePersistConnectionCache` has no error-driven invalidation
-
-**Severity:** Medium - once the cached SQLite connection enters a persistent error state, every subsequent persist tick silently logs the same error. No auto-recovery.
-
-`SqlitePersistConnectionCache::connection_for(path)` at `src/api.rs:353-397` only swaps the connection when `path` changes. On a persistent SQLite error (`SQLITE_READONLY`, `SQLITE_CORRUPT`, `SQLITE_FULL`, the backing file unlinked by a user "reset", a Windows-side handle issue after a crash), every subsequent call reuses the broken handle. Errors land in the persist-thread log, but the cache never reopens, so the process can get stuck in a permanent "persist broken" state that a backend restart would repair.
-
-**Current behavior:**
-- `persist_delta_via_cache` grabs the cached connection, builds a transaction, commits.
-- On transaction or commit failure, the error propagates up and the persist thread logs it.
-- The cache still holds the same broken connection. Next tick: same error, same log, forever.
-
-**Proposal:**
-- On persist error, drop the cached connection (`cache.connection = None; cache.path = None;`) so the next tick reopens and re-runs `ensure_sqlite_state_schema`.
-- Accept the cost of the reopen on error; the happy path still reuses one connection per process lifetime.
-- Add a regression test: seed an error that the cache should recover from (e.g., unlink the backing file after a successful write) and assert the next persist tick creates a new connection and writes successfully.
-
-## `session_mut` helpers stamp eagerly before the caller decides to mutate
-
-**Severity:** Low - check-then-early-return paths advance the mutation stamp even when no field actually changed, so the persist thread re-serializes the session on the next tick for no reason. Softly undoes the delta-persist benefit.
-
-`session_mut_by_index` and `session_mut` both bump `last_mutation_stamp` and write it to the record before returning `&mut SessionRecord`. Several callers acquire the mut borrow, read a field, decide nothing needs to change, and return. `sync_session_cursor_mode`, `set_agent_commands`, and several `clear_stopped_orchestrator_queued_prompts` sites follow this pattern. The stamp is permanent, so `collect_persist_delta` on the next commit sees the session as dirty and writes its row.
-
-**Current behavior:**
-- `session_mut*` stamps on access, before the caller decides.
-- Check-then-early-return callers spuriously mark sessions dirty.
-- Persist thread writes unchanged session rows on follow-up commits.
-- Cost is small per-instance but compounds across many mutation sites.
-
-**Proposal:**
-- Add a read-only `session_by_index(index) -> Option<&SessionRecord>` helper for read-first callers.
-- Callers that need to mutate after the read switch to `stamp_session_at_index(index)` explicitly before mutating, or re-borrow through `session_mut_by_index` only when certain.
-- Alternatively: change `session_mut*` to return a guard type that stamps on drop only if the caller called a `mark_mutated()` method — more invasive.
 
 ## SSE state broadcaster can reorder state events against deltas
 
@@ -1764,6 +1810,22 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   future edit that throws during installation could leak globals. Move the
   mock installation inside the `try` so `finally` always runs against the
   saved originals.
+- [ ] P2: Pin the `SqlitePersistConnectionCache` error-driven
+  invalidation path:
+  the SQLite cache now drops its cached connection on any
+  persist error so the next tick reopens fresh. The cache
+  struct and its sole write path (`persist_delta_via_cache`)
+  are both `#[cfg(not(test))]`-gated today — test builds use
+  JSON persistence via the test variant of
+  `persist_state_from_persisted` instead — so a direct
+  regression test requires either (a) removing the cfg gate
+  (and accepting the rusqlite compile cost in test builds) or
+  (b) adding a narrow integration-style test that opens a real
+  SQLite path, seeds a persist failure (e.g., delete the
+  backing file between calls, or issue a deliberately-failing
+  transaction), and asserts the next call reopens and
+  succeeds. Option (b) is cheaper; pick a single failure mode
+  and pin the reopen.
 - [ ] P2: Pin the `adoptCreatedSessionResponse` "recovering"
   outcome:
   the three-way discriminated outcome (`"adopted" | "stale" |
