@@ -62,9 +62,9 @@ export type MonacoInlineZone = {
  * about the set of hosts, not about who owns the latest
  * `zone.render()` closure. Keying the observer effect on this
  * derived string stops it from disconnecting and rebuilding
- * itself on every keystroke. See docs/bugs.md →
- * "`setInlineZoneHostState` writes fresh state on every
- * keystroke" for the prior symptom.
+ * itself on every keystroke — the prior symptom was observer
+ * teardown + reconstruction per keystroke at O(zones) cost,
+ * correctness-preserving but wasteful.
  *
  * `\n` is used as the separator because it can't appear inside a
  * zone id (region ids from `source-renderers.ts` are of the form

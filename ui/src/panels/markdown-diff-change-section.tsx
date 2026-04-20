@@ -273,7 +273,21 @@ export function EditableRenderedMarkdownSection({
   function handleInput(event: FormEvent<HTMLElement>) {
     if (!canEdit) {
       if (allowReadOnlyCaret) {
-        event.currentTarget.textContent = segment.markdown;
+        // `onReadOnlyMutation()` bumps a reset version on the
+        // parent which remounts this section; the next commit
+        // re-paints the rendered Markdown DOM under React's
+        // control. Previously we ALSO assigned
+        // `event.currentTarget.textContent = segment.markdown`
+        // here as a "snap back immediately" guard — but that
+        // wrote RAW SOURCE text into the contentEditable for a
+        // single paint frame before React's remount landed,
+        // producing a visible plain-source flash on every
+        // disallowed read-only edit. Dropping the assignment
+        // leaves the unwanted user-typed characters visible for
+        // one frame, which is less disruptive than the
+        // raw-source flash (and React reconciles them away on
+        // the immediately-following commit from the
+        // `onReadOnlyMutation` remount).
         onReadOnlyMutation();
       }
       return;

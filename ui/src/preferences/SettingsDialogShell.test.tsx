@@ -41,6 +41,14 @@ describe("SettingsDialogShell backdrop dismissal", () => {
   afterEach(() => {
     if (originalPlatform) {
       Object.defineProperty(navigator, "platform", originalPlatform);
+    } else {
+      // In jsdom, `navigator.platform` is commonly inherited from
+      // the prototype rather than existing as an own property. The
+      // `stubPlatform` call above creates an OWN property on each
+      // test; leaving it behind shadows the prototype value for
+      // any later test that runs in the same worker and doesn't
+      // stub explicitly. Mirror the `userAgentData` cleanup below.
+      Reflect.deleteProperty(navigator, "platform");
     }
     if (originalUserAgentData) {
       Object.defineProperty(navigator, "userAgentData", originalUserAgentData);

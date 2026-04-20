@@ -48,6 +48,60 @@ pairs feeds Markdown like `[click me](javascript:alert(1))` through the full
 render pipeline and asserts no `<a>` role, no `href="javascript:void(0)"`,
 and the link text still renders as plain content.
 
+Also fixed in the current tree: a third small-items pass landed
+two more. (1) The dialog-backdrop platform fallback is now
+directly exercised — two new Vitest cases in
+`ui/src/dialog-backdrop-dismiss.test.ts` delete
+`navigator.userAgentData` and stub only `navigator.platform`,
+verifying macOS and non-Apple detection both work through the
+`navigator.platform` fallback branch (previously every test
+wrote both values, leaving the Safari/Firefox-style branch
+unpinned). (2) `markdown-diff-change-section.tsx::handleInput`
+no longer assigns `event.currentTarget.textContent = segment
+.markdown` in the read-only `allowReadOnlyCaret` branch — the
+subsequent `onReadOnlyMutation()` remount already restores the
+rendered DOM under React's control, and the raw-source-text
+assignment was producing a one-frame "plain source flash" on
+every disallowed read-only edit.
+
+Also fixed in the current tree: a second small-items pass landed
+four more. (1) `.mermaid-diagram-frame` in `ui/src/styles.css`
+now sets `min-width: 0` (was `min-width: 100%`) so the iframe
+can shrink below its intrinsic 4096-px width inside a flex
+ancestor — fixes the "Mermaid iframe max-width: 100% defeated
+by a flex ancestor" entry at its root. (2) The dialog platform
+stub `afterEach` in `ui/src/dialog-backdrop-dismiss.test.ts`
+and `ui/src/preferences/SettingsDialogShell.test.tsx` now deletes
+the stubbed own `navigator.platform` property when there was no
+original own descriptor — previously the stub could leak into
+later tests on the same worker since jsdom inherits `platform`
+from the prototype. (3) The "Flagship deadline-guard test
+doesn't isolate the post-await check" entry is retired as
+already-fixed: the main test was renamed to `"hard-cap
+\`stopped\` flag bails an in-flight await when the cap
+setTimeout fires"` and the post-await deadline check is
+covered independently by `"post-await \`now() >= deadlineMs\`
+check bails when the injected clock passes the deadline"` —
+both with clear docstrings.
+
+Also fixed in the current tree: four small ledger-polish items
+landed together. (1) `MonacoCodeEditor.tsx`'s
+`computeInlineZoneStructureKey` doc comment and
+(2) `DiffPanel.tsx`'s `commitRenderedMarkdownDrafts` doc comment
+no longer reference-by-title the active `docs/bugs.md` headings
+they replaced — both comments now describe the invariant in
+situ so they don't rot when the matching ledger entry moves to
+preamble. (3) The scratch `docs/math-demo.md` / `docs/mermaid-demo.md`
+edits left over from mid-session debugging have been reverted
+(they were never intentional fixture updates). (4) The
+`MarkdownDocumentEolStyle` / `detectMarkdownDocumentEolStyle` /
+`applyMarkdownDocumentEolStyle` docs in
+`markdown-diff-segments.ts` now describe the contract accurately
+— "detected dominant EOL style preserved across the round-trip",
+not "original CRLF/LF mix preserved". Homogeneous inputs still
+round-trip byte-exact; heterogeneous inputs are normalised to
+the dominant style (documented trade-off, not a bug).
+
 Also fixed in the current tree: React dep-array hygiene across
 three hot effects + timers. (1) `App.tsx`'s session-hydration
 `useEffect` dropped `activeSession?.messages.length` from its
@@ -267,52 +321,6 @@ detection (pure LF, pure CRLF, mixed CRLF/LF dominant, ties → LF, bare
 `\r` legacy Mac ignored) and application (empty strings, LF identity,
 CRLF expansion, round-trip invariant) contracts.
 
-## Monaco inline-zone structure-key comment points at a removed bug heading
-
-**Severity:** Low - a new source comment documents the inline-zone observer invariant by pointing at a `docs/bugs.md` issue title that the same change moves out of the active bug list.
-
-The `computeInlineZoneStructureKey` comment in `MonacoCodeEditor.tsx` correctly explains why the `ResizeObserver` should depend on a derived zone-id structure key instead of the fresh `inlineZoneHostState` array. The problem is the cross-reference: it names the active bug heading that was resolved and removed from the active section, so future readers can follow the pointer and fail to find the referenced section.
-
-**Current behavior:**
-- `MonacoCodeEditor.tsx` references the old `docs/bugs.md` heading for the inline-zone observer churn bug.
-- The reviewed `docs/bugs.md` change moves that issue into the fixed preamble instead of keeping it as an active heading.
-- The local invariant explanation remains useful, but the issue-title reference is brittle.
-
-**Proposal:**
-- Keep the source comment's invariant explanation.
-- Remove the direct `docs/bugs.md` issue-title reference, or reword it as a historical note that does not depend on an active bug heading.
-
-## DiffPanel conflict-gate comment points at a removed bug heading
-
-**Severity:** Low - a new source comment documents an important rendered-Markdown commit invariant by pointing at a `docs/bugs.md` issue title that the same change moves out of the active bug list.
-
-The `commitRenderedMarkdownDrafts` comment in `DiffPanel.tsx` correctly explains why `handleApplyDiffEditsToDiskVersion` must stop when rendered-Markdown drafts fail to commit. The problem is the cross-reference: it names the active bug heading that was resolved and removed from the active section, so future readers can follow the pointer and fail to find the referenced section.
-
-**Current behavior:**
-- `DiffPanel.tsx` references the old `docs/bugs.md` heading for the apply-to-disk rendered-Markdown conflict bug.
-- The reviewed `docs/bugs.md` change moves that issue into the fixed preamble instead of keeping it as an active heading.
-- The local invariant explanation remains useful, but the issue-title reference is brittle.
-
-**Proposal:**
-- Keep the source comment's invariant explanation.
-- Remove the direct `docs/bugs.md` issue-title reference, or reword it as a historical note that does not depend on an active bug heading.
-
-## Demo Markdown files contain unrelated scratch edits
-
-**Severity:** Note - visual demo fixtures have small content edits that appear unrelated to the active behavior fixes and bug-tracker updates.
-
-`docs/math-demo.md` and `docs/mermaid-demo.md` are demo/smoke-test fixtures for rendered Markdown behavior. The current diff changes their visible content, but the rest of the change set is focused on editor/runtime behavior and bug-tracker maintenance rather than intentional fixture updates.
-
-**Current behavior:**
-- `docs/math-demo.md` changes the heading from `Math Demo` to `Math Demo2`.
-- `docs/mermaid-demo.md` removes blank lines and changes a Mermaid edge target from `Stop2` to `Stop`.
-- The diff does not explain why those fixture changes are part of the same behavior fix.
-
-**Proposal:**
-- Keep the demo-doc edits only if they are intentional fixture updates.
-- Otherwise leave them out of the change set before staging/committing.
-- If intentional, document the reason in the commit or PR notes so reviewers know they are not scratch edits.
-
 ## Rendered Markdown commit fallback path can disagree on offsets for CRLF files
 
 **Severity:** Low - `ui/src/panels/markdown-diff-change-section.tsx::326` captures `commit.sourceContent` from the draft's rendered preview — which on a CRLF-on-disk document is the CRLF form (`markdownPreview.after.content`). `ui/src/panels/DiffPanel.tsx::handleRenderedMarkdownSectionCommits` then passes the LF-normalized `sourceContent` to `resolveRenderedMarkdownCommitRange`, whose fallback path calls `mapMarkdownRangeAcrossContentChange(commit.sourceContent, currentContent, ...)` with mismatched line-ending shapes.
@@ -329,22 +337,6 @@ In the happy path (strategy 1: the segment's original offsets still slice cleanl
 - Add a Vitest case that exercises strategy 2 (`mapMarkdownRangeAcrossContentChange`) on a CRLF document: edit a rendered section, apply an unrelated watcher rebase that shifts the anchor, commit again, and assert the commit lands without "could not be applied".
 - Surfaced by the CRLF-preservation review; out of scope for that change, tracked here as a follow-up.
 
-## Markdown EOL helper contract overstates mixed-line-ending preservation
-
-**Severity:** Low - exported helper comments imply exact original newline preservation for mixed-EOL documents, but the implementation preserves only a detected document convention.
-
-The rendered-Markdown save path now correctly avoids silently converting pure CRLF files to LF. The helper contract is still easy to misread: `detectMarkdownDocumentEolStyle` chooses between LF and CRLF based on the dominant newline style, while `applyMarkdownDocumentEolStyle` rewrites every normalized LF newline to that selected style.
-
-That is the right shape for the current fix, but it is not an exact round-trip for documents that intentionally mix CRLF and LF line endings.
-
-**Current behavior:**
-- `detectMarkdownDocumentEolStyle` returns CRLF only when CRLF newlines outnumber standalone LF newlines; ties and LF-majority documents return LF.
-- `applyMarkdownDocumentEolStyle` leaves LF documents unchanged or converts every `\n` to `\r\n` for CRLF documents.
-- Helper comments and test descriptions can be read as preserving the original CRLF/LF mix rather than the detected dominant convention.
-
-**Proposal:**
-- Reword the helper comments to say they preserve the detected or dominant document EOL convention.
-- Explicitly document that mixed-EOL documents are normalized to the detected style unless future work tracks per-line newline markers.
 
 ## Conversation cards overlap for one frame during scroll through long messages
 
@@ -393,21 +385,6 @@ The branch solves a real scroll-height jump, but it makes a reusable message ren
 **Proposal:**
 - Thread an explicit `preferImmediateHeavyRender` style prop or provide a small React context from the virtualized list.
 - Add a regression test that renders heavy content inside a virtualized wrapper and asserts the real content appears immediately without the deferred placeholder.
-
-## `dialog-backdrop-dismiss` platform fallback is untested
-
-**Severity:** Medium - `ui/src/dialog-backdrop-dismiss.ts` explicitly falls back from `navigator.userAgentData?.platform` to `navigator.platform`, but `ui/src/dialog-backdrop-dismiss.test.ts` sets both values in every platform stub.
-
-That leaves the Safari/Firefox-style branch unpinned. A future edit could break the fallback-only path while all current helper tests continue to pass through the `userAgentData.platform` branch.
-
-**Current behavior:**
-- `stubPlatform()` writes both `navigator.platform` and `navigator.userAgentData.platform`.
-- The suite checks userAgentData precedence, but not userAgentData absence.
-- The production helper still depends on the fallback for browsers without `navigator.userAgentData`.
-
-**Proposal:**
-- Add a test that deletes or omits `navigator.userAgentData`, stubs only `navigator.platform = "MacIntel"`, and asserts Ctrl+primary returns `false`.
-- Add a paired non-Apple fallback case if useful, e.g. `navigator.platform = "Linux x86_64"` returns `true` for Ctrl+primary.
 
 ## App-owned dialog backdrop integrations lack coverage
 
@@ -506,21 +483,6 @@ This is a pre-existing gap — the inline tab-bar JSX the component replaced had
 - Keep `Enter` / `Space` / click unchanged — they already work via native button semantics.
 - Add a Vitest case that renders the component, focuses the active tab, sends ArrowRight, and asserts the next tab is both selected and focused.
 
-## Dialog platform stubs can leak between tests
-
-**Severity:** Low - `ui/src/dialog-backdrop-dismiss.test.ts` and `ui/src/preferences/SettingsDialogShell.test.tsx` restore `navigator.platform` only when `Object.getOwnPropertyDescriptor(navigator, "platform")` returns a descriptor.
-
-In jsdom, `navigator.platform` is commonly inherited from the prototype. When there is no original own descriptor, `stubPlatform()` creates an own property and `afterEach` leaves it behind, so later tests in the same worker can inherit the previous platform stub and become order-dependent.
-
-**Current behavior:**
-- `originalPlatform` can be `undefined` when `platform` is inherited.
-- `stubPlatform()` then creates an own `navigator.platform` property.
-- `afterEach` restores only the descriptor-present path; it does not delete the created own property when `originalPlatform` was absent.
-
-**Proposal:**
-- Mirror the `userAgentData` cleanup: when there was no original own `platform` descriptor, delete the stubbed own property in `afterEach`.
-- Apply the fix to both `dialog-backdrop-dismiss.test.ts` and `SettingsDialogShell.test.tsx`.
-
 ## Session-find active-hit scroll can fight a user who scrolls away
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1724-1761` adds a `useLayoutEffect` that writes `node.scrollTop = activeConversationSearchScrollTop` whenever `activeConversationSearchMessageIndex` or `activeConversationSearchScrollTop` changes. Its deps do not include the user's current `node.scrollTop`, so after the initial scroll-to-hit a later measurement commit that changes `layout.tops[activeIdx]` or `messageHeights[activeIdx]` re-runs the effect and snaps the viewport back to the hit — even if the user has since manually scrolled to inspect context around the match.
@@ -537,6 +499,22 @@ In practice measurement convergence is fast for visible items, but with measurem
 - Or: only run the pin when `activeConversationSearchMessageId` changes — keep a ref of the last handled active id and compare before writing.
 - Move the `shouldKeepBottomAfterLayoutRef.current = false` assignment inside the `Math.abs(...) >= 1` guard so it only fires when the scroll write actually happens.
 - Add a Vitest case: open session find, scroll the viewport away from the active hit, trigger a measurement-height change, and assert `scrollTop` is unchanged.
+
+## Read-only Markdown flash fix lacks load-bearing immediate-state coverage
+
+**Severity:** Low - the read-only rendered-Markdown test verifies the final remounted DOM, but not the transient frame that the current fix was meant to remove.
+
+The production code now avoids assigning `event.currentTarget.textContent = segment.markdown` in the disallowed-input path. That prevents a one-frame raw-source flash before React remounts the rendered Markdown section. The updated test re-queries after remount and proves the final DOM is restored, but it would still pass if the raw-source assignment were reintroduced and then overwritten by the remount.
+
+**Current behavior:**
+- `DiffPanel.test.tsx` waits for the remounted rendered section and asserts the final text is restored.
+- The test does not inspect the contentEditable subtree immediately after the disallowed `input` event.
+- Reintroducing the raw-source assignment could still pass the test while restoring the user-visible flash.
+
+**Proposal:**
+- Add a load-bearing assertion for the immediate post-input DOM state before the remount settles.
+- Or instrument the read-only branch so the test fails if raw Markdown source is written into the contentEditable subtree.
+- Keep the existing final-DOM assertion as the end-state check.
 
 ## Restart detection accepts late responses from old server instances
 
@@ -568,24 +546,6 @@ If no later state mutation sends another `PersistRequest::Delta`, the restored t
 **Proposal:**
 - Re-arm persistence on failure, preferably with a bounded/backoff retry path inside the persist worker.
 - Keep the watermark unchanged and recollect after restoring tombstones so changed sessions and deletes retry together.
-
-## Flagship deadline-guard test doesn't isolate the post-await check
-
-**Severity:** Medium - `ui/src/active-prompt-poll.test.ts::stops re-arming after the hard-cap deadline even when fetchState is in flight` (line ~82) claims to pin the post-await `now() >= deadlineMs` guard at `ui/src/active-prompt-poll.ts:125`, but actually exercises a different code path.
-
-Under real fake-timer advance, the belt-and-suspenders hard-cap setTimeout fires first and sets `stopped = true`. When the deferred fetch resolves, the bail-out fires via `if (stopped || !handlers.isMounted()) return;` at line 118 — well before the deadline line. The test would still pass with the post-await deadline check deleted entirely. I noticed this during the "disable fix and verify test fails" verification and even mentioned it in the commit message, but the test docstring still claims to cover line 125 — that's false confidence for future readers and reviewers.
-
-Only the `uses an injectable now()` test at line 394 actually isolates line 125 (its `now()` advance stays independent of the fake timer clock, so the hard-cap setTimeout never fires during the advance window).
-
-**Current behavior:**
-- Main deadline test passes due to the `stopped`-flag belt-and-suspenders, not the post-await deadline check.
-- Docstring + test name both advertise coverage that only the sibling injectable-now test delivers.
-- Regression that drops only `if (now() >= deadlineMs) return;` at line 125 would still pass the main test and only fail the injectable-now test.
-
-**Proposal:**
-- Rename the main test to `hard-cap \`stopped\` flag bails an in-flight await when setTimeout cap fires` (matches what it really proves).
-- Move the "post-await deadline check" claim from the main docstring to the injectable-now test's docstring (it is the actual regression gate).
-- Optionally: add a third test that uses a large `maxDurationMs` in real time + injected `now()` that advances past the deadline, so the hard-cap setTimeout never fires during the advance and the post-await deadline line is the only defense. Would cover both belt-and-suspenders and deadline-check paths independently.
 
 ## `saveError` visibility over-gated by informational `externalFileNotice`
 
@@ -627,19 +587,6 @@ Only the `uses an injectable now()` test at line 394 actually isolates line 125 
 - If the flake is temp-file path collision: switch to `tempfile::tempdir()` with unique per-test directories.
 - If env: add `TEST_HOME_ENV_MUTEX` acquisition and `ScopedEnvVar::remove` isolation to match the Gemini pattern.
 - Document the root cause in the fix commit message so the "why mutex / why tempdir" is visible at review time.
-
-## Stale `src/tests.rs` can reappear in the working tree alongside `src/tests/mod.rs`
-
-**Severity:** Low - during the April 16 session split of `src/tests.rs` into the `src/tests/` directory, a copy of the original pre-split file was observed reappearing in the working tree as a staged "new file" after later commits. The cause is not fully understood (possibly an IDE cache, a tool operation that restored an earlier snapshot, or accidental `git add` glob behavior). Rustc errors out with `E0761: file for module 'tests' found at both "src\tests.rs" and "src\tests\mod.rs"` under `cargo check --tests`, though `cargo test --bin termal` can sometimes still resolve the module to `src/tests/mod.rs` and pass, masking the problem.
-
-**Current behavior:**
-- The stale file reappeared at least once after the directory form was already committed; it was staged as `new file: src/tests.rs`.
-- `cargo check --tests` fails immediately; `cargo test --bin termal` may or may not, depending on invocation path.
-
-**Proposal:**
-- Add a `.gitignore` or `.gitattributes` guard against a literal `src/tests.rs` path while the directory form is in use.
-- Prefer running `cargo check --tests` (not just `cargo test`) in local verification, since the bin-only invocation can miss the ambiguity.
-- If the reappearance was an IDE-side artifact, consider documenting the offending tool so future contributors avoid the same mistake.
 
 ## `adoptCreatedSessionResponse` recovery still opens a fallback workspace pane
 
@@ -721,20 +668,6 @@ At `src/api.rs:2797`, the diff dropped the `-l` flag. `sh -c` runs in non-login 
 - Restore `sh -lc` unless there is a documented reason (e.g., the login-shell init was measurably slow and intentionally removed).
 - If the removal was intentional, add a comment explaining why and document the expectation that `PATH` must be set at the parent-process level.
 
-## Read-only Markdown input flashes plain source for a frame
-
-**Severity:** Low - when the user tries to edit a read-only Markdown segment, the handler imperatively sets `event.currentTarget.textContent = segment.markdown` before triggering the `onReadOnlyMutation` remount. For one paint frame the rendered Markdown subtree is replaced by raw source text.
-
-At `ui/src/panels/DiffPanel.tsx:2785-2790`, the read-only branch of `handleInput` assigns raw text to `textContent` and then bumps `readOnlyResetVersion` to remount. The textContent assignment is unnecessary — `onReadOnlyMutation()` alone triggers the remount and React will reconcile the correct rendered DOM on the next commit.
-
-**Current behavior:**
-- User attempts a disallowed edit.
-- Plain source text flashes for one paint frame.
-- Remount completes, rendered Markdown returns.
-
-**Proposal:**
-- Drop the `event.currentTarget.textContent = segment.markdown` assignment; rely on `onReadOnlyMutation()` to trigger the remount.
-
 ## `session_mut` helpers stamp eagerly before the caller decides to mutate
 
 **Severity:** Low - check-then-early-return paths advance the mutation stamp even when no field actually changed, so the persist thread re-serializes the session on the next tick for no reason. Softly undoes the delta-persist benefit.
@@ -799,22 +732,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 **Proposal:**
 - Take `PersistedState` by value where possible and `std::mem::take(&mut persisted.sessions)` into a local; reuse the remaining `persisted` as metadata.
 - Or: add a dedicated `PersistedState::split_into_metadata_and_sessions(self) -> (Self, Vec<PersistedSessionRecord>)`.
-
-## Mermaid iframe `max-width: 100%` can be defeated by a flex ancestor
-
-**Severity:** Low - the dimension cap correctly bounds the iframe's intrinsic width at 4096 px, but `max-width: 100%` only binds if no ancestor sizes the child by intrinsic content.
-
-Common React-flex pitfall: a flex child with an intrinsic width of 4096 px forces the parent to that width even with `max-width: 100%`, because flex items default to `min-width: auto` which prevents shrinking below content size. The cap helps layout not break at 10 000+ px, but does not guarantee the iframe scales with the viewport on every ancestor layout.
-
-**Current behavior:**
-- `.mermaid-diagram-frame { max-width: 100% }` is set in CSS.
-- Inline `maxWidth: "100%"` is set in the computed style.
-- If an ancestor column or flex container does not set `min-width: 0`, a 4096 px iframe still forces its container to 4096 px.
-
-**Proposal:**
-- Add `.mermaid-diagram-frame { min-width: 0; }` explicitly so the iframe can shrink below its intrinsic width.
-- Or: ensure a known ancestor column sets `min-width: 0` / `overflow-x: auto` for Mermaid blocks.
-- Add a regression test with a narrow-column ancestor that asserts the iframe's rendered width does not exceed the column.
 
 ## State snapshots still include full session transcripts on the wire
 
@@ -929,6 +846,21 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
+- [ ] P2: Extract a shared `navigator.platform` stub helper:
+  `ui/src/dialog-backdrop-dismiss.test.ts` and
+  `ui/src/preferences/SettingsDialogShell.test.tsx` duplicate
+  ~40 lines of identical scaffolding (`originalPlatform` +
+  `originalUserAgentData` capture in `beforeEach`, the
+  `stubPlatform` helper, and the delete-or-restore `afterEach`
+  cleanup with the jsdom-prototype-shadow workaround). A shared
+  `ui/src/test-support/stub-navigator-platform.ts` exporting
+  `installPlatformStub()` that returns a `restore()` function
+  would let each suite collapse to one `beforeEach` + one
+  `afterEach` call. Low priority — the duplication is small and
+  both call sites are close to their consumers — but any future
+  change to the jsdom workaround (e.g., if `navigator.userAgentData`
+  stops being configurable on a jsdom bump) would otherwise need
+  to be made twice.
 - [ ] P2: Add integration coverage for the inline-zone
   `ResizeObserver` stability fix:
   `MonacoCodeEditor.test.ts` pins the pure
@@ -951,6 +883,16 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   path (full replace of the component), so a new dedicated
   Monaco test file with a minimal real-Monaco harness + stubbed
   ResizeObserver would close this gap.
+- [ ] P2: Make the read-only rendered-Markdown flash test
+  load-bearing:
+  `DiffPanel.test.tsx` now re-queries after the
+  `readOnlyResetVersion` remount and proves the final rendered DOM
+  is restored, but that would still pass if
+  `event.currentTarget.textContent = segment.markdown` were
+  reintroduced and then overwritten by the remount. Add an
+  immediate post-input assertion, or a small test hook around the
+  read-only branch, so writing raw Markdown source into the
+  contentEditable subtree fails the test before the remount settles.
 - [ ] P2: Broaden `handleApplyDiffEditsToDiskVersion` rendered-
   Markdown commit coverage beyond the empty-commits path:
   `DiffPanel.test.tsx::"keeps apply-to-disk-version flowing when

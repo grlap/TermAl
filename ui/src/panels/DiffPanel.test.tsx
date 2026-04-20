@@ -1601,8 +1601,27 @@ describe("DiffPanel", () => {
     addedSections[1].innerHTML = "<p>Ready to save.</p>";
     fireEvent.input(addedSections[1]);
 
+    // The read-only input handler bumps `readOnlyResetVersion` on
+    // the parent, which remounts `MarkdownDiffDocument` via its
+    // `key={readOnlyResetVersion}`. After remount, the OLD
+    // `addedSections[1]` reference is detached from the DOM; we
+    // must re-query to see the restored rendered Markdown. The
+    // pre-refactor path assigned `event.currentTarget.textContent
+    // = segment.markdown` inline BEFORE the remount, which made
+    // this test pass against the stale reference — but also
+    // produced a visible one-frame plain-source flash in
+    // production. See docs/bugs.md preamble for the retirement.
     await waitFor(() => {
-      expect(addedSections[1]).toHaveTextContent("Ready to commit.");
+      const restoredAddedSections = document.querySelectorAll<HTMLElement>(
+        ".markdown-diff-rendered-section-added [data-markdown-caret='true']",
+      );
+      // Pin the structural invariant alongside the content
+      // assertion so a future test change that inserts an extra
+      // added section before this assertion can't silently drift
+      // the `[1]` index onto an unrelated element that happens to
+      // contain matching text.
+      expect(restoredAddedSections).toHaveLength(2);
+      expect(restoredAddedSections[1]).toHaveTextContent("Ready to commit.");
     });
     expect(onSaveFile).not.toHaveBeenCalled();
 

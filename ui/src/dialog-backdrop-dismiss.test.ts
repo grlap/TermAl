@@ -32,6 +32,19 @@ describe("isDialogBackdropDismissMouseDown", () => {
   afterEach(() => {
     if (originalPlatform) {
       Object.defineProperty(navigator, "platform", originalPlatform);
+    } else {
+      // In jsdom, `navigator.platform` is commonly inherited from
+      // the prototype rather than existing as an own property. When
+      // `stubPlatform` then calls `Object.defineProperty(navigator,
+      // "platform", ...)` it creates an OWN property; leaving it
+      // there shadows the prototype value for the rest of the
+      // worker. Later tests in the same file (or, worse, other
+      // files scheduled onto the same worker) would silently
+      // inherit the previous platform stub and become order-
+      // dependent. Mirror the `userAgentData` cleanup below:
+      // when there was no original own descriptor, delete the
+      // stubbed own property.
+      Reflect.deleteProperty(navigator, "platform");
     }
     if (originalUserAgentData) {
       Object.defineProperty(navigator, "userAgentData", originalUserAgentData);
@@ -122,5 +135,43 @@ describe("isDialogBackdropDismissMouseDown", () => {
     expect(
       isDialogBackdropDismissMouseDown({ button: 0, ctrlKey: true }),
     ).toBe(false);
+  });
+
+  // Safari / Firefox do not expose `navigator.userAgentData`; the
+  // helper must fall back to `navigator.platform` on those. Every
+  // other test in this file writes both values via `stubPlatform`,
+  // so the fallback-only path went unexercised — a regression that
+  // broke the `navigator.platform` branch would pass the whole
+  // suite via the userAgentData path.
+  it("falls back to navigator.platform for Apple detection when userAgentData is absent", () => {
+    Reflect.deleteProperty(
+      navigator as NavigatorWithUserAgentData,
+      "userAgentData",
+    );
+    Object.defineProperty(navigator, "platform", {
+      configurable: true,
+      value: "MacIntel",
+    });
+    // macOS via navigator.platform → Ctrl+primary is a context-menu
+    // gesture, not a dismiss.
+    expect(
+      isDialogBackdropDismissMouseDown({ button: 0, ctrlKey: true }),
+    ).toBe(false);
+  });
+
+  it("falls back to navigator.platform for non-Apple detection when userAgentData is absent", () => {
+    Reflect.deleteProperty(
+      navigator as NavigatorWithUserAgentData,
+      "userAgentData",
+    );
+    Object.defineProperty(navigator, "platform", {
+      configurable: true,
+      value: "Linux x86_64",
+    });
+    // Non-Apple via navigator.platform → Ctrl+primary is NOT a
+    // context-menu gesture; backdrop dismisses normally.
+    expect(
+      isDialogBackdropDismissMouseDown({ button: 0, ctrlKey: true }),
+    ).toBe(true);
   });
 });

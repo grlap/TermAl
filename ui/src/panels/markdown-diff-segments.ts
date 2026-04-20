@@ -1038,29 +1038,41 @@ export function normalizeMarkdownDocumentLineEndings(content: string) {
 }
 
 /**
- * End-of-line conventions the rendered-Markdown edit pipeline preserves
- * on save. `crlf` covers files that Git, Windows editors, or
- * `core.autocrlf=true` typically produce; `lf` covers everything else
- * (Unix-style, the default for new Markdown files, and the internal
- * working form inside the segment math).
+ * End-of-line convention the rendered-Markdown edit pipeline detects
+ * and preserves across a round-trip save. `crlf` covers files that
+ * Git, Windows editors, or `core.autocrlf=true` typically produce;
+ * `lf` covers everything else (Unix-style, the default for new
+ * Markdown files, and the internal working form inside the segment
+ * math).
  *
- * Legacy CR-only (classic Mac) files are coerced to `lf` — they were
- * already coerced pre-fix by `normalizeMarkdownDocumentLineEndings`, and
- * the rendered-Markdown edit pipeline has never been plausibly used on
- * such files in this project.
+ * This is a DETECTED DOMINANT style, not a per-line preservation of
+ * the original mix. A document whose newlines are heterogeneous
+ * (some CRLF, some LF) is normalised to whichever style is more
+ * common on save; per-line newline markers would need a deeper
+ * pipeline rework and are not today's contract. In practice this
+ * only matters for files created by tools that emit inconsistent
+ * newlines — normal editor output produces homogeneous files on
+ * which the round-trip is exact.
+ *
+ * Legacy CR-only (classic Mac) files are coerced to `lf` — they
+ * were already coerced pre-fix by `normalizeMarkdownDocumentLineEndings`,
+ * and the rendered-Markdown edit pipeline has never been plausibly
+ * used on such files in this project.
  */
 export type MarkdownDocumentEolStyle = "crlf" | "lf";
 
 /**
- * Returns the dominant EOL style of the document. We count CRLF
- * occurrences and standalone-LF occurrences (newlines not preceded by a
- * carriage return) and pick the winner; ties fall back to `lf`.
+ * Returns the document's dominant EOL style (see the
+ * `MarkdownDocumentEolStyle` doc for the dominant-vs-per-line
+ * trade-off). We count CRLF occurrences and standalone-LF
+ * occurrences (newlines not preceded by a carriage return) and pick
+ * the winner; ties fall back to `lf`.
  *
  * Exported so the commit handler in `DiffPanel.tsx` can capture the
- * original style at the source-content boundary BEFORE it
- * LF-normalizes for segment math, then re-apply that style when
- * writing `nextDocumentContent` back into the edit buffer. Without
- * that round-trip, the first rendered-Markdown commit would silently
+ * style at the source-content boundary BEFORE it LF-normalizes for
+ * segment math, then re-apply that style when writing
+ * `nextDocumentContent` back into the edit buffer. Without that
+ * round-trip, the first rendered-Markdown commit would silently
  * overwrite a CRLF-on-disk document with its LF-normalized form on
  * the next save.
  */
@@ -1085,14 +1097,18 @@ export function detectMarkdownDocumentEolStyle(content: string): MarkdownDocumen
 }
 
 /**
- * Re-applies the original EOL convention to an LF-normalized document.
+ * Re-applies the document's detected dominant EOL style to an
+ * LF-normalized document.
  *
- * The rendered-Markdown commit pipeline keeps internal segment math on
- * LF (positions-in-bytes are easier to reason about with a single
+ * The rendered-Markdown commit pipeline keeps internal segment math
+ * on LF (positions-in-bytes are easier to reason about with a single
  * one-byte line terminator), then passes the resulting
- * `nextDocumentContent` through this helper so the on-disk form round-
- * trips: `detectMarkdownDocumentEolStyle(X) → apply → setEditValueState`
- * preserves the original CRLF/LF mix.
+ * `nextDocumentContent` through this helper so the on-disk form
+ * round-trips: `detectMarkdownDocumentEolStyle(X) → apply` preserves
+ * X's dominant style exactly (and reproduces X byte-for-byte when
+ * X was homogeneous). Heterogeneous inputs are intentionally
+ * normalised to the dominant style — see `MarkdownDocumentEolStyle`
+ * for the trade-off.
  *
  * For `lf` this is the identity. For `crlf` we replace every `\n`
  * with `\r\n` — safe because the input is guaranteed LF-normalized;

@@ -306,13 +306,13 @@ export function DiffPanel({
   // next side effect on a clean commit (notably
   // `handleApplyDiffEditsToDiskVersion`) capture this return so
   // they don't proceed to `fetchFile` / rebase against a buffer
-  // whose drafts are still dirty — see docs/bugs.md →
-  // "handleApplyDiffEditsToDiskVersion silently continues when
-  // rendered Markdown commit batch conflicts". Callers that
-  // ignore the return (the Save / reload / navigation paths)
-  // continue to treat the function as a best-effort flush; they
-  // already surface the commit error through the `saveError`
-  // banner.
+  // whose drafts are still dirty — without the boolean gate, a
+  // rejected commit only surfaced via a `saveError` banner while
+  // the apply-to-disk action silently no-op'd (or worse, rebased
+  // against the pre-flush edit buffer). Callers that ignore the
+  // return (Save / reload / navigation) continue to treat the
+  // function as a best-effort flush; the existing `saveError`
+  // banner still surfaces the commit error for them.
   function commitRenderedMarkdownDrafts(): boolean {
     const commits = collectRenderedMarkdownCommits();
     if (commits.length === 0) {
