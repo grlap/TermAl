@@ -355,6 +355,379 @@ describe("markdown diff segments", () => {
     expect(orderedKinds.slice(0, prefixAddedIndex)).not.toContain("removed");
   });
 
+  it("separates a pre-fence line edit from a changed Mermaid fence when both sides differ", () => {
+    // Regression guard for the case where BOTH sides of a changed
+    // range carry non-fence content before a fence that also
+    // differs. Example: the user replaced a blank line just before
+    // a Mermaid fence with "333" AND edited a label inside the
+    // fence. The previous heuristic only split when the removed
+    // side started EXACTLY at a fence opener
+    // (`removedStartsWithFence`), so a pre-fence line edit got
+    // smeared into the fence's removed + added blocks — the
+    // rendered diff showed the old diagram as red, then a single
+    // green block containing "333" AND the new diagram.
+    //
+    // The fix generalizes to "both sides have a fence in the
+    // changed range": emit pre-fence removed/added as their own
+    // pair, then the fence-onwards removed/added as a second
+    // pair. The renderer's change-block grouping breaks on an
+    // `added → removed` transition, so this lands as two distinct
+    // visual blocks.
+    const segments = buildFullMarkdownDiffDocumentSegments(
+      [
+        "# Mermaid Demo",
+        "",
+        "",
+        "```mermaid",
+        "flowchart TD",
+        "  Start --> Stop2",
+        "```",
+        "",
+      ].join("\n"),
+      [
+        "# Mermaid Demo",
+        "",
+        "333",
+        "```mermaid",
+        "flowchart TD",
+        "  Start --> Stop",
+        "```",
+        "",
+      ].join("\n"),
+    );
+
+    // The pre-fence added segment carries JUST "333", without the
+    // fence opener or any fence interior. Previously this
+    // segment's content smeared into a single added block that
+    // also contained the new fence — the exact regression the
+    // fix prevents.
+    const preFenceAdded = segments.find(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.markdown.includes("333") &&
+        !segment.markdown.includes("```mermaid"),
+    );
+    expect(preFenceAdded).toBeDefined();
+    expect(preFenceAdded?.markdown).not.toContain("```mermaid");
+    expect(preFenceAdded?.markdown).not.toContain("flowchart TD");
+
+    // The paired pre-fence removed segment is suppressed by
+    // `pushMarkdownDiffSegment`'s whitespace-only filter
+    // (removing a blank line only shouldn't show a red chunk),
+    // so we don't look for it — the downstream renderer's
+    // change-block grouping still breaks correctly on the
+    // `added → removed` boundary between `preFenceAdded` and
+    // `fenceRemoved` below, which is what produces the two
+    // distinct visual blocks the user sees.
+
+    // Fence-onwards pair: whole atomic fence replacement, with
+    // NO "333" bleed into either side.
+    const fenceRemoved = segments.find(
+      (segment) =>
+        segment.kind === "removed" &&
+        segment.markdown.includes("Start --> Stop2"),
+    );
+    const fenceAdded = segments.find(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.markdown.includes("Start --> Stop") &&
+        !segment.markdown.includes("Start --> Stop2"),
+    );
+    expect(fenceRemoved).toBeDefined();
+    expect(fenceAdded).toBeDefined();
+    expect(fenceRemoved?.markdown).not.toContain("333");
+    expect(fenceAdded?.markdown).not.toContain("333");
+    expect(fenceRemoved?.markdown).toContain("```mermaid");
+    expect(fenceAdded?.markdown).toContain("```mermaid");
+
+    // Segment order lands as [pre-fence-added, fence-removed,
+    // fence-added]. The renderer breaks the change-block on the
+    // `added → removed` transition between `preFenceAdded` and
+    // `fenceRemoved`, so the two land as distinct visual blocks:
+    // a green "333" on top, a red old diagram next to a green
+    // new diagram below.
+    const preFenceAddedIndex = segments.indexOf(preFenceAdded!);
+    const fenceRemovedIndex = segments.indexOf(fenceRemoved!);
+    const fenceAddedIndex = segments.indexOf(fenceAdded!);
+    expect(preFenceAddedIndex).toBeLessThan(fenceRemovedIndex);
+    expect(fenceRemovedIndex).toBeLessThan(fenceAddedIndex);
+
+    // Critical invariant: the only `added → removed` transition
+    // in the segment list is between `preFenceAdded` and
+    // `fenceRemoved`. The renderer uses that transition to split
+    // the change-block. If the pre-fence addition smears back
+    // into the fence's added segment (the regression shape),
+    // there'd be no `added → removed` transition and the whole
+    // thing would render as a single red/green block.
+    let addedToRemovedTransitions = 0;
+    for (let index = 1; index < segments.length; index += 1) {
+      const previous = segments[index - 1];
+      const current = segments[index];
+      if (previous?.kind === "added" && current?.kind === "removed") {
+        addedToRemovedTransitions += 1;
+      }
+    }
+    expect(addedToRemovedTransitions).toBe(1);
+  });
+
+  it("keeps multi-line pre-fence edits in their own pre-fence segments", () => {
+    // The pre-fence split should scale to multiple lines of
+    // edit. Previously a single `removedStartsWithFence` check
+    // either passed (all pre-fence lines lumped into one added
+    // segment) or failed (all smeared into the fence block). The
+    // new "both sides have a fence" heuristic splits at the
+    // first fence in each side, so multiple pre-fence lines land
+    // together in the pre-fence pair without bleeding into the
+    // fence replacement.
+    const segments = buildFullMarkdownDiffDocumentSegments(
+      [
+        "# Demo",
+        "",
+        "",
+        "",
+        "```mermaid",
+        "flowchart TD",
+        "  Start --> Stop2",
+        "```",
+        "",
+      ].join("\n"),
+      [
+        "# Demo",
+        "",
+        "one",
+        "two",
+        "three",
+        "```mermaid",
+        "flowchart TD",
+        "  Start --> Stop",
+        "```",
+        "",
+      ].join("\n"),
+    );
+
+    // All three pre-fence added lines ("one", "two", "three")
+    // live in a single pre-fence added segment (or get merged).
+    // The fence segments contain ```mermaid and flowchart TD but
+    // none of the pre-fence text.
+    const preFenceAdded = segments.find(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.markdown.includes("one") &&
+        segment.markdown.includes("two") &&
+        segment.markdown.includes("three") &&
+        !segment.markdown.includes("```mermaid") &&
+        !segment.markdown.includes("flowchart TD"),
+    );
+    expect(preFenceAdded).toBeDefined();
+    const fenceRemoved = segments.find(
+      (segment) =>
+        segment.kind === "removed" &&
+        segment.markdown.includes("Start --> Stop2"),
+    );
+    const fenceAdded = segments.find(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.markdown.includes("Start --> Stop") &&
+        !segment.markdown.includes("Start --> Stop2"),
+    );
+    expect(fenceRemoved).toBeDefined();
+    expect(fenceAdded).toBeDefined();
+    expect(fenceAdded?.markdown).not.toContain("one");
+    expect(fenceAdded?.markdown).not.toContain("two");
+    expect(fenceAdded?.markdown).not.toContain("three");
+
+    // Critical ordering invariant: pre-fence added comes BEFORE
+    // the fence removed so the renderer's change-block grouper
+    // breaks at the `added → removed` transition. Without the
+    // fix the emission order is reversed (removed-fence first,
+    // then added-prefence, then added-fence) — a single change
+    // block with no break — and the multi-line pre-fence edit
+    // smears into the same green column as the new fence.
+    const preFenceAddedIndex = segments.indexOf(preFenceAdded!);
+    const fenceRemovedIndex = segments.indexOf(fenceRemoved!);
+    expect(preFenceAddedIndex).toBeLessThan(fenceRemovedIndex);
+  });
+
+  it("applies the pre-fence split to non-Mermaid fences too", () => {
+    // The heuristic keys on `fenceBlock` which is populated for
+    // any Markdown fence (``` or ~~~ of any language), not just
+    // Mermaid. Pin that a language-agnostic fence (TypeScript,
+    // Python, plain code block) gets the same pre-fence split
+    // treatment — otherwise a regression that tied the behavior
+    // to the Mermaid language tag specifically would silently
+    // slip past the Mermaid-only regression tests above.
+    const segments = buildFullMarkdownDiffDocumentSegments(
+      [
+        "# Docs",
+        "",
+        "",
+        "```typescript",
+        "const answer = 42;",
+        "```",
+        "",
+      ].join("\n"),
+      [
+        "# Docs",
+        "",
+        "intro paragraph",
+        "```typescript",
+        "const answer = 43;",
+        "```",
+        "",
+      ].join("\n"),
+    );
+
+    const preFenceAdded = segments.find(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.markdown.includes("intro paragraph") &&
+        !segment.markdown.includes("```typescript"),
+    );
+    expect(preFenceAdded).toBeDefined();
+
+    const fenceRemoved = segments.find(
+      (segment) =>
+        segment.kind === "removed" && segment.markdown.includes("answer = 42"),
+    );
+    const fenceAdded = segments.find(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.markdown.includes("answer = 43") &&
+        !segment.markdown.includes("answer = 42"),
+    );
+    expect(fenceRemoved).toBeDefined();
+    expect(fenceAdded).toBeDefined();
+    expect(fenceAdded?.markdown).not.toContain("intro paragraph");
+    expect(fenceAdded?.markdown).toContain("```typescript");
+
+    // Same ordering invariant as the Mermaid cases: pre-fence
+    // added must come BEFORE the fence removed so the
+    // renderer's change-block grouper produces two distinct
+    // visual blocks. Proves the heuristic keys on `fenceBlock`
+    // generally, not on a Mermaid-specific language tag.
+    const preFenceAddedIndex = segments.indexOf(preFenceAdded!);
+    const fenceRemovedIndex = segments.indexOf(fenceRemoved!);
+    expect(preFenceAddedIndex).toBeLessThan(fenceRemovedIndex);
+  });
+
+  it("does not split when only the fence content changes and pre-fence is unchanged", () => {
+    // Negative control: if the user ONLY edits the fence
+    // interior (no pre-fence line changes), the pre-fence split
+    // should NOT fire. Previously, an overeager heuristic that
+    // always searched for "first fence in range" could emit
+    // spurious empty-range pre-fence segments, which would
+    // confuse the segment iterator or leak invisible empty
+    // segments into the output.
+    //
+    // Expected shape: the pre-fence content ("# Title", blank
+    // line) is normal; the fence replacement is a red/green
+    // pair with no extra segments bracketing it.
+    const segments = buildFullMarkdownDiffDocumentSegments(
+      [
+        "# Title",
+        "",
+        "```mermaid",
+        "flowchart TD",
+        "  Start --> Stop2",
+        "```",
+        "",
+      ].join("\n"),
+      [
+        "# Title",
+        "",
+        "```mermaid",
+        "flowchart TD",
+        "  Start --> Stop",
+        "```",
+        "",
+      ].join("\n"),
+    );
+
+    const kinds = segments.map((segment) => segment.kind);
+    // Exactly: one or more normals (pre-fence), one removed
+    // (old fence), one added (new fence). No other segments.
+    expect(kinds).toContain("removed");
+    expect(kinds).toContain("added");
+    const nonNormalKinds = kinds.filter((kind) => kind !== "normal");
+    expect(nonNormalKinds).toEqual(["removed", "added"]);
+
+    // The normal segment(s) carry the pre-fence content without
+    // any leak of fence content.
+    const normalSegments = segments.filter((segment) => segment.kind === "normal");
+    const normalMarkdown = normalSegments.map((segment) => segment.markdown).join("");
+    expect(normalMarkdown).toContain("# Title");
+    expect(normalMarkdown).not.toContain("```mermaid");
+    expect(normalMarkdown).not.toContain("flowchart TD");
+  });
+
+  it("assigns stable oldStart/newStart line numbers across the pre-fence split", () => {
+    // The pre-fence split changes which segment covers which
+    // line range, which means the `oldStart` / `newStart`
+    // callbacks must receive the correct chunk starts for each
+    // emitted segment. A regression in the line-number wiring
+    // would show up as off-by-one labels in the diff view — the
+    // user sees the right segment content but the line numbers
+    // shift by however many lines the pre-fence content spans.
+    //
+    // Pin the contract by asserting each segment's
+    // `oldStart` / `newStart` reflect the actual position the
+    // chunk begins at in the before/after documents. Line
+    // numbers are 1-based per the existing segment convention.
+    const segments = buildFullMarkdownDiffDocumentSegments(
+      [
+        "# Demo",
+        "",
+        "",
+        "```mermaid",
+        "flowchart TD",
+        "  Start --> Stop2",
+        "```",
+        "",
+      ].join("\n"),
+      [
+        "# Demo",
+        "",
+        "333",
+        "```mermaid",
+        "flowchart TD",
+        "  Start --> Stop",
+        "```",
+        "",
+      ].join("\n"),
+    );
+
+    const preFenceAdded = segments.find(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.markdown.includes("333") &&
+        !segment.markdown.includes("```mermaid"),
+    );
+    const fenceRemoved = segments.find(
+      (segment) =>
+        segment.kind === "removed" &&
+        segment.markdown.includes("Start --> Stop2"),
+    );
+    const fenceAdded = segments.find(
+      (segment) =>
+        segment.kind === "added" &&
+        segment.markdown.includes("Start --> Stop") &&
+        !segment.markdown.includes("Start --> Stop2"),
+    );
+
+    // "333" is on line 3 of the AFTER document (1-based: line 1
+    // = "# Demo", line 2 = blank, line 3 = "333").
+    expect(preFenceAdded?.newStart).toBe(3);
+    // Old fence starts on line 3 of the BEFORE document
+    // (1-based: 1=# Demo, 2=blank, 3=blank, 4=```mermaid — the
+    // fence opens on line 4). The fence block expands to cover
+    // the whole block, but the `oldStart` points at the first
+    // line of the emitted chunk, which is the fence opener.
+    expect(fenceRemoved?.oldStart).toBe(4);
+    // New fence opens on line 4 of the AFTER document
+    // (1=# Demo, 2=blank, 3=333, 4=```mermaid).
+    expect(fenceAdded?.newStart).toBe(4);
+  });
+
   it("treats Markdown table separator formatting as unchanged", () => {
     const segments = buildFullMarkdownDiffDocumentSegments(
       [

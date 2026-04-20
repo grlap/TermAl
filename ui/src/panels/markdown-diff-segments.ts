@@ -104,31 +104,64 @@ export function buildFullMarkdownDiffDocumentSegments(
     const expandedBeforeEnd = expandedRange.beforeEnd;
     const expandedAfterEnd = expandedRange.afterEnd;
 
-    // When the removed range starts with a fence and the added range
-    // has non-fence content before its first fence, emit the pre-fence
-    // added content as its own pure-add segment BEFORE the removed
-    // segment. That way the renderer's change-block grouping (which
-    // walks consecutive non-normal segments) can break between the
-    // pure-add and the removed-add fence pair — so a paragraph the
-    // user typed before a changed fence renders in its own green block,
-    // not visually lumped with the fence replacement below.
+    // Fence-boundary split. When BOTH sides of the changed range
+    // contain a fence, split the range into a pre-fence pair and
+    // a fence-onwards pair, emitted in interleaved order:
     //
-    // Heuristic boundary: "first fence start in the added range". Only
-    // applies when the removed range's first chunk starts at a fence
-    // opener — otherwise the removed side isn't a clean fence-replace
-    // and we keep the existing remove-then-add order.
+    //   [removed-pre-fence, added-pre-fence,
+    //    removed-fence-onwards, added-fence-onwards]
+    //
+    // The renderer's change-block grouping breaks on an
+    // `added → removed` transition, so this layout lands as two
+    // distinct visual blocks: the pre-fence edits (non-fence
+    // content the user typed / edited immediately before the
+    // fence) and the atomic fence replacement (the whole fence
+    // swapped out). Previously the split only fired when the
+    // removed side started EXACTLY at a fence opener, so a
+    // trailing pre-fence edit (e.g. the blank line before a
+    // fence changing to a paragraph) got smeared into the
+    // fence's removed/added blocks.
+    //
+    // When only one side has a fence in the range — or neither
+    // does — fall back to emitting the whole range as a single
+    // removed/added pair.
+    const firstFenceStartInBefore = findFirstFenceStartInRange(
+      beforeLines,
+      beforeCursor,
+      expandedBeforeEnd,
+    );
     const firstFenceStartInAfter = findFirstFenceStartInRange(
       afterLines,
       afterCursor,
       expandedAfterEnd,
     );
-    const removedStartsWithFence =
-      beforeCursor < expandedBeforeEnd &&
-      beforeLines[beforeCursor]?.fenceBlock?.start === beforeCursor;
-    const hasPreFenceAdded =
-      firstFenceStartInAfter !== null &&
-      firstFenceStartInAfter > afterCursor &&
-      removedStartsWithFence;
+    const hasFenceSplit =
+      firstFenceStartInBefore !== null && firstFenceStartInAfter !== null;
+    const preFenceBeforeEnd = hasFenceSplit
+      ? firstFenceStartInBefore
+      : expandedBeforeEnd;
+    const preFenceAfterEnd = hasFenceSplit
+      ? firstFenceStartInAfter
+      : expandedAfterEnd;
+    const hasPreFenceRemoved = beforeCursor < preFenceBeforeEnd;
+    const hasPreFenceAdded = afterCursor < preFenceAfterEnd;
+
+    if (hasPreFenceRemoved) {
+      const insertionOffset =
+        afterLines[afterCursor]?.start ?? afterContent.length;
+      pushMarkdownDiffLineRangeSegments({
+        afterEndOffset: insertionOffset,
+        afterStartOffset: insertionOffset,
+        isInAfterDocument: false,
+        kind: "removed",
+        lines: beforeLines,
+        newStartForChunk: () => afterCursor + 1,
+        oldStartForChunk: (chunkStart) => chunkStart + 1,
+        rangeEnd: preFenceBeforeEnd,
+        rangeStart: beforeCursor,
+        segments,
+      });
+    }
 
     if (hasPreFenceAdded) {
       pushMarkdownDiffLineRangeSegments({
@@ -136,8 +169,8 @@ export function buildFullMarkdownDiffDocumentSegments(
         kind: "added",
         lines: afterLines,
         newStartForChunk: (chunkStart) => chunkStart + 1,
-        oldStartForChunk: () => beforeCursor + 1,
-        rangeEnd: firstFenceStartInAfter,
+        oldStartForChunk: () => preFenceBeforeEnd + 1,
+        rangeEnd: preFenceAfterEnd,
         rangeStart: afterCursor,
         segments,
         afterOffsetsForChunk: (chunkStart, chunkEnd) => {
@@ -150,32 +183,37 @@ export function buildFullMarkdownDiffDocumentSegments(
       });
     }
 
-    if (beforeCursor < expandedBeforeEnd) {
-      const insertionOffset = afterLines[hasPreFenceAdded ? firstFenceStartInAfter : afterCursor]?.start ?? afterContent.length;
+    // `hasFenceSplit` already guarantees `firstFenceStartInBefore`
+    // and `firstFenceStartInAfter` are non-null AND lie within
+    // `[beforeCursor, expandedBeforeEnd)` / `[afterCursor,
+    // expandedAfterEnd)` respectively — that's precisely what
+    // `findFirstFenceStartInRange` returns. No extra
+    // `< expandedBeforeEnd` guard needed; TypeScript's aliased-
+    // condition narrowing keeps the indices typed as `number`
+    // inside the `if (hasFenceSplit)` branches.
+    if (hasFenceSplit) {
+      const insertionOffset =
+        afterLines[firstFenceStartInAfter]?.start ?? afterContent.length;
       pushMarkdownDiffLineRangeSegments({
         afterEndOffset: insertionOffset,
         afterStartOffset: insertionOffset,
         isInAfterDocument: false,
         kind: "removed",
         lines: beforeLines,
-        newStartForChunk: () => (hasPreFenceAdded ? firstFenceStartInAfter : afterCursor) + 1,
+        newStartForChunk: () => firstFenceStartInAfter + 1,
         oldStartForChunk: (chunkStart) => chunkStart + 1,
         rangeEnd: expandedBeforeEnd,
-        rangeStart: beforeCursor,
+        rangeStart: firstFenceStartInBefore,
         segments,
       });
-    }
-
-    const remainingAddedStart = hasPreFenceAdded ? firstFenceStartInAfter : afterCursor;
-    if (remainingAddedStart < expandedAfterEnd) {
       pushMarkdownDiffLineRangeSegments({
         isInAfterDocument: true,
         kind: "added",
         lines: afterLines,
         newStartForChunk: (chunkStart) => chunkStart + 1,
-        oldStartForChunk: () => beforeCursor + 1,
+        oldStartForChunk: () => firstFenceStartInBefore + 1,
         rangeEnd: expandedAfterEnd,
-        rangeStart: remainingAddedStart,
+        rangeStart: firstFenceStartInAfter,
         segments,
         afterOffsetsForChunk: (chunkStart, chunkEnd) => {
           const startOffset = afterLines[chunkStart]?.start ?? afterContent.length;
