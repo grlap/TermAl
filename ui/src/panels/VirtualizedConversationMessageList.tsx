@@ -174,6 +174,19 @@ export function VirtualizedConversationMessageList({
   // Expected behavior: when the viewport is already at the latest message,
   // virtualized height measurements should keep the viewport pinned there.
   const shouldKeepBottomAfterLayoutRef = useRef(false);
+  // Tracks the most recently pinned conversation-search hit id so
+  // the pin-to-active-hit `useLayoutEffect` below only writes
+  // `scrollTop` when the user actually navigates to a NEW match
+  // (via "next match" / "previous match" / a fresh query that
+  // changes `activeConversationSearchMessageId`). Without this,
+  // measurement churn on message-height recomputes would re-fire
+  // the effect with the same active id and a refined
+  // `activeConversationSearchScrollTop`, snapping the viewport
+  // back to the hit even after the user deliberately scrolled
+  // away to read surrounding context. Reset to `null` whenever
+  // there is no active hit (search closed, query cleared) so a
+  // later search that lands on the same id still fires the pin.
+  const lastPinnedConversationSearchIdRef = useRef<string | null>(null);
   // Pending anchor-stabilization write after `setRenderWindowSize`
   // prepends older messages. Captured in the scroll-near-top auto-load
   // handler (and the explicit "Load N earlier messages" button), then
@@ -404,6 +417,15 @@ export function VirtualizedConversationMessageList({
       activeConversationSearchMessageIndex === undefined ||
       activeConversationSearchScrollTop === null
     ) {
+      // No active hit (search closed, query cleared, or the
+      // matched message is outside the windowed range — the
+      // last branch is currently unreachable while search is
+      // active because `windowStartIndex` is forced to 0 above,
+      // but the guard is kept defensive for future changes to
+      // the windowing policy). Reset the pin-tracking ref so a
+      // subsequent search that lands on the same message id
+      // still triggers the pin write.
+      lastPinnedConversationSearchIdRef.current = null;
       return;
     }
 
@@ -412,14 +434,38 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
+    // Only pin when the user navigated to a DIFFERENT hit. If
+    // this re-fire is measurement churn on the same active id
+    // (message-height recompute after a reply streams in, a
+    // new card renders, etc.) respect the user's current scroll
+    // position. Previously the effect re-wrote `scrollTop` on
+    // every re-fire, snapping the viewport back to the hit for
+    // one or two commits after a user-initiated scroll-away.
+    if (
+      lastPinnedConversationSearchIdRef.current ===
+      activeConversationSearchMessageId
+    ) {
+      return;
+    }
+
     const nextViewportHeight =
       node.clientHeight > 0 ? node.clientHeight : DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT;
     const nextScrollTop = activeConversationSearchScrollTop;
 
-    shouldKeepBottomAfterLayoutRef.current = false;
     if (Math.abs(node.scrollTop - nextScrollTop) >= 1) {
+      // Only flip the bottom-pin flag when we actually write
+      // scrollTop. The previous unconditional assignment meant
+      // that once this effect ran — even on the no-op branch
+      // where scrollTop was already at the target — the
+      // bottom-pin intent was cleared and the user had to
+      // nudge the viewport before `syncViewport` /
+      // `isScrollContainerNearBottom` could self-heal sticky
+      // bottom after search closed.
+      shouldKeepBottomAfterLayoutRef.current = false;
       node.scrollTop = nextScrollTop;
     }
+    lastPinnedConversationSearchIdRef.current =
+      activeConversationSearchMessageId;
     setViewport((current) =>
       current.height === nextViewportHeight && current.scrollTop === nextScrollTop
         ? current
@@ -429,6 +475,14 @@ export function VirtualizedConversationMessageList({
           },
     );
   }, [
+    // `activeConversationSearchMessageId` is the hit IDENTITY —
+    // the gate that distinguishes "user navigated to a new hit"
+    // (re-pin) from "measurement churn on the same hit" (leave
+    // the user's scroll alone). It's derived from
+    // `conversationSearchActiveItemKey` per render but included
+    // here explicitly so the effect re-runs on every identity
+    // change, not just on scroll-top recomputes.
+    activeConversationSearchMessageId,
     activeConversationSearchMessageIndex,
     activeConversationSearchScrollTop,
     hasConversationSearch,
