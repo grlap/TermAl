@@ -4781,6 +4781,149 @@ describe("DiffPanel", () => {
     ).not.toBeInTheDocument();
   });
 
+  // Regression guard for the save-error-over-gated fix in
+  // `DiffPanel.tsx`. Previously the "Save failed: <reason>"
+  // diagnostic was gated on `!externalFileNotice &&
+  // !diffEditConflictOnDisk`, which suppressed the diagnostic
+  // whenever ANY `externalFileNotice` was visible — including
+  // purely informational notices like "Rendered Markdown edits
+  // will save this document to the worktree file." (set when
+  // editing a rendered-Markdown diff whose `after.source !==
+  // "worktree"`). A save failure while that informational notice
+  // was visible produced a "Save failed" pill with no diagnostic
+  // — the exact regression the diagnostic was added to prevent.
+  //
+  // The fix narrows the gate to `!diffEditConflictOnDisk` only.
+  // The conflict path still renders its own recovery UI (with
+  // "Apply my edits to disk version" / "Save anyway" / "Reload
+  // from disk" buttons) in place of the raw diagnostic; the
+  // informational notice can now coexist with the diagnostic.
+  it("surfaces the save-error diagnostic when an informational externalFileNotice is visible", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "Shared intro.\n# Staged document\nShared middle.\nReady to commit.\nShared outro.\n",
+      contentHash: "sha256:base",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+    const onSaveFile = vi
+      .fn()
+      // A non-stale error: `isStaleFileSaveError` returns false,
+      // so the catch branch takes only `setSaveError(message)`
+      // and does NOT set `externalFileNotice` / flip
+      // `diffEditConflictOnDisk`. The informational notice set
+      // during the keystroke handler stays visible.
+      .mockRejectedValue(new Error("permission denied"));
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " Shared intro.",
+            "-# Base document",
+            "+# Staged document",
+            " Shared middle.",
+            "-Committed text.",
+            "+Ready to commit.",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "Shared intro.\n# Base document\nShared middle.\nCommitted text.\nShared outro.\n",
+              source: "index",
+            },
+            // `source: "index"` (not "worktree") triggers the
+            // informational notice in the keystroke handler at
+            // `handleRenderedMarkdownSectionDraftChange`. Pairing
+            // with `gitSectionId: "unstaged"` keeps the diff
+            // editable (`isStagedMarkdownDiff === false`) —
+            // staged Markdown diffs are read-only so the notice
+            // handler would never run against them.
+            after: {
+              content: "Shared intro.\n# Staged document\nShared middle.\nReady to commit.\nShared outro.\n",
+              source: "index",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-save-error-informational-notice"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={onSaveFile}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    await waitFor(() => {
+      expect(
+        document.querySelectorAll(".markdown-diff-rendered-section-added").length,
+      ).toBeGreaterThan(0);
+    });
+
+    const addedSections = document.querySelectorAll<HTMLElement>(
+      ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+    );
+    const readyToCommitSection = Array.from(addedSections).find((section) =>
+      (section.textContent ?? "").includes("Ready to commit."),
+    );
+    expect(readyToCommitSection).toBeDefined();
+    if (!readyToCommitSection) {
+      return;
+    }
+
+    // Editing arms the informational notice via the keystroke
+    // handler. The notice is set to "Rendered Markdown edits
+    // will save this document to the worktree file." because
+    // `after.source !== "worktree"`.
+    editRenderedMarkdownSection(readyToCommitSection, "<p>Ready to ship.</p>");
+    expect(
+      screen.getByText("Rendered Markdown edits will save this document to the worktree file."),
+    ).toBeInTheDocument();
+
+    // Save rejects with a non-stale error → `setSaveError`
+    // runs, informational notice is NOT cleared.
+    await clickAndSettle(screen.getByRole("button", { name: "Save Markdown" }));
+
+    // Pill label.
+    expect(await screen.findByText("Save failed")).toBeInTheDocument();
+    // PRIMARY ASSERTION: the diagnostic text is visible even
+    // though the informational notice is also visible. Reverting
+    // the fix (restoring `!externalFileNotice` in the gate) makes
+    // this assertion fail — the diagnostic would be suppressed.
+    expect(screen.getByText(/Save failed: permission denied/i)).toBeInTheDocument();
+    // Secondary: the informational notice stays visible alongside
+    // the diagnostic. The two do not compete — they stack.
+    expect(
+      screen.getByText("Rendered Markdown edits will save this document to the worktree file."),
+    ).toBeInTheDocument();
+    // Negative control: the stale-save recovery UI must NOT
+    // appear. `permission denied` is not a stale-file error, so
+    // `diffEditConflictOnDisk` stays false and the recovery
+    // buttons do not render.
+    expect(
+      screen.queryByRole("button", { name: "Apply my edits to disk version" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save anyway" }),
+    ).not.toBeInTheDocument();
+    // All three recovery buttons render under the same
+    // `diffEditConflictOnDisk && latestFile.status === "ready"`
+    // gate — assert all three so the negative control matches
+    // the regression comment's "Apply / Save anyway / Reload
+    // from disk" enumeration.
+    expect(
+      screen.queryByRole("button", { name: "Reload from disk" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("reloads stale diff edits from disk on request", async () => {
     fetchFileMock
       .mockResolvedValueOnce({

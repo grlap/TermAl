@@ -1557,10 +1557,22 @@ export function DiffPanel({
          * before any network call) produced "Save failed" with no
          * explanation. Rendering the raw message here keeps both paths
          * diagnosable without changing the stale-disk recovery flow
-         * (those cases also set `externalFileNotice` / `diffEditConflictOnDisk`
-         * which render their own UI below).
+         * (those cases set `diffEditConflictOnDisk` which renders its
+         * own recovery UI — "Apply my edits to disk version" /
+         * "Save anyway" / "Reload from disk" — below, where the conflict
+         * context is self-evident from the button labels).
+         *
+         * Deliberately NOT gated on `!externalFileNotice`:
+         * `externalFileNotice` is often informational (e.g. "Rendered
+         * Markdown edits will save this document to the worktree file.",
+         * "File refreshed from disk.") and carries no error semantics.
+         * Suppressing the save-error diagnostic whenever an informational
+         * notice was visible produced the exact regression the
+         * diagnostic was added to prevent — "Save failed" pill with no
+         * explanation. The notice and the diagnostic can coexist; the
+         * reader sees them stacked.
          */}
-        {saveError && !externalFileNotice && !diffEditConflictOnDisk ? (
+        {saveError && !diffEditConflictOnDisk ? (
           <p className="support-copy diff-preview-note">{`Save failed: ${saveError}`}</p>
         ) : null}
         {externalFileNotice ? (
