@@ -12059,6 +12059,84 @@ describe("App", () => {
     });
   });
 
+  it("registers the message-stack wheel listener as non-passive so preventDefault takes effect", async () => {
+    // Regression guard for the native-wheel-handling migration in
+    // `SessionPaneView.tsx`. The message stack moved from React's
+    // delegated `onWheel` prop to a direct
+    // `node.addEventListener("wheel", listener, { passive: false })`
+    // because passive wheel listeners silently no-op
+    // `preventDefault()` — which meant both the custom
+    // `scrollTop` write and the browser's native scroll ran on
+    // the same wheel tick, producing a jagged scroll-up
+    // experience. A revert to React's prop would reintroduce
+    // the regression with no test catching it.
+    //
+    // Spy on `Element.prototype.addEventListener` globally,
+    // capture every `"wheel"` registration with its options,
+    // then filter to the one installed on the `.message-stack`
+    // node after render. Assert `{ passive: false }`.
+    const wheelRegistrations: Array<{
+      target: EventTarget;
+      options: AddEventListenerOptions | boolean | undefined;
+    }> = [];
+    const originalAdd = Element.prototype.addEventListener;
+    Element.prototype.addEventListener = function patched(
+      this: Element,
+      type: string,
+      listener: EventListenerOrEventListenerObject | null,
+      options?: AddEventListenerOptions | boolean,
+    ) {
+      if (type === "wheel") {
+        wheelRegistrations.push({ target: this, options });
+      }
+      // The cast mirrors the native signature; `listener` can be
+      // null in some polyfill shapes but the prototype method
+      // handles that.
+      return originalAdd.call(
+        this,
+        type,
+        listener as EventListenerOrEventListenerObject,
+        options,
+      );
+    } as typeof Element.prototype.addEventListener;
+
+    try {
+      const { cleanup: teardown } = await renderAppWithProjectAndSession();
+      try {
+        await settleAsyncUi();
+        const messageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        expect(messageStack).toBeInstanceOf(HTMLElement);
+
+        // Find the wheel registration installed on THIS message
+        // stack. Other elements in the tree may also install
+        // wheel listeners (Monaco, the virtualized message list,
+        // etc.); filter by node identity rather than by count.
+        const messageStackRegistration = wheelRegistrations.find(
+          (entry) => entry.target === messageStack,
+        );
+        expect(messageStackRegistration).toBeDefined();
+        // A revert to React's `onWheel` prop would NOT install a
+        // direct listener on this node — React delegates through
+        // the document root and the registration array would not
+        // contain this target at all. The `toBeDefined` above
+        // catches that. The `{ passive: false }` assertion below
+        // catches a narrower regression: someone switched back to
+        // a direct listener but forgot the options argument, so
+        // the browser defaults to passive on scrolling events in
+        // modern Chrome/Firefox.
+        expect(messageStackRegistration?.options).toEqual(
+          expect.objectContaining({ passive: false }),
+        );
+      } finally {
+        teardown();
+      }
+    } finally {
+      Element.prototype.addEventListener = originalAdd;
+    }
+  });
+
   it("keeps standalone project tabs independent from the docked control panel scope", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
