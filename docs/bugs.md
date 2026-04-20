@@ -458,21 +458,6 @@ detection (pure LF, pure CRLF, mixed CRLF/LF dominant, ties → LF, bare
 `\r` legacy Mac ignored) and application (empty strings, LF identity,
 CRLF expansion, round-trip invariant) contracts.
 
-## Mermaid demo still contains an unrelated edge-target edit
-
-**Severity:** Note - `docs/mermaid-demo.md` still changes the visible demo graph even though the active work is remote proxy, hydration, DiffPanel, and bug-ledger maintenance.
-
-The current diff changes the Mermaid edge target from `Stop2` to `Stop`. This may be harmless, but the surrounding change set does not explain why the demo fixture should change, and removing the active ledger entry would make the bug list look cleaner than the working tree actually is.
-
-**Current behavior:**
-- `docs/mermaid-demo.md` changes `Edit --> Stop2` to `Edit --> Stop`.
-- The graph has no explicit `Stop` node definition in the fixture.
-- The fixture edit is unrelated to the current reviewed behavior changes.
-
-**Proposal:**
-- Revert the fixture edit if it was scratch work.
-- If intentional, add a short note explaining why the demo graph target should change.
-
 ## Unix terminal login-shell behavior lacks regression coverage
 
 **Severity:** Medium - the Unix terminal spawn path now restores `sh -lc`, but the behavior is not pinned by a dedicated test.
