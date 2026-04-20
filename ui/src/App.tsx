@@ -15,6 +15,7 @@ import { createPortal, flushSync } from "react-dom";
 import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
 import { DialogCloseIcon } from "./message-card-icons";
 import {
+  ApiRequestError,
   archiveCodexThread,
   cancelQueuedPrompt,
   compactCodexThread,
@@ -1609,9 +1610,28 @@ export default function App() {
           hydratedSessionIdsRef.current.add(sessionId);
         }
       } catch (error) {
-        if (isMountedRef.current) {
-          reportRequestError(error);
+        if (!isMountedRef.current) {
+          return;
         }
+        // 404 is a benign race: the session was deleted, hidden,
+        // or renumbered between a delta event that referenced it
+        // and this hydration fetch. The action-recovery resync
+        // will repair our local view on the next SSE tick without
+        // dropping a toast on the user. Mirrors
+        // `fetchWorkspaceLayout`'s "404 → silent recovery" UX
+        // posture; the transport shape differs (that one returns
+        // `null` at the API boundary so callers treat it as "no
+        // layout yet"; here `fetchSession` throws
+        // `ApiRequestError` and we branch on `instanceof` + status
+        // at the call site).
+        if (
+          error instanceof ApiRequestError &&
+          error.status === 404
+        ) {
+          requestActionRecoveryResyncRef.current();
+          return;
+        }
+        reportRequestError(error);
       } finally {
         hydratingSessionIdsRef.current.delete(sessionId);
       }
