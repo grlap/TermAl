@@ -664,3 +664,142 @@ fn persisted_state_requires_queued_prompt_source() {
 
     let _ = fs::remove_file(path);
 }
+
+// Builds an `AppState` like `test_app_state` but with a LIVE
+// persist channel receiver so the caller can observe
+// `PersistRequest` signals. The default `test_app_state` drops
+// the receiver on construction so every `persist_tx.send(...)`
+// returns `Err(Disconnected)` and tests automatically take the
+// synchronous fallback path — which is good for JSON round-trip
+// tests but hides whether a code path correctly routes async.
+fn test_app_state_with_live_persist_channel()
+-> (AppState, mpsc::Receiver<PersistRequest>) {
+    let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
+    let persistence_path =
+        std::env::temp_dir().join(format!("termal-test-{}.json", Uuid::new_v4()));
+    let state = AppState {
+        server_instance_id: Uuid::new_v4().to_string(),
+        default_workdir: "/tmp".to_owned(),
+        persistence_path: Arc::new(persistence_path),
+        orchestrator_templates_path: Arc::new(
+            std::env::temp_dir().join(format!("termal-orchestrators-test-{}.json", Uuid::new_v4())),
+        ),
+        orchestrator_templates_lock: Arc::new(Mutex::new(())),
+        review_documents_lock: Arc::new(Mutex::new(())),
+        state_events: broadcast::channel(16).0,
+        delta_events: broadcast::channel(16).0,
+        file_events: broadcast::channel(16).0,
+        file_events_revision: Arc::new(AtomicU64::new(0)),
+        persist_tx,
+        state_broadcast_tx: mpsc::channel().0,
+        shared_codex_runtime: Arc::new(Mutex::new(None)),
+        agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
+        agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
+        remote_registry: test_remote_registry(),
+        remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
+        terminal_local_command_semaphore: Arc::new(tokio::sync::Semaphore::new(
+            TERMINAL_LOCAL_COMMAND_CONCURRENCY_LIMIT,
+        )),
+        terminal_remote_command_semaphore: Arc::new(tokio::sync::Semaphore::new(
+            TERMINAL_REMOTE_COMMAND_CONCURRENCY_LIMIT,
+        )),
+        stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
+        stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
+        inner: Arc::new(Mutex::new(StateInner::new())),
+    };
+    (state, persist_rx)
+}
+
+// Regression guard: `commit_session_created_locked` must route
+// the persist work through the background channel rather than
+// calling `persist_created_session` synchronously under the state
+// mutex. Previously the mutex was held across a full SQLite
+// transaction (connection open, schema-ensure, metadata + session
+// upsert, commit with fsync) — every concurrent request that
+// called `self.inner.lock()` blocked behind that I/O for 10-100 ms
+// on slow disks.
+//
+// The sibling `persist_internal_locked` path has used the
+// background channel since it was introduced; this test pins that
+// the session-creation path shares the same contract. The
+// crash-before-persist window is acceptable because a freshly-
+// created `SessionRecord` has no user content (empty
+// `messages: []`, no agent output) — see the commit message for
+// the trade-off analysis.
+#[test]
+fn commit_session_created_locked_signals_background_persist_instead_of_blocking() {
+    let (state, persist_rx) = test_app_state_with_live_persist_channel();
+    let persistence_path = state.persistence_path.as_ref().to_path_buf();
+    // Session record built under the same lock the caller would
+    // hold, matching the real call site in `session_crud.rs`.
+    let (revision, record_id) = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner.create_session(
+            Agent::Claude,
+            Some("persist-channel-signal test".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        );
+        // `create_session` already called `push_session` internally
+        // (see `state_inner.rs`), so the record is in `inner.sessions`
+        // at a known id — re-stamp it via `session_mut_by_index` to
+        // mirror the real caller in `session_crud.rs`, which
+        // overwrites the pushed slot with agent-specific field
+        // defaults and then re-stamps so `collect_persist_delta`
+        // picks up the rewrite on the next persist tick.
+        let record_id = record.session.id.clone();
+        let index = inner
+            .find_session_index(&record_id)
+            .expect("create_session should have pushed the record");
+        let _ = inner.session_mut_by_index(index);
+        let revision = state
+            .commit_session_created_locked(&mut inner, &record)
+            .expect("commit_session_created_locked should succeed");
+        (revision, record_id)
+    };
+
+    // Primary assertion: the background channel received a `Delta`
+    // wake. Reverting the fix (restoring the synchronous
+    // `persist_created_session` call on every invocation) makes
+    // the channel `try_recv` return `Err(Empty)` and this
+    // assertion fails.
+    let received = persist_rx
+        .try_recv()
+        .expect("commit_session_created_locked should have sent PersistRequest::Delta");
+    // `PersistRequest` is a single-variant enum today; `matches!`
+    // with an exhaustive pattern makes the assertion structural
+    // (a future variant addition forces the reviewer to update
+    // the test, which is the desired signal).
+    assert!(matches!(received, PersistRequest::Delta));
+
+    // Negative assertion: no synchronous persist happened. Under
+    // the `#[cfg(test)]` build, the fallback path writes via
+    // `persist_state_from_persisted` to the JSON `persistence_path`.
+    // A synchronous fallback would create that file; the async
+    // path never touches it.
+    assert!(
+        !persistence_path.exists(),
+        "persistence path should not exist — fallback persist ran unexpectedly"
+    );
+
+    // Sanity: the revision did advance (the pre-persist increment
+    // is unchanged by the fix).
+    assert_eq!(revision, 1);
+    // Fixture sanity — the record id should follow the
+    // `session-<n>` shape `StateInner::create_session` mints.
+    // Phrased as a `starts_with` so a future change to
+    // `StateInner::new()`'s `next_session_number` seed (or a move
+    // to UUID-shaped ids) doesn't false-fail this assertion.
+    assert!(
+        record_id.starts_with("session-"),
+        "record id should follow `session-<n>` shape, got: {record_id}"
+    );
+
+    // Defensive cleanup: the negative assertion above already
+    // proves the fallback persist did not run, but in a regression
+    // where it did, clean up so the rogue file doesn't linger in
+    // the shared temp dir. `remove_file` on a non-existent path
+    // returns an error we ignore.
+    let _ = fs::remove_file(&persistence_path);
+}

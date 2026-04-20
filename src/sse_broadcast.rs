@@ -67,17 +67,56 @@ impl AppState {
         Ok(revision)
     }
 
-    /// Commits a newly visible session without cloning every historical
-    /// message. SQLite production persistence can update global counters plus
-    /// the created session row; test JSON persistence keeps the legacy full
-    /// snapshot path so existing persistence tests stay representative.
+    /// Commits a newly visible session and wakes the background persist
+    /// thread so the new record lands in SQLite without holding the
+    /// state mutex across disk I/O.
+    ///
+    /// Previously this called `persist_created_session` synchronously
+    /// under the caller's mutex lock, so every session create blocked
+    /// every concurrent request (SSE publishers, other handlers, the
+    /// background persist thread itself) behind a full SQLite
+    /// transaction — connection open, `ensure_sqlite_state_schema`
+    /// upsert, metadata + session INSERT OR UPDATE, commit with
+    /// fsync. On slow disks that adds 10–100 ms to every session
+    /// creation while holding the global state lock.
+    ///
+    /// The session's `mutation_stamp` was already advanced by
+    /// `session_mut_by_index` / `push_session` in the caller, so
+    /// `collect_persist_delta(watermark)` on the background thread
+    /// picks this record up on the next tick and writes it via the
+    /// cached `SqlitePersistConnectionCache`. The crash-before-
+    /// persist window loses at most a just-created empty session
+    /// shell (metadata + config, no user content) — the same
+    /// durability posture `persist_internal_locked` already has for
+    /// every subsequent mutation on the session.
+    ///
+    /// Test + shutdown fallback: when `persist_tx.send` fails
+    /// (channel disconnected — tests construct `AppState` with a
+    /// receiver-dropped channel; shutdown happens if the persist
+    /// thread exited early), fall back to the original synchronous
+    /// `persist_created_session` path. This matches
+    /// `persist_internal_locked`'s fallback shape.
     fn commit_session_created_locked(
         &self,
         inner: &mut StateInner,
         record: &SessionRecord,
     ) -> Result<u64> {
+        // Ordering note: the revision tick happens before the
+        // persist-route selection to match `persist_internal_locked`
+        // (see [`Self::persist_internal_locked`] / `bump_revision_and_persist_locked`).
+        // On the fallback path, if `persist_created_session` returns
+        // `Err` the revision has already advanced but no persist
+        // work landed — the caller surfaces that as
+        // `ApiError::internal`, the record is not in SQLite, and the
+        // next successful commit produces a non-contiguous revision.
+        // Nothing today requires strict contiguity (clients gap-detect
+        // and resync via `/api/state`), and keeping the ordering
+        // symmetric with the sibling means the two paths share one
+        // durability posture.
         inner.revision += 1;
-        persist_created_session(&self.persistence_path, inner, record)?;
+        if self.persist_tx.send(PersistRequest::Delta).is_err() {
+            persist_created_session(&self.persistence_path, inner, record)?;
+        }
         Ok(inner.revision)
     }
 
