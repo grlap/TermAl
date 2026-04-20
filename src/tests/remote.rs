@@ -879,22 +879,51 @@ fn failed_remote_snapshot_sync_restores_session_tombstones() {
         pre_sessions.len(),
         "rollback should restore the session list length"
     );
+    // Previously we compared only the list of session IDs, which
+    // catches membership and ordering but silently allows
+    // rollback to leave mutated fields behind (a partial restore
+    // that touches `session.name`, `session.status`,
+    // `session.preview`, `remote_id`, `remote_session_id`, or the
+    // codex-prompt settings would still match id-by-id).
+    //
+    // Compare the full serialized shape of every session: the
+    // `Session` struct (id, name, emoji, workdir, project_id,
+    // model, approval policy, reasoning effort, sandbox mode,
+    // cursor/claude/gemini settings, status, preview, messages,
+    // pending prompts) plus the two remote-proxy metadata fields
+    // on `SessionRecord`. `Session` implements `Serialize` but
+    // not `PartialEq`, and `SessionRecord` contains runtime
+    // handles (`SessionRuntime`) that cannot derive `PartialEq`
+    // — serializing to `serde_json::Value` is the cheapest way
+    // to get a deep-equality comparison on the durable surface
+    // without threading trait bounds through the runtime types.
+    fn session_comparable(record: &SessionRecord) -> Value {
+        json!({
+            "session": serde_json::to_value(&record.session)
+                .expect("Session serialization should not fail"),
+            "remote_id": record.remote_id.clone(),
+            "remote_session_id": record.remote_session_id.clone(),
+        })
+    }
+    let pre_sessions_summary: Vec<Value> =
+        pre_sessions.iter().map(session_comparable).collect();
+    let post_sessions_summary: Vec<Value> =
+        inner.sessions.iter().map(session_comparable).collect();
     assert_eq!(
-        inner
-            .sessions
-            .iter()
-            .map(|record| record.session.id.clone())
-            .collect::<Vec<_>>(),
-        pre_sessions
-            .iter()
-            .map(|record| record.session.id.clone())
-            .collect::<Vec<_>>(),
-        "rollback should restore the session list ordering and membership"
+        post_sessions_summary, pre_sessions_summary,
+        "rollback should restore full session content (Session fields + remote metadata), not just IDs"
     );
+    // `OrchestratorInstance` derives `PartialEq` directly, so
+    // the vec comparison asserts every instance field matches:
+    // orchestrator id, template id, project id, status, sessions,
+    // prompts, settings — the complete payload. A partial
+    // rollback that restored the COUNT but not the body (e.g.
+    // status drifted from Running to Paused, or a child session
+    // id changed) is the exact regression the length-only check
+    // let slip.
     assert_eq!(
-        inner.orchestrator_instances.len(),
-        pre_orchestrator_instances.len(),
-        "rollback should restore the orchestrator instance count"
+        inner.orchestrator_instances, pre_orchestrator_instances,
+        "rollback should restore full orchestrator instance content, not just the count"
     );
 
     drop(inner);
