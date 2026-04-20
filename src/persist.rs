@@ -394,6 +394,24 @@ impl SqlitePersistConnectionCache {
             .as_mut()
             .expect("connection was just cached for the requested path"))
     }
+
+    /// Drops the cached connection so the next `connection_for` call
+    /// reopens fresh and re-runs `ensure_sqlite_state_schema`.
+    ///
+    /// Invoked when a persist operation fails. The cached connection
+    /// may be in a poisoned or transaction-stuck state
+    /// (`SQLITE_BUSY`, `SQLITE_CORRUPT`, the backing file unlinked
+    /// by a manual reset, a Windows-side handle glitch after an OS
+    /// sleep, etc.). Without invalidation every subsequent tick
+    /// would reuse the broken handle and log the same error
+    /// forever — a "permanent persist broken" state that a backend
+    /// restart would otherwise repair. The next tick pays the cost
+    /// of one open-plus-schema-ensure; the happy path still reuses
+    /// one connection per process lifetime.
+    fn invalidate(&mut self) {
+        self.connection = None;
+        self.path = None;
+    }
 }
 
 /// Applies a `PersistDelta` — metadata upsert plus targeted session
@@ -406,8 +424,44 @@ impl SqlitePersistConnectionCache {
 /// session no longer rewrites every other session row every commit.
 /// See `state.rs::PersistDelta` and `StateInner::collect_persist_delta`
 /// for the authoritative description of how the delta is assembled.
+///
+/// Error-driven invalidation: on ANY error returned from
+/// [`persist_delta_via_cache_inner`] the cached connection is
+/// dropped via [`SqlitePersistConnectionCache::invalidate`]
+/// before the error propagates. The next persist tick reopens
+/// fresh and re-runs `ensure_sqlite_state_schema`. Without this,
+/// a connection poisoned by `SQLITE_BUSY` / `SQLITE_CORRUPT` /
+/// an unlinked backing file / a Windows handle glitch would be
+/// reused tick after tick, logging the same error forever — a
+/// permanent persist-broken state that a backend restart would
+/// otherwise repair.
+///
+/// Invalidation is deliberately wide: it fires on transaction-
+/// path errors (`transaction()` / `execute` / `commit`) AND on
+/// pre-connection failures in the inner helper (metadata JSON
+/// serialization, the `fs::create_dir_all` inside
+/// `connection_for`, or the open+schema-ensure itself). The
+/// reopen cost is bounded — a single open + `ensure_sqlite_state_schema`
+/// on the next tick — and the stuck-handle case we actually
+/// care about is covered. Narrowing the window to only the
+/// transaction calls would require splitting the inner helper
+/// into "pre-connection / transaction / post-connection" phases
+/// with extra plumbing; not worth it for this severity.
 #[cfg(not(test))]
 fn persist_delta_via_cache(
+    cache: &mut SqlitePersistConnectionCache,
+    path: &FsPath,
+    delta: &PersistDelta,
+) -> Result<()> {
+    let result = persist_delta_via_cache_inner(cache, path, delta);
+    if result.is_err() {
+        cache.invalidate();
+    }
+    result
+}
+
+#[cfg(not(test))]
+fn persist_delta_via_cache_inner(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,
     delta: &PersistDelta,
