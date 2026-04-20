@@ -702,6 +702,59 @@ describe("MarkdownContent document links", () => {
   });
 });
 
+// Dangerous-protocol neutralization integration test. The unit-level
+// contract for `transformMarkdownLinkUri` lives in
+// `ui/src/markdown-links.test.ts`; this covers the rendered-DOM side
+// of the pipeline: an empty `href` (the sentinel our transform emits
+// for neutralized URIs) must render as a plain `<span>`, not an
+// anchor, so there's no inert same-page-navigate, no
+// `javascript:void(0)` reaching the DOM, and no React warning.
+describe("MarkdownContent dangerous link neutralization", () => {
+  it("renders `[text](javascript:alert(1))` as plain text with no anchor", () => {
+    render(<MarkdownContent markdown="[click me](javascript:alert(1))" />);
+
+    // The rendered text is still visible — we don't silently drop
+    // the link label, we just render it without an anchor.
+    expect(screen.getByText("click me")).toBeInTheDocument();
+
+    // No link role — the `a`-renderer took the empty-href branch and
+    // returned a `<span>`. If this flips, a regression has broken
+    // either `transformMarkdownLinkUri`'s sentinel substitution or
+    // the `!href` guard in `MarkdownContent`'s `a` component.
+    expect(screen.queryByRole("link", { name: /click me/ })).toBeNull();
+
+    // Load-bearing DOM-level assertion: the
+    // `"javascript:void(0)"` placeholder that react-markdown uses
+    // internally must not reach the DOM. React ≥ 18.3 logs a warning
+    // if it does, and is slated to block the string outright in a
+    // future release. This is the real invariant — even if the
+    // internal sentinel string changes upstream, this check keeps
+    // dangerous hrefs out of the rendered output.
+    expect(document.querySelector('[href="javascript:void(0)"]')).toBeNull();
+    // Belt-and-braces: no anchor with a `javascript:` prefix at all.
+    expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
+  });
+
+  it("neutralizes `vbscript:` and non-image `data:` Markdown links the same way", () => {
+    render(
+      <MarkdownContent
+        markdown={[
+          "[vb](vbscript:msgbox('x'))",
+          "[html](data:text/html,<script>alert(1)</script>)",
+        ].join("\n\n")}
+      />,
+    );
+
+    expect(screen.getByText("vb")).toBeInTheDocument();
+    expect(screen.getByText("html")).toBeInTheDocument();
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    expect(document.querySelectorAll('[href="javascript:void(0)"]')).toHaveLength(0);
+    expect(document.querySelectorAll('a[href^="javascript:"]')).toHaveLength(0);
+    expect(document.querySelectorAll('a[href^="vbscript:"]')).toHaveLength(0);
+    expect(document.querySelectorAll('a[href^="data:"]')).toHaveLength(0);
+  });
+});
+
 describe("MarkdownContent line numbers", () => {
   it("renders source line numbers only when requested", async () => {
     const markdown = ["# Title", "", "Body text.", "", "- First item"].join("\n");

@@ -37,6 +37,17 @@ positive control — a no-input measurement must write the pin target, a
 post-wheel measurement must not — so an unbound or broken wheel listener can
 no longer leave the test passing.
 
+Also fixed in the current tree: dangerous-Markdown-link neutralization is
+now directly covered. A new `ui/src/markdown-links.test.ts` pins the
+`transformMarkdownLinkUri` contract with table-driven cases for `javascript:`
+(including mixed-case variants), `vbscript:`, non-image `data:`, and
+`data:image/*` all → `""`; safe `http`/`https`/`mailto`/`tel` round-trip
+unchanged; `#anchor` and relative paths bypass uriTransformer via the
+`isExternalMarkdownHref` early return. A new `MarkdownContent` render test
+pairs feeds Markdown like `[click me](javascript:alert(1))` through the full
+render pipeline and asserts no `<a>` role, no `href="javascript:void(0)"`,
+and the link text still renders as plain content.
+
 ## Conversation cards overlap for one frame during scroll through long messages
 
 **Severity:** Medium - `estimateConversationMessageHeight` in `ui/src/panels/conversation-virtualization.ts` produces an initial height for unmeasured cards using a per-line pixel heuristic with line-count caps (`Math.min(outputLineCount, 14)` for `command`, `Math.min(diffLineCount, 20)` for `diff`) and overall ceilings of 1400/1500/1600/1800/900 px. For heavy messages — review-tool output, build logs, large patches — the estimate is 20×-40× under the rendered height, so `layout.tops[index]` for cards below an under-priced neighbour places them inside the neighbour's rendered area. The user sees the cards painted on top of each other for one frame, until the `ResizeObserver` measurement lands and `setLayoutVersion` rebuilds the layout.
@@ -69,21 +80,6 @@ The behavior depends on `preventDefault()` taking effect before the handler manu
 **Proposal:**
 - Add a focused test that spies on `addEventListener` for the message stack and verifies `{ passive: false }`.
 - Or dispatch a cancelable `WheelEvent` and assert `defaultPrevented` plus the expected single `scrollTop` update.
-
-## Dangerous Markdown link neutralization lacks direct coverage
-
-**Severity:** Medium - `ui/src/markdown-links.ts::transformMarkdownLinkUri` now converts `react-markdown`'s neutralized `"javascript:void(0)"` sentinel to an empty string, and `MarkdownContent` renders empty hrefs as plain text instead of anchors. The dangerous-protocol cases are not directly covered.
-
-This change prevents React warnings and keeps `javascript:` placeholders out of the DOM. Without tests for `javascript:`, `vbscript:`, and disallowed `data:` links, a future change could accidentally reintroduce an inert anchor, a `javascript:void(0)` href, or a React warning.
-
-**Current behavior:**
-- Unsafe external Markdown hrefs are transformed to `""`.
-- The Markdown anchor renderer treats falsy hrefs as plain `<span>` content.
-- Existing Markdown link tests cover workspace/file links but not dangerous URI neutralization.
-
-**Proposal:**
-- Add unit tests for `transformMarkdownLinkUri("javascript:alert(1)") === ""` and similar dangerous-protocol cases.
-- Add a `MarkdownContent` render test proving `[x](javascript:alert(1))` produces visible text with no link and no `href="javascript:void(0)"`.
 
 ## Deferred heavy content virtualization relies on CSS ancestry
 
@@ -810,14 +806,6 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   `deferred-code-placeholder` class). Pair with the outside-virtualizer
   case that still shows the placeholder until the intersection observer
   activates.
-- [ ] P2: Add `transformMarkdownLinkUri` + `a`-as-span coverage:
-  new co-located `ui/src/markdown-links.test.ts` (or equivalent) with
-  table-driven cases for `javascript:`, `JavaScript:`, `vbscript:`,
-  `data:text/html,...`, `https://...` (unchanged), `./relative` (unchanged),
-  `#anchor` (unchanged). Pair with a `MarkdownContent.test.tsx` case that
-  feeds markdown `"[click](javascript:alert(1))"` and asserts
-  `screen.queryByRole("link")` is null while the text "click" is still
-  rendered.
 - [ ] P2: Add message-stack non-passive wheel listener coverage:
   dispatch a cancelable `WheelEvent` on the `.message-stack` `<section>`
   in `SessionPaneView.test.tsx`, assert `event.defaultPrevented === true`
