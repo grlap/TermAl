@@ -210,7 +210,19 @@ export function VirtualizedConversationMessageList({
   // input here so `handleHeightChange` can skip the scrollTop write
   // while the user is actively scrolling — layout still updates on
   // measurement, the wheel input still wins the visible scroll.
-  const lastUserScrollInputTimeRef = useRef(0);
+  //
+  // Initialised to `Number.NEGATIVE_INFINITY` (not `0`) so
+  // `performance.now() - lastUserScrollInputTimeRef.current` is
+  // always `+Infinity` until a wheel / touchmove / keydown event
+  // actually fires. If this were `0`, the first few hundred
+  // milliseconds after mount — when `performance.now()` on a fresh
+  // Node/browser context can be below the 200 ms cooldown — would
+  // falsely register as "user currently scrolling" and suppress
+  // legitimate streaming pin writes until the wall clock caught
+  // up. It also makes the regression tests honest: a broken wheel
+  // listener would no longer leave the cooldown passively active
+  // from mount.
+  const lastUserScrollInputTimeRef = useRef(Number.NEGATIVE_INFINITY);
   const [viewport, setViewport] = useState({
     height: DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
     scrollTop: 0,
@@ -522,9 +534,10 @@ export function VirtualizedConversationMessageList({
     // supposed to close. Gating the effect on the same cooldown
     // keeps the scroll-to-bottom handoff working for pure streaming
     // (no direct-scroll input → `lastUserScrollInputTimeRef` stays
-    // at its init 0 → `performance.now() - 0` always exceeds the
-    // cooldown) while suppressing the re-pin during an active wheel
-    // gesture.
+    // at its `Number.NEGATIVE_INFINITY` init → `performance.now() -
+    // (-Infinity)` is `+Infinity`, which never satisfies the
+    // `< USER_SCROLL_ADJUSTMENT_COOLDOWN_MS` check) while suppressing
+    // the re-pin during an active wheel gesture.
     const timeSinceUserScroll =
       performance.now() - lastUserScrollInputTimeRef.current;
     if (timeSinceUserScroll < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS) {

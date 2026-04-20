@@ -284,15 +284,15 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
-  it("skips the bottom pin write while the user is actively scrolling", async () => {
+  it("skips the bottom pin write only while the user is actively scrolling", async () => {
     // Regression guard for the "near-bottom streaming re-pins the
     // viewport and fights user scroll-up" symptom. Inside
     // `USER_SCROLL_ADJUSTMENT_COOLDOWN_MS` (200 ms) of a `wheel` /
     // `touchmove` / `keydown` event on the scroll container, a
     // streaming-driven height measurement must not snap `scrollTop`
     // back to the bottom — even when the user is still within the
-    // 72 px near-bottom band. After the cooldown expires, normal
-    // pinning resumes.
+    // 72 px near-bottom band. After the cooldown expires (or when no
+    // user input has occurred), pinning resumes.
     //
     // Two code paths must honour the cooldown: `handleHeightChange`'s
     // `shouldKeepBottom` branch (which would `node.scrollTop = target`
@@ -303,6 +303,19 @@ describe("AgentSessionPanel conversation caching", () => {
     // `measuredSlotHeight` so both paths see the post-measurement
     // geometry — reverting either gate reproduces a write we can
     // assert against.
+    //
+    // The test has two phases to prove the wheel event is
+    // load-bearing:
+    //   1. No user input → measurement → scrollWrites must CONTAIN
+    //      the pin target. If the wheel listener were broken but the
+    //      ref still initialised to `0`, `performance.now() - 0` in a
+    //      fast-start test could be below 200 ms and spuriously
+    //      suppress this write. The production code now initialises
+    //      `lastUserScrollInputTimeRef` to `Number.NEGATIVE_INFINITY`
+    //      so this phase always sees the pin fire.
+    //   2. Fire wheel → measurement → scrollWrites must be empty.
+    //      This pins the other direction: the cooldown does suppress
+    //      the write when a real direct-scroll input occurred.
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
@@ -400,24 +413,43 @@ describe("AgentSessionPanel conversation caching", () => {
         return candidate!;
       });
 
-      // Simulate the user wheeling up inside the scroll container. The
-      // component's `syncViewport` effect attaches a `wheel` listener
-      // on `scrollNode` that timestamps the last direct-scroll input.
-      fireEvent.wheel(scrollNode, { deltaY: -50 });
-
-      // Trigger a streaming-style height measurement. `scrollTop` is
-      // intentionally at 400 (clientHeight 100 / pre-measurement
-      // scrollHeight 500 → gap 0 → `isScrollContainerNearBottom` is
-      // true, pin heuristic armed). The measurement grows the card
-      // from 180 → 260 px; the live `scrollHeight` getter then
-      // reports 580. Without the cooldown on EITHER the inline
-      // `handleHeightChange` write path OR the follow-up re-pin
-      // `useLayoutEffect`, `scrollTop` would be written to the new
-      // pin target (580 − 100 = 480). The cooldown must suppress
-      // both paths.
+      // Phase 1 — negative control. WITHOUT any wheel/touch/key
+      // input, trigger a streaming-style measurement. `scrollTop` is
+      // at 400 (clientHeight 100 / pre-measurement scrollHeight 500
+      // → gap 0 → `isScrollContainerNearBottom` is true, pin
+      // heuristic armed). The measurement grows the card from 180 →
+      // 260 px; the live `scrollHeight` getter then reports 580.
+      // With no direct-scroll input the cooldown must NOT fire, so
+      // `scrollTop` must be written to the pin target (580 − 100 =
+      // 480). This proves the measurement path is live inside the
+      // test harness — a false pass here would indicate the
+      // cooldown is spuriously active on mount.
       scrollWrites.length = 0;
       scrollTop = 400;
       measuredSlotHeight = 260;
+      await act(async () => {
+        resizeCallbacks.get(slot)?.([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+        await Promise.resolve();
+      });
+
+      expect(scrollWrites).toContain(480);
+
+      // Phase 2 — positive assertion. Simulate the user wheeling up
+      // inside the scroll container. The component's `syncViewport`
+      // effect attaches a `wheel` listener on `scrollNode` that
+      // timestamps `lastUserScrollInputTimeRef`.
+      fireEvent.wheel(scrollNode, { deltaY: -50 });
+
+      // Trigger another streaming measurement. The card grows from
+      // 260 → 340 px; the live `scrollHeight` getter now reports
+      // 660. `scrollTop` is still near the bottom (480 from phase
+      // 1) so `shouldKeepBottom` stays true. Without the cooldown
+      // on EITHER the inline `handleHeightChange` write path OR
+      // the follow-up re-pin `useLayoutEffect`, `scrollTop` would
+      // be written to 660 − 100 = 560. The cooldown must suppress
+      // both paths.
+      scrollWrites.length = 0;
+      measuredSlotHeight = 340;
       await act(async () => {
         resizeCallbacks.get(slot)?.([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
         await Promise.resolve();

@@ -29,6 +29,14 @@ through the same anchor-preserving prepend helper as scroll-triggered auto-load,
 and keeps the auto-load scroll listener stable by reading volatile viewport
 state through refs instead of re-subscribing on every scroll tick.
 
+Also fixed in the current tree: the near-bottom cooldown regression test is
+now load-bearing. `lastUserScrollInputTimeRef` initialises to
+`Number.NEGATIVE_INFINITY` so mount-time measurements never falsely register
+inside the cooldown, and the test itself now runs a two-phase negative /
+positive control — a no-input measurement must write the pin target, a
+post-wheel measurement must not — so an unbound or broken wheel listener can
+no longer leave the test passing.
+
 ## Conversation cards overlap for one frame during scroll through long messages
 
 **Severity:** Medium - `estimateConversationMessageHeight` in `ui/src/panels/conversation-virtualization.ts` produces an initial height for unmeasured cards using a per-line pixel heuristic with line-count caps (`Math.min(outputLineCount, 14)` for `command`, `Math.min(diffLineCount, 20)` for `diff`) and overall ceilings of 1400/1500/1600/1800/900 px. For heavy messages — review-tool output, build logs, large patches — the estimate is 20×-40× under the rendered height, so `layout.tops[index]` for cards below an under-priced neighbour places them inside the neighbour's rendered area. The user sees the cards painted on top of each other for one frame, until the `ResizeObserver` measurement lands and `setLayoutVersion` rebuilds the layout.
@@ -61,21 +69,6 @@ The behavior depends on `preventDefault()` taking effect before the handler manu
 **Proposal:**
 - Add a focused test that spies on `addEventListener` for the message stack and verifies `{ passive: false }`.
 - Or dispatch a cancelable `WheelEvent` and assert `defaultPrevented` plus the expected single `scrollTop` update.
-
-## Near-bottom cooldown regression test does not prove wheel input
-
-**Severity:** High - `ui/src/panels/AgentSessionPanel.test.tsx` adds a near-bottom cooldown regression test, but the test can pass even if the `wheel` listener never updates the direct-scroll timestamp.
-
-`VirtualizedConversationMessageList` initializes `lastUserScrollInputTimeRef` to `0`, and the test triggers a measurement immediately after mount. In jsdom, `performance.now()` is usually still below the 200 ms cooldown, so `performance.now() - 0 < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS` suppresses the `scrollTop` write even without `fireEvent.wheel(...)` doing anything.
-
-**Current behavior:**
-- The test fires a wheel event, but does not prove that the wheel listener changed `lastUserScrollInputTimeRef`.
-- Time is not controlled, so the component begins inside the cooldown window by default.
-- A broken or unbound wheel listener could still leave the test passing.
-
-**Proposal:**
-- Control `performance.now()` in the test: first set it beyond the cooldown and prove a measurement writes the bottom pin without user input, then fire the wheel event at a later timestamp and prove the next measurement is suppressed.
-- Consider initializing `lastUserScrollInputTimeRef` to `Number.NEGATIVE_INFINITY` so production never treats the first 200 ms after mount as user-scroll cooldown without direct input.
 
 ## Dangerous Markdown link neutralization lacks direct coverage
 
@@ -787,13 +780,6 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
-- [ ] P2: Tighten the near-bottom cooldown regression test:
-  mock `performance.now()` so the test starts outside the 200 ms
-  cooldown, assert a no-user-input measurement would write the bottom
-  pin, then fire a wheel event at a later timestamp and assert the next
-  measurement is suppressed. Consider initializing
-  `lastUserScrollInputTimeRef` to `Number.NEGATIVE_INFINITY` so mount
-  time never counts as direct user input.
 - [ ] P2: Add anchor-stabilized load-earlier button-path coverage:
   `AgentSessionPanel.test.tsx` now covers the near-bottom cooldown
   on `handleHeightChange` and the no-scroll-tick-resubscribe
