@@ -48,6 +48,81 @@ pairs feeds Markdown like `[click me](javascript:alert(1))` through the full
 render pipeline and asserts no `<a>` role, no `href="javascript:void(0)"`,
 and the link text still renders as plain content.
 
+Also fixed in the current tree: the only High-severity backend
+bug — `commit_session_created_locked` performing synchronous
+SQLite I/O under the state mutex — now routes through the
+existing background persist channel. `src/sse_broadcast.rs`'s
+`commit_session_created_locked` sends `PersistRequest::Delta`
+instead of calling `persist_created_session` synchronously,
+matching the pattern `persist_internal_locked` already used.
+The state mutex is no longer held across a full SQLite
+transaction (connection open, schema-ensure, metadata + session
+upsert, commit with fsync), so other requests that need
+`inner.lock()` no longer stall behind session-create disk I/O.
+The crash-before-persist window loses at most a just-created
+empty session shell — metadata + config, zero user content
+(messages are always `[]` at commit time) — which is the same
+durability posture `persist_internal_locked` already has for
+every subsequent mutation. Test + shutdown fallback preserved:
+when `persist_tx.send` fails (tests construct `AppState` with a
+dropped-receiver channel; shutdown happens when the persist
+thread exited early) the original synchronous path still runs.
+A new co-located test in `src/tests/persist.rs` builds an
+`AppState` with a LIVE persist-channel receiver, calls
+`commit_session_created_locked` directly, and asserts both that
+a `PersistRequest::Delta` was sent (primary assertion) and that
+no synchronous persist-file write happened (negative control).
+Verified load-bearing by reverting the channel-send and
+observing the test fail.
+
+Also fixed in the current tree: the synchronous persist path
+(`persist_persisted_state_to_sqlite` in `src/persist.rs`) no
+longer deep-clones every session transcript just to discard the
+clones. The previous `persisted.clone(); metadata.sessions.clear();`
+pattern paid a full `PersistedSessionRecord::clone` — and every
+message inside it — per call; a new
+`PersistedState::metadata_only()` helper clones only the
+metadata fields and leaves `sessions: Vec::new()`, so the
+caller avoids touching session transcripts at all and feeds the
+original `&persisted.sessions` slice to
+`persist_state_parts_to_sqlite` unchanged. This path is a
+fallback (tests with a disconnected persist channel, plus
+shutdown after the background persist thread has exited), so
+the perf hit was silent but still wasteful on large
+transcripts. All 32 persist tests pass.
+
+Also fixed in the current tree: `load_state_from_sqlite` no
+longer eagerly evaluates the legacy app-state lookup on the
+happy path. `.or(sqlite_app_state_value(...)?)` forced both
+`SELECT ... FROM app_state WHERE key = ?` round-trips to run on
+every startup even though the fallback value is only needed
+when the primary `SQLITE_METADATA_KEY` row is missing. The
+lookup now uses an `if let Some(...) else if let Some(...) else`
+chain so the legacy query only runs when the primary returns
+`None` — silent cost on every startup was a second query
+against a connection that's about to be dropped. The optional
+follow-up from the bug entry (sharing the cached connection
+across load/persist) is not done; it was explicitly marked
+optional.
+
+Also fixed in the current tree: the `/api/terminal` Unix spawn
+path now uses `sh -lc` instead of `sh -c`, restoring login-shell
+semantics. `build_terminal_shell_command` in `src/terminal.rs`
+passes `-l` so `sh` sources `/etc/profile` and `~/.profile`
+before executing the command — users who extend `PATH` from
+those files (`nvm`, `uv`, `poetry`, pyenv, rbenv, Homebrew on
+Apple Silicon, `cargo env`, gcloud shims, etc.) again see their
+tooling resolve from the terminal panel the same way it
+resolves from their desktop terminal. The change is a revert of
+the incidental flag drop in commit `e208dde` ("Add terminal
+command execution support"), which did not document a reason
+for dropping `-l`. The Windows branch continues to use
+`powershell.exe -NoProfile` — the tradeoff tilts differently on
+Windows (PS profiles commonly do heavy per-invocation work;
+`PATH` there comes from the registry, not the profile), and the
+comment in `build_terminal_shell_command` explains the
+asymmetry for future readers.
+
 Also fixed in the current tree: a third small-items pass landed
 two more. (1) The dialog-backdrop platform fallback is now
 directly exercised — two new Vitest cases in
@@ -91,9 +166,11 @@ landed together. (1) `MonacoCodeEditor.tsx`'s
 no longer reference-by-title the active `docs/bugs.md` headings
 they replaced — both comments now describe the invariant in
 situ so they don't rot when the matching ledger entry moves to
-preamble. (3) The scratch `docs/math-demo.md` / `docs/mermaid-demo.md`
-edits left over from mid-session debugging have been reverted
-(they were never intentional fixture updates). (4) The
+preamble. (3) The scratch `docs/math-demo.md` edit left over
+from mid-session debugging has been reverted (it was never an
+intentional fixture update); the remaining `docs/mermaid-demo.md`
+fixture edit is tracked below until it is either reverted or
+documented as intentional. (4) The
 `MarkdownDocumentEolStyle` / `detectMarkdownDocumentEolStyle` /
 `applyMarkdownDocumentEolStyle` docs in
 `markdown-diff-segments.ts` now describe the contract accurately
@@ -320,6 +397,37 @@ case loads a CRLF README, edits a rendered section, saves, and asserts the
 detection (pure LF, pure CRLF, mixed CRLF/LF dominant, ties → LF, bare
 `\r` legacy Mac ignored) and application (empty strings, LF identity,
 CRLF expansion, round-trip invariant) contracts.
+
+## Mermaid demo still contains an unrelated edge-target edit
+
+**Severity:** Note - `docs/mermaid-demo.md` still changes the visible demo graph even though the active work is backend persistence and bug-ledger maintenance.
+
+The current diff changes the Mermaid edge target from `Stop2` to `Stop`. This may be harmless, but the surrounding change set does not explain why the demo fixture should change, and the fixed preamble previously claimed the scratch demo edits had been reverted.
+
+**Current behavior:**
+- `docs/mermaid-demo.md` changes `Edit --> Stop2` to `Edit --> Stop`.
+- The graph has no explicit `Stop` node definition in the fixture.
+- The fixture edit is unrelated to the session-create persistence refactor.
+
+**Proposal:**
+- Revert the fixture edit if it was scratch work.
+- If intentional, add a short note explaining why the demo graph target should change.
+
+## Unix terminal login-shell behavior lacks regression coverage
+
+**Severity:** Medium - the Unix terminal spawn path now restores `sh -lc`, but the behavior is not pinned by a dedicated test.
+
+This is user-visible for Unix users whose PATH/tooling comes from login-shell setup such as `.profile`, `nvm`, `uv`, `poetry`, Homebrew, `cargo env`, or gcloud shims. The existing terminal smoke test proves a trivial command can run, but it would still pass if the `-l` flag were dropped again.
+
+**Current behavior:**
+- `build_terminal_shell_command` passes `sh -lc` on Unix.
+- Existing terminal tests exercise command execution, not the exact login-shell invocation.
+- Regressing to `sh -c` would not be caught by the current test suite.
+
+**Proposal:**
+- Add a Unix-only regression test that pins login-shell behavior.
+- Prefer factoring shell construction into a testable helper and asserting the Unix argv includes `-lc`.
+- If practical, add a stronger integration test with PATH setup that is only visible through login-shell initialization.
 
 ## Rendered Markdown commit fallback path can disagree on offsets for CRLF files
 
@@ -653,21 +761,6 @@ The message is not hidden; it is genuinely gone from SQLite. No amount of fronte
 - Accept the cost of the reopen on error; the happy path still reuses one connection per process lifetime.
 - Add a regression test: seed an error that the cache should recover from (e.g., unlink the backing file after a successful write) and assert the next persist tick creates a new connection and writes successfully.
 
-## Unix terminal shell spawn dropped the login-shell flag
-
-**Severity:** Medium - the `/api/terminal` Unix spawn path changed from `sh -lc` to `sh -c`, so the terminal no longer sources `.profile`/`.bash_profile`. Users who rely on those for `PATH` additions (`nvm`, `uv`, `poetry`, homebrew prefixes) will find their tools missing from the terminal panel.
-
-At `src/api.rs:2797`, the diff dropped the `-l` flag. `sh -c` runs in non-login mode, which skips profile sourcing on most user configurations.
-
-**Current behavior:**
-- Terminal panel spawns `sh -c <command>` on Unix instead of `sh -lc <command>`.
-- Commands run without the user's login-shell `PATH` adjustments.
-- A user whose `node` / `uv` / `poetry` / `gcloud` is only on PATH via `.profile` gets "command not found" in the terminal panel.
-
-**Proposal:**
-- Restore `sh -lc` unless there is a documented reason (e.g., the login-shell init was measurably slow and intentionally removed).
-- If the removal was intentional, add a comment explaining why and document the expectation that `PATH` must be set at the parent-process level.
-
 ## `session_mut` helpers stamp eagerly before the caller decides to mutate
 
 **Severity:** Low - check-then-early-return paths advance the mutation stamp even when no field actually changed, so the persist thread re-serializes the session on the next tick for no reason. Softly undoes the delta-persist benefit.
@@ -719,20 +812,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - Drop or overwrite superseded snapshots before they can accumulate in memory.
 - Add a burst test that publishes multiple large snapshots while the broadcaster is delayed and asserts only the latest snapshot is retained.
 
-## `persist_state_from_persisted_with_connection` clones the full state then clears sessions
-
-**Severity:** Low - the test-fallback and any synchronous-persist call site deep-clones every session transcript, then discards the clones to produce metadata.
-
-`let mut metadata = persisted.clone(); metadata.sessions.clear();` — every transcript is deep-copied just to drop it. Pre-existing pattern; the delta work didn't introduce it but also didn't fix it.
-
-**Current behavior:**
-- Every synchronous persist call allocates MBs only to discard them.
-- The same pattern lives in `persist_persisted_state_to_sqlite`.
-
-**Proposal:**
-- Take `PersistedState` by value where possible and `std::mem::take(&mut persisted.sessions)` into a local; reuse the remaining `persisted` as metadata.
-- Or: add a dedicated `PersistedState::split_into_metadata_and_sessions(self) -> (Self, Vec<PersistedSessionRecord>)`.
-
 ## State snapshots still include full session transcripts on the wire
 
 **Severity:** Medium - `/api/state` response bodies and SSE state broadcasts still include every session's full `messages` vector. The serialization CPU cost is now off the mutex and off the tokio workers (broadcaster thread + `spawn_blocking`), but the payload size itself is unchanged.
@@ -751,22 +830,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - **Before landing** (per the earlier revert): audit every `commit_locked` caller and ensure a matching `publish_delta` exists for any state change that adds/edits messages, so stripped state events do not drop the change.
 - Add backend and App-level regression coverage proving `/api/state` omits transcripts, session hydration restores the full transcript, and metadata snapshots do not clear an already-hydrated active session.
 
-## `commit_session_created_locked` performs synchronous SQLite I/O under the state mutex
-
-**Severity:** High - session creation now holds the `Arc<Mutex<StateInner>>` across a full SQLite transaction, blocking every concurrent request behind disk I/O.
-
-The new `commit_session_created_locked` path in `src/state.rs` calls `persist_created_session`, which in production opens a SQLite connection, runs `ensure_sqlite_state_schema`, starts a transaction, writes metadata plus the created session row, commits, and closes — all synchronously while the `inner` mutex is held. The existing `persist_internal_locked` pattern explicitly offloads persistence to a background thread via `persist_tx` specifically so other requests are not blocked behind disk I/O (see its doc comment). The new path defeats that invariant and regresses session-create latency under contention (e.g., an SSE publisher trying to read state, or a burst of session creations).
-
-**Current behavior:**
-- `commit_session_created_locked` runs `persist_created_session` synchronously.
-- `persist_created_session` opens a SQLite connection, runs schema-ensure, transactional metadata + session upsert, commit, close — all under the state mutex.
-- Any other request that calls `self.inner.lock()` (including SSE publish paths) blocks behind the disk write.
-
-**Proposal:**
-- Route `persist_created_session` through the same `persist_tx` background channel used by `persist_internal_locked`. Add a new `PersistRequest` variant or reuse the existing one with just the changed session payload.
-- At minimum, drop the state mutex before calling `persist_created_session` and accept the race window for the in-memory revision-vs-persisted divergence.
-- Add a test that measures the state-mutex hold duration across a session create and asserts it stays under a small budget.
-
 ## SQLite persistence lacks file permission hardening and indefinite backup retention
 
 **Severity:** Medium - session history including agent output, user prompts, and captured file contents is readable by other local users on default Unix systems, and a second sensitive copy is kept indefinitely at a predictable path.
@@ -782,20 +845,6 @@ The new SQLite persistence path opens `~/.termal/termal.sqlite` via `rusqlite::C
 - On Unix, call `fs::set_permissions(path, Permissions::from_mode(0o600))` on both the SQLite DB and the imported backup immediately after open/rename.
 - On Windows, document the reliance on `%USERPROFILE%\.termal\` ACL inheritance; optionally tighten via `SetNamedSecurityInfo`.
 - Either delete the imported backup after a successful cold start confirms the SQLite file is usable, or emit a one-shot UI notice with the backup path and an explicit delete affordance.
-
-## SQLite load path still opens a fresh connection and double-queries app state
-
-**Severity:** Low - the first SQLite slice is restart-safe, but `load_state_from_sqlite` still opens a fresh connection and eagerly evaluates a fallback app-state key on the happy path.
-
-The background persist thread now caches a single SQLite connection for its lifetime (`SqlitePersistConnectionCache`), and `ensure_sqlite_state_schema` runs only on the first open. The load path remains unchanged: each startup still opens a fresh connection (acceptable — it's a one-shot) and uses `.or(...)` where `if let Some(..) else { .. }` would avoid a redundant query on the happy path.
-
-**Current behavior:**
-- `load_state_from_sqlite` opens a fresh connection on every startup.
-- Eager `.or(...)` in `load_state_from_sqlite` evaluates the legacy app-state lookup even when the primary key is present.
-
-**Proposal:**
-- Convert `.or(...)` to a lazy `if let Some(..) else { .. }`.
-- Optionally share the cached connection across load/persist if any post-startup load path emerges.
 
 ## `persist_created_session` skips hidden Claude spare pool changes
 
@@ -846,6 +895,13 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
+- [ ] P2: Add Unix terminal login-shell regression coverage:
+  `build_terminal_shell_command` now uses `sh -lc` on Unix so
+  terminal commands see login-shell PATH setup, but the current
+  smoke test would still pass if `-l` were dropped. Add a Unix-only
+  test that asserts the constructed shell argv contains `-lc`, or
+  exercise a command that only resolves through login-shell
+  initialization.
 - [ ] P2: Extract a shared `navigator.platform` stub helper:
   `ui/src/dialog-backdrop-dismiss.test.ts` and
   `ui/src/preferences/SettingsDialogShell.test.tsx` duplicate
@@ -1637,6 +1693,50 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   future edit that throws during installation could leak globals. Move the
   mock installation inside the `try` so `finally` always runs against the
   saved originals.
+- [ ] P2: Pin the lazy legacy-key lookup in `load_state_from_sqlite`:
+  the `.or(...)` → `if let` refactor in `src/persist.rs` is a
+  pure startup-cost optimization — both the eager and lazy
+  variants return identical values, so all 32 existing persist
+  tests pass against either. A regression that restored `.or(...)`
+  would silently reintroduce the redundant
+  `SELECT ... FROM app_state WHERE key = ?` round-trip on every
+  startup without any test failing. Pin the contract by either
+  (a) wrapping the `Connection` in a query-counting shim used
+  only by a dedicated test, or (b) adding a `rusqlite`
+  trace-hook-based test that asserts exactly one
+  `FROM app_state` SELECT fires when the primary metadata row
+  is present. Low priority because the tests still correctly
+  pin return-value behavior; the only regression the pin would
+  catch is the "silent redundant query" failure mode.
+- [ ] P2: Add a direct field-survival test for
+  `PersistedState::metadata_only()`:
+  the helper is currently `#[cfg(not(test))]`-gated so no test
+  exercises it directly. Behavioral equivalence with
+  `metadata_from_inner` is load-bearing — if a future top-level
+  field is added to `PersistedState` and only one of the two
+  methods is updated, the production persist path silently
+  drops the field from the SQLite `app_state` row. Either drop
+  the `#[cfg(not(test))]` gate and add a test that builds a
+  `PersistedState` with a populated sessions vec, calls
+  `metadata_only()`, and asserts (a) sessions is empty and (b)
+  every non-sessions field survives, or keep the gate and add a
+  macro/test harness that asserts field parity between the two
+  constructors. The inline cross-reference doc comments on each
+  method already flag the pairing; a test would make the
+  coupling load-bearing.
+- [ ] P2: Extract a shared `build_test_app_state(persist_tx)` helper:
+  `src/tests/mod.rs::test_app_state` and
+  `src/tests/persist.rs::test_app_state_with_live_persist_channel` now
+  duplicate ~35 lines of `AppState` field construction. Only two
+  fields actually differ between them today — `persist_tx` (receiver
+  dropped vs. kept alive) and the uniqueness of the `persistence_path`
+  temp-file name. A shared constructor that takes a `Sender<PersistRequest>`
+  and returns an `AppState` would let both callers collapse to
+  `build_test_app_state(mpsc::channel().0)` vs. the live-receiver
+  variant, and a future third variant (e.g., a test that wants a live
+  broadcaster thread too) would not need to duplicate the field list
+  again. Low priority — the helper is small and only two call sites
+  share the shape today.
 
 ## Known Design Limitations
 
