@@ -1098,8 +1098,26 @@ fn build_terminal_shell_command(command: &str) -> (&'static str, Command) {
 
     #[cfg(not(windows))]
     {
+        // `-l` makes `sh` a login shell so it sources `/etc/profile`
+        // and `~/.profile` before executing the command. Users who
+        // extend `PATH` from those files (nvm, uv, poetry, pyenv,
+        // rbenv, Homebrew on Apple Silicon, `cargo env`, gcloud
+        // shims, etc.) expect their tooling to resolve from a
+        // terminal panel the same way it does from their desktop
+        // terminal emulator — which runs login shells by default on
+        // macOS and on most Linux distros via `bash --login` / the
+        // session's login-shell entrypoint. Running without `-l`
+        // produced "command not found" for users whose only `PATH`
+        // adjustment happens inside `.profile`.
+        //
+        // This is asymmetric with the Windows branch's `-NoProfile`:
+        // PowerShell profiles commonly contain heavy per-invocation
+        // work (prompt themes, module autoload) and PATH additions
+        // on Windows come from the registry rather than the
+        // profile, so skipping the profile is the right default
+        // there. On Unix the tradeoff tilts the other way.
         let mut shell = Command::new("sh");
-        shell.args(["-c", command]);
+        shell.args(["-lc", command]);
         ("sh", shell)
     }
 }
