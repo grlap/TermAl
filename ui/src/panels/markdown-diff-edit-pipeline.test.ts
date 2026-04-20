@@ -123,19 +123,24 @@ describe("isSafePastedMarkdownHref", () => {
     });
   });
 
-  describe("drive-letter exception (current contract)", () => {
-    // The guard currently returns true for any href matching
-    // `/^[a-zA-Z]:[\\/]/`. This is the "Windows drive-letter
-    // exception" — it lets a file path like `C:\repo\docs\api.md`
-    // survive a paste without being rejected as a protocol URL.
+  describe("rejects Windows drive-letter paths", () => {
+    // The guard previously short-circuited on `/^[a-zA-Z]:[\\/]/`
+    // and returned true for Windows drive-letter paths. That
+    // branch was removed so paste-sanitize treats drive-letter
+    // hrefs the same as any other unknown protocol:
+    // `C:\foo` has its colon at index 1, the one-letter "c"
+    // protocol is not in the http/https/mailto allowlist, so
+    // the href is rejected — and the paste-sanitizer's
+    // attribute scrubber then drops the `href` attribute while
+    // keeping the `<a>` element and its inner text.
     //
-    // Note: this allowlist is LOOSER than `transformMarkdownLinkUri`
-    // in `ui/src/markdown-links.ts`, which does NOT special-case
-    // drive letters. The mismatch is tracked in
-    // `docs/bugs.md` → "isSafePastedMarkdownHref Windows drive-letter
-    // exception inconsistent with protocol allowlist". These tests
-    // pin the current behavior so a future tightening can be made
-    // deliberately.
+    // Local-path file links that the user AUTHORS (typed into
+    // the rendered-Markdown editor or in a committed file) still
+    // work through
+    // `markdown-links.ts::resolveMarkdownFileLinkTarget`, which
+    // has its own allowlist that recognizes drive-letter paths.
+    // Only the paste-sanitize entry point is tightened here; the
+    // rendered/open-in-source-panel path is unchanged.
     it.each([
       ["C:\\repo\\docs\\api.md"],
       ["c:/repo/docs/api.md"],
@@ -143,23 +148,29 @@ describe("isSafePastedMarkdownHref", () => {
       ["d:/x"],
       ["A:\\"],
       ["z:/"],
-    ])("returns true for %s (drive letter)", (href) => {
-      expect(isSafePastedMarkdownHref(href)).toBe(true);
+      // Bare drive letter without separator — also rejected.
+      ["C:"],
+      // Two-letter prefix that's definitely not a drive letter.
+      ["CC:\\foo"],
+    ])("returns false for %s", (href) => {
+      expect(isSafePastedMarkdownHref(href)).toBe(false);
     });
 
-    it("returns false for a bare drive letter with no separator", () => {
-      // `C:` alone does not match the `[a-zA-Z]:[\\/]` regex (the
-      // regex requires a slash or backslash after the colon), so it
-      // falls through to the colon check and is rejected because
-      // protocol "c" isn't in the http/https/mailto allowlist.
-      expect(isSafePastedMarkdownHref("C:")).toBe(false);
-    });
-
-    it("returns false for a two-letter prefix that looks like a drive letter", () => {
-      // The regex requires EXACTLY ONE letter before the colon, so
-      // `CC:\foo` is not treated as a drive letter. It falls through
-      // to the protocol check — "cc" isn't allowed → false.
-      expect(isSafePastedMarkdownHref("CC:\\foo")).toBe(false);
+    it("strips href from a pasted <a href=\"C:\\...\"> anchor", () => {
+      // End-to-end proof: the sanitizer reads
+      // `isSafePastedMarkdownHref` for the `<a>` attribute
+      // scrubber, and the new contract is "drive-letter paths
+      // lose their href". The `<a>` element itself is in the
+      // ALLOWED set, so the element stays; its link text
+      // survives as plain content.
+      const fragment = buildPasteFragment(
+        '<a href="C:\\Windows\\System32\\cmd.exe">open cmd</a>',
+      );
+      sanitizePastedMarkdownFragment(fragment);
+      const anchor = fragment.querySelector("a");
+      expect(anchor).not.toBeNull();
+      expect(anchor?.hasAttribute("href")).toBe(false);
+      expect(anchor?.textContent).toBe("open cmd");
     });
   });
 });

@@ -48,6 +48,24 @@ pairs feeds Markdown like `[click me](javascript:alert(1))` through the full
 render pipeline and asserts no `<a>` role, no `href="javascript:void(0)"`,
 and the link text still renders as plain content.
 
+Also fixed in the current tree: the `isSafePastedMarkdownHref`
+Windows drive-letter exception is removed. Paste-sanitize no longer
+short-circuits `/^[a-zA-Z]:[\\/]/` to `true`; drive-letter hrefs now
+fall through the normal protocol-allowlist check and are rejected
+because `c:`, `d:`, etc. are not in the `http`/`https`/`mailto`
+allowlist. The `<a>` element itself stays (it's in ALLOWED), so its
+link text survives as plain content, but the `href` attribute is
+stripped — no latent path-handler-invocation risk if TermAl ever
+wraps in Tauri/Electron. Local-path file links that the user types
+or authors continue to work through
+`markdown-links.ts::resolveMarkdownFileLinkTarget`, which has its own
+allowlist for drive-letter paths; only the paste-sanitize entry point
+is tightened. Test file flipped the six drive-letter rows from
+`toBe(true)` to `toBe(false)`, consolidated the bare-drive-letter
+and two-letter-lookalike cases into the same `it.each` table, and
+added a direct sanitizer test proving `<a href="C:\Windows\System32\cmd.exe">`
+loses its href while the `<a>` element and link text survive.
+
 Also fixed in the current tree: the `markdown-diff-edit-pipeline` paste
 sanitizer now has direct Vitest coverage. A new
 `ui/src/panels/markdown-diff-edit-pipeline.test.ts` pins the
@@ -778,21 +796,6 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
 - Add a `hydrationMismatchSessionIdsRef` (or count attempts) to avoid re-firing after one mismatch until an authoritative state event arrives.
 - Route the existing-session replace branch through `reconcileSession` (or a similar identity-preserving merge) so memoized children keep stable identity.
 
-## `isSafePastedMarkdownHref` Windows drive-letter exception inconsistent with protocol allowlist
-
-**Severity:** Low - pasted `<a href="C:\...">` links are accepted as "safe" even though the function advertises a strict protocol allowlist; inert in a browser today but a latent hazard if hrefs are ever opened via a native handler.
-
-`isSafePastedMarkdownHref` short-circuits on `[a-zA-Z]:[\\/]` and returns `true` before the protocol allowlist check runs. This accepts arbitrary local filesystem paths on Windows. In a browser, clicking such an href is inert (modern browsers refuse `file://` from an http origin), but if TermAl ever ships a Tauri/Electron wrapper or a native link opener, this becomes arbitrary local-file invocation.
-
-**Current behavior:**
-- `/^[a-zA-Z]:[\\/]/.test(trimmed)` short-circuits to `true`.
-- The `http/https/mailto` protocol allowlist never sees Windows drive-letter paths.
-- Pasted `<a href="C:\Windows\System32\cmd.exe">` survives sanitization with its href intact.
-
-**Proposal:**
-- Drop the drive-letter short-circuit. If local-path Markdown links are a product need, handle them through a constrained opener, not generic `<a href>`.
-- Add a test asserting `<a href="C:\foo">` loses its href through sanitization.
-
 ## 404 on `fetchSession` surfaces as a user-visible request error instead of silent resync
 
 **Severity:** Low - a benign race where a session is deleted or hidden between a delta event and the hydration fetch becomes a toast.
@@ -838,14 +841,6 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
   `target`. All of these are stripped today (allowlist
   scrubber), but direct tests would catch a regression that
   changed to a denylist shape.
-- [ ] P2: Document the pre-vs-post-normalize asymmetry in
-  `isSafePastedMarkdownHref`:
-  the drive-letter regex runs against the `trimmed` value, while
-  the protocol allowlist runs against `normalized` (control bytes
-  and whitespace stripped). A short comment on the drive-letter
-  describe block in `markdown-diff-edit-pipeline.test.ts` would
-  make the asymmetry explicit for the reader who lands the
-  drive-letter tightening (Tier 1 item #3).
 - [ ] P2: Pin the `<template>`-inert-content invariant directly:
   `insertSanitizedMarkdownPaste` parses the pasted HTML into a
   `<template>` before sanitizing. Browsers don't execute

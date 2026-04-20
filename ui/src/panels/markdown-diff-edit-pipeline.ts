@@ -214,13 +214,33 @@ export function normalizePastedMarkdownCodeClass(className: string) {
 }
 
 export function isSafePastedMarkdownHref(href: string) {
+  // Paste-time allowlist for `<a href="...">` in the rendered-
+  // Markdown diff editor. Dangerous protocols are rejected; safe
+  // external protocols (http/https/mailto) round-trip; no-colon
+  // hrefs (relative paths, anchors) are accepted because they
+  // cannot be interpreted as a scheme by the browser's URL
+  // parser.
+  //
+  // Previously this function also short-circuited on
+  // `/^[a-zA-Z]:[\\/]/` and returned true for Windows drive-
+  // letter paths (`C:\foo`, `c:/bar`). That branch is removed:
+  // such pastes survive sanitization with their `href` stripped
+  // (the `<a>` element itself stays in ALLOWED; the serializer
+  // then emits the anchor's text without a link target). The
+  // drive-letter exception was inert under the current browser
+  // deployment — `file://` hrefs are blocked from an http origin
+  // — but would become an arbitrary-local-file hazard if TermAl
+  // ever ships a Tauri/Electron wrapper or a native link opener,
+  // and it disagreed with the rest of the project's allowlist
+  // policy (see `docs/bugs.md` → "isSafePastedMarkdownHref
+  // Windows drive-letter exception inconsistent with protocol
+  // allowlist"). Local-path Markdown links that the user types
+  // or authors continue to work through the rendered-Markdown
+  // pathway in `markdown-links.ts::resolveMarkdownFileLinkTarget`;
+  // only the paste-sanitize entry point is tightened here.
   const trimmed = href.trim();
   if (!trimmed) {
     return false;
-  }
-
-  if (/^[a-zA-Z]:[\\/]/.test(trimmed)) {
-    return true;
   }
 
   const normalized = trimmed.replace(/[\u0000-\u001F\u007F\s]+/g, "");
