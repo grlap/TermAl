@@ -48,6 +48,28 @@ pairs feeds Markdown like `[click me](javascript:alert(1))` through the full
 render pipeline and asserts no `<a>` role, no `href="javascript:void(0)"`,
 and the link text still renders as plain content.
 
+Also fixed in the current tree: the `markdown-diff-edit-pipeline` paste
+sanitizer now has direct Vitest coverage. A new
+`ui/src/panels/markdown-diff-edit-pipeline.test.ts` pins the
+`isSafePastedMarkdownHref` contract (empty/whitespace → reject;
+`javascript:` / `vbscript:` / `data:` / `file:` / `ftp:` / `blob:` /
+other non-allowlisted protocols → reject; mixed-case + control-byte
+obfuscation like `java\u0000script:` → reject after normalisation;
+`http` / `https` / `mailto` → accept; drive-letter paths accept per
+current contract, with the tighter-allowlist follow-up tracked
+separately), and it covers `sanitizePastedMarkdownFragment`'s three
+gates end-to-end: every element in the 24-entry drop set is verified
+removed (scripts, iframes, forms, buttons, svg, math, option,
+audio/video, etc.), every element in the 31-entry allow set survives,
+unknown tags (`<section>`, `<mark>`, `<article>`, `<details>`,
+`<font>`, etc.) are unwrapped with their children preserved, and
+attribute scrubbing keeps only safe `href` on `<a>` plus normalised
+`language-*` class on `<code>` — `onclick` / `onmouseover` / `style` /
+`data-*` / `id` are all stripped everywhere. Four smoke tests exercise
+`insertSanitizedMarkdownPaste` end-to-end, confirming the
+sanitize-before-insert ordering means no dropped tags ever reach the
+section DOM.
+
 Also fixed in the current tree: rendered-Markdown commits on CRLF-on-disk
 documents no longer silently convert the whole buffer to LF on save. Two
 new helpers (`detectMarkdownDocumentEolStyle` and
@@ -185,24 +207,6 @@ The App-owned handlers also gate dismissal on `!isCreating` and `!isCreatingProj
 **Proposal:**
 - Add App-level tests for create-session and create-project backdrop mousedown behavior: primary closes when not creating; middle/right/macOS Ctrl-click do not.
 - If practical in the existing harness, also assert the creating-state guard leaves the dialog open when the action is pending.
-
-## `markdown-diff-edit-pipeline` paste sanitizer has no direct unit tests
-
-**Severity:** Medium - `ui/src/panels/markdown-diff-edit-pipeline.ts::isSafePastedMarkdownHref` (line 216) and `ui/src/panels/markdown-diff-edit-pipeline.ts::sanitizePastedMarkdownFragment` (line 161) are the security boundary for paste-into-Markdown. Neither has any direct Vitest coverage, and no integration test in `DiffPanel.test.tsx` exercises these two functions end-to-end.
-
-`isSafePastedMarkdownHref` has four branches (empty-string rejection, drive-letter allowlist, no-colon relative-path allowance, and the `http` / `https` / `mailto` protocol allowlist) plus a control-character stripper (`/[\u0000-\u001F\u007F\s]+/g`) that runs before protocol extraction. A regression that flipped `protocol === "http"` to include `"javascript"`, or weakened the control-char filter (so `java\u0000script:` slipped past the protocol check), would ship silently — nothing else in the repo references these symbols.
-
-`sanitizePastedMarkdownFragment` has three guards (HTML namespace, 23-element drop set, 32-element allow set) and an attribute-stripping pass that keeps only `href` on anchors (gated by `isSafePastedMarkdownHref`) and `class` on code (gated by `normalizePastedMarkdownCodeClass`). A set membership regression (e.g., accidentally removing `button` from the drop set, or adding `svg` to the allow set) would ship silently.
-
-**Current behavior:**
-- Both helpers exist as extracted pure functions in `./markdown-diff-edit-pipeline`.
-- Neither has a `markdown-diff-edit-pipeline.test.ts`.
-- `DiffPanel.test.tsx` does not exercise a paste flow that would stress the sanitizer.
-
-**Proposal:**
-- Add `ui/src/panels/markdown-diff-edit-pipeline.test.ts` with table-driven cases for `isSafePastedMarkdownHref`: `javascript:`, `data:`, `vbscript:`, `JAVASCRIPT:`, `java\u0000script:`, `  javascript:` (leading whitespace), `C:\foo`, `c:/foo`, `http://a`, `https://a`, `mailto:a@b`, `./relative`, `#anchor`, empty string, whitespace-only.
-- Pair with sanitizer tests that take a `template` fragment containing `<a onclick="x">`, `<iframe>`, `<svg>`, `<script>`, `<button>`, `<code class="language-py bad">`, and assert the post-sanitize DOM shape: removed elements gone, unwanted attributes stripped, `language-py` kept on `<code>`.
-- Include a regression guard on the `<template>`-content sanitize-before-insert ordering (verify no `<script>` fetch fires before `sanitizePastedMarkdownFragment` runs).
 
 ## Missing error boundary around portal `render()` in MonacoCodeEditor
 
@@ -819,6 +823,39 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
+- [ ] P2: Extend paste-sanitizer test coverage with obfuscation and
+  encoding variants:
+  a few Note-level gaps remain worth tracking for future
+  tightening: Unicode bidi override (`\u202Ejavascript:`),
+  fullwidth-lookalike colon (`javascript\uFF1Aalert(1)`),
+  percent-encoded protocol colons (`%6Aavascript:`,
+  `javascript%3Aalert(1)`), HTML-entity protocol fragments
+  (`java&#115;cript:`), and less-common dangerous protocols
+  (`wss:`, `livescript:`, `jar:`, `chrome:`). Extend the `on*`
+  handler coverage too: the scrubber is tested against `onclick`
+  / `onmouseover`, but not `onerror` / `onload` / `onfocus` /
+  `srcdoc` / `formaction` / `xlink:href` / `ping` / `download` /
+  `target`. All of these are stripped today (allowlist
+  scrubber), but direct tests would catch a regression that
+  changed to a denylist shape.
+- [ ] P2: Document the pre-vs-post-normalize asymmetry in
+  `isSafePastedMarkdownHref`:
+  the drive-letter regex runs against the `trimmed` value, while
+  the protocol allowlist runs against `normalized` (control bytes
+  and whitespace stripped). A short comment on the drive-letter
+  describe block in `markdown-diff-edit-pipeline.test.ts` would
+  make the asymmetry explicit for the reader who lands the
+  drive-letter tightening (Tier 1 item #3).
+- [ ] P2: Pin the `<template>`-inert-content invariant directly:
+  `insertSanitizedMarkdownPaste` parses the pasted HTML into a
+  `<template>` before sanitizing. Browsers don't execute
+  `<script>` or fire `<img onerror>` inside template content,
+  which is why the sanitize-before-insert ordering is safe. Add
+  a test that pastes
+  `<img src="/nonexistent" onerror="window.__xss=true">` and
+  asserts `window.__xss` stays undefined — it would pass today
+  (template inert) and fail if the code is ever refactored to
+  assign `innerHTML` on a live DOM node.
 - [ ] P2: Tighten the bare-CR detector test:
   `markdown-diff-segments.test.ts::detectMarkdownDocumentEolStyle`
   currently asserts `"line1\r\nline2\rline3\n"` picks `crlf` (one
