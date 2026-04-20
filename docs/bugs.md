@@ -48,6 +48,81 @@ pairs feeds Markdown like `[click me](javascript:alert(1))` through the full
 render pipeline and asserts no `<a>` role, no `href="javascript:void(0)"`,
 and the link text still renders as plain content.
 
+Also fixed in the current tree: `adoptCreatedSessionResponse`
+no longer leaves a phantom workspace pane when the create
+response violates the wire contract. The function now returns
+a discriminated outcome — `"adopted" | "stale" | "recovering"`
+— instead of a boolean. The three call sites in `App.tsx`
+(create-session, fork-Codex-thread, remote-project create)
+each fall through to the workspace-pane fallback ONLY on
+`"stale"` (an earlier SSE delta already raised the revision
+past the POST response, so the session IS in `sessionsRef`
+and the pane points at a real session). On `"recovering"`
+(the `created.session.id !== created.sessionId` mismatch
+branch) the fallback is skipped — the mismatched id was never
+inserted into `sessionsRef`, so opening a pane would leave a
+phantom that persists until the scheduled
+`requestActionRecoveryResyncRef.current()` reconciles. On
+`"adopted"` the function already opened the pane internally.
+The TypeScript compiler enforces the three-way distinction at
+every call site. A dedicated Vitest test for the recovering
+branch is tracked as a P2 task — the full-App integration
+scaffolding for a mocked `api.createSession` mismatch response
+is heavier than the fix itself.
+
+Also fixed in the current tree:
+`failed_remote_snapshot_sync_restores_session_tombstones` now
+compares the full content of every restored session plus full
+orchestrator-instance contents, not just ID membership and
+counts. Previously a partial rollback that restored session IDs
+while leaving mutated `Session` fields, remote metadata, or
+orchestrator payloads behind would have slipped past. The test
+now (a) serializes each `SessionRecord` into a canonical shape
+(full `Session` JSON + `remote_id` + `remote_session_id`) and
+asserts pre/post equality, and (b) directly compares
+`inner.orchestrator_instances` (which already derives
+`PartialEq`) for full-payload equality — orchestrator id,
+template id, project id, status, sessions, prompts, settings.
+The helper sidesteps needing `PartialEq` on `SessionRecord`
+(which contains runtime handles like `SessionRuntime`) by
+comparing via `serde_json::Value`. 73 remote tests stay green.
+
+Also fixed in the current tree: the read-only rendered-Markdown
+flash regression test is now load-bearing. The previous test
+waited for the `readOnlyResetVersion` remount via `waitFor` and
+asserted the restored DOM — which would still pass if
+`event.currentTarget.textContent = segment.markdown` were
+reintroduced in `markdown-diff-change-section.tsx::handleInput`
+and subsequently overwritten by the remount. A new immediate
+post-input assertion runs BEFORE the `waitFor` yields:
+`expect(addedSections[1].querySelector("p")).not.toBeNull()`
+plus `toContain("Ready to save.")` — the raw-source regression
+collapses the `<p>` wrapper to a plain-text node on the same
+tick, so reintroducing the assignment now fails the test on
+the first assertion before the remount can paper it over.
+Verified load-bearing by reintroducing the raw-source write in
+the production code and observing the test fail, then
+restoring. The matching P2 task in the Implementation Tasks
+list is removed.
+
+Also fixed in the current tree: the Settings dialog tab bar
+(`ui/src/preferences/SettingsTabBar.tsx`) now implements the
+WAI-ARIA tablist keyboard pattern. Roving `tabIndex` — only
+the active tab carries `tabIndex={0}`, every other tab is
+`tabIndex={-1}` — so `Tab` leaves the tablist after one stop
+instead of visiting all seven tab buttons. `ArrowLeft` /
+`ArrowRight` wrap around the tablist; `Home` / `End` jump to
+the first and last tab. The handler lives on the tablist
+wrapper and moves DOM focus imperatively via
+`document.getElementById(\`settings-tab-${id}\`).focus()` so
+selection and keyboard position stay in lockstep (a WAI-ARIA
+protocol requirement). Click / Enter / Space still work via
+native `<button>` semantics — only the keyboard navigation
+surface changed. A new test file
+`SettingsTabBar.test.tsx` (8 tests) pins roving tabindex,
+Arrow wrapping at both ends, Home/End jumps, unrelated-key
+pass-through, and click preservation.
+
 Also fixed in the current tree: the duplicated
 `if changed { publish_delta(DeltaEvent::SessionCreated { ... }) }`
 block in `remote_create_proxies.rs` and `remote_codex_proxies.rs`
@@ -474,6 +549,67 @@ This is user-visible for Unix users whose PATH/tooling comes from login-shell se
 - Prefer factoring shell construction into a testable helper and asserting the Unix argv includes `-lc`.
 - If practical, add a stronger integration test with PATH setup that is only visible through login-shell initialization.
 
+## Stale create responses can still open phantom workspace panes
+
+**Severity:** Low - the `"stale"` `adoptCreatedSessionResponse` outcome is treated as safe to open, but a stale revision does not prove the created session is already present in `sessionsRef`.
+
+The current refactor correctly separates `"recovering"` from `"stale"`, but `"stale"` still means only that `shouldAdoptSnapshotRevision` rejected the create response. A single-session hydration response can advance `latestStateRevisionRef` without adopting a full session list, so a later create or fork response with an older revision can return `"stale"` even though `sessionsRef` does not contain `created.sessionId`.
+
+**Current behavior:**
+- `adoptCreatedSessionResponse` returns `"stale"` when the revision gate rejects the create response.
+- Call sites treat `"stale"` as safe and open `created.sessionId` in the workspace fallback.
+- If the stale revision came from unrelated single-session hydration, the workspace can still open a phantom pane for a missing session.
+
+**Proposal:**
+- Before treating `"stale"` as openable, verify `sessionsRef.current.some((session) => session.id === created.sessionId)`.
+- If the session is absent, request action-recovery resync and skip the workspace fallback.
+- Add a Vitest regression test that advances the revision without inserting the created session, then asserts the fallback does not open a phantom pane.
+
+## Settings tab no-op Home/End keys can fall through to browser defaults
+
+**Severity:** Low - `Home` on the first settings tab and `End` on the last settings tab are handled tablist keys, but the handler returns before calling `event.preventDefault()`.
+
+The Settings tab bar now implements roving tabindex and WAI-ARIA keyboard navigation, but the no-op edges still let browser defaults run. That can scroll the page or dialog while focus remains inside the tablist, weakening the keyboard contract the change is meant to provide.
+
+**Current behavior:**
+- `ArrowLeft`, `ArrowRight`, `Home`, and `End` are recognized by the tablist key handler.
+- When the computed destination equals the current tab, the handler returns before `preventDefault`.
+- Existing tests cover movement cases, not `Home` on the first tab or `End` on the last tab.
+
+**Proposal:**
+- Call `event.preventDefault()` once a supported key is recognized and the active tab index is valid, before the no-op destination check.
+- Add tests for `Home` on the first tab and `End` on the last tab that assert selection stays put and default is prevented.
+
+## Mermaid demo still contains an unrelated edge-target edit
+
+**Severity:** Note - `docs/mermaid-demo.md` still changes the visible demo graph even though the active work is App adoption, Settings tab keyboard behavior, test hardening, and bug-ledger maintenance.
+
+The current diff changes the Mermaid edge target from `Stop2` to `Stop`. This may be harmless, but the surrounding change set does not explain why the demo fixture should change, and the ledger text says the remaining fixture edit is tracked below even though the active entry had been removed.
+
+**Current behavior:**
+- `docs/mermaid-demo.md` changes `Edit --> Stop2` to `Edit --> Stop`.
+- The graph has no explicit `Stop` node definition in the fixture.
+- The fixture edit is unrelated to the current reviewed behavior changes.
+
+**Proposal:**
+- Revert the fixture edit if it was scratch work.
+- If intentional, add a short note explaining why the demo graph target should change.
+
+## SettingsTabBar keyboard coverage file is untracked
+
+**Severity:** Note - `docs/bugs.md` says `SettingsTabBar.test.tsx` is part of the current fix, but `git status` shows the file as untracked.
+
+Untracked files are easy to omit from a commit or review bundle. If `ui/src/preferences/SettingsTabBar.test.tsx` is not added, the Settings tab keyboard behavior can ship without the intended regression coverage while the bug ledger incorrectly claims the tests landed.
+
+**Current behavior:**
+- `ui/src/preferences/SettingsTabBar.test.tsx` exists as an untracked file.
+- `git diff` does not include the file content.
+- `docs/bugs.md` currently claims the Settings tab keyboard fix includes that test file.
+
+**Proposal:**
+- Add the test file to version control when preparing the patch.
+- If the test is not meant to land yet, keep the Settings tab coverage item active instead of claiming it is fixed.
+
 ## Rendered Markdown commit fallback path can disagree on offsets for CRLF files
 
 **Severity:** Low - `ui/src/panels/markdown-diff-change-section.tsx::326` captures `commit.sourceContent` from the draft's rendered preview — which on a CRLF-on-disk document is the CRLF form (`markdownPreview.after.content`). `ui/src/panels/DiffPanel.tsx::handleRenderedMarkdownSectionCommits` then passes the LF-normalized `sourceContent` to `resolveRenderedMarkdownCommitRange`, whose fallback path calls `mapMarkdownRangeAcrossContentChange(commit.sourceContent, currentContent, ...)` with mismatched line-ending shapes.
@@ -619,23 +755,6 @@ Searching for stored retry notice text such as "response finished" or "Retrying 
 - Keep rendered and searchable text aligned by including the original retry detail in the resolved card.
 - Or update the session-find index to use the same derived display text and add coverage for resolved retry notices.
 
-## Settings tab bar missing WAI-ARIA tablist keyboard pattern
-
-**Severity:** Low - `ui/src/preferences/SettingsTabBar.tsx` renders `role="tablist"` + `role="tab"` but does not implement the WAI-ARIA tab keyboard pattern. Arrow keys, Home, and End do nothing, and every tab is individually reachable via Tab (no roving `tabIndex`), so keyboard-first users cycle through every tab instead of jumping laterally within the tablist.
-
-This is a pre-existing gap — the inline tab-bar JSX the component replaced had the same shape — not a regression introduced by the split. The split just makes it a good moment to address it because the tab bar now lives in one small focused file.
-
-**Current behavior:**
-- Each `<button role="tab">` has default `tabIndex=0`, so `Tab` traversal visits all seven tabs before leaving the tablist.
-- `ArrowLeft` / `ArrowRight` / `Home` / `End` inside the tablist do nothing — the focused tab has no handler.
-- Only click (or `Enter` / `Space` via the native button default) selects a tab.
-
-**Proposal:**
-- Set `tabIndex={isSelected ? 0 : -1}` on each tab button so `Tab` only reaches the active tab.
-- Add an `onKeyDown` on the tablist `<div>` that handles `ArrowLeft` / `ArrowRight` (wrap at ends), `Home` (first tab), and `End` (last tab). On arrow/home/end, call `onSelectTab(next)` and also move DOM focus to the corresponding `<button>` (the caller should re-render with `tabIndex={0}` on the newly-selected tab, which will take focus).
-- Keep `Enter` / `Space` / click unchanged — they already work via native button semantics.
-- Add a Vitest case that renders the component, focuses the active tab, sends ArrowRight, and asserts the next tab is both selected and focused.
-
 ## Session-find active-hit scroll can fight a user who scrolls away
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1724-1761` adds a `useLayoutEffect` that writes `node.scrollTop = activeConversationSearchScrollTop` whenever `activeConversationSearchMessageIndex` or `activeConversationSearchScrollTop` changes. Its deps do not include the user's current `node.scrollTop`, so after the initial scroll-to-hit a later measurement commit that changes `layout.tops[activeIdx]` or `messageHeights[activeIdx]` re-runs the effect and snaps the viewport back to the hit — even if the user has since manually scrolled to inspect context around the match.
@@ -652,22 +771,6 @@ In practice measurement convergence is fast for visible items, but with measurem
 - Or: only run the pin when `activeConversationSearchMessageId` changes — keep a ref of the last handled active id and compare before writing.
 - Move the `shouldKeepBottomAfterLayoutRef.current = false` assignment inside the `Math.abs(...) >= 1` guard so it only fires when the scroll write actually happens.
 - Add a Vitest case: open session find, scroll the viewport away from the active hit, trigger a measurement-height change, and assert `scrollTop` is unchanged.
-
-## Read-only Markdown flash fix lacks load-bearing immediate-state coverage
-
-**Severity:** Low - the read-only rendered-Markdown test verifies the final remounted DOM, but not the transient frame that the current fix was meant to remove.
-
-The production code now avoids assigning `event.currentTarget.textContent = segment.markdown` in the disallowed-input path. That prevents a one-frame raw-source flash before React remounts the rendered Markdown section. The updated test re-queries after remount and proves the final DOM is restored, but it would still pass if the raw-source assignment were reintroduced and then overwritten by the remount.
-
-**Current behavior:**
-- `DiffPanel.test.tsx` waits for the remounted rendered section and asserts the final text is restored.
-- The test does not inspect the contentEditable subtree immediately after the disallowed `input` event.
-- Reintroducing the raw-source assignment could still pass the test while restoring the user-visible flash.
-
-**Proposal:**
-- Add a load-bearing assertion for the immediate post-input DOM state before the remount settles.
-- Or instrument the read-only branch so the test fails if raw Markdown source is written into the contentEditable subtree.
-- Keep the existing final-DOM assertion as the end-state check.
 
 ## Restart detection accepts late responses from old server instances
 
@@ -714,35 +817,6 @@ If no later state mutation sends another `PersistRequest::Delta`, the restored t
 - If the flake is temp-file path collision: switch to `tempfile::tempdir()` with unique per-test directories.
 - If env: add `TEST_HOME_ENV_MUTEX` acquisition and `ScopedEnvVar::remove` isolation to match the Gemini pattern.
 - Document the root cause in the fix commit message so the "why mutex / why tempdir" is visible at review time.
-
-## `adoptCreatedSessionResponse` recovery still opens a fallback workspace pane
-
-**Severity:** Low - the new `created.session.id !== created.sessionId` branch requests a recovery resync, but it still returns `false`. All current call sites interpret `false` as "adoption failed, open `created.sessionId` in the workspace anyway."
-
-For a malformed create/fork response, the session is not inserted into `sessionsRef`, but the workspace fallback can still create a pane for `created.sessionId`. The resync may later remove or repair it, but until then the UI can show a phantom or blank session pane.
-
-**Current behavior:**
-- Mismatch branch calls `requestActionRecoveryResyncRef.current()` and returns `false`.
-- Create/fork call sites open `created.sessionId` on `!adopted`.
-- There is no typed distinction between "not adopted yet" and "recovery in progress; do not trust this id."
-
-**Proposal:**
-- Return a discriminated result such as `adopted | stale | recovering` from `adoptCreatedSessionResponse`.
-- Suppress workspace fallback opening for protocol mismatch/recovery.
-- Add Vitest coverage that a mismatched create response triggers recovery without inserting or opening the mismatched session.
-
-## Remote sync rollback test does not compare full rollback contents
-
-**Severity:** Low (test robustness) - `failed_remote_snapshot_sync_restores_session_tombstones` now checks that rollback restores session IDs, tombstones, session numbering, and orchestrator count, but it does not compare full session records or full orchestrator instance contents.
-
-A future regression could restore the right IDs while leaving mutated session fields, remote metadata, project IDs, or orchestrator payloads behind. The test would still pass even though `RemoteSyncRollback` is intended to restore the complete captured state for the fields it owns.
-
-**Current behavior:**
-- Test asserts session-id membership/count and orchestrator count.
-- It does not assert full `SessionRecord` or `OrchestratorInstance` equality/content.
-
-**Proposal:**
-- Compare the full captured session records and orchestrator instances after rollback, or at least compare full `Session` values plus remote metadata and complete orchestrator instance contents.
 
 ## Server restart without browser refresh can lose the last streamed message
 
@@ -946,16 +1020,6 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   path (full replace of the component), so a new dedicated
   Monaco test file with a minimal real-Monaco harness + stubbed
   ResizeObserver would close this gap.
-- [ ] P2: Make the read-only rendered-Markdown flash test
-  load-bearing:
-  `DiffPanel.test.tsx` now re-queries after the
-  `readOnlyResetVersion` remount and proves the final rendered DOM
-  is restored, but that would still pass if
-  `event.currentTarget.textContent = segment.markdown` were
-  reintroduced and then overwritten by the remount. Add an
-  immediate post-input assertion, or a small test hook around the
-  read-only branch, so writing raw Markdown source into the
-  contentEditable subtree fails the test before the remount settles.
 - [ ] P2: Broaden `handleApplyDiffEditsToDiskVersion` rendered-
   Markdown commit coverage beyond the empty-commits path:
   `DiffPanel.test.tsx::"keeps apply-to-disk-version flowing when
@@ -1700,6 +1764,37 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   future edit that throws during installation could leak globals. Move the
   mock installation inside the `try` so `finally` always runs against the
   saved originals.
+- [ ] P2: Pin the `adoptCreatedSessionResponse` "recovering"
+  outcome:
+  the three-way discriminated outcome (`"adopted" | "stale" |
+  "recovering"`) replaces a boolean return so the three call
+  sites in `App.tsx` can suppress the workspace-pane fallback
+  for the wire-contract-mismatch branch. The TypeScript
+  compiler enforces the discrimination, but no test exercises
+  the `"recovering"` path end-to-end. A Vitest case should
+  mock `api.createSession` to resolve with a mismatched
+  response (`created.session.id !== created.sessionId`),
+  submit the create-session dialog, and assert (a) no
+  workspace pane opens for the mismatched id, (b)
+  `api.fetchState` fires (the action-recovery resync), and
+  (c) `sessionsRef` is unchanged. Pair with a "stale"
+  scenario (earlier delta already bumped revision past the
+  POST response) to confirm the fallback still runs in that
+  case.
+- [ ] P2: Pin `"stale"` create-response fallback safety:
+  `adoptCreatedSessionResponse` now treats `"stale"` as safe to
+  open, but a stale revision can come from unrelated
+  single-session hydration that did not insert `created.sessionId`
+  into `sessionsRef`. Add a Vitest case that advances
+  `latestStateRevisionRef` without adopting the created session,
+  returns an older create response, and asserts the workspace
+  fallback does not open a pane unless `sessionsRef` already
+  contains the session id.
+- [ ] P2: Pin no-op Settings tab Home/End keyboard handling:
+  `SettingsTabBar.tsx` covers roving tabindex and movement keys,
+  but the no-op edges (`Home` on the first tab, `End` on the last
+  tab) need tests proving the handler still prevents browser
+  defaults while leaving selection and focus unchanged.
 - [ ] P2: Pin the `fetchSession` 404 → silent resync branch
   (`ui/src/App.tsx:1627`):
   the hydration effect's catch block now routes
