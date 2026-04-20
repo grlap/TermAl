@@ -85,13 +85,24 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
         let next_commands = dedupe_agent_commands(agent_commands);
+        // Read-only check first: if the commands haven't changed,
+        // return without bumping the mutation stamp. Using
+        // `session_mut_by_index` up-front would mark this session
+        // dirty on every duplicate announce, forcing
+        // `collect_persist_delta` to re-serialize its row for no
+        // real change.
+        if inner
+            .session_by_index(index)
+            .expect("session index should be valid")
+            .agent_commands
+            == next_commands
+        {
+            return Ok(());
+        }
         let should_publish = {
             let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-            if record.agent_commands == next_commands {
-                return Ok(());
-            }
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
             record.agent_commands = next_commands;
             if record.hidden {
                 false
@@ -123,15 +134,28 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        // Read-only check before the stamp bump: exit on the
+        // no-op path (agent doesn't support cursor mode, or the
+        // mode already matches) without marking the session
+        // dirty. `session_mut_by_index` would advance the
+        // mutation stamp permanently, forcing
+        // `collect_persist_delta` to re-serialize the session
+        // row on the next tick for no real change.
+        {
+            let record = inner
+                .session_by_index(index)
+                .expect("session index should be valid");
+            if !record.session.agent.supports_cursor_mode()
+                || record.session.cursor_mode == Some(cursor_mode)
+            {
+                return Ok(());
+            }
+        }
+        // A mutation is required — re-borrow mutably to take a
+        // fresh stamp.
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
-        if !record.session.agent.supports_cursor_mode()
-            || record.session.cursor_mode == Some(cursor_mode)
-        {
-            return Ok(());
-        }
-
         record.session.cursor_mode = Some(cursor_mode);
         self.commit_locked(&mut inner)?;
         Ok(())

@@ -317,6 +317,26 @@ impl StateInner {
         Some(record)
     }
 
+    /// Read-only indexed access, the mirror of
+    /// [`Self::session_mut_by_index`] without the stamp bump.
+    ///
+    /// Use when a caller needs to inspect a field (e.g. compare an
+    /// incoming value to the current one and return early on no
+    /// change) before deciding whether to mutate. The `session_mut*`
+    /// helpers stamp eagerly — they hand out a `&mut` borrow and
+    /// can't know whether the caller will actually change anything
+    /// — so a check-then-early-return caller using `session_mut*`
+    /// permanently marks the session dirty and forces
+    /// `collect_persist_delta` to re-serialize its row on the next
+    /// tick. Reading through this helper first keeps the stamp
+    /// unchanged on the no-op path. Callers that decide to mutate
+    /// after the read should re-borrow via `session_mut_by_index`
+    /// to pick up a fresh stamp.
+    #[cfg_attr(test, allow(dead_code))]
+    fn session_by_index(&self, index: usize) -> Option<&SessionRecord> {
+        self.sessions.get(index)
+    }
+
     /// Like [`StateInner::session_mut`] but indexed directly. Returns
     /// `None` for out-of-bounds indices without advancing
     /// `last_mutation_stamp`. Callers should still obtain the index via

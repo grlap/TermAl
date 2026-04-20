@@ -303,15 +303,36 @@ impl AppState {
                 let Some(session_index) = inner.find_session_index(session_id) else {
                     continue;
                 };
-                let queued_prompt_count = inner.sessions[session_index].queued_prompts.len();
+                // Read-only pre-check: skip the stamp bump on
+                // sessions that have no orchestrator-sourced
+                // prompts to clear. `session_mut_by_index` would
+                // mark the session dirty via the mutation stamp
+                // even if `clear_stopped_orchestrator_queued_prompts`
+                // no-oped, forcing `collect_persist_delta` to
+                // re-serialize the row for no real change. Route
+                // through `session_by_index` (rather than the
+                // direct `inner.sessions[…]` index) for
+                // consistency with the sibling read-first
+                // callers in `session_sync.rs`.
+                let has_orchestrator_prompt = inner
+                    .session_by_index(session_index)
+                    .expect("session index should be valid")
+                    .queued_prompts
+                    .iter()
+                    .any(|queued| queued.source == QueuedPromptSource::Orchestrator);
+                if !has_orchestrator_prompt {
+                    continue;
+                }
                 clear_stopped_orchestrator_queued_prompts(
                     inner
                         .session_mut_by_index(session_index)
                         .expect("session index should be valid"),
                 );
-                if inner.sessions[session_index].queued_prompts.len() != queued_prompt_count {
-                    changed = true;
-                }
+                // `clear_stopped_orchestrator_queued_prompts`
+                // always removes at least one prompt on this
+                // branch (pre-check established the source was
+                // present), so the session is genuinely dirty.
+                changed = true;
             }
 
             if changed {
