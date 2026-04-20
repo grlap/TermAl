@@ -220,6 +220,56 @@ impl AppState {
         }
     }
 
+    /// Publishes a `SessionCreated` delta for the remote-proxy
+    /// session-upsert paths iff the upsert actually changed the
+    /// local record.
+    ///
+    /// `remote_create_proxies.rs` and `remote_codex_proxies.rs`
+    /// both run the same post-lock-drop flow: call
+    /// `ensure_remote_proxy_session_record`, observe a `changed`
+    /// boolean, and emit a `SessionCreated` delta only when that
+    /// boolean is true. Emitting the delta unconditionally would
+    /// be protocol-smell — the client silently drops same-revision
+    /// deltas via `decideDeltaRevisionAction`, but advertising a
+    /// mutation that did not happen leaks a subtle drift risk when
+    /// two remote-proxy call sites start to diverge (e.g., one
+    /// adds a new delta variant and the other misses it).
+    ///
+    /// Routing both sites through this helper keeps the
+    /// "announce only when the record actually changed"
+    /// invariant in one place. Takes `local_session: &Session`
+    /// rather than by value so callers can still move the owned
+    /// `Session` into their `CreateSessionResponse` afterwards
+    /// without an extra clone outside the `if changed` branch.
+    ///
+    /// Deliberately NOT used by
+    /// `remote_routes.rs::apply_remote_delta_event`. That path
+    /// forwards an inbound `SessionCreated` delta from a remote
+    /// TermAl where the revision bump has already happened on
+    /// the source. The inbound side's
+    /// `should_skip_remote_applied_delta_revision` guard already
+    /// filters true revision duplicates; gating THAT site on
+    /// local-record `changed` would silence legitimate re-
+    /// broadcasts (e.g., a duplicate apply whose local mirror
+    /// was already in sync) and break chained-remote topologies
+    /// where downstream clients have not yet seen the delta via
+    /// any other path. Different semantic layer, different gate.
+    fn announce_remote_session_created_if_changed(
+        &self,
+        changed: bool,
+        revision: u64,
+        local_session: &Session,
+    ) {
+        if !changed {
+            return;
+        }
+        self.publish_delta(&DeltaEvent::SessionCreated {
+            revision,
+            session_id: local_session.id.clone(),
+            session: local_session.clone(),
+        });
+    }
+
     /// Broadcasts a batch of file-change events on the `file_events`
     /// channel and also records them against the currently active
     /// turn (if any) via [`Self::record_active_turn_file_changes`].

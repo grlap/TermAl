@@ -200,14 +200,10 @@ impl AppState {
         // it advertises a mutation that did not happen. The returned
         // `session` + `revision` already reflect the bridge-mirrored
         // state the caller needs; peer clients are already in sync via
-        // the earlier SSE delta that advanced `inner.revision`.
-        if changed {
-            self.publish_delta(&DeltaEvent::SessionCreated {
-                revision,
-                session_id: local_session.id.clone(),
-                session: local_session.clone(),
-            });
-        }
+        // the earlier SSE delta that advanced `inner.revision`. Shared
+        // with `remote_codex_proxies.rs::proxy_remote_fork_codex_thread`
+        // via the helper below.
+        self.announce_remote_session_created_if_changed(changed, revision, &local_session);
 
         Ok(CreateSessionResponse {
             session_id: local_session_id,

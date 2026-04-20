@@ -104,17 +104,11 @@ impl AppState {
             };
             (revision, local_session_id, local_session, changed)
         };
-        // Skip the SSE announcement on the no-change branch. See the
-        // identical comment in `remote_create_proxies.rs` for the
-        // rationale — emitting a same-revision `SessionCreated` is
-        // protocol-smell and the client silently drops it anyway.
-        if changed {
-            self.publish_delta(&DeltaEvent::SessionCreated {
-                revision,
-                session_id: local_session.id.clone(),
-                session: local_session.clone(),
-            });
-        }
+        // Skip the SSE announcement on the no-change branch — see
+        // the shared rationale on
+        // [`AppState::announce_remote_session_created_if_changed`]
+        // and its invocation from `remote_create_proxies.rs`.
+        self.announce_remote_session_created_if_changed(changed, revision, &local_session);
 
         Ok(CreateSessionResponse {
             session_id: local_session_id,
