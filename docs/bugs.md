@@ -48,6 +48,113 @@ pairs feeds Markdown like `[click me](javascript:alert(1))` through the full
 render pipeline and asserts no `<a>` role, no `href="javascript:void(0)"`,
 and the link text still renders as plain content.
 
+Also fixed in the current tree: React dep-array hygiene across
+three hot effects + timers. (1) `App.tsx`'s session-hydration
+`useEffect` dropped `activeSession?.messages.length` from its
+deps — the body reads only `activeSession?.id` and
+`activeSession?.messagesLoaded`, so streaming tokens no longer
+re-trigger the effect just to hit the "already hydrated /
+already hydrating" early-returns. (2) `message-cards.tsx`'s
+Markdown line-marker `useEffect` dropped `documentPath`,
+`hasOpenSourceLink`, `workspaceRoot` from its deps — those
+affect the `<a>` renderer (href resolution, click handlers), not
+the `[data-markdown-line-start]` attributes the ResizeObserver
+re-queries. Tearing down + rebuilding the observer on unrelated
+context changes is now avoided. (3) `active-prompt-poll.ts`'s
+belt-and-suspenders hard-cap `setTimeout` is now cleared when
+the chain self-stops via `shouldStop` / deadline-lapsed (not
+just via external `cancel()`). Extracted a shared `stopPoll()`
+helper that clears BOTH the chained and hard-cap timers and is
+called from every self-stop site; previously a completed prompt
+left a pending timer slot for up to 5 minutes. New co-located
+test in `active-prompt-poll.test.ts` uses `vi.getTimerCount()`
+to verify zero pending timers after a `shouldStop` exit —
+verified load-bearing by temporarily dropping the shared
+`stopPoll()` call from the `shouldStop` branch and watching the
+test fail.
+
+Also fixed in the current tree: the narrower startup hard-cap
+timer edge in `startActivePromptPoll` is now guarded too. The
+first synchronous `schedule()` call can self-stop before
+`hardCapTimerId` has been assigned, so the post-`schedule()`
+hard-cap setup now checks `!stopped` before arming the timer.
+`active-prompt-poll.test.ts` covers the `isMounted: () => false`
+startup path and asserts `vi.getTimerCount()` stays at zero.
+
+Investigated and closed (not the claimed bug): the "`MessageCard`
+default-prop inline arrows defeat memoization" entry was based
+on a misdiagnosis. React's `memo` comparator receives the RAW
+props object as passed by the parent, NOT the destructured
+values — so an optional prop the parent omits reads as
+`undefined` on both `prev` and `next` and passes the `===`
+identity check cleanly without any help from stable defaults.
+Verified empirically by temporarily reverting the "fix" and
+watching the regression test still pass.
+
+Also improved (on code-quality grounds, not a correctness fix):
+the two no-op defaults on `MessageCard` (`onMcpElicitationSubmit`,
+`onCodexAppRequestSubmit`) are now hoisted to module-scope
+constants (`NOOP_MCP_ELICITATION_SUBMIT`,
+`NOOP_CODEX_APP_REQUEST_SUBMIT`) in `ui/src/message-cards.tsx`
+— named defaults, reusable across future call sites, one fewer
+arrow allocation per render. Paired with a co-located test
+(`MarkdownContent.test.tsx::"skips re-rendering when a parent
+re-renders with identical props and no optional callbacks"`)
+that counts `parseConnectionRetryNotice` invocations across a
+rerender to prove the memo DOES hit for the omitted-optional
+case — a forward-looking regression guard for the memo
+comparator itself (e.g., a future change that forgets to
+compare a new prop) rather than for the cosmetic cleanup
+itself.
+
+Also fixed in the current tree: inline-zone id stability is now
+directly exercised. Four new Vitest cases in
+`ui/src/panels/SourcePanel.test.tsx::"inline-zone id stability"`
+pin the current contract across Markdown-fence and `.mmd`
+whole-file ids — same-span-and-body → stable, body-edit →
+flipped, insert-above → flipped today (the latent gap is
+tracked separately as an active bug entry with fix proposals),
+`.mmd` any-edit → flipped (intentional whole-file hashing).
+
+Also fixed in the current tree: MonacoCodeEditor's inline-zone
+`ResizeObserver` no longer disconnects and rebuilds on every
+keystroke. Previously the observer's `useEffect` depended on
+`inlineZoneHostState`, which the `[inlineZones]` effect rewrites
+with a fresh array on every prop change (and `inlineZones` itself
+is rebuilt on every keystroke via `SourcePanel`'s
+`renderableRegions` memo, whose deps include `editorValue`). The
+observer was then torn down and re-built on every keystroke —
+correctness-preserving (diagram DOM survived via stable ids +
+portal key), but wasteful at O(zones) per keystroke. The fix
+extracts `computeInlineZoneStructureKey(hosts): string` — a pure
+function that joins the hosts' ids with `\n` — and depends the
+observer effect on that string instead. Same ids in the same
+order → same string → `Object.is` passes → effect body is
+skipped. Any zone added, removed, or re-hashed (the
+`mermaid:start:end:hash` / `mermaid-file:hash` id format in
+`source-renderers.ts` bakes a content hash into the id) flips the
+key and correctly rebuilds the observer. The portal-render path
+still writes `setInlineZoneHostState` unconditionally so
+appearance / workspaceRoot changes flow through to fresh
+`zone.render()` closures — only the observer is de-churned.
+Unit coverage in `ui/src/MonacoCodeEditor.test.ts` pins the
+key-derivation contract: structural equality in → equal strings
+out (verified via `Object.is`), empty handled, add / remove /
+reorder / id-change all flip the key.
+
+Also fixed in the current tree: the Monaco inline-zone helper
+coverage file is now part of the change set instead of an
+untracked local file. The `ui/src/MonacoCodeEditor.test.ts`
+coverage claim above now matches the files that will ship with
+the Monaco observer-key change, rather than depending on a
+forgotten working-tree-only test.
+
+Also fixed in the current tree: the generated Vitest cache file
+is no longer dirty in the working tree. `git status --short`
+does not show the prior
+`node_modules/.vite/vitest/.../results.json` metadata change, so
+the active tracker entry was stale and has been removed.
+
 Also fixed in the current tree: MonacoCodeEditor inline-zone
 portal children are now wrapped in an `InlineZoneErrorBoundary`
 class component. A throw inside the zone's `render()` callback —
@@ -160,6 +267,21 @@ detection (pure LF, pure CRLF, mixed CRLF/LF dominant, ties → LF, bare
 `\r` legacy Mac ignored) and application (empty strings, LF identity,
 CRLF expansion, round-trip invariant) contracts.
 
+## Monaco inline-zone structure-key comment points at a removed bug heading
+
+**Severity:** Low - a new source comment documents the inline-zone observer invariant by pointing at a `docs/bugs.md` issue title that the same change moves out of the active bug list.
+
+The `computeInlineZoneStructureKey` comment in `MonacoCodeEditor.tsx` correctly explains why the `ResizeObserver` should depend on a derived zone-id structure key instead of the fresh `inlineZoneHostState` array. The problem is the cross-reference: it names the active bug heading that was resolved and removed from the active section, so future readers can follow the pointer and fail to find the referenced section.
+
+**Current behavior:**
+- `MonacoCodeEditor.tsx` references the old `docs/bugs.md` heading for the inline-zone observer churn bug.
+- The reviewed `docs/bugs.md` change moves that issue into the fixed preamble instead of keeping it as an active heading.
+- The local invariant explanation remains useful, but the issue-title reference is brittle.
+
+**Proposal:**
+- Keep the source comment's invariant explanation.
+- Remove the direct `docs/bugs.md` issue-title reference, or reword it as a historical note that does not depend on an active bug heading.
+
 ## DiffPanel conflict-gate comment points at a removed bug heading
 
 **Severity:** Low - a new source comment documents an important rendered-Markdown commit invariant by pointing at a `docs/bugs.md` issue title that the same change moves out of the active bug list.
@@ -177,9 +299,9 @@ The `commitRenderedMarkdownDrafts` comment in `DiffPanel.tsx` correctly explains
 
 ## Demo Markdown files contain unrelated scratch edits
 
-**Severity:** Note - visual demo fixtures have small content edits that appear unrelated to the DiffPanel behavior fixes and bug-tracker update.
+**Severity:** Note - visual demo fixtures have small content edits that appear unrelated to the active behavior fixes and bug-tracker updates.
 
-`docs/math-demo.md` and `docs/mermaid-demo.md` are demo/smoke-test fixtures for rendered Markdown behavior. The current diff changes their visible content, but the rest of the change set is focused on staged rendered-diff fallback behavior and rendered-Markdown apply-to-disk conflict handling.
+`docs/math-demo.md` and `docs/mermaid-demo.md` are demo/smoke-test fixtures for rendered Markdown behavior. The current diff changes their visible content, but the rest of the change set is focused on editor/runtime behavior and bug-tracker maintenance rather than intentional fixture updates.
 
 **Current behavior:**
 - `docs/math-demo.md` changes the heading from `Math Demo` to `Math Demo2`.
@@ -223,20 +345,6 @@ That is the right shape for the current fix, but it is not an exact round-trip f
 **Proposal:**
 - Reword the helper comments to say they preserve the detected or dominant document EOL convention.
 - Explicitly document that mixed-EOL documents are normalized to the detected style unless future work tracks per-line newline markers.
-
-## Generated Vitest cache is dirty in the working tree
-
-**Severity:** Note - local test-run metadata from `node_modules/.vite/vitest` is present in the unstaged diff and can add noise or accidental commits.
-
-The current working tree includes a modified Vite/Vitest results cache file. It records local test status and timing metadata, not source behavior, so it should not travel with the rendered-Markdown CRLF fix.
-
-**Current behavior:**
-- `node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json` appears in the unstaged changes.
-- The file contains generated local test cache metadata.
-
-**Proposal:**
-- Do not stage or commit the generated cache file with source changes.
-- If this path is tracked by git, remove it from version control and keep the Vite/Vitest cache ignored.
 
 ## Conversation cards overlap for one frame during scroll through long messages
 
@@ -316,21 +424,6 @@ The App-owned handlers also gate dismissal on `!isCreating` and `!isCreatingProj
 - Add App-level tests for create-session and create-project backdrop mousedown behavior: primary closes when not creating; middle/right/macOS Ctrl-click do not.
 - If practical in the existing harness, also assert the creating-state guard leaves the dialog open when the action is pending.
 
-## `setInlineZoneHostState` writes fresh state on every keystroke
-
-**Severity:** Medium - `ui/src/MonacoCodeEditor.tsx:354-361` calls `setInlineZoneHostState` with a fresh array on every `inlineZones` prop change. Since `SourcePanel` rebuilds `inlineZones` on every keystroke (the `renderableRegions` memo depends on `editorValue`), the zone-host state is written unconditionally even when the zone set is structurally unchanged.
-
-This cascades through the ResizeObserver effect (whose dep is `inlineZoneHostState`), disconnecting and reconnecting the observer on every keystroke. The diagram DOM survives via stable zone ids + portal key, so correctness is intact — but the per-keystroke work is O(zones) observer setup + O(zones) re-observe calls.
-
-**Current behavior:**
-- `useEffect([inlineZones])` writes `setInlineZoneHostState(fresh-array)` every time `inlineZones` identity changes (every keystroke).
-- The `[inlineZoneHostState]` observer effect disconnects and re-creates the ResizeObserver on every re-render.
-- Symptom-free today; performance degrades linearly with zone count.
-
-**Proposal:**
-- Shallow-compare the new zone set against the current state before calling `setInlineZoneHostState` (same ids in same order + same inner-node refs → no-op).
-- Or move the ResizeObserver setup into the zone-registry effect, observing/unobserving specific nodes incrementally rather than recreating the observer.
-
 ## Rendered Markdown diff view cannot jump between changes
 
 **Severity:** Medium - regular file diffs expose previous/next change navigation, but the rendered Markdown diff view does not, so reviewing a long Markdown document requires manual scrolling and visual scanning.
@@ -348,17 +441,22 @@ This is especially noticeable because the same diff tab already has change navig
 - Keep per-view scroll position stable when jumping or switching between Monaco and rendered Markdown diff views.
 - Add coverage that rendered Markdown diff mode focuses/scrolls to the next and previous changed section without leaving the rendered view.
 
-## Inline-zone id stability not exercised by tests
+## Inline-zone id is line-number-dependent, reinitialises Mermaid diagrams on every edit above the fence
 
-**Severity:** Medium - the mock in `ui/src/panels/SourcePanel.test.tsx:32-34` exposes a `data-inline-zone-ids` attribute (comma-joined zone ids) but no test asserts against it. The whole point of stable ids is that the portal DOM node survives keystrokes outside the fence — Mermaid iframe stays initialized, KaTeX output isn't re-parsed. But nothing pins that contract. A regression that re-hashes the id on every call would pass all current tests.
+**Severity:** Medium - `ui/src/source-renderers.ts::detectMarkdownRegions` builds each Mermaid fence region's id as `mermaid:${fence.startLine}:${fence.endLine}:${quickHash(fence.body)}`. `startLine` and `endLine` are 1-based ABSOLUTE line numbers in the source buffer, so inserting any line above the fence shifts both — and the id flips. The `MonacoCodeEditor` portal is keyed on the zone id (see `MonacoCodeEditor.tsx:~718-730`); when the id flips, the portal unmounts and remounts, which tears down the Mermaid iframe and reinitialises it from scratch. Every keystroke in the heading / paragraphs above a Mermaid fence triggers this reinitialisation, producing a visible flicker on slow machines and wasting GPU cycles on fast ones.
+
+The intent of the stable id was exactly the opposite — keep the diagram DOM alive across keystrokes outside the fence. A new test pinned the contract as it exists today (`SourcePanel.test.tsx::"inline-zone id stability" → "changes the zone id when lines are inserted above the fence (latent stability gap)"`) so a future fix has a clear assertion to flip from `.not.toBe` to `.toBe`.
 
 **Current behavior:**
-- Mock surfaces the attribute; tests assert `data-inline-zone-count` and `data-inline-zone-first-after-line` only.
-- Particularly relevant because `detectWholeFileMermaidRegion` hashes the entire content (`mermaid-file:${quickHash(context.content)}`), so `.mmd` file ids WILL change on edits — the stability contract only applies to Markdown files with fence-scoped ids.
+- Id format: `mermaid:${startLine}:${endLine}:${hash(body)}`.
+- Inserting a line above the fence shifts `startLine` → id changes → portal remounts → Mermaid reinitialises.
+- Typing inside the fence body changes the hash → id changes → portal remounts (correct — the diagram source changed).
+- Editing below the fence (or in-place edits above without line-count changes) preserves startLine/endLine/body → id stable (correct).
 
 **Proposal:**
-- Add a Vitest case: capture `data-inline-zone-ids` before an edit, type a line above the fence (outside all regions) in a Markdown file with a Mermaid fence, assert the first zone's id is unchanged.
-- Document the `.mmd` file exception explicitly (whole-file regions hash the whole content, so ids do shift on any edit).
+- **Primary**: drop `startLine`/`endLine` from the id and use `mermaid:${hash(body)}` alone. This preserves id stability under line shifts. The id must stay globally unique per file (the portal-key dedupe via `new Set(inlineZones.map((zone) => zone.id))` in `MonacoCodeEditor.tsx::zone-sync effect` collapses collisions into one entry, so non-unique ids would lose zones), which means a tiebreaker is needed ONLY when two fences collide on body hash. Tiebreaker rule: within a file, take the ordinal position of this fence among all fences that share its body hash, in document order (i.e., `mermaid:0:${hash}` for the first fence with this body, `mermaid:1:${hash}` for the second, etc.). Collisions are rare in practice; when they do happen, reordering two identical-body fences remounts both — semantically a no-op because identical bodies render identical diagrams.
+- **Simpler but coarser alternative**: use `mermaid:${fenceOrdinal}:${hash}` where `fenceOrdinal` is the position among ALL Mermaid fences in the file (not just ones with the same body). This re-introduces a structural-remount problem the primary proposal avoids — inserting a new Mermaid fence BEFORE an existing one re-indexes every downstream fence and remounts them all. Listed for completeness; prefer the primary proposal.
+- Flip the assertion in the test from `.not.toBe(idsBeforeEdit)` to `.toBe(idsBeforeEdit)` when the fix lands. Update the describe-header comment too — drop the "latent stability gap" paragraph once case (c) passes as "id stable".
 
 ## Retry notice liveness ignores session lifecycle and retry sequencing
 
@@ -515,19 +613,6 @@ Only the `uses an injectable now()` test at line 394 actually isolates line 125 
 - Extract `AppState::announce_session_created_if_changed(&self, changed: bool, revision: u64, local_session: &Session)` (or a similar signature) that encapsulates the `if changed { publish_delta(&DeltaEvent::SessionCreated { ... }) }` block.
 - Both proxy paths call it. Single source of truth, compile-visible enforcement of the invariant.
 
-## `startActivePromptPoll` leaves hard-cap timer pending after natural onState stop
-
-**Severity:** Low - when the chained poll stops naturally because `onState` returns `true` (session becomes idle), the chained timer is not re-armed but the belt-and-suspenders `hardCapTimerId` setTimeout stays pending for up to 5 minutes until its callback fires harmlessly. Minor timer churn on fast-turn workflows; not a memory leak since the callback eventually clears itself.
-
-**Current behavior:**
-- `onState` returning `true` hits the `if (shouldStop) return;` branch in the chained-setTimeout async callback.
-- That branch does not clear `hardCapTimerId`; the timer stays armed until the cap elapses.
-- Many fast-turn prompt cycles accumulate dangling 5-minute timers in the JS runtime (each firing an empty cancel).
-
-**Proposal:**
-- When `onState` returns `true`, clear `hardCapTimerId` as well — either call the internal cancel body inline, or extract a `stopAndClear()` helper shared by the natural-stop path and the returned `cancel` function.
-- Add a Vitest case that exercises the natural-stop path and asserts `vi.getTimerCount()` drops to zero after `onState` returns `true`.
-
 ## `shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime` test flake
 
 **Severity:** Low - `tests::shared_codex::shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime` was observed failing intermittently during batched `cargo test --bin termal` runs. Passes when re-run in isolation. The two Gemini-auth siblings (`select_acp_auth_method_ignores_workspace_dotenv_credentials` and `gemini_dotenv_env_pairs_ignore_workspace_env_files`) were fixed by acquiring `TEST_HOME_ENV_MUTEX` and isolating HOME + Gemini/Google env vars; verified via 5 consecutive green `cargo test --bin termal` runs. The shared-codex test did not surface in those 5 runs, so either (a) it is much rarer than the Gemini one, (b) it was indirectly fixed by an unrelated change, or (c) it is still broken but the window is too narrow to hit.
@@ -635,33 +720,6 @@ At `src/api.rs:2797`, the diff dropped the `-l` flag. `sh -c` runs in non-login 
 **Proposal:**
 - Restore `sh -lc` unless there is a documented reason (e.g., the login-shell init was measurably slow and intentionally removed).
 - If the removal was intentional, add a comment explaining why and document the expectation that `PATH` must be set at the parent-process level.
-
-## `MessageCard` default-prop inline arrows defeat memoization
-
-**Severity:** Low - two optional callback props default to fresh inline arrow functions, so the new strict `===` memo comparator will always report them as different when the parent omits them, forcing a re-render on every parent render.
-
-`MessageCard` destructures `onMcpElicitationSubmit = () => {}` and `onCodexAppRequestSubmit = () => {}` at `ui/src/message-cards.tsx:105-117`. Each parent render allocates a new default function. The comparator added at lines 327-328 compares these with `===` and always fails on the optional-and-omitted case.
-
-**Current behavior:**
-- Parent renders a `MessageCard` without the two optional callbacks.
-- Each render, a fresh default arrow is passed.
-- Comparator sees a "changed" prop and re-renders, even when nothing the user sees has changed.
-
-**Proposal:**
-- Hoist the two no-op defaults to module scope for stable identity, or drop them from the comparator when the parent can guarantee they are always passed.
-
-## React dep-array hygiene: stale-or-extraneous deps across three hot effects
-
-**Severity:** Low - three `useEffect` hooks over-list deps that either re-trigger the effect for no behavioral reason (wasting work) or cause observer churn. Minor perf only; no correctness impact.
-
-- `ui/src/App.tsx:2203-2207` — hydration effect lists `activeSession?.messages.length` in deps; body only reads `activeSession?.id` and `activeSession?.messagesLoaded`. Every streamed token reruns the effect and early-returns.
-- `ui/src/message-cards.tsx:2854` — Markdown line-marker `useEffect` was extended to include `documentPath`, `hasOpenSourceLink`, `workspaceRoot` in deps. The body reads none of them; only `showLineNumbers` and the `markdownRootRef` DOM. Triggers `ResizeObserver` tear-down + rebuild on unrelated context changes.
-- `ui/src/App.tsx:4734-4737` — the 5-minute hard-cap `setTimeout` is not cleared when the poll chain exits because the session left "active" status. The handler no-ops, so it is not a leak — just a pending timer slot held for up to 5 minutes per completed prompt.
-
-**Proposal:**
-- Drop `activeSession?.messages.length` from the hydration effect deps.
-- Drop `documentPath`, `hasOpenSourceLink`, `workspaceRoot` from the line-marker effect deps.
-- In the early-return branch of the safety-net poll, clear `activePromptPollTimeoutRef.current` alongside the chain ref.
 
 ## Read-only Markdown input flashes plain source for a frame
 
@@ -871,6 +929,28 @@ The new hydration effect's error path calls `reportRequestError(error)` on any `
 
 ## Implementation Tasks
 
+- [ ] P2: Add integration coverage for the inline-zone
+  `ResizeObserver` stability fix:
+  `MonacoCodeEditor.test.ts` pins the pure
+  `computeInlineZoneStructureKey` contract (same ids → same
+  string, verified via `Object.is`; add/remove/reorder/id-change
+  all flip the key), but those tests would all still pass if
+  someone reverted the observer `useEffect`'s dep from
+  `[inlineZoneStructureKey]` back to `[inlineZoneHostState]` —
+  the helper is unchanged, only its caller is wrong. The
+  genuine regression this fix prevents is "observer
+  disconnects and rebuilds on every keystroke", which needs a
+  MonacoCodeEditor-level test that either (a) renders the
+  component with a stubbed `ResizeObserver` and verifies
+  `disconnect` / `new ResizeObserver` aren't called across a
+  burst of keystrokes with the same zone set, or (b) extracts
+  the observer body into a testable hook that can be driven
+  without mounting Monaco. Option (a) is cheaper — the existing
+  MonacoCodeEditor mocks in `App.test.tsx` /
+  `DiffPanel.test.tsx` / `SourcePanel.test.tsx` take a different
+  path (full replace of the component), so a new dedicated
+  Monaco test file with a minimal real-Monaco harness + stubbed
+  ResizeObserver would close this gap.
 - [ ] P2: Broaden `handleApplyDiffEditsToDiskVersion` rendered-
   Markdown commit coverage beyond the empty-commits path:
   `DiffPanel.test.tsx::"keeps apply-to-disk-version flowing when

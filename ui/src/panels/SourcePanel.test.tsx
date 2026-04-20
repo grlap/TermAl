@@ -560,6 +560,263 @@ describe("SourcePanel", () => {
     expect(await screen.findByRole("button", { name: "Preview" })).toBeInTheDocument();
   });
 
+  // Inline-zone id stability contract (what this block pins):
+  //
+  // - For a Markdown file with a fenced Mermaid block, the id is
+  //   `mermaid:${startLine}:${endLine}:${quickHash(fence.body)}`
+  //   (see `ui/src/source-renderers.ts::detectMarkdownRegions`).
+  //   So the id is stable IFF the fence's start line, end line,
+  //   AND body are all unchanged. The portal key in
+  //   `MonacoCodeEditor` uses the id, so stability here is what
+  //   keeps the Mermaid iframe DOM alive across keystrokes
+  //   (without it, the iframe reinitialises every time).
+  //
+  // - For a dedicated `.mmd` file, the id is
+  //   `mermaid-file:${quickHash(context.content)}` — the WHOLE
+  //   file content is hashed, so any edit flips the id and the
+  //   diagram DOM is recreated. This is an intentional trade-off
+  //   documented in the code; we pin it here so a future
+  //   refactor doesn't silently drop the exception.
+  //
+  // - Typing a line ABOVE the fence shifts `startLine` and
+  //   flips the id today. That's a latent stability gap
+  //   separate from this test-coverage bug; it's tracked as a
+  //   new entry in `docs/bugs.md`. Until that's fixed, we pin
+  //   the current (gap-bearing) behaviour here so a fix has a
+  //   clear place to flip the assertion.
+  describe("inline-zone id stability", () => {
+    it("keeps the zone id stable when the fence's line span and body are unchanged", async () => {
+      render(
+        <SourcePanel
+          editorAppearance={editorAppearance}
+          editorFontSizePx={14}
+          fileState={{
+            ...readyFileState,
+            path: "/repo/docs/diagram.md",
+            content: [
+              "# Title",
+              "",
+              "```mermaid",
+              "flowchart TD",
+              "  A --> B",
+              "```",
+              "",
+              "Footer.",
+            ].join("\n"),
+            language: "markdown",
+          }}
+          sourcePath="/repo/docs/diagram.md"
+          onSaveFile={vi.fn()}
+        />,
+      );
+
+      const editor = await screen.findByLabelText(
+        "Source editor for /repo/docs/diagram.md",
+      );
+      expect(editor).toHaveAttribute("data-inline-zone-count", "1");
+      const idsBeforeEdit = editor.getAttribute("data-inline-zone-ids");
+      expect(idsBeforeEdit).toBeTruthy();
+
+      // In-place footer rewrite — no line-count change above the
+      // fence, no fence-body change. `startLine` / `endLine` /
+      // body all unchanged → id stable.
+      fireEvent.change(editor, {
+        target: {
+          value: [
+            "# Title",
+            "",
+            "```mermaid",
+            "flowchart TD",
+            "  A --> B",
+            "```",
+            "",
+            "Footer edited.",
+          ].join("\n"),
+        },
+      });
+
+      await waitFor(() => {
+        // Wait for the edit to propagate: the editor value prop
+        // should reflect the new content. Use this as a
+        // synchronization point rather than asserting the id
+        // directly (which might report stale during the update).
+        expect((editor as HTMLTextAreaElement).value).toContain("Footer edited.");
+      });
+      expect(editor).toHaveAttribute("data-inline-zone-ids", idsBeforeEdit!);
+    });
+
+    it("changes the zone id when the fence body changes", async () => {
+      render(
+        <SourcePanel
+          editorAppearance={editorAppearance}
+          editorFontSizePx={14}
+          fileState={{
+            ...readyFileState,
+            path: "/repo/docs/diagram.md",
+            content: [
+              "# Title",
+              "",
+              "```mermaid",
+              "flowchart TD",
+              "  A --> B",
+              "```",
+              "",
+            ].join("\n"),
+            language: "markdown",
+          }}
+          sourcePath="/repo/docs/diagram.md"
+          onSaveFile={vi.fn()}
+        />,
+      );
+
+      const editor = await screen.findByLabelText(
+        "Source editor for /repo/docs/diagram.md",
+      );
+      const idsBeforeEdit = editor.getAttribute("data-inline-zone-ids");
+      expect(idsBeforeEdit).toBeTruthy();
+
+      // Edit the fence body — same start/end line, different
+      // hash → id changes. This signals the portal to remount
+      // so the Mermaid renderer picks up the new source.
+      fireEvent.change(editor, {
+        target: {
+          value: [
+            "# Title",
+            "",
+            "```mermaid",
+            "flowchart TD",
+            "  A --> C",
+            "```",
+            "",
+          ].join("\n"),
+        },
+      });
+
+      await waitFor(() => {
+        expect((editor as HTMLTextAreaElement).value).toContain("A --> C");
+      });
+      const idsAfterEdit = editor.getAttribute("data-inline-zone-ids");
+      expect(idsAfterEdit).toBeTruthy();
+      expect(idsAfterEdit).not.toBe(idsBeforeEdit);
+    });
+
+    it("changes the zone id when lines are inserted above the fence (latent stability gap)", async () => {
+      // This is the gap flagged in `docs/bugs.md` → "Inline-zone
+      // id is line-number-dependent, reinitialises Mermaid on
+      // every edit above the fence". The id format includes
+      // `startLine:endLine`, so inserting a line above the fence
+      // shifts both and flips the id — which causes the portal
+      // to remount and the Mermaid iframe to reinitialise.
+      //
+      // This test pins the current (gap-bearing) behaviour. When
+      // the id format is reworked to be line-independent, flip
+      // the assertion to `toBe(idsBeforeEdit)` so a future
+      // regression that reintroduces line-sensitivity is
+      // caught.
+      render(
+        <SourcePanel
+          editorAppearance={editorAppearance}
+          editorFontSizePx={14}
+          fileState={{
+            ...readyFileState,
+            path: "/repo/docs/diagram.md",
+            content: [
+              "# Title",
+              "",
+              "```mermaid",
+              "flowchart TD",
+              "  A --> B",
+              "```",
+              "",
+            ].join("\n"),
+            language: "markdown",
+          }}
+          sourcePath="/repo/docs/diagram.md"
+          onSaveFile={vi.fn()}
+        />,
+      );
+
+      const editor = await screen.findByLabelText(
+        "Source editor for /repo/docs/diagram.md",
+      );
+      const idsBeforeEdit = editor.getAttribute("data-inline-zone-ids");
+      expect(idsBeforeEdit).toBeTruthy();
+
+      // Insert a new paragraph BEFORE the fence. The fence body
+      // and line span relative to the fence are unchanged, but
+      // its ABSOLUTE `startLine` shifts → id flips (today).
+      fireEvent.change(editor, {
+        target: {
+          value: [
+            "# Title",
+            "",
+            "Preamble paragraph.",
+            "",
+            "```mermaid",
+            "flowchart TD",
+            "  A --> B",
+            "```",
+            "",
+          ].join("\n"),
+        },
+      });
+
+      await waitFor(() => {
+        expect((editor as HTMLTextAreaElement).value).toContain("Preamble paragraph.");
+      });
+      const idsAfterEdit = editor.getAttribute("data-inline-zone-ids");
+      expect(idsAfterEdit).toBeTruthy();
+      // CURRENT behaviour — id flips. Flip this to `.toBe(
+      // idsBeforeEdit)` when the id format becomes line-
+      // independent.
+      expect(idsAfterEdit).not.toBe(idsBeforeEdit);
+    });
+
+    it("changes the zone id on any `.mmd` whole-file edit (documented exception)", async () => {
+      // Whole-file `.mmd` regions hash the ENTIRE file content
+      // (see `source-renderers.ts::detectWholeFileMermaidRegion`
+      // — id is `mermaid-file:${quickHash(context.content)}`),
+      // so ANY keystroke inside the file flips the id and the
+      // diagram portal is remounted. This is an intentional
+      // trade-off for `.mmd` files (the whole file IS the
+      // diagram, so there's no stable "outside-the-fence"
+      // region to key on). Pinned here so a refactor that
+      // changes the id format has to consciously update this
+      // test.
+      render(
+        <SourcePanel
+          editorAppearance={editorAppearance}
+          editorFontSizePx={14}
+          fileState={{
+            ...readyFileState,
+            path: "/repo/diagrams/flow.mmd",
+            content: "flowchart TD\n  A --> B\n",
+            language: null,
+          }}
+          sourcePath="/repo/diagrams/flow.mmd"
+          onSaveFile={vi.fn()}
+        />,
+      );
+
+      const editor = await screen.findByLabelText(
+        "Source editor for /repo/diagrams/flow.mmd",
+      );
+      const idsBeforeEdit = editor.getAttribute("data-inline-zone-ids");
+      expect(idsBeforeEdit).toMatch(/^mermaid-file:/);
+
+      fireEvent.change(editor, {
+        target: { value: "flowchart TD\n  A --> B\n  B --> C\n" },
+      });
+
+      await waitFor(() => {
+        expect((editor as HTMLTextAreaElement).value).toContain("B --> C");
+      });
+      const idsAfterEdit = editor.getAttribute("data-inline-zone-ids");
+      expect(idsAfterEdit).toMatch(/^mermaid-file:/);
+      expect(idsAfterEdit).not.toBe(idsBeforeEdit);
+    });
+  });
+
   it("auto-rebases the latest editor buffer after a disk refresh returns", async () => {
     const latestFile = createDeferred<SourceFileState>();
     const onFetchLatestFile = vi.fn(() => latestFile.promise);

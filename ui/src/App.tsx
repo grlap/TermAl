@@ -1616,11 +1616,15 @@ export default function App() {
         hydratingSessionIdsRef.current.delete(sessionId);
       }
     })();
-  }, [
-    activeSession?.id,
-    activeSession?.messages.length,
-    activeSession?.messagesLoaded,
-  ]);
+    // Deps intentionally do NOT include `activeSession?.messages.length`:
+    // the body only reads `activeSession?.id` and
+    // `activeSession?.messagesLoaded`, so re-triggering on every
+    // streamed token (which bumps `messages.length`) just to hit
+    // the "already hydrated / already hydrating" early-returns is
+    // wasted work. Session swap (id change) and the one-shot
+    // `messagesLoaded: false → true` transition are the only
+    // signals this effect cares about.
+  }, [activeSession?.id, activeSession?.messagesLoaded]);
 
   function beginWorkspaceSummariesRequest() {
     workspaceSummariesRequestTokenRef.current += 1;

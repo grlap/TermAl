@@ -119,6 +119,30 @@ const HEAVY_MARKDOWN_LINE_THRESHOLD = 24;
 const FILE_CHANGES_COLLAPSE_THRESHOLD = 6;
 let mermaidDiagramIdCounter = 0;
 
+// Stable no-op defaults for the optional callback props on
+// `MessageCard`. NOTE: React's `memo` comparator receives the
+// RAW props object as passed by the parent, NOT the destructured
+// values — so an omitted optional prop reads as `undefined` on
+// both sides and passes the `===` identity check cleanly without
+// any help from these constants. Hoisting the defaults to module
+// scope is a pure code-quality improvement: the defaults are now
+// named, reusable across future call sites, and avoid allocating
+// a fresh no-op arrow on every render (a tiny GC win, not a
+// memoization fix). See docs/bugs.md → "MessageCard default-prop
+// inline arrows" for the original misdiagnosis and the test in
+// `MarkdownContent.test.tsx::"skips re-rendering when a parent
+// re-renders with identical props and no optional callbacks"`
+// that pins the actual memo-hit behaviour for the omitted case.
+const NOOP_MCP_ELICITATION_SUBMIT: (
+  messageId: string,
+  action: McpElicitationAction,
+  content?: JsonValue,
+) => void = () => {};
+const NOOP_CODEX_APP_REQUEST_SUBMIT: (
+  messageId: string,
+  result: JsonValue,
+) => void = () => {};
+
 // Re-exported for backwards compatibility with callers that used to import
 // the type from this module before the helpers were split out into
 // `./markdown-links`.
@@ -153,8 +177,8 @@ export const MessageCard = memo(function MessageCard({
   preferImmediateHeavyRender = false,
   onApprovalDecision,
   onUserInputSubmit,
-  onMcpElicitationSubmit = () => {},
-  onCodexAppRequestSubmit = () => {},
+  onMcpElicitationSubmit = NOOP_MCP_ELICITATION_SUBMIT,
+  onCodexAppRequestSubmit = NOOP_CODEX_APP_REQUEST_SUBMIT,
   searchQuery = "",
   searchHighlightTone = "match",
   isLatestAssistantMessage = true,
@@ -2833,7 +2857,18 @@ export function MarkdownContent({
       resizeObserver?.disconnect();
       window.removeEventListener("resize", scheduleLineMarkerUpdate);
     };
-  }, [documentPath, hasOpenSourceLink, markdown, normalizedStartLineNumber, showLineNumbers, workspaceRoot]);
+    // Deps intentionally exclude `documentPath`, `hasOpenSourceLink`,
+    // and `workspaceRoot`: those only feed the `<a>` renderer in
+    // `ReactMarkdown`'s `components` prop (href resolution, click
+    // handlers), not the `[data-markdown-line-start]` attributes
+    // the ResizeObserver re-queries. Keeping them in the deps
+    // would tear down + rebuild the observer on every unrelated
+    // appearance or source-link-handler change — O(markers)
+    // teardown + re-observe per context change with no benefit.
+    // `markdown` and `normalizedStartLineNumber` stay because they
+    // DO change the set of `[data-markdown-line-start]` elements
+    // the body scans.
+  }, [markdown, normalizedStartLineNumber, showLineNumbers]);
 
   const rendered = useMemo(() => {
     const highlightChildren = (children: ReactNode) =>

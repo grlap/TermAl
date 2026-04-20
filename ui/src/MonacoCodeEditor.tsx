@@ -3,6 +3,7 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -42,6 +43,42 @@ export type MonacoInlineZone = {
   afterLineNumber: number;
   render: () => ReactNode;
 };
+
+/**
+ * Builds a stable structure key for the inline-zone
+ * `ResizeObserver` effect's dep array. Same ids in the same order
+ * produce the same string (JS `Object.is` is byte-wise for
+ * primitives, so React sees the dep as unchanged and skips the
+ * effect), while any id added, removed, or reordered flips the
+ * key and triggers the observer to rebuild.
+ *
+ * Exported so the unit test can pin the "structural-equality in
+ * → structural-equality out" invariant without spinning up the
+ * whole MonacoCodeEditor harness. The invariant matters because
+ * `inlineZoneHostState` is rewritten with a fresh array every
+ * time the `inlineZones` prop changes (which happens on every
+ * keystroke, since `SourcePanel`'s `renderableRegions` memo
+ * depends on `editorValue`) — but the ResizeObserver only cares
+ * about the set of hosts, not about who owns the latest
+ * `zone.render()` closure. Keying the observer effect on this
+ * derived string stops it from disconnecting and rebuilding
+ * itself on every keystroke. See docs/bugs.md →
+ * "`setInlineZoneHostState` writes fresh state on every
+ * keystroke" for the prior symptom.
+ *
+ * `\n` is used as the separator because it can't appear inside a
+ * zone id (region ids from `source-renderers.ts` are of the form
+ * `mermaid:<start>:<end>:<hash>` or `mermaid-file:<hash>` — all
+ * single-line, URL-safe). Any id with an embedded `\n` would
+ * collide with ids whose boundary sits at the `\n` position,
+ * but the id format makes that impossible today; this is a
+ * deliberate pragmatic choice, not an injection-style concern.
+ */
+export function computeInlineZoneStructureKey(
+  hosts: ReadonlyArray<{ id: string }>,
+): string {
+  return hosts.map((host) => host.id).join("\n");
+}
 
 export type MonacoCodeEditorStatus = {
   line: number;
@@ -414,6 +451,15 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
     );
   }, [inlineZones]);
 
+  // Stable structure key for the `ResizeObserver` effect below.
+  // See `computeInlineZoneStructureKey` for the contract and why
+  // the observer only cares about the SET of ids, not about who
+  // owns the latest `zone.render()` closure.
+  const inlineZoneStructureKey = useMemo(
+    () => computeInlineZoneStructureKey(inlineZoneHostState),
+    [inlineZoneHostState],
+  );
+
   // ResizeObserver watches each zone's INNER content wrapper — the
   // `height: auto` node the React portal renders into. When a
   // diagram finishes its async Mermaid render or the user edits
@@ -427,6 +473,10 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
   // size never reflects the true content extent. That's the root
   // cause of the "diagram overlaps source below" symptom the
   // previous implementation produced.
+  //
+  // Deps: `inlineZoneStructureKey` (see above) rather than
+  // `inlineZoneHostState` so the observer only rebuilds when
+  // the set of zone ids changes.
   useEffect(() => {
     const editor = editorRef.current;
     const monaco = monacoRef.current;
@@ -490,7 +540,7 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
         inlineZoneResizeObserverRef.current = null;
       }
     };
-  }, [inlineZoneHostState]);
+  }, [inlineZoneStructureKey]);
 
   useEffect(() => {
     const monaco = monacoRef.current;

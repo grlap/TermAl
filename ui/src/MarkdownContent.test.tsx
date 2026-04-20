@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import mermaid from "mermaid";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as appUtils from "./app-utils";
 import { MarkdownContent, MessageCard, areMarkdownLineMarkersEqual } from "./message-cards";
 import type {
   CodexAppRequestMessage,
@@ -18,6 +19,28 @@ vi.mock("mermaid", () => ({
     })),
   },
 }));
+
+// Wrap the real `app-utils` module and turn
+// `parseConnectionRetryNotice` into a spy that forwards to the
+// real implementation. `MessageCard`'s text-message path calls
+// this helper exactly once per render (see
+// `ui/src/message-cards.tsx:~208`), so the spy's call count is
+// a proxy for "how many times has the memoized `MessageCard`
+// actually executed its render body". The `MessageCard default
+// props stable across re-renders` test below uses this to
+// assert that a parent re-render with identical props does NOT
+// re-run the body (i.e., the memo hit). All other tests in the
+// file pass the spy-wrapped real behaviour through unchanged, so
+// the mock is safe to apply at module scope.
+vi.mock("./app-utils", async () => {
+  const actual = await vi.importActual<typeof appUtils>("./app-utils");
+  return {
+    ...actual,
+    parseConnectionRetryNotice: vi.fn(actual.parseConnectionRetryNotice),
+  };
+});
+
+const parseConnectionRetryNoticeMock = vi.mocked(appUtils.parseConnectionRetryNotice);
 
 const mermaidInitializeMock = vi.mocked(mermaid.initialize);
 const mermaidRenderMock = vi.mocked(mermaid.render);
@@ -572,6 +595,70 @@ describe("MessageCard memoization", () => {
     expect(secondHandler).toHaveBeenCalledWith("mcp-elicitation-1", "accept", {
       environment: "production",
     });
+  });
+
+  // Pins the actual memo-hit behaviour for the omitted-optional-
+  // callback case. docs/bugs.md → "`MessageCard` default-prop
+  // inline arrows" originally claimed that inline arrow defaults
+  // in the destructuring head (`onMcpElicitationSubmit = () =>
+  // {}`) defeated memoization by making the comparator see a
+  // fresh-function-per-render, but that's a misdiagnosis —
+  // React's `memo` comparator receives the RAW props object as
+  // passed by the parent, NOT the destructured values. When the
+  // parent omits an optional prop, both `prev` and `next` read
+  // as `undefined` and pass the `===` identity check cleanly.
+  //
+  // The test is still useful as a memo regression guard: it
+  // counts how many times `parseConnectionRetryNotice` runs
+  // (called once per text-message render body) across a parent
+  // re-render with identical props, and asserts the count does
+  // NOT go up. A future regression to the memo comparator (e.g.,
+  // forgetting to compare a new prop, or inverting a check) that
+  // breaks the omitted-optional path specifically would trip
+  // this. The fix itself (module-scope stable no-op constants)
+  // is a code-quality + tiny-GC improvement, not a correctness
+  // requirement — so this test would pass both with the fix
+  // applied AND with the original inline arrow defaults.
+  it("skips re-rendering when a parent re-renders with identical props and no optional callbacks", () => {
+    const onApprovalDecision = vi.fn();
+    const onUserInputSubmit = vi.fn();
+    const message = {
+      author: "assistant" as const,
+      id: "text-memo-test",
+      text: "plain text body",
+      timestamp: "2026-04-15T00:00:00.000Z",
+      type: "text" as const,
+    };
+    parseConnectionRetryNoticeMock.mockClear();
+
+    const { rerender } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={onApprovalDecision}
+        onUserInputSubmit={onUserInputSubmit}
+      />,
+    );
+    const callsAfterMount = parseConnectionRetryNoticeMock.mock.calls.length;
+    expect(callsAfterMount).toBeGreaterThan(0);
+
+    // Rerender with IDENTICAL props. The parent (this test) has
+    // no state change, and all props are the same references
+    // (`message`, `onApprovalDecision`, `onUserInputSubmit`).
+    // The two optional callbacks (`onMcpElicitationSubmit`,
+    // `onCodexAppRequestSubmit`) are omitted and must resolve to
+    // the same module-scope NOOP references as before. If the
+    // memo comparator sees every listed prop as `===` equal, the
+    // render body is skipped → no new call to
+    // `parseConnectionRetryNotice`.
+    rerender(
+      <MessageCard
+        message={message}
+        onApprovalDecision={onApprovalDecision}
+        onUserInputSubmit={onUserInputSubmit}
+      />,
+    );
+
+    expect(parseConnectionRetryNoticeMock.mock.calls.length).toBe(callsAfterMount);
   });
 
   it("uses the latest Codex app-request handler after handler-only rerenders", () => {

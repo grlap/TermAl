@@ -443,6 +443,82 @@ describe("startActivePromptPoll", () => {
     }
   });
 
+  it("clears the hard-cap timer when the chain self-stops via `shouldStop`", async () => {
+    // Regression guard for docs/bugs.md →
+    // "`startActivePromptPoll` leaves hard-cap timer pending after
+    // natural onState stop". Before the fix, when `onState` returned
+    // `true` the chained timer was cleared but the belt-and-suspenders
+    // `setTimeout(..., maxDurationMs)` kept running until its
+    // 5-minute deadline; its callback eventually fired as a no-op.
+    // After the fix, the chain-exit path calls a shared `stopPoll()`
+    // helper that clears BOTH timers, so no pending fake timers
+    // remain after the chain naturally exits.
+    const fetchState = vi.fn(async () => ({ ok: true as const }));
+    const onState = vi.fn(() => true); // stop immediately after first state
+
+    const cancel = startActivePromptPoll({
+      fetchState,
+      onState,
+      isMounted: () => true,
+    });
+
+    try {
+      // Before the interval elapses, two timers are armed: the
+      // chained poll's first `setTimeout(intervalMs)` and the
+      // hard-cap `setTimeout(maxDurationMs)`.
+      expect(vi.getTimerCount()).toBe(2);
+
+      // Fire the first poll. onState returns true → chain exits via
+      // `shouldStop` path, which must clear BOTH timers.
+      await vi.advanceTimersByTimeAsync(ACTIVE_PROMPT_POLL_INTERVAL_MS);
+      expect(fetchState).toHaveBeenCalledTimes(1);
+      expect(onState).toHaveBeenCalledWith({ ok: true });
+
+      // Both the chained timer (not re-armed after `shouldStop`) AND
+      // the hard-cap timer (explicitly cleared by the shared
+      // `stopPoll()`) must be gone.
+      expect(vi.getTimerCount()).toBe(0);
+
+      // Advancing past the full hard-cap deadline must not fire the
+      // cleared timer, and must not restart the chain.
+      await vi.advanceTimersByTimeAsync(ACTIVE_PROMPT_POLL_MAX_DURATION_MS + 1_000);
+      expect(fetchState).toHaveBeenCalledTimes(1);
+    } finally {
+      cancel();
+    }
+  });
+
+  it("does not arm a hard-cap timer when the synchronous first `schedule()` self-stops", () => {
+    // Companion guard for the `shouldStop` exit case above. The
+    // synchronous first `schedule()` call inside
+    // `startActivePromptPoll` can hit an early-return on
+    // `!handlers.isMounted()` or `now() >= deadlineMs` BEFORE the
+    // hard-cap `setTimeout` is armed. `stopPoll()` fires in that
+    // path, sets `stopped = true`, and returns. Without a
+    // `!stopped` guard around the subsequent `hardCapTimerId =
+    // setTimeout(..., maxDurationMs)`, a fresh no-op timer would
+    // be armed anyway — reintroducing the exact "stranded
+    // hard-cap timer" symptom the whole fix was meant to
+    // eliminate. This test covers that narrower path.
+    //
+    // `isMounted: () => false` is the cleanest trigger for the
+    // synchronous early-return: `schedule()` checks mount gate
+    // first at the top, calls `stopPoll()`, returns. Control then
+    // reaches the post-`schedule()` hard-cap site. With the
+    // `!stopped` guard, no timer is armed → pending timer count
+    // is 0 immediately.
+    const cancel = startActivePromptPoll({
+      fetchState: vi.fn(async () => ({ ok: true as const })),
+      onState: vi.fn(() => false),
+      isMounted: () => false,
+    });
+    try {
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      cancel();
+    }
+  });
+
   it("respects custom intervalMs and maxDurationMs options", async () => {
     let fetchStateCallCount = 0;
     const fetchState = vi.fn(async () => {
