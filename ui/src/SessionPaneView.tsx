@@ -75,6 +75,7 @@ import {
   resolveSettledScrollMinimumAttempts,
   syncMessageStackScrollPosition,
 } from "./scroll-position";
+import { notifyMessageStackScrollWrite } from "./message-stack-scroll-sync";
 
 import {
   CodexPromptSettingsCard,
@@ -1084,6 +1085,7 @@ export function SessionPaneView({
         top: nextScrollTop,
         behavior,
       });
+      notifyMessageStackScrollWrite(node);
     }
     setShouldStickToBottom(true);
     paneScrollPositions[scrollStateKey] = {
@@ -1104,6 +1106,7 @@ export function SessionPaneView({
       top: distance * direction,
       behavior: "smooth",
     });
+    notifyMessageStackScrollWrite(node);
   }
 
   function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
@@ -1132,6 +1135,7 @@ export function SessionPaneView({
       top: 0,
       behavior: "auto",
     });
+    notifyMessageStackScrollWrite(node);
     setShouldStickToBottom(false);
     paneScrollPositions[scrollStateKey] = {
       top: 0,
@@ -1217,6 +1221,7 @@ export function SessionPaneView({
 
     event.preventDefault();
     node.scrollTop = nextScrollTop;
+    notifyMessageStackScrollWrite(node);
     const { shouldStick } = syncMessageStackScrollPosition(
       node,
       scrollStateKey,
@@ -1401,6 +1406,7 @@ export function SessionPaneView({
 
     const nextTop = clamp(targetTop, 0, maxScrollTop);
     node.scrollTop = nextTop;
+    notifyMessageStackScrollWrite(node);
     paneScrollPositions[scrollStateKey] = {
       top: targetTop,
       shouldStick: false,
@@ -1453,6 +1459,7 @@ export function SessionPaneView({
       };
     } else {
       node.scrollTop = 0;
+      notifyMessageStackScrollWrite(node);
       setShouldStickToBottom(false);
       paneScrollPositions[scrollStateKey] = {
         top: 0,
@@ -1486,6 +1493,7 @@ export function SessionPaneView({
     if (!container) {
       return;
     }
+    notifyMessageStackScrollWrite(container);
 
     paneScrollPositions[scrollStateKey] = {
       top: container.scrollTop,

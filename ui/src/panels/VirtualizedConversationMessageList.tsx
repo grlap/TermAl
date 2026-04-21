@@ -61,16 +61,19 @@ import {
   useState,
   type RefObject,
 } from "react";
+import { flushSync } from "react-dom";
 import { MessageSlot } from "./session-message-leaves";
 import {
   DEFAULT_ESTIMATED_MESSAGE_HEIGHT,
   DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
   buildVirtualizedMessageLayout,
+  clampVirtualizedViewportScrollTop,
   estimateConversationMessageHeight,
   findVirtualizedMessageRange,
   getAdjustedVirtualizedScrollTopForHeightChange,
   isScrollContainerNearBottom,
 } from "./conversation-virtualization";
+import { MESSAGE_STACK_SCROLL_WRITE_EVENT } from "../message-stack-scroll-sync";
 import type {
   ApprovalDecision,
   JsonValue,
@@ -126,6 +129,7 @@ const RENDER_WINDOW_INITIAL_SIZE = 200;
 const RENDER_WINDOW_LOAD_MORE = 200;
 /** Scroll-top threshold (px) at which older messages auto-load. */
 const RENDER_WINDOW_LOAD_MORE_THRESHOLD_PX = 400;
+const ACTIVE_VIEWPORT_STARTUP_RESYNC_FRAMES = 12;
 /**
  * Cool-down window (ms) after a direct-scroll input (wheel, touch,
  * keyboard) during which measurement-driven `scrollTop` adjustments
@@ -252,8 +256,42 @@ export function VirtualizedConversationMessageList({
         : nextState,
     );
   }, []);
+  // `syncViewportFromScrollNode` alone relies on React's automatic
+  // batching to flush `setViewport` before the browser paints. That
+  // holds inside `useLayoutEffect` (React guarantees synchronous
+  // flush before paint) but NOT inside:
+  //   - `requestAnimationFrame` callbacks (e.g. the tick loop in
+  //     `scheduleSettledScrollToBottom` that calls
+  //     `scrollToLatestMessage` → `notifyMessageStackScrollWrite` →
+  //     our custom-event listener here), and
+  //   - `ResizeObserver` microtasks (which drive `handleHeightChange`
+  //     and its bottom-pin re-scroll).
+  // In both paths React 18's auto-batching can defer the re-render
+  // to the next tick — AFTER the browser paints with the new
+  // `scrollTop` but the OLD rendered window. The symptom is a
+  // visible flash per RAF iteration during settle-to-bottom and
+  // per measurement commit, even though each individual write
+  // correctly updates `scrollTop` in the DOM.
+  //
+  // `flushSync` forces the pending `setViewport` re-render to
+  // commit before the current callback returns, so the paint that
+  // follows sees the correct window. Safe outside the render
+  // phase; not called from inside `useLayoutEffect` because React
+  // there is already synchronous-before-paint.
+  const syncViewportFromScrollNodeFlushed = useCallback(
+    (node: HTMLElement) => {
+      flushSync(() => {
+        syncViewportFromScrollNode(node);
+      });
+    },
+    [syncViewportFromScrollNode],
+  );
   const writeScrollTopAndSyncViewport = useCallback(
-    (node: HTMLElement, nextScrollTop: number) => {
+    (
+      node: HTMLElement,
+      nextScrollTop: number,
+      options: { flushViewportSync?: boolean } = {},
+    ) => {
       const targetScrollTop = Number.isFinite(nextScrollTop) ? Math.max(nextScrollTop, 0) : 0;
       if (Math.abs(node.scrollTop - targetScrollTop) >= 1) {
         node.scrollTop = targetScrollTop;
@@ -261,17 +299,26 @@ export function VirtualizedConversationMessageList({
       // Programmatic scroll writes can paint before the browser emits
       // a scroll event. Sync the virtualizer's viewport state
       // immediately so the rendered window matches the new scrollTop
-      // in the same commit. The sync fires unconditionally — even when
-      // the `>= 1` guard above skipped the write — because a prior
-      // native scroll event may not have propagated to `viewport`
-      // state yet (event queue latency, React batching) and the
-      // viewport shape still needs to catch up before the next render
-      // computes the window. The `setViewport` call inside
-      // `syncViewportFromScrollNode` short-circuits on equality, so a
-      // truly-redundant sync is free.
-      syncViewportFromScrollNode(node);
+      // before the next paint. Layout-effect callers use the normal
+      // sync path because React already flushes them before paint;
+      // true async callers opt into `flushSync` so React 18's
+      // auto-batching cannot defer the viewport-state update until
+      // after the browser paints the new scrollTop with the old rows.
+      //
+      // The sync fires unconditionally — even when the `>= 1` guard
+      // above skipped the write — because a prior native scroll
+      // event may not have propagated to `viewport` state yet
+      // (event queue latency, React batching) and the viewport
+      // shape still needs to catch up. The `setViewport` call
+      // inside `syncViewportFromScrollNode` short-circuits on
+      // equality, so a truly-redundant sync is free.
+      if (options.flushViewportSync) {
+        syncViewportFromScrollNodeFlushed(node);
+      } else {
+        syncViewportFromScrollNode(node);
+      }
     },
-    [syncViewportFromScrollNode],
+    [syncViewportFromScrollNode, syncViewportFromScrollNodeFlushed],
   );
   const [layoutVersion, setLayoutVersion] = useState(0);
   // Post-activation measurement phase: when the list transitions from
@@ -362,7 +409,12 @@ export function VirtualizedConversationMessageList({
     activeViewport?.clientHeight && activeViewport.clientHeight > 0
       ? activeViewport.clientHeight
       : viewport.height;
-  const viewportScrollTop = activeViewport ? activeViewport.scrollTop : viewport.scrollTop;
+  const rawViewportScrollTop = activeViewport ? activeViewport.scrollTop : viewport.scrollTop;
+  const viewportScrollTop = clampVirtualizedViewportScrollTop({
+    scrollTop: rawViewportScrollTop,
+    viewportHeight,
+    totalHeight: layout.totalHeight,
+  });
   const activeConversationSearchMessageIndex =
     activeConversationSearchMessageId !== null
       ? messageIndexById.get(activeConversationSearchMessageId)
@@ -580,7 +632,9 @@ export function VirtualizedConversationMessageList({
       const node = scrollContainerRef.current;
       if (node) {
         const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-        writeScrollTopAndSyncViewport(node, target);
+        writeScrollTopAndSyncViewport(node, target, {
+          flushViewportSync: true,
+        });
       }
       shouldKeepBottomAfterLayoutRef.current = true;
       setIsMeasuringPostActivation(false);
@@ -707,9 +761,25 @@ export function VirtualizedConversationMessageList({
     const markUserScroll = () => {
       lastUserScrollInputTimeRef.current = performance.now();
     };
+    const syncProgrammaticScrollWrite = () => {
+      // Use the flushed variant: this listener fires from
+      // `notifyMessageStackScrollWrite`, which is dispatched from
+      // SessionPaneView code paths that include the RAF tick loop
+      // in `scheduleSettledScrollToBottom`. RAF-callback setState
+      // doesn't flush synchronously under React 18 auto-batching,
+      // so without `flushSync` the browser would paint each RAF
+      // iteration's new scrollTop with the OLD rendered window —
+      // once per frame for up to 60 frames — which reads as a
+      // persistent flicker while the settle-to-bottom loop runs.
+      syncViewportFromScrollNodeFlushed(node);
+    };
 
     syncViewport();
     node.addEventListener("scroll", syncViewport, { passive: true });
+    node.addEventListener(
+      MESSAGE_STACK_SCROLL_WRITE_EVENT,
+      syncProgrammaticScrollWrite,
+    );
     node.addEventListener("wheel", markUserScroll, { passive: true });
     node.addEventListener("touchmove", markUserScroll, { passive: true });
     node.addEventListener("keydown", markUserScroll);
@@ -718,12 +788,64 @@ export function VirtualizedConversationMessageList({
 
     return () => {
       node.removeEventListener("scroll", syncViewport);
+      node.removeEventListener(
+        MESSAGE_STACK_SCROLL_WRITE_EVENT,
+        syncProgrammaticScrollWrite,
+      );
       node.removeEventListener("wheel", markUserScroll);
       node.removeEventListener("touchmove", markUserScroll);
       node.removeEventListener("keydown", markUserScroll);
       resizeObserver.disconnect();
     };
-  }, [isActive, scrollContainerRef, sessionId, syncViewportFromScrollNode]);
+  }, [
+    isActive,
+    scrollContainerRef,
+    sessionId,
+    syncViewportFromScrollNode,
+    syncViewportFromScrollNodeFlushed,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!isActive) {
+      return undefined;
+    }
+
+    const node = scrollContainerRef.current;
+    if (!node) {
+      return undefined;
+    }
+
+    syncViewportFromScrollNode(node);
+
+    let frameId = 0;
+    let remainingFrames = ACTIVE_VIEWPORT_STARTUP_RESYNC_FRAMES;
+    const tick = () => {
+      frameId = 0;
+      const currentNode = scrollContainerRef.current;
+      if (!currentNode) {
+        return;
+      }
+
+      syncViewportFromScrollNodeFlushed(currentNode);
+      remainingFrames -= 1;
+      if (remainingFrames > 0) {
+        frameId = window.requestAnimationFrame(tick);
+      }
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => {
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [
+    isActive,
+    scrollContainerRef,
+    sessionId,
+    syncViewportFromScrollNode,
+    syncViewportFromScrollNodeFlushed,
+  ]);
 
   // Stabilize handler references so MeasuredMessageCard memo can skip
   // re-renders for messages whose data and position haven't changed,
@@ -897,7 +1019,9 @@ export function VirtualizedConversationMessageList({
     writeScrollTopAndSyncViewport(node, nextScrollTop);
   }, [renderWindowSize, scrollContainerRef, writeScrollTopAndSyncViewport]);
 
-  const handleHeightChange = useCallback((messageId: string, nextHeight: number) => {
+  const handleHeightChange = useCallback((messageId: string, nextHeight: number, options: {
+    flushViewportSync?: boolean;
+  } = {}) => {
     if (!Number.isFinite(nextHeight) || nextHeight <= 0) {
       return;
     }
@@ -968,7 +1092,9 @@ export function VirtualizedConversationMessageList({
           // the previous pin target cannot trigger an extra scroll event +
           // reflow + ResizeObserver re-fire cycle.
           const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-          writeScrollTopAndSyncViewport(node, target);
+          writeScrollTopAndSyncViewport(node, target, {
+            flushViewportSync: options.flushViewportSync,
+          });
         }
       } else if (inUserScrollCooldown) {
         // Defer the anchor-preserving `scrollTop` write for the same
@@ -990,7 +1116,9 @@ export function VirtualizedConversationMessageList({
           nextHeight: roundedHeight,
           previousHeight,
         });
-        writeScrollTopAndSyncViewport(node, nextScrollTop);
+        writeScrollTopAndSyncViewport(node, nextScrollTop, {
+          flushViewportSync: options.flushViewportSync,
+        });
       }
     }
 
@@ -1097,7 +1225,11 @@ const MeasuredMessageCard = memo(function MeasuredMessageCard({
   onUserInputSubmit: BoundUserInputSubmitHandler;
   onMcpElicitationSubmit: BoundMcpElicitationSubmitHandler;
   onCodexAppRequestSubmit: BoundCodexAppRequestSubmitHandler;
-  onHeightChange: (messageId: string, nextHeight: number) => void;
+  onHeightChange: (
+    messageId: string,
+    nextHeight: number,
+    options?: { flushViewportSync?: boolean },
+  ) => void;
   top: number;
 }) {
   const slotRef = useRef<HTMLDivElement | null>(null);
@@ -1113,9 +1245,14 @@ const MeasuredMessageCard = memo(function MeasuredMessageCard({
     }
 
     let frameId = 0;
+    let hasMeasuredOnce = false;
     const measure = () => {
       frameId = 0;
-      onHeightChange(message.id, node.getBoundingClientRect().height);
+      const flushViewportSync = hasMeasuredOnce;
+      hasMeasuredOnce = true;
+      onHeightChange(message.id, node.getBoundingClientRect().height, {
+        flushViewportSync,
+      });
     };
 
     measure();

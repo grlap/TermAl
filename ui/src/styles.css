@@ -3872,6 +3872,10 @@ textarea {
   pointer-events: auto;
 }
 
+.virtualized-message-list .message-card {
+  animation: none;
+}
+
 /* Force `content-visibility: visible` on everything inside the
    active conversation page. The per-element `content-visibility: auto`
    rules above are meant to skip layout/paint for off-screen messages

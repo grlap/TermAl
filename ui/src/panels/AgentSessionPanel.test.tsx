@@ -8,8 +8,10 @@ import {
 } from "./AgentSessionPanel";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { RunningIndicator } from "./session-activity-cards";
+import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
 import {
   buildVirtualizedMessageLayout,
+  clampVirtualizedViewportScrollTop,
   estimateConversationMessageHeight,
   getAdjustedVirtualizedScrollTopForHeightChange,
   getScrollContainerBottomGap,
@@ -244,6 +246,207 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.queryByText("message-1")).not.toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
+  it("renders the new window immediately after a parent-owned scroll write", () => {
+    // Regression guard for flicker during pane-level scroll writes. The
+    // parent pane owns wheel scrolling, saved-position restores, and
+    // scroll-to-boundary jumps; those writes move the same scroll container
+    // the virtualizer observes. If the virtualizer waits for a later native
+    // scroll event, it can paint rows for the previous viewport for one
+    // frame, which appears as a blank or half-filled transcript.
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalGetBoundingClientRect =
+      Element.prototype.getBoundingClientRect;
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    const messages = makeTextMessages(120);
+    const estimatedLayout = buildVirtualizedMessageLayout(
+      messages.map(estimateConversationMessageHeight),
+    );
+    const clientHeight = 500;
+    let scrollTop = 0;
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => clientHeight,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => estimatedLayout.totalHeight,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
+    window.ResizeObserver =
+      ResizeObserverMock as unknown as typeof ResizeObserver;
+    Element.prototype.getBoundingClientRect =
+      function getBoundingClientRectMock() {
+        const element = this as HTMLElement;
+        const height = element.classList.contains("virtualized-message-slot")
+          ? 0
+          : clientHeight;
+        return {
+          bottom: height,
+          height,
+          left: 0,
+          right: 100,
+          top: 0,
+          width: 100,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      };
+
+    try {
+      render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={messages}
+          scrollContainerRef={{
+            current: scrollNode,
+          } as RefObject<HTMLElement | null>}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      expect(scrollTop).toBe(estimatedLayout.totalHeight - clientHeight);
+      expect(screen.queryByText("message-120")).toBeInTheDocument();
+
+      act(() => {
+        scrollTop = 0;
+        notifyMessageStackScrollWrite(scrollNode);
+      });
+
+      expect(screen.queryByText("message-1")).toBeInTheDocument();
+      expect(screen.queryByText("message-120")).not.toBeInTheDocument();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
+  it("resyncs the rendered window after a silent startup scrollTop change", () => {
+    // Startup/restart can leave the browser's scrollTop clamped or
+    // restored after the virtualizer's first render without emitting a
+    // native scroll event. The short startup resync loop must notice the
+    // real scrollTop and render the matching rows even when no user input
+    // occurs.
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalGetBoundingClientRect =
+      Element.prototype.getBoundingClientRect;
+    const frameCallbacks: FrameRequestCallback[] = [];
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    const messages = makeTextMessages(120);
+    const estimatedLayout = buildVirtualizedMessageLayout(
+      messages.map(estimateConversationMessageHeight),
+    );
+    const clientHeight = 500;
+    let scrollTop = 0;
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => clientHeight,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => estimatedLayout.totalHeight,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
+    window.ResizeObserver =
+      ResizeObserverMock as unknown as typeof ResizeObserver;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      frameCallbacks.push(callback);
+      return frameCallbacks.length;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
+    Element.prototype.getBoundingClientRect =
+      function getBoundingClientRectMock() {
+        const element = this as HTMLElement;
+        const height = element.classList.contains("virtualized-message-slot")
+          ? 0
+          : clientHeight;
+        return {
+          bottom: height,
+          height,
+          left: 0,
+          right: 100,
+          top: 0,
+          width: 100,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      };
+
+    try {
+      render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={messages}
+          scrollContainerRef={{
+            current: scrollNode,
+          } as RefObject<HTMLElement | null>}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      expect(scrollTop).toBe(estimatedLayout.totalHeight - clientHeight);
+      expect(screen.queryByText("message-120")).toBeInTheDocument();
+
+      act(() => {
+        scrollTop = 0;
+        frameCallbacks.shift()?.(0);
+      });
+
+      expect(screen.queryByText("message-1")).toBeInTheDocument();
+      expect(screen.queryByText("message-120")).not.toBeInTheDocument();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
       Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     }
   });
@@ -1038,6 +1241,35 @@ describe("getAdjustedVirtualizedScrollTopForHeightChange", () => {
         messageTop: 20,
         nextHeight: 100,
         previousHeight: 200,
+      }),
+    ).toBe(0);
+  });
+});
+
+describe("clampVirtualizedViewportScrollTop", () => {
+  it("clamps stale restored scroll positions to the current virtualized layout", () => {
+    expect(
+      clampVirtualizedViewportScrollTop({
+        scrollTop: 10_000,
+        viewportHeight: 500,
+        totalHeight: 2_000,
+      }),
+    ).toBe(1_500);
+  });
+
+  it("floors negative and non-finite scroll positions", () => {
+    expect(
+      clampVirtualizedViewportScrollTop({
+        scrollTop: -200,
+        viewportHeight: 500,
+        totalHeight: 2_000,
+      }),
+    ).toBe(0);
+    expect(
+      clampVirtualizedViewportScrollTop({
+        scrollTop: Number.NaN,
+        viewportHeight: 500,
+        totalHeight: 2_000,
       }),
     ).toBe(0);
   });

@@ -109,6 +109,26 @@ export function findVirtualizedMessageRange(
   };
 }
 
+export function clampVirtualizedViewportScrollTop({
+  scrollTop,
+  viewportHeight,
+  totalHeight,
+}: {
+  scrollTop: number;
+  viewportHeight: number;
+  totalHeight: number;
+}) {
+  const safeScrollTop = Number.isFinite(scrollTop) ? Math.max(scrollTop, 0) : 0;
+  const safeViewportHeight =
+    Number.isFinite(viewportHeight) && viewportHeight > 0
+      ? viewportHeight
+      : DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT;
+  const safeTotalHeight =
+    Number.isFinite(totalHeight) && totalHeight > 0 ? totalHeight : 0;
+  const maxScrollTop = Math.max(safeTotalHeight - safeViewportHeight, 0);
+  return Math.min(safeScrollTop, maxScrollTop);
+}
+
 export function getScrollContainerBottomGap(
   node: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">,
 ) {
