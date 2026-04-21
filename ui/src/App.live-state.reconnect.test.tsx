@@ -2084,4 +2084,129 @@ describe("App live state — reconnect", () => {
     }
   });
 
+  it("keeps omitted adoptState slices unchanged", () => {
+    const preservedCodex = {
+      notices: [
+        {
+          kind: "runtimeNotice" as const,
+          level: "warning" as const,
+          title: "Existing notice",
+          detail: "Keep this codex state when omitted.",
+          timestamp: "2026-04-06T00:00:00Z",
+        },
+      ],
+    };
+    const preservedReadiness = [
+      makeReadiness({
+        agent: "Codex",
+        detail: "Keep this readiness state when omitted.",
+      }),
+    ];
+    const preservedProjects = [
+      {
+        id: "project-local",
+        name: "Local",
+        rootPath: "/repo",
+      },
+    ];
+    const preservedOrchestrators = [
+      makeOrchestrator({
+        id: "orchestrator-existing",
+      }),
+    ];
+    const preservedWorkspaces = [
+      {
+        id: "workspace-existing",
+        revision: 3,
+        updatedAt: "2026-04-06 00:00:00",
+        controlPanelSide: "left" as const,
+      },
+    ];
+
+    const adopted = resolveAdoptedStateSlices(
+      {
+        codex: preservedCodex,
+        agentReadiness: preservedReadiness,
+        projects: preservedProjects,
+        orchestrators: preservedOrchestrators,
+        workspaces: preservedWorkspaces,
+      },
+      {},
+    );
+
+    expect(adopted.codex).toBe(preservedCodex);
+    expect(adopted.agentReadiness).toBe(preservedReadiness);
+    expect(adopted.projects).toBe(preservedProjects);
+    expect(adopted.orchestrators).toBe(preservedOrchestrators);
+    expect(adopted.workspaces).toBe(preservedWorkspaces);
+  });
+
+  it("adopts explicitly empty adoptState slices", () => {
+    const currentCodex = {
+      notices: [
+        {
+          kind: "runtimeNotice" as const,
+          level: "warning" as const,
+          title: "Existing notice",
+          detail: "This should be replaced by the next state.",
+          timestamp: "2026-04-06T00:00:00Z",
+        },
+      ],
+    };
+    const currentReadiness = [
+      makeReadiness({
+        agent: "Codex",
+        detail: "This should be replaced by the next state.",
+      }),
+    ];
+    const currentProjects = [
+      {
+        id: "project-local",
+        name: "Local",
+        rootPath: "/repo",
+      },
+    ];
+    const currentOrchestrators = [
+      makeOrchestrator({
+        id: "orchestrator-existing",
+      }),
+    ];
+    const currentWorkspaces = [
+      {
+        id: "workspace-existing",
+        revision: 3,
+        updatedAt: "2026-04-06 00:00:00",
+        controlPanelSide: "left" as const,
+      },
+    ];
+    const emptyCodex = { notices: [] };
+    const emptyReadiness: typeof currentReadiness = [];
+    const emptyProjects: typeof currentProjects = [];
+    const emptyOrchestrators: typeof currentOrchestrators = [];
+    const emptyWorkspaces: typeof currentWorkspaces = [];
+
+    const adopted = resolveAdoptedStateSlices(
+      {
+        codex: currentCodex,
+        agentReadiness: currentReadiness,
+        projects: currentProjects,
+        orchestrators: currentOrchestrators,
+        workspaces: currentWorkspaces,
+      },
+      {
+        codex: emptyCodex,
+        agentReadiness: emptyReadiness,
+        projects: emptyProjects,
+        orchestrators: emptyOrchestrators,
+        workspaces: emptyWorkspaces,
+      },
+    );
+
+    expect(adopted.codex).toBe(emptyCodex);
+    expect(adopted.agentReadiness).toBe(emptyReadiness);
+    expect(adopted.projects).toBe(emptyProjects);
+    expect(adopted.orchestrators).toBe(emptyOrchestrators);
+    expect(adopted.workspaces).toBe(emptyWorkspaces);
+  });
+
 });
