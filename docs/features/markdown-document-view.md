@@ -410,9 +410,10 @@ Advanced follow-up:
 - Preserve preview scroll position while editing.
 - Find/search highlighting inside rendered preview.
 - Rendered preview print/export path.
-- Mermaid diagrams.
-- Math blocks and inline math.
 - GitHub-style alerts or admonitions.
+- D2 fenced diagrams as a future renderer, with an explicit dependency decision first
+  (local binary, wasm, or other bundled renderer). Prefer admonitions before D2 because
+  admonitions are text-first and do not add a diagram-runtime dependency.
 - Raw HTML policy: escaped, sanitized, or rendered.
 - Image sizing controls where Markdown or HTML provides dimensions.
 - Drag and drop or paste image workflow for local Markdown docs.
@@ -595,5 +596,9 @@ Manual checks:
 
 - Add local image loading if not included in v1.
 - Add frontmatter handling.
-- Add footnotes, alerts, diagrams, and math if the Markdown stack supports them cleanly.
+- Add footnotes.
+- Add admonitions / alerts as the next low-risk Markdown extension.
+- Evaluate one additional fenced renderer after Mermaid/math:
+  - D2 if we accept the extra dependency and renderer-bundling cost.
+  - Vega-Lite if we want a lighter-weight in-browser chart path first.
 - Decide and implement raw HTML policy.

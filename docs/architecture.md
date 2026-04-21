@@ -751,7 +751,13 @@ Messages are rendered as typed cards:
 - **Approval** — title, command detail, accept/reject/accept-for-session buttons
 - **UserInputRequest / McpElicitationRequest / CodexAppRequest** — structured interaction requests that need an explicit user response
 
-Long conversations (80+ messages) use **windowed rendering** — only messages near the viewport are mounted.
+Long conversations (80+ messages) use **page-band virtualized rendering**. The
+mounted transcript band is real DOM; only unseen pages above/below it are
+represented by virtual spacers. `VirtualizedConversationMessageList.tsx`
+measures whole mounted page bands, grows the mounted band from real DOM edges,
+and preserves a visible-row anchor when prepending pages or applying deferred
+page-height corrections. The design intentionally avoids per-message estimated
+height corrections in the live scroll path.
 
 ### Monaco Integration
 

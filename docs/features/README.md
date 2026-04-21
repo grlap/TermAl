@@ -26,6 +26,7 @@ design decisions, and future plans.
 - [Orchestration](./orchestration.md)
 - [Multi-Browser Workspaces](./multi-browser-workspaces.md)
 - [Workspace Terminal](./workspace-terminal.md)
+- [Session Virtualized Transcript](./session-virtualized-transcript.md)
 
 ## Planned Or Exploratory Briefs
 
