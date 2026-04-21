@@ -22,14 +22,11 @@ import {
   createProject,
   createSession,
   deleteProject,
-  deleteWorkspaceLayout,
   fetchAgentCommands,
   fetchGitDiff,
   fetchGitStatus,
   fetchSession,
   fetchState,
-  fetchWorkspaceLayout,
-  fetchWorkspaceLayouts,
   forkCodexThread,
   isBackendUnavailableError,
   killSession,
@@ -40,7 +37,6 @@ import {
   stopOrchestratorInstance,
   renameSession,
   rollbackCodexThread,
-  saveWorkspaceLayout,
   sendMessage,
   stopSession,
   submitApproval,
@@ -52,7 +48,6 @@ import {
   type GitDiffSection,
   type OpenPathOptions,
   type StateResponse,
-  type WorkspaceLayoutSummary,
   unarchiveCodexThread,
   updateAppSettings,
   updateSessionSettings,
@@ -102,10 +97,7 @@ import {
 import { SettingsDialogShell } from "./preferences/SettingsDialogShell";
 import { SettingsTabBar } from "./preferences/SettingsTabBar";
 import type { PreferencesTabId } from "./preferences/preferences-tabs";
-import {
-  hydrateControlPanelLayout,
-  resolveStandaloneControlPanelDockWidthRatio,
-} from "./control-panel-layout";
+import { resolveStandaloneControlPanelDockWidthRatio } from "./control-panel-layout";
 import {
   getWorkspaceSplitResizeBounds,
   resolveControlSurfaceSectionIdForWorkspaceTab,
@@ -128,12 +120,10 @@ import {
   describeBackendConnectionIssueDetail,
   type BackendConnectionState,
 } from "./backend-connection";
-import {
-  resolveAdoptedStateSlices,
-  resolveRecoveredWorkspaceLayoutRequestError,
-} from "./state-adoption";
+import { resolveAdoptedStateSlices } from "./state-adoption";
 import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
 import { useAppPreferencesState } from "./app-preferences-state";
+import { useAppWorkspaceLayout } from "./app-workspace-layout";
 import { appTestHooks } from "./app-test-hooks";
 import { ProjectListSection } from "./ProjectListSection";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
@@ -231,8 +221,6 @@ import {
   setPaneSourcePath,
   setPaneViewMode,
   splitPane,
-  stripDiffPreviewDocumentContentFromWorkspaceState,
-  stripLoadingGitDiffPreviewTabsFromWorkspaceState,
   updateGitDiffPreviewTabInWorkspaceState,
   updateSplitRatio,
   upsertCanvasSessionCard,
@@ -242,13 +230,8 @@ import {
   type WorkspaceTab,
 } from "./workspace";
 import {
-  createWorkspaceViewId,
-  deleteStoredWorkspaceLayout,
   ensureWorkspaceViewId,
-  parseStoredWorkspaceLayout,
-  persistWorkspaceLayout,
   type ControlPanelSide,
-  WORKSPACE_VIEW_QUERY_PARAM,
 } from "./workspace-storage";
 import { reconcileSessions } from "./session-reconcile";
 import {
@@ -325,16 +308,13 @@ import {
   RECONNECT_STATE_RESYNC_DELAY_MS,
   RECONNECT_STATE_RESYNC_MAX_DELAY_MS,
   TAB_DRAG_STALE_TIMEOUT_MS,
-  WORKSPACE_LAYOUT_PERSIST_DELAY_MS,
   type OrchestratorRuntimeAction,
   type PendingSessionRename,
-  type PendingWorkspaceLayoutSave,
   type SessionConversationItem,
   type SessionErrorMap,
   type SessionNoticeMap,
   type StandaloneControlSurfaceViewState,
   type StateEventPayload,
-  type WorkspaceLayoutPersistencePayload,
 } from "./app-shell-internals";
 
 export default function App() {
@@ -360,19 +340,7 @@ export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceState>(
     initialWorkspaceBootstrap.workspace,
   );
-  const [isWorkspaceLayoutReady, setIsWorkspaceLayoutReady] = useState(false);
   const [isWorkspaceSwitcherOpen, setIsWorkspaceSwitcherOpen] = useState(false);
-  const [workspaceSummaries, setWorkspaceSummaries] = useState<
-    WorkspaceLayoutSummary[]
-  >([]);
-  const [isWorkspaceSwitcherLoading, setIsWorkspaceSwitcherLoading] =
-    useState(false);
-  const [workspaceSwitcherError, setWorkspaceSwitcherError] = useState<
-    string | null
-  >(null);
-  const [deletingWorkspaceIds, setDeletingWorkspaceIds] = useState<string[]>(
-    [],
-  );
   const [draftsBySessionId, setDraftsBySessionId] = useState<
     Record<string, string>
   >({});
@@ -565,10 +533,7 @@ export default function App() {
     startY: number;
     size: number;
   } | null>(null);
-  const ignoreFetchedWorkspaceLayoutRef = useRef(false);
   const backendInlineRequestErrorMessageRef = useRef<string | null>(null);
-  const workspaceLayoutRestartErrorMessageRef = useRef<string | null>(null);
-  const workspaceLayoutLoadPendingRef = useRef(false);
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>(
     {},
   );
@@ -603,21 +568,12 @@ export default function App() {
   const lastDerivedControlPanelFilesystemRootRef = useRef<string | null>(null);
   const lastDerivedControlPanelGitWorkdirRef = useRef<string | null>(null);
   const workspaceSwitcherRef = useRef<HTMLDivElement | null>(null);
-  const workspaceSummariesRequestTokenRef = useRef(0);
-  const deletingWorkspaceIdsRef = useRef<Set<string>>(new Set());
-  const pendingWorkspaceLayoutSaveRef =
-    useRef<PendingWorkspaceLayoutSave | null>(null);
-  const pendingWorkspaceLayoutSaveTimeoutRef = useRef<number | null>(null);
-  const flushWorkspaceLayoutSaveRef = useRef<
-    (options?: { keepalive?: boolean }) => void
-  >(() => {});
   const sessionsRef = useRef<Session[]>([]);
   const workspaceRef = useRef(workspace);
   const codexStateRef = useRef(codexState);
   const agentReadinessRef = useRef(agentReadiness);
   const projectsRef = useRef(projects);
   const orchestratorsRef = useRef(orchestrators);
-  const workspaceSummariesRef = useRef(workspaceSummaries);
   const latestStateRevisionRef = useRef<number | null>(null);
   // The `serverInstanceId` the client last adopted. Paired with
   // `latestStateRevisionRef` as the server-restart detector: when an
@@ -812,6 +768,65 @@ export default function App() {
     );
     requestBackendReconnectRef.current();
   }
+
+  const {
+    isWorkspaceLayoutReady,
+    workspaceSummaries,
+    workspaceSummariesRef,
+    setWorkspaceSummaries,
+    isWorkspaceSwitcherLoading,
+    workspaceSwitcherError,
+    deletingWorkspaceIds,
+    ignoreFetchedWorkspaceLayoutRef,
+    workspaceLayoutLoadPendingRef,
+    pendingWorkspaceLayoutSaveRef,
+    flushWorkspaceLayoutSaveRef,
+    refreshWorkspaceSummaries,
+    flushPendingWorkspaceLayoutSave,
+    handleWorkspaceSwitcherToggle,
+    handleOpenWorkspaceHere,
+    handleOpenNewWorkspaceHere,
+    handleOpenNewWorkspaceWindow,
+    handleDeleteWorkspace,
+  } = useAppWorkspaceLayout({
+    workspaceViewId,
+    workspace,
+    setWorkspace,
+    controlPanelSide,
+    setControlPanelSide,
+    preferences: {
+      themeId,
+      styleId,
+      markdownThemeId,
+      markdownStyleId,
+      diagramThemeOverrideMode,
+      diagramLook,
+      diagramPalette,
+      fontSizePx,
+      editorFontSizePx,
+      densityPercent,
+    },
+    setPreferences: {
+      setThemeId,
+      setStyleId,
+      setMarkdownThemeId,
+      setMarkdownStyleId,
+      setDiagramThemeOverrideMode,
+      setDiagramLook,
+      setDiagramPalette,
+      setFontSizePx,
+      setEditorFontSizePx,
+      setDensityPercent,
+    },
+    setIsWorkspaceSwitcherOpen,
+    setRequestError,
+    isMountedRef,
+    clearRecoveredBackendRequestError,
+    setBackendConnectionState,
+    reportRequestError,
+    applyControlPanelLayout,
+  });
+
   const selectedProject =
     selectedProjectId === ALL_PROJECTS_FILTER_ID
       ? null
@@ -1628,211 +1643,6 @@ export default function App() {
     // `messagesLoaded: false → true` transition are the only
     // signals this effect cares about.
   }, [activeSession?.id, activeSession?.messagesLoaded]);
-
-  function beginWorkspaceSummariesRequest() {
-    workspaceSummariesRequestTokenRef.current += 1;
-    return workspaceSummariesRequestTokenRef.current;
-  }
-
-  function isLatestWorkspaceSummariesRequest(requestToken: number) {
-    return workspaceSummariesRequestTokenRef.current === requestToken;
-  }
-
-  function finishDeletingWorkspace(workspaceId: string) {
-    const nextDeletingWorkspaceIds = new Set(deletingWorkspaceIdsRef.current);
-    nextDeletingWorkspaceIds.delete(workspaceId);
-    deletingWorkspaceIdsRef.current = nextDeletingWorkspaceIds;
-    if (isMountedRef.current) {
-      setDeletingWorkspaceIds([...nextDeletingWorkspaceIds]);
-    }
-  }
-
-  const refreshWorkspaceSummaries = useCallback(async () => {
-    const requestToken = beginWorkspaceSummariesRequest();
-    const workspacesAtRequest = workspaceSummariesRef.current;
-    setIsWorkspaceSwitcherLoading(true);
-    setWorkspaceSwitcherError(null);
-    try {
-      const response = await fetchWorkspaceLayouts();
-      if (
-        !isMountedRef.current ||
-        !isLatestWorkspaceSummariesRequest(requestToken)
-      ) {
-        return;
-      }
-      // Only apply the refresh result when the workspace list has not been
-      // updated by another source (SSE-delivered workspace data, a delete
-      // handler, etc.) during the fetch. This avoids overwriting a more
-      // authoritative SSE-delivered list with a stale /api/workspaces
-      // snapshot, while still applying the result when only unrelated
-      // session/orchestrator events arrived.
-      if (workspaceSummariesRef.current === workspacesAtRequest) {
-        workspaceSummariesRef.current = response.workspaces;
-        setWorkspaceSummaries(response.workspaces);
-      }
-    } catch (error) {
-      if (
-        !isMountedRef.current ||
-        !isLatestWorkspaceSummariesRequest(requestToken)
-      ) {
-        return;
-      }
-      setWorkspaceSwitcherError(getErrorMessage(error));
-    } finally {
-      if (
-        isMountedRef.current &&
-        isLatestWorkspaceSummariesRequest(requestToken)
-      ) {
-        setIsWorkspaceSwitcherLoading(false);
-      }
-    }
-    // All dependencies are stable callbacks or refs, so re-subscribing only
-    // happens if the browser-recovery handler itself changes.
-  }, [clearRecoveredBackendRequestError, setBackendConnectionState]);
-
-  function clearPendingWorkspaceLayoutSaveTimeout() {
-    if (
-      pendingWorkspaceLayoutSaveTimeoutRef.current === null ||
-      typeof window === "undefined"
-    ) {
-      return;
-    }
-
-    window.clearTimeout(pendingWorkspaceLayoutSaveTimeoutRef.current);
-    pendingWorkspaceLayoutSaveTimeoutRef.current = null;
-  }
-
-  function persistPendingWorkspaceLayoutSave(
-    pendingSave: PendingWorkspaceLayoutSave,
-    options?: { keepalive?: boolean },
-  ) {
-    void saveWorkspaceLayout(
-      pendingSave.workspaceId,
-      pendingSave.layout,
-      options?.keepalive ? { keepalive: true } : undefined,
-    ).catch((error) => {
-      console.warn(
-        "workspace layout warning> failed to save server workspace layout:",
-        error,
-      );
-    });
-  }
-
-  function flushPendingWorkspaceLayoutSave(options?: { keepalive?: boolean }) {
-    clearPendingWorkspaceLayoutSaveTimeout();
-    const pendingSave = pendingWorkspaceLayoutSaveRef.current;
-    if (!pendingSave) {
-      return;
-    }
-
-    pendingWorkspaceLayoutSaveRef.current = null;
-    persistPendingWorkspaceLayoutSave(pendingSave, options);
-  }
-
-  flushWorkspaceLayoutSaveRef.current = flushPendingWorkspaceLayoutSave;
-
-  function navigateToWorkspace(nextWorkspaceViewId: string) {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    flushPendingWorkspaceLayoutSave({ keepalive: true });
-    const url = new URL(window.location.href);
-    url.searchParams.set(WORKSPACE_VIEW_QUERY_PARAM, nextWorkspaceViewId);
-    window.location.assign(url.toString());
-  }
-
-  function handleWorkspaceSwitcherToggle() {
-    setIsWorkspaceSwitcherOpen((current) => !current);
-  }
-
-  function handleOpenWorkspaceHere(nextWorkspaceViewId: string) {
-    setIsWorkspaceSwitcherOpen(false);
-    if (nextWorkspaceViewId === workspaceViewId) {
-      return;
-    }
-    navigateToWorkspace(nextWorkspaceViewId);
-  }
-
-  function handleOpenNewWorkspaceHere() {
-    handleOpenWorkspaceHere(createWorkspaceViewId());
-  }
-
-  function handleOpenNewWorkspaceWindow() {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const nextWorkspaceViewId = createWorkspaceViewId();
-    flushPendingWorkspaceLayoutSave({ keepalive: true });
-    const url = new URL(window.location.href);
-    url.searchParams.set(WORKSPACE_VIEW_QUERY_PARAM, nextWorkspaceViewId);
-    window.open(url.toString(), "_blank", "noopener");
-    setIsWorkspaceSwitcherOpen(false);
-  }
-
-  async function handleDeleteWorkspace(workspaceId: string) {
-    if (
-      workspaceId === workspaceViewId ||
-      deletingWorkspaceIdsRef.current.has(workspaceId)
-    ) {
-      return;
-    }
-
-    const nextDeletingWorkspaceIds = new Set(deletingWorkspaceIdsRef.current);
-    nextDeletingWorkspaceIds.add(workspaceId);
-    deletingWorkspaceIdsRef.current = nextDeletingWorkspaceIds;
-    setDeletingWorkspaceIds([...nextDeletingWorkspaceIds]);
-    setWorkspaceSwitcherError(null);
-
-    const requestToken = beginWorkspaceSummariesRequest();
-    const workspacesAtRequest = workspaceSummariesRef.current;
-    setIsWorkspaceSwitcherLoading(true);
-    try {
-      const deleteResponse = await deleteWorkspaceLayout(workspaceId);
-      deleteStoredWorkspaceLayout(workspaceId);
-      if (isMountedRef.current) {
-        if (
-          isLatestWorkspaceSummariesRequest(requestToken) &&
-          workspaceSummariesRef.current === workspacesAtRequest
-        ) {
-          // This is the latest workspace request and the workspace list
-          // has not been updated by another source (SSE, another delete,
-          // a refresh) during the flight: the server's post-delete list is
-          // the most up-to-date view and safely reflects concurrent
-          // cross-tab operations.
-          workspaceSummariesRef.current = deleteResponse.workspaces;
-          setWorkspaceSummaries(deleteResponse.workspaces);
-        } else {
-          // Either a newer workspace request was initiated (e.g. a refresh)
-          // or the workspace list was updated by SSE / another handler
-          // during the delete. Don't replace the entire list (the newer
-          // source is more authoritative), but ensure the confirmed-deleted
-          // workspace is removed locally.
-          setWorkspaceSummaries((current) => {
-            const next = current.filter((w) => w.id !== workspaceId);
-            workspaceSummariesRef.current = next;
-            return next;
-          });
-        }
-      }
-    } catch (error) {
-      if (
-        isMountedRef.current &&
-        isLatestWorkspaceSummariesRequest(requestToken)
-      ) {
-        setWorkspaceSwitcherError(getErrorMessage(error));
-      }
-    } finally {
-      finishDeletingWorkspace(workspaceId);
-      if (
-        isMountedRef.current &&
-        isLatestWorkspaceSummariesRequest(requestToken)
-      ) {
-        setIsWorkspaceSwitcherLoading(false);
-      }
-    }
-  }
 
   function buildOptimisticSessionSettingsUpdate(
     session: Session,
@@ -3176,198 +2986,6 @@ export default function App() {
   }, [activeSession?.id]);
 
   useEffect(() => {
-    let cancelled = false;
-    workspaceLayoutLoadPendingRef.current = true;
-    ignoreFetchedWorkspaceLayoutRef.current = false;
-    setIsWorkspaceLayoutReady(false);
-
-    void fetchWorkspaceLayout(workspaceViewId)
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-
-        const nextLayout = response
-          ? parseStoredWorkspaceLayout(
-              JSON.stringify({
-                controlPanelSide: response.layout.controlPanelSide,
-                themeId: response.layout.themeId,
-                styleId: response.layout.styleId,
-                markdownThemeId: response.layout.markdownThemeId,
-                markdownStyleId: response.layout.markdownStyleId,
-                diagramThemeOverrideMode: response.layout.diagramThemeOverrideMode,
-                diagramLook: response.layout.diagramLook,
-                diagramPalette: response.layout.diagramPalette,
-                fontSizePx: response.layout.fontSizePx,
-                editorFontSizePx: response.layout.editorFontSizePx,
-                densityPercent: response.layout.densityPercent,
-                workspace: response.layout.workspace,
-              }),
-            )
-          : null;
-
-        if (nextLayout) {
-          const shouldApplyFetchedWorkspaceLayout =
-            !ignoreFetchedWorkspaceLayoutRef.current;
-          // A manual layout change during hydration claims the workspace tree
-          // and dock side locally, but still allows the server-stored visual
-          // preferences to merge in once the fetch resolves.
-          if (shouldApplyFetchedWorkspaceLayout) {
-            setControlPanelSide(nextLayout.controlPanelSide);
-          }
-          if (nextLayout.themeId) {
-            setThemeId(nextLayout.themeId);
-          }
-          if (nextLayout.styleId) {
-            setStyleId(nextLayout.styleId);
-          }
-          if (nextLayout.markdownThemeId) {
-            setMarkdownThemeId(nextLayout.markdownThemeId);
-          }
-          if (nextLayout.markdownStyleId) {
-            setMarkdownStyleId(nextLayout.markdownStyleId);
-          }
-          if (nextLayout.diagramThemeOverrideMode) {
-            setDiagramThemeOverrideMode(nextLayout.diagramThemeOverrideMode);
-          }
-          if (nextLayout.diagramLook) {
-            setDiagramLook(nextLayout.diagramLook);
-          }
-          if (nextLayout.diagramPalette) {
-            setDiagramPalette(nextLayout.diagramPalette);
-          }
-          if (nextLayout.fontSizePx !== undefined) {
-            setFontSizePx(nextLayout.fontSizePx);
-          }
-          if (nextLayout.editorFontSizePx !== undefined) {
-            setEditorFontSizePx(nextLayout.editorFontSizePx);
-          }
-          if (nextLayout.densityPercent !== undefined) {
-            setDensityPercent(nextLayout.densityPercent);
-          }
-          if (shouldApplyFetchedWorkspaceLayout) {
-            setWorkspace(
-              hydrateControlPanelLayout(
-                nextLayout.workspace,
-                nextLayout.controlPanelSide,
-              ),
-            );
-            persistWorkspaceLayout(workspaceViewId, nextLayout);
-          }
-        }
-
-        // A successful layout fetch proves the route that restart-required
-        // errors report as broken is now functional. Clear the stale toast
-        // only if the current requestError is the exact message we set.
-        const staleRestartMessage =
-          workspaceLayoutRestartErrorMessageRef.current;
-        if (staleRestartMessage !== null) {
-          workspaceLayoutRestartErrorMessageRef.current = null;
-          setRequestError((current) =>
-            resolveRecoveredWorkspaceLayoutRequestError(
-              current,
-              staleRestartMessage,
-            ),
-          );
-        }
-        workspaceLayoutLoadPendingRef.current = false;
-        setIsWorkspaceLayoutReady(true);
-      })
-      .catch((error) => {
-        console.warn(
-          "workspace layout warning> failed to load server workspace layout:",
-          error,
-        );
-        if (!cancelled) {
-          // Restart-required errors indicate an incompatible backend; surface
-          // the restart instruction to the user instead of silently degrading.
-          if (isBackendUnavailableError(error) && error.restartRequired) {
-            const message = getErrorMessage(error);
-            workspaceLayoutRestartErrorMessageRef.current = message;
-            reportRequestError(error);
-          }
-          workspaceLayoutLoadPendingRef.current = false;
-          setIsWorkspaceLayoutReady(true);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-      workspaceLayoutLoadPendingRef.current = false;
-    };
-  }, [workspaceViewId]);
-
-  useEffect(() => {
-    if (!isWorkspaceLayoutReady) {
-      return;
-    }
-
-    const persistedWorkspace =
-      stripDiffPreviewDocumentContentFromWorkspaceState(
-        stripLoadingGitDiffPreviewTabsFromWorkspaceState(
-          applyControlPanelLayout(workspace, controlPanelSide),
-        ),
-      );
-    const layout: WorkspaceLayoutPersistencePayload = {
-      controlPanelSide,
-      themeId,
-      styleId,
-      markdownThemeId,
-      markdownStyleId,
-      diagramThemeOverrideMode,
-      diagramLook,
-      diagramPalette,
-      fontSizePx,
-      editorFontSizePx,
-      densityPercent,
-      workspace: persistedWorkspace,
-    };
-    persistWorkspaceLayout(workspaceViewId, layout);
-    pendingWorkspaceLayoutSaveRef.current = {
-      workspaceId: workspaceViewId,
-      layout,
-    };
-
-    clearPendingWorkspaceLayoutSaveTimeout();
-    const persistTimeout = window.setTimeout(() => {
-      flushPendingWorkspaceLayoutSave();
-    }, WORKSPACE_LAYOUT_PERSIST_DELAY_MS);
-    pendingWorkspaceLayoutSaveTimeoutRef.current = persistTimeout;
-
-    return () => {
-      if (pendingWorkspaceLayoutSaveTimeoutRef.current === persistTimeout) {
-        clearPendingWorkspaceLayoutSaveTimeout();
-      }
-    };
-  }, [
-    controlPanelSide,
-    densityPercent,
-    diagramLook,
-    diagramPalette,
-    diagramThemeOverrideMode,
-    editorFontSizePx,
-    fontSizePx,
-    isWorkspaceLayoutReady,
-    markdownStyleId,
-    markdownThemeId,
-    styleId,
-    themeId,
-    workspace,
-    workspaceViewId,
-  ]);
-
-  useEffect(() => {
-    function handlePageHide() {
-      flushWorkspaceLayoutSaveRef.current({ keepalive: true });
-    }
-
-    window.addEventListener("pagehide", handlePageHide);
-    return () => {
-      window.removeEventListener("pagehide", handlePageHide);
-    };
-  }, []);
-
-  useEffect(() => {
     if (!isWorkspaceSwitcherOpen) {
       return;
     }
@@ -3478,8 +3096,7 @@ export default function App() {
     agentReadinessRef.current = agentReadiness;
     projectsRef.current = projects;
     orchestratorsRef.current = orchestrators;
-    workspaceSummariesRef.current = workspaceSummaries;
-  }, [agentReadiness, codexState, orchestrators, projects, workspaceSummaries]);
+  }, [agentReadiness, codexState, orchestrators, projects]);
 
   useEffect(() => {
     draftAttachmentsRef.current = draftAttachmentsBySessionId;
