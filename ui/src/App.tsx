@@ -11,57 +11,31 @@ import {
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { createPortal, flushSync } from "react-dom";
+import { flushSync } from "react-dom";
 import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
 import { DialogCloseIcon } from "./message-card-icons";
 import {
-  archiveCodexThread,
-  cancelQueuedPrompt,
-  compactCodexThread,
-  createProject,
-  createSession,
   deleteProject,
-  fetchAgentCommands,
   fetchGitDiff,
   fetchGitStatus,
   fetchState,
-  forkCodexThread,
   isBackendUnavailableError,
-  killSession,
   pauseOrchestratorInstance,
-  pickProjectRoot,
-  refreshSessionModelOptions,
   resumeOrchestratorInstance,
   stopOrchestratorInstance,
-  renameSession,
-  rollbackCodexThread,
-  sendMessage,
-  stopSession,
-  submitApproval,
-  submitCodexAppRequest,
-  submitMcpElicitation,
-  submitUserInput,
-  type CreateSessionResponse,
   type GitDiffRequestPayload,
   type GitDiffSection,
   type OpenPathOptions,
   type StateResponse,
-  unarchiveCodexThread,
   updateAppSettings,
-  updateSessionSettings,
 } from "./api";
 import { AgentIcon } from "./agent-icon";
 import {
   createSessionModelHint,
   defaultNewSessionModel,
-  describeCodexModelAdjustmentNotice,
   describeProjectScope,
-  describeSessionModelRefreshError,
-  normalizedCodexReasoningEffort,
-  normalizedRequestedSessionModel,
   resolveControlPanelWorkspaceRoot,
   resolveRemoteConfig,
-  resolveUnknownSessionModelSendAttempt,
   remoteBadgeLabel,
   usesSessionModelPicker,
   CLAUDE_EFFORT_OPTIONS,
@@ -109,6 +83,13 @@ import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
 import { useAppPreferencesState } from "./app-preferences-state";
 import { useAppWorkspaceLayout } from "./app-workspace-layout";
 import { useAppLiveState } from "./app-live-state";
+import { useAppSessionActions } from "./app-session-actions";
+import { useAppDragResize } from "./app-drag-resize";
+import { useAppDialogState } from "./app-dialog-state";
+import { useAppWorkspaceActions } from "./app-workspace-actions";
+import { useAppControlPanelState } from "./app-control-panel-state";
+import { AppControlSurface } from "./AppControlSurface";
+import { AppDialogs } from "./AppDialogs";
 import { appTestHooks } from "./app-test-hooks";
 import { ProjectListSection } from "./ProjectListSection";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
@@ -129,10 +110,9 @@ import {
 } from "./workspace-shell-controls";
 import type { RuntimeAction } from "./runtime-action-button";
 import { OrchestratorRuntimeActionButton } from "./OrchestratorRuntimeActionButton";
-import {
-  ControlPanelSurface,
-  type ControlPanelSectionId,
-  type ControlPanelSurfaceHandle,
+import type {
+  ControlPanelSectionId,
+  ControlPanelSurfaceHandle,
 } from "./panels/ControlPanelSurface";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
@@ -147,8 +127,6 @@ import {
   type SessionListSearchResult,
 } from "./session-find";
 import type {
-  ApprovalDecision,
-  ApprovalPolicy,
   AgentReadiness,
   AgentType,
   ClaudeApprovalMode,
@@ -159,17 +137,13 @@ import type {
   DiffMessage,
   ExhaustiveValueCoverage,
   GeminiApprovalMode,
-  JsonValue,
   Message,
-  McpElicitationAction,
   PendingPrompt,
   OrchestratorInstance,
   Project,
   RemoteConfig,
   SandboxMode,
   Session,
-  SessionSettingsField,
-  SessionSettingsValue,
 } from "./types";
 import {
   activatePane,
@@ -180,7 +154,6 @@ import {
   ensureControlPanelInWorkspaceState,
   findNearestControlSurfacePaneId,
   findNearestSessionPaneId,
-  findWorkspacePaneIdForSession,
   getSplitRatio,
   openCanvasInWorkspaceState,
   openDiffPreviewInWorkspaceState,
@@ -242,7 +215,6 @@ import {
   filterSessionsByListFilter,
   type SessionListFilter,
 } from "./session-list-filter";
-import { startActivePromptPoll } from "./active-prompt-poll";
 import {
   TAB_DRAG_CHANNEL_NAME,
   attachWorkspaceTabDragData,
@@ -263,8 +235,6 @@ import {
   pruneSessionFlags,
   readNavigatorOnline,
   releaseDraftAttachments,
-  removeQueuedPromptFromSessions,
-  setSessionFlag,
   type DraftImageAttachment,
   type SessionAgentCommandMap,
   type SessionFlagMap,
@@ -341,6 +311,8 @@ export default function App() {
   const [pendingKillSessionId, setPendingKillSessionId] = useState<
     string | null
   >(null);
+  const [pendingSessionRename, setPendingSessionRename] =
+    useState<PendingSessionRename | null>(null);
   const [updatingSessionIds, setUpdatingSessionIds] = useState<SessionFlagMap>(
     {},
   );
@@ -454,23 +426,12 @@ export default function App() {
     collapsedSessionOrchestratorIdsBySurfaceId,
     setCollapsedSessionOrchestratorIdsBySurfaceId,
   ] = useState<Record<string, string[]>>({});
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<PreferencesTabId>("themes");
-  const [pendingSessionRename, setPendingSessionRename] =
-    useState<PendingSessionRename | null>(null);
-  const [pendingSessionRenameDraft, setPendingSessionRenameDraft] =
-    useState("");
-  const [pendingSessionRenameStyle, setPendingSessionRenameStyle] =
-    useState<CSSProperties | null>(null);
-  const [pendingKillPopoverStyle, setPendingKillPopoverStyle] =
-    useState<CSSProperties | null>(null);
   const [pendingScrollToBottomRequest, setPendingScrollToBottomRequest] =
     useState<{
       sessionId: string;
       token: number;
     } | null>(null);
   const [windowId] = useState(() => crypto.randomUUID());
-  const [draggedTab, setDraggedTab] = useState<WorkspaceTabDrag | null>(null);
   const gitDiffPreviewRefreshVersionsRef = useRef<Map<string, number>>(
     new Map(),
   );
@@ -480,31 +441,14 @@ export default function App() {
   const attemptedGitDiffDocumentContentRestoreKeysRef = useRef<Set<string>>(
     new Set(),
   );
-  const [launcherDraggedTab, setLauncherDraggedTab] =
-    useState<WorkspaceTabDrag | null>(null);
-  const [externalDraggedTab, setExternalDraggedTab] =
-    useState<WorkspaceTabDrag | null>(null);
-  const resizeStateRef = useRef<{
-    splitId: string;
-    direction: "row" | "column";
-    startRatio: number;
-    minRatio: number;
-    maxRatio: number;
-    startX: number;
-    startY: number;
-    size: number;
-  } | null>(null);
   const backendInlineRequestErrorMessageRef = useRef<string | null>(null);
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>(
     {},
   );
-  const dragChannelRef = useRef<BroadcastChannel | null>(null);
-  const draggedTabRef = useRef<WorkspaceTabDrag | null>(null);
-  const launcherDraggedTabRef = useRef<WorkspaceTabDrag | null>(null);
   const isMountedRef = useRef(true);
   // Self-chained safety-net poll (see the sendMessage path). A previous
   // implementation used `setInterval`, which stacks overlapping fires when
-  // a slow `/api/state` response exceeds the interval — on large transcripts
+  // a slow `/api/state` response exceeds the interval â€” on large transcripts
   // that caused the backend to be hit by multiple concurrent full-state
   // serializations. The current implementation delegates to
   // `startActivePromptPoll`, which chains `setTimeout` so the next poll is
@@ -514,14 +458,6 @@ export default function App() {
   // `handleSend` can stop an in-progress chain.
   const activePromptPollCancelRef = useRef<(() => void) | null>(null);
   const sessionListSearchInputRef = useRef<HTMLInputElement>(null);
-  const pendingSessionRenameTriggerRef = useRef<HTMLElement | null>(null);
-  const pendingSessionRenamePopoverRef = useRef<HTMLFormElement | null>(null);
-  const pendingSessionRenameInputRef = useRef<HTMLInputElement | null>(null);
-  const pendingSessionRenameCloseTimeoutRef = useRef<number | null>(null);
-  const pendingKillTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const pendingKillPopoverRef = useRef<HTMLDivElement | null>(null);
-  const pendingKillConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
-  const pendingKillCloseTimeoutRef = useRef<number | null>(null);
   const confirmedUnknownModelSendsRef = useRef<Set<string>>(new Set());
   const refreshingSessionModelOptionIdsRef = useRef<SessionFlagMap>({});
   const refreshingAgentCommandSessionIdsRef = useRef<SessionFlagMap>({});
@@ -667,7 +603,7 @@ export default function App() {
       return;
     }
 
-    // Incompatible backend serving HTML — show the restart instruction in the
+    // Incompatible backend serving HTML â€” show the restart instruction in the
     // request error toast but do not trigger auto-reconnect since the backend
     // IS reachable and reconnect success would immediately clear the guidance.
     // The toast is NOT cleared by transport-level recovery (SSE open, state
@@ -687,7 +623,7 @@ export default function App() {
     // Do NOT mutate backendConnectionState here. The connection badge reflects
     // the SSE transport state, and a one-off action 502 does not mean the SSE
     // stream is down. Mutating it to "reconnecting" would leave a permanent
-    // badge because the action-recovery resync only clears error text — only
+    // badge because the action-recovery resync only clears error text â€” only
     // EventSource.onopen / confirmReconnectRecoveryFromLiveEvent restore
     // "connected", and those won't fire when the stream never went down.
     //
@@ -849,340 +785,265 @@ export default function App() {
     selectedProjectId === ALL_PROJECTS_FILTER_ID
       ? null
       : (projectLookup.get(selectedProjectId) ?? null);
-  const remoteLookup = useMemo(
-    () => new Map(remoteConfigs.map((remote) => [remote.id, remote])),
-    [remoteConfigs],
-  );
-  const localRemoteConfig =
-    remoteLookup.get(LOCAL_REMOTE_ID) ?? createBuiltinLocalRemote();
-  const enabledProjectRemotes = useMemo(
-    () =>
-      remoteConfigs.filter(
-        (remote) => remote.enabled || isLocalRemoteId(remote.id),
-      ),
-    [remoteConfigs],
-  );
-  const newProjectSelectedRemote = resolveRemoteConfig(
-    remoteLookup,
-    newProjectRemoteId,
-  );
   const newProjectUsesLocalRemote = isLocalRemoteId(newProjectRemoteId);
-  const createProjectRemoteOptions = useMemo<readonly ComboboxOption[]>(() => {
-    return enabledProjectRemotes.map((remote) => ({
-      label: remoteDisplayName(remote, remote.id),
-      value: remote.id,
-      description: remoteConnectionLabel(remote),
-      badges: [remoteBadgeLabel(remote)],
-    }));
-  }, [enabledProjectRemotes]);
-  const newSessionModelOptions = NEW_SESSION_MODEL_OPTIONS[newSessionAgent];
+  const {
+    handleSend,
+    handleDraftAttachmentsAdd,
+    handleDraftAttachmentRemove,
+    handleNewSession,
+    handleCloneSessionFromExisting,
+    handleCreateProject,
+    handlePickProjectRoot,
+    handleApprovalDecision,
+    handleUserInputSubmit,
+    handleMcpElicitationSubmit,
+    handleCodexAppRequestSubmit,
+    handleCancelQueuedPrompt,
+    handleStopSession,
+    executeKillSession,
+    handleRenameSession,
+    handleSessionSettingsChange,
+    handleRefreshSessionModelOptions,
+    handleForkCodexThread,
+    handleArchiveCodexThread,
+    handleUnarchiveCodexThread,
+    handleCompactCodexThread,
+    handleRollbackCodexThread,
+    handleRefreshAgentCommands,
+  } = useAppSessionActions({
+    lookups: {
+      sessionLookup,
+      projectLookup,
+      agentReadinessByAgent,
+      activeSession,
+      workspace,
+    },
+    draftsBySessionId,
+    draftAttachmentsBySessionId,
+    newProjectRootPath,
+    newProjectRemoteId,
+    newProjectUsesLocalRemote,
+    defaults: {
+      defaultCodexApprovalPolicy,
+      defaultCodexReasoningEffort,
+      defaultCodexSandboxMode,
+      defaultClaudeApprovalMode,
+      defaultClaudeEffort,
+      defaultCursorMode,
+      defaultGeminiApprovalMode,
+    },
+    refs: {
+      isMountedRef,
+      sessionsRef,
+      confirmedUnknownModelSendsRef,
+      activePromptPollCancelRef,
+      refreshingSessionModelOptionIdsRef,
+      refreshingAgentCommandSessionIdsRef,
+    },
+    setters: {
+      setSessions,
+      setWorkspace,
+      setRequestError,
+      setIsCreating,
+      setSendingSessionIds,
+      setDraftsBySessionId,
+      setDraftAttachmentsBySessionId,
+      setIsCreatingProject,
+      setNewProjectRootPath,
+      setNewProjectRemoteId,
+      setSelectedProjectId,
+      setStoppingSessionIds,
+      setKillingSessionIds,
+      setUpdatingSessionIds,
+      setSessionSettingNotices,
+      setRefreshingSessionModelOptionIds,
+      setSessionModelOptionErrors,
+      setAgentCommandsBySessionId,
+      setRefreshingAgentCommandSessionIds,
+      setAgentCommandErrors,
+    },
+    adoptState,
+    adoptCreatedSessionResponse,
+    applyControlPanelLayout,
+    reportRequestError,
+  });
+  const {
+    isSettingsOpen,
+    setIsSettingsOpen,
+    settingsTab,
+    setSettingsTab,
+    pendingKillSession,
+    pendingKillPopoverStyle,
+    pendingKillPopoverRef,
+    pendingKillConfirmButtonRef,
+    handleKillSession,
+    confirmKillSession,
+    clearPendingKillCloseTimeout,
+    schedulePendingKillConfirmationClose,
+    closePendingKillConfirmation,
+    pendingSessionRenameSession,
+    pendingSessionRenameDraft,
+    setPendingSessionRenameDraft,
+    pendingSessionRenameValue,
+    isPendingSessionRenameSubmitting,
+    isPendingSessionRenameCreating,
+    isPendingSessionRenameKilling,
+    pendingSessionRenameStyle,
+    pendingSessionRenamePopoverRef,
+    pendingSessionRenameInputRef,
+    handleSessionRenameRequest,
+    confirmSessionRename,
+    handlePendingSessionRenameNew,
+    handlePendingSessionRenameKill,
+    clearPendingSessionRenameCloseTimeout,
+    schedulePendingSessionRenameClose,
+    closePendingSessionRename,
+    openCreateSessionDialog,
+    openCreateProjectDialog,
+  } = useAppDialogState({
+    selectedProjectId,
+    activeSession,
+    workspaceActivePaneId: workspace.activePaneId,
+    projectLookup,
+    sessionLookup,
+    updatingSessionIds,
+    killingSessionIds,
+    isCreating,
+    killRevealSessionId,
+    setKillRevealSessionId,
+    pendingKillSessionId,
+    setPendingKillSessionId,
+    pendingSessionRename,
+    setPendingSessionRename,
+    setIsCreateSessionOpen,
+    setCreateSessionPaneId,
+    setCreateSessionProjectId,
+    setIsCreateProjectOpen,
+    setNewProjectRemoteId,
+    clearRequestError: () => setRequestError(null),
+    executeKillSession,
+    handleRenameSession,
+    handleCloneSessionFromExisting,
+  });
+  const {
+    remoteLookup,
+    localRemoteConfig,
+    enabledProjectRemotes,
+    newProjectSelectedRemote,
+    createProjectRemoteOptions,
+    newSessionModelOptions,
+    createSessionSelectedProject,
+    createSessionWorkspaceProject,
+    createSessionEffectiveProject,
+    createSessionSelectedRemote,
+    createSessionProjectOptions,
+    controlPanelProjectOptions,
+    createSessionProjectHint,
+    createSessionUsesRemoteProject,
+    createSessionProjectSelectionError,
+    createSessionUsesSessionModelPicker,
+    createSessionAgentReadiness,
+    createSessionBlocked,
+    projectScopedSessions,
+    controlPanelContextSession,
+    controlPanelSessionId,
+    sessionFilterCounts,
+    hasSessionListSearch,
+    sessionListSearchResults,
+    filteredSessions,
+    projectSessionCounts,
+  } = useAppControlPanelState({
+    remoteConfigs,
+    activeSession,
+    selectedProject,
+    selectedProjectId,
+    projects,
+    sessions,
+    projectLookup,
+    paneLookup,
+    sessionLookup,
+    workspace,
+    newProjectRemoteId,
+    setNewProjectRemoteId,
+    createSessionProjectId,
+    setCreateSessionProjectId,
+    newSessionAgent,
+    agentReadinessByAgent,
+    sessionListFilter,
+    sessionListSearchQuery,
+    controlPanelFilesystemRoot,
+    setControlPanelFilesystemRoot,
+    controlPanelGitWorkdir,
+    setControlPanelGitWorkdir,
+    setControlPanelGitStatusCount,
+    lastDerivedControlPanelFilesystemRootRef,
+    lastDerivedControlPanelGitWorkdirRef,
+  });
   const newSessionModel =
     newSessionModelByAgent[newSessionAgent] ??
     defaultNewSessionModel(newSessionAgent);
-  const createSessionSelectedProject =
-    createSessionProjectId === CREATE_SESSION_WORKSPACE_ID
-      ? null
-      : (projectLookup.get(createSessionProjectId) ?? null);
-  const createSessionWorkspaceProject =
-    createSessionProjectId === CREATE_SESSION_WORKSPACE_ID &&
-    activeSession?.projectId &&
-    projectLookup.has(activeSession.projectId)
-      ? (projectLookup.get(activeSession.projectId) ?? null)
-      : null;
-  const createSessionEffectiveProject =
-    createSessionSelectedProject ??
-    (createSessionWorkspaceProject &&
-    !isLocalRemoteId(resolveProjectRemoteId(createSessionWorkspaceProject))
-      ? createSessionWorkspaceProject
-      : null);
-  const createSessionSelectedRemote = createSessionEffectiveProject
-    ? resolveRemoteConfig(
-        remoteLookup,
-        resolveProjectRemoteId(createSessionEffectiveProject),
-      )
-    : localRemoteConfig;
-  const createSessionProjectOptions = useMemo<readonly ComboboxOption[]>(() => {
-    const workspaceLabel = activeSession?.workdir
-      ? "Current workspace"
-      : "Default workspace";
-
-    return [
-      { label: workspaceLabel, value: CREATE_SESSION_WORKSPACE_ID },
-      ...projects.map((project) => {
-        const remote = resolveRemoteConfig(
-          remoteLookup,
-          resolveProjectRemoteId(project),
-        );
-        return {
-          label: project.name,
-          value: project.id,
-          description: describeProjectScope(project, remoteLookup),
-          badges: [remoteBadgeLabel(remote)],
-        };
-      }),
-    ];
-  }, [activeSession?.workdir, projects, remoteLookup]);
-  const controlPanelProjectOptions = useMemo<readonly ComboboxOption[]>(() => {
-    return [
-      {
-        label: "All projects",
-        value: ALL_PROJECTS_FILTER_ID,
-        description: "Show every session in this window.",
-      },
-      ...projects.map((project) => {
-        const remote = resolveRemoteConfig(
-          remoteLookup,
-          resolveProjectRemoteId(project),
-        );
-        return {
-          label: project.name,
-          value: project.id,
-          description: describeProjectScope(project, remoteLookup),
-          badges: [remoteBadgeLabel(remote)],
-        };
-      }),
-    ];
-  }, [projects, remoteLookup]);
-  const createSessionProjectHint = createSessionSelectedProject
-    ? describeProjectScope(createSessionSelectedProject, remoteLookup)
-    : createSessionEffectiveProject
-      ? describeProjectScope(createSessionEffectiveProject, remoteLookup)
-      : activeSession?.workdir
-        ? `Uses ${activeSession.workdir}`
-        : "Uses the app default workspace.";
-  const createSessionUsesRemoteProject =
-    !!createSessionEffectiveProject &&
-    !isLocalRemoteId(resolveProjectRemoteId(createSessionEffectiveProject));
-  const createSessionProjectSelectionError =
-    createSessionProjectId === CREATE_SESSION_WORKSPACE_ID &&
-    !!activeSession?.projectId &&
-    !projectLookup.has(activeSession.projectId)
-      ? "The current workspace is tied to a project that is no longer available. Choose a project before creating a session."
-      : null;
-  const createSessionUsesSessionModelPicker =
-    usesSessionModelPicker(newSessionAgent);
-  const createSessionAgentReadiness = createSessionUsesRemoteProject
-    ? null
-    : (agentReadinessByAgent.get(newSessionAgent) ?? null);
-  const createSessionBlocked = createSessionAgentReadiness?.blocking ?? false;
-  const projectScopedSessions = useMemo(() => {
-    if (!selectedProject) {
-      return sessions;
-    }
-
-    return sessions.filter(
-      (session) => session.projectId === selectedProject.id,
-    );
-  }, [selectedProject, sessions]);
-  const dockedControlPanelPane =
-    workspace.panes.find((pane) =>
-      pane.tabs.some((tab) => tab.kind === "controlPanel"),
-    ) ?? null;
-  const dockedControlPanelActiveTab = dockedControlPanelPane
-    ? (dockedControlPanelPane.tabs.find(
-        (tab) => tab.id === dockedControlPanelPane.activeTabId,
-      ) ??
-      dockedControlPanelPane.tabs[0] ??
-      null)
-    : null;
-  const dockedControlPanelOriginSession =
-    dockedControlPanelActiveTab &&
-    "originSessionId" in dockedControlPanelActiveTab &&
-    dockedControlPanelActiveTab.originSessionId
-      ? (sessionLookup.get(dockedControlPanelActiveTab.originSessionId) ?? null)
-      : null;
-  const dockedControlPanelPaneSession = dockedControlPanelPane?.activeSessionId
-    ? (sessionLookup.get(dockedControlPanelPane.activeSessionId) ?? null)
-    : null;
-  const dockedControlPanelNearestSessionPaneId = dockedControlPanelPane
-    ? findNearestSessionPaneId(workspace, dockedControlPanelPane.id)
-    : null;
-  const dockedControlPanelNearestSessionPane =
-    dockedControlPanelNearestSessionPaneId
-      ? (paneLookup.get(dockedControlPanelNearestSessionPaneId) ?? null)
-      : null;
-  const dockedControlPanelNearestSessionTab =
-    dockedControlPanelNearestSessionPane
-      ? (dockedControlPanelNearestSessionPane.tabs.find(
-          (tab) => tab.id === dockedControlPanelNearestSessionPane.activeTabId,
-        ) ??
-        dockedControlPanelNearestSessionPane.tabs[0] ??
-        null)
-      : null;
-  const dockedControlPanelNearestSession =
-    dockedControlPanelNearestSessionTab?.kind === "session"
-      ? (sessionLookup.get(dockedControlPanelNearestSessionTab.sessionId) ??
-        null)
-      : null;
-  const dockedControlPanelSessionCandidates = [
-    dockedControlPanelOriginSession,
-    dockedControlPanelPaneSession,
-    dockedControlPanelNearestSession,
-    activeSession,
-  ].filter((session): session is Session => Boolean(session));
-  const controlPanelContextSession = selectedProject
-    ? (dockedControlPanelSessionCandidates.find(
-        (session) => session.projectId === selectedProject.id,
-      ) ??
-      projectScopedSessions[0] ??
-      null)
-    : (dockedControlPanelSessionCandidates[0] ?? sessions[0] ?? null);
-  const derivedControlPanelWorkspaceRoot = resolveControlPanelWorkspaceRoot(
-    selectedProject,
-    controlPanelContextSession?.workdir ?? null,
-  );
-  const derivedControlPanelFilesystemRoot = derivedControlPanelWorkspaceRoot;
-  const derivedControlPanelGitWorkdir = derivedControlPanelWorkspaceRoot;
-  const controlPanelSessionId = controlPanelContextSession?.id ?? null;
-  const sessionFilterCounts = useMemo(
-    () => countSessionsByFilter(projectScopedSessions),
-    [projectScopedSessions],
-  );
-  const statusFilteredSessions = useMemo(() => {
-    return filterSessionsByListFilter(projectScopedSessions, sessionListFilter);
-  }, [projectScopedSessions, sessionListFilter]);
-  const trimmedSessionListSearchQuery = sessionListSearchQuery.trim();
-  const deferredSessionListSearchQuery = useDeferredValue(
-    trimmedSessionListSearchQuery,
-  );
-  const effectiveSessionListSearchQuery =
-    trimmedSessionListSearchQuery.length === 0
-      ? ""
-      : deferredSessionListSearchQuery;
-  const hasSessionListSearch = effectiveSessionListSearchQuery.length > 0;
-  const sessionListSearchIndex = useMemo(() => {
-    if (!hasSessionListSearch) {
-      return null;
-    }
-
-    return new Map(
-      statusFilteredSessions.map(
-        (session) => [session.id, buildSessionSearchIndex(session)] as const,
-      ),
-    );
-  }, [hasSessionListSearch, statusFilteredSessions]);
-
-  useEffect(() => {
-    if (
-      createSessionProjectId !== CREATE_SESSION_WORKSPACE_ID &&
-      !projectLookup.has(createSessionProjectId)
-    ) {
-      setCreateSessionProjectId(CREATE_SESSION_WORKSPACE_ID);
-    }
-  }, [createSessionProjectId, projectLookup]);
-
-  useEffect(() => {
-    if (
-      !enabledProjectRemotes.some((remote) => remote.id === newProjectRemoteId)
-    ) {
-      setNewProjectRemoteId(enabledProjectRemotes[0]?.id ?? LOCAL_REMOTE_ID);
-    }
-  }, [enabledProjectRemotes, newProjectRemoteId]);
-
-  useEffect(() => {
-    const previousDerived =
-      lastDerivedControlPanelFilesystemRootRef.current?.trim() ?? "";
-    lastDerivedControlPanelFilesystemRootRef.current =
-      derivedControlPanelFilesystemRoot;
-
-    setControlPanelFilesystemRoot((current) => {
-      const trimmedCurrent = current?.trim() ?? "";
-      if (!trimmedCurrent || trimmedCurrent === previousDerived) {
-        return derivedControlPanelFilesystemRoot;
-      }
-      return current;
-    });
-  }, [derivedControlPanelFilesystemRoot]);
-
-  useEffect(() => {
-    const previousDerived =
-      lastDerivedControlPanelGitWorkdirRef.current?.trim() ?? "";
-    lastDerivedControlPanelGitWorkdirRef.current =
-      derivedControlPanelGitWorkdir;
-
-    setControlPanelGitWorkdir((current) => {
-      const trimmedCurrent = current?.trim() ?? "";
-      if (!trimmedCurrent || trimmedCurrent === previousDerived) {
-        return derivedControlPanelGitWorkdir;
-      }
-      return current;
-    });
-  }, [derivedControlPanelGitWorkdir]);
-
-  useEffect(() => {
-    const normalizedGitWorkdir = controlPanelGitWorkdir?.trim() ?? "";
-    let cancelled = false;
-
-    if (!normalizedGitWorkdir) {
-      setControlPanelGitStatusCount(0);
-      return;
-    }
-
-    void fetchGitStatus(normalizedGitWorkdir, controlPanelSessionId, {
-      projectId: selectedProject?.id ?? null,
-    })
-      .then((status) => {
-        if (cancelled) {
-          return;
-        }
-        setControlPanelGitStatusCount(status.files.length);
-      })
-      .catch(() => {
-        if (cancelled) {
-          return;
-        }
-        setControlPanelGitStatusCount(0);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [controlPanelGitWorkdir, controlPanelSessionId, selectedProject?.id]);
-
-  const sessionListSearchResults = useMemo(() => {
-    if (!hasSessionListSearch || !sessionListSearchIndex) {
-      return new Map<string, SessionListSearchResult>();
-    }
-
-    return new Map(
-      statusFilteredSessions.flatMap((session) => {
-        const searchIndex = sessionListSearchIndex.get(session.id);
-        if (!searchIndex) {
-          return [];
-        }
-
-        const result = buildSessionListSearchResultFromIndex(
-          searchIndex,
-          effectiveSessionListSearchQuery,
-        );
-        return result ? ([[session.id, result]] as const) : [];
-      }),
-    );
-  }, [
-    effectiveSessionListSearchQuery,
-    hasSessionListSearch,
-    sessionListSearchIndex,
-    statusFilteredSessions,
-  ]);
-  const filteredSessions = useMemo(() => {
-    if (!hasSessionListSearch) {
-      return statusFilteredSessions;
-    }
-
-    return statusFilteredSessions.filter((session) =>
-      sessionListSearchResults.has(session.id),
-    );
-  }, [hasSessionListSearch, sessionListSearchResults, statusFilteredSessions]);
-  const projectSessionCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const session of sessions) {
-      if (!session.projectId) {
-        continue;
-      }
-      counts.set(session.projectId, (counts.get(session.projectId) ?? 0) + 1);
-    }
-    return counts;
-  }, [sessions]);
+  const {
+    handleCreateSessionDialogSubmit,
+    handleSidebarSessionClick,
+    handleOpenConversationFromDiff,
+    handleInsertReviewIntoPrompt,
+    handleScrollToBottomRequestHandled,
+    handlePaneActivate,
+    handlePaneTabSelect,
+    handleCloseTab,
+    handleSplitPane,
+    handleDraftChange,
+    handlePaneViewModeChange,
+    handlePaneSourcePathChange,
+    handleOpenSourceTab,
+    handleOpenDiffPreviewTab,
+    handleOpenGitStatusDiffPreviewTab,
+    handleOpenFilesystemTab,
+    handleOpenGitStatusTab,
+    handleOpenTerminalTab,
+    handleOpenSessionListTab,
+    handleOpenProjectListTab,
+    handleOpenCanvasTab,
+    handleOpenOrchestratorListTab,
+    handleOpenOrchestratorCanvasTab,
+    handleUpsertCanvasSessionCard,
+    handleRemoveCanvasSessionCard,
+    handleSetCanvasZoom,
+    handleOrchestratorStateUpdated,
+    handleOrchestratorRuntimeAction,
+    handleOpenInstructionDebuggerTab,
+    handleProjectMenuStartSession,
+    handleProjectMenuRemoveProject,
+  } = useAppWorkspaceActions({
+    workspace,
+    workspaceRef,
+    paneLookup,
+    sessionLookup,
+    projectLookup,
+    isMountedRef,
+    gitDiffPreviewRefreshVersionsRef,
+    attemptedGitDiffDocumentContentRestoreKeysRef,
+    newSessionAgent,
+    newSessionModel,
+    createSessionPaneId,
+    createSessionProjectId,
+    closePendingSessionRename,
+    setKillRevealSessionId,
+    setSelectedProjectId,
+    setWorkspace,
+    setStandaloneControlSurfaceViewStateByTabId,
+    setDraftsBySessionId,
+    setPendingScrollToBottomRequest,
+    setRequestError,
+    setPendingOrchestratorActionById,
+    setIsCreateSessionOpen,
+    applyControlPanelLayout,
+    markSessionTabsForBottomAfterWorkspaceRebuild,
+    reportRequestError,
+    adoptState,
+    handleNewSession,
+    openCreateSessionDialog,
+  });
   const activeTheme = THEMES.find((theme) => theme.id === themeId) ?? THEMES[0];
   const activeStyle = STYLES.find((style) => style.id === styleId) ?? STYLES[0];
   const activeMarkdownTheme =
@@ -1196,18 +1057,6 @@ export default function App() {
   )
     ? "dark"
     : "light";
-  const activeDraggedTab =
-    draggedTab ?? launcherDraggedTab ?? externalDraggedTab;
-
-  function getKnownWorkspaceTabDrag() {
-    return (
-      draggedTabRef.current ??
-      draggedTab ??
-      launcherDraggedTabRef.current ??
-      launcherDraggedTab ??
-      externalDraggedTab
-    );
-  }
   function focusSessionListSearch(selectAll = false) {
     controlPanelSurfaceRef.current?.selectSection("sessions");
     window.requestAnimationFrame(() => {
@@ -1221,10 +1070,6 @@ export default function App() {
         input.select();
       }
     });
-  }
-
-  function broadcastTabDragMessage(message: WorkspaceTabDragChannelMessage) {
-    dragChannelRef.current?.postMessage(message);
   }
 
   function applyControlPanelLayout(
@@ -1276,210 +1121,27 @@ export default function App() {
     }
   }
 
-  function updateSessionLocally(
-    sessionId: string,
-    update: (session: Session) => Session,
-  ) {
-    const nextSessions = sessionsRef.current.map((entry) => {
-      if (entry.id !== sessionId) {
-        return entry;
-      }
-
-      return update(entry);
-    });
-    const hasChanged = nextSessions.some(
-      (entry, index) => entry !== sessionsRef.current[index],
-    );
-    if (!hasChanged) {
-      return;
-    }
-
-    sessionsRef.current = nextSessions;
-    setSessions(nextSessions);
-    setWorkspace((current) =>
-      applyControlPanelLayout(reconcileWorkspaceState(current, nextSessions)),
-    );
-  }
-
-  function buildOptimisticSessionSettingsUpdate(
-    session: Session,
-    field: SessionSettingsField,
-    value: SessionSettingsValue,
-  ) {
-    const normalizedModelValue =
-      field === "model"
-        ? normalizedRequestedSessionModel(session, value as string)
-        : null;
-
-    switch (session.agent) {
-      case "Codex": {
-        const nextModel = normalizedModelValue ?? session.model;
-        const nextReasoningEffort =
-          field === "reasoningEffort"
-            ? (value as CodexReasoningEffort)
-            : normalizedCodexReasoningEffort(session, nextModel);
-        const nextSandboxMode =
-          field === "sandboxMode"
-            ? (value as SandboxMode)
-            : session.sandboxMode;
-        const nextApprovalPolicy =
-          field === "approvalPolicy"
-            ? (value as ApprovalPolicy)
-            : session.approvalPolicy;
-
-        if (
-          nextModel === session.model &&
-          nextReasoningEffort === session.reasoningEffort &&
-          nextSandboxMode === session.sandboxMode &&
-          nextApprovalPolicy === session.approvalPolicy
-        ) {
-          return session;
-        }
-
-        return {
-          ...session,
-          model: nextModel,
-          reasoningEffort: nextReasoningEffort,
-          sandboxMode: nextSandboxMode,
-          approvalPolicy: nextApprovalPolicy,
-        };
-      }
-      case "Cursor": {
-        const nextModel = normalizedModelValue ?? session.model;
-        const nextCursorMode =
-          field === "cursorMode" ? (value as CursorMode) : session.cursorMode;
-
-        if (
-          nextModel === session.model &&
-          nextCursorMode === session.cursorMode
-        ) {
-          return session;
-        }
-
-        return {
-          ...session,
-          model: nextModel,
-          cursorMode: nextCursorMode,
-        };
-      }
-      case "Claude": {
-        const nextModel = normalizedModelValue ?? session.model;
-        const nextClaudeApprovalMode =
-          field === "claudeApprovalMode"
-            ? (value as ClaudeApprovalMode)
-            : session.claudeApprovalMode;
-        const nextClaudeEffort =
-          field === "claudeEffort"
-            ? (value as ClaudeEffortLevel)
-            : session.claudeEffort;
-
-        if (
-          nextModel === session.model &&
-          nextClaudeApprovalMode === session.claudeApprovalMode &&
-          nextClaudeEffort === session.claudeEffort
-        ) {
-          return session;
-        }
-
-        return {
-          ...session,
-          model: nextModel,
-          claudeApprovalMode: nextClaudeApprovalMode,
-          claudeEffort: nextClaudeEffort,
-        };
-      }
-      case "Gemini": {
-        const nextModel = normalizedModelValue ?? session.model;
-        const nextGeminiApprovalMode =
-          field === "geminiApprovalMode"
-            ? (value as GeminiApprovalMode)
-            : session.geminiApprovalMode;
-
-        if (
-          nextModel === session.model &&
-          nextGeminiApprovalMode === session.geminiApprovalMode
-        ) {
-          return session;
-        }
-
-        return {
-          ...session,
-          model: nextModel,
-          geminiApprovalMode: nextGeminiApprovalMode,
-        };
-      }
-    }
-  }
-
-  function rollbackOptimisticSessionSettingsUpdate(
-    currentSession: Session,
-    previousSession: Session,
-    optimisticSession: Session,
-  ) {
-    let changed = false;
-    const nextSession = { ...currentSession };
-
-    if (
-      currentSession.model === optimisticSession.model &&
-      currentSession.model !== previousSession.model
-    ) {
-      nextSession.model = previousSession.model;
-      changed = true;
-    }
-    if (
-      currentSession.approvalPolicy === optimisticSession.approvalPolicy &&
-      currentSession.approvalPolicy !== previousSession.approvalPolicy
-    ) {
-      nextSession.approvalPolicy = previousSession.approvalPolicy;
-      changed = true;
-    }
-    if (
-      currentSession.reasoningEffort === optimisticSession.reasoningEffort &&
-      currentSession.reasoningEffort !== previousSession.reasoningEffort
-    ) {
-      nextSession.reasoningEffort = previousSession.reasoningEffort;
-      changed = true;
-    }
-    if (
-      currentSession.sandboxMode === optimisticSession.sandboxMode &&
-      currentSession.sandboxMode !== previousSession.sandboxMode
-    ) {
-      nextSession.sandboxMode = previousSession.sandboxMode;
-      changed = true;
-    }
-    if (
-      currentSession.cursorMode === optimisticSession.cursorMode &&
-      currentSession.cursorMode !== previousSession.cursorMode
-    ) {
-      nextSession.cursorMode = previousSession.cursorMode;
-      changed = true;
-    }
-    if (
-      currentSession.claudeApprovalMode ===
-        optimisticSession.claudeApprovalMode &&
-      currentSession.claudeApprovalMode !== previousSession.claudeApprovalMode
-    ) {
-      nextSession.claudeApprovalMode = previousSession.claudeApprovalMode;
-      changed = true;
-    }
-    if (
-      currentSession.claudeEffort === optimisticSession.claudeEffort &&
-      currentSession.claudeEffort !== previousSession.claudeEffort
-    ) {
-      nextSession.claudeEffort = previousSession.claudeEffort;
-      changed = true;
-    }
-    if (
-      currentSession.geminiApprovalMode ===
-        optimisticSession.geminiApprovalMode &&
-      currentSession.geminiApprovalMode !== previousSession.geminiApprovalMode
-    ) {
-      nextSession.geminiApprovalMode = previousSession.geminiApprovalMode;
-      changed = true;
-    }
-
-    return changed ? nextSession : currentSession;
-  }
+  const {
+    activeDraggedTab,
+    getKnownWorkspaceTabDrag,
+    handleSplitResizeStart,
+    handleTabDragStart,
+    handleTabDragEnd,
+    handleControlPanelLauncherDragStart,
+    handleControlPanelLauncherDragEnd,
+    handleTabDrop,
+  } = useAppDragResize({
+    windowId,
+    workspace,
+    paneLookup,
+    controlPanelSide,
+    setControlPanelSide,
+    setWorkspace,
+    applyControlPanelLayout,
+    workspaceLayoutLoadPendingRef,
+    ignoreFetchedWorkspaceLayoutRef,
+    markSessionTabsForBottomAfterWorkspaceRebuild,
+  });
 
   async function persistAppPreferences(payload: {
     defaultCodexReasoningEffort?: CodexReasoningEffort;
@@ -1978,58 +1640,6 @@ export default function App() {
   }, [workspaceFilesChangedEvent]);
 
   useEffect(() => {
-    if (typeof BroadcastChannel === "undefined") {
-      return;
-    }
-
-    const channel = new BroadcastChannel(TAB_DRAG_CHANNEL_NAME);
-    dragChannelRef.current = channel;
-    channel.onmessage = (event: MessageEvent<unknown>) => {
-      const message = event.data;
-      if (!isWorkspaceTabDragChannelMessage(message)) {
-        return;
-      }
-
-      switch (message.type) {
-        case "drag-start":
-          if (message.payload.sourceWindowId !== windowId) {
-            setExternalDraggedTab(message.payload);
-          }
-          break;
-        case "drag-end":
-          setExternalDraggedTab((current) =>
-            current?.dragId === message.dragId ? null : current,
-          );
-          break;
-        case "drop-commit":
-          if (message.sourceWindowId !== windowId) {
-            break;
-          }
-
-          if (draggedTabRef.current?.dragId === message.dragId) {
-            draggedTabRef.current = null;
-          }
-          setDraggedTab((current) =>
-            current?.dragId === message.dragId ? null : current,
-          );
-          setWorkspace((current) =>
-            applyControlPanelLayout(
-              closeWorkspaceTab(current, message.sourcePaneId, message.tabId),
-            ),
-          );
-          break;
-      }
-    };
-
-    return () => {
-      channel.close();
-      if (dragChannelRef.current === channel) {
-        dragChannelRef.current = null;
-      }
-    };
-  }, [windowId]);
-
-  useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
@@ -2045,183 +1655,6 @@ export default function App() {
       );
     };
   }, []);
-
-  useEffect(() => {
-    return () => {
-      clearPendingKillCloseTimeout();
-      clearPendingSessionRenameCloseTimeout();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!pendingKillSessionId) {
-      clearPendingKillCloseTimeout();
-      return;
-    }
-
-    const focusFrameId = window.requestAnimationFrame(() => {
-      pendingKillConfirmButtonRef.current?.focus();
-    });
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closePendingKillConfirmation(true);
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.cancelAnimationFrame(focusFrameId);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [pendingKillSessionId]);
-
-  useLayoutEffect(() => {
-    if (!pendingKillSessionId) {
-      setPendingKillPopoverStyle(null);
-      return;
-    }
-
-    setPendingKillPopoverStyle({
-      left: 0,
-      top: 0,
-      visibility: "hidden",
-    });
-
-    function updatePendingKillPopoverStyle() {
-      const trigger = pendingKillTriggerRef.current;
-      const popover = pendingKillPopoverRef.current;
-      if (!trigger || !popover) {
-        return;
-      }
-
-      const triggerRect = trigger.getBoundingClientRect();
-      const popoverRect = popover.getBoundingClientRect();
-      const viewportPadding = 12;
-      const preferredLeft =
-        triggerRect.left + triggerRect.width / 2 - popoverRect.width / 2;
-      const left = clamp(
-        preferredLeft,
-        viewportPadding,
-        window.innerWidth - popoverRect.width - viewportPadding,
-      );
-      const preferredTop = triggerRect.top - 10;
-      const top = clamp(
-        preferredTop,
-        viewportPadding,
-        window.innerHeight - popoverRect.height - viewportPadding,
-      );
-
-      setPendingKillPopoverStyle({
-        left,
-        top,
-      });
-    }
-
-    const frameId = window.requestAnimationFrame(updatePendingKillPopoverStyle);
-    window.addEventListener("resize", updatePendingKillPopoverStyle);
-    window.addEventListener("scroll", updatePendingKillPopoverStyle, true);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      window.removeEventListener("resize", updatePendingKillPopoverStyle);
-      window.removeEventListener("scroll", updatePendingKillPopoverStyle, true);
-    };
-  }, [pendingKillSessionId]);
-
-  useEffect(() => {
-    if (!pendingSessionRename) {
-      clearPendingSessionRenameCloseTimeout();
-      return;
-    }
-
-    const focusFrameId = window.requestAnimationFrame(() => {
-      pendingSessionRenameInputRef.current?.focus();
-      pendingSessionRenameInputRef.current?.select();
-    });
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closePendingSessionRename(true);
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.cancelAnimationFrame(focusFrameId);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [pendingSessionRename]);
-
-  useLayoutEffect(() => {
-    if (!pendingSessionRename) {
-      setPendingSessionRenameStyle(null);
-      return;
-    }
-
-    const renameAnchor = pendingSessionRename;
-
-    setPendingSessionRenameStyle({
-      left: 0,
-      top: 0,
-      visibility: "hidden",
-    });
-
-    function updatePendingSessionRenameStyle() {
-      const popover = pendingSessionRenamePopoverRef.current;
-      if (!popover) {
-        return;
-      }
-
-      const popoverRect = popover.getBoundingClientRect();
-      const viewportPadding = 12;
-      const left = clamp(
-        renameAnchor.clientX - popoverRect.width / 2,
-        viewportPadding,
-        window.innerWidth - popoverRect.width - viewportPadding,
-      );
-      const top = clamp(
-        renameAnchor.clientY - 18,
-        viewportPadding,
-        window.innerHeight - popoverRect.height - viewportPadding,
-      );
-
-      setPendingSessionRenameStyle({
-        left,
-        top,
-      });
-    }
-
-    const frameId = window.requestAnimationFrame(
-      updatePendingSessionRenameStyle,
-    );
-    window.addEventListener("resize", updatePendingSessionRenameStyle);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      window.removeEventListener("resize", updatePendingSessionRenameStyle);
-    };
-  }, [pendingSessionRename]);
-
-  useEffect(() => {
-    if (!isSettingsOpen) {
-      return;
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setIsSettingsOpen(false);
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isSettingsOpen]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -2249,3547 +1682,108 @@ export default function App() {
     };
   }, [isSettingsOpen, pendingKillSessionId]);
 
-  useEffect(() => {
-    function handlePointerMove(event: PointerEvent) {
-      const resizeState = resizeStateRef.current;
-      if (!resizeState) {
-        return;
-      }
-
-      const delta =
-        resizeState.direction === "row"
-          ? event.clientX - resizeState.startX
-          : event.clientY - resizeState.startY;
-      const nextRatio = clamp(
-        resizeState.startRatio + delta / Math.max(resizeState.size, 1),
-        resizeState.minRatio,
-        resizeState.maxRatio,
-      );
-      if (
-        workspaceLayoutLoadPendingRef.current &&
-        nextRatio !== resizeState.startRatio
-      ) {
-        // Keep a manual resize from being overwritten by a late initial layout
-        // fetch for the current workspace.
-        ignoreFetchedWorkspaceLayoutRef.current = true;
-      }
-
-      setWorkspace((current) =>
-        updateSplitRatio(current, resizeState.splitId, nextRatio),
-      );
-    }
-
-    function handlePointerUp() {
-      resizeStateRef.current = null;
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-    };
-  }, []);
-
-  function startActivePromptRecoveryPoll(sessionId: string) {
-    // Safety net: if the SSE stream is dead (e.g. after a server
-    // restart the proxy may not forward the connection close), the
-    // agent's response would never arrive via deltas. Chain a
-    // `setTimeout` poll of the authoritative snapshot until the
-    // session is no longer active. If SSE is healthy, the polls are
-    // no-ops (same revision) and stop once the turn completes. See
-    // `startActivePromptPoll` in `active-prompt-poll.ts` for the
-    // chain + deadline contract.
-    //
-    // Clear any previous safety-net poll so rapid prompts don't
-    // stack independent timers.
-    activePromptPollCancelRef.current?.();
-    activePromptPollCancelRef.current = startActivePromptPoll({
-      fetchState,
-      isMounted: () => isMountedRef.current,
-      onState: (freshState) => {
-        // The server-instance-id check inside `adoptState` now
-        // detects server restarts deterministically via
-        // `nextState.serverInstanceId`, so the poll no longer needs
-        // `force + allowRevisionDowngrade` to recover from a restart.
-        // Adopt with default flags: a stale poll response (server still
-        // running, SSE already delivered a newer revision) becomes a
-        // silent no-op, and a genuine restart is still accepted because
-        // the instance id changed.
-        adoptState(freshState);
-        // Return `true` to stop the chain once the session is no longer
-        // active.
-        return !freshState.sessions?.some(
-          (session) => session.id === sessionId && session.status === "active",
-        );
-      },
-    });
-  }
-
-  function handleSend(
-    sessionId: string,
-    draftTextOverride?: string,
-    expandedTextOverride?: string | null,
-  ) {
-    const session = sessionLookup.get(sessionId);
-    if (!session) {
-      return false;
-    }
-
-    const draftText = draftTextOverride ?? draftsBySessionId[sessionId] ?? "";
-    const prompt = draftText.trim();
-    const expandedText = expandedTextOverride?.trim() || null;
-    const normalizedExpandedText =
-      expandedText && expandedText !== prompt ? expandedText : null;
-    const attachments = draftAttachmentsBySessionId[sessionId] ?? [];
-    if (!prompt && attachments.length === 0) {
-      return false;
-    }
-    if (
-      session.agent === "Codex" &&
-      session.externalSessionId &&
-      session.codexThreadState === "archived"
-    ) {
-      setRequestError(
-        "This Codex thread is archived. Unarchive it before sending another prompt.",
-      );
-      return false;
-    }
-    const unknownModelAttempt = resolveUnknownSessionModelSendAttempt(
-      confirmedUnknownModelSendsRef.current,
-      session,
-    );
-    confirmedUnknownModelSendsRef.current =
-      unknownModelAttempt.nextConfirmedKeys;
-    if (!unknownModelAttempt.allowSend) {
-      setRequestError(unknownModelAttempt.warning);
-      return false;
-    }
-
-    setSendingSessionIds((current) => setSessionFlag(current, sessionId, true));
-    setDraftsBySessionId((current) => {
-      if ((current[sessionId] ?? "") === "") {
-        return current;
-      }
-
-      return {
-        ...current,
-        [sessionId]: "",
-      };
-    });
-    setDraftAttachmentsBySessionId((current) => {
-      if (!current[sessionId]?.length) {
-        return current;
-      }
-
-      const nextState = { ...current };
-      delete nextState[sessionId];
-      return nextState;
-    });
-
-    void (async () => {
-      try {
-        const state = await sendMessage(
-          sessionId,
-          prompt,
-          attachments.map((attachment) => ({
-            data: attachment.base64Data,
-            fileName: attachment.fileName,
-            mediaType: attachment.mediaType,
-          })),
-          normalizedExpandedText,
-        );
-        const adopted = adoptState(state);
-        releaseDraftAttachments(attachments);
-        setRequestError(null);
-        startActivePromptRecoveryPoll(sessionId);
-        if (!adopted) {
-          // adoptState returns false when the response is stale
-          // against the current in-memory revision AND the server
-          // instance id did NOT change (so it's not a restart rewind,
-          // just a normal out-of-order race where SSE already
-          // delivered a newer revision for this session — the user's
-          // prompt is already visible via the SSE delta).
-          //
-          // The post-POST side effects (attachment release, error
-          // clear, safety-net poll arm) already ran above the guard,
-          // so this branch only has to skip the success-path
-          // fall-through and return. Do NOT restore the draft here:
-          // the prompt HAS been accepted by the server (the POST
-          // succeeded with 202), restoring would re-insert the
-          // just-sent text into an empty box and let the user
-          // accidentally send it twice.
-          return;
-        }
-      } catch (error) {
-        let restoredDraft = false;
-        let restoredAttachments = false;
-
-        setDraftsBySessionId((current) => {
-          if (!draftText || (current[sessionId] ?? "") !== "") {
-            return current;
-          }
-
-          restoredDraft = true;
-          return {
-            ...current,
-            [sessionId]: draftText,
-          };
-        });
-        setDraftAttachmentsBySessionId((current) => {
-          if (
-            attachments.length === 0 ||
-            (current[sessionId]?.length ?? 0) > 0
-          ) {
-            return current;
-          }
-
-          restoredAttachments = true;
-          return {
-            ...current,
-            [sessionId]: attachments,
-          };
-        });
-        if (!restoredAttachments) {
-          releaseDraftAttachments(attachments);
-        }
-        reportRequestError(error);
-      } finally {
-        setSendingSessionIds((current) =>
-          setSessionFlag(current, sessionId, false),
-        );
-      }
-    })();
-
-    return true;
-  }
-
-  function handleDraftAttachmentsAdd(
-    sessionId: string,
-    attachments: DraftImageAttachment[],
-  ) {
-    setDraftAttachmentsBySessionId((current) => ({
-      ...current,
-      [sessionId]: [...(current[sessionId] ?? []), ...attachments],
-    }));
-  }
-
-  function handleDraftAttachmentRemove(
-    sessionId: string,
-    attachmentId: string,
-  ) {
-    setDraftAttachmentsBySessionId((current) => {
-      const existing = current[sessionId];
-      if (!existing) {
-        return current;
-      }
-
-      const removed = existing.filter(
-        (attachment) => attachment.id === attachmentId,
-      );
-      if (removed.length === 0) {
-        return current;
-      }
-
-      releaseDraftAttachments(removed);
-      const nextAttachments = existing.filter(
-        (attachment) => attachment.id !== attachmentId,
-      );
-      if (nextAttachments.length === 0) {
-        const nextState = { ...current };
-        delete nextState[sessionId];
-        return nextState;
-      }
-
-      return {
-        ...current,
-        [sessionId]: nextAttachments,
-      };
-    });
-  }
-
-  function openCreateSessionDialog(
-    preferredPaneId: string | null = null,
-    defaultProjectSelectionId: string | null = null,
-  ) {
-    const normalizedDefaultProjectSelectionId =
-      defaultProjectSelectionId?.trim() ?? "";
-    const fallbackProjectId =
-      selectedProjectId !== ALL_PROJECTS_FILTER_ID &&
-      projectLookup.has(selectedProjectId)
-        ? selectedProjectId
-        : activeSession?.projectId && projectLookup.has(activeSession.projectId)
-          ? activeSession.projectId
-          : CREATE_SESSION_WORKSPACE_ID;
-    const defaultProjectId =
-      normalizedDefaultProjectSelectionId === ALL_PROJECTS_FILTER_ID
-        ? CREATE_SESSION_WORKSPACE_ID
-        : normalizedDefaultProjectSelectionId &&
-            projectLookup.has(normalizedDefaultProjectSelectionId)
-          ? normalizedDefaultProjectSelectionId
-          : fallbackProjectId;
-
-    setCreateSessionPaneId(preferredPaneId ?? workspace.activePaneId);
-    setCreateSessionProjectId(defaultProjectId);
-    setRequestError(null);
-    setIsCreateSessionOpen(true);
-  }
-
-  function resetRemovedProjectSelection(projectId: string) {
-    setSelectedProjectId((current) =>
-      current === projectId ? ALL_PROJECTS_FILTER_ID : current,
-    );
-    setStandaloneControlSurfaceViewStateByTabId((current) => {
-      let changed = false;
-      const nextState: Record<string, StandaloneControlSurfaceViewState> = {};
-
-      for (const [tabId, viewState] of Object.entries(current)) {
-        if (viewState.projectId === projectId) {
-          changed = true;
-          nextState[tabId] = {
-            ...viewState,
-            projectId: ALL_PROJECTS_FILTER_ID,
-          };
-          continue;
-        }
-
-        nextState[tabId] = viewState;
-      }
-
-      return changed ? nextState : current;
-    });
-    setWorkspace((current) => {
-      let changed = false;
-      const panes = current.panes.map((pane) => {
-        let paneChanged = false;
-        const tabs = pane.tabs.map((tab): WorkspaceTab => {
-          if ("originProjectId" in tab && tab.originProjectId === projectId) {
-            paneChanged = true;
-            return {
-              ...tab,
-              originProjectId: null,
-            };
-          }
-
-          return tab;
-        });
-
-        if (!paneChanged) {
-          return pane;
-        }
-
-        changed = true;
-        return {
-          ...pane,
-          tabs,
-        };
-      });
-
-      return changed ? { ...current, panes } : current;
-    });
-  }
-
-  function handleProjectMenuStartSession(
-    paneId: string | null,
-    projectId: string,
-  ) {
-    openCreateSessionDialog(paneId, projectId);
-  }
-
-  async function handleProjectMenuRemoveProject(project: Project) {
-    const confirmed = window.confirm(
-      `Remove "${project.name}" from TermAl? Existing sessions stay in All projects. Files on disk are not deleted.`,
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    try {
-      const state = await deleteProject(project.id);
-      if (!isMountedRef.current) {
-        return;
-      }
-      appTestHooks?.onDeleteProjectPostAwaitPath?.("resolve");
-      adoptState(state);
-      resetRemovedProjectSelection(project.id);
-      setRequestError(null);
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return;
-      }
-      appTestHooks?.onDeleteProjectPostAwaitPath?.("reject");
-      reportRequestError(error);
-    }
-  }
-
-  async function handleNewSession({
-    agent,
-    model,
-    preferredPaneId = null,
-    projectSelectionId = CREATE_SESSION_WORKSPACE_ID,
-  }: {
-    agent: AgentType;
-    model: string;
-    preferredPaneId?: string | null;
-    projectSelectionId?: string;
-  }) {
-    const trimmedModel = model.trim();
-    if (!trimmedModel && !usesSessionModelPicker(agent)) {
-      setRequestError("Choose a model.");
-      return false;
-    }
-    if (
-      projectSelectionId === CREATE_SESSION_WORKSPACE_ID &&
-      !!activeSession?.projectId &&
-      !projectLookup.has(activeSession.projectId)
-    ) {
-      setRequestError(
-        "The current workspace project is unavailable. Choose a project before creating a session.",
-      );
-      return false;
-    }
-    const workspaceProject =
-      projectSelectionId === CREATE_SESSION_WORKSPACE_ID &&
-      activeSession?.projectId &&
-      projectLookup.has(activeSession.projectId)
-        ? (projectLookup.get(activeSession.projectId) ?? null)
-        : null;
-    const targetProject =
-      projectSelectionId !== CREATE_SESSION_WORKSPACE_ID
-        ? (projectLookup.get(projectSelectionId) ?? null)
-        : workspaceProject &&
-            !isLocalRemoteId(resolveProjectRemoteId(workspaceProject))
-          ? workspaceProject
-          : null;
-    const targetUsesRemoteProject =
-      !!targetProject &&
-      !isLocalRemoteId(resolveProjectRemoteId(targetProject));
-    const readiness = targetUsesRemoteProject
-      ? null
-      : agentReadinessByAgent.get(agent);
-    if (readiness?.blocking) {
-      setRequestError(readiness.detail);
-      return false;
-    }
-
-    setIsCreating(true);
-    try {
-      const targetPaneId = preferredPaneId ?? workspace.activePaneId;
-      const targetProjectId =
-        projectSelectionId === CREATE_SESSION_WORKSPACE_ID
-          ? null
-          : projectSelectionId;
-      const created = await createSession({
-        agent,
-        model: usesSessionModelPicker(agent) ? undefined : trimmedModel,
-        approvalPolicy:
-          agent === "Codex" ? defaultCodexApprovalPolicy : undefined,
-        reasoningEffort:
-          agent === "Codex" ? defaultCodexReasoningEffort : undefined,
-        cursorMode: agent === "Cursor" ? defaultCursorMode : undefined,
-        claudeApprovalMode:
-          agent === "Claude" ? defaultClaudeApprovalMode : undefined,
-        claudeEffort: agent === "Claude" ? defaultClaudeEffort : undefined,
-        geminiApprovalMode:
-          agent === "Gemini" ? defaultGeminiApprovalMode : undefined,
-        sandboxMode: agent === "Codex" ? defaultCodexSandboxMode : undefined,
-        projectId: targetProjectId ?? targetProject?.id ?? undefined,
-        workdir:
-          targetProjectId || targetProject ? undefined : activeSession?.workdir,
-      });
-      if (!isMountedRef.current) {
-        return false;
-      }
-      const adopted = adoptCreatedSessionResponse(created, {
-        openSessionId: created.sessionId,
-        paneId: targetPaneId,
-      });
-      // "stale" is a safe fallback — an earlier delta already
-      // raised the revision past the POST response, which means
-      // the session is already in `sessionsRef`; opening the
-      // workspace pane points at a real session.
-      //
-      // "recovering" must NOT fall through — the id came from a
-      // wire-contract-violating response and is not in
-      // `sessionsRef`. Opening would leave a phantom pane until
-      // the scheduled resync reconciles.
-      if (adopted === "stale") {
-        setWorkspace((current) =>
-          applyControlPanelLayout(
-            openSessionInWorkspaceState(
-              current,
-              created.sessionId,
-              targetPaneId,
-            ),
-          ),
-        );
-      }
-      if (
-        agent === "Claude" ||
-        agent === "Codex" ||
-        agent === "Cursor" ||
-        agent === "Gemini"
-      ) {
-        void handleRefreshSessionModelOptions(created.sessionId, {
-          reportGlobalError: false,
-        });
-      }
-      setRequestError(null);
-      return true;
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return false;
-      }
-      reportRequestError(error);
-      return false;
-    } finally {
-      if (isMountedRef.current) {
-        setIsCreating(false);
-      }
-    }
-  }
-
-  async function handleCreateSessionDialogSubmit() {
-    const created = await handleNewSession({
-      agent: newSessionAgent,
-      model: newSessionModel,
-      preferredPaneId: createSessionPaneId,
-      projectSelectionId: createSessionProjectId,
-    });
-
-    if (created && isMountedRef.current) {
-      setIsCreateSessionOpen(false);
-    }
-  }
-
-  function openCreateProjectDialog() {
-    setNewProjectRemoteId(LOCAL_REMOTE_ID);
-    setRequestError(null);
-    setIsCreateProjectOpen(true);
-  }
-
-  async function handleCreateProject() {
-    const rootPath = newProjectRootPath.trim();
-    if (!rootPath) {
-      setRequestError("Enter a project root path.");
-      return false;
-    }
-
-    setIsCreatingProject(true);
-    try {
-      const created = await createProject({
-        rootPath,
-        remoteId: newProjectRemoteId,
-      });
-      adoptState(created.state);
-      setSelectedProjectId(created.projectId);
-      setNewProjectRootPath("");
-      setNewProjectRemoteId(LOCAL_REMOTE_ID);
-      setRequestError(null);
-      return true;
-    } catch (error) {
-      reportRequestError(error);
-      return false;
-    } finally {
-      setIsCreatingProject(false);
-    }
-  }
-
-  async function handlePickProjectRoot() {
-    if (!newProjectUsesLocalRemote) {
-      setRequestError(
-        "Remote projects need a path from the remote machine. Enter it manually.",
-      );
-      return;
-    }
-
-    setIsCreatingProject(true);
-    try {
-      const response = await pickProjectRoot();
-      if (response.path) {
-        setNewProjectRootPath(response.path);
-        setRequestError(null);
-      }
-    } catch (error) {
-      reportRequestError(error);
-    } finally {
-      setIsCreatingProject(false);
-    }
-  }
-
-  async function handleApprovalDecision(
-    sessionId: string,
-    messageId: string,
-    decision: ApprovalDecision,
-  ) {
-    try {
-      const state = await submitApproval(sessionId, messageId, decision);
-      adoptState(state);
-      setRequestError(null);
-    } catch (error) {
-      reportRequestError(error);
-    }
-  }
-
-  async function handleUserInputSubmit(
-    sessionId: string,
-    messageId: string,
-    answers: Record<string, string[]>,
-  ) {
-    try {
-      const state = await submitUserInput(sessionId, messageId, answers);
-      adoptState(state);
-      setRequestError(null);
-    } catch (error) {
-      reportRequestError(error);
-    }
-  }
-
-  async function handleMcpElicitationSubmit(
-    sessionId: string,
-    messageId: string,
-    action: McpElicitationAction,
-    content?: JsonValue,
-  ) {
-    try {
-      const state = await submitMcpElicitation(
-        sessionId,
-        messageId,
-        action,
-        content,
-      );
-      adoptState(state);
-      setRequestError(null);
-    } catch (error) {
-      reportRequestError(error);
-    }
-  }
-
-  async function handleCodexAppRequestSubmit(
-    sessionId: string,
-    messageId: string,
-    result: JsonValue,
-  ) {
-    try {
-      const state = await submitCodexAppRequest(sessionId, messageId, result);
-      adoptState(state);
-      setRequestError(null);
-    } catch (error) {
-      reportRequestError(error);
-    }
-  }
-
-  async function handleCancelQueuedPrompt(sessionId: string, promptId: string) {
-    setSessions((current) => {
-      const next = removeQueuedPromptFromSessions(current, sessionId, promptId);
-      sessionsRef.current = next;
-      return next;
-    });
-    try {
-      const state = await cancelQueuedPrompt(sessionId, promptId);
-      adoptState(state);
-      setRequestError(null);
-    } catch (error) {
-      try {
-        const state = await fetchState();
-        adoptState(state);
-      } catch {
-        // Keep the original request error below; state refresh is best-effort.
-      }
-      reportRequestError(error);
-    }
-  }
-
-  async function handleStopSession(sessionId: string) {
-    setStoppingSessionIds((current) =>
-      setSessionFlag(current, sessionId, true),
-    );
-    try {
-      const state = await stopSession(sessionId);
-      adoptState(state);
-      setRequestError(null);
-    } catch (error) {
-      reportRequestError(error);
-    } finally {
-      setStoppingSessionIds((current) =>
-        setSessionFlag(current, sessionId, false),
-      );
-    }
-  }
-
-  function handleKillSession(
-    sessionId: string,
-    trigger?: HTMLButtonElement | null,
-  ) {
-    const session = sessionLookup.get(sessionId);
-    if (!session) {
-      return;
-    }
-
-    closePendingSessionRename();
-    clearPendingKillCloseTimeout();
-    pendingKillTriggerRef.current = trigger ?? null;
-    setPendingKillSessionId((current) =>
-      current === sessionId ? null : sessionId,
-    );
-  }
-
-  async function executeKillSession(sessionId: string) {
-    setKillingSessionIds((current) => setSessionFlag(current, sessionId, true));
-    try {
-      const state = await killSession(sessionId);
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      adoptState(state);
-      setRequestError(null);
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      reportRequestError(error);
-    } finally {
-      if (isMountedRef.current) {
-        setKillingSessionIds((current) =>
-          setSessionFlag(current, sessionId, false),
-        );
-      }
-    }
-  }
-
-  async function confirmKillSession() {
-    if (!pendingKillSessionId) {
-      return;
-    }
-
-    const sessionId = pendingKillSessionId;
-    setPendingKillSessionId(null);
-    setKillRevealSessionId(null);
-
-    await executeKillSession(sessionId);
-  }
-
-  function focusPendingKillTrigger() {
-    window.requestAnimationFrame(() => {
-      pendingKillTriggerRef.current?.focus();
-    });
-  }
-
-  function clearPendingKillCloseTimeout() {
-    if (pendingKillCloseTimeoutRef.current === null) {
-      return;
-    }
-
-    window.clearTimeout(pendingKillCloseTimeoutRef.current);
-    pendingKillCloseTimeoutRef.current = null;
-  }
-
-  function schedulePendingKillConfirmationClose() {
-    clearPendingKillCloseTimeout();
-
-    const sessionId = pendingKillSessionId;
-    if (!sessionId) {
-      return;
-    }
-
-    pendingKillCloseTimeoutRef.current = window.setTimeout(() => {
-      pendingKillCloseTimeoutRef.current = null;
-      setPendingKillSessionId((current) =>
-        current === sessionId ? null : current,
-      );
-      setPendingKillPopoverStyle(null);
-    }, PENDING_KILL_CLOSE_DELAY_MS);
-  }
-
-  function closePendingKillConfirmation(restoreFocus = false) {
-    clearPendingKillCloseTimeout();
-    setPendingKillSessionId(null);
-    setPendingKillPopoverStyle(null);
-    if (restoreFocus) {
-      focusPendingKillTrigger();
-    }
-  }
-
-  function clearPendingSessionRenameCloseTimeout() {
-    if (pendingSessionRenameCloseTimeoutRef.current === null) {
-      return;
-    }
-
-    window.clearTimeout(pendingSessionRenameCloseTimeoutRef.current);
-    pendingSessionRenameCloseTimeoutRef.current = null;
-  }
-
-  function schedulePendingSessionRenameClose() {
-    clearPendingSessionRenameCloseTimeout();
-
-    const pendingRename = pendingSessionRename;
-    if (!pendingRename) {
-      return;
-    }
-    if (pendingSessionRenameInputRef.current === document.activeElement) {
-      return;
-    }
-
-    pendingSessionRenameCloseTimeoutRef.current = window.setTimeout(() => {
-      pendingSessionRenameCloseTimeoutRef.current = null;
-      setPendingSessionRename((current) =>
-        current?.sessionId === pendingRename.sessionId ? null : current,
-      );
-      setPendingSessionRenameDraft("");
-      setPendingSessionRenameStyle(null);
-    }, PENDING_SESSION_RENAME_CLOSE_DELAY_MS);
-  }
-
-  function handleSessionRenameRequest(
-    sessionId: string,
-    clientX: number,
-    clientY: number,
-    trigger?: HTMLElement | null,
-  ) {
-    const session = sessionLookup.get(sessionId);
-    if (!session) {
-      return;
-    }
-
-    closePendingKillConfirmation();
-    clearPendingSessionRenameCloseTimeout();
-    pendingSessionRenameTriggerRef.current = trigger ?? null;
-    setPendingSessionRenameDraft(session.name);
-    setPendingSessionRename({
-      sessionId,
-      clientX,
-      clientY,
-    });
-  }
-
-  function focusPendingSessionRenameTrigger() {
-    window.requestAnimationFrame(() => {
-      pendingSessionRenameTriggerRef.current?.focus();
-    });
-  }
-
-  function closePendingSessionRename(restoreFocus = false) {
-    clearPendingSessionRenameCloseTimeout();
-    setPendingSessionRename(null);
-    setPendingSessionRenameDraft("");
-    setPendingSessionRenameStyle(null);
-    if (restoreFocus) {
-      focusPendingSessionRenameTrigger();
-    }
-  }
-
-  async function confirmSessionRename() {
-    if (!pendingSessionRename) {
-      return;
-    }
-
-    const session = sessionLookup.get(pendingSessionRename.sessionId);
-    const nextName = pendingSessionRenameDraft.trim();
-    if (!session) {
-      closePendingSessionRename();
-      return;
-    }
-    if (!nextName) {
-      return;
-    }
-    if (nextName === session.name.trim()) {
-      closePendingSessionRename(true);
-      return;
-    }
-
-    setUpdatingSessionIds((current) =>
-      setSessionFlag(current, session.id, true),
-    );
-    try {
-      const state = await renameSession(session.id, nextName);
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      adoptState(state);
-      setRequestError(null);
-      closePendingSessionRename();
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      reportRequestError(error);
-    } finally {
-      if (isMountedRef.current) {
-        setUpdatingSessionIds((current) =>
-          setSessionFlag(current, session.id, false),
-        );
-      }
-    }
-  }
-
-  async function handlePendingSessionRenameNew() {
-    if (!pendingSessionRename) {
-      return;
-    }
-
-    const session = sessionLookup.get(pendingSessionRename.sessionId);
-    if (!session) {
-      closePendingSessionRename();
-      return;
-    }
-
-    setIsCreating(true);
-    try {
-      const targetPaneId =
-        findWorkspacePaneIdForSession(workspace, session.id) ??
-        workspace.activePaneId;
-      const created = await createSession({
-        agent: session.agent,
-        model: session.model,
-        approvalPolicy:
-          session.agent === "Codex"
-            ? (session.approvalPolicy ?? defaultCodexApprovalPolicy)
-            : undefined,
-        reasoningEffort:
-          session.agent === "Codex"
-            ? (session.reasoningEffort ?? defaultCodexReasoningEffort)
-            : undefined,
-        cursorMode:
-          session.agent === "Cursor"
-            ? (session.cursorMode ?? defaultCursorMode)
-            : undefined,
-        claudeApprovalMode:
-          session.agent === "Claude"
-            ? (session.claudeApprovalMode ?? defaultClaudeApprovalMode)
-            : undefined,
-        claudeEffort:
-          session.agent === "Claude"
-            ? (session.claudeEffort ?? defaultClaudeEffort)
-            : undefined,
-        geminiApprovalMode:
-          session.agent === "Gemini"
-            ? (session.geminiApprovalMode ?? defaultGeminiApprovalMode)
-            : undefined,
-        sandboxMode:
-          session.agent === "Codex"
-            ? (session.sandboxMode ?? defaultCodexSandboxMode)
-            : undefined,
-        projectId:
-          session.projectId && projectLookup.has(session.projectId)
-            ? session.projectId
-            : undefined,
-        workdir: session.workdir,
-      });
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      const adopted = adoptCreatedSessionResponse(created, {
-        openSessionId: created.sessionId,
-        paneId: targetPaneId,
-      });
-      // See call-site above for the adopt-outcome rationale:
-      // only "stale" falls through to the workspace fallback;
-      // "recovering" skips it to avoid a phantom pane.
-      if (adopted === "stale") {
-        setWorkspace((current) =>
-          applyControlPanelLayout(
-            openSessionInWorkspaceState(
-              current,
-              created.sessionId,
-              targetPaneId,
-            ),
-          ),
-        );
-      }
-      if (
-        session.agent === "Claude" ||
-        session.agent === "Codex" ||
-        session.agent === "Cursor" ||
-        session.agent === "Gemini"
-      ) {
-        void handleRefreshSessionModelOptions(created.sessionId, {
-          reportGlobalError: false,
-        });
-      }
-      setRequestError(null);
-      closePendingSessionRename();
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      reportRequestError(error);
-    } finally {
-      if (isMountedRef.current) {
-        setIsCreating(false);
-      }
-    }
-  }
-
-  async function handlePendingSessionRenameKill() {
-    if (!pendingSessionRename) {
-      return;
-    }
-
-    const session = sessionLookup.get(pendingSessionRename.sessionId);
-    if (!session) {
-      closePendingSessionRename();
-      return;
-    }
-
-    closePendingSessionRename();
-    setKillRevealSessionId(null);
-    await executeKillSession(session.id);
-  }
-
-  async function handleSessionSettingsChange(
-    sessionId: string,
-    field: SessionSettingsField,
-    value: SessionSettingsValue,
-  ) {
-    const session = sessionLookup.get(sessionId);
-    if (!session) {
-      return;
-    }
-    const normalizedModelValue =
-      field === "model"
-        ? normalizedRequestedSessionModel(session, value as string)
-        : null;
-    const payload =
-      session.agent === "Codex"
-        ? {
-            ...(field === "model"
-              ? { model: normalizedModelValue ?? (value as string) }
-              : {}),
-            reasoningEffort:
-              field === "reasoningEffort"
-                ? (value as CodexReasoningEffort)
-                : normalizedCodexReasoningEffort(
-                    session,
-                    field === "model"
-                      ? (normalizedModelValue ?? (value as string))
-                      : session.model,
-                  ),
-            sandboxMode:
-              field === "sandboxMode"
-                ? (value as SandboxMode)
-                : (session.sandboxMode ?? "workspace-write"),
-            approvalPolicy:
-              field === "approvalPolicy"
-                ? (value as ApprovalPolicy)
-                : (session.approvalPolicy ?? "never"),
-          }
-        : session.agent === "Cursor"
-          ? field === "model"
-            ? {
-                model: normalizedModelValue ?? (value as string),
-              }
-            : field === "cursorMode"
-              ? {
-                  cursorMode: value as CursorMode,
-                }
-              : null
-          : session.agent === "Claude"
-            ? field === "model"
-              ? {
-                  model: normalizedModelValue ?? (value as string),
-                }
-              : field === "claudeApprovalMode"
-                ? {
-                    claudeApprovalMode: value as ClaudeApprovalMode,
-                  }
-                : field === "claudeEffort"
-                  ? {
-                      claudeEffort: value as ClaudeEffortLevel,
-                    }
-                  : null
-            : session.agent === "Gemini"
-              ? field === "model"
-                ? {
-                    model: normalizedModelValue ?? (value as string),
-                  }
-                : field === "geminiApprovalMode"
-                  ? {
-                      geminiApprovalMode: value as GeminiApprovalMode,
-                    }
-                  : null
-              : null;
-    if (!payload) {
-      return;
-    }
-
-    const optimisticSession = buildOptimisticSessionSettingsUpdate(
-      session,
-      field,
-      value,
-    );
-    const hasOptimisticUpdate = optimisticSession !== session;
-
-    setRequestError(null);
-    if (hasOptimisticUpdate) {
-      updateSessionLocally(sessionId, () => optimisticSession);
-    }
-    setUpdatingSessionIds((current) =>
-      setSessionFlag(current, sessionId, true),
-    );
-    try {
-      const state = await updateSessionSettings(sessionId, payload);
-      adoptState(state);
-      const updatedSession =
-        state.sessions.find((entry) => entry.id === sessionId) ?? null;
-      const nextNotice =
-        session.agent === "Codex" && field === "model" && updatedSession
-          ? describeCodexModelAdjustmentNotice(session, updatedSession)
-          : null;
-      setSessionSettingNotices((current) => {
-        if (nextNotice) {
-          return {
-            ...current,
-            [sessionId]: nextNotice,
-          };
-        }
-        if (!current[sessionId]) {
-          return current;
-        }
-
-        const nextState = { ...current };
-        delete nextState[sessionId];
-        return nextState;
-      });
-      setRequestError(null);
-    } catch (error) {
-      if (hasOptimisticUpdate) {
-        updateSessionLocally(sessionId, (current) =>
-          rollbackOptimisticSessionSettingsUpdate(
-            current,
-            session,
-            optimisticSession,
-          ),
-        );
-      }
-      reportRequestError(error);
-    } finally {
-      setUpdatingSessionIds((current) =>
-        setSessionFlag(current, sessionId, false),
-      );
-    }
-  }
-
-  async function handleRefreshSessionModelOptions(
-    sessionId: string,
-    options?: { reportGlobalError?: boolean },
-  ) {
-    if (!isMountedRef.current) {
-      return;
-    }
-    const previousSession =
-      sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
-    if (refreshingSessionModelOptionIdsRef.current[sessionId]) {
-      return;
-    }
-    const nextRefreshingSessionIds = setSessionFlag(
-      refreshingSessionModelOptionIdsRef.current,
-      sessionId,
-      true,
-    );
-    refreshingSessionModelOptionIdsRef.current = nextRefreshingSessionIds;
-    setRefreshingSessionModelOptionIds(nextRefreshingSessionIds);
-
-    setSessionModelOptionErrors((current) => {
-      if (!current[sessionId]) {
-        return current;
-      }
-
-      const nextState = { ...current };
-      delete nextState[sessionId];
-      return nextState;
-    });
-
-    try {
-      const state = await refreshSessionModelOptions(sessionId);
-      if (!isMountedRef.current) {
-        return;
-      }
-      adoptState(state);
-      if (previousSession?.agent === "Codex") {
-        const refreshedSession =
-          state.sessions.find((entry) => entry.id === sessionId) ?? null;
-        const nextNotice = refreshedSession
-          ? describeCodexModelAdjustmentNotice(
-              previousSession,
-              refreshedSession,
-            )
-          : null;
-        if (nextNotice) {
-          setSessionSettingNotices((current) => ({
-            ...current,
-            [sessionId]: nextNotice,
-          }));
-        }
-      }
-      setRequestError(null);
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return;
-      }
-      const rawMessage = getErrorMessage(error);
-      const session =
-        sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
-      const message = session
-        ? describeSessionModelRefreshError(
-            session.agent,
-            rawMessage,
-            agentReadinessByAgent.get(session.agent) ?? null,
-          )
-        : rawMessage;
-      setSessionModelOptionErrors((current) => ({
-        ...current,
-        [sessionId]: message,
-      }));
-      if (options?.reportGlobalError !== false) {
-        reportRequestError(error, { message });
-      }
-    } finally {
-      if (!isMountedRef.current) {
-        return;
-      }
-      const nextRefreshingSessionIds = setSessionFlag(
-        refreshingSessionModelOptionIdsRef.current,
-        sessionId,
-        false,
-      );
-      refreshingSessionModelOptionIdsRef.current = nextRefreshingSessionIds;
-      setRefreshingSessionModelOptionIds(nextRefreshingSessionIds);
-    }
-  }
-
-  async function runCodexThreadStateAction(
-    sessionId: string,
-    request: () => Promise<StateResponse>,
-    successNotice: string,
-  ) {
-    setRequestError(null);
-    setUpdatingSessionIds((current) =>
-      setSessionFlag(current, sessionId, true),
-    );
-    try {
-      const state = await request();
-      if (!isMountedRef.current) {
-        return;
-      }
-      adoptState(state);
-      setSessionSettingNotices((current) => ({
-        ...current,
-        [sessionId]: successNotice,
-      }));
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return;
-      }
-      reportRequestError(error);
-    } finally {
-      if (isMountedRef.current) {
-        setUpdatingSessionIds((current) =>
-          setSessionFlag(current, sessionId, false),
-        );
-      }
-    }
-  }
-
-  async function handleForkCodexThread(
-    sessionId: string,
-    preferredPaneId: string | null,
-  ) {
-    setRequestError(null);
-    setUpdatingSessionIds((current) =>
-      setSessionFlag(current, sessionId, true),
-    );
-    try {
-      const created = await forkCodexThread(sessionId);
-      if (!isMountedRef.current) {
-        return;
-      }
-      const adopted = adoptCreatedSessionResponse(created, {
-        openSessionId: created.sessionId,
-        paneId: preferredPaneId,
-      });
-      // Only "stale" falls through to the workspace fallback
-      // (session is in `sessionsRef` via an earlier delta, safe
-      // to open). "recovering" must skip — mismatched
-      // `sessionId` is not in `sessionsRef` and opening would
-      // leave a phantom pane until the scheduled resync
-      // reconciles.
-      if (adopted === "stale") {
-        setWorkspace((current) =>
-          applyControlPanelLayout(
-            openSessionInWorkspaceState(
-              current,
-              created.sessionId,
-              preferredPaneId,
-            ),
-          ),
-        );
-      }
-      setSessionSettingNotices((current) => ({
-        ...current,
-        [sessionId]: "Forked the live Codex thread into a new session.",
-        [created.sessionId]:
-          "This session is attached to a forked Codex thread. Earlier Codex history was restored from Codex where available.",
-      }));
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return;
-      }
-      reportRequestError(error);
-    } finally {
-      if (isMountedRef.current) {
-        setUpdatingSessionIds((current) =>
-          setSessionFlag(current, sessionId, false),
-        );
-      }
-    }
-  }
-
-  async function handleArchiveCodexThread(sessionId: string) {
-    await runCodexThreadStateAction(
-      sessionId,
-      () => archiveCodexThread(sessionId),
-      "Archived the live Codex thread for this session.",
-    );
-  }
-
-  async function handleUnarchiveCodexThread(sessionId: string) {
-    await runCodexThreadStateAction(
-      sessionId,
-      () => unarchiveCodexThread(sessionId),
-      "Restored the archived Codex thread for this session.",
-    );
-  }
-
-  async function handleCompactCodexThread(sessionId: string) {
-    await runCodexThreadStateAction(
-      sessionId,
-      () => compactCodexThread(sessionId),
-      "Started Codex context compaction for this session.",
-    );
-  }
-
-  async function handleRollbackCodexThread(
-    sessionId: string,
-    numTurns: number,
-  ) {
-    const turnLabel = numTurns === 1 ? "turn" : "turns";
-    await runCodexThreadStateAction(
-      sessionId,
-      () => rollbackCodexThread(sessionId, numTurns),
-      `Rolled the live Codex thread back by ${numTurns} ${turnLabel}.`,
-    );
-  }
-
-  async function handleRefreshAgentCommands(sessionId: string) {
-    if (refreshingAgentCommandSessionIdsRef.current[sessionId]) {
-      return;
-    }
-
-    const nextRefreshingSessionIds = setSessionFlag(
-      refreshingAgentCommandSessionIdsRef.current,
-      sessionId,
-      true,
-    );
-    refreshingAgentCommandSessionIdsRef.current = nextRefreshingSessionIds;
-    setRefreshingAgentCommandSessionIds(nextRefreshingSessionIds);
-    setAgentCommandErrors((current) => {
-      if (!current[sessionId]) {
-        return current;
-      }
-
-      const nextState = { ...current };
-      delete nextState[sessionId];
-      return nextState;
-    });
-
-    try {
-      const response = await fetchAgentCommands(sessionId);
-      setAgentCommandsBySessionId((current) => ({
-        ...current,
-        [sessionId]: response.commands,
-      }));
-    } catch (error) {
-      const message = getErrorMessage(error);
-      setAgentCommandErrors((current) => ({
-        ...current,
-        [sessionId]: message,
-      }));
-    } finally {
-      const nextRefreshingSessionIds = setSessionFlag(
-        refreshingAgentCommandSessionIdsRef.current,
-        sessionId,
-        false,
-      );
-      refreshingAgentCommandSessionIdsRef.current = nextRefreshingSessionIds;
-      setRefreshingAgentCommandSessionIds(nextRefreshingSessionIds);
-    }
-  }
-
-  function handleSidebarSessionClick(
-    sessionId: string,
-    preferredPaneId: string | null = null,
-    syncControlPanelProject = true,
-  ) {
-    const session = sessionLookup.get(sessionId);
-    closePendingSessionRename();
-    setKillRevealSessionId(null);
-    if (syncControlPanelProject) {
-      setSelectedProjectId(session?.projectId ?? ALL_PROJECTS_FILTER_ID);
-    }
-    requestScrollToBottom(sessionId);
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openSessionInWorkspaceState(
-          current,
-          sessionId,
-          preferredPaneId ?? current.activePaneId,
-        ),
-      ),
-    );
-  }
-
-  function handleOpenConversationFromDiff(
-    sessionId: string,
-    preferredPaneId: string | null = null,
-  ) {
-    handleSidebarSessionClick(sessionId, preferredPaneId);
-  }
-
-  function handleInsertReviewIntoPrompt(
-    sessionId: string,
-    preferredPaneId: string | null,
-    prompt: string,
-  ) {
-    const nextPrompt = prompt.trim();
-    handleOpenConversationFromDiff(sessionId, preferredPaneId);
-    if (!nextPrompt) {
-      return;
-    }
-
-    setDraftsBySessionId((current) => {
-      const existingDraft = current[sessionId] ?? "";
-      const nextValue =
-        existingDraft.trim().length > 0
-          ? `${existingDraft.trimEnd()}\n\n${nextPrompt}`
-          : nextPrompt;
-      if (existingDraft === nextValue) {
-        return current;
-      }
-
-      return {
-        ...current,
-        [sessionId]: nextValue,
-      };
-    });
-  }
-
-  function handleScrollToBottomRequestHandled(token: number) {
-    setPendingScrollToBottomRequest((current) =>
-      current?.token === token ? null : current,
-    );
-  }
-
-  const pendingSessionRenameSession = pendingSessionRename
-    ? (sessionLookup.get(pendingSessionRename.sessionId) ?? null)
-    : null;
-  const pendingSessionRenameValue = pendingSessionRenameDraft.trim();
-  const isPendingSessionRenameSubmitting = pendingSessionRenameSession
-    ? Boolean(updatingSessionIds[pendingSessionRenameSession.id])
-    : false;
-  const isPendingSessionRenameCreating = pendingSessionRenameSession
-    ? isCreating
-    : false;
-  const isPendingSessionRenameKilling = pendingSessionRenameSession
-    ? Boolean(killingSessionIds[pendingSessionRenameSession.id])
-    : false;
-  const pendingKillSession = pendingKillSessionId
-    ? (sessionLookup.get(pendingKillSessionId) ?? null)
-    : null;
-
-  function handlePaneActivate(paneId: string) {
-    setWorkspace((current) => activatePane(current, paneId));
-  }
-
-  function handlePaneTabSelect(paneId: string, tabId: string) {
-    const pane = paneLookup.get(paneId);
-    const tab = pane?.tabs.find((candidate) => candidate.id === tabId);
-
-    if (tab?.kind === "controlPanel") {
-      const nearestSessionPaneId = findNearestSessionPaneId(workspace, paneId);
-      const nearestSessionPane = nearestSessionPaneId
-        ? (paneLookup.get(nearestSessionPaneId) ?? null)
-        : null;
-      const nearestSessionTab = nearestSessionPane
-        ? (nearestSessionPane.tabs.find(
-            (candidate) => candidate.id === nearestSessionPane.activeTabId,
-          ) ??
-          nearestSessionPane.tabs[0] ??
-          null)
-        : null;
-      const nearestSession =
-        nearestSessionTab?.kind === "session"
-          ? (sessionLookup.get(nearestSessionTab.sessionId) ?? null)
-          : null;
-      if (nearestSession) {
-        const projectId = nearestSession.projectId ?? null;
-        setSelectedProjectId(
-          projectId && projectLookup.has(projectId)
-            ? projectId
-            : ALL_PROJECTS_FILTER_ID,
-        );
-      }
-
-      setWorkspace((current) => {
-        const next = activatePane(current, paneId, tabId);
-        if (!nearestSession) {
-          return next;
-        }
-
-        return rescopeControlSurfacePane(
-          next,
-          paneId,
-          nearestSession.id,
-          nearestSession.projectId ?? null,
-          nearestSession.workdir ?? null,
-        );
-      });
-      return;
-    }
-
-    if (tab && CONTROL_SURFACE_KINDS.has(tab.kind)) {
-      const nearestSessionPaneId = findNearestSessionPaneId(workspace, paneId);
-      const nearestSessionPane = nearestSessionPaneId
-        ? (paneLookup.get(nearestSessionPaneId) ?? null)
-        : null;
-      const nearestSessionTab = nearestSessionPane
-        ? (nearestSessionPane.tabs.find(
-            (candidate) => candidate.id === nearestSessionPane.activeTabId,
-          ) ??
-          nearestSessionPane.tabs[0] ??
-          null)
-        : null;
-      const nearestSession =
-        nearestSessionTab?.kind === "session"
-          ? (sessionLookup.get(nearestSessionTab.sessionId) ?? null)
-          : null;
-      if (nearestSession) {
-        setSelectedProjectId(
-          nearestSession.projectId &&
-            projectLookup.has(nearestSession.projectId)
-            ? nearestSession.projectId
-            : ALL_PROJECTS_FILTER_ID,
-        );
-      }
-
-      setWorkspace((current) => {
-        const next = activatePane(current, paneId, tabId);
-        if (!nearestSession) {
-          return next;
-        }
-
-        return rescopeControlSurfacePane(
-          next,
-          paneId,
-          nearestSession.id,
-          nearestSession.projectId ?? null,
-          nearestSession.workdir ?? null,
-        );
-      });
-      return;
-    }
-
-    const nearestControlSurface = findNearestControlSurfacePaneId(
-      workspace,
-      paneId,
-    );
-    if (nearestControlSurface) {
-      const session =
-        tab?.kind === "session" ? sessionLookup.get(tab.sessionId) : null;
-      const nearestPane = paneLookup.get(nearestControlSurface);
-      const nearestActiveTab = nearestPane?.tabs.find(
-        (candidate) => candidate.id === nearestPane.activeTabId,
-      );
-      const nearestIsDockedControlPanel =
-        nearestActiveTab?.kind === "controlPanel";
-
-      if (session) {
-        const projectId = session.projectId ?? null;
-        if (
-          nearestIsDockedControlPanel &&
-          projectId &&
-          projectLookup.has(projectId)
-        ) {
-          setSelectedProjectId(projectId);
-        }
-      } else {
-        const projectId = resolveWorkspaceTabProjectId(tab, sessionLookup);
-        if (
-          projectId &&
-          projectLookup.has(projectId) &&
-          nearestIsDockedControlPanel
-        ) {
-          setSelectedProjectId(projectId);
-        }
-      }
-    }
-
-    setWorkspace((current) => activatePane(current, paneId, tabId));
-  }
-
-  function handleCloseTab(paneId: string, tabId: string) {
-    setWorkspace((current) =>
-      applyControlPanelLayout(closeWorkspaceTab(current, paneId, tabId)),
-    );
-  }
-
-  function handleSplitPane(paneId: string, direction: "row" | "column") {
-    markSessionTabsForBottomAfterWorkspaceRebuild(workspaceRef.current);
-    setWorkspace((current) =>
-      applyControlPanelLayout(splitPane(current, paneId, direction)),
-    );
-  }
-
-  function handleSplitResizeStart(
-    splitId: string,
-    direction: "row" | "column",
-    event: ReactPointerEvent<HTMLDivElement>,
-  ) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const container = event.currentTarget.parentElement;
-    const ratio = getSplitRatio(workspace.root, splitId);
-    if (!container || ratio === null) {
-      return;
-    }
-
-    const rect = container.getBoundingClientRect();
-    const { minRatio, maxRatio } = getWorkspaceSplitResizeBounds(
-      workspace.root,
-      splitId,
-      direction,
-      direction === "row" ? rect.width : rect.height,
-      paneLookup,
-    );
-    resizeStateRef.current = {
-      splitId,
-      direction,
-      startRatio: ratio,
-      minRatio,
-      maxRatio,
-      startX: event.clientX,
-      startY: event.clientY,
-      size: direction === "row" ? rect.width : rect.height,
-    };
-  }
-
-  function handleDraftChange(sessionId: string, nextValue: string) {
-    setDraftsBySessionId((current) => {
-      if ((current[sessionId] ?? "") === nextValue) {
-        return current;
-      }
-
-      return {
-        ...current,
-        [sessionId]: nextValue,
-      };
-    });
-  }
-
-  function handleTabDragStart(drag: WorkspaceTabDrag) {
-    draggedTabRef.current = drag;
-    setDraggedTab(drag);
-    broadcastTabDragMessage({
-      type: "drag-start",
-      payload: drag,
-    });
-  }
-
-  function handleTabDragEnd() {
-    const endedDrag = draggedTabRef.current;
-    draggedTabRef.current = null;
-    setDraggedTab(null);
-    if (!endedDrag) {
-      return;
-    }
-
-    broadcastTabDragMessage({
-      type: "drag-end",
-      dragId: endedDrag.dragId,
-      sourceWindowId: endedDrag.sourceWindowId,
-    });
-  }
-
-  function handleControlPanelLauncherDragStart(
-    event: ReactDragEvent<HTMLButtonElement>,
-    paneId: string,
-    sectionId: ControlPanelSectionId,
-    tab: WorkspaceTab,
-  ) {
-    const drag = createWorkspaceTabDrag(
-      windowId,
-      `control-panel-launcher:${paneId}:${sectionId}`,
-      tab,
-    );
-    event.dataTransfer.effectAllowed = "copyMove";
-    attachWorkspaceTabDragData(event.dataTransfer, drag);
-    launcherDraggedTabRef.current = drag;
-    // Defer the React state update - Chrome cancels in-progress drags when DOM
-    // mutations happen during or immediately after dragstart.  setTimeout pushes
-    // the re-render to the next task, after Chrome has committed the drag.
-    setTimeout(() => setLauncherDraggedTab(drag), 0);
-  }
-
-  function handleControlPanelLauncherDragEnd() {
-    launcherDraggedTabRef.current = null;
-    setLauncherDraggedTab(null);
-  }
-
-  function clearStaleTabDragState() {
-    const endedDrag = draggedTabRef.current;
-    draggedTabRef.current = null;
-    setDraggedTab(null);
-    launcherDraggedTabRef.current = null;
-    setLauncherDraggedTab(null);
-    setExternalDraggedTab(null);
-    if (!endedDrag) {
-      return;
-    }
-
-    broadcastTabDragMessage({
-      type: "drag-end",
-      dragId: endedDrag.dragId,
-      sourceWindowId: endedDrag.sourceWindowId,
-    });
-  }
-
-  function recoverFromLostTabDrag(buttons: number) {
-    if (buttons !== 0) {
-      return false;
-    }
-
-    if (
-      !draggedTabRef.current &&
-      !launcherDraggedTabRef.current &&
-      !externalDraggedTab
-    ) {
-      return false;
-    }
-
-    clearStaleTabDragState();
-    return true;
-  }
-
-  function handleTabDrop(
-    targetPaneId: string,
-    placement: TabDropPlacement,
-    tabIndex?: number,
-    dataTransfer?: DataTransfer | null,
-  ) {
-    const droppedSession = readSessionDragData(dataTransfer ?? null);
-    if (droppedSession) {
-      markSessionTabsForBottomAfterWorkspaceRebuild(workspaceRef.current, {
-        sessionIds: [droppedSession.sessionId],
-      });
-      startTransition(() => {
-        setWorkspace((current) => {
-          const nextWorkspace = placeSessionDropInWorkspaceState(
-            current,
-            droppedSession.sessionId,
-            targetPaneId,
-            placement,
-            tabIndex,
-          );
-          return applyControlPanelLayout(nextWorkspace, controlPanelSide);
-        });
-      });
-      return;
-    }
-
-    const parsedDrag = readWorkspaceTabDragData(dataTransfer);
-    const sameWindowParsedDrag =
-      parsedDrag && parsedDrag.sourceWindowId === windowId ? parsedDrag : null;
-    const parsedLauncherDrag = sameWindowParsedDrag?.sourcePaneId.startsWith(
-      "control-panel-launcher:",
-    )
-      ? sameWindowParsedDrag
-      : null;
-    const parsedPaneDrag =
-      sameWindowParsedDrag &&
-      !sameWindowParsedDrag.sourcePaneId.startsWith("control-panel-launcher:")
-        ? sameWindowParsedDrag
-        : null;
-    const currentDraggedTab =
-      draggedTabRef.current ?? draggedTab ?? parsedPaneDrag;
-    const currentLauncherDraggedTab =
-      launcherDraggedTabRef.current ?? launcherDraggedTab ?? parsedLauncherDrag;
-    const currentExternalDraggedTab =
-      externalDraggedTab ??
-      (parsedDrag && parsedDrag.sourceWindowId !== windowId
-        ? parsedDrag
-        : null);
-
-    if (currentDraggedTab) {
-      const drop = currentDraggedTab;
-      markSessionTabsForBottomAfterWorkspaceRebuild(workspaceRef.current, {
-        tabs: [drop.tab],
-      });
-      draggedTabRef.current = null;
-      setDraggedTab(null);
-      const nextControlPanelSide =
-        drop.tab.kind === "controlPanel" &&
-        (placement === "left" || placement === "right")
-          ? placement
-          : controlPanelSide;
-      if (nextControlPanelSide !== controlPanelSide) {
-        setControlPanelSide(nextControlPanelSide);
-      }
-      startTransition(() => {
-        setWorkspace((current) =>
-          applyControlPanelLayout(
-            placeDraggedTab(
-              current,
-              drop.sourcePaneId,
-              drop.tabId,
-              targetPaneId,
-              placement,
-              tabIndex,
-            ),
-            nextControlPanelSide,
-          ),
-        );
-      });
-      return;
-    }
-
-    if (currentLauncherDraggedTab) {
-      const drop = currentLauncherDraggedTab;
-      markSessionTabsForBottomAfterWorkspaceRebuild(workspaceRef.current, {
-        tabs: [drop.tab],
-      });
-      launcherDraggedTabRef.current = null;
-      setLauncherDraggedTab(null);
-      flushSync(() => {
-        setWorkspace((current) =>
-          applyControlPanelLayout(
-            placeExternalTab(
-              current,
-              drop.tab,
-              targetPaneId,
-              placement,
-              tabIndex,
-            ),
-          ),
-        );
-      });
-      return;
-    }
-
-    if (!currentExternalDraggedTab) {
-      return;
-    }
-
-    const drop = currentExternalDraggedTab;
-    markSessionTabsForBottomAfterWorkspaceRebuild(workspaceRef.current, {
-      tabs: [drop.tab],
-    });
-    setExternalDraggedTab((current) =>
-      current?.dragId === drop.dragId ? null : current,
-    );
-    const nextControlPanelSide =
-      drop.tab.kind === "controlPanel" &&
-      (placement === "left" || placement === "right")
-        ? placement
-        : controlPanelSide;
-    if (nextControlPanelSide !== controlPanelSide) {
-      setControlPanelSide(nextControlPanelSide);
-    }
-    // Only ask the source window to remove its tab after this window has applied the drop.
-    flushSync(() => {
-      setWorkspace((current) =>
-        applyControlPanelLayout(
-          placeExternalTab(
-            current,
-            drop.tab,
-            targetPaneId,
-            placement,
-            tabIndex,
-          ),
-          nextControlPanelSide,
-        ),
-      );
-    });
-    broadcastTabDragMessage({
-      type: "drop-commit",
-      dragId: drop.dragId,
-      sourceWindowId: drop.sourceWindowId,
-      sourcePaneId: drop.sourcePaneId,
-      tabId: drop.tabId,
-      targetWindowId: windowId,
-    });
-    broadcastTabDragMessage({
-      type: "drag-end",
-      dragId: drop.dragId,
-      sourceWindowId: drop.sourceWindowId,
-    });
-  }
-
-  useEffect(() => {
-    if (!draggedTab && !launcherDraggedTab && !externalDraggedTab) {
-      return;
-    }
-
-    const handleWindowBlur = () => {
-      clearStaleTabDragState();
-    };
-    const handlePageHide = () => {
-      clearStaleTabDragState();
-    };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        clearStaleTabDragState();
-      }
-    };
-    const timeoutId = window.setTimeout(() => {
-      clearStaleTabDragState();
-    }, TAB_DRAG_STALE_TIMEOUT_MS);
-
-    window.addEventListener("blur", handleWindowBlur);
-    window.addEventListener("pagehide", handlePageHide);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-      window.removeEventListener("blur", handleWindowBlur);
-      window.removeEventListener("pagehide", handlePageHide);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [draggedTab, launcherDraggedTab, externalDraggedTab]);
-
-  function handlePaneViewModeChange(
-    paneId: string,
-    viewMode: SessionPaneViewMode,
-  ) {
-    if (viewMode === "session") {
-      const pane = paneLookup.get(paneId);
-      const activeTab = pane?.tabs.find(
-        (candidate) => candidate.id === pane.activeTabId,
-      );
-      if (activeTab?.kind === "session") {
-        requestScrollToBottom(activeTab.sessionId);
-      }
-    }
-
-    setWorkspace((current) => setPaneViewMode(current, paneId, viewMode));
-  }
-
-  function requestScrollToBottom(sessionId: string) {
-    setPendingScrollToBottomRequest({
-      sessionId,
-      token: Date.now() + Math.random(),
-    });
-  }
-
-  function handlePaneSourcePathChange(paneId: string, path: string) {
-    setWorkspace((current) => setPaneSourcePath(current, paneId, path));
-  }
-
-  function handleOpenSourceTab(
-    paneId: string,
-    path: string | null,
-    originSessionId: string | null,
-    originProjectId: string | null,
-    options?: OpenPathOptions,
-  ) {
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openSourceInWorkspaceState(
-          current,
-          path,
-          paneId,
-          originSessionId,
-          originProjectId,
-          {
-            line: options?.line,
-            column: options?.column,
-            openInNewTab: options?.openInNewTab,
-          },
-        ),
-      ),
-    );
-  }
-
-  function handleOpenDiffPreviewTab(
-    paneId: string,
-    message: DiffMessage,
-    originSessionId: string | null,
-    originProjectId: string | null,
-  ) {
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openDiffPreviewInWorkspaceState(
-          current,
-          {
-            changeType: message.changeType,
-            changeSetId: message.changeSetId ?? `change-${message.id}`,
-            diff: message.diff,
-            diffMessageId: message.id,
-            filePath: message.filePath,
-            language: message.language ?? null,
-            originSessionId,
-            originProjectId,
-            summary: message.summary,
-          },
-          paneId,
-        ),
-      ),
-    );
-  }
-
-  async function handleOpenGitStatusDiffPreviewTab(
-    paneId: string,
-    request: GitDiffRequestPayload,
-    originSessionId: string | null,
-    originProjectId: string | null,
-    options?: {
-      openInNewTab?: boolean;
-      sectionId?: GitDiffSection;
-    },
-  ) {
-    const requestKey = buildGitDiffPreviewRequestKey(
-      paneId,
-      request,
-      Boolean(options?.openInNewTab),
-    );
-    const currentVersion =
-      (gitDiffPreviewRefreshVersionsRef.current.get(requestKey) ?? 0) + 1;
-    gitDiffPreviewRefreshVersionsRef.current.set(requestKey, currentVersion);
-    // Tell the restore-from-persisted-layout useEffect that this
-    // requestKey is being handled manually. Without this, the moment
-    // the manual fetch resolves with `documentContent === null` and
-    // `isLoading === false`, the restore useEffect sees a freshly
-    // created tab that looks like one restored from persisted
-    // layout without documentContent and fires a duplicate
-    // fetchGitDiff — which races the in-flight manual fetch and, in
-    // tests, overflows the mockImplementationOnce queue into a
-    // backend-unavailable error.
-    attemptedGitDiffDocumentContentRestoreKeysRef.current.add(requestKey);
-    const gitSectionId = options?.sectionId ?? request.sectionId;
-    const pendingTab = {
-      changeType: pendingGitDiffPreviewChangeType(request.statusCode),
-      changeSetId: null,
-      diff: "",
-      documentEnrichmentNote: null,
-      documentContent: null,
-      diffMessageId: requestKey,
-      filePath: request.path,
-      gitSectionId,
-      language: null,
-      originSessionId,
-      originProjectId,
-      summary: pendingGitDiffPreviewSummary(gitSectionId, request.path),
-      gitDiffRequestKey: requestKey,
-      gitDiffRequest: request,
-      isLoading: true,
-      loadError: null,
-    };
-
-    setWorkspace((current) => {
-      const opened = openDiffPreviewInWorkspaceState(
-        current,
-        pendingTab,
-        paneId,
-        options?.openInNewTab
-          ? {
-              openInNewTab: true,
-            }
-          : {
-              reuseActiveViewerTab: true,
-            },
-      );
-      return applyControlPanelLayout(
-        updateGitDiffPreviewTabInWorkspaceState(opened, requestKey, (tab) => ({
-          ...tab,
-          ...pendingTab,
-          id: tab.id,
-        })),
-      );
-    });
-
-    try {
-      const diffPreview = await fetchGitDiff(request);
-      if (
-        !isMountedRef.current ||
-        gitDiffPreviewRefreshVersionsRef.current.get(requestKey) !==
-          currentVersion
-      ) {
-        return;
-      }
-      setWorkspace((current) =>
-        applyControlPanelLayout(
-          updateGitDiffPreviewTabInWorkspaceState(
-            current,
-            requestKey,
-            (tab) => ({
-              ...tab,
-              changeType: diffPreview.changeType,
-              changeSetId: diffPreview.changeSetId ?? null,
-              diff: diffPreview.diff,
-              documentEnrichmentNote:
-                diffPreview.documentEnrichmentNote ?? null,
-              documentContent: diffPreview.documentContent ?? null,
-              filePath: diffPreview.filePath ?? tab.filePath,
-              gitSectionId,
-              language: diffPreview.language ?? null,
-              summary: diffPreview.summary,
-              isLoading: false,
-              loadError: null,
-            }),
-          ),
-        ),
-      );
-    } catch (error) {
-      if (
-        !isMountedRef.current ||
-        gitDiffPreviewRefreshVersionsRef.current.get(requestKey) !==
-          currentVersion
-      ) {
-        return;
-      }
-      const errorMessage = getErrorMessage(error);
-      setWorkspace((current) =>
-        applyControlPanelLayout(
-          updateGitDiffPreviewTabInWorkspaceState(
-            current,
-            requestKey,
-            (tab) => ({
-              ...tab,
-              diff: "",
-              documentEnrichmentNote: null,
-              documentContent: null,
-              summary: `Failed to load ${gitSectionId} changes in ${request.path}`,
-              isLoading: false,
-              loadError: errorMessage,
-            }),
-          ),
-        ),
-      );
-      throw error;
-    }
-  }
-
-  function handleOpenFilesystemTab(
-    paneId: string,
-    rootPath: string | null,
-    originSessionId: string | null,
-    originProjectId: string | null,
-  ) {
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openFilesystemInWorkspaceState(
-          current,
-          rootPath,
-          paneId,
-          originSessionId,
-          originProjectId,
-        ),
-      ),
-    );
-  }
-
-  function handleOpenGitStatusTab(
-    paneId: string,
-    workdir: string | null,
-    originSessionId: string | null,
-    originProjectId: string | null,
-  ) {
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openGitStatusInWorkspaceState(
-          current,
-          workdir,
-          paneId,
-          originSessionId,
-          originProjectId,
-        ),
-      ),
-    );
-  }
-
-  function handleOpenTerminalTab(
-    paneId: string,
-    workdir: string | null,
-    originSessionId: string | null,
-    originProjectId: string | null,
-  ) {
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openTerminalInWorkspaceState(
-          current,
-          workdir,
-          paneId,
-          originSessionId,
-          originProjectId,
-        ),
-      ),
-    );
-  }
-
-  function handleOpenSessionListTab(
-    paneId: string,
-    originSessionId: string | null,
-    originProjectId: string | null,
-  ) {
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openSessionListInWorkspaceState(
-          current,
-          paneId,
-          originSessionId,
-          originProjectId,
-        ),
-      ),
-    );
-  }
-
-  function handleOpenProjectListTab(
-    paneId: string,
-    originSessionId: string | null,
-    originProjectId: string | null,
-  ) {
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openProjectListInWorkspaceState(
-          current,
-          paneId,
-          originSessionId,
-          originProjectId,
-        ),
-      ),
-    );
-  }
-
-  function handleOpenCanvasTab(
-    paneId: string,
-    originSessionId: string | null,
-    originProjectId: string | null,
-  ) {
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openCanvasInWorkspaceState(
-          current,
-          paneId,
-          originSessionId,
-          originProjectId,
-        ),
-      ),
-    );
-  }
-
-  function handleOpenOrchestratorListTab(
-    paneId: string,
-    originSessionId: string | null,
-    originProjectId: string | null,
-  ) {
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openOrchestratorListInWorkspaceState(
-          current,
-          paneId,
-          originSessionId,
-          originProjectId,
-        ),
-      ),
-    );
-  }
-
-  function handleOpenOrchestratorCanvasTab(
-    paneId: string,
-    originSessionId: string | null,
-    originProjectId: string | null,
-    options: {
-      startMode?: "new" | null;
-      templateId?: string | null;
-    } = {},
-  ) {
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openOrchestratorCanvasInWorkspaceState(
-          current,
-          paneId,
-          originSessionId,
-          originProjectId,
-          options,
-        ),
-      ),
-    );
-  }
-
-  function handleUpsertCanvasSessionCard(
-    canvasTabId: string,
-    sessionId: string,
-    position: { x: number; y: number },
-  ) {
-    setWorkspace((current) =>
-      upsertCanvasSessionCard(current, canvasTabId, {
-        sessionId,
-        x: position.x,
-        y: position.y,
-      }),
-    );
-  }
-
-  function handleRemoveCanvasSessionCard(
-    canvasTabId: string,
-    sessionId: string,
-  ) {
-    setWorkspace((current) =>
-      removeCanvasSessionCard(current, canvasTabId, sessionId),
-    );
-  }
-
-  function handleSetCanvasZoom(canvasTabId: string, zoom: number) {
-    setWorkspace((current) => setCanvasZoom(current, canvasTabId, zoom));
-  }
-
-  function handleOrchestratorStateUpdated(state: StateResponse) {
-    adoptState(state);
-  }
-
-  async function handleOrchestratorRuntimeAction(
-    instanceId: string,
-    action: OrchestratorRuntimeAction,
-  ) {
-    setRequestError(null);
-    setPendingOrchestratorActionById((current) => ({
-      ...current,
-      [instanceId]: action,
-    }));
-
-    try {
-      let state: StateResponse;
-      switch (action) {
-        case "pause":
-          state = await pauseOrchestratorInstance(instanceId);
-          break;
-        case "resume":
-          state = await resumeOrchestratorInstance(instanceId);
-          break;
-        case "stop":
-          state = await stopOrchestratorInstance(instanceId);
-          break;
-      }
-
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      handleOrchestratorStateUpdated(state);
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      reportRequestError(error);
-    } finally {
-      if (isMountedRef.current) {
-        setPendingOrchestratorActionById((current) => {
-          const { [instanceId]: _discarded, ...rest } = current;
-          return rest;
-        });
-      }
-    }
-  }
-
-  function handleOpenInstructionDebuggerTab(
-    paneId: string,
-    workdir: string | null,
-    originSessionId: string | null,
-    originProjectId: string | null,
-  ) {
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openInstructionDebuggerInWorkspaceState(
-          current,
-          workdir,
-          paneId,
-          originSessionId,
-          originProjectId,
-        ),
-      ),
-    );
-  }
-
   function renderWorkspaceControlSurface(
     paneId: string,
     fixedSection: ControlPanelSectionId | null = null,
   ): JSX.Element {
-    const surfaceId = fixedSection ? `${paneId}-${fixedSection}` : paneId;
-    const controlPanelProjectFilterId = `control-panel-project-scope-${surfaceId}`;
-    const controlSurfaceCollapsedOrchestratorIds =
-      collapsedSessionOrchestratorIdsBySurfaceId[surfaceId] ?? [];
-    const controlSurfacePane = paneLookup.get(paneId) ?? null;
-    const controlSurfaceActiveTab = controlSurfacePane
-      ? (controlSurfacePane.tabs.find(
-          (tab) => tab.id === controlSurfacePane.activeTabId,
-        ) ??
-        controlSurfacePane.tabs[0] ??
-        null)
-      : null;
-    const controlSurfaceOriginSession =
-      controlSurfaceActiveTab &&
-      "originSessionId" in controlSurfaceActiveTab &&
-      controlSurfaceActiveTab.originSessionId
-        ? (sessionLookup.get(controlSurfaceActiveTab.originSessionId) ?? null)
-        : null;
-    const controlSurfacePaneSession = controlSurfacePane?.activeSessionId
-      ? (sessionLookup.get(controlSurfacePane.activeSessionId) ?? null)
-      : null;
-    const nearestSessionPaneId = findNearestSessionPaneId(workspace, paneId);
-    const nearestSessionPane = nearestSessionPaneId
-      ? (paneLookup.get(nearestSessionPaneId) ?? null)
-      : null;
-    const nearestSessionTab = nearestSessionPane
-      ? (nearestSessionPane.tabs.find(
-          (tab) => tab.id === nearestSessionPane.activeTabId,
-        ) ??
-        nearestSessionPane.tabs[0] ??
-        null)
-      : null;
-    const nearestSession =
-      nearestSessionTab?.kind === "session"
-        ? (sessionLookup.get(nearestSessionTab.sessionId) ?? null)
-        : null;
-    const isStandaloneControlSurface = fixedSection !== null;
-    const standaloneControlSurfaceTabId =
-      isStandaloneControlSurface && controlSurfaceActiveTab
-        ? controlSurfaceActiveTab.id
-        : null;
-    const standaloneControlSurfaceViewState = standaloneControlSurfaceTabId
-      ? (standaloneControlSurfaceViewStateByTabId[
-          standaloneControlSurfaceTabId
-        ] ?? null)
-      : null;
-    const controlSurfaceTabProjectId = resolveWorkspaceTabProjectId(
-      controlSurfaceActiveTab ?? undefined,
-      sessionLookup,
-    );
-    const controlSurfaceSelectedProjectId = isStandaloneControlSurface
-      ? (standaloneControlSurfaceViewState?.projectId ??
-        (controlSurfaceTabProjectId &&
-        projectLookup.has(controlSurfaceTabProjectId)
-          ? controlSurfaceTabProjectId
-          : ALL_PROJECTS_FILTER_ID))
-      : selectedProjectId;
-    const controlSurfaceSelectedProject =
-      controlSurfaceSelectedProjectId === ALL_PROJECTS_FILTER_ID
-        ? null
-        : (projectLookup.get(controlSurfaceSelectedProjectId) ?? null);
-    const controlSurfaceSessionCandidates = (
-      isStandaloneControlSurface
-        ? [controlSurfaceOriginSession, controlSurfacePaneSession]
-        : [
-            controlSurfaceOriginSession,
-            controlSurfacePaneSession,
-            nearestSession,
-            activeSession,
-          ]
-    ).filter((session): session is Session => Boolean(session));
-    const controlSurfaceSession = controlSurfaceSelectedProject
-      ? (controlSurfaceSessionCandidates.find(
-          (session) => session.projectId === controlSurfaceSelectedProject.id,
-        ) ??
-        sessions.find(
-          (session) => session.projectId === controlSurfaceSelectedProject.id,
-        ) ??
-        null)
-      : (controlSurfaceSessionCandidates[0] ?? sessions[0] ?? null);
-    const controlPanelLauncherOriginProjectId =
-      controlSurfaceSelectedProject?.id ??
-      controlSurfaceSession?.projectId ??
-      controlSurfaceTabProjectId ??
-      null;
-    const controlPanelLauncherOriginSessionId =
-      controlSurfaceSession?.id ?? null;
-    const controlSurfaceWorkspaceRoot = resolveControlPanelWorkspaceRoot(
-      controlSurfaceSelectedProject,
-      controlSurfaceSession?.workdir ?? null,
-    );
-    const isStandaloneSessionList =
-      fixedSection === "sessions" && standaloneControlSurfaceTabId !== null;
-    const standaloneSessionListState = isStandaloneSessionList
-      ? buildControlSurfaceSessionListState(
-          sessions,
-          controlSurfaceSelectedProject,
-          standaloneControlSurfaceViewState?.sessionListFilter ?? "all",
-          standaloneControlSurfaceViewState?.sessionListSearchQuery ?? "",
-        )
-      : null;
-    const controlSurfaceSessionListFilter = standaloneSessionListState
-      ? (standaloneControlSurfaceViewState?.sessionListFilter ?? "all")
-      : sessionListFilter;
-    const controlSurfaceSessionListSearchQuery = standaloneSessionListState
-      ? (standaloneControlSurfaceViewState?.sessionListSearchQuery ?? "")
-      : sessionListSearchQuery;
-    const controlSurfaceSessionFilterCounts = standaloneSessionListState
-      ? standaloneSessionListState.sessionFilterCounts
-      : sessionFilterCounts;
-    const controlSurfaceHasSessionListSearch = standaloneSessionListState
-      ? standaloneSessionListState.hasSessionListSearch
-      : hasSessionListSearch;
-    const controlSurfaceSessionListSearchResults = standaloneSessionListState
-      ? standaloneSessionListState.sessionListSearchResults
-      : sessionListSearchResults;
-    const controlSurfaceFilteredSessions = standaloneSessionListState
-      ? standaloneSessionListState.filteredSessions
-      : filteredSessions;
-    const controlSurfaceSessionListEntries =
-      buildControlSurfaceSessionListEntries(
-        controlSurfaceFilteredSessions,
-        orchestrators,
-      );
-    const controlSurfaceFilesystemRoot =
-      controlSurfaceActiveTab?.kind === "filesystem"
-        ? controlSurfaceActiveTab.rootPath
-        : fixedSection === "files"
-          ? controlSurfaceWorkspaceRoot
-          : controlPanelFilesystemRoot;
-    const controlSurfaceGitWorkdir =
-      controlSurfaceActiveTab?.kind === "gitStatus"
-        ? controlSurfaceActiveTab.workdir
-        : fixedSection === "git"
-          ? controlSurfaceWorkspaceRoot
-          : controlPanelGitWorkdir;
-
-    function renderControlSurfaceSessionRow(session: Session) {
-      const isActive = session.id === activeSession?.id;
-      const isOpen = openSessionIds.has(session.id);
-      const isKilling = Boolean(killingSessionIds[session.id]);
-      const isKillConfirmationOpen = pendingKillSessionId === session.id;
-      const isKillVisible =
-        isKilling ||
-        isKillConfirmationOpen ||
-        killRevealSessionId === session.id;
-      const searchResult = controlSurfaceSessionListSearchResults.get(
-        session.id,
-      );
-
-      return (
-        <div
-          key={`${surfaceId}-${session.id}`}
-          className={`session-row-shell ${isActive ? "selected" : ""} ${isOpen ? "open" : ""} ${isKillVisible ? "kill-armed" : ""}`}
-          onMouseLeave={() => {
-            if (!isKilling && !isKillConfirmationOpen) {
-              setKillRevealSessionId((current) =>
-                current === session.id ? null : current,
-              );
-            }
-          }}
-          onBlur={(event) => {
-            const nextTarget = event.relatedTarget;
-            if (
-              !isKilling &&
-              !isKillConfirmationOpen &&
-              (!(nextTarget instanceof Node) ||
-                !event.currentTarget.contains(nextTarget))
-            ) {
-              setKillRevealSessionId((current) =>
-                current === session.id ? null : current,
-              );
-            }
-          }}
-        >
-          <button
-            className={`session-row ${isActive ? "selected" : ""} ${isOpen ? "open" : ""}`}
-            type="button"
-            draggable
-            onClick={() =>
-              handleSidebarSessionClick(session.id, paneId, !fixedSection)
-            }
-            title={`${session.agent} / ${session.workdir}`}
-            onDragStart={(event) => {
-              event.dataTransfer.effectAllowed = "copy";
-              attachSessionDragData(
-                event.dataTransfer,
-                session.id,
-                session.name,
-              );
-              const rect = event.currentTarget.getBoundingClientRect();
-              event.dataTransfer.setDragImage(
-                event.currentTarget,
-                Math.max(12, event.clientX - rect.left),
-                Math.max(12, event.clientY - rect.top),
-              );
-            }}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              handleSessionRenameRequest(
-                session.id,
-                event.clientX,
-                event.clientY,
-                event.currentTarget,
-              );
-            }}
-          >
-            <div className="session-copy">
-              <div className="session-title-line">
-                <strong>{session.name}</strong>
-                {searchResult ? (
-                  <span className="session-search-count">
-                    {searchResult.matchCount} hit
-                    {searchResult.matchCount === 1 ? "" : "s"}
-                  </span>
-                ) : null}
-              </div>
-              <div
-                className={`session-preview${searchResult ? " session-preview-search-result" : ""}`}
-                title={searchResult?.snippet ?? session.preview}
-              >
-                {searchResult?.snippet ?? session.preview}
-              </div>
-            </div>
-          </button>
-          <button
-            className="session-row-status-button"
-            type="button"
-            onClick={() =>
-              setKillRevealSessionId((current) =>
-                current === session.id && !isKilling ? null : session.id,
-              )
-            }
-            aria-label={`Show session actions for ${session.name}`}
-          >
-            <span
-              className="status-agent-badge session-row-status-badge"
-              data-status={session.status}
-            >
-              <AgentIcon
-                agent={session.agent}
-                className="session-row-status-icon"
-              />
-            </span>
-          </button>
-          <button
-            className="ghost-button session-row-kill"
-            type="button"
-            onClick={(event) => {
-              handleKillSession(session.id, event.currentTarget);
-            }}
-            disabled={isKilling}
-            aria-expanded={isKillConfirmationOpen}
-            aria-controls={
-              isKillConfirmationOpen
-                ? `kill-session-popover-${session.id}`
-                : undefined
-            }
-            aria-label={`Kill ${session.name}`}
-          >
-            {isKilling ? "Killing" : "Kill"}
-          </button>
-        </div>
-      );
-    }
-
-    function buildControlPanelLauncherTab(sectionId: ControlPanelSectionId) {
-      return createControlPanelSectionLauncherTab(sectionId, {
-        filesystemRoot: controlSurfaceFilesystemRoot,
-        gitWorkdir: controlSurfaceGitWorkdir,
-        originProjectId: controlPanelLauncherOriginProjectId,
-        originSessionId: controlPanelLauncherOriginSessionId,
-      });
-    }
-    function handleControlPanelSectionTabDragStart(
-      event: ReactDragEvent<HTMLButtonElement>,
-      sectionId: ControlPanelSectionId,
-    ) {
-      const tab = buildControlPanelLauncherTab(sectionId);
-      if (!tab) {
-        return;
-      }
-
-      handleControlPanelLauncherDragStart(event, paneId, sectionId, tab);
-    }
-
-    function updateStandaloneControlSurfaceViewState(
-      updates: Partial<StandaloneControlSurfaceViewState>,
-    ) {
-      if (!standaloneControlSurfaceTabId) {
-        return;
-      }
-
-      setStandaloneControlSurfaceViewStateByTabId((current) => {
-        const previous = current[standaloneControlSurfaceTabId] ?? {};
-        const next = { ...previous, ...updates };
-        if (
-          previous.projectId === next.projectId &&
-          previous.sessionListFilter === next.sessionListFilter &&
-          previous.sessionListSearchQuery === next.sessionListSearchQuery
-        ) {
-          return current;
-        }
-
-        return {
-          ...current,
-          [standaloneControlSurfaceTabId]: next,
-        };
-      });
-    }
-
-    function toggleControlSurfaceOrchestratorGroup(orchestratorId: string) {
-      setCollapsedSessionOrchestratorIdsBySurfaceId((current) => {
-        const previous = current[surfaceId] ?? [];
-        const next = previous.includes(orchestratorId)
-          ? previous.filter((candidateId) => candidateId !== orchestratorId)
-          : [...previous, orchestratorId];
-
-        if (!next.length) {
-          if (!(surfaceId in current)) {
-            return current;
-          }
-
-          const { [surfaceId]: _discard, ...rest } = current;
-          return rest;
-        }
-
-        return {
-          ...current,
-          [surfaceId]: next,
-        };
-      });
-    }
-
-    function handleControlSurfaceProjectScopeChange(nextProjectId: string) {
-      if (!isStandaloneControlSurface || !controlSurfaceActiveTab) {
-        setSelectedProjectId(nextProjectId);
-        return;
-      }
-
-      updateStandaloneControlSurfaceViewState({ projectId: nextProjectId });
-      const nextSelectedProject =
-        nextProjectId !== ALL_PROJECTS_FILTER_ID &&
-        projectLookup.has(nextProjectId)
-          ? (projectLookup.get(nextProjectId) ?? null)
-          : null;
-      const preferredStandaloneSession =
-        controlSurfaceOriginSession ?? controlSurfacePaneSession ?? null;
-      const nextScopedSession = nextSelectedProject
-        ? preferredStandaloneSession?.projectId === nextSelectedProject.id
-          ? preferredStandaloneSession
-          : (sessions.find(
-              (session) => session.projectId === nextSelectedProject.id,
-            ) ?? null)
-        : (preferredStandaloneSession ?? sessions[0] ?? null);
-      const nextWorkspaceRoot = resolveControlPanelWorkspaceRoot(
-        nextSelectedProject,
-        nextScopedSession?.workdir ?? null,
-      );
-
-      setWorkspace((current) =>
-        rescopeControlSurfacePane(
-          current,
-          paneId,
-          nextScopedSession?.id ?? null,
-          nextSelectedProject?.id ?? null,
-          nextWorkspaceRoot,
-        ),
-      );
-    }
-
-    function renderControlPanelProjectScope() {
-      return (
-        <div className="control-panel-scope-control">
-          <label
-            className="control-panel-scope-label"
-            htmlFor={controlPanelProjectFilterId}
-          >
-            Project
-          </label>
-          <ThemedCombobox
-            id={controlPanelProjectFilterId}
-            className="control-panel-scope-combobox"
-            value={controlSurfaceSelectedProjectId}
-            options={controlPanelProjectOptions}
-            onChange={handleControlSurfaceProjectScopeChange}
-            aria-label="Project"
-          />
-        </div>
-      );
-    }
-
-    function renderOpenTabAction(
-      sectionId: ControlPanelSectionId,
-      onClick: () => void,
-      disabled: boolean,
-      tab: WorkspaceTab | null,
-    ): JSX.Element {
-      return (
-        <button
-          className="control-panel-header-action control-panel-header-open-button"
-          type="button"
-          draggable={!disabled && tab !== null}
-          aria-label="Open tab"
-          title={
-            disabled ? "Open tab" : "Open tab or drag it into the workspace"
-          }
-          onClick={onClick}
-          onDragStart={(event) => {
-            if (!tab) {
-              event.preventDefault();
-              return;
-            }
-
-            handleControlPanelLauncherDragStart(event, paneId, sectionId, tab);
-          }}
-          onDragEnd={handleControlPanelLauncherDragEnd}
-          disabled={disabled}
-        >
-          <span
-            className="control-panel-header-action-icon control-panel-header-action-icon-open-tab"
-            aria-hidden="true"
-          >
-            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-              <path
-                d="M3.5 4.25h4l1.15 1.25h4A1.25 1.25 0 0 1 13.9 6.75v5.5a1.25 1.25 0 0 1-1.25 1.25H3.5A1.25 1.25 0 0 1 2.25 12.25v-6.75A1.25 1.25 0 0 1 3.5 4.25Z"
-                fill="none"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="1.35"
-              />
-              <path
-                d="M8.75 3.25v4.5M6.5 5.5h4.5"
-                fill="none"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeWidth="1.35"
-              />
-            </svg>
-          </span>
-        </button>
-      );
-    }
-
-    function renderCanvasTabAction(onClick: () => void): JSX.Element {
-      return (
-        <button
-          className="control-panel-header-action control-panel-header-open-button"
-          type="button"
-          onClick={onClick}
-          aria-label="Canvas"
-          title="Canvas"
-        >
-          <span
-            className="control-panel-header-action-icon control-panel-header-action-icon-open-tab"
-            aria-hidden="true"
-          >
-            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-              <rect
-                x="2.5"
-                y="4"
-                width="11"
-                height="7.5"
-                rx="0.8"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.35"
-              />
-              <path
-                d="M5.5 11.5L4 14.5M10.5 11.5l1.5 3M8 11.5V14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.2"
-                strokeLinecap="round"
-              />
-              <path
-                d="M7 2v2M9 2v2"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.2"
-                strokeLinecap="round"
-              />
-            </svg>
-          </span>
-        </button>
-      );
-    }
-
-    function renderControlPanelHeaderActions(sectionId: ControlPanelSectionId) {
-      switch (sectionId) {
-        case "files":
-          return fixedSection
-            ? null
-            : renderOpenTabAction(
-                "files",
-                () =>
-                  handleOpenFilesystemTab(
-                    paneId,
-                    controlSurfaceFilesystemRoot,
-                    controlPanelLauncherOriginSessionId,
-                    controlPanelLauncherOriginProjectId,
-                  ),
-                !(controlSurfaceFilesystemRoot?.trim() ?? ""),
-                buildControlPanelLauncherTab("files"),
-              );
-
-        case "git":
-          return (
-            <>
-              {fixedSection
-                ? null
-                : renderOpenTabAction(
-                    "git",
-                    () =>
-                      handleOpenGitStatusTab(
-                        paneId,
-                        controlSurfaceGitWorkdir,
-                        controlPanelLauncherOriginSessionId,
-                        controlPanelLauncherOriginProjectId,
-                      ),
-                    !(controlSurfaceGitWorkdir?.trim() ?? ""),
-                    buildControlPanelLauncherTab("git"),
-                  )}
-            </>
-          );
-
-        case "projects":
-          return (
-            <>
-              {fixedSection
-                ? null
-                : renderOpenTabAction(
-                    "projects",
-                    () =>
-                      handleOpenProjectListTab(
-                        paneId,
-                        controlPanelLauncherOriginSessionId,
-                        controlPanelLauncherOriginProjectId,
-                      ),
-                    false,
-                    buildControlPanelLauncherTab("projects"),
-                  )}
-              <button
-                className="control-panel-header-action control-panel-header-new-session-button"
-                type="button"
-                onClick={() => openCreateProjectDialog()}
-                aria-label="Add project"
-                title="Add project"
-                disabled={isCreatingProject}
-              >
-                <span
-                  className="control-panel-header-action-icon control-panel-header-action-icon-new"
-                  aria-hidden="true"
-                >
-                  <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                    <circle
-                      cx="8"
-                      cy="8"
-                      r="6.5"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.3"
-                    />
-                    <path
-                      d="M8 5v6M5 8h6"
-                      stroke="currentColor"
-                      strokeWidth="1.3"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </span>
-              </button>
-            </>
-          );
-
-        case "orchestrators":
-          return (
-            <>
-              {fixedSection
-                ? null
-                : renderOpenTabAction(
-                    "orchestrators",
-                    () =>
-                      handleOpenOrchestratorListTab(
-                        paneId,
-                        controlPanelLauncherOriginSessionId,
-                        controlPanelLauncherOriginProjectId,
-                      ),
-                    false,
-                    buildControlPanelLauncherTab("orchestrators"),
-                  )}
-              <button
-                className="control-panel-header-action control-panel-header-new-session-button"
-                type="button"
-                onClick={() =>
-                  handleOpenOrchestratorCanvasTab(
-                    paneId,
-                    controlPanelLauncherOriginSessionId,
-                    controlPanelLauncherOriginProjectId,
-                    { startMode: "new" },
-                  )
-                }
-              >
-                <span
-                  className="control-panel-header-action-icon control-panel-header-action-icon-canvas"
-                  aria-hidden="true"
-                >
-                  <svg
-                    viewBox="-9 0 64 64"
-                    focusable="false"
-                    aria-hidden="true"
-                  >
-                    <g
-                      transform="translate(1,1)"
-                      stroke="currentColor"
-                      strokeWidth="3.5"
-                      fill="none"
-                    >
-                      <path d="M12.5,45 L7.8,62 L2.9,62 L7.6,45" />
-                      <path d="M30.5,45 L35.2,62 L40.1,62 L35.4,45" />
-                      <rect x="20" y="45" width="4" height="11" />
-                      <rect x="19" y="0" width="4" height="9" />
-                      <path d="M42,37 C43.1,37 44,37.9 44,39 L44,43 C44,44.1 43.1,45 42,45 L2,45 C0.9,45 0,44.1 0,43 L0,39 C0,37.9 0.9,37 2,37" />
-                      <path d="M40.2,41 L4,41 C2.9,41 2,40.1 2,39 L2,11 C2,9.9 2.9,9 4,9 L40.2,9 C41.3,9 42,9.9 42,11 L42,39 C42,40.1 41.3,41 40.2,41 Z" />
-                    </g>
-                    <line
-                      x1="24"
-                      y1="20"
-                      x2="34"
-                      y2="20"
-                      stroke="currentColor"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                    />
-                    <line
-                      x1="29"
-                      y1="15"
-                      x2="29"
-                      y2="25"
-                      stroke="currentColor"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </span>
-              </button>
-            </>
-          );
-
-        case "sessions":
-          return (
-            <>
-              {fixedSection
-                ? null
-                : renderOpenTabAction(
-                    "sessions",
-                    () =>
-                      handleOpenSessionListTab(
-                        paneId,
-                        controlPanelLauncherOriginSessionId,
-                        controlPanelLauncherOriginProjectId,
-                      ),
-                    false,
-                    buildControlPanelLauncherTab("sessions"),
-                  )}
-              {renderCanvasTabAction(() =>
-                handleOpenCanvasTab(
-                  paneId,
-                  controlPanelLauncherOriginSessionId,
-                  controlPanelLauncherOriginProjectId,
-                ),
-              )}
-              <button
-                className="control-panel-header-action control-panel-header-new-session-button"
-                type="button"
-                onClick={() =>
-                  openCreateSessionDialog(
-                    paneId,
-                    controlSurfaceSelectedProjectId,
-                  )
-                }
-                aria-label="New"
-                title="New session"
-                aria-haspopup="dialog"
-                aria-expanded={isCreateSessionOpen}
-                aria-controls="create-session-dialog"
-                disabled={isCreating}
-              >
-                <span
-                  className="control-panel-header-action-icon control-panel-header-action-icon-new"
-                  aria-hidden="true"
-                >
-                  <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                    <circle
-                      cx="8"
-                      cy="8"
-                      r="6.5"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.3"
-                    />
-                    <path
-                      d="M8 5v6M5 8h6"
-                      stroke="currentColor"
-                      strokeWidth="1.3"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </span>
-              </button>
-            </>
-          );
-
-        default:
-          return null;
-      }
-    }
-
-    function renderControlPanelSection(sectionId: ControlPanelSectionId) {
-      switch (sectionId) {
-        case "files":
-          return (
-            <section
-              className="control-panel-section-stack control-panel-section-files"
-              aria-label="Files"
-            >
-              {renderControlPanelProjectScope()}
-              <FileSystemPanel
-                rootPath={controlSurfaceFilesystemRoot}
-                sessionId={controlPanelLauncherOriginSessionId}
-                projectId={controlPanelLauncherOriginProjectId}
-                workspaceFilesChangedEvent={workspaceFilesChangedEvent}
-                showPathControls={false}
-                onOpenPath={(path, options) =>
-                  handleOpenSourceTab(
-                    paneId,
-                    path,
-                    controlPanelLauncherOriginSessionId,
-                    controlPanelLauncherOriginProjectId,
-                    options,
-                  )
-                }
-                onOpenRootPath={(path) => {
-                  if (!fixedSection) {
-                    setControlPanelFilesystemRoot(path.trim() || null);
-                  }
-                }}
-              />
-            </section>
-          );
-
-        case "orchestrators":
-          return (
-            <OrchestratorTemplateLibraryPanel
-              orchestrators={orchestrators}
-              onStateUpdated={handleOrchestratorStateUpdated}
-              onNewCanvas={() =>
-                handleOpenOrchestratorCanvasTab(
-                  paneId,
-                  controlPanelLauncherOriginSessionId,
-                  controlPanelLauncherOriginProjectId,
-                  { startMode: "new" },
-                )
-              }
-              onOpenCanvas={(templateId) =>
-                handleOpenOrchestratorCanvasTab(
-                  paneId,
-                  controlPanelLauncherOriginSessionId,
-                  controlPanelLauncherOriginProjectId,
-                  { templateId },
-                )
-              }
-            />
-          );
-
-        case "git":
-          return (
-            <section
-              className="control-panel-section-stack control-panel-section-git"
-              aria-label="Git status"
-            >
-              {renderControlPanelProjectScope()}
-              <GitStatusPanel
-                projectId={controlPanelLauncherOriginProjectId}
-                sessionId={controlPanelLauncherOriginSessionId}
-                workdir={controlSurfaceGitWorkdir}
-                showPathControls={false}
-                onStatusChange={(status) =>
-                  setControlPanelGitStatusCount(status?.files.length ?? 0)
-                }
-                onOpenDiff={(diff, options) =>
-                  handleOpenGitStatusDiffPreviewTab(
-                    paneId,
-                    diff,
-                    controlPanelLauncherOriginSessionId,
-                    controlPanelLauncherOriginProjectId,
-                    options,
-                  )
-                }
-                onOpenWorkdir={(path) => {
-                  if (!fixedSection) {
-                    setControlPanelGitWorkdir(path.trim() || null);
-                  }
-                }}
-              />
-            </section>
-          );
-
-        case "projects":
-          return (
-            <ProjectListSection
-              paneId={paneId}
-              projectSessionCounts={projectSessionCounts}
-              projects={projects}
-              remoteLookup={remoteLookup}
-              selectedProjectId={controlSurfaceSelectedProjectId}
-              sessionCount={sessions.length}
-              onProjectScopeChange={handleControlSurfaceProjectScopeChange}
-              onRemoveProject={(project) =>
-                void handleProjectMenuRemoveProject(project)
-              }
-              onStartSession={handleProjectMenuStartSession}
-            />
-          );
-
-        case "sessions":
-        default:
-          return (
-            <section
-              className="control-panel-section-stack control-panel-section-sessions"
-              aria-label="Sessions"
-            >
-              <section className="session-list-shell" aria-label="Sessions">
-                <div className="session-list-tools">
-                  {renderControlPanelProjectScope()}
-                  <input
-                    ref={fixedSection ? undefined : sessionListSearchInputRef}
-                    className="themed-input session-list-search-input"
-                    type="search"
-                    value={controlSurfaceSessionListSearchQuery}
-                    placeholder="Search sessions"
-                    spellCheck={false}
-                    aria-label="Search sessions"
-                    title={`Search across visible sessions (${primaryModifierLabel()}+Shift+F)`}
-                    onChange={(event) => {
-                      if (standaloneControlSurfaceTabId) {
-                        updateStandaloneControlSurfaceViewState({
-                          sessionListSearchQuery: event.currentTarget.value,
-                        });
-                      } else {
-                        setSessionListSearchQuery(event.currentTarget.value);
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        if (controlSurfaceSessionListSearchQuery) {
-                          if (standaloneControlSurfaceTabId) {
-                            updateStandaloneControlSurfaceViewState({
-                              sessionListSearchQuery: "",
-                            });
-                          } else {
-                            setSessionListSearchQuery("");
-                          }
-                        } else {
-                          event.currentTarget.blur();
-                        }
-                      }
-                    }}
-                  />
-                  {controlSurfaceHasSessionListSearch ? (
-                    <div
-                      className="session-list-search-meta"
-                      aria-live="polite"
-                    >
-                      {controlSurfaceFilteredSessions.length === 1
-                        ? "1 matching session"
-                        : `${controlSurfaceFilteredSessions.length} matching sessions`}
-                    </div>
-                  ) : null}
-                </div>
-                <div className="session-list">
-                  {controlSurfaceFilteredSessions.length > 0 ? (
-                    controlSurfaceSessionListEntries.map((entry) => {
-                      if (entry.kind === "session") {
-                        return renderControlSurfaceSessionRow(entry.session);
-                      }
-
-                      const groupName = formatSessionOrchestratorGroupName(
-                        entry.orchestrator,
-                      );
-
-                      const isGroupCollapsed =
-                        controlSurfaceCollapsedOrchestratorIds.includes(
-                          entry.orchestrator.id,
-                        );
-                      const groupListId = `${surfaceId}-orchestrator-group-list-${entry.orchestrator.id}`;
-                      const pendingOrchestratorAction =
-                        pendingOrchestratorActionById[entry.orchestrator.id];
-                      const hasPendingOrchestratorAction = Boolean(
-                        pendingOrchestratorAction,
-                      );
-
-                      return (
-                        <section
-                          key={`${surfaceId}-orchestrator-group-${entry.orchestrator.id}`}
-                          className="session-orchestrator-group"
-                          role="group"
-                          aria-label={`Orchestration ${groupName}`}
-                          data-status={entry.orchestrator.status}
-                        >
-                          <header className="session-orchestrator-group-header">
-                            <button
-                              className="session-orchestrator-group-toggle"
-                              type="button"
-                              onClick={() =>
-                                toggleControlSurfaceOrchestratorGroup(
-                                  entry.orchestrator.id,
-                                )
-                              }
-                              aria-expanded={!isGroupCollapsed}
-                              aria-controls={
-                                !isGroupCollapsed ? groupListId : undefined
-                              }
-                              aria-label={`${isGroupCollapsed ? "Expand" : "Collapse"} ${groupName} sessions`}
-                              title={
-                                isGroupCollapsed
-                                  ? "Expand sessions"
-                                  : "Collapse sessions"
-                              }
-                            >
-                              <svg
-                                className={`session-orchestrator-group-chevron${!isGroupCollapsed ? " expanded" : ""}`}
-                                viewBox="0 0 12 12"
-                                focusable="false"
-                                aria-hidden="true"
-                              >
-                                <path
-                                  d="M4 2.75 7.75 6 4 9.25"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth="1.4"
-                                />
-                              </svg>
-                            </button>
-                            <div className="session-orchestrator-group-copy">
-                              <span className="session-orchestrator-group-label">
-                                Orchestration
-                              </span>
-                              <div className="session-orchestrator-group-title-row">
-                                <strong className="session-orchestrator-group-name">
-                                  {groupName}
-                                </strong>
-                                <span className="session-orchestrator-group-count">
-                                  {entry.sessions.length === 1
-                                    ? "1 session"
-                                    : `${entry.sessions.length} sessions`}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="session-orchestrator-group-meta">
-                              {entry.orchestrator.status === "running" ? (
-                                <div className="session-orchestrator-group-actions">
-                                  <OrchestratorRuntimeActionButton
-                                    action="pause"
-                                    orchestratorId={entry.orchestrator.id}
-                                    isPending={
-                                      pendingOrchestratorAction === "pause"
-                                    }
-                                    disabled={hasPendingOrchestratorAction}
-                                    onClick={() =>
-                                      void handleOrchestratorRuntimeAction(
-                                        entry.orchestrator.id,
-                                        "pause",
-                                      )
-                                    }
-                                  />
-                                  <OrchestratorRuntimeActionButton
-                                    action="stop"
-                                    orchestratorId={entry.orchestrator.id}
-                                    isPending={
-                                      pendingOrchestratorAction === "stop"
-                                    }
-                                    disabled={hasPendingOrchestratorAction}
-                                    onClick={() =>
-                                      void handleOrchestratorRuntimeAction(
-                                        entry.orchestrator.id,
-                                        "stop",
-                                      )
-                                    }
-                                  />
-                                </div>
-                              ) : entry.orchestrator.status === "paused" ? (
-                                <div className="session-orchestrator-group-actions">
-                                  <OrchestratorRuntimeActionButton
-                                    action="resume"
-                                    orchestratorId={entry.orchestrator.id}
-                                    isPending={
-                                      pendingOrchestratorAction === "resume"
-                                    }
-                                    disabled={hasPendingOrchestratorAction}
-                                    onClick={() =>
-                                      void handleOrchestratorRuntimeAction(
-                                        entry.orchestrator.id,
-                                        "resume",
-                                      )
-                                    }
-                                  />
-                                  <OrchestratorRuntimeActionButton
-                                    action="stop"
-                                    orchestratorId={entry.orchestrator.id}
-                                    isPending={
-                                      pendingOrchestratorAction === "stop"
-                                    }
-                                    disabled={hasPendingOrchestratorAction}
-                                    onClick={() =>
-                                      void handleOrchestratorRuntimeAction(
-                                        entry.orchestrator.id,
-                                        "stop",
-                                      )
-                                    }
-                                  />
-                                </div>
-                              ) : null}
-                            </div>
-                          </header>
-                          {!isGroupCollapsed ? (
-                            <div
-                              id={groupListId}
-                              className="session-orchestrator-group-list"
-                            >
-                              {entry.sessions.map((session) =>
-                                renderControlSurfaceSessionRow(session),
-                              )}
-                            </div>
-                          ) : null}
-                        </section>
-                      );
-                    })
-                  ) : (
-                    <div className="session-filter-empty">
-                      {sessions.length === 0
-                        ? "No sessions yet."
-                        : controlSurfaceHasSessionListSearch
-                          ? controlSurfaceSelectedProject
-                            ? `No sessions match this search in ${controlSurfaceSelectedProject.name}.`
-                            : "No sessions match this search."
-                          : controlSurfaceSelectedProject
-                            ? `No ${controlSurfaceSessionListFilter === "all" ? "" : `${controlSurfaceSessionListFilter} `}sessions in ${controlSurfaceSelectedProject.name}.`
-                            : "No sessions match this filter."}
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              <section className="sidebar-status" aria-label="Session filters">
-                <div className="session-control-label">Status</div>
-                <div className="sidebar-status-chips">
-                  <button
-                    className={`chip sidebar-status-chip ${controlSurfaceSessionListFilter === "all" ? "selected" : ""}`}
-                    type="button"
-                    onClick={() => {
-                      if (standaloneControlSurfaceTabId) {
-                        updateStandaloneControlSurfaceViewState({
-                          sessionListFilter: "all",
-                        });
-                      } else {
-                        setSessionListFilter("all");
-                      }
-                    }}
-                    aria-pressed={controlSurfaceSessionListFilter === "all"}
-                  >
-                    No filter ({controlSurfaceSessionFilterCounts.all})
-                  </button>
-                  <button
-                    className={`chip sidebar-status-chip ${controlSurfaceSessionListFilter === "working" ? "selected" : ""}`}
-                    type="button"
-                    onClick={() => {
-                      if (standaloneControlSurfaceTabId) {
-                        updateStandaloneControlSurfaceViewState({
-                          sessionListFilter: "working",
-                        });
-                      } else {
-                        setSessionListFilter("working");
-                      }
-                    }}
-                    aria-pressed={controlSurfaceSessionListFilter === "working"}
-                  >
-                    Working ({controlSurfaceSessionFilterCounts.working})
-                  </button>
-                  <button
-                    className={`chip sidebar-status-chip ${controlSurfaceSessionListFilter === "asking" ? "selected" : ""}`}
-                    type="button"
-                    onClick={() => {
-                      if (standaloneControlSurfaceTabId) {
-                        updateStandaloneControlSurfaceViewState({
-                          sessionListFilter: "asking",
-                        });
-                      } else {
-                        setSessionListFilter("asking");
-                      }
-                    }}
-                    aria-pressed={controlSurfaceSessionListFilter === "asking"}
-                  >
-                    Asking ({controlSurfaceSessionFilterCounts.asking})
-                  </button>
-                  <button
-                    className={`chip sidebar-status-chip ${controlSurfaceSessionListFilter === "completed" ? "selected" : ""}`}
-                    type="button"
-                    onClick={() => {
-                      if (standaloneControlSurfaceTabId) {
-                        updateStandaloneControlSurfaceViewState({
-                          sessionListFilter: "completed",
-                        });
-                      } else {
-                        setSessionListFilter("completed");
-                      }
-                    }}
-                    aria-pressed={
-                      controlSurfaceSessionListFilter === "completed"
-                    }
-                  >
-                    Completed ({controlSurfaceSessionFilterCounts.completed})
-                  </button>
-                </div>
-              </section>
-            </section>
-          );
-      }
-    }
-
     return (
-      <div className="sidebar sidebar-panel">
-        <ControlPanelSurface
-          ref={fixedSection ? undefined : controlPanelSurfaceRef}
-          fixedSection={fixedSection}
-          gitStatusCount={controlPanelGitStatusCount}
-          isPreferencesOpen={isSettingsOpen}
-          onOpenPreferences={() => setIsSettingsOpen(true)}
-          onSectionTabDragEnd={handleControlPanelLauncherDragEnd}
-          onSectionTabDragStart={handleControlPanelSectionTabDragStart}
-          projectCount={projects.length}
-          sessionCount={projectScopedSessions.length}
-          renderHeaderActions={renderControlPanelHeaderActions}
-          renderSection={renderControlPanelSection}
-          sectionLauncherTabs={{
-            files: buildControlPanelLauncherTab("files"),
-            git: buildControlPanelLauncherTab("git"),
-            projects: buildControlPanelLauncherTab("projects"),
-            sessions: buildControlPanelLauncherTab("sessions"),
-            orchestrators: buildControlPanelLauncherTab("orchestrators"),
-          }}
-          windowId={windowId}
-          launcherPaneId={paneId}
-        />
-      </div>
+      <AppControlSurface
+        paneId={paneId}
+        fixedSection={fixedSection}
+        controlPanelSurfaceRef={controlPanelSurfaceRef}
+        collapsedSessionOrchestratorIdsBySurfaceId={
+          collapsedSessionOrchestratorIdsBySurfaceId
+        }
+        paneLookup={paneLookup}
+        sessionLookup={sessionLookup}
+        workspace={workspace}
+        standaloneControlSurfaceViewStateByTabId={
+          standaloneControlSurfaceViewStateByTabId
+        }
+        projectLookup={projectLookup}
+        selectedProjectId={selectedProjectId}
+        activeSession={activeSession}
+        sessions={sessions}
+        orchestrators={orchestrators}
+        openSessionIds={openSessionIds}
+        sessionListFilter={sessionListFilter}
+        setSessionListFilter={setSessionListFilter}
+        sessionListSearchQuery={sessionListSearchQuery}
+        setSessionListSearchQuery={setSessionListSearchQuery}
+        sessionFilterCounts={sessionFilterCounts}
+        hasSessionListSearch={hasSessionListSearch}
+        sessionListSearchResults={sessionListSearchResults}
+        filteredSessions={filteredSessions}
+        controlPanelFilesystemRoot={controlPanelFilesystemRoot}
+        controlPanelGitWorkdir={controlPanelGitWorkdir}
+        controlPanelGitStatusCount={controlPanelGitStatusCount}
+        setControlPanelGitStatusCount={setControlPanelGitStatusCount}
+        workspaceFilesChangedEvent={workspaceFilesChangedEvent}
+        projects={projects}
+        projectSessionCounts={projectSessionCounts}
+        remoteLookup={remoteLookup}
+        projectScopedSessions={projectScopedSessions}
+        isSettingsOpen={isSettingsOpen}
+        setIsSettingsOpen={setIsSettingsOpen}
+        isCreateSessionOpen={isCreateSessionOpen}
+        isCreating={isCreating}
+        isCreatingProject={isCreatingProject}
+        controlPanelProjectOptions={controlPanelProjectOptions}
+        controlPanelInlineIssueDetail={controlPanelInlineIssueDetail}
+        backendConnectionState={backendConnectionState}
+        workspaceViewId={workspaceViewId}
+        deletingWorkspaceIds={deletingWorkspaceIds}
+        workspaceSwitcherError={workspaceSwitcherError}
+        isWorkspaceSwitcherLoading={isWorkspaceSwitcherLoading}
+        isWorkspaceSwitcherOpen={isWorkspaceSwitcherOpen}
+        workspaceSummaries={workspaceSummaries}
+        workspaceSwitcherRef={workspaceSwitcherRef}
+        windowId={windowId}
+        pendingOrchestratorActionById={pendingOrchestratorActionById}
+        killingSessionIds={killingSessionIds}
+        pendingKillSessionId={pendingKillSessionId}
+        killRevealSessionId={killRevealSessionId}
+        sessionListSearchInputRef={sessionListSearchInputRef}
+        setKillRevealSessionId={setKillRevealSessionId}
+        setControlPanelFilesystemRoot={setControlPanelFilesystemRoot}
+        setControlPanelGitWorkdir={setControlPanelGitWorkdir}
+        setStandaloneControlSurfaceViewStateByTabId={
+          setStandaloneControlSurfaceViewStateByTabId
+        }
+        setCollapsedSessionOrchestratorIdsBySurfaceId={
+          setCollapsedSessionOrchestratorIdsBySurfaceId
+        }
+        setSelectedProjectId={setSelectedProjectId}
+        setWorkspace={setWorkspace}
+        handleSidebarSessionClick={handleSidebarSessionClick}
+        handleKillSession={handleKillSession}
+        handleSessionRenameRequest={handleSessionRenameRequest}
+        handleControlPanelLauncherDragStart={
+          handleControlPanelLauncherDragStart
+        }
+        handleControlPanelLauncherDragEnd={handleControlPanelLauncherDragEnd}
+        handleOpenFilesystemTab={handleOpenFilesystemTab}
+        handleOpenGitStatusTab={handleOpenGitStatusTab}
+        handleOpenGitStatusDiffPreviewTab={handleOpenGitStatusDiffPreviewTab}
+        handleOpenProjectListTab={handleOpenProjectListTab}
+        handleOpenOrchestratorListTab={handleOpenOrchestratorListTab}
+        handleOpenOrchestratorCanvasTab={handleOpenOrchestratorCanvasTab}
+        handleOpenSessionListTab={handleOpenSessionListTab}
+        handleOpenCanvasTab={handleOpenCanvasTab}
+        openCreateProjectDialog={openCreateProjectDialog}
+        openCreateSessionDialog={openCreateSessionDialog}
+        handleOpenSourceTab={handleOpenSourceTab}
+        handleOrchestratorStateUpdated={handleOrchestratorStateUpdated}
+        handleProjectMenuRemoveProject={handleProjectMenuRemoveProject}
+        handleProjectMenuStartSession={handleProjectMenuStartSession}
+        handleOrchestratorRuntimeAction={handleOrchestratorRuntimeAction}
+        handleDeleteWorkspace={handleDeleteWorkspace}
+        handleOpenNewWorkspaceHere={handleOpenNewWorkspaceHere}
+        handleOpenNewWorkspaceWindow={handleOpenNewWorkspaceWindow}
+        handleOpenWorkspaceHere={handleOpenWorkspaceHere}
+        handleWorkspaceSwitcherToggle={handleWorkspaceSwitcherToggle}
+        handleRetryBackendConnection={handleRetryBackendConnection}
+      />
     );
   }
 
@@ -5955,720 +1949,122 @@ export default function App() {
           )}
         </section>
       </main>
-      {pendingKillSession && typeof document !== "undefined"
-        ? createPortal(
-            <>
-              <div
-                className="session-kill-popover-backdrop"
-                onPointerMove={() => {
-                  schedulePendingKillConfirmationClose();
-                }}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  closePendingKillConfirmation();
-                }}
-              />
-              <div
-                ref={pendingKillPopoverRef}
-                id={`kill-session-popover-${pendingKillSession.id}`}
-                className="session-kill-popover panel"
-                style={
-                  pendingKillPopoverStyle ?? {
-                    left: 0,
-                    top: 0,
-                    visibility: "hidden",
-                  }
-                }
-                role="dialog"
-                aria-label={`Confirm killing ${pendingKillSession.name}`}
-                onPointerEnter={() => {
-                  clearPendingKillCloseTimeout();
-                }}
-                onPointerLeave={() => {
-                  schedulePendingKillConfirmationClose();
-                }}
-              >
-                <div className="session-kill-popover-actions">
-                  <button
-                    className="ghost-button session-kill-popover-cancel"
-                    type="button"
-                    onClick={() => {
-                      closePendingKillConfirmation(true);
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    ref={pendingKillConfirmButtonRef}
-                    className="send-button session-kill-popover-confirm"
-                    type="button"
-                    onClick={() => void confirmKillSession()}
-                  >
-                    Kill
-                  </button>
-                </div>
-              </div>
-            </>,
-            document.body,
-          )
-        : null}
-      {pendingSessionRenameSession && typeof document !== "undefined"
-        ? createPortal(
-            <>
-              <div
-                className="session-rename-popover-backdrop"
-                onPointerMove={() => {
-                  schedulePendingSessionRenameClose();
-                }}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  closePendingSessionRename();
-                }}
-              />
-              <form
-                ref={pendingSessionRenamePopoverRef}
-                className="session-rename-popover panel"
-                style={
-                  pendingSessionRenameStyle ?? {
-                    left: 0,
-                    top: 0,
-                    visibility: "hidden",
-                  }
-                }
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void confirmSessionRename();
-                }}
-                onPointerEnter={() => {
-                  clearPendingSessionRenameCloseTimeout();
-                }}
-                onPointerLeave={() => {
-                  schedulePendingSessionRenameClose();
-                }}
-              >
-                <input
-                  ref={pendingSessionRenameInputRef}
-                  className="themed-input session-rename-input"
-                  type="text"
-                  value={pendingSessionRenameDraft}
-                  maxLength={120}
-                  spellCheck={false}
-                  aria-label="Session name"
-                  placeholder="Session name"
-                  onFocus={() => {
-                    clearPendingSessionRenameCloseTimeout();
-                  }}
-                  onChange={(event) => {
-                    clearPendingSessionRenameCloseTimeout();
-                    setPendingSessionRenameDraft(event.currentTarget.value);
-                  }}
-                />
-                <div className="session-rename-actions">
-                  <button
-                    className="ghost-button session-rename-new"
-                    type="button"
-                    onClick={() => {
-                      void handlePendingSessionRenameNew();
-                    }}
-                    disabled={
-                      isPendingSessionRenameCreating ||
-                      isPendingSessionRenameSubmitting ||
-                      isPendingSessionRenameKilling
-                    }
-                  >
-                    {isPendingSessionRenameCreating ? "Creating" : "New"}
-                  </button>
-                  <button
-                    className="ghost-button session-rename-kill"
-                    type="button"
-                    onClick={() => {
-                      void handlePendingSessionRenameKill();
-                    }}
-                    disabled={
-                      isPendingSessionRenameCreating ||
-                      isPendingSessionRenameSubmitting ||
-                      isPendingSessionRenameKilling
-                    }
-                  >
-                    {isPendingSessionRenameKilling ? "Killing" : "Kill"}
-                  </button>
-                  <button
-                    className="ghost-button session-rename-cancel"
-                    type="button"
-                    onClick={() => {
-                      closePendingSessionRename(true);
-                    }}
-                    disabled={
-                      isPendingSessionRenameCreating ||
-                      isPendingSessionRenameSubmitting ||
-                      isPendingSessionRenameKilling
-                    }
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="send-button session-rename-save"
-                    type="submit"
-                    disabled={
-                      !pendingSessionRenameValue ||
-                      isPendingSessionRenameCreating ||
-                      isPendingSessionRenameSubmitting ||
-                      isPendingSessionRenameKilling
-                    }
-                  >
-                    {isPendingSessionRenameSubmitting ? "Saving" : "Save"}
-                  </button>
-                </div>
-              </form>
-            </>,
-            document.body,
-          )
-        : null}
-      {isCreateSessionOpen ? (
-        <div
-          className="dialog-backdrop"
-          onMouseDown={(event) => {
-            // Primary-button only (+ macOS Ctrl-click guard). See
-            // `./dialog-backdrop-dismiss.ts` for the rationale —
-            // middle-click / right-click / mac-secondary-click must
-            // not swallow the native gesture by closing the dialog.
-            if (!isDialogBackdropDismissMouseDown(event.nativeEvent)) {
-              return;
-            }
-            if (!isCreating) {
-              setRequestError(null);
-              setIsCreateSessionOpen(false);
-            }
-          }}
-        >
-          <section
-            id="create-session-dialog"
-            className="dialog-card panel create-session-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="create-session-dialog-title"
-            onMouseDown={(event) => {
-              event.stopPropagation();
-            }}
-          >
-            <div className="create-session-dialog-header">
-              <div>
-                <div className="card-label">Session</div>
-                <h2 id="create-session-dialog-title">New session</h2>
-                <p className="dialog-copy">
-                  Pick the assistant, project, and any startup settings before
-                  opening the session. Session-specific controls stay with the
-                  session after it starts.
-                </p>
-              </div>
-
-              <button
-                className="ghost-button settings-dialog-close"
-                type="button"
-                aria-label="Close dialog"
-                title="Close"
-                onClick={() => {
-                  setRequestError(null);
-                  setIsCreateSessionOpen(false);
-                }}
-                disabled={isCreating}
-              >
-                <DialogCloseIcon />
-              </button>
-            </div>
-
-            <form
-              className="create-session-dialog-body"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void handleCreateSessionDialogSubmit();
-              }}
-            >
-              {requestError ? (
-                <article className="thread-notice create-session-dialog-error">
-                  <div className="card-label">Backend</div>
-                  <p>{requestError}</p>
-                </article>
-              ) : null}
-
-              <div className="create-session-field">
-                <label
-                  className="session-control-label"
-                  htmlFor="create-session-agent"
-                >
-                  Assistant
-                </label>
-                <ThemedCombobox
-                  id="create-session-agent"
-                  value={newSessionAgent}
-                  options={
-                    NEW_SESSION_AGENT_OPTIONS as readonly ComboboxOption[]
-                  }
-                  onChange={(nextValue) =>
-                    setNewSessionAgent(nextValue as AgentType)
-                  }
-                  disabled={isCreating}
-                />
-              </div>
-
-              {createSessionUsesSessionModelPicker ? (
-                <div className="create-session-field">
-                  <label className="session-control-label">Model</label>
-                  <p className="create-session-field-hint">
-                    {createSessionModelHint(newSessionAgent)}
-                  </p>
-                </div>
-              ) : (
-                <div className="create-session-field">
-                  <label
-                    className="session-control-label"
-                    htmlFor="create-session-model"
-                  >
-                    Model
-                  </label>
-                  <ThemedCombobox
-                    id="create-session-model"
-                    value={newSessionModel}
-                    options={newSessionModelOptions}
-                    onChange={(nextValue) =>
-                      setNewSessionModelByAgent((current) => ({
-                        ...current,
-                        [newSessionAgent]: nextValue,
-                      }))
-                    }
-                    disabled={isCreating}
-                  />
-                </div>
-              )}
-
-              {newSessionAgent === "Codex" ? (
-                <div className="create-session-field">
-                  <label
-                    className="session-control-label"
-                    htmlFor="create-session-codex-reasoning-effort"
-                  >
-                    Codex reasoning effort
-                  </label>
-                  <ThemedCombobox
-                    id="create-session-codex-reasoning-effort"
-                    value={defaultCodexReasoningEffort}
-                    options={
-                      CODEX_REASONING_EFFORT_OPTIONS as readonly ComboboxOption[]
-                    }
-                    onChange={(nextValue) =>
-                      handleDefaultCodexReasoningEffortChange(
-                        nextValue as CodexReasoningEffort,
-                      )
-                    }
-                    disabled={isCreating}
-                  />
-                  <p className="create-session-field-hint">
-                    New Codex sessions start with this reasoning effort, and you
-                    can still change it per session later.
-                  </p>
-                </div>
-              ) : null}
-
-              {newSessionAgent === "Claude" ? (
-                <div className="create-session-field">
-                  <label
-                    className="session-control-label"
-                    htmlFor="create-session-claude-effort"
-                  >
-                    Claude effort
-                  </label>
-                  <ThemedCombobox
-                    id="create-session-claude-effort"
-                    value={defaultClaudeEffort}
-                    options={CLAUDE_EFFORT_OPTIONS as readonly ComboboxOption[]}
-                    onChange={(nextValue) =>
-                      handleDefaultClaudeEffortChange(
-                        nextValue as ClaudeEffortLevel,
-                      )
-                    }
-                    disabled={isCreating}
-                  />
-                  <p className="create-session-field-hint">
-                    New Claude sessions start with this effort, and you can
-                    still change it per session later.
-                  </p>
-                </div>
-              ) : null}
-
-              {newSessionAgent === "Cursor" ? (
-                <div className="create-session-field">
-                  <label
-                    className="session-control-label"
-                    htmlFor="create-session-cursor-mode"
-                  >
-                    Cursor mode
-                  </label>
-                  <ThemedCombobox
-                    id="create-session-cursor-mode"
-                    value={defaultCursorMode}
-                    options={CURSOR_MODE_OPTIONS as readonly ComboboxOption[]}
-                    onChange={(nextValue) =>
-                      setDefaultCursorMode(nextValue as CursorMode)
-                    }
-                    disabled={isCreating}
-                  />
-                  <p className="create-session-field-hint">
-                    Agent auto-approves tool requests and can edit, Ask keeps
-                    approval cards, and Plan stays read-only.
-                  </p>
-                </div>
-              ) : null}
-
-              {newSessionAgent === "Gemini" ? (
-                <div className="create-session-field">
-                  <label
-                    className="session-control-label"
-                    htmlFor="create-session-gemini-mode"
-                  >
-                    Gemini approvals
-                  </label>
-                  <ThemedCombobox
-                    id="create-session-gemini-mode"
-                    value={defaultGeminiApprovalMode}
-                    options={
-                      GEMINI_APPROVAL_OPTIONS as readonly ComboboxOption[]
-                    }
-                    onChange={(nextValue) =>
-                      setDefaultGeminiApprovalMode(
-                        nextValue as GeminiApprovalMode,
-                      )
-                    }
-                    disabled={isCreating}
-                  />
-                  <p className="create-session-field-hint">
-                    Default prompts for approval, Auto edit approves edit tools,
-                    YOLO approves all tools, and Plan keeps Gemini read-only.
-                  </p>
-                </div>
-              ) : null}
-
-              <div className="create-session-field">
-                <label
-                  className="session-control-label"
-                  htmlFor="create-session-project"
-                >
-                  Project
-                </label>
-                <ThemedCombobox
-                  id="create-session-project"
-                  value={createSessionProjectId}
-                  options={createSessionProjectOptions}
-                  onChange={setCreateSessionProjectId}
-                  disabled={isCreating}
-                />
-                <p className="create-session-field-hint">
-                  {createSessionProjectHint}
-                </p>
-              </div>
-
-              {createSessionProjectSelectionError ? (
-                <article className="thread-notice create-session-readiness">
-                  <div className="card-label">Remote</div>
-                  <p>{createSessionProjectSelectionError}</p>
-                </article>
-              ) : null}
-
-              {createSessionAgentReadiness ? (
-                <article className="thread-notice create-session-readiness">
-                  <div className="card-label">
-                    {createSessionAgentReadiness.blocking
-                      ? "Setup Required"
-                      : "Ready"}
-                  </div>
-                  <p>{createSessionAgentReadiness.detail}</p>
-                  {createSessionAgentReadiness.commandPath ? (
-                    <p className="create-session-field-hint">
-                      Binary: {createSessionAgentReadiness.commandPath}
-                    </p>
-                  ) : null}
-                </article>
-              ) : null}
-
-              {createSessionAgentReadiness?.warningDetail ? (
-                <article className="thread-notice create-session-readiness">
-                  <div className="card-label">Warning</div>
-                  <p>{createSessionAgentReadiness.warningDetail}</p>
-                </article>
-              ) : null}
-
-              <div className="dialog-actions create-session-dialog-actions">
-                <button
-                  className="ghost-button"
-                  type="button"
-                  onClick={() => {
-                    setRequestError(null);
-                    setIsCreateSessionOpen(false);
-                  }}
-                  disabled={isCreating}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="send-button create-session-submit"
-                  type="submit"
-                  disabled={
-                    isCreating ||
-                    createSessionBlocked ||
-                    !!createSessionProjectSelectionError
-                  }
-                >
-                  {isCreating ? "Creating..." : "Create session"}
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
-      ) : null}
-      {isCreateProjectOpen ? (
-        <div
-          className="dialog-backdrop"
-          onMouseDown={(event) => {
-            // Primary-button only (+ macOS Ctrl-click guard). See
-            // `./dialog-backdrop-dismiss.ts` for the rationale.
-            if (!isDialogBackdropDismissMouseDown(event.nativeEvent)) {
-              return;
-            }
-            if (!isCreatingProject) {
-              setRequestError(null);
-              setIsCreateProjectOpen(false);
-            }
-          }}
-        >
-          <section
-            id="create-project-dialog"
-            className="dialog-card panel create-project-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="create-project-dialog-title"
-            onMouseDown={(event) => {
-              event.stopPropagation();
-            }}
-          >
-            <div className="create-project-dialog-header">
-              <div>
-                <div className="card-label">Project</div>
-                <h2 id="create-project-dialog-title">Add project</h2>
-                <p className="dialog-copy">
-                  Choose a local folder or enter a remote root path to add a
-                  scoped project.
-                </p>
-              </div>
-
-              <button
-                className="ghost-button settings-dialog-close"
-                type="button"
-                aria-label="Close dialog"
-                title="Close"
-                onClick={() => {
-                  setRequestError(null);
-                  setIsCreateProjectOpen(false);
-                }}
-                disabled={isCreatingProject}
-              >
-                <DialogCloseIcon />
-              </button>
-            </div>
-
-            <form
-              className="create-project-dialog-body"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void (async () => {
-                  const created = await handleCreateProject();
-                  if (created) {
-                    setIsCreateProjectOpen(false);
-                  }
-                })();
-              }}
-            >
-              {requestError ? (
-                <article className="thread-notice create-project-dialog-error">
-                  <div className="card-label">Backend</div>
-                  <p>{requestError}</p>
-                </article>
-              ) : null}
-
-              <div className="create-project-field">
-                <label
-                  className="session-control-label"
-                  htmlFor="create-project-remote"
-                >
-                  Remote
-                </label>
-                <ThemedCombobox
-                  id="create-project-remote"
-                  value={newProjectRemoteId}
-                  options={createProjectRemoteOptions}
-                  onChange={setNewProjectRemoteId}
-                  disabled={isCreatingProject}
-                />
-                <p className="create-session-field-hint">
-                  {remoteDisplayName(
-                    newProjectSelectedRemote,
-                    newProjectRemoteId,
-                  )}{" "}
-                  - {remoteConnectionLabel(newProjectSelectedRemote)}
-                </p>
-              </div>
-
-              <div className="create-project-field">
-                <label
-                  className="session-control-label"
-                  htmlFor="create-project-root"
-                >
-                  {newProjectUsesLocalRemote ? "Folder" : "Remote root path"}
-                </label>
-                <input
-                  id="create-project-root"
-                  className="themed-input project-root-input"
-                  type="text"
-                  value={newProjectRootPath}
-                  placeholder={
-                    newProjectUsesLocalRemote
-                      ? "/path/to/project"
-                      : "/remote/path/to/project"
-                  }
-                  onChange={(event) =>
-                    setNewProjectRootPath(event.target.value)
-                  }
-                  disabled={isCreatingProject}
-                />
-                <p className="create-session-field-hint">
-                  {newProjectUsesLocalRemote
-                    ? "Local projects use the folder picker and local filesystem panels immediately."
-                    : "Remote projects store the remote path and route files and sessions through the local SSH proxy."}
-                </p>
-              </div>
-
-              <div className="dialog-actions create-project-dialog-actions">
-                <button
-                  className="ghost-button"
-                  type="button"
-                  onClick={() => void handlePickProjectRoot()}
-                  disabled={isCreatingProject || !newProjectUsesLocalRemote}
-                >
-                  Choose folder
-                </button>
-                <button
-                  className="ghost-button"
-                  type="button"
-                  onClick={() => {
-                    setRequestError(null);
-                    setIsCreateProjectOpen(false);
-                  }}
-                  disabled={isCreatingProject}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="send-button create-project-submit"
-                  type="submit"
-                  disabled={isCreatingProject}
-                >
-                  {isCreatingProject ? "Adding..." : "Add project"}
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
-      ) : null}
-      {isSettingsOpen ? (
-        <SettingsDialogShell onClose={() => setIsSettingsOpen(false)}>
-          <SettingsTabBar
-            activeTabId={settingsTab}
-            onSelectTab={setSettingsTab}
-          />
-
-          <div
-            id={`settings-panel-${settingsTab}`}
-            className={`settings-tab-panel ${settingsTab === "themes" || settingsTab === "markdown" ? "theme-settings-panel" : ""}`.trim()}
-            role="tabpanel"
-            aria-labelledby={`settings-tab-${settingsTab}`}
-          >
-            {settingsTab === "themes" ? (
-              <ThemePreferencesPanel
-                activeStyle={activeStyle}
-                activeTheme={activeTheme}
-                styleId={styleId}
-                themeId={themeId}
-                onSelectStyle={setStyleId}
-                onSelectTheme={setThemeId}
-              />
-            ) : settingsTab === "markdown" ? (
-              <MarkdownPreferencesPanel
-                activeMarkdownTheme={activeMarkdownTheme}
-                activeMarkdownStyle={activeMarkdownStyle}
-                markdownThemeId={markdownThemeId}
-                markdownStyleId={markdownStyleId}
-                diagramThemeOverrideMode={diagramThemeOverrideMode}
-                diagramLook={diagramLook}
-                diagramPalette={diagramPalette}
-                onSelectMarkdownTheme={setMarkdownThemeId}
-                onSelectMarkdownStyle={setMarkdownStyleId}
-                onSelectDiagramThemeOverrideMode={setDiagramThemeOverrideMode}
-                onSelectDiagramLook={setDiagramLook}
-                onSelectDiagramPalette={setDiagramPalette}
-              />
-            ) : settingsTab === "appearance" ? (
-              <AppearancePreferencesPanel
-                densityPercent={densityPercent}
-                editorFontSizePx={editorFontSizePx}
-                fontSizePx={fontSizePx}
-                onSelectDensity={(nextValue) =>
-                  setDensityPercent(clampDensityPreference(nextValue))
-                }
-                onSelectEditorFontSize={(nextValue) =>
-                  setEditorFontSizePx(
-                    clampEditorFontSizePreference(nextValue),
-                  )
-                }
-                onSelectFontSize={(nextValue) =>
-                  setFontSizePx(clampFontSizePreference(nextValue))
-                }
-              />
-            ) : settingsTab === "remotes" ? (
-              <RemotePreferencesPanel
-                remotes={remoteConfigs}
-                onSaveRemotes={(nextRemotes) => {
-                  void persistAppPreferences({ remotes: nextRemotes });
-                }}
-              />
-            ) : settingsTab === "orchestrators" ? (
-              <OrchestratorTemplatesPanel
-                projects={projects}
-                sessions={sessions}
-                onStateUpdated={handleOrchestratorStateUpdated}
-              />
-            ) : settingsTab === "codex-prompts" ? (
-              <CodexPromptPreferencesPanel
-                defaultApprovalPolicy={defaultCodexApprovalPolicy}
-                defaultReasoningEffort={defaultCodexReasoningEffort}
-                defaultSandboxMode={defaultCodexSandboxMode}
-                onSelectApprovalPolicy={setDefaultCodexApprovalPolicy}
-                onSelectReasoningEffort={
-                  handleDefaultCodexReasoningEffortChange
-                }
-                onSelectSandboxMode={setDefaultCodexSandboxMode}
-              />
-            ) : (
-              <ClaudeApprovalsPreferencesPanel
-                defaultClaudeApprovalMode={defaultClaudeApprovalMode}
-                defaultClaudeEffort={defaultClaudeEffort}
-                onSelectEffort={handleDefaultClaudeEffortChange}
-                onSelectMode={handleDefaultClaudeApprovalModeChange}
-              />
-            )}
-          </div>
-        </SettingsDialogShell>
-      ) : null}
+      <AppDialogs
+        pendingKillSession={pendingKillSession}
+        pendingKillPopoverRef={pendingKillPopoverRef}
+        pendingKillPopoverStyle={pendingKillPopoverStyle}
+        pendingKillConfirmButtonRef={pendingKillConfirmButtonRef}
+        schedulePendingKillConfirmationClose={schedulePendingKillConfirmationClose}
+        clearPendingKillCloseTimeout={clearPendingKillCloseTimeout}
+        closePendingKillConfirmation={closePendingKillConfirmation}
+        confirmKillSession={confirmKillSession}
+        pendingSessionRenameSession={pendingSessionRenameSession}
+        pendingSessionRenamePopoverRef={pendingSessionRenamePopoverRef}
+        pendingSessionRenameStyle={pendingSessionRenameStyle}
+        pendingSessionRenameInputRef={pendingSessionRenameInputRef}
+        pendingSessionRenameDraft={pendingSessionRenameDraft}
+        pendingSessionRenameValue={pendingSessionRenameValue}
+        isPendingSessionRenameCreating={isPendingSessionRenameCreating}
+        isPendingSessionRenameSubmitting={isPendingSessionRenameSubmitting}
+        isPendingSessionRenameKilling={isPendingSessionRenameKilling}
+        schedulePendingSessionRenameClose={schedulePendingSessionRenameClose}
+        clearPendingSessionRenameCloseTimeout={clearPendingSessionRenameCloseTimeout}
+        closePendingSessionRename={closePendingSessionRename}
+        confirmSessionRename={confirmSessionRename}
+        setPendingSessionRenameDraft={setPendingSessionRenameDraft}
+        handlePendingSessionRenameNew={handlePendingSessionRenameNew}
+        handlePendingSessionRenameKill={handlePendingSessionRenameKill}
+        requestError={requestError}
+        isCreateSessionOpen={isCreateSessionOpen}
+        isCreating={isCreating}
+        closeCreateSessionDialog={() => {
+          setRequestError(null);
+          setIsCreateSessionOpen(false);
+        }}
+        handleCreateSessionDialogSubmit={handleCreateSessionDialogSubmit}
+        newSessionAgent={newSessionAgent}
+        onChangeNewSessionAgent={setNewSessionAgent}
+        createSessionUsesSessionModelPicker={createSessionUsesSessionModelPicker}
+        newSessionModel={newSessionModel}
+        newSessionModelOptions={newSessionModelOptions}
+        onChangeNewSessionModel={(nextValue) =>
+          setNewSessionModelByAgent((current) => ({
+            ...current,
+            [newSessionAgent]: nextValue,
+          }))
+        }
+        defaultCodexReasoningEffort={defaultCodexReasoningEffort}
+        handleDefaultCodexReasoningEffortChange={handleDefaultCodexReasoningEffortChange}
+        defaultClaudeEffort={defaultClaudeEffort}
+        handleDefaultClaudeEffortChange={handleDefaultClaudeEffortChange}
+        defaultCursorMode={defaultCursorMode}
+        onChangeDefaultCursorMode={setDefaultCursorMode}
+        defaultGeminiApprovalMode={defaultGeminiApprovalMode}
+        onChangeDefaultGeminiApprovalMode={setDefaultGeminiApprovalMode}
+        createSessionProjectId={createSessionProjectId}
+        createSessionProjectOptions={createSessionProjectOptions}
+        onChangeCreateSessionProjectId={setCreateSessionProjectId}
+        createSessionProjectHint={createSessionProjectHint}
+        createSessionProjectSelectionError={createSessionProjectSelectionError}
+        createSessionAgentReadiness={createSessionAgentReadiness}
+        createSessionBlocked={createSessionBlocked}
+        isCreateProjectOpen={isCreateProjectOpen}
+        isCreatingProject={isCreatingProject}
+        closeCreateProjectDialog={() => {
+          setRequestError(null);
+          setIsCreateProjectOpen(false);
+        }}
+        handleCreateProject={handleCreateProject}
+        newProjectRemoteId={newProjectRemoteId}
+        createProjectRemoteOptions={createProjectRemoteOptions}
+        onChangeNewProjectRemoteId={setNewProjectRemoteId}
+        newProjectSelectedRemote={newProjectSelectedRemote}
+        newProjectUsesLocalRemote={newProjectUsesLocalRemote}
+        newProjectRootPath={newProjectRootPath}
+        onChangeNewProjectRootPath={setNewProjectRootPath}
+        handlePickProjectRoot={handlePickProjectRoot}
+        isSettingsOpen={isSettingsOpen}
+        closeSettingsDialog={() => setIsSettingsOpen(false)}
+        settingsTab={settingsTab}
+        setSettingsTab={setSettingsTab}
+        activeStyle={activeStyle}
+        activeTheme={activeTheme}
+        styleId={styleId}
+        themeId={themeId}
+        setStyleId={setStyleId}
+        setThemeId={setThemeId}
+        activeMarkdownTheme={activeMarkdownTheme}
+        activeMarkdownStyle={activeMarkdownStyle}
+        markdownThemeId={markdownThemeId}
+        markdownStyleId={markdownStyleId}
+        diagramThemeOverrideMode={diagramThemeOverrideMode}
+        diagramLook={diagramLook}
+        diagramPalette={diagramPalette}
+        setMarkdownThemeId={setMarkdownThemeId}
+        setMarkdownStyleId={setMarkdownStyleId}
+        setDiagramThemeOverrideMode={setDiagramThemeOverrideMode}
+        setDiagramLook={setDiagramLook}
+        setDiagramPalette={setDiagramPalette}
+        densityPercent={densityPercent}
+        editorFontSizePx={editorFontSizePx}
+        fontSizePx={fontSizePx}
+        setDensityPercent={setDensityPercent}
+        setEditorFontSizePx={setEditorFontSizePx}
+        setFontSizePx={setFontSizePx}
+        remoteConfigs={remoteConfigs}
+        onSaveRemotes={(nextRemotes) => {
+          void persistAppPreferences({ remotes: nextRemotes });
+        }}
+        projects={projects}
+        sessions={sessions}
+        handleOrchestratorStateUpdated={handleOrchestratorStateUpdated}
+        defaultCodexApprovalPolicy={defaultCodexApprovalPolicy}
+        defaultCodexSandboxMode={defaultCodexSandboxMode}
+        setDefaultCodexApprovalPolicy={setDefaultCodexApprovalPolicy}
+        setDefaultCodexSandboxMode={setDefaultCodexSandboxMode}
+        defaultClaudeApprovalMode={defaultClaudeApprovalMode}
+        setDefaultClaudeApprovalMode={handleDefaultClaudeApprovalModeChange}
+      />
     </div>
   );
 }
-
-
-

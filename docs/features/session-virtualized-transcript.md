@@ -248,11 +248,21 @@ These are the important behavioral rules for future work:
 
 ## Known Limitations
 
-### Native upward momentum can stop abruptly
+### Incremental upward reading is the sensitive path
+
+Scrollbar seek / drag behavior is acceptable for the current implementation.
+The path that still needs the most scrutiny is incremental upward reading from
+the bottom of a long conversation:
+
+- go to the bottom
+- press `PgUp`
+- continue scrolling upward
+- judge whether the transcript remains visually stable
 
 Anchor restoration currently uses an imperative `scrollTop` write. That keeps
-the visible row stable, but it can interrupt the browser's native inertial /
-smooth upward scroll when new pages are prepended.
+the visible row stable, but it can still interrupt the browser's native upward
+motion or land at a slightly different offset than expected when new pages are
+prepended above the viewport.
 
 ### Unseen page geometry is still estimated
 
@@ -293,12 +303,20 @@ The current page size is a pragmatic tradeoff, not a universal optimum.
    - useful for validating remaining edge cases without relying only on visual
      repros
 
-5. **Search-target prewarm**
+5. **Separate incremental reading from random-access seek**
+   - treat wheel / `PgUp` / normal upward reading as the highest-fidelity path
+   - let scrollbar seek remain a simpler "jump, mount, settle" flow
+   - this matches how the transcript is currently evaluated in practice: the
+     important quality bar is visual stability while reading upward from the
+     bottom, not perfect pixel accuracy during arbitrary scrollbar seeks
+
+6. **Search-target prewarm**
    - optionally mount the target page band before applying the search scroll, so
      search can rely on real DOM more often and on estimated fallback less often
 
-6. **More regression coverage**
+7. **More regression coverage**
    - long upward wheel scroll
+   - bottom → `PgUp` → continued upward read-through
    - long upward smooth/page scroll
    - prepend during very tall prompt / Markdown block
    - mounted-range escape recovery

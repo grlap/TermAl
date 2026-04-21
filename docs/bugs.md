@@ -692,6 +692,38 @@ detection (pure LF, pure CRLF, mixed CRLF/LF dominant, ties → LF, bare
 `\r` legacy Mac ignored) and application (empty strings, LF identity,
 CRLF expansion, round-trip invariant) contracts.
 
+## Cross-window tab drag channel restarts on ordinary renders
+
+**Severity:** High - `useAppDragResize` recreates its `BroadcastChannel` subscription on ordinary renders, which can drop cross-window tab drag coordination messages.
+
+The extracted drag/resize hook now owns the `BroadcastChannel` that carries `drag-start`, `drop-commit`, and `drag-end` across windows. That effect depends on `applyControlPanelLayout`, but `App.tsx` still defines `applyControlPanelLayout(...)` inline, so its identity changes on every render. Any render while a cross-window tab drag is in flight tears down the active channel and creates a fresh one. Because the tab-drag protocol is transient and message-based, the source or target window can miss `drop-commit` / `drag-end`, leaving stale external drag state or failing to close the source tab after a successful cross-window drop.
+
+**Current behavior:**
+- `ui/src/app-drag-resize.ts` registers the tab-drag `BroadcastChannel` in a `useEffect` keyed by `applyControlPanelLayout`.
+- `ui/src/App.tsx` recreates `applyControlPanelLayout(...)` on ordinary renders.
+- A render during cross-window drag/drop can close and reopen the channel mid-protocol, dropping in-flight drag messages.
+
+**Proposal:**
+- Keep the channel effect stable per `windowId` instead of per render.
+- Read the latest layout helper through a ref inside `channel.onmessage` rather than making it an effect dependency.
+- Add a regression test that forces a render between `drag-start` and `drop-commit` and asserts the source tab still closes cleanly.
+
+## Extracted session actions still update state after unmount
+
+**Severity:** Medium - several async handlers moved into `ui/src/app-session-actions.ts` still call setters after `await` without guarding against unmount.
+
+The split extracted a large set of session and project actions into `useAppSessionActions`, but a few handlers still do post-`await` state work unconditionally. `handleCreateProject`, `handlePickProjectRoot`, approval/user-input submission, queued-prompt cancellation, stop-session cleanup, and agent-command refresh all reach `adoptState(...)`, `reportRequestError(...)`, or local flag setters after awaiting network work without first checking `isMountedRef`. Neighboring extracted flows such as kill and rename already use that guard, so the module now has inconsistent unmount safety. If the app unmounts while one of these requests is in flight, the hook can still mutate a dead tree or repopulate UI flags during teardown.
+
+**Current behavior:**
+- Multiple handlers in `ui/src/app-session-actions.ts` run post-`await` setters without `isMountedRef.current` checks.
+- Those setters include both adopted state writes and local cleanup/error flags.
+- Existing tests cover one unmount-sensitive delete-project path, but not the newly extracted create-project, approval, stop-session, or refresh-agent-commands paths.
+
+**Proposal:**
+- Apply the same `isMountedRef` guard pattern used by the extracted kill/rename flows to every post-`await` state update and `finally` cleanup setter.
+- Centralize the guard in small helper wrappers where possible so future extracted handlers do not drift.
+- Add unmount-focused regression tests for create-project, approval submission, stop-session, and refresh-agent-command flows.
+
 ## Unix terminal login-shell behavior lacks regression coverage
 
 **Severity:** Medium - the Unix terminal spawn path now restores `sh -lc`, but the behavior is not pinned by a dedicated test.
@@ -1025,6 +1057,23 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
 
 ## Implementation Tasks
 
+- [ ] P2: Add App-level coverage for the extracted Add project flow:
+  open the control-panel "Add project" action, exercise both local and
+  remote remotes, assert `pickProjectRoot` only wires the local path,
+  and verify a successful `createProject` closes the dialog and adopts
+  the new project state.
+- [ ] P2: Add focused coverage for the extracted session kill/rename popovers:
+  open each popover from a session row/tab, cover Save/New/Kill
+  branches, and assert Escape/backdrop dismissal plus listener cleanup
+  after unmount.
+- [ ] P2: Cover the project context-menu "Start new session" path after the control-surface split:
+  open a project's context menu, choose "Start new session", and assert
+  the create-session dialog opens with the expected project preselected
+  and pane context preserved.
+- [ ] P2: Tighten the standalone control-panel scoping save assertion:
+  replace `expect(clearedWorkspaceSave).toBeTruthy()` with an assertion
+  against the matching saved workspace payload so the test proves the
+  target tab's `originProjectId` was actually cleared.
 - [ ] P2: Add Unix terminal login-shell regression coverage:
   `build_terminal_shell_command` now uses `sh -lc` on Unix so
   terminal commands see login-shell PATH setup, but the current
