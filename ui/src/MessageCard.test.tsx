@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { MessageCard } from "./App";
+import { MessageCard } from "./message-cards";
 import type {
   ApprovalMessage,
   CodexAppRequestMessage,

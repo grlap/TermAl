@@ -91,18 +91,6 @@ import {
   type ComboboxOption,
 } from "./session-model-utils";
 
-// Re-export public API used by test files
-export {
-  describeCodexModelAdjustmentNotice,
-  describeSessionModelRefreshError,
-  describeUnknownSessionModelWarning,
-  resolveControlPanelWorkspaceRoot,
-  resolveUnknownSessionModelSendAttempt,
-  type ComboboxOption,
-} from "./session-model-utils";
-
-export { MessageCard, MarkdownContent } from "./message-cards";
-
 import {
   ThemePreferencesPanel,
   AppearancePreferencesPanel,
@@ -153,14 +141,6 @@ import { ProjectListSection } from "./ProjectListSection";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
 import { EmptyState } from "./EmptyState";
 import { WorkspaceNodeView } from "./WorkspaceNodeView";
-
-export { ThemedCombobox } from "./preferences-panels";
-export {
-  CodexPromptSettingsCard,
-  ClaudePromptSettingsCard,
-  CursorPromptSettingsCard,
-  GeminiPromptSettingsCard,
-} from "./prompt-settings-cards";
 
 import {
   LOCAL_REMOTE_ID,
@@ -377,9 +357,6 @@ import {
   type StateEventPayload,
   type WorkspaceLayoutPersistencePayload,
 } from "./app-shell-internals";
-
-// Re-exported from ./types for backward compatibility
-export type { SessionSettingsField, SessionSettingsValue } from "./types";
 
 export default function App() {
   const [workspaceViewId] = useState(() => ensureWorkspaceViewId());

@@ -6,7 +6,7 @@ import {
   CodexPromptSettingsCard,
   CursorPromptSettingsCard,
   GeminiPromptSettingsCard,
-} from "./App";
+} from "./prompt-settings-cards";
 import type { Session } from "./types";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {

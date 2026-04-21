@@ -18,15 +18,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
-import App, {
-  MarkdownContent,
-  ThemedCombobox,
+import App from "./App";
+import { MarkdownContent } from "./message-cards";
+import { ThemedCombobox } from "./preferences-panels";
+import {
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
-  resolveControlPanelWorkspaceRoot,
   describeUnknownSessionModelWarning,
+  resolveControlPanelWorkspaceRoot,
   resolveUnknownSessionModelSendAttempt,
-} from "./App";
+} from "./session-model-utils";
 import { setAppTestHooksForTests } from "./app-test-hooks";
 import { resolveStandaloneControlPanelDockWidthRatio } from "./control-panel-layout";
 import {
