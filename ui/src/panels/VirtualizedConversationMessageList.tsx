@@ -762,6 +762,39 @@ export function VirtualizedConversationMessageList({
       lastUserScrollInputTimeRef.current = performance.now();
     };
     const syncProgrammaticScrollWrite = () => {
+      // ORDER MATTERS: clear the bottom-pin intent BEFORE calling
+      // the flushed viewport sync. If a programmatic write moved
+      // us AWAY from near-bottom (e.g. Ctrl+PgUp / Ctrl+Home
+      // jumping to the top, a session-find pin to a hit far from
+      // the end), drop the flag here — the upcoming `flushSync`
+      // re-render will mount new rows at the new scrollTop, and
+      // each newly-mounted `MeasuredMessageCard` fires its
+      // initial `measure()` synchronously inside a `useLayoutEffect`.
+      // That path calls `handleHeightChange`, which — if
+      // `shouldKeepBottomAfterLayoutRef.current` is still `true`
+      // — would immediately write `scrollTop` back to the bottom,
+      // undoing the jump. Clearing the flag before flushSync means
+      // every measurement that fires inside the re-render sees the
+      // post-jump (intent-cleared) state.
+      //
+      // Matches what the native-scroll-event `syncViewport`
+      // handler does on user-initiated scrolls, but placed
+      // synchronously inside this dispatch so it beats the
+      // measurement cascade that `flushSync` triggers.
+      //
+      // The opposite case (scroll-to-bottom via
+      // `scheduleSettledScrollToBottom`) is safe: the new
+      // scrollTop IS near the bottom, `isScrollContainerNearBottom`
+      // returns true, and the branch is skipped — leaving the
+      // re-pinning `useLayoutEffect` that arms the flag for the
+      // bottom-pin commit in charge.
+      if (
+        shouldKeepBottomAfterLayoutRef.current &&
+        !isScrollContainerNearBottom(node)
+      ) {
+        shouldKeepBottomAfterLayoutRef.current = false;
+      }
+
       // Use the flushed variant: this listener fires from
       // `notifyMessageStackScrollWrite`, which is dispatched from
       // SessionPaneView code paths that include the RAF tick loop

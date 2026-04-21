@@ -346,6 +346,169 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
+  it("does not snap back to the bottom after a programmatic boundary jump to the top", async () => {
+    // Regression guard for the "Ctrl+PgUp takes 4 presses" symptom.
+    // When the list is pinned to the bottom and a parent-owned
+    // scroll write (Ctrl+PgUp / Ctrl+Home / "scroll to top" button)
+    // moves scrollTop to 0, the ResizeObserver callbacks for the
+    // newly-exposed top rows fire on subsequent microtasks. If
+    // `shouldKeepBottomAfterLayoutRef` is still `true` when those
+    // microtasks run, `handleHeightChange` writes scrollTop back
+    // to the bottom — undoing the boundary jump. The native
+    // `scroll` event that would clear the flag fires later than
+    // the ResizeObserver microtasks, so the race favors the
+    // measurement re-pin and the user has to press the key
+    // multiple times (or nudge the scroll manually) before the
+    // jump sticks.
+    //
+    // The fix clears `shouldKeepBottomAfterLayoutRef` inside the
+    // synchronous custom-event dispatch from
+    // `notifyMessageStackScrollWrite` — specifically when the new
+    // scrollTop is NOT near the bottom. This test exercises the
+    // full sequence: initial bottom pin, programmatic jump to
+    // top, subsequent measurement callback, and asserts the
+    // measurement did NOT re-pin to the bottom.
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalGetBoundingClientRect =
+      Element.prototype.getBoundingClientRect;
+    const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
+    let measuredSlotHeight = 80;
+    let scrollTop = 0;
+    const scrollWrites: number[] = [];
+
+    class ResizeObserverMock {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        resizeCallbacks.set(target, this.callback);
+      }
+      disconnect() {}
+    }
+
+    const messages = makeTextMessages(120);
+    const estimatedLayout = buildVirtualizedMessageLayout(
+      messages.map(estimateConversationMessageHeight),
+    );
+    const clientHeight = 500;
+    const totalHeight = estimatedLayout.totalHeight;
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => clientHeight,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => totalHeight,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+        scrollWrites.push(nextValue);
+      },
+    });
+
+    window.ResizeObserver =
+      ResizeObserverMock as unknown as typeof ResizeObserver;
+    Element.prototype.getBoundingClientRect =
+      function getBoundingClientRectMock() {
+        const element = this as HTMLElement;
+        const height = element.classList.contains("virtualized-message-slot")
+          ? measuredSlotHeight
+          : clientHeight;
+        return {
+          bottom: height,
+          height,
+          left: 0,
+          right: 100,
+          top: 0,
+          width: 100,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      };
+
+    try {
+      const { container } = render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={messages}
+          scrollContainerRef={{
+            current: scrollNode,
+          } as RefObject<HTMLElement | null>}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      // Initial mount lands at the bottom via the re-pin effect.
+      // `shouldKeepBottomAfterLayoutRef` is now `true`.
+      expect(scrollTop).toBe(totalHeight - clientHeight);
+
+      // Simulate Ctrl+PgUp: parent sets scrollTop=0, then
+      // notifies the virtualizer via the custom event. The
+      // listener must clear the bottom-pin intent synchronously
+      // inside this dispatch, BEFORE the upcoming `flushSync`
+      // re-render mounts new top rows whose measurements would
+      // otherwise see the still-set flag and snap back to the
+      // bottom.
+      scrollWrites.length = 0;
+      act(() => {
+        scrollTop = 0;
+        notifyMessageStackScrollWrite(scrollNode);
+      });
+
+      // The re-rendered window now shows the top rows — their
+      // slots mount and the ResizeObserver callback is queued.
+      // Simulate the measurement microtask firing: if the bug
+      // were still present, `handleHeightChange`'s bottom-pin
+      // branch would fire and push a scrollTop write targeted
+      // at the bottom.
+      const topSlot = await waitFor(() => {
+        const candidate = container.querySelector(".virtualized-message-slot");
+        expect(candidate).not.toBeNull();
+        expect(resizeCallbacks.has(candidate!)).toBe(true);
+        return candidate!;
+      });
+
+      measuredSlotHeight = 120;
+      await act(async () => {
+        resizeCallbacks
+          .get(topSlot)
+          ?.([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+        await Promise.resolve();
+      });
+
+      // Critical invariant: no scrollTop write to the bottom
+      // fired from `handleHeightChange`. The only acceptable
+      // writes here are small height-adjustment writes via the
+      // anchor-preserving branch. A write that targets
+      // `totalHeight - clientHeight` (or anywhere near the
+      // bottom) would indicate the bottom-pin intent was NOT
+      // cleared by the programmatic-jump dispatch.
+      const bottomTarget = totalHeight - clientHeight;
+      const wroteToBottom = scrollWrites.some(
+        (value) => Math.abs(value - bottomTarget) < clientHeight,
+      );
+      expect(wroteToBottom).toBe(false);
+      // And scrollTop itself stays at or near the top (anchor-
+      // preserving adjustments can move it by a small delta but
+      // must not land near the bottom).
+      expect(scrollTop).toBeLessThan(clientHeight * 2);
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
   it("resyncs the rendered window after a silent startup scrollTop change", () => {
     // Startup/restart can leave the browser's scrollTop clamped or
     // restored after the virtualizer's first render without emitting a
