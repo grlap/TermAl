@@ -1282,6 +1282,70 @@ describe("App", () => {
     });
   });
 
+  it("cancels a pending settle-to-bottom frame when Ctrl+PageUp jumps to the top", async () => {
+    await withSuppressedActWarnings(async () => {
+      const pendingFrames = new Map<number, FrameRequestCallback>();
+      let nextFrameId = 1;
+      vi.stubGlobal(
+        "requestAnimationFrame",
+        ((callback: FrameRequestCallback) => {
+          const frameId = nextFrameId;
+          nextFrameId += 1;
+          pendingFrames.set(frameId, callback);
+          return frameId;
+        }) as typeof requestAnimationFrame,
+      );
+      const cancelAnimationFrameMock = vi.fn((frameId: number) => {
+        pendingFrames.delete(frameId);
+      });
+      vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
+
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+
+      const context = await renderAppWithProjectAndSession();
+
+      try {
+        const messageStack = document.querySelector(".message-stack");
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+        messageStack.scrollTop = 800;
+
+        await act(async () => {
+          fireEvent.keyDown(messageStack, {
+            key: "PageUp",
+            code: "PageUp",
+            ctrlKey: true,
+          });
+        });
+        await settleAsyncUi();
+
+        expect(messageStack.scrollTop).toBe(0);
+        expect(filterScrollToCallsAt(scrollToMock, 0, "auto").length).toBeGreaterThan(0);
+        expect(cancelAnimationFrameMock).toHaveBeenCalled();
+
+        const queuedFrames = [...pendingFrames.values()];
+        pendingFrames.clear();
+        for (const callback of queuedFrames) {
+          await act(async () => {
+            callback(Date.now());
+            await flushUiWork();
+          });
+        }
+        await settleAsyncUi();
+
+        expect(messageStack.scrollTop).toBe(0);
+      } finally {
+        context.cleanup();
+        restoreScrollGeometry();
+      }
+    });
+  });
+
   it("arms the active-prompt poll when a successful send response is stale", async () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;

@@ -640,6 +640,7 @@ export function SessionPaneView({
   const fileStateRef = useRef(fileState);
   const sourceEditorDirtyRef = useRef(false);
   const messageStackRef = useRef<HTMLElement | null>(null);
+  const settledScrollToBottomCancelRef = useRef<(() => void) | null>(null);
   const paneTopRef = useRef<HTMLDivElement | null>(null);
   const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<
     TabDropPlacement,
@@ -1131,6 +1132,7 @@ export function SessionPaneView({
       return;
     }
 
+    cancelSettledScrollToBottom();
     node.scrollTo({
       top: 0,
       behavior: "auto",
@@ -1230,6 +1232,8 @@ export function SessionPaneView({
     setShouldStickToBottom(shouldStick);
     if (shouldStick) {
       setNewResponseIndicator(scrollStateKey, false);
+    } else {
+      cancelSettledScrollToBottom();
     }
   };
 
@@ -1321,6 +1325,8 @@ export function SessionPaneView({
       onComplete?: () => void;
     } = {},
   ) {
+    cancelSettledScrollToBottom();
+
     let frameId = 0;
     let cancelled = false;
     let completed = false;
@@ -1340,6 +1346,9 @@ export function SessionPaneView({
       }
 
       completed = true;
+      if (settledScrollToBottomCancelRef.current === cancel) {
+        settledScrollToBottomCancelRef.current = null;
+      }
       options.onComplete?.();
     }
 
@@ -1384,13 +1393,25 @@ export function SessionPaneView({
       }
     };
 
-    tick();
-    return () => {
+    const cancel = () => {
       cancelled = true;
       if (frameId !== 0) {
         window.cancelAnimationFrame(frameId);
       }
+      if (settledScrollToBottomCancelRef.current === cancel) {
+        settledScrollToBottomCancelRef.current = null;
+      }
     };
+
+    settledScrollToBottomCancelRef.current = cancel;
+    tick();
+    return cancel;
+  }
+
+  function cancelSettledScrollToBottom() {
+    const cancel = settledScrollToBottomCancelRef.current;
+    settledScrollToBottomCancelRef.current = null;
+    cancel?.();
   }
 
   function restoreMessageStackScrollTop(targetTop: number) {
@@ -2305,6 +2326,8 @@ export function SessionPaneView({
           setShouldStickToBottom(shouldStick);
           if (shouldStick) {
             setNewResponseIndicator(scrollStateKey, false);
+          } else {
+            cancelSettledScrollToBottom();
           }
         }}
       >
