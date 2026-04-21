@@ -81,7 +81,6 @@ const VIRTUALIZED_MESSAGES_PER_PAGE = 8;
 const VIRTUALIZED_PAGE_BUFFER_ABOVE = 4;
 const VIRTUALIZED_PAGE_BUFFER_BELOW = 4;
 const VIRTUALIZED_PAGE_EDGE_GROW_THRESHOLD_VIEWPORTS = 3;
-const VIRTUALIZED_PAGE_GROW_BATCH = 3;
 const ACTIVE_VIEWPORT_STARTUP_RESYNC_FRAMES = 12;
 const USER_SCROLL_ADJUSTMENT_COOLDOWN_MS = 200;
 
@@ -141,15 +140,16 @@ function buildPageLayout(pageHeights: number[]) {
   return { tops, totalHeight };
 }
 
-function getMountedMessageSlots(scrollContainerNode: HTMLElement) {
-  return Array.from(
-    scrollContainerNode.querySelectorAll<HTMLElement>(".virtualized-message-slot[data-message-id]"),
+function rangeContainsRange(container: VirtualizedRange, target: VirtualizedRange) {
+  return (
+    container.startIndex <= target.startIndex &&
+    container.endIndex >= target.endIndex
   );
 }
 
-function getMountedPageNodes(scrollContainerNode: HTMLElement) {
+function getMountedMessageSlots(scrollContainerNode: HTMLElement) {
   return Array.from(
-    scrollContainerNode.querySelectorAll<HTMLElement>(".virtualized-message-page[data-page-key]"),
+    scrollContainerNode.querySelectorAll<HTMLElement>(".virtualized-message-slot[data-message-id]"),
   );
 }
 
@@ -484,6 +484,31 @@ export function VirtualizedConversationMessageList({
 
     return { startIndex, endIndex };
   }, [pages.length, visiblePageRange]);
+  const edgeGrowThresholdPx = Math.max(
+    viewportHeight * VIRTUALIZED_PAGE_EDGE_GROW_THRESHOLD_VIEWPORTS,
+    DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
+  );
+  const reservedMountedPageRange = useMemo(() => {
+    if (pages.length === 0) {
+      return { startIndex: 0, endIndex: 0 };
+    }
+
+    return findVirtualizedMessageRange(
+      pageLayout.tops,
+      pageHeights,
+      viewportScrollTop,
+      viewportHeight,
+      edgeGrowThresholdPx,
+      edgeGrowThresholdPx,
+    );
+  }, [
+    edgeGrowThresholdPx,
+    pageHeights,
+    pageLayout.tops,
+    pages.length,
+    viewportHeight,
+    viewportScrollTop,
+  ]);
   const [mountedPageRange, setMountedPageRange] = useState<VirtualizedRange>(
     desiredMountedPageRange,
   );
@@ -519,50 +544,44 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
-    const node = scrollContainerRef.current;
-    if (!node || pages.length === 0) {
+    if (pages.length === 0) {
       return;
     }
 
-    const mountedPageNodes = getMountedPageNodes(node);
-    if (mountedPageNodes.length === 0) {
+    // Scrollbar drags can move the viewport far enough in one step that the
+    // existing mounted band no longer intersects the new visible range at all.
+    // In that case the "reconcile to desired range" effect below owns the
+    // direct jump to the new region. Growing the old band here would union the
+    // old and new regions and can cascade into a long series of synchronous
+    // layout updates.
+    if (!rangeContainsRange(mountedPageRange, visiblePageRange)) {
       return;
     }
 
-    const scrollContainerRect = node.getBoundingClientRect();
-    const firstMountedPageRect = mountedPageNodes[0]!.getBoundingClientRect();
-    const lastMountedPageRect =
-      mountedPageNodes[mountedPageNodes.length - 1]!.getBoundingClientRect();
-    const edgeGrowThresholdPx = Math.max(
-      viewportHeight * VIRTUALIZED_PAGE_EDGE_GROW_THRESHOLD_VIEWPORTS,
-      DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
-    );
-
-    let nextRange = mountedPageRange;
-    if (
-      nextRange.startIndex > 0 &&
-      firstMountedPageRect.top - scrollContainerRect.top > -edgeGrowThresholdPx
-    ) {
-      pendingMountedRangeAnchorRef.current = captureFirstVisibleMountedMessageAnchor(node);
-      nextRange = {
-        startIndex: Math.max(nextRange.startIndex - VIRTUALIZED_PAGE_GROW_BATCH, 0),
-        endIndex: nextRange.endIndex,
-      };
-    }
-    if (
-      nextRange.endIndex < pages.length &&
-      lastMountedPageRect.bottom - scrollContainerRect.bottom < edgeGrowThresholdPx
-    ) {
-      nextRange = {
-        startIndex: nextRange.startIndex,
-        endIndex: Math.min(nextRange.endIndex + VIRTUALIZED_PAGE_GROW_BATCH, pages.length),
-      };
-    }
+    const nextRange = {
+      startIndex: Math.min(mountedPageRange.startIndex, reservedMountedPageRange.startIndex),
+      endIndex: Math.max(mountedPageRange.endIndex, reservedMountedPageRange.endIndex),
+    };
 
     if (!rangesEqual(nextRange, mountedPageRange)) {
+      const node = scrollContainerRef.current;
+      if (
+        node &&
+        nextRange.startIndex < mountedPageRange.startIndex &&
+        !isScrollContainerNearBottom(node)
+      ) {
+        pendingMountedRangeAnchorRef.current = captureFirstVisibleMountedMessageAnchor(node);
+      }
       setMountedPageRange(nextRange);
     }
-  }, [isActive, mountedPageRange, pages.length, scrollContainerRef, viewportHeight]);
+  }, [
+    isActive,
+    mountedPageRange,
+    pages.length,
+    reservedMountedPageRange,
+    scrollContainerRef,
+    visiblePageRange,
+  ]);
 
   useLayoutEffect(() => {
     if (rangesEqual(mountedPageRange, desiredMountedPageRange)) {
@@ -574,9 +593,10 @@ export function VirtualizedConversationMessageList({
     const growsMountedBand =
       desiredMountedPageRange.startIndex < mountedPageRange.startIndex ||
       desiredMountedPageRange.endIndex > mountedPageRange.endIndex;
-    const viewportEscapedMountedBand =
-      visiblePageRange.startIndex < mountedPageRange.startIndex ||
-      visiblePageRange.endIndex > mountedPageRange.endIndex;
+    const viewportEscapedMountedBand = !rangeContainsRange(
+      mountedPageRange,
+      visiblePageRange,
+    );
     if (inUserScrollCooldown && growsMountedBand && !viewportEscapedMountedBand) {
       // During active manual scroll the mounted band grows from the real DOM edge
       // above. Letting estimated page layout grow it here reintroduces the same
