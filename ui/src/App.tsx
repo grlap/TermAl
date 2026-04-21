@@ -68,9 +68,6 @@ import {
 import {
   areRemoteConfigsEqual,
   createSessionModelHint,
-  DEFAULT_CLAUDE_EFFORT,
-  DEFAULT_CLAUDE_APPROVAL_MODE,
-  DEFAULT_CODEX_REASONING_EFFORT,
   defaultNewSessionModel,
   describeCodexModelAdjustmentNotice,
   describeProjectScope,
@@ -136,6 +133,7 @@ import {
   resolveRecoveredWorkspaceLayoutRequestError,
 } from "./state-adoption";
 import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
+import { useAppPreferencesState } from "./app-preferences-state";
 import { appTestHooks } from "./app-test-hooks";
 import { ProjectListSection } from "./ProjectListSection";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
@@ -262,28 +260,9 @@ import {
   MARKDOWN_THEMES,
   STYLES,
   THEMES,
-  applyDensityPreference,
-  applyDiagramLookPreference,
-  applyDiagramPalettePreference,
-  applyDiagramThemeOverridePreference,
-  applyFontSizePreference,
-  applyMarkdownStylePreference,
-  applyMarkdownThemePreference,
-  applyStylePreference,
-  applyThemePreference,
   clampDensityPreference,
   clampEditorFontSizePreference,
   clampFontSizePreference,
-  persistDensityPreference,
-  persistDiagramLookPreference,
-  persistDiagramPalettePreference,
-  persistDiagramThemeOverridePreference,
-  persistEditorFontSizePreference,
-  persistFontSizePreference,
-  persistMarkdownStylePreference,
-  persistMarkdownThemePreference,
-  persistStylePreference,
-  persistThemePreference,
   type DiagramLook,
   type DiagramPalette,
   type DiagramThemeOverrideMode,
@@ -478,54 +457,44 @@ export default function App() {
   const [newProjectRemoteId, setNewProjectRemoteId] =
     useState<string>(LOCAL_REMOTE_ID);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
-  const [themeId, setThemeId] = useState<ThemeId>(
-    initialWorkspaceBootstrap.themeId,
-  );
-  const [styleId, setStyleId] = useState<StyleId>(
-    initialWorkspaceBootstrap.styleId,
-  );
-  const [markdownThemeId, setMarkdownThemeId] = useState<MarkdownThemeId>(
-    initialWorkspaceBootstrap.markdownThemeId,
-  );
-  const [markdownStyleId, setMarkdownStyleId] = useState<MarkdownStyleId>(
-    initialWorkspaceBootstrap.markdownStyleId,
-  );
-  const [diagramThemeOverrideMode, setDiagramThemeOverrideMode] =
-    useState<DiagramThemeOverrideMode>(
-      initialWorkspaceBootstrap.diagramThemeOverrideMode,
-    );
-  const [diagramLook, setDiagramLook] = useState<DiagramLook>(
-    initialWorkspaceBootstrap.diagramLook,
-  );
-  const [diagramPalette, setDiagramPalette] = useState<DiagramPalette>(
-    initialWorkspaceBootstrap.diagramPalette,
-  );
-  const [fontSizePx, setFontSizePx] = useState<number>(
-    initialWorkspaceBootstrap.fontSizePx,
-  );
-  const [editorFontSizePx, setEditorFontSizePx] = useState<number>(
-    initialWorkspaceBootstrap.editorFontSizePx,
-  );
-  const [densityPercent, setDensityPercent] = useState<number>(
-    initialWorkspaceBootstrap.densityPercent,
-  );
-  const [defaultCodexSandboxMode, setDefaultCodexSandboxMode] =
-    useState<SandboxMode>("workspace-write");
-  const [defaultCodexApprovalPolicy, setDefaultCodexApprovalPolicy] =
-    useState<ApprovalPolicy>("never");
-  const [defaultCodexReasoningEffort, setDefaultCodexReasoningEffort] =
-    useState<CodexReasoningEffort>(DEFAULT_CODEX_REASONING_EFFORT);
-  const [defaultClaudeApprovalMode, setDefaultClaudeApprovalMode] =
-    useState<ClaudeApprovalMode>(DEFAULT_CLAUDE_APPROVAL_MODE);
-  const [defaultClaudeEffort, setDefaultClaudeEffort] =
-    useState<ClaudeEffortLevel>(DEFAULT_CLAUDE_EFFORT);
-  const [remoteConfigs, setRemoteConfigs] = useState<RemoteConfig[]>(
-    () => resolveAppPreferences(null).remotes,
-  );
-  const [defaultCursorMode, setDefaultCursorMode] =
-    useState<CursorMode>("agent");
-  const [defaultGeminiApprovalMode, setDefaultGeminiApprovalMode] =
-    useState<GeminiApprovalMode>("default");
+  const {
+    themeId,
+    setThemeId,
+    styleId,
+    setStyleId,
+    markdownThemeId,
+    setMarkdownThemeId,
+    markdownStyleId,
+    setMarkdownStyleId,
+    diagramThemeOverrideMode,
+    setDiagramThemeOverrideMode,
+    diagramLook,
+    setDiagramLook,
+    diagramPalette,
+    setDiagramPalette,
+    fontSizePx,
+    setFontSizePx,
+    editorFontSizePx,
+    setEditorFontSizePx,
+    densityPercent,
+    setDensityPercent,
+    defaultCodexSandboxMode,
+    setDefaultCodexSandboxMode,
+    defaultCodexApprovalPolicy,
+    setDefaultCodexApprovalPolicy,
+    defaultCodexReasoningEffort,
+    setDefaultCodexReasoningEffort,
+    defaultClaudeApprovalMode,
+    setDefaultClaudeApprovalMode,
+    defaultClaudeEffort,
+    setDefaultClaudeEffort,
+    defaultCursorMode,
+    setDefaultCursorMode,
+    defaultGeminiApprovalMode,
+    setDefaultGeminiApprovalMode,
+    remoteConfigs,
+    setRemoteConfigs,
+  } = useAppPreferencesState(initialWorkspaceBootstrap);
   const [isCreateSessionOpen, setIsCreateSessionOpen] = useState(false);
   const [createSessionPaneId, setCreateSessionPaneId] = useState<string | null>(
     null,
@@ -3205,56 +3174,6 @@ export default function App() {
       setNewSessionAgent(activeSession.agent);
     }
   }, [activeSession?.id]);
-
-  useLayoutEffect(() => {
-    applyThemePreference(themeId);
-    // Also update the global fallback key so main.tsx can use it for new workspaces
-    persistThemePreference(themeId);
-  }, [themeId]);
-
-  useLayoutEffect(() => {
-    applyStylePreference(styleId);
-    persistStylePreference(styleId);
-  }, [styleId]);
-
-  useLayoutEffect(() => {
-    applyMarkdownThemePreference(markdownThemeId);
-    persistMarkdownThemePreference(markdownThemeId);
-  }, [markdownThemeId]);
-
-  useLayoutEffect(() => {
-    applyMarkdownStylePreference(markdownStyleId);
-    persistMarkdownStylePreference(markdownStyleId);
-  }, [markdownStyleId]);
-
-  useLayoutEffect(() => {
-    applyDiagramThemeOverridePreference(diagramThemeOverrideMode);
-    persistDiagramThemeOverridePreference(diagramThemeOverrideMode);
-  }, [diagramThemeOverrideMode]);
-
-  useLayoutEffect(() => {
-    applyDiagramLookPreference(diagramLook);
-    persistDiagramLookPreference(diagramLook);
-  }, [diagramLook]);
-
-  useLayoutEffect(() => {
-    applyDiagramPalettePreference(diagramPalette);
-    persistDiagramPalettePreference(diagramPalette);
-  }, [diagramPalette]);
-
-  useLayoutEffect(() => {
-    applyFontSizePreference(fontSizePx);
-    persistFontSizePreference(fontSizePx);
-  }, [fontSizePx]);
-
-  useLayoutEffect(() => {
-    applyDensityPreference(densityPercent);
-    persistDensityPreference(densityPercent);
-  }, [densityPercent]);
-
-  useEffect(() => {
-    persistEditorFontSizePreference(editorFontSizePx);
-  }, [editorFontSizePx]);
 
   useEffect(() => {
     let cancelled = false;
