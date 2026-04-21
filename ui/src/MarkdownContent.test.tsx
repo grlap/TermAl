@@ -1152,3 +1152,256 @@ describe("MarkdownContent math rendering", () => {
     expect(blockDiv?.hasAttribute("data-markdown-line-start")).toBe(true);
   });
 });
+
+// The following suite was relocated from App.test.tsx in Slice 2 of
+// the App-split plan (see docs/app-split-plan.md). It intentionally
+// keeps the original top-level `describe("MarkdownContent", ...)`
+// name so the tests remain grep-findable by their historical
+// identifiers.
+describe("MarkdownContent", () => {
+  it("wraps markdown tables in a scroll container", () => {
+    const markdown = [
+      "| Finding | Resolution |",
+      "| --- | --- |",
+      "| `skip_list.rs` | Fixed |",
+    ].join("\n");
+
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    try {
+      const { container } = render(<MarkdownContent markdown={markdown} />);
+
+      const tableScroll = container.querySelector(".markdown-table-scroll");
+      expect(tableScroll).not.toBeNull();
+      expect(tableScroll?.querySelector("table")).not.toBeNull();
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("opens local file links through the source callback", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="[experience.tex#L63](experience.tex#L63)"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "experience.tex#L63" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/repo/experience.tex",
+      line: 63,
+      openInNewTab: false,
+    });
+  });
+
+  it("opens absolute Windows file links through the source callback", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="[route_post_processing_service.dart:469](C:/github/Personal/fit_friends/lib/services/route_post_processing_service.dart#L469)"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="C:/github/Personal/TermAl"
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("link", {
+        name: "route_post_processing_service.dart:469",
+      }),
+    );
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "C:/github/Personal/fit_friends/lib/services/route_post_processing_service.dart",
+      line: 469,
+      openInNewTab: false,
+    });
+  });
+
+  it("opens absolute Linux file links through the source callback", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="[route_post_processing_service.dart:469](/home/grzeg/projects/fit_friends/lib/services/route_post_processing_service.dart#L469)"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("link", {
+        name: "route_post_processing_service.dart:469",
+      }),
+    );
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/home/grzeg/projects/fit_friends/lib/services/route_post_processing_service.dart",
+      line: 469,
+      openInNewTab: false,
+    });
+  });
+
+  it("opens localhost app file URLs through the source callback", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="[20260322000004_child_provisioning_rpcs.sql](http://127.0.0.1:4173/C:/github/Personal/questly/supabase/migrations/20260322000004_child_provisioning_rpcs.sql#L15C1)"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="C:/github/Personal/questly"
+      />,
+    );
+
+    const link = screen.getByRole("link", {
+      name: "20260322000004_child_provisioning_rpcs.sql",
+    });
+    expect(link).not.toHaveAttribute("target");
+
+    fireEvent.click(link);
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "C:/github/Personal/questly/supabase/migrations/20260322000004_child_provisioning_rpcs.sql",
+      line: 15,
+      column: 1,
+      openInNewTab: false,
+    });
+  });
+
+  it("renders bare localhost app file URLs with workspace-relative labels", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="http://127.0.0.1:4173/C:/github/Personal/questly/supabase/migrations/20260322000004_child_provisioning_rpcs.sql#L15C1"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="C:/github/Personal/questly"
+      />,
+    );
+
+    const link = screen.getByRole("link", {
+      name: "supabase/migrations/20260322000004_child_provisioning_rpcs.sql#L15C1",
+    });
+    expect(link).not.toHaveAttribute("target");
+
+    fireEvent.click(link);
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "C:/github/Personal/questly/supabase/migrations/20260322000004_child_provisioning_rpcs.sql",
+      line: 15,
+      column: 1,
+      openInNewTab: false,
+    });
+  });
+
+  it("opens localhost Unix file URLs through the source callback", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="[service.rs](http://127.0.0.1:4173/home/grzeg/projects/fit_friends/src/service.rs#L12)"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/home/grzeg/projects/fit_friends"
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: "service.rs" });
+    expect(link).not.toHaveAttribute("target");
+
+    fireEvent.click(link);
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/home/grzeg/projects/fit_friends/src/service.rs",
+      line: 12,
+      openInNewTab: false,
+    });
+  });
+  it("keeps same-origin docs URLs as normal external links", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="http://localhost/docs/architecture.md"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    const link = screen.getByRole("link", {
+      name: "http://localhost/docs/architecture.md",
+    });
+    expect(link).toHaveAttribute("target", "_blank");
+
+    fireEvent.click(link);
+
+    expect(onOpenSourceLink).not.toHaveBeenCalled();
+  });
+
+  it("autolinks bare file references with line targets", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="The Microsoft scope bullet needs more evidence in experience.tex#L63."
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "experience.tex#L63" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/repo/experience.tex",
+      line: 63,
+      openInNewTab: false,
+    });
+  });
+
+  it("autolinks bare file references with dotted line targets", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="The Microsoft scope bullet needs more evidence in experience.tex.#L63."
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "experience.tex.#L63" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/repo/experience.tex",
+      line: 63,
+      openInNewTab: false,
+    });
+  });
+
+  it("opens inline code file references through the source callback", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="Text like `experience.tex.#L63` should stay clickable."
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "experience.tex.#L63" }));
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: "/repo/experience.tex",
+      line: 63,
+      openInNewTab: false,
+    });
+  });
+});
