@@ -271,6 +271,7 @@ export const MessageCard = memo(function MessageCard({
               {message.expandedText ? (
                 <ExpandedPromptPanel
                   expandedText={message.expandedText}
+                  storageKey={message.id}
                   searchQuery={searchQuery}
                   searchHighlightTone={searchHighlightTone}
                 />

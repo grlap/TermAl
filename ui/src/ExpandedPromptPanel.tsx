@@ -1,21 +1,38 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 
 import {
   renderHighlightedText,
   type SearchHighlightTone,
 } from "./search-highlight";
 
+const expandedPromptStateByStorageKey = new Map<string, boolean>();
+
+export function isExpandedPromptOpen(storageKey?: string) {
+  return storageKey ? (expandedPromptStateByStorageKey.get(storageKey) ?? false) : false;
+}
+
 export const ExpandedPromptPanel = memo(function ExpandedPromptPanel({
   expandedText,
+  storageKey,
   searchQuery = "",
   searchHighlightTone = "match",
 }: {
   expandedText: string;
+  storageKey?: string;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() =>
+    storageKey ? (expandedPromptStateByStorageKey.get(storageKey) ?? false) : false,
+  );
   const isExpanded = expanded || searchQuery.trim().length > 0;
+
+  useEffect(() => {
+    if (!storageKey) {
+      return;
+    }
+    expandedPromptStateByStorageKey.set(storageKey, expanded);
+  }, [expanded, storageKey]);
 
   return (
     <div className="prompt-expansion">

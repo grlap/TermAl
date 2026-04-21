@@ -15,8 +15,9 @@
 //     gap handling + safe defaults for unmeasured items.
 //   - `findVirtualizedMessageRange` — given the laid-out tops,
 //     heights, viewport scroll position, viewport height, and
-//     overscan budget, returns the `[startIndex, endIndex)` slice
-//     of messages that need to be rendered.
+//     overscan budgets above/below the viewport, returns the
+//     `[startIndex, endIndex)` slice of messages that need to be
+//     rendered.
 //   - `getScrollContainerBottomGap` — pixel distance from the
 //     current viewport bottom to the end of the scroll content.
 //   - `isScrollContainerNearBottom` — true when the viewport is
@@ -52,6 +53,65 @@ import type { Message } from "../types";
 export const VIRTUALIZED_MESSAGE_GAP_PX = 12;
 export const DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT = 720;
 export const DEFAULT_ESTIMATED_MESSAGE_HEIGHT = 180;
+export const VIEWPORT_TOP_HEIGHT_CHANGE_HYSTERESIS_PX = 24;
+const DEFAULT_ESTIMATED_MESSAGE_WIDTH_PX = 1120;
+const MIN_ESTIMATED_TEXT_CONTENT_WIDTH_PX = 320;
+const ESTIMATED_USER_TEXT_HORIZONTAL_CHROME_PX = 96;
+const ESTIMATED_ASSISTANT_TEXT_HORIZONTAL_CHROME_PX = 72;
+const ESTIMATED_USER_TEXT_CHARACTER_WIDTH_PX = 10.2;
+const ESTIMATED_ASSISTANT_TEXT_CHARACTER_WIDTH_PX = 9.8;
+const MAX_ESTIMATED_TEXT_MESSAGE_HEIGHT = 4800;
+
+function resolveEstimatedTextContentWidthPx(
+  availableWidthPx: number | undefined,
+  horizontalChromePx: number,
+) {
+  const safeAvailableWidthPx =
+    Number.isFinite(availableWidthPx) && availableWidthPx && availableWidthPx > 0
+      ? availableWidthPx
+      : DEFAULT_ESTIMATED_MESSAGE_WIDTH_PX;
+  return Math.max(
+    safeAvailableWidthPx - horizontalChromePx,
+    MIN_ESTIMATED_TEXT_CONTENT_WIDTH_PX,
+  );
+}
+
+function estimateCharactersPerLineForWidth(contentWidthPx: number, characterWidthPx: number) {
+  return Math.max(28, Math.floor(contentWidthPx / characterWidthPx));
+}
+
+function estimateWrappedPlainTextLineCount(text: string, charactersPerLine: number) {
+  if (text.length === 0) {
+    return 1;
+  }
+
+  return text.split("\n").reduce((count, line) => {
+    return count + Math.max(1, Math.ceil(line.length / charactersPerLine));
+  }, 0);
+}
+
+function normalizeAssistantMarkdownForHeightEstimate(markdown: string) {
+  return markdown
+    .replace(/```[\s\S]*?```/g, "[code block]")
+    .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^>\s?/gm, "")
+    .replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "")
+    .replace(/`/g, "")
+    .trim();
+}
+
+function countMarkdownPatternMatches(markdown: string, pattern: RegExp) {
+  return (markdown.match(pattern) ?? []).length;
+}
+
+function countFencedCodeBlockLines(markdown: string) {
+  const fencedBlocks = markdown.match(/```[\s\S]*?```/g) ?? [];
+  return fencedBlocks.reduce((count, block) => {
+    const lineCount = block.split("\n").length;
+    return count + Math.max(lineCount - 2, 1);
+  }, 0);
+}
 
 export function buildVirtualizedMessageLayout(itemHeights: number[]) {
   const tops = new Array<number>(itemHeights.length);
@@ -77,7 +137,8 @@ export function findVirtualizedMessageRange(
   itemHeights: number[],
   scrollTop: number,
   viewportHeight: number,
-  overscan: number,
+  overscanAbove: number,
+  overscanBelow: number = overscanAbove,
 ) {
   if (itemHeights.length === 0) {
     return {
@@ -86,9 +147,11 @@ export function findVirtualizedMessageRange(
     };
   }
 
-  const startBoundary = Math.max(scrollTop - overscan, 0);
+  const startBoundary = Math.max(scrollTop - overscanAbove, 0);
   const endBoundary =
-    scrollTop + Math.max(viewportHeight, DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT) + overscan;
+    scrollTop +
+    Math.max(viewportHeight, DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT) +
+    overscanBelow;
 
   let startIndex = 0;
   while (
@@ -161,27 +224,115 @@ export function getAdjustedVirtualizedScrollTopForHeightChange({
   previousHeight: number;
 }) {
   const heightDelta = nextHeight - previousHeight;
+  const previousBottom = messageTop + previousHeight;
 
   // Never adjust for messages that start at or below the viewport top.
   if (messageTop >= currentScrollTop) {
     return currentScrollTop;
   }
 
-  // Growing a partially visible message should not jump the viewport. Shrinks
-  // still adjust so the anchor can move upward, floored at zero.
-  if (heightDelta > 0 && messageTop + previousHeight > currentScrollTop) {
+  // Growing a message that is partially visible — or has only just crossed
+  // above the fold — should not jump the viewport. In practice tall cards can
+  // report a late measurement a few pixels after their bottom clears the
+  // viewport top; without a small hysteresis band the helper flips from
+  // "leave scrollTop alone" to "add the full height delta", which reads as a
+  // sudden forward jump right as the user passes the card.
+  //
+  // Shrinks still adjust so the anchor can move upward, floored at zero.
+  if (
+    heightDelta > 0 &&
+    previousBottom >= currentScrollTop - VIEWPORT_TOP_HEIGHT_CHANGE_HYSTERESIS_PX
+  ) {
     return currentScrollTop;
   }
 
   return Math.max(currentScrollTop + heightDelta, 0);
 }
 
-export function estimateConversationMessageHeight(message: Message): number {
+export function estimateConversationMessageHeight(
+  message: Message,
+  options: { availableWidthPx?: number; expandedPromptOpen?: boolean } = {},
+) {
   switch (message.type) {
     case "text": {
-      const lineCount = message.text.length === 0 ? 1 : message.text.split("\n").length;
+      if (message.author === "assistant") {
+        const assistantCharactersPerLine = estimateCharactersPerLineForWidth(
+          resolveEstimatedTextContentWidthPx(
+            options.availableWidthPx,
+            ESTIMATED_ASSISTANT_TEXT_HORIZONTAL_CHROME_PX,
+          ),
+          ESTIMATED_ASSISTANT_TEXT_CHARACTER_WIDTH_PX,
+        );
+        const normalizedMarkdown = normalizeAssistantMarkdownForHeightEstimate(message.text);
+        const wrappedLineCount = estimateWrappedPlainTextLineCount(
+          normalizedMarkdown,
+          assistantCharactersPerLine,
+        );
+        const paragraphCount =
+          normalizedMarkdown.length === 0
+            ? 1
+            : normalizedMarkdown.split(/\n\s*\n/).length;
+        const listItemCount = countMarkdownPatternMatches(
+          message.text,
+          /^\s*(?:[-*+]|\d+\.)\s+/gm,
+        );
+        const headingCount = countMarkdownPatternMatches(message.text, /^#{1,6}\s+/gm);
+        const blockquoteCount = countMarkdownPatternMatches(message.text, /^>\s?/gm);
+        const fencedCodeLineCount = countFencedCodeBlockLines(message.text);
+        const attachmentHeight = (message.attachments?.length ?? 0) * 54;
+        const paragraphGapHeight = Math.max(0, paragraphCount - 1) * 12;
+        const listGapHeight = Math.max(0, listItemCount - 1) * 6;
+        const headingHeight = headingCount * 10;
+        const blockquoteHeight = blockquoteCount * 8;
+        const fencedCodeHeight = Math.min(fencedCodeLineCount, 96) * 18;
+        return Math.min(
+          MAX_ESTIMATED_TEXT_MESSAGE_HEIGHT,
+          Math.max(
+            108,
+            88 +
+              wrappedLineCount * 24 +
+              attachmentHeight +
+              paragraphGapHeight +
+              listGapHeight +
+              headingHeight +
+              blockquoteHeight +
+              fencedCodeHeight,
+          ),
+        );
+      }
+
+      const userCharactersPerLine = estimateCharactersPerLineForWidth(
+        resolveEstimatedTextContentWidthPx(
+          options.availableWidthPx,
+          ESTIMATED_USER_TEXT_HORIZONTAL_CHROME_PX,
+        ),
+        ESTIMATED_USER_TEXT_CHARACTER_WIDTH_PX,
+      );
+      const lineCount = estimateWrappedPlainTextLineCount(
+        message.text,
+        userCharactersPerLine,
+      );
       const attachmentHeight = (message.attachments?.length ?? 0) * 54;
-      return Math.min(1800, Math.max(92, 78 + lineCount * 24 + attachmentHeight));
+      const expandedPromptToggleHeight = message.expandedText ? 40 : 0;
+      const expandedPromptLineCount =
+        options.expandedPromptOpen && message.expandedText
+          ? estimateWrappedPlainTextLineCount(message.expandedText, userCharactersPerLine)
+          : 0;
+      const expandedPromptContentHeight =
+        options.expandedPromptOpen && message.expandedText
+          ? Math.max(104, 72 + expandedPromptLineCount * 20)
+          : 0;
+      return Math.min(
+        MAX_ESTIMATED_TEXT_MESSAGE_HEIGHT,
+        Math.max(
+          92,
+          78 +
+            lineCount * 24 +
+            attachmentHeight +
+            expandedPromptToggleHeight +
+            expandedPromptContentHeight,
+        ),
+      );
     }
     case "thinking":
       return Math.min(900, Math.max(140, 112 + message.lines.length * 28));

@@ -14,4 +14,28 @@ describe("ExpandedPromptPanel", () => {
     expect(screen.getByText("Expanded prompt")).toBeInTheDocument();
     expect(screen.getByText("Review staged changes in detail.")).toBeInTheDocument();
   });
+
+  it("restores the expanded state across remounts for the same storage key", () => {
+    const { unmount } = render(
+      <ExpandedPromptPanel
+        expandedText={"Review staged changes in detail."}
+        storageKey="expanded-prompt-test-remount"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Show expanded prompt" }));
+    expect(screen.getByText("Expanded prompt")).toBeInTheDocument();
+
+    unmount();
+
+    render(
+      <ExpandedPromptPanel
+        expandedText={"Review staged changes in detail."}
+        storageKey="expanded-prompt-test-remount"
+      />,
+    );
+
+    expect(screen.getByText("Expanded prompt")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide expanded prompt" })).toBeInTheDocument();
+  });
 });

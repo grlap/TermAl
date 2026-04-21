@@ -132,6 +132,7 @@ export const PendingPromptCard = memo(function PendingPromptCard({
           {prompt.expandedText ? (
             <ExpandedPromptPanel
               expandedText={prompt.expandedText}
+              storageKey={prompt.id}
               searchQuery={searchQuery}
               searchHighlightTone={searchHighlightTone}
             />

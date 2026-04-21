@@ -104,6 +104,52 @@ fn read_capped_child_stdout_line_drains_oversized_line_at_eof() {
     assert_eq!(eof_bytes, 0);
 }
 
+// Pins the shared Codex reader budget high enough for a valid
+// `item/completed` JSON line that is just above the historical 16 MiB
+// ceiling. Guards against silently draining legitimate large
+// `aggregatedOutput` payloads from the shared app-server.
+#[test]
+fn read_capped_child_stdout_line_keeps_large_shared_codex_json_payloads() {
+    let old_cap = 16 * 1024 * 1024;
+    let mut line = String::from(
+        r#"{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"commandExecution","aggregatedOutput":""#,
+    );
+    line.push_str(&"x".repeat(old_cap + 256 * 1024));
+    line.push_str(r#"","status":"completed","exitCode":0}}}"#);
+    line.push('\n');
+
+    assert!(
+        line.len() > old_cap,
+        "regression fixture should exceed the historical 16 MiB cap"
+    );
+    assert!(
+        line.len() < SHARED_CODEX_STDOUT_LINE_MAX_BYTES,
+        "fixture should still fit under the current shared Codex stdout cap"
+    );
+
+    let mut reader = std::io::Cursor::new(line.as_bytes().to_vec());
+    let mut line_buf = Vec::new();
+
+    let bytes_read = read_capped_child_stdout_line(
+        &mut reader,
+        &mut line_buf,
+        SHARED_CODEX_STDOUT_LINE_MAX_BYTES,
+        "shared Codex app-server stdout",
+    )
+    .unwrap();
+    assert_eq!(bytes_read, line.len());
+    assert_eq!(line_buf, line.as_bytes());
+
+    let eof_bytes = read_capped_child_stdout_line(
+        &mut reader,
+        &mut line_buf,
+        SHARED_CODEX_STDOUT_LINE_MAX_BYTES,
+        "shared Codex app-server stdout",
+    )
+    .unwrap();
+    assert_eq!(eof_bytes, 0);
+}
+
 // Pins `read_capped_terminal_output` keeping the returned string at or
 // under `TERMINAL_OUTPUT_MAX_BYTES`, flagging truncation once the cap
 // is exceeded, and lossy-decoding invalid UTF-8 with the replacement

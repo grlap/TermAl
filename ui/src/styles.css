@@ -3845,8 +3845,25 @@ textarea {
 }
 
 .virtualized-message-list {
-  position: relative;
   min-height: 1px;
+}
+
+.virtualized-message-range-block {
+  min-height: 1px;
+}
+
+.virtualized-message-range {
+  display: grid;
+  gap: 12px;
+}
+
+.virtualized-message-page {
+  min-height: 1px;
+}
+
+.virtualized-message-spacer {
+  flex: 0 0 auto;
+  min-height: 0;
 }
 
 .load-earlier-messages {
@@ -3862,9 +3879,6 @@ textarea {
 }
 
 .virtualized-message-slot {
-  position: absolute;
-  left: 0;
-  right: 0;
   pointer-events: none;
 }
 

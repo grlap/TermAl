@@ -498,7 +498,11 @@ struct SharedCodexSessionState {
 const SHARED_CODEX_COMPLETED_TURN_GRACE_PERIOD: Duration = Duration::from_millis(25);
 #[cfg(not(test))]
 const SHARED_CODEX_COMPLETED_TURN_GRACE_PERIOD: Duration = Duration::from_secs(5);
-const SHARED_CODEX_STDOUT_LINE_MAX_BYTES: usize = 16 * 1024 * 1024;
+// Shared Codex `item/completed` notifications can carry large
+// `aggregatedOutput` payloads from command executions. Keep enough
+// headroom that legitimate app-server JSON lines are not silently
+// drained before they reach the normal transcript/state path.
+const SHARED_CODEX_STDOUT_LINE_MAX_BYTES: usize = 32 * 1024 * 1024;
 const SHARED_CODEX_STDOUT_LOG_PREVIEW_MAX_CHARS: usize = 200;
 const SHARED_CODEX_MAX_CONSECUTIVE_BAD_JSON_LINES: usize = 5;
 

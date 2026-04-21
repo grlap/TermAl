@@ -495,7 +495,14 @@ Manual checks:
 
 Consider additional renderers only after Mermaid and math are stable:
 
+- Admonitions / alerts. These are the next pragmatic Markdown extension because they
+  stay text-first, fit the existing rendered-Markdown editing model, and do not add a
+  separate diagram runtime.
+- D2 diagrams. Attractive for architecture-style docs, but they require an explicit
+  dependency choice first: bundled wasm, local CLI/binary, or another local renderer.
+  Do not ship D2 behind a network dependency.
 - Graphviz/DOT.
 - PlantUML, likely requiring a server-side or local binary decision.
-- Vega-Lite or chart blocks.
+- Vega-Lite or chart blocks. Lower dependency friction than D2 because they can run
+  fully in-browser.
 - JSON/schema visualizers.

@@ -1,55 +1,10 @@
-// Virtualized-conversation list rendering for an agent session pane.
+// Virtualized conversation rendering for an agent session.
 //
-// What this file owns:
-//   - `VirtualizedConversationMessageList` — the React component
-//     that renders a long session transcript via absolute-positioned
-//     message slots whose heights are measured via
-//     `ResizeObserver`. Owns the full render-window orchestration:
-//     which messages are in the window, what their estimated vs.
-//     measured heights are, how the viewport tracks the bottom of
-//     the conversation while streaming, the anchor-stabilized
-//     scroll-up auto-load of older messages, and the user-scroll
-//     cooldown that keeps measurement-driven `scrollTop` adjustments
-//     from fighting direct-input scroll gestures.
-//   - `MeasuredMessageCard` — the per-slot wrapper that reports its
-//     measured height back to the virtualizer via `onHeightChange`
-//     after every `ResizeObserver` tick.
-//   - Handler type aliases for the render-message callback signature
-//     (`RenderMessageCard`), the unbound session-wide handlers
-//     (`UserInputSubmitHandler`, `McpElicitationSubmitHandler`,
-//     `CodexAppRequestSubmitHandler`) that the parent pane threads
-//     through, and the bound-to-a-session variants
-//     (`BoundUserInputSubmitHandler`, `BoundMcpElicitationSubmitHandler`,
-//     `BoundCodexAppRequestSubmitHandler`) that `MeasuredMessageCard`
-//     calls into.
-//   - Virtualization tuning constants specific to the render-window
-//     (`VIRTUALIZED_MESSAGE_OVERSCAN_PX`, `RENDER_WINDOW_INITIAL_SIZE`,
-//     `RENDER_WINDOW_LOAD_MORE`,
-//     `RENDER_WINDOW_LOAD_MORE_THRESHOLD_PX`,
-//     `USER_SCROLL_ADJUSTMENT_COOLDOWN_MS`) and the shared empty-set
-//     sentinel `EMPTY_MATCHED_ITEM_KEYS` for session-find
-//     highlighting.
-//
-// What this file does NOT own:
-//   - The pure virtualization math
-//     (`buildVirtualizedMessageLayout`,
-//     `findVirtualizedMessageRange`,
-//     `getAdjustedVirtualizedScrollTopForHeightChange`,
-//     `estimateConversationMessageHeight`,
-//     `DEFAULT_ESTIMATED_MESSAGE_HEIGHT`,
-//     `DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT`,
-//     `isScrollContainerNearBottom`, `getScrollContainerBottomGap`)
-//     — those stay in `./conversation-virtualization`.
-//   - The outer pane shell, footer, composer, non-virtualized
-//     conversation path for short sessions, and the
-//     inactive-but-cached session wrapper — those remain in
-//     `./AgentSessionPanel.tsx` and import the component from here.
-//   - `MessageSlot` — rendered inside each `MeasuredMessageCard` but
-//     defined in `./session-message-leaves`.
-//
-// Split out of `ui/src/panels/AgentSessionPanel.tsx`. Same exports,
-// same signatures, same constants; consumers in `AgentSessionPanel`
-// now import both the component and the handler types from here.
+// The model here is intentionally simple:
+// - mounted page bands are real DOM and own the live scroll experience
+// - only unseen pages above/below the mounted band are virtual space
+// - page measurements may refine unseen spacers, but anchor preservation keeps
+//   the currently visible DOM band stable while that virtual space catches up
 
 import {
   memo,
@@ -61,24 +16,21 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { flushSync } from "react-dom";
+import { isExpandedPromptOpen } from "../ExpandedPromptPanel";
+import { MESSAGE_STACK_SCROLL_WRITE_EVENT } from "../message-stack-scroll-sync";
 import { MessageSlot } from "./session-message-leaves";
 import {
-  DEFAULT_ESTIMATED_MESSAGE_HEIGHT,
   DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
-  buildVirtualizedMessageLayout,
-  clampVirtualizedViewportScrollTop,
+  VIRTUALIZED_MESSAGE_GAP_PX,
   estimateConversationMessageHeight,
   findVirtualizedMessageRange,
-  getAdjustedVirtualizedScrollTopForHeightChange,
   isScrollContainerNearBottom,
 } from "./conversation-virtualization";
-import { MESSAGE_STACK_SCROLL_WRITE_EVENT } from "../message-stack-scroll-sync";
 import type {
   ApprovalDecision,
   JsonValue,
-  Message,
   McpElicitationAction,
+  Message,
 } from "../types";
 
 export type UserInputSubmitHandler = (
@@ -111,7 +63,10 @@ export type CodexAppRequestSubmitHandler = (
   result: JsonValue,
 ) => void;
 
-export type BoundCodexAppRequestSubmitHandler = (messageId: string, result: JsonValue) => void;
+export type BoundCodexAppRequestSubmitHandler = (
+  messageId: string,
+  result: JsonValue,
+) => void;
 
 export type RenderMessageCard = (
   message: Message,
@@ -122,23 +77,144 @@ export type RenderMessageCard = (
   onCodexAppRequestSubmit: BoundCodexAppRequestSubmitHandler,
 ) => JSX.Element | null;
 
-const VIRTUALIZED_MESSAGE_OVERSCAN_PX = 960;
-/** Maximum number of messages to render initially. Older messages load on scroll-up or via the inline button. */
-const RENDER_WINDOW_INITIAL_SIZE = 200;
-/** Number of additional messages to prepend when the window expands (auto or via button). */
-const RENDER_WINDOW_LOAD_MORE = 200;
-/** Scroll-top threshold (px) at which older messages auto-load. */
-const RENDER_WINDOW_LOAD_MORE_THRESHOLD_PX = 400;
+const VIRTUALIZED_MESSAGES_PER_PAGE = 8;
+const VIRTUALIZED_PAGE_BUFFER_ABOVE = 4;
+const VIRTUALIZED_PAGE_BUFFER_BELOW = 4;
+const VIRTUALIZED_PAGE_EDGE_GROW_THRESHOLD_VIEWPORTS = 3;
+const VIRTUALIZED_PAGE_GROW_BATCH = 3;
 const ACTIVE_VIEWPORT_STARTUP_RESYNC_FRAMES = 12;
-/**
- * Cool-down window (ms) after a direct-scroll input (wheel, touch,
- * keyboard) during which measurement-driven `scrollTop` adjustments
- * in `handleHeightChange` are skipped. 200 ms comfortably covers a
- * single wheel notch plus browser scroll coalescing; longer than
- * that and idle anchor preservation starts losing responsiveness.
- */
 const USER_SCROLL_ADJUSTMENT_COOLDOWN_MS = 200;
+
 export const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
+
+type VirtualizedRange = { startIndex: number; endIndex: number };
+type VisibleMessageAnchor = { messageId: string; viewportOffsetPx: number };
+type MessageLocation = {
+  message: Message;
+  messageIndex: number;
+  pageIndex: number;
+  pageLocalIndex: number;
+};
+type MessagePage = {
+  key: string;
+  pageIndex: number;
+  startIndex: number;
+  endIndex: number;
+  hasTrailingGap: boolean;
+  messages: Message[];
+};
+
+function rangesEqual(first: VirtualizedRange, second: VirtualizedRange) {
+  return first.startIndex === second.startIndex && first.endIndex === second.endIndex;
+}
+
+function buildMessagePages(messages: Message[]) {
+  const pages: MessagePage[] = [];
+  for (
+    let startIndex = 0;
+    startIndex < messages.length;
+    startIndex += VIRTUALIZED_MESSAGES_PER_PAGE
+  ) {
+    const endIndex = Math.min(startIndex + VIRTUALIZED_MESSAGES_PER_PAGE, messages.length);
+    const pageMessages = messages.slice(startIndex, endIndex);
+    const firstMessageId = pageMessages[0]?.id ?? `page-${startIndex}`;
+    const lastMessageId = pageMessages[pageMessages.length - 1]?.id ?? firstMessageId;
+    pages.push({
+      key: `${startIndex}:${endIndex}:${firstMessageId}:${lastMessageId}`,
+      pageIndex: pages.length,
+      startIndex,
+      endIndex,
+      hasTrailingGap: endIndex < messages.length,
+      messages: pageMessages,
+    });
+  }
+  return pages;
+}
+
+function buildPageLayout(pageHeights: number[]) {
+  const tops = new Array<number>(pageHeights.length);
+  let totalHeight = 0;
+  for (let index = 0; index < pageHeights.length; index += 1) {
+    tops[index] = totalHeight;
+    totalHeight += pageHeights[index] ?? 0;
+  }
+  return { tops, totalHeight };
+}
+
+function getMountedMessageSlots(scrollContainerNode: HTMLElement) {
+  return Array.from(
+    scrollContainerNode.querySelectorAll<HTMLElement>(".virtualized-message-slot[data-message-id]"),
+  );
+}
+
+function getMountedPageNodes(scrollContainerNode: HTMLElement) {
+  return Array.from(
+    scrollContainerNode.querySelectorAll<HTMLElement>(".virtualized-message-page[data-page-key]"),
+  );
+}
+
+function captureFirstVisibleMountedMessageAnchor(
+  scrollContainerNode: HTMLElement,
+): VisibleMessageAnchor | null {
+  const scrollContainerRect = scrollContainerNode.getBoundingClientRect();
+  const slots = getMountedMessageSlots(scrollContainerNode);
+  const firstVisibleSlot =
+    slots.find((slot) => {
+      const rect = slot.getBoundingClientRect();
+      return rect.bottom > scrollContainerRect.top && rect.top < scrollContainerRect.bottom;
+    }) ?? slots[0];
+  const messageId = firstVisibleSlot?.dataset.messageId;
+  if (!firstVisibleSlot || !messageId) {
+    return null;
+  }
+
+  return {
+    messageId,
+    viewportOffsetPx: firstVisibleSlot.getBoundingClientRect().top - scrollContainerRect.top,
+  };
+}
+
+function findMountedMessageSlotById(scrollContainerNode: HTMLElement, messageId: string) {
+  return (
+    getMountedMessageSlots(scrollContainerNode).find(
+      (slot) => slot.dataset.messageId === messageId,
+    ) ?? null
+  );
+}
+
+function estimatePageHeight(
+  page: MessagePage,
+  estimateMessageHeight: (message: Message) => number,
+) {
+  if (page.messages.length === 0) {
+    return 0;
+  }
+
+  let total = 0;
+  for (let index = 0; index < page.messages.length; index += 1) {
+    total += estimateMessageHeight(page.messages[index]!);
+    if (index < page.messages.length - 1) {
+      total += VIRTUALIZED_MESSAGE_GAP_PX;
+    }
+  }
+  if (page.hasTrailingGap) {
+    total += VIRTUALIZED_MESSAGE_GAP_PX;
+  }
+  return total;
+}
+
+function estimateMessageOffsetWithinPage(
+  page: MessagePage,
+  messageLocalIndex: number,
+  estimateMessageHeight: (message: Message) => number,
+) {
+  let offset = 0;
+  for (let index = 0; index < messageLocalIndex; index += 1) {
+    offset += estimateMessageHeight(page.messages[index]!);
+    offset += VIRTUALIZED_MESSAGE_GAP_PX;
+  }
+  return offset;
+}
 
 export function VirtualizedConversationMessageList({
   isActive,
@@ -174,186 +250,115 @@ export function VirtualizedConversationMessageList({
     conversationSearchActiveItemKey?.startsWith("message:")
       ? conversationSearchActiveItemKey.slice("message:".length)
       : null;
-  const messageHeightsRef = useRef<Record<string, number>>({});
-  // Expected behavior: when the viewport is already at the latest message,
-  // virtualized height measurements should keep the viewport pinned there.
+
+  const pageHeightsRef = useRef<Record<string, number>>({});
   const shouldKeepBottomAfterLayoutRef = useRef(false);
-  // Tracks the most recently pinned conversation-search hit id so
-  // the pin-to-active-hit `useLayoutEffect` below only writes
-  // `scrollTop` when the user actually navigates to a NEW match
-  // (via "next match" / "previous match" / a fresh query that
-  // changes `activeConversationSearchMessageId`). Without this,
-  // measurement churn on message-height recomputes would re-fire
-  // the effect with the same active id and a refined
-  // `activeConversationSearchScrollTop`, snapping the viewport
-  // back to the hit even after the user deliberately scrolled
-  // away to read surrounding context. Reset to `null` whenever
-  // there is no active hit (search closed, query cleared) so a
-  // later search that lands on the same id still fires the pin.
   const lastPinnedConversationSearchIdRef = useRef<string | null>(null);
-  // Pending anchor-stabilization write after `setRenderWindowSize`
-  // prepends older messages. Captured in the scroll-near-top auto-load
-  // handler (and the explicit "Load N earlier messages" button), then
-  // applied in a `useLayoutEffect` after React commits the grown
-  // layout but before the browser paints — so the viewport never
-  // shows the new document at the old `scrollTop`. Tracking a
-  // specific message's viewport offset (rather than a raw
-  // `scrollHeight` delta) keeps the anchor valid regardless of whether
-  // the newly-prepended cards are priced at their estimated or
-  // measured heights; subsequent `ResizeObserver`-driven measurement
-  // adjustments via `getAdjustedVirtualizedScrollTopForHeightChange`
-  // then preserve the same offset as the prepended block settles.
-  const pendingLoadMoreAnchorRef = useRef<{
-    anchorMessageId: string;
-    anchorOffsetInViewport: number;
-    // Render-window size this anchor was captured for. The consuming
-    // `useLayoutEffect` only applies the anchor when the current
-    // `renderWindowSize` matches this value, so an auto-grow on a
-    // streaming-delta render (lines 898-905) that bumps
-    // `renderWindowSize` by a single message cannot silently pick up
-    // a stale anchor captured during an earlier scroll gesture.
-    expectedRenderWindowSize: number;
-  } | null>(null);
-  // Timestamp of the user's last direct-scroll input (wheel, touch-drag,
-  // or keyboard PageUp/PageDown/arrow/Home/End). Measurement-driven
-  // `scrollTop` adjustments via
-  // `getAdjustedVirtualizedScrollTopForHeightChange` fight the user
-  // during an active scroll: each unmeasured card that enters the
-  // viewport reports a height much larger than its estimate, the
-  // anchor math rewrites `scrollTop` to preserve the anchor on
-  // content that shifted down, and the net effect is the user's
-  // wheel-up motion gets cancelled (or even reversed) by a
-  // simultaneous growth adjustment. We track the last direct-scroll
-  // input here so `handleHeightChange` can skip the scrollTop write
-  // while the user is actively scrolling — layout still updates on
-  // measurement, the wheel input still wins the visible scroll.
-  //
-  // Initialised to `Number.NEGATIVE_INFINITY` (not `0`) so
-  // `performance.now() - lastUserScrollInputTimeRef.current` is
-  // always `+Infinity` until a wheel / touchmove / keydown event
-  // actually fires. If this were `0`, the first few hundred
-  // milliseconds after mount — when `performance.now()` on a fresh
-  // Node/browser context can be below the 200 ms cooldown — would
-  // falsely register as "user currently scrolling" and suppress
-  // legitimate streaming pin writes until the wall clock caught
-  // up. It also makes the regression tests honest: a broken wheel
-  // listener would no longer leave the cooldown passively active
-  // from mount.
   const lastUserScrollInputTimeRef = useRef(Number.NEGATIVE_INFINITY);
+  const lastNativeScrollTopRef = useRef(0);
+  const pendingProgrammaticScrollTopRef = useRef<number | null>(null);
+  const pendingDeferredLayoutAnchorRef = useRef<VisibleMessageAnchor | null>(null);
+  const pendingMountedRangeAnchorRef = useRef<VisibleMessageAnchor | null>(null);
+  const pendingDeferredLayoutTimerRef = useRef<number | null>(null);
+  const pendingProgrammaticViewportSyncRef = useRef(false);
+
   const [viewport, setViewport] = useState({
     height: DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
     scrollTop: 0,
+    width: 0,
   });
+  const [layoutVersion, setLayoutVersion] = useState(0);
+  const [isMeasuringPostActivation, setIsMeasuringPostActivation] = useState(
+    () => isActive && messages.length > 0,
+  );
+  const [prevIsActive, setPrevIsActive] = useState(isActive);
+
   const syncViewportFromScrollNode = useCallback((node: HTMLElement) => {
     const nextState = {
       height: node.clientHeight > 0 ? node.clientHeight : DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
       scrollTop: node.scrollTop,
+      width: node.clientWidth > 0 ? node.clientWidth : 0,
     };
-
     setViewport((current) =>
-      current.height === nextState.height && current.scrollTop === nextState.scrollTop
+      current.height === nextState.height &&
+      current.scrollTop === nextState.scrollTop &&
+      current.width === nextState.width
         ? current
         : nextState,
     );
   }, []);
-  // `syncViewportFromScrollNode` alone relies on React's automatic
-  // batching to flush `setViewport` before the browser paints. That
-  // holds inside `useLayoutEffect` (React guarantees synchronous
-  // flush before paint) but NOT inside:
-  //   - `requestAnimationFrame` callbacks (e.g. the tick loop in
-  //     `scheduleSettledScrollToBottom` that calls
-  //     `scrollToLatestMessage` → `notifyMessageStackScrollWrite` →
-  //     our custom-event listener here), and
-  //   - `ResizeObserver` microtasks (which drive `handleHeightChange`
-  //     and its bottom-pin re-scroll).
-  // In both paths React 18's auto-batching can defer the re-render
-  // to the next tick — AFTER the browser paints with the new
-  // `scrollTop` but the OLD rendered window. The symptom is a
-  // visible flash per RAF iteration during settle-to-bottom and
-  // per measurement commit, even though each individual write
-  // correctly updates `scrollTop` in the DOM.
-  //
-  // `flushSync` forces the pending `setViewport` re-render to
-  // commit before the current callback returns, so the paint that
-  // follows sees the correct window. Safe outside the render
-  // phase; not called from inside `useLayoutEffect` because React
-  // there is already synchronous-before-paint.
-  const syncViewportFromScrollNodeFlushed = useCallback(
-    (node: HTMLElement) => {
-      flushSync(() => {
-        syncViewportFromScrollNode(node);
-      });
+
+  const writeScrollTopAndSyncViewport = useCallback(
+    (node: HTMLElement, nextScrollTop: number) => {
+      const targetScrollTop = Number.isFinite(nextScrollTop) ? Math.max(nextScrollTop, 0) : 0;
+      if (Math.abs(node.scrollTop - targetScrollTop) >= 1) {
+        pendingProgrammaticScrollTopRef.current = targetScrollTop;
+        node.scrollTop = targetScrollTop;
+      }
+      syncViewportFromScrollNode(node);
     },
     [syncViewportFromScrollNode],
   );
-  const writeScrollTopAndSyncViewport = useCallback(
-    (
-      node: HTMLElement,
-      nextScrollTop: number,
-      options: { flushViewportSync?: boolean } = {},
-    ) => {
-      const targetScrollTop = Number.isFinite(nextScrollTop) ? Math.max(nextScrollTop, 0) : 0;
-      if (Math.abs(node.scrollTop - targetScrollTop) >= 1) {
-        node.scrollTop = targetScrollTop;
-      }
-      // Programmatic scroll writes can paint before the browser emits
-      // a scroll event. Sync the virtualizer's viewport state
-      // immediately so the rendered window matches the new scrollTop
-      // before the next paint. Layout-effect callers use the normal
-      // sync path because React already flushes them before paint;
-      // true async callers opt into `flushSync` so React 18's
-      // auto-batching cannot defer the viewport-state update until
-      // after the browser paints the new scrollTop with the old rows.
-      //
-      // The sync fires unconditionally — even when the `>= 1` guard
-      // above skipped the write — because a prior native scroll
-      // event may not have propagated to `viewport` state yet
-      // (event queue latency, React batching) and the viewport
-      // shape still needs to catch up. The `setViewport` call
-      // inside `syncViewportFromScrollNode` short-circuits on
-      // equality, so a truly-redundant sync is free.
-      if (options.flushViewportSync) {
-        syncViewportFromScrollNodeFlushed(node);
-      } else {
-        syncViewportFromScrollNode(node);
-      }
+
+  const bumpLayoutVersion = useCallback(() => {
+    setLayoutVersion((current) => current + 1);
+  }, []);
+
+  const clearPendingDeferredLayoutTimer = useCallback(() => {
+    if (pendingDeferredLayoutTimerRef.current !== null) {
+      window.clearTimeout(pendingDeferredLayoutTimerRef.current);
+      pendingDeferredLayoutTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleDeferredLayoutVersion = useCallback(
+    (delayMs: number) => {
+      clearPendingDeferredLayoutTimer();
+
+      const armTimer = (remainingDelayMs: number) => {
+        pendingDeferredLayoutTimerRef.current = window.setTimeout(() => {
+          pendingDeferredLayoutTimerRef.current = null;
+          const timeSinceUserScroll =
+            performance.now() - lastUserScrollInputTimeRef.current;
+          const remainingCooldownMs =
+            USER_SCROLL_ADJUSTMENT_COOLDOWN_MS - timeSinceUserScroll;
+          if (remainingCooldownMs > 0) {
+            armTimer(remainingCooldownMs);
+            return;
+          }
+
+          const node = scrollContainerRef.current;
+          pendingDeferredLayoutAnchorRef.current =
+            node && !isScrollContainerNearBottom(node)
+              ? captureFirstVisibleMountedMessageAnchor(node)
+              : null;
+          bumpLayoutVersion();
+        }, Math.max(Math.ceil(remainingDelayMs), 0));
+      };
+
+      armTimer(delayMs);
     },
-    [syncViewportFromScrollNode, syncViewportFromScrollNodeFlushed],
+    [bumpLayoutVersion, clearPendingDeferredLayoutTimer, scrollContainerRef],
   );
-  const [layoutVersion, setLayoutVersion] = useState(0);
-  // Post-activation measurement phase: when the list transitions from
-  // inactive to active (or mounts directly in the active state with
-  // messages already present), the first render uses estimated heights
-  // for any messages that were added while the list was inactive. Those
-  // estimates drive `layout.tops` and `layout.totalHeight`.
-  //
-  // This flag used to ALSO hide the wrapper via a CSS
-  // `visibility: hidden` class so the mis-estimated first paint
-  // never reached the screen. That produced a "shows messages then
-  // empty" flicker in practice: any path that momentarily toggled
-  // `isActive` or re-triggered the measuring phase during streaming
-  // would snap the whole transcript invisible for one commit before
-  // the completion check (or the 150 ms timeout) revealed it again,
-  // and the invisible-commit also stole the viewport from anyone
-  // mid-scroll. The hide is gone now; the flag only gates the
-  // scroll-to-bottom handoff after measurements land (and the
-  // `shouldKeepBottomAfterLayoutRef` arm below). Cards may paint at
-  // estimated positions for one frame on tab switch; the original
-  // overlap-on-scroll trade-off is intentionally smaller because
-  // only that first post-activation frame can be off, not steady
-  // state. A future cleanup could inline the scroll-write logic
-  // directly into the inactive→active transition detector and drop
-  // the state variable entirely.
-  const [isMeasuringPostActivation, setIsMeasuringPostActivation] = useState(
-    () => isActive && messages.length > 0,
+
+  const scheduleProgrammaticViewportSync = useCallback(
+    (node: HTMLElement) => {
+      if (pendingProgrammaticViewportSyncRef.current) {
+        return;
+      }
+
+      pendingProgrammaticViewportSyncRef.current = true;
+      queueMicrotask(() => {
+        pendingProgrammaticViewportSyncRef.current = false;
+        if (scrollContainerRef.current !== node) {
+          return;
+        }
+        syncViewportFromScrollNode(node);
+      });
+    },
+    [scrollContainerRef, syncViewportFromScrollNode],
   );
-  // Detect inactive → active transitions during render so the
-  // measurement handoff runs in the SAME render phase as
-  // `isActive=true`. Setting state during render is React's
-  // officially-blessed pattern for derived-from-props state; React
-  // replays the render synchronously so intermediate state never
-  // commits.
-  const [prevIsActive, setPrevIsActive] = useState(isActive);
+
   if (prevIsActive !== isActive) {
     setPrevIsActive(isActive);
     if (!prevIsActive && isActive && messages.length > 0) {
@@ -361,156 +366,260 @@ export function VirtualizedConversationMessageList({
     }
   }
 
-  // Render window: normally only keep the last N messages in the layout.
-  // Session find temporarily keeps all messages in the layout so the active
-  // hit can be positioned, while still rendering only the visible rows.
-  const [renderWindowSize, setRenderWindowSize] = useState(
-    Math.min(RENDER_WINDOW_INITIAL_SIZE, messages.length),
-  );
-  const prevMessageCountRef = useRef(messages.length);
-  // When new messages arrive (agent responding), keep the window anchored
-  // to the bottom by expanding it to cover the new messages.
-  if (messages.length > prevMessageCountRef.current) {
-    const growth = messages.length - prevMessageCountRef.current;
-    if (renderWindowSize + growth <= messages.length) {
-      // Expand window by the number of new messages so they're visible.
-      // This runs during render (before effects) so the layout is correct
-      // on the first paint.
-      setRenderWindowSize((prev) => Math.min(prev + growth, messages.length));
-    }
-  }
-  prevMessageCountRef.current = messages.length;
-
-  const windowStartIndex = hasConversationSearch
-    ? 0
-    : Math.max(0, messages.length - renderWindowSize);
-  const windowedMessages = useMemo(
-    () => messages.slice(windowStartIndex),
-    [messages, windowStartIndex],
-  );
-  const hasOlderMessages = windowStartIndex > 0;
-
-  const messageIndexById = useMemo(
-    () => new Map(windowedMessages.map((message, index) => [message.id, index])),
-    [windowedMessages],
-  );
-  const messageHeights = useMemo(
-    () =>
-      windowedMessages.map(
-        (message) => messageHeightsRef.current[message.id] ?? estimateConversationMessageHeight(message),
-      ),
-    [layoutVersion, windowedMessages],
-  );
-  const layout = useMemo(() => buildVirtualizedMessageLayout(messageHeights), [messageHeights]);
-  const layoutTopsRef = useRef(layout.tops);
-  layoutTopsRef.current = layout.tops;
   const activeViewport = isActive ? scrollContainerRef.current : null;
   const viewportHeight =
     activeViewport?.clientHeight && activeViewport.clientHeight > 0
       ? activeViewport.clientHeight
       : viewport.height;
-  const rawViewportScrollTop = activeViewport ? activeViewport.scrollTop : viewport.scrollTop;
-  const viewportScrollTop = clampVirtualizedViewportScrollTop({
-    scrollTop: rawViewportScrollTop,
-    viewportHeight,
-    totalHeight: layout.totalHeight,
-  });
-  const activeConversationSearchMessageIndex =
-    activeConversationSearchMessageId !== null
-      ? messageIndexById.get(activeConversationSearchMessageId)
-      : undefined;
-  const activeConversationSearchScrollTop =
-    hasConversationSearch && activeConversationSearchMessageIndex !== undefined
-      ? Math.max(
-          (layout.tops[activeConversationSearchMessageIndex] ?? 0) -
-            Math.max(
-              (viewportHeight -
-                (messageHeights[activeConversationSearchMessageIndex] ??
-                  DEFAULT_ESTIMATED_MESSAGE_HEIGHT)) /
-                2,
-              0,
-            ),
-          0,
-        )
-      : null;
-  const viewportVisibleRange = useMemo(
+  const viewportWidth =
+    activeViewport?.clientWidth && activeViewport.clientWidth > 0
+      ? activeViewport.clientWidth
+      : viewport.width;
+
+  const estimateMessageHeight = useCallback(
+    (message: Message) =>
+      estimateConversationMessageHeight(message, {
+        availableWidthPx: viewportWidth,
+        expandedPromptOpen:
+          message.type === "text" &&
+          message.author === "you" &&
+          Boolean(message.expandedText) &&
+          isExpandedPromptOpen(message.id),
+      }),
+    [viewportWidth],
+  );
+
+  const pages = useMemo(() => buildMessagePages(messages), [messages]);
+  const pageKeys = useMemo(() => new Set(pages.map((page) => page.key)), [pages]);
+  const messageLocationById = useMemo(() => {
+    const locations = new Map<string, MessageLocation>();
+    pages.forEach((page) => {
+      page.messages.forEach((message, pageLocalIndex) => {
+        locations.set(message.id, {
+          message,
+          messageIndex: page.startIndex + pageLocalIndex,
+          pageIndex: page.pageIndex,
+          pageLocalIndex,
+        });
+      });
+    });
+    return locations;
+  }, [pages]);
+
+  const pageHeights = useMemo(
     () =>
-      findVirtualizedMessageRange(
-        layout.tops,
-        messageHeights,
-        viewportScrollTop,
-        viewportHeight,
-        VIRTUALIZED_MESSAGE_OVERSCAN_PX,
+      pages.map(
+        (page) => pageHeightsRef.current[page.key] ?? estimatePageHeight(page, estimateMessageHeight),
       ),
-    [layout.tops, messageHeights, viewportHeight, viewportScrollTop],
+    [estimateMessageHeight, layoutVersion, pages],
   );
-  const activeConversationSearchVisibleRange = useMemo(
-    () =>
-      activeConversationSearchScrollTop === null
-        ? null
-        : findVirtualizedMessageRange(
-            layout.tops,
-            messageHeights,
-            activeConversationSearchScrollTop,
-            viewportHeight,
-            VIRTUALIZED_MESSAGE_OVERSCAN_PX,
-          ),
-    [
-      activeConversationSearchScrollTop,
-      layout.tops,
-      messageHeights,
+  const pageLayout = useMemo(() => buildPageLayout(pageHeights), [pageHeights]);
+  const effectiveTotalHeight =
+    activeViewport !== null
+      ? Math.max(pageLayout.totalHeight, activeViewport.scrollHeight)
+      : pageLayout.totalHeight;
+  const rawViewportScrollTop = activeViewport ? activeViewport.scrollTop : viewport.scrollTop;
+  const viewportScrollTop =
+    Number.isFinite(rawViewportScrollTop) && rawViewportScrollTop > 0
+      ? Math.min(rawViewportScrollTop, Math.max(effectiveTotalHeight - viewportHeight, 0))
+      : 0;
+
+  const visiblePageRange = useMemo(() => {
+    if (pages.length === 0) {
+      return { startIndex: 0, endIndex: 0 };
+    }
+    return findVirtualizedMessageRange(
+      pageLayout.tops,
+      pageHeights,
+      viewportScrollTop,
       viewportHeight,
-    ],
+      0,
+      0,
+    );
+  }, [pageHeights, pageLayout.tops, pages.length, viewportHeight, viewportScrollTop]);
+
+  const activeConversationSearchLocation =
+    activeConversationSearchMessageId !== null
+      ? messageLocationById.get(activeConversationSearchMessageId)
+      : undefined;
+  const activeConversationSearchScrollTop = useMemo(() => {
+    if (!hasConversationSearch || !activeConversationSearchLocation) {
+      return null;
+    }
+
+    const page = pages[activeConversationSearchLocation.pageIndex];
+    if (!page) {
+      return null;
+    }
+
+    const messageTop =
+      (pageLayout.tops[activeConversationSearchLocation.pageIndex] ?? 0) +
+      estimateMessageOffsetWithinPage(
+        page,
+        activeConversationSearchLocation.pageLocalIndex,
+        estimateMessageHeight,
+      );
+    const messageHeight = estimateMessageHeight(activeConversationSearchLocation.message);
+    return Math.max(messageTop - Math.max((viewportHeight - messageHeight) / 2, 0), 0);
+  }, [
+    activeConversationSearchLocation,
+    estimateMessageHeight,
+    hasConversationSearch,
+    pageLayout.tops,
+    pages,
+    viewportHeight,
+  ]);
+
+  const desiredMountedPageRange = useMemo(() => {
+    if (pages.length === 0) {
+      return { startIndex: 0, endIndex: 0 };
+    }
+
+    const startIndex = Math.max(visiblePageRange.startIndex - VIRTUALIZED_PAGE_BUFFER_ABOVE, 0);
+    const endIndex = Math.min(
+      Math.max(visiblePageRange.endIndex, visiblePageRange.startIndex + 1) +
+        VIRTUALIZED_PAGE_BUFFER_BELOW,
+      pages.length,
+    );
+
+    return { startIndex, endIndex };
+  }, [pages.length, visiblePageRange]);
+  const [mountedPageRange, setMountedPageRange] = useState<VirtualizedRange>(
+    desiredMountedPageRange,
   );
-  const visibleRanges = useMemo(() => {
-    const ranges = [viewportVisibleRange];
-    if (activeConversationSearchVisibleRange) {
-      ranges.push(activeConversationSearchVisibleRange);
-    }
 
-    const sortedRanges = ranges
-      .filter((range) => range.endIndex > range.startIndex)
-      .map((range) => ({ ...range }))
-      .sort((first, second) => first.startIndex - second.startIndex);
-    const mergedRanges: { startIndex: number; endIndex: number }[] = [];
-
-    for (const range of sortedRanges) {
-      const lastRange = mergedRanges[mergedRanges.length - 1];
-      if (!lastRange || range.startIndex > lastRange.endIndex) {
-        mergedRanges.push(range);
-        continue;
-      }
-
-      lastRange.endIndex = Math.max(lastRange.endIndex, range.endIndex);
-    }
-
-    return mergedRanges.length > 0 ? mergedRanges : [{ startIndex: 0, endIndex: 0 }];
-  }, [activeConversationSearchVisibleRange, viewportVisibleRange]);
+  const mountedPages = useMemo(
+    () => pages.slice(mountedPageRange.startIndex, mountedPageRange.endIndex),
+    [mountedPageRange.endIndex, mountedPageRange.startIndex, pages],
+  );
+  const topSpacerHeight =
+    mountedPageRange.startIndex > 0 ? (pageLayout.tops[mountedPageRange.startIndex] ?? 0) : 0;
+  const mountedPageEndOffset =
+    mountedPageRange.endIndex <= mountedPageRange.startIndex
+      ? topSpacerHeight
+      : (pageLayout.tops[mountedPageRange.endIndex - 1] ?? topSpacerHeight) +
+        (pageHeights[mountedPageRange.endIndex - 1] ?? 0);
+  const bottomSpacerHeight = Math.max(pageLayout.totalHeight - mountedPageEndOffset, 0);
 
   useEffect(() => {
-    messageHeightsRef.current = Object.fromEntries(
-      windowedMessages
-        .filter((message) => messageHeightsRef.current[message.id] !== undefined)
-        .map((message) => [message.id, messageHeightsRef.current[message.id] as number]),
+    return () => {
+      clearPendingDeferredLayoutTimer();
+      pendingProgrammaticViewportSyncRef.current = false;
+    };
+  }, [clearPendingDeferredLayoutTimer]);
+
+  useEffect(() => {
+    pageHeightsRef.current = Object.fromEntries(
+      Object.entries(pageHeightsRef.current).filter(([pageKey]) => pageKeys.has(pageKey)),
     );
-  }, [windowedMessages]);
+  }, [pageKeys]);
+
+  useLayoutEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
+    const node = scrollContainerRef.current;
+    if (!node || pages.length === 0) {
+      return;
+    }
+
+    const mountedPageNodes = getMountedPageNodes(node);
+    if (mountedPageNodes.length === 0) {
+      return;
+    }
+
+    const scrollContainerRect = node.getBoundingClientRect();
+    const firstMountedPageRect = mountedPageNodes[0]!.getBoundingClientRect();
+    const lastMountedPageRect =
+      mountedPageNodes[mountedPageNodes.length - 1]!.getBoundingClientRect();
+    const edgeGrowThresholdPx = Math.max(
+      viewportHeight * VIRTUALIZED_PAGE_EDGE_GROW_THRESHOLD_VIEWPORTS,
+      DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
+    );
+
+    let nextRange = mountedPageRange;
+    if (
+      nextRange.startIndex > 0 &&
+      firstMountedPageRect.top - scrollContainerRect.top > -edgeGrowThresholdPx
+    ) {
+      pendingMountedRangeAnchorRef.current = captureFirstVisibleMountedMessageAnchor(node);
+      nextRange = {
+        startIndex: Math.max(nextRange.startIndex - VIRTUALIZED_PAGE_GROW_BATCH, 0),
+        endIndex: nextRange.endIndex,
+      };
+    }
+    if (
+      nextRange.endIndex < pages.length &&
+      lastMountedPageRect.bottom - scrollContainerRect.bottom < edgeGrowThresholdPx
+    ) {
+      nextRange = {
+        startIndex: nextRange.startIndex,
+        endIndex: Math.min(nextRange.endIndex + VIRTUALIZED_PAGE_GROW_BATCH, pages.length),
+      };
+    }
+
+    if (!rangesEqual(nextRange, mountedPageRange)) {
+      setMountedPageRange(nextRange);
+    }
+  }, [isActive, mountedPageRange, pages.length, scrollContainerRef, viewportHeight]);
+
+  useLayoutEffect(() => {
+    if (rangesEqual(mountedPageRange, desiredMountedPageRange)) {
+      return;
+    }
+
+    const timeSinceUserScroll = performance.now() - lastUserScrollInputTimeRef.current;
+    const inUserScrollCooldown = timeSinceUserScroll < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
+    const growsMountedBand =
+      desiredMountedPageRange.startIndex < mountedPageRange.startIndex ||
+      desiredMountedPageRange.endIndex > mountedPageRange.endIndex;
+    const viewportEscapedMountedBand =
+      visiblePageRange.startIndex < mountedPageRange.startIndex ||
+      visiblePageRange.endIndex > mountedPageRange.endIndex;
+    if (inUserScrollCooldown && growsMountedBand && !viewportEscapedMountedBand) {
+      // During active manual scroll the mounted band grows from the real DOM edge
+      // above. Letting estimated page layout grow it here reintroduces the same
+      // jumpy prepend path we are trying to avoid.
+      return;
+    }
+
+    const node = scrollContainerRef.current;
+    if (
+      isActive &&
+      node &&
+      desiredMountedPageRange.startIndex < mountedPageRange.startIndex &&
+      mountedPageRange.endIndex > mountedPageRange.startIndex &&
+      !isScrollContainerNearBottom(node)
+    ) {
+      // Expected behavior: prepending newly-mounted pages above the live DOM band
+      // must preserve the first visible mounted row. Otherwise the new DOM lands
+      // above the viewport before its real measured height is known, so the
+      // transcript appears to slide downward as the page is inserted.
+      pendingMountedRangeAnchorRef.current = captureFirstVisibleMountedMessageAnchor(node);
+    }
+
+    setMountedPageRange(desiredMountedPageRange);
+  }, [
+    desiredMountedPageRange,
+    isActive,
+    mountedPageRange,
+    scrollContainerRef,
+    visiblePageRange,
+  ]);
 
   useLayoutEffect(() => {
     if (
       !isActive ||
       !hasConversationSearch ||
-      activeConversationSearchMessageIndex === undefined ||
+      !activeConversationSearchMessageId ||
       activeConversationSearchScrollTop === null
     ) {
-      // No active hit (search closed, query cleared, or the
-      // matched message is outside the windowed range — the
-      // last branch is currently unreachable while search is
-      // active because `windowStartIndex` is forced to 0 above,
-      // but the guard is kept defensive for future changes to
-      // the windowing policy). Reset the pin-tracking ref so a
-      // subsequent search that lands on the same message id
-      // still triggers the pin write.
       lastPinnedConversationSearchIdRef.current = null;
+      return;
+    }
+
+    if (lastPinnedConversationSearchIdRef.current === activeConversationSearchMessageId) {
       return;
     }
 
@@ -519,74 +628,90 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
-    // Only pin when the user navigated to a DIFFERENT hit. If
-    // this re-fire is measurement churn on the same active id
-    // (message-height recompute after a reply streams in, a
-    // new card renders, etc.) respect the user's current scroll
-    // position. Previously the effect re-wrote `scrollTop` on
-    // every re-fire, snapping the viewport back to the hit for
-    // one or two commits after a user-initiated scroll-away.
-    if (
-      lastPinnedConversationSearchIdRef.current ===
-      activeConversationSearchMessageId
-    ) {
-      return;
-    }
-
-    const nextScrollTop = activeConversationSearchScrollTop;
+    const mountedTargetSlot = findMountedMessageSlotById(node, activeConversationSearchMessageId);
+    const nextScrollTop = mountedTargetSlot
+      ? Math.max(
+          node.scrollTop +
+            (mountedTargetSlot.getBoundingClientRect().top - node.getBoundingClientRect().top) -
+            Math.max(
+              (viewportHeight - mountedTargetSlot.getBoundingClientRect().height) / 2,
+              0,
+            ),
+          0,
+        )
+      : activeConversationSearchScrollTop;
 
     if (Math.abs(node.scrollTop - nextScrollTop) >= 1) {
-      // Only flip the bottom-pin flag when we actually write
-      // scrollTop. The previous unconditional assignment meant
-      // that once this effect ran — even on the no-op branch
-      // where scrollTop was already at the target — the
-      // bottom-pin intent was cleared and the user had to
-      // nudge the viewport before `syncViewport` /
-      // `isScrollContainerNearBottom` could self-heal sticky
-      // bottom after search closed.
       shouldKeepBottomAfterLayoutRef.current = false;
     }
     writeScrollTopAndSyncViewport(node, nextScrollTop);
-    lastPinnedConversationSearchIdRef.current =
-      activeConversationSearchMessageId;
+    lastPinnedConversationSearchIdRef.current = activeConversationSearchMessageId;
   }, [
-    // `activeConversationSearchMessageId` is the hit IDENTITY —
-    // the gate that distinguishes "user navigated to a new hit"
-    // (re-pin) from "measurement churn on the same hit" (leave
-    // the user's scroll alone). It's derived from
-    // `conversationSearchActiveItemKey` per render but included
-    // here explicitly so the effect re-runs on every identity
-    // change, not just on scroll-top recomputes.
     activeConversationSearchMessageId,
-    activeConversationSearchMessageIndex,
     activeConversationSearchScrollTop,
     hasConversationSearch,
     isActive,
     scrollContainerRef,
+    viewportHeight,
     writeScrollTopAndSyncViewport,
   ]);
 
-  // Arm the bottom-pin flag while measuring so the existing re-pin
-  // `useLayoutEffect` (declared below) writes the correct scrollTop
-  // after each measurement commit. Declared BEFORE the re-pin effect so
-  // that it runs first in the commit phase and the flag is set by the
-  // time the re-pin reads it.
+  useLayoutEffect(() => {
+    const pendingAnchor = pendingMountedRangeAnchorRef.current;
+    if (!pendingAnchor) {
+      return;
+    }
+    pendingMountedRangeAnchorRef.current = null;
+
+    const node = scrollContainerRef.current;
+    if (!isActive || !node) {
+      return;
+    }
+
+    const anchorSlot = findMountedMessageSlotById(node, pendingAnchor.messageId);
+    if (!anchorSlot) {
+      return;
+    }
+
+    const scrollContainerRect = node.getBoundingClientRect();
+    const anchorRect = anchorSlot.getBoundingClientRect();
+    const nextViewportOffsetPx = anchorRect.top - scrollContainerRect.top;
+    const targetScrollTop =
+      node.scrollTop + (nextViewportOffsetPx - pendingAnchor.viewportOffsetPx);
+    writeScrollTopAndSyncViewport(node, targetScrollTop);
+  }, [isActive, mountedPageRange, scrollContainerRef, writeScrollTopAndSyncViewport]);
+
+  useLayoutEffect(() => {
+    const pendingAnchor = pendingDeferredLayoutAnchorRef.current;
+    if (!pendingAnchor) {
+      return;
+    }
+    pendingDeferredLayoutAnchorRef.current = null;
+
+    const node = scrollContainerRef.current;
+    if (!isActive || !node) {
+      return;
+    }
+
+    const anchorSlot = findMountedMessageSlotById(node, pendingAnchor.messageId);
+    if (!anchorSlot) {
+      return;
+    }
+
+    const scrollContainerRect = node.getBoundingClientRect();
+    const anchorRect = anchorSlot.getBoundingClientRect();
+    const nextViewportOffsetPx = anchorRect.top - scrollContainerRect.top;
+    const targetScrollTop =
+      node.scrollTop + (nextViewportOffsetPx - pendingAnchor.viewportOffsetPx);
+    writeScrollTopAndSyncViewport(node, targetScrollTop);
+  }, [isActive, layoutVersion, scrollContainerRef, writeScrollTopAndSyncViewport]);
+
   useLayoutEffect(() => {
     if (isMeasuringPostActivation) {
       shouldKeepBottomAfterLayoutRef.current = true;
     }
   }, [isMeasuringPostActivation]);
 
-  // Completion check: intentionally runs on every commit while measuring is
-  // active. Measurements mutate `messageHeightsRef` synchronously and then
-  // trigger ordinary React commits, so an explicit dependency list is more
-  // likely to miss a ref-only measurement than to make this safer.
-  // When all currently-visible slots have real measurements, write a
-  // final scrollTop and reveal by clearing the flag. Reading from
-  // `messageHeightsRef.current` is safe because `handleHeightChange`
-  // mutates it synchronously before bumping `layoutVersion`, so by the
-  // time this effect runs after a measurement-driven commit, the ref
-  // already reflects the latest data.
   useLayoutEffect(() => {
     if (!isMeasuringPostActivation) {
       return;
@@ -596,17 +721,13 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
-    const visibleMessages = visibleRanges.flatMap((range) =>
-      windowedMessages.slice(range.startIndex, range.endIndex),
-    );
-    if (visibleMessages.length === 0) {
+    const visiblePages = pages.slice(visiblePageRange.startIndex, visiblePageRange.endIndex);
+    if (visiblePages.length === 0) {
       setIsMeasuringPostActivation(false);
       return;
     }
 
-    const allMeasured = visibleMessages.every(
-      (message) => messageHeightsRef.current[message.id] !== undefined,
-    );
+    const allMeasured = visiblePages.every((page) => pageHeightsRef.current[page.key] !== undefined);
     if (!allMeasured) {
       return;
     }
@@ -617,12 +738,16 @@ export function VirtualizedConversationMessageList({
       writeScrollTopAndSyncViewport(node, target);
     }
     setIsMeasuringPostActivation(false);
-  });
+  }, [
+    isActive,
+    isMeasuringPostActivation,
+    pages,
+    scrollContainerRef,
+    visiblePageRange.endIndex,
+    visiblePageRange.startIndex,
+    writeScrollTopAndSyncViewport,
+  ]);
 
-  // Timeout fallback: if the visible slots take longer than 150 ms to
-  // report their first measurement (e.g., a heavy syntax-highlighted
-  // code block or a deferred markdown renderer), reveal the wrapper
-  // anyway so the user sees something rather than a blank region.
   useEffect(() => {
     if (!isMeasuringPostActivation) {
       return;
@@ -632,9 +757,7 @@ export function VirtualizedConversationMessageList({
       const node = scrollContainerRef.current;
       if (node) {
         const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-        writeScrollTopAndSyncViewport(node, target, {
-          flushViewportSync: true,
-        });
+        writeScrollTopAndSyncViewport(node, target);
       }
       shouldKeepBottomAfterLayoutRef.current = true;
       setIsMeasuringPostActivation(false);
@@ -650,24 +773,7 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
-    // Honour the user-scroll cooldown here too. `handleHeightChange`
-    // already skips its own `scrollTop` write during the cooldown, but
-    // it still calls `setLayoutVersion((c) => c + 1)`, which triggers
-    // a re-render that commits a new `layout.totalHeight` — and THIS
-    // effect fires on that change. Without the gate the re-pin
-    // would run anyway and snap `scrollTop` back to the bottom, so
-    // the user's wheel-up input is cancelled one commit later. The
-    // net effect is the exact "near-bottom streaming re-pins the
-    // viewport and fights user scroll-up" symptom the cooldown is
-    // supposed to close. Gating the effect on the same cooldown
-    // keeps the scroll-to-bottom handoff working for pure streaming
-    // (no direct-scroll input → `lastUserScrollInputTimeRef` stays
-    // at its `Number.NEGATIVE_INFINITY` init → `performance.now() -
-    // (-Infinity)` is `+Infinity`, which never satisfies the
-    // `< USER_SCROLL_ADJUSTMENT_COOLDOWN_MS` check) while suppressing
-    // the re-pin during an active wheel gesture.
-    const timeSinceUserScroll =
-      performance.now() - lastUserScrollInputTimeRef.current;
+    const timeSinceUserScroll = performance.now() - lastUserScrollInputTimeRef.current;
     if (timeSinceUserScroll < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS) {
       return;
     }
@@ -677,35 +783,9 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
-    // Re-pin to the new bottom on every commit while the flag is set.
-    // The flag is cleared only in the scroll handler (see `syncViewport`
-    // below) when the user explicitly scrolls away from near-bottom.
-    //
-    // The round 8 pre-fix version cleared this flag here after observing
-    // `isScrollContainerAtBottom(node)`, but that ran in the SAME commit
-    // the flag was set in (via `handleHeightChange` → `setLayoutVersion`).
-    // At that point the DOM reflected the OLD `scrollHeight` — the
-    // wrapper's `style={{ height: layout.totalHeight }}` had not yet
-    // committed the new total height — so `isScrollContainerAtBottom`
-    // reported true against the stale geometry, cleared the flag, and
-    // the *next* commit (the one that actually committed the new
-    // height) found the flag cleared and bailed out of the re-pin. The
-    // net effect was leaving the user ~10-100 px above the new bottom
-    // on the exact measurement-driven growth scenario the round 8 fix
-    // was added to handle. Clearing is delegated to scroll events so
-    // the pin survives across as many commits as the measurement cycle
-    // needs, matching the `TerminalPanel.shouldStickToBottomRef`
-    // sticky-until-user-scrolls-away pattern.
-    //
-    // The `>= 1` guard prevents no-op writes from triggering a scroll
-    // event + reflow + ResizeObserver tick cascade. When the layout
-    // commit only moved `scrollHeight` by the subpixel rounding delta,
-    // the computed target matches the current scrollTop and we do
-    // nothing instead of writing a value the browser would round to the
-    // same integer anyway.
     const target = Math.max(node.scrollHeight - node.clientHeight, 0);
     writeScrollTopAndSyncViewport(node, target);
-  }, [isActive, layout.totalHeight, scrollContainerRef, writeScrollTopAndSyncViewport]);
+  }, [isActive, layoutVersion, pageLayout.totalHeight, scrollContainerRef, writeScrollTopAndSyncViewport]);
 
   useLayoutEffect(() => {
     if (!isActive) {
@@ -717,125 +797,69 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
-    const syncViewport = () => {
-      // Route through the shared helper so the viewport-from-node
-      // contract (clientHeight fallback, scrollTop capture, equality
-      // short-circuit in `setViewport`) stays in one place. A
-      // previous revision inlined the same logic here and the two
-      // copies were drifting — e.g. the helper's `Math.max(target, 0)`
-      // clamp lived only on the programmatic-write path while this
-      // listener path had no clamp, which is safe for native scroll
-      // events (browsers already clamp) but confusing for future
-      // readers.
+    const syncViewport = (options: { isNativeScrollEvent?: boolean } = {}) => {
+      if (options.isNativeScrollEvent) {
+        const pendingProgrammaticScrollTop = pendingProgrammaticScrollTopRef.current;
+        const isProgrammaticScrollEvent =
+          pendingProgrammaticScrollTop !== null &&
+          Math.abs(node.scrollTop - pendingProgrammaticScrollTop) < 1;
+        if (isProgrammaticScrollEvent) {
+          pendingProgrammaticScrollTopRef.current = null;
+        } else {
+          lastNativeScrollTopRef.current = node.scrollTop;
+          lastUserScrollInputTimeRef.current = performance.now();
+        }
+      }
+
       syncViewportFromScrollNode(node);
 
-      // Clear the pin flag once the user has scrolled away from
-      // near-bottom. Mirrors `TerminalPanel.shouldStickToBottomRef`'s
-      // `onScroll` update: sticky stays on until the user explicitly
-      // moves away, then re-arms only when a later `handleHeightChange`
-      // observes the viewport back near the bottom. This is the only
-      // site that clears the flag — the re-pinning `useLayoutEffect`
-      // above intentionally leaves it set so a single measurement
-      // growth can survive the same-commit `setLayoutVersion` →
-      // follow-up-commit re-render without tearing down the pin.
-      // This side effect is specific to the native-scroll-event path
-      // and does NOT belong inside `syncViewportFromScrollNode`
-      // (programmatic writes shouldn't auto-clear the pin).
-      if (
-        shouldKeepBottomAfterLayoutRef.current &&
-        !isScrollContainerNearBottom(node)
-      ) {
+      if (shouldKeepBottomAfterLayoutRef.current && !isScrollContainerNearBottom(node)) {
         shouldKeepBottomAfterLayoutRef.current = false;
       }
     };
 
-    // Record direct-input scroll gestures so measurement-driven
-    // `scrollTop` adjustments in `handleHeightChange` can defer while
-    // the user is actively scrolling. See the comment on
-    // `lastUserScrollInputTimeRef` above for the failure mode this
-    // protects against. Keyboard scrolling (arrow keys,
-    // PageUp/PageDown, Home/End, Space) is routed through the same
-    // path because browsers fire the same cascade of scroll events,
-    // but the `keydown` listener covers the input intent regardless
-    // of whether the key actually moves the viewport.
     const markUserScroll = () => {
       lastUserScrollInputTimeRef.current = performance.now();
     };
     const syncProgrammaticScrollWrite = () => {
-      // ORDER MATTERS: clear the bottom-pin intent BEFORE calling
-      // the flushed viewport sync. If a programmatic write moved
-      // us AWAY from near-bottom (e.g. Ctrl+PgUp / Ctrl+Home
-      // jumping to the top, a session-find pin to a hit far from
-      // the end), drop the flag here — the upcoming `flushSync`
-      // re-render will mount new rows at the new scrollTop, and
-      // each newly-mounted `MeasuredMessageCard` fires its
-      // initial `measure()` synchronously inside a `useLayoutEffect`.
-      // That path calls `handleHeightChange`, which — if
-      // `shouldKeepBottomAfterLayoutRef.current` is still `true`
-      // — would immediately write `scrollTop` back to the bottom,
-      // undoing the jump. Clearing the flag before flushSync means
-      // every measurement that fires inside the re-render sees the
-      // post-jump (intent-cleared) state.
-      //
-      // Matches what the native-scroll-event `syncViewport`
-      // handler does on user-initiated scrolls, but placed
-      // synchronously inside this dispatch so it beats the
-      // measurement cascade that `flushSync` triggers.
-      //
-      // The opposite case (scroll-to-bottom via
-      // `scheduleSettledScrollToBottom`) is safe: the new
-      // scrollTop IS near the bottom, `isScrollContainerNearBottom`
-      // returns true, and the branch is skipped — leaving the
-      // re-pinning `useLayoutEffect` that arms the flag for the
-      // bottom-pin commit in charge.
-      if (
-        shouldKeepBottomAfterLayoutRef.current &&
-        !isScrollContainerNearBottom(node)
-      ) {
+      if (shouldKeepBottomAfterLayoutRef.current && !isScrollContainerNearBottom(node)) {
         shouldKeepBottomAfterLayoutRef.current = false;
       }
-
-      // Use the flushed variant: this listener fires from
-      // `notifyMessageStackScrollWrite`, which is dispatched from
-      // SessionPaneView code paths that include the RAF tick loop
-      // in `scheduleSettledScrollToBottom`. RAF-callback setState
-      // doesn't flush synchronously under React 18 auto-batching,
-      // so without `flushSync` the browser would paint each RAF
-      // iteration's new scrollTop with the OLD rendered window —
-      // once per frame for up to 60 frames — which reads as a
-      // persistent flicker while the settle-to-bottom loop runs.
-      syncViewportFromScrollNodeFlushed(node);
+      pendingDeferredLayoutAnchorRef.current = null;
+      clearPendingDeferredLayoutTimer();
+      scheduleProgrammaticViewportSync(node);
     };
 
     syncViewport();
-    node.addEventListener("scroll", syncViewport, { passive: true });
-    node.addEventListener(
-      MESSAGE_STACK_SCROLL_WRITE_EVENT,
-      syncProgrammaticScrollWrite,
-    );
+    lastNativeScrollTopRef.current = node.scrollTop;
+    const onNativeScroll = () => {
+      syncViewport({ isNativeScrollEvent: true });
+    };
+    node.addEventListener("scroll", onNativeScroll, { passive: true });
+    node.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, syncProgrammaticScrollWrite);
     node.addEventListener("wheel", markUserScroll, { passive: true });
     node.addEventListener("touchmove", markUserScroll, { passive: true });
     node.addEventListener("keydown", markUserScroll);
-    const resizeObserver = new ResizeObserver(syncViewport);
+    const resizeObserver = new ResizeObserver(() => {
+      syncViewport();
+    });
     resizeObserver.observe(node);
 
     return () => {
-      node.removeEventListener("scroll", syncViewport);
-      node.removeEventListener(
-        MESSAGE_STACK_SCROLL_WRITE_EVENT,
-        syncProgrammaticScrollWrite,
-      );
+      node.removeEventListener("scroll", onNativeScroll);
+      node.removeEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, syncProgrammaticScrollWrite);
       node.removeEventListener("wheel", markUserScroll);
       node.removeEventListener("touchmove", markUserScroll);
       node.removeEventListener("keydown", markUserScroll);
       resizeObserver.disconnect();
     };
   }, [
+    clearPendingDeferredLayoutTimer,
     isActive,
+    scheduleProgrammaticViewportSync,
     scrollContainerRef,
     sessionId,
     syncViewportFromScrollNode,
-    syncViewportFromScrollNodeFlushed,
   ]);
 
   useLayoutEffect(() => {
@@ -859,7 +883,7 @@ export function VirtualizedConversationMessageList({
         return;
       }
 
-      syncViewportFromScrollNodeFlushed(currentNode);
+      syncViewportFromScrollNode(currentNode);
       remainingFrames -= 1;
       if (remainingFrames > 0) {
         frameId = window.requestAnimationFrame(tick);
@@ -872,420 +896,167 @@ export function VirtualizedConversationMessageList({
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [
-    isActive,
-    scrollContainerRef,
-    sessionId,
-    syncViewportFromScrollNode,
-    syncViewportFromScrollNodeFlushed,
-  ]);
+  }, [isActive, scrollContainerRef, sessionId, syncViewportFromScrollNode]);
 
-  // Stabilize handler references so MeasuredMessageCard memo can skip
-  // re-renders for messages whose data and position haven't changed,
-  // and so event handlers inside the `useEffect`s below can read the
-  // latest per-render data (windowed messages, message index map,
-  // current render-window size, current viewport visible range)
-  // without participating in those effects' dependency arrays.
-  const messagesRef = useRef(windowedMessages);
-  messagesRef.current = windowedMessages;
-  const messageIndexByIdRef = useRef(messageIndexById);
-  messageIndexByIdRef.current = messageIndexById;
-  // Current render-window size, updated every render so the scroll-up
-  // auto-load helper can compute the exact next value synchronously.
-  // Storing the computed `nextSize` in `pendingLoadMoreAnchorRef` lets
-  // the consuming `useLayoutEffect` distinguish "our grow landed"
-  // from "some other code path bumped renderWindowSize" (e.g. the
-  // new-message auto-grow during streaming at lines 898-905).
-  const renderWindowSizeRef = useRef(renderWindowSize);
-  renderWindowSizeRef.current = renderWindowSize;
-  // Viewport visible range, mirrored to a ref so the auto-load-older-
-  // messages scroll listener can read the current range without
-  // participating in the effect's dep array. Putting
-  // `viewportVisibleRange.startIndex` in the deps caused the effect
-  // to tear down and re-subscribe the native scroll listener on
-  // every scroll event (that's what updates `viewport.scrollTop` ->
-  // recomputes `viewportVisibleRange`), dropping any wheel event
-  // that landed in the window between `removeEventListener` and the
-  // next `addEventListener`. The ref pattern matches `messagesRef` /
-  // `messageIndexByIdRef` / `renderWindowSizeRef`.
-  const viewportVisibleRangeRef = useRef(viewportVisibleRange);
-  viewportVisibleRangeRef.current = viewportVisibleRange;
-
-  // Shared "prepend older messages + anchor the viewport" helper used
-  // by both the scroll-near-top auto-load effect (below) and the
-  // explicit "Load N earlier messages" button (in the render body).
-  // Both entry points need the same lifecycle — compute the next
-  // render-window size against the current value, bail on no-op,
-  // capture the first visible message as the anchor, write
-  // `pendingLoadMoreAnchorRef`, call `setRenderWindowSize(nextSize)`.
-  // The consuming `useLayoutEffect` then restores the anchor's
-  // viewport offset before paint.
-  //
-  // Previously the button path called `setRenderWindowSize` directly
-  // without the anchor, so clicking it painted the grown document at
-  // the old `scrollTop` for one frame while the scroll-up path was
-  // smooth; routing both sites through this helper makes the button
-  // behave identically.
-  //
-  // `useCallback` with `[scrollContainerRef]` keeps the identity
-  // stable across renders so the auto-load effect doesn't re-subscribe
-  // its listener whenever render state changes. Caller passes the
-  // current full message count; reading `messages.length` through
-  // the outer closure is fine because both call sites re-evaluate it
-  // at invocation time (the effect depends on `messages.length`, so
-  // it re-subscribes when the count changes; the button reads it
-  // from render scope).
-  const loadMoreEarlierMessages = useCallback((fullMessageCount: number) => {
-    const node = scrollContainerRef.current;
-    if (!node) {
-      return;
-    }
-    const currentSize = renderWindowSizeRef.current;
-    const nextSize = Math.min(currentSize + RENDER_WINDOW_LOAD_MORE, fullMessageCount);
-    if (nextSize === currentSize) {
-      return;
-    }
-    const firstVisibleIndex = viewportVisibleRangeRef.current.startIndex;
-    const anchorMessage = messagesRef.current[firstVisibleIndex];
-    if (!anchorMessage) {
-      return;
-    }
-    const anchorTop = layoutTopsRef.current[firstVisibleIndex] ?? 0;
-    pendingLoadMoreAnchorRef.current = {
-      anchorMessageId: anchorMessage.id,
-      anchorOffsetInViewport: anchorTop - node.scrollTop,
-      expectedRenderWindowSize: nextSize,
-    };
-    setRenderWindowSize(nextSize);
-  }, [scrollContainerRef]);
-
-  // Auto-load older messages when the scroll container approaches
-  // the top of the rendered window. Before calling
-  // `setRenderWindowSize` we record an anchor — the id of the first
-  // visible message plus its current offset from `scrollTop`. The
-  // separate `useLayoutEffect` below consumes that anchor right
-  // after React commits the grown layout (before the browser paints)
-  // and writes the `scrollTop` value that keeps the anchor message
-  // at the same viewport offset. Two reasons this shape replaced the
-  // earlier `requestAnimationFrame`-based approach that read the
-  // `scrollHeight` delta:
-  //
-  //   1. `requestAnimationFrame` fires after React commits but can
-  //      fire after the browser has already painted the grown
-  //      document at the OLD `scrollTop`, producing a visible
-  //      one-frame jump where the user suddenly sees the top of the
-  //      prepended block. `useLayoutEffect` runs synchronously
-  //      between commit and paint, so the paint only ever lands at
-  //      the corrected `scrollTop`.
-  //
-  //   2. A raw `newScrollHeight - prevScrollHeight` delta is fed by
-  //      `layout.totalHeight`, which for freshly-prepended messages
-  //      uses `estimateConversationMessageHeight`. When the prepended
-  //      cards' `ResizeObserver`s fire asynchronously and the
-  //      estimates are replaced with real measurements,
-  //      `layout.totalHeight` shifts again and the anchor would bob.
-  //      Anchoring on a specific message's viewport offset is stable
-  //      against measurement arrivals — the existing
-  //      `getAdjustedVirtualizedScrollTopForHeightChange` path keeps
-  //      that same offset as each measurement lands.
-  useEffect(() => {
-    if (!isActive || !hasOlderMessages) {
-      return;
-    }
-
-    const node = scrollContainerRef.current;
-    if (!node) {
-      return;
-    }
-
-    function handleScroll() {
-      if (!node || node.scrollTop > RENDER_WINDOW_LOAD_MORE_THRESHOLD_PX) {
+  const handlePageHeightChange = useCallback(
+    (pageKey: string, nextHeight: number) => {
+      if (!Number.isFinite(nextHeight) || nextHeight <= 0) {
         return;
       }
-      loadMoreEarlierMessages(messages.length);
-    }
 
-    node.addEventListener("scroll", handleScroll, { passive: true });
-    return () => {
-      node.removeEventListener("scroll", handleScroll);
-    };
-  }, [
-    hasOlderMessages,
-    isActive,
-    loadMoreEarlierMessages,
-    messages.length,
-    scrollContainerRef,
-  ]);
-
-  // Apply the pending scroll anchor right after `setRenderWindowSize`
-  // commits the grown layout — synchronously before paint. See the
-  // scroll-up auto-load `useEffect` above for rationale.
-  //
-  // The anchor is only applied when the current `renderWindowSize`
-  // matches the `expectedRenderWindowSize` captured at scroll-handler
-  // time. If those disagree, this effect fired for a different reason
-  // (e.g. the new-message auto-grow at lines 898-905 bumped
-  // `renderWindowSize` by +1 during streaming) and the anchor is
-  // stale from an earlier scroll gesture. Clearing the ref in that
-  // case prevents a surprise scroll jump when a streaming delta
-  // arrives after the user scrolled up but didn't actually trigger
-  // the load-more path.
-  useLayoutEffect(() => {
-    const anchor = pendingLoadMoreAnchorRef.current;
-    if (!anchor) {
-      return;
-    }
-    pendingLoadMoreAnchorRef.current = null;
-    if (anchor.expectedRenderWindowSize !== renderWindowSize) {
-      return;
-    }
-    const node = scrollContainerRef.current;
-    if (!node) {
-      return;
-    }
-    const newIndex = messageIndexByIdRef.current.get(anchor.anchorMessageId);
-    if (newIndex === undefined) {
-      return;
-    }
-    const newAnchorTop = layoutTopsRef.current[newIndex] ?? 0;
-    const nextScrollTop = Math.max(newAnchorTop - anchor.anchorOffsetInViewport, 0);
-    writeScrollTopAndSyncViewport(node, nextScrollTop);
-  }, [renderWindowSize, scrollContainerRef, writeScrollTopAndSyncViewport]);
-
-  const handleHeightChange = useCallback((messageId: string, nextHeight: number, options: {
-    flushViewportSync?: boolean;
-  } = {}) => {
-    if (!Number.isFinite(nextHeight) || nextHeight <= 0) {
-      return;
-    }
-
-    // Round to integer pixels so subpixel drift from `getBoundingClientRect`
-    // cannot repeatedly cross the 1-pixel commit threshold below. Storing
-    // fractional heights caused a cascading shake: each float-level
-    // measurement committed, bumped `layoutVersion`, re-pinned `scrollTop`,
-    // reflowed, and then reported a slightly different fractional height on
-    // the next ResizeObserver tick. Integer storage eliminates the drift at
-    // the source so the re-pin loop cannot be re-entered by noise alone.
-    const roundedHeight = Math.round(nextHeight);
-    const hadPreviousMeasurement = messageHeightsRef.current[messageId] !== undefined;
-    const previousHeight =
-      messageHeightsRef.current[messageId] ??
-      estimateConversationMessageHeight(messagesRef.current[messageIndexByIdRef.current.get(messageId) ?? 0]);
-    if (hadPreviousMeasurement && Math.abs(previousHeight - roundedHeight) < 1) {
-      return;
-    }
-
-    messageHeightsRef.current[messageId] = roundedHeight;
-
-    const messageIndex = messageIndexByIdRef.current.get(messageId);
-    const node = scrollContainerRef.current;
-    // If the user/app is already at the latest message, measurements that
-    // increase the virtualized height should move the viewport with the bottom.
-    const shouldKeepBottom =
-      isActive && node
-        ? shouldKeepBottomAfterLayoutRef.current ||
-          isScrollContainerNearBottom(node)
-        : false;
-    if (shouldKeepBottom) {
-      shouldKeepBottomAfterLayoutRef.current = true;
-    }
-    if (node && messageIndex !== undefined) {
-      // The user-scroll cooldown gates BOTH branches below. During a
-      // direct-scroll gesture (wheel / touch / key input in the last
-      // `USER_SCROLL_ADJUSTMENT_COOLDOWN_MS`) we never want a streaming
-      // measurement to rewrite `scrollTop` out from under the user —
-      // not even to re-pin the viewport to the bottom. The original
-      // symptom this protects against is "near-bottom streaming
-      // re-pins the viewport and fights user scroll-up": while
-      // streaming, measurements fire dozens of times per second, and
-      // before this gate a user wheeling up within the 72 px
-      // near-bottom band would see the pin snap `scrollTop` back to
-      // the bottom on every measurement, making it nearly impossible
-      // to escape the band by slow wheeling. With the gate, their
-      // wheel motion accumulates until `isScrollContainerNearBottom`
-      // reports false, `syncViewport` clears the pin flag, and the
-      // shouldKeepBottom condition dissolves naturally. When the
-      // cooldown expires (user pauses), the pin resumes — so the
-      // intended "keep me at bottom while I'm just watching new
-      // content arrive" behaviour still works.
-      const timeSinceUserScroll =
-        performance.now() - lastUserScrollInputTimeRef.current;
-      const inUserScrollCooldown =
-        timeSinceUserScroll < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
-      if (shouldKeepBottom) {
-        if (inUserScrollCooldown) {
-          // User is actively scrolling; do not re-pin to bottom even
-          // though the heuristic still considers them near-bottom.
-          // `shouldKeepBottomAfterLayoutRef` stays set above so the
-          // pin naturally resumes once the cooldown elapses (unless
-          // `syncViewport` clears it first because the user has
-          // scrolled past the 72 px band in the interim).
-        } else {
-          // Skip no-op writes so a measurement whose rounded height matches
-          // the previous pin target cannot trigger an extra scroll event +
-          // reflow + ResizeObserver re-fire cycle.
-          const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-          writeScrollTopAndSyncViewport(node, target, {
-            flushViewportSync: options.flushViewportSync,
-          });
-        }
-      } else if (inUserScrollCooldown) {
-        // Defer the anchor-preserving `scrollTop` write for the same
-        // reason the pin write is deferred above: during a wheel-up
-        // gesture `getAdjustedVirtualizedScrollTopForHeightChange` is
-        // driven by previously-unmeasured cards reporting real
-        // heights an order of magnitude larger than the estimate, so
-        // the compensation would cancel or reverse the user's scroll
-        // intent. Layout still rebuilds (the `setLayoutVersion` bump
-        // below runs unconditionally), so freshly-measured cards
-        // render at their real heights on the next paint; we just
-        // don't move the viewport. Once the cooldown expires the
-        // anchor-preservation resumes for idle-user cases (streaming
-        // updates, syntax highlighting completion, image load).
-      } else {
-        const nextScrollTop = getAdjustedVirtualizedScrollTopForHeightChange({
-          currentScrollTop: node.scrollTop,
-          messageTop: layoutTopsRef.current[messageIndex] ?? 0,
-          nextHeight: roundedHeight,
-          previousHeight,
-        });
-        writeScrollTopAndSyncViewport(node, nextScrollTop, {
-          flushViewportSync: options.flushViewportSync,
-        });
+      const roundedHeight = Math.round(nextHeight);
+      const previousHeight = pageHeightsRef.current[pageKey];
+      if (previousHeight !== undefined && Math.abs(previousHeight - roundedHeight) < 1) {
+        return;
       }
-    }
 
-    setLayoutVersion((current) => current + 1);
-  }, [isActive, scrollContainerRef, writeScrollTopAndSyncViewport]);
+      pageHeightsRef.current[pageKey] = roundedHeight;
+
+      const node = scrollContainerRef.current;
+      const shouldKeepBottom =
+        isActive && node
+          ? shouldKeepBottomAfterLayoutRef.current || isScrollContainerNearBottom(node)
+          : false;
+      if (shouldKeepBottom) {
+        shouldKeepBottomAfterLayoutRef.current = true;
+      }
+
+      const timeSinceUserScroll = performance.now() - lastUserScrollInputTimeRef.current;
+      const inUserScrollCooldown = timeSinceUserScroll < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
+      if (inUserScrollCooldown) {
+        scheduleDeferredLayoutVersion(
+          USER_SCROLL_ADJUSTMENT_COOLDOWN_MS - timeSinceUserScroll,
+        );
+        return;
+      }
+
+      if (node && !shouldKeepBottom) {
+        pendingDeferredLayoutAnchorRef.current = captureFirstVisibleMountedMessageAnchor(node);
+      }
+      bumpLayoutVersion();
+      if (node && shouldKeepBottom) {
+        const target = Math.max(node.scrollHeight - node.clientHeight, 0);
+        writeScrollTopAndSyncViewport(node, target);
+      }
+    },
+    [
+      bumpLayoutVersion,
+      isActive,
+      scheduleDeferredLayoutVersion,
+      scrollContainerRef,
+      writeScrollTopAndSyncViewport,
+    ],
+  );
 
   const boundApprovalDecision = useCallback(
-    (messageId: string, decision: ApprovalDecision) => onApprovalDecision(sessionId, messageId, decision),
-    [sessionId, onApprovalDecision],
+    (messageId: string, decision: ApprovalDecision) =>
+      onApprovalDecision(sessionId, messageId, decision),
+    [onApprovalDecision, sessionId],
   );
   const boundUserInputSubmit = useCallback(
-    (messageId: string, answers: Record<string, string[]>) => onUserInputSubmit(sessionId, messageId, answers),
-    [sessionId, onUserInputSubmit],
+    (messageId: string, answers: Record<string, string[]>) =>
+      onUserInputSubmit(sessionId, messageId, answers),
+    [onUserInputSubmit, sessionId],
   );
   const boundMcpElicitationSubmit = useCallback(
     (messageId: string, action: McpElicitationAction, content?: JsonValue) =>
       onMcpElicitationSubmit(sessionId, messageId, action, content),
-    [sessionId, onMcpElicitationSubmit],
+    [onMcpElicitationSubmit, sessionId],
   );
   const boundCodexAppRequestSubmit = useCallback(
-    (messageId: string, result: JsonValue) => onCodexAppRequestSubmit(sessionId, messageId, result),
-    [sessionId, onCodexAppRequestSubmit],
+    (messageId: string, result: JsonValue) =>
+      onCodexAppRequestSubmit(sessionId, messageId, result),
+    [onCodexAppRequestSubmit, sessionId],
   );
 
   if (!isActive) {
-    return <div className="virtualized-message-list" style={{ height: layout.totalHeight }} />;
+    return <div className="virtualized-message-list" style={{ height: pageLayout.totalHeight }} />;
   }
 
   return (
     <div
       className={`virtualized-message-list${isMeasuringPostActivation ? " is-measuring-post-activation" : ""}`}
-      style={{ height: layout.totalHeight }}
     >
-      {hasOlderMessages && viewportVisibleRange.startIndex === 0 && (
-        <div
-          className="load-earlier-messages"
-          style={{ position: "absolute", top: 0, left: 0, right: 0 }}
-        >
-          <button
-            type="button"
-            className="ghost-button load-earlier-messages-button"
-            onClick={() => loadMoreEarlierMessages(messages.length)}
-          >
-            Load {Math.min(RENDER_WINDOW_LOAD_MORE, windowStartIndex)} earlier
-            messages ({windowStartIndex} hidden)
-          </button>
-        </div>
-      )}
-      {visibleRanges.flatMap((range) =>
-        windowedMessages
-          .slice(range.startIndex, range.endIndex)
-          .map((message, visibleIndex) => {
-            const messageIndex = range.startIndex + visibleIndex;
-            return (
-              <MeasuredMessageCard
-                key={message.id}
-                isActive={isActive}
-                renderMessageCard={renderMessageCard}
-                message={message}
-                itemKey={isActive ? `message:${message.id}` : undefined}
-                isSearchMatch={conversationSearchMatchedItemKeys.has(`message:${message.id}`)}
-                isSearchActive={conversationSearchActiveItemKey === `message:${message.id}`}
-                preferImmediateHeavyRender={isActive && messageIndex >= windowedMessages.length - 2}
-                top={layout.tops[messageIndex] ?? 0}
-                onSearchItemMount={onConversationSearchItemMount}
-                onApprovalDecision={boundApprovalDecision}
-                onUserInputSubmit={boundUserInputSubmit}
-                onMcpElicitationSubmit={boundMcpElicitationSubmit}
-                onCodexAppRequestSubmit={boundCodexAppRequestSubmit}
-                onHeightChange={handleHeightChange}
-              />
-            );
-          }),
-      )}
+      {topSpacerHeight > 0 ? (
+        <div className="virtualized-message-spacer" style={{ height: topSpacerHeight }} />
+      ) : null}
+      {mountedPages.map((page) => (
+        <MeasuredPageBand
+          key={page.key}
+          isActive={isActive}
+          page={page}
+          renderMessageCard={renderMessageCard}
+          conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
+          conversationSearchActiveItemKey={conversationSearchActiveItemKey}
+          onSearchItemMount={onConversationSearchItemMount}
+          onApprovalDecision={boundApprovalDecision}
+          onUserInputSubmit={boundUserInputSubmit}
+          onMcpElicitationSubmit={boundMcpElicitationSubmit}
+          onCodexAppRequestSubmit={boundCodexAppRequestSubmit}
+          onHeightChange={handlePageHeightChange}
+        />
+      ))}
+      {bottomSpacerHeight > 0 ? (
+        <div className="virtualized-message-spacer" style={{ height: bottomSpacerHeight }} />
+      ) : null}
     </div>
   );
 }
 
-const MeasuredMessageCard = memo(function MeasuredMessageCard({
+const MeasuredPageBand = memo(function MeasuredPageBand({
   isActive,
+  page,
   renderMessageCard,
-  message,
-  itemKey,
-  isSearchMatch,
-  isSearchActive,
-  preferImmediateHeavyRender,
+  conversationSearchMatchedItemKeys,
+  conversationSearchActiveItemKey,
   onSearchItemMount,
   onApprovalDecision,
   onUserInputSubmit,
   onMcpElicitationSubmit,
   onCodexAppRequestSubmit,
   onHeightChange,
-  top,
 }: {
   isActive: boolean;
+  page: MessagePage;
   renderMessageCard: RenderMessageCard;
-  message: Message;
-  itemKey?: string;
-  isSearchMatch: boolean;
-  isSearchActive: boolean;
-  preferImmediateHeavyRender: boolean;
+  conversationSearchMatchedItemKeys: ReadonlySet<string>;
+  conversationSearchActiveItemKey?: string | null;
   onSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
   onUserInputSubmit: BoundUserInputSubmitHandler;
   onMcpElicitationSubmit: BoundMcpElicitationSubmitHandler;
   onCodexAppRequestSubmit: BoundCodexAppRequestSubmitHandler;
-  onHeightChange: (
-    messageId: string,
-    nextHeight: number,
-    options?: { flushViewportSync?: boolean },
-  ) => void;
-  top: number;
+  onHeightChange: (pageKey: string, nextHeight: number) => void;
 }) {
-  const slotRef = useRef<HTMLDivElement | null>(null);
+  const pageRef = useRef<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
     if (!isActive) {
       return;
     }
 
-    const node = slotRef.current;
+    const node = pageRef.current;
     if (!node) {
       return;
     }
 
     let frameId = 0;
-    let hasMeasuredOnce = false;
     const measure = () => {
       frameId = 0;
-      const flushViewportSync = hasMeasuredOnce;
-      hasMeasuredOnce = true;
-      onHeightChange(message.id, node.getBoundingClientRect().height, {
-        flushViewportSync,
+      const slotNodes = Array.from(
+        node.querySelectorAll<HTMLElement>(".virtualized-message-slot"),
+      );
+      let totalHeight = 0;
+      slotNodes.forEach((slotNode, index) => {
+        totalHeight += Math.max(slotNode.getBoundingClientRect().height, 0);
+        if (index < slotNodes.length - 1) {
+          totalHeight += VIRTUALIZED_MESSAGE_GAP_PX;
+        }
       });
+      if (page.hasTrailingGap) {
+        totalHeight += VIRTUALIZED_MESSAGE_GAP_PX;
+      }
+      onHeightChange(page.key, totalHeight);
     };
 
     measure();
@@ -1293,10 +1064,12 @@ const MeasuredMessageCard = memo(function MeasuredMessageCard({
       if (frameId !== 0) {
         return;
       }
-
       frameId = window.requestAnimationFrame(measure);
     });
     resizeObserver.observe(node);
+    Array.from(node.querySelectorAll(".virtualized-message-slot")).forEach((slotNode) => {
+      resizeObserver.observe(slotNode);
+    });
 
     return () => {
       resizeObserver.disconnect();
@@ -1304,25 +1077,41 @@ const MeasuredMessageCard = memo(function MeasuredMessageCard({
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [isActive, message, onHeightChange]);
+  }, [isActive, onHeightChange, page.hasTrailingGap, page.key, page.messages]);
 
   return (
-    <div ref={slotRef} className="virtualized-message-slot" style={{ top }}>
-      <MessageSlot
-        itemKey={itemKey}
-        isSearchMatch={isSearchMatch}
-        isSearchActive={isSearchActive}
-        onSearchItemMount={onSearchItemMount}
-      >
-        {renderMessageCard(
-          message,
-          preferImmediateHeavyRender,
-          onApprovalDecision,
-          onUserInputSubmit,
-          onMcpElicitationSubmit,
-          onCodexAppRequestSubmit,
-        )}
-      </MessageSlot>
+    <div ref={pageRef} className="virtualized-message-page" data-page-key={page.key}>
+      <div className="virtualized-message-range">
+        {page.messages.map((message) => (
+          <div
+            key={message.id}
+            className="virtualized-message-slot"
+            data-message-id={message.id}
+          >
+            <MessageSlot
+              itemKey={isActive ? `message:${message.id}` : undefined}
+              isSearchMatch={conversationSearchMatchedItemKeys.has(`message:${message.id}`)}
+              isSearchActive={conversationSearchActiveItemKey === `message:${message.id}`}
+              onSearchItemMount={onSearchItemMount}
+            >
+              {renderMessageCard(
+                message,
+                true,
+                onApprovalDecision,
+                onUserInputSubmit,
+                onMcpElicitationSubmit,
+                onCodexAppRequestSubmit,
+              )}
+            </MessageSlot>
+          </div>
+        ))}
+      </div>
+      {page.hasTrailingGap ? (
+        <div
+          className="virtualized-message-page-gap"
+          style={{ height: VIRTUALIZED_MESSAGE_GAP_PX }}
+        />
+      ) : null}
     </div>
   );
 });

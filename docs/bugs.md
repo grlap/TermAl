@@ -3,6 +3,9 @@
 This file tracks reproduced, current issues. Resolved work, speculative refactors,
 and cleanup notes do not belong here.
 
+[termal] skipping oversized shared Codex app-server stdout line (18279545 bytes, cap 16777216 bytes)
+[termal] skipping oversized shared Codex app-server stdout line (18279545 bytes, cap 16777216 bytes)
+
 ## Active Repo Bugs
 
 Also fixed in the current tree: the dialog backdrop mouse-button contract now
@@ -1810,6 +1813,25 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   future edit that throws during installation could leak globals. Move the
   mock installation inside the `try` so `finally` always runs against the
   saved originals.
+- [ ] P2: Broaden `writeScrollTopAndSyncViewport` regression
+  coverage beyond the initial-mount bottom-pin:
+  `AgentSessionPanel.test.tsx::"renders the bottom window
+  immediately after a virtualized bottom-pin scroll write"`
+  pins the initial-mount bottom-pin call site of the helper,
+  but the other call sites (session-find hit pin,
+  post-activation completion + fallback timeout,
+  anchor-preserving scroll after `renderWindowSize` changes,
+  and both branches of `handleHeightChange`) inherit
+  correctness from the helper without a dedicated window-
+  tracking assertion. The load-more anchor path in particular
+  has the same failure mode ("click Load N earlier →
+  `scrollTop` moves to anchor offset → stale window renders")
+  but no direct test. Add a Vitest case that mounts with 200+
+  messages at the top, scrolls up to `scrollTop = 0`, clicks
+  "Load N earlier messages", and asserts both the anchor-
+  aligned `scrollTop` write and that cards around the anchor
+  are rendered (while newly-prepended earlier messages are
+  absent).
 - [ ] P2: Pin the `SqlitePersistConnectionCache` error-driven
   invalidation path:
   the SQLite cache now drops its cached connection on any
