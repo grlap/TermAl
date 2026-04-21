@@ -65,8 +65,23 @@ export function resolvePaneScrollCommand(
   }
 
   if (event.key === "PageUp" || event.key === "PageDown") {
-    if (event.altKey || event.ctrlKey || event.metaKey) {
+    if (event.altKey || event.metaKey) {
       return null;
+    }
+
+    if (event.ctrlKey) {
+      // Ctrl+PageUp/PageDown is a Windows/Linux boundary-jump
+      // shortcut. On macOS the convention is Cmd-arrow (already
+      // rejected above by the `metaKey` gate) and the pane has
+      // no reason to intercept `Ctrl+PageUp/Down` there — falling
+      // through to `makePaneScrollCommand` would turn it into a
+      // one-page scroll, a platform-specific capture the user
+      // didn't ask for. Mirrors the `Ctrl+ArrowUp/Down` branch
+      // below which also bails on Apple.
+      if (isApplePlatform(platform)) {
+        return null;
+      }
+      return { kind: "boundary", direction: event.key === "PageUp" ? "up" : "down" };
     }
 
     return makePaneScrollCommand(event.key === "PageUp" ? "up" : "down", event.shiftKey);
@@ -80,7 +95,7 @@ export function resolvePaneScrollCommand(
     return null;
   }
 
-  return makePaneScrollCommand(event.key === "ArrowUp" ? "up" : "down", event.shiftKey);
+  return { kind: "boundary", direction: event.key === "ArrowUp" ? "up" : "down" };
 }
 
 function hasCaretAtStart(element: HTMLInputElement | HTMLTextAreaElement): boolean {

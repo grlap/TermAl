@@ -51,7 +51,7 @@ describe("resolvePaneScrollCommand", () => {
     ).toEqual({ kind: "boundary", direction: "up" });
   });
 
-  it("maps Ctrl+ArrowDown to page scrolling on Windows/Linux", () => {
+  it("maps Ctrl+ArrowDown to a boundary jump on Windows/Linux", () => {
     expect(
       resolvePaneScrollCommand(
         {
@@ -64,10 +64,10 @@ describe("resolvePaneScrollCommand", () => {
         document.createElement("div"),
         "Win32",
       ),
-    ).toEqual({ kind: "page", direction: "down" });
+    ).toEqual({ kind: "boundary", direction: "down" });
   });
 
-  it("maps Shift+Ctrl+ArrowUp to a boundary jump on Windows/Linux", () => {
+  it("maps Ctrl+ArrowUp to a boundary jump on Windows/Linux", () => {
     expect(
       resolvePaneScrollCommand(
         {
@@ -75,12 +75,85 @@ describe("resolvePaneScrollCommand", () => {
           ctrlKey: true,
           key: "ArrowUp",
           metaKey: false,
-          shiftKey: true,
+          shiftKey: false,
         },
         document.createElement("div"),
         "Linux x86_64",
       ),
     ).toEqual({ kind: "boundary", direction: "up" });
+  });
+
+  it("maps Ctrl+PageDown to a boundary jump on Windows/Linux", () => {
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "PageDown",
+          metaKey: false,
+          shiftKey: false,
+        },
+        document.createElement("div"),
+        "Win32",
+      ),
+    ).toEqual({ kind: "boundary", direction: "down" });
+  });
+
+  it("maps Ctrl+PageUp from a textarea at the start to a boundary jump", () => {
+    const textarea = document.createElement("textarea");
+    textarea.value = "prompt";
+    textarea.setSelectionRange(0, 0);
+
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "PageUp",
+          metaKey: false,
+          shiftKey: false,
+        },
+        textarea,
+        "Win32",
+      ),
+    ).toEqual({ kind: "boundary", direction: "up" });
+  });
+
+  it("does not intercept Ctrl+PageUp on macOS", () => {
+    // Ctrl+PageUp/PageDown is a Windows/Linux boundary-jump
+    // shortcut. macOS's equivalent is Cmd-arrow (already rejected
+    // by the `metaKey` gate on this function). The pane must not
+    // fall through to a one-page scroll on Apple — that would be
+    // a platform-specific shortcut capture the user didn't ask
+    // for, and is inconsistent with the `Ctrl+ArrowUp/Down`
+    // branch which already bails on Apple. Return `null` so the
+    // key event propagates to whatever else might handle it.
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "PageUp",
+          metaKey: false,
+          shiftKey: false,
+        },
+        document.createElement("div"),
+        "MacIntel",
+      ),
+    ).toBeNull();
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "PageDown",
+          metaKey: false,
+          shiftKey: false,
+        },
+        document.createElement("div"),
+        "MacIntel",
+      ),
+    ).toBeNull();
   });
 
   it("keeps Home and End inside textareas even when the caret starts at the boundary", () => {
