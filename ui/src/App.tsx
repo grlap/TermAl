@@ -15,7 +15,6 @@ import { createPortal, flushSync } from "react-dom";
 import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
 import { DialogCloseIcon } from "./message-card-icons";
 import {
-  ApiRequestError,
   archiveCodexThread,
   cancelQueuedPrompt,
   compactCodexThread,
@@ -25,7 +24,6 @@ import {
   fetchAgentCommands,
   fetchGitDiff,
   fetchGitStatus,
-  fetchSession,
   fetchState,
   forkCodexThread,
   isBackendUnavailableError,
@@ -56,26 +54,21 @@ import { AgentIcon } from "./agent-icon";
 import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
   LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,
-  applyDeltaToSessions,
   pruneLiveTransportActivitySessions,
   sessionHasPotentiallyStaleTransport,
 } from "./live-updates";
 import {
-  areRemoteConfigsEqual,
   createSessionModelHint,
   defaultNewSessionModel,
   describeCodexModelAdjustmentNotice,
   describeProjectScope,
   describeSessionModelRefreshError,
-  describeUnknownSessionModelWarning,
   normalizedCodexReasoningEffort,
   normalizedRequestedSessionModel,
-  resolveAppPreferences,
   resolveControlPanelWorkspaceRoot,
   resolveRemoteConfig,
   resolveUnknownSessionModelSendAttempt,
   remoteBadgeLabel,
-  unknownSessionModelConfirmationKey,
   usesSessionModelPicker,
   CLAUDE_EFFORT_OPTIONS,
   CODEX_REASONING_EFFORT_OPTIONS,
@@ -109,7 +102,6 @@ import {
   buildControlSurfaceSessionListState,
   createControlPanelSectionLauncherTab,
   formatSessionOrchestratorGroupName,
-  mergeOrchestratorDeltaSessions,
 } from "./control-surface-state";
 import {
   collectGitDiffPreviewRefreshes,
@@ -120,10 +112,13 @@ import {
   describeBackendConnectionIssueDetail,
   type BackendConnectionState,
 } from "./backend-connection";
-import { resolveAdoptedStateSlices } from "./state-adoption";
 import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
 import { useAppPreferencesState } from "./app-preferences-state";
 import { useAppWorkspaceLayout } from "./app-workspace-layout";
+import {
+  useAppLiveState,
+  type LiveTransportCoordination,
+} from "./app-live-state";
 import { appTestHooks } from "./app-test-hooks";
 import { ProjectListSection } from "./ProjectListSection";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
@@ -171,7 +166,6 @@ import type {
   CodexReasoningEffort,
   CodexState,
   CursorMode,
-  DeltaEvent,
   DiffMessage,
   ExhaustiveValueCoverage,
   GeminiApprovalMode,
@@ -186,7 +180,6 @@ import type {
   Session,
   SessionSettingsField,
   SessionSettingsValue,
-  WorkspaceFilesChangedEvent,
 } from "./types";
 import {
   activatePane,
@@ -233,7 +226,6 @@ import {
   ensureWorkspaceViewId,
   type ControlPanelSide,
 } from "./workspace-storage";
-import { reconcileSessions } from "./session-reconcile";
 import {
   attachSessionDragData,
   readSessionDragData,
@@ -262,10 +254,6 @@ import {
 } from "./session-list-filter";
 import { startActivePromptPoll } from "./active-prompt-poll";
 import {
-  decideDeltaRevisionAction,
-  shouldAdoptSnapshotRevision,
-} from "./state-revision";
-import {
   TAB_DRAG_CHANNEL_NAME,
   attachWorkspaceTabDragData,
   createWorkspaceTabDrag,
@@ -282,11 +270,7 @@ import {
   pendingGitDiffPreviewChangeType,
   pendingGitDiffPreviewSummary,
   primaryModifierLabel,
-  pruneSessionAttachmentValues,
-  pruneSessionCommandValues,
   pruneSessionFlags,
-  pruneSessionFlagsWithInvalidation,
-  pruneSessionValues,
   readNavigatorOnline,
   releaseDraftAttachments,
   removeQueuedPromptFromSessions,
@@ -295,9 +279,6 @@ import {
   type SessionAgentCommandMap,
   type SessionFlagMap,
 } from "./app-utils";
-import {
-  mergeWorkspaceFilesChangedEvents,
-} from "./workspace-file-events";
 import {
   CREATE_SESSION_WORKSPACE_ID,
   LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,
@@ -314,8 +295,25 @@ import {
   type SessionErrorMap,
   type SessionNoticeMap,
   type StandaloneControlSurfaceViewState,
-  type StateEventPayload,
 } from "./app-shell-internals";
+
+function createDefaultLiveTransportCoordination(): LiveTransportCoordination {
+  return {
+    isCancelled: () => true,
+    sawReconnectOpenSinceLastError: () => false,
+    hasReconnectStateResyncTimeout: () => false,
+    confirmReconnectRecoveryFromLiveEvent: () => {},
+    clearInitialStateResyncRetryTimeout: () => {},
+    clearReconnectStateResyncTimeoutAfterConfirmedReopen: () => {},
+    scheduleReconnectStateResync: () => {},
+    requestStateResync: () => {},
+    markLiveTransportActivity: () => {},
+    markLiveSessionResumeWatchdogBaseline: () => {},
+    syncLiveTransportActivityFromState: () => {},
+    pruneLiveTransportActivitySessions: () => {},
+    syncLiveSessionResumeWatchdogBaselines: () => {},
+  };
+}
 
 export default function App() {
   const [workspaceViewId] = useState(() => ensureWorkspaceViewId());
@@ -504,12 +502,6 @@ export default function App() {
     } | null>(null);
   const [windowId] = useState(() => crypto.randomUUID());
   const [draggedTab, setDraggedTab] = useState<WorkspaceTabDrag | null>(null);
-  const [workspaceFilesChangedEvent, setWorkspaceFilesChangedEvent] =
-    useState<WorkspaceFilesChangedEvent | null>(null);
-  const workspaceFilesChangedEventBufferRef =
-    useRef<WorkspaceFilesChangedEvent | null>(null);
-  const workspaceFilesChangedEventFlushTimeoutRef = useRef<number | null>(null);
-  const lastWorkspaceFilesChangedRevisionRef = useRef<number | null>(null);
   const gitDiffPreviewRefreshVersionsRef = useRef<Map<string, number>>(
     new Map(),
   );
@@ -584,7 +576,6 @@ export default function App() {
   // Updated in lockstep with `latestStateRevisionRef` inside
   // `adoptState` / `adoptCreatedSessionResponse` / `adoptFetchedSession`.
   const lastSeenServerInstanceIdRef = useRef<string | null>(null);
-  const forceAdoptNextStateEventRef = useRef(false);
   const stateResyncInFlightRef = useRef(false);
   const stateResyncPendingRef = useRef(false);
   const stateResyncAllowAuthoritativeRollbackRef = useRef(false);
@@ -597,6 +588,9 @@ export default function App() {
   const syncAdoptedLiveSessionResumeWatchdogBaselinesRef = useRef<
     (sessions: Session[], now?: number) => void
   >(() => {});
+  const transportCoordinationRef = useRef<LiveTransportCoordination>(
+    createDefaultLiveTransportCoordination(),
+  );
   const paneShouldStickToBottomRef = useRef<
     Record<string, boolean | undefined>
   >({});
@@ -609,8 +603,6 @@ export default function App() {
   const forceSessionScrollToBottomRef = useRef<
     Record<string, true | undefined>
   >({});
-  const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
-  const hydratedSessionIdsRef = useRef<Set<string>>(new Set());
 
   const projectLookup = useMemo(
     () => new Map(projects.map((project) => [project.id, project])),
@@ -825,6 +817,75 @@ export default function App() {
     setBackendConnectionState,
     reportRequestError,
     applyControlPanelLayout,
+  });
+
+  const {
+    handleDeltaEvent,
+    handleStateEvent,
+    handleWorkspaceFilesChangedEvent,
+    adoptState,
+    adoptCreatedSessionResponse,
+    syncPreferencesFromState,
+    hydratedSessionIdsRef,
+    hydratingSessionIdsRef,
+    forceAdoptNextStateEventRef,
+    workspaceFilesChangedEvent,
+    workspaceFilesChangedEventBufferRef,
+    workspaceFilesChangedEventFlushTimeoutRef,
+    resetWorkspaceFilesChangedEventGate,
+  } = useAppLiveState({
+    adoptionRefs: {
+      isMountedRef,
+      latestStateRevisionRef,
+      lastSeenServerInstanceIdRef,
+      sessionsRef,
+      codexStateRef,
+      agentReadinessRef,
+      projectsRef,
+      orchestratorsRef,
+      workspaceSummariesRef,
+      refreshingAgentCommandSessionIdsRef,
+      confirmedUnknownModelSendsRef,
+    },
+    stateSetters: {
+      setSessions,
+      setWorkspace,
+      setCodexState,
+      setAgentReadiness,
+      setProjects,
+      setOrchestrators,
+      setWorkspaceSummaries,
+      setDraftsBySessionId,
+      setDraftAttachmentsBySessionId,
+      setSendingSessionIds,
+      setStoppingSessionIds,
+      setKillingSessionIds,
+      setKillRevealSessionId,
+      setPendingKillSessionId,
+      setPendingSessionRename,
+      setUpdatingSessionIds,
+      setAgentCommandsBySessionId,
+      setRefreshingAgentCommandSessionIds,
+      setAgentCommandErrors,
+      setSessionSettingNotices,
+      setSelectedProjectId,
+      setIsLoading,
+      setBackendConnectionIssueDetail,
+      setBackendConnectionState,
+    },
+    preferenceSetters: {
+      setDefaultCodexReasoningEffort,
+      setDefaultClaudeApprovalMode,
+      setDefaultClaudeEffort,
+      setRemoteConfigs,
+    },
+    applyControlPanelLayout,
+    requestActionRecoveryResyncRef,
+    syncAdoptedLiveSessionResumeWatchdogBaselinesRef,
+    transportCoordinationRef,
+    clearRecoveredBackendRequestError,
+    reportRequestError,
+    activeSession,
   });
 
   const selectedProject =
@@ -1258,137 +1319,6 @@ export default function App() {
     }
   }
 
-  function adoptSessions(
-    nextSessions: Session[],
-    options?: { openSessionId?: string; paneId?: string | null },
-  ) {
-    const previousSessions = sessionsRef.current;
-    const previousSessionsById = new Map(
-      previousSessions.map((session) => [session.id, session]),
-    );
-    const mergedSessions = reconcileSessions(previousSessions, nextSessions);
-    const availableSessionIds = new Set(
-      mergedSessions.map((session) => session.id),
-    );
-    const sessionsWithChangedWorkdir = new Set(
-      mergedSessions.flatMap((session) => {
-        const previousSession = previousSessionsById.get(session.id);
-        return previousSession && previousSession.workdir !== session.workdir
-          ? [session.id]
-          : [];
-      }),
-    );
-    // Avoid rewriting workspace state when an adopted snapshot preserves the
-    // same reconciled sessions. Workspace autosave is keyed off `workspace`
-    // identity, so an identity-only rewrite here can create a loop:
-    // workspace PUT -> SSE state snapshot -> adoptSessions -> workspace save.
-    const shouldReconcileWorkspace =
-      mergedSessions !== previousSessions || Boolean(options?.openSessionId);
-
-    sessionsRef.current = mergedSessions;
-    setSessions(mergedSessions);
-    if (shouldReconcileWorkspace) {
-      setWorkspace((current) => {
-        const reconciled =
-          mergedSessions !== previousSessions
-            ? applyControlPanelLayout(
-                reconcileWorkspaceState(current, mergedSessions),
-              )
-            : current;
-        if (!options?.openSessionId) {
-          return reconciled;
-        }
-
-        return applyControlPanelLayout(
-          openSessionInWorkspaceState(
-            reconciled,
-            options.openSessionId,
-            options.paneId ?? null,
-          ),
-        );
-      });
-    }
-    setDraftsBySessionId((current) =>
-      pruneSessionValues(current, availableSessionIds),
-    );
-    setDraftAttachmentsBySessionId((current) =>
-      pruneSessionAttachmentValues(current, availableSessionIds),
-    );
-    setSendingSessionIds((current) =>
-      pruneSessionFlags(current, availableSessionIds),
-    );
-    setStoppingSessionIds((current) =>
-      pruneSessionFlags(current, availableSessionIds),
-    );
-    setKillingSessionIds((current) =>
-      pruneSessionFlags(current, availableSessionIds),
-    );
-    setKillRevealSessionId((current) =>
-      current && availableSessionIds.has(current) ? current : null,
-    );
-    setPendingKillSessionId((current) =>
-      current && availableSessionIds.has(current) ? current : null,
-    );
-    setPendingSessionRename((current) =>
-      current && availableSessionIds.has(current.sessionId) ? current : null,
-    );
-    setUpdatingSessionIds((current) =>
-      pruneSessionFlags(current, availableSessionIds),
-    );
-    setAgentCommandsBySessionId((current) =>
-      pruneSessionCommandValues(
-        current,
-        availableSessionIds,
-        sessionsWithChangedWorkdir,
-      ),
-    );
-    setRefreshingAgentCommandSessionIds((current) =>
-      pruneSessionFlagsWithInvalidation(
-        current,
-        availableSessionIds,
-        sessionsWithChangedWorkdir,
-      ),
-    );
-    refreshingAgentCommandSessionIdsRef.current =
-      pruneSessionFlagsWithInvalidation(
-        refreshingAgentCommandSessionIdsRef.current,
-        availableSessionIds,
-        sessionsWithChangedWorkdir,
-      );
-    setAgentCommandErrors((current) =>
-      pruneSessionValues(
-        current,
-        availableSessionIds,
-        sessionsWithChangedWorkdir,
-      ),
-    );
-    setSessionSettingNotices((current) =>
-      pruneSessionValues(current, availableSessionIds),
-    );
-    const availableUnknownModelKeys = new Set(
-      mergedSessions
-        .filter((session) => describeUnknownSessionModelWarning(session))
-        .map((session) =>
-          unknownSessionModelConfirmationKey(session.id, session.model),
-        ),
-    );
-    confirmedUnknownModelSendsRef.current = new Set(
-      [...confirmedUnknownModelSendsRef.current].filter((key) =>
-        availableUnknownModelKeys.has(key),
-      ),
-    );
-    hydratingSessionIdsRef.current = new Set(
-      [...hydratingSessionIdsRef.current].filter((sessionId) =>
-        availableSessionIds.has(sessionId),
-      ),
-    );
-    hydratedSessionIdsRef.current = new Set(
-      [...hydratedSessionIdsRef.current].filter((sessionId) =>
-        availableSessionIds.has(sessionId),
-      ),
-    );
-  }
-
   function updateSessionLocally(
     sessionId: string,
     update: (session: Session) => Session,
@@ -1413,236 +1343,6 @@ export default function App() {
       applyControlPanelLayout(reconcileWorkspaceState(current, nextSessions)),
     );
   }
-
-  // Outcome of `adoptCreatedSessionResponse`:
-  //   - "adopted":    session inserted into `sessionsRef` and the
-  //                   workspace pane opened. Nothing for the caller
-  //                   to do.
-  //   - "stale":      revision gate rejected the write because a
-  //                   newer snapshot already landed. The session
-  //                   was NOT inserted here but an earlier delta
-  //                   already saw it (that's how the revision got
-  //                   ahead), so `sessionsRef` does contain
-  //                   `created.sessionId`. The caller may still
-  //                   open the workspace pane as a safe fallback.
-  //   - "recovering": wire-contract violation
-  //                   (`session.id !== sessionId`) — a resync was
-  //                   scheduled and the caller MUST NOT open a
-  //                   workspace pane for the mismatched id. That
-  //                   id was never inserted into `sessionsRef`,
-  //                   so opening it would leave a phantom pane
-  //                   that persists until the resync reconciles.
-  //
-  // A plain boolean could not carry the "stale vs recovering"
-  // distinction, so the call-site fallback (`if (!adopted) { open
-  // workspace pane }`) opened a phantom on protocol mismatch.
-  type AdoptCreatedSessionOutcome = "adopted" | "stale" | "recovering";
-
-  function adoptCreatedSessionResponse(
-    created: CreateSessionResponse,
-    options?: { openSessionId?: string; paneId?: string | null },
-  ): AdoptCreatedSessionOutcome {
-    if (created.session.id !== created.sessionId) {
-      // Wire contract guarantees `session.id === sessionId`; a mismatch
-      // means protocol drift. Trigger a recovery resync so the client
-      // reconciles against authoritative state instead of opening a
-      // workspace pane for a session that was never inserted into
-      // `sessionsRef`. Mirrors the sibling path in `adoptFetchedSession`.
-      requestActionRecoveryResyncRef.current();
-      return "recovering";
-    }
-
-    // Route the session write through the same revision-gate that
-    // governs `adoptState`, BUT pass the response's `serverInstanceId`
-    // so a server-restart-driven revision rewind is accepted. This is
-    // the unified fix for:
-    //   - "Prompt sent during SSE reconnect window is invisible until
-    //     safety-net poll" — after a restart, the POST response's
-    //     instance id differs from `lastSeenServerInstanceIdRef` and
-    //     the gate accepts the lower revision, so the user's prompt
-    //     shows up immediately.
-    //   - "adoptCreatedSessionResponse session write is not
-    //     revision-gated" — a stale POST response (race between SSE
-    //     delta and POST resolution on the same server instance) is
-    //     now rejected instead of unconditionally overwriting
-    //     `sessionsRef`.
-    if (
-      !shouldAdoptSnapshotRevision(
-        latestStateRevisionRef.current,
-        created.revision,
-        {
-          lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
-          nextServerInstanceId: created.serverInstanceId,
-        },
-      )
-    ) {
-      return "stale";
-    }
-
-    const previousSessions = sessionsRef.current;
-    const existingIndex = previousSessions.findIndex(
-      (session) => session.id === created.sessionId,
-    );
-    const nextSessions =
-      existingIndex === -1
-        ? [...previousSessions, created.session]
-        : previousSessions.map((session, index) =>
-            index === existingIndex ? created.session : session,
-          );
-    latestStateRevisionRef.current = created.revision;
-    if (created.serverInstanceId) {
-      lastSeenServerInstanceIdRef.current = created.serverInstanceId;
-    }
-    sessionsRef.current = nextSessions;
-    setSessions(nextSessions);
-    setWorkspace((current) =>
-      applyControlPanelLayout(
-        openSessionInWorkspaceState(
-          reconcileWorkspaceState(current, nextSessions),
-          options?.openSessionId ?? created.sessionId,
-          options?.paneId ?? null,
-        ),
-      ),
-    );
-    return "adopted";
-  }
-
-  // Returns `boolean` rather than the sibling
-  // `AdoptCreatedSessionOutcome` discriminated union because the
-  // wire-contract-mismatch branch for this path is hoisted to
-  // the call site in the hydration effect below (see
-  // `fetchSession` catch branch: it checks
-  // `response.session.id !== sessionId` and triggers recovery
-  // BEFORE reaching this function). The two `false` outcomes
-  // here — unknown session id (deleted during fetch) and
-  // revision gate rejection — both collapse to the same caller
-  // behaviour: don't mark as hydrated, let the next SSE delta
-  // or action-recovery resync reconcile. A three-way
-  // discrimination would be useful only if those two cases
-  // ever needed divergent callback treatment.
-  function adoptFetchedSession(
-    session: Session,
-    revision: number,
-    serverInstanceId: string,
-  ) {
-    const previousRevision = latestStateRevisionRef.current;
-    const previousSessions = sessionsRef.current;
-    const existingIndex = previousSessions.findIndex(
-      (entry) => entry.id === session.id,
-    );
-    if (existingIndex === -1) {
-      return false;
-    }
-
-    const currentSession = previousSessions[existingIndex];
-    // Routing through `shouldAdoptSnapshotRevision` gives us the
-    // `serverInstanceId` restart-detection branch while preserving the
-    // pre-existing nuance: on a genuine first hydration (no local
-    // messages yet) we accept even a lower revision, but once the
-    // session has hydrated messages we refuse to clobber them with an
-    // older snapshot. `force + allowRevisionDowngrade: <messages empty>`
-    // encodes exactly that — force=true enters the downgrade branch,
-    // and `allowRevisionDowngrade` decides whether same-instance
-    // downgrades are permitted. Instance mismatch wins over both, so
-    // a restart mid-hydration is always adopted regardless of revision.
-    if (
-      !shouldAdoptSnapshotRevision(previousRevision, revision, {
-        lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
-        nextServerInstanceId: serverInstanceId,
-        force: true,
-        allowRevisionDowngrade: currentSession.messages.length === 0,
-      })
-    ) {
-      return false;
-    }
-
-    const hydratedSession = { ...session, messagesLoaded: true };
-    const nextSessions = previousSessions.map((entry, index) =>
-      index === existingIndex ? hydratedSession : entry,
-    );
-    if (previousRevision === null || revision > previousRevision) {
-      latestStateRevisionRef.current = revision;
-    }
-    if (serverInstanceId) {
-      lastSeenServerInstanceIdRef.current = serverInstanceId;
-    }
-    sessionsRef.current = nextSessions;
-    setSessions(nextSessions);
-    return true;
-  }
-
-  useEffect(() => {
-    if (
-      !activeSession ||
-      activeSession.messagesLoaded !== false
-    ) {
-      return;
-    }
-
-    const sessionId = activeSession.id;
-    if (
-      hydratedSessionIdsRef.current.has(sessionId) ||
-      hydratingSessionIdsRef.current.has(sessionId)
-    ) {
-      return;
-    }
-
-    hydratingSessionIdsRef.current.add(sessionId);
-    void (async () => {
-      try {
-        const response = await fetchSession(sessionId);
-        if (!isMountedRef.current) {
-          return;
-        }
-        if (response.session.id !== sessionId) {
-          requestActionRecoveryResyncRef.current();
-          return;
-        }
-        if (
-          adoptFetchedSession(
-            response.session,
-            response.revision,
-            response.serverInstanceId,
-          )
-        ) {
-          hydratedSessionIdsRef.current.add(sessionId);
-        }
-      } catch (error) {
-        if (!isMountedRef.current) {
-          return;
-        }
-        // 404 is a benign race: the session was deleted, hidden,
-        // or renumbered between a delta event that referenced it
-        // and this hydration fetch. The action-recovery resync
-        // will repair our local view on the next SSE tick without
-        // dropping a toast on the user. Mirrors
-        // `fetchWorkspaceLayout`'s "404 → silent recovery" UX
-        // posture; the transport shape differs (that one returns
-        // `null` at the API boundary so callers treat it as "no
-        // layout yet"; here `fetchSession` throws
-        // `ApiRequestError` and we branch on `instanceof` + status
-        // at the call site).
-        if (
-          error instanceof ApiRequestError &&
-          error.status === 404
-        ) {
-          requestActionRecoveryResyncRef.current();
-          return;
-        }
-        reportRequestError(error);
-      } finally {
-        hydratingSessionIdsRef.current.delete(sessionId);
-      }
-    })();
-    // Deps intentionally do NOT include `activeSession?.messages.length`:
-    // the body only reads `activeSession?.id` and
-    // `activeSession?.messagesLoaded`, so re-triggering on every
-    // streamed token (which bumps `messages.length`) just to hit
-    // the "already hydrated / already hydrating" early-returns is
-    // wasted work. Session swap (id change) and the one-shot
-    // `messagesLoaded: false → true` transition are the only
-    // signals this effect cares about.
-  }, [activeSession?.id, activeSession?.messagesLoaded]);
 
   function buildOptimisticSessionSettingsUpdate(
     session: Session,
@@ -1822,101 +1522,6 @@ export default function App() {
     }
 
     return changed ? nextSession : currentSession;
-  }
-
-  function syncPreferencesFromState(nextState: StateResponse) {
-    const preferences = resolveAppPreferences(nextState.preferences);
-    setDefaultCodexReasoningEffort(preferences.defaultCodexReasoningEffort);
-    setDefaultClaudeApprovalMode(preferences.defaultClaudeApprovalMode);
-    setDefaultClaudeEffort(preferences.defaultClaudeEffort);
-    setRemoteConfigs((current) =>
-      areRemoteConfigsEqual(current, preferences.remotes)
-        ? current
-        : preferences.remotes,
-    );
-  }
-
-  function adoptState(
-    nextState: StateResponse,
-    options?: {
-      force?: boolean;
-      /** Allow adopting a snapshot with a lower revision than the current one.
-       *  Only used for backend restart rollbacks where the revision counter resets. */
-      allowRevisionDowngrade?: boolean;
-      openSessionId?: string;
-      paneId?: string | null;
-    },
-  ) {
-    if (!isMountedRef.current) {
-      return false;
-    }
-
-    if (
-      !shouldAdoptSnapshotRevision(
-        latestStateRevisionRef.current,
-        nextState.revision,
-        {
-          ...options,
-          lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
-          nextServerInstanceId: nextState.serverInstanceId,
-        },
-      )
-    ) {
-      return false;
-    }
-
-    latestStateRevisionRef.current = nextState.revision;
-    if (nextState.serverInstanceId) {
-      lastSeenServerInstanceIdRef.current = nextState.serverInstanceId;
-    }
-    const currentCodexState = codexStateRef.current;
-    const currentAgentReadiness = agentReadinessRef.current;
-    const currentProjects = projectsRef.current;
-    const currentOrchestrators = orchestratorsRef.current;
-    const currentWorkspaceSummaries = workspaceSummariesRef.current;
-    const adoptedStateSlices = resolveAdoptedStateSlices(
-      {
-        codex: currentCodexState,
-        agentReadiness: currentAgentReadiness,
-        projects: currentProjects,
-        orchestrators: currentOrchestrators,
-        workspaces: currentWorkspaceSummaries,
-      },
-      nextState,
-    );
-    if (adoptedStateSlices.codex !== currentCodexState) {
-      codexStateRef.current = adoptedStateSlices.codex;
-      setCodexState(adoptedStateSlices.codex);
-    }
-    if (adoptedStateSlices.agentReadiness !== currentAgentReadiness) {
-      agentReadinessRef.current = adoptedStateSlices.agentReadiness;
-      setAgentReadiness(adoptedStateSlices.agentReadiness);
-    }
-    syncPreferencesFromState(nextState);
-    if (adoptedStateSlices.projects !== currentProjects) {
-      projectsRef.current = adoptedStateSlices.projects;
-      setProjects(adoptedStateSlices.projects);
-    }
-    if (adoptedStateSlices.orchestrators !== currentOrchestrators) {
-      orchestratorsRef.current = adoptedStateSlices.orchestrators;
-      setOrchestrators(adoptedStateSlices.orchestrators);
-    }
-    if (adoptedStateSlices.workspaces !== currentWorkspaceSummaries) {
-      workspaceSummariesRef.current = adoptedStateSlices.workspaces;
-      setWorkspaceSummaries(adoptedStateSlices.workspaces);
-    }
-    adoptSessions(nextState.sessions, options);
-    // Local state adoptions can resume or create active sessions before any SSE arrives.
-    syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current(
-      nextState.sessions,
-    );
-    if (options?.openSessionId) {
-      const openedSession = nextState.sessions.find(
-        (session) => session.id === options.openSessionId,
-      );
-      setSelectedProjectId(openedSession?.projectId ?? ALL_PROJECTS_FILTER_ID);
-    }
-    return true;
   }
 
   async function persistAppPreferences(payload: {
@@ -2446,53 +2051,6 @@ export default function App() {
       );
     }
 
-    function flushWorkspaceFilesChangedEventBuffer() {
-      workspaceFilesChangedEventFlushTimeoutRef.current = null;
-      const bufferedEvent = workspaceFilesChangedEventBufferRef.current;
-      workspaceFilesChangedEventBufferRef.current = null;
-      if (!bufferedEvent || cancelled) {
-        return;
-      }
-
-      startTransition(() => {
-        setWorkspaceFilesChangedEvent(bufferedEvent);
-      });
-    }
-
-    function resetWorkspaceFilesChangedEventGate() {
-      lastWorkspaceFilesChangedRevisionRef.current = null;
-      workspaceFilesChangedEventBufferRef.current = null;
-      if (workspaceFilesChangedEventFlushTimeoutRef.current !== null) {
-        window.clearTimeout(workspaceFilesChangedEventFlushTimeoutRef.current);
-        workspaceFilesChangedEventFlushTimeoutRef.current = null;
-      }
-    }
-
-    function enqueueWorkspaceFilesChangedEvent(
-      filesChanged: WorkspaceFilesChangedEvent,
-    ) {
-      const lastRevision = lastWorkspaceFilesChangedRevisionRef.current;
-      if (lastRevision !== null && filesChanged.revision < lastRevision) {
-        return;
-      }
-
-      lastWorkspaceFilesChangedRevisionRef.current = filesChanged.revision;
-      workspaceFilesChangedEventBufferRef.current =
-        mergeWorkspaceFilesChangedEvents(
-          workspaceFilesChangedEventBufferRef.current,
-          filesChanged,
-        );
-
-      if (workspaceFilesChangedEventFlushTimeoutRef.current !== null) {
-        return;
-      }
-
-      workspaceFilesChangedEventFlushTimeoutRef.current = window.setTimeout(
-        flushWorkspaceFilesChangedEventBuffer,
-        0,
-      );
-    }
-
     function markResumeResyncIfNeeded() {
       if (latestStateRevisionRef.current === null) {
         return;
@@ -2578,192 +2136,26 @@ export default function App() {
       });
     }
 
-    function handleStateEvent(event: MessageEvent<string>) {
-      if (cancelled) {
-        return;
-      }
-
-      try {
-        const state = JSON.parse(event.data) as StateEventPayload;
-        if (state._sseFallback) {
-          // Marked fallback payloads only signal that the client should refetch
-          // the authoritative snapshot from /api/state.
-          forceAdoptNextStateEventRef.current = false;
-          requestStateResync({
-            allowAuthoritativeRollback: true,
-            preserveReconnectFallback: true,
-          });
-          return;
-        }
-
-        const force = forceAdoptNextStateEventRef.current;
-        // SSE state events are always the first event on a new connection
-        // (before any deltas), so there is no risk of a delta racing ahead
-        // and being overwritten. Allow revision downgrade so a restarted
-        // server (whose persisted revision may be lower) is adopted.
-        const adopted = adoptState(state, {
-          force,
-          allowRevisionDowngrade: force,
-        });
-        forceAdoptNextStateEventRef.current = false;
-        // Confirm recovery only after adoption succeeds. If adoptState throws
-        // (bad payload, reducer error), the catch block must keep the client in
-        // the reconnecting state with fallback polling armed rather than
-        // prematurely marking the connection as healthy.
-        confirmReconnectRecoveryFromLiveEvent();
-        if (adopted) {
-          clearInitialStateResyncRetryTimeout();
-          const adoptedAt = Date.now();
-          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
-          // A live SSE state payload proves the stream is healthy again, so it also
-          // clears any residual watchdog retry cooldown from an earlier fallback probe.
-          syncLiveTransportActivityFromState(state.sessions, adoptedAt);
-          pruneLiveTransportActivitySessions(
-            lastLiveTransportActivityAtBySessionId,
-            state.sessions,
-          );
-          syncLiveSessionResumeWatchdogBaselines(state.sessions, adoptedAt);
-        }
-        setBackendConnectionIssueDetail(null);
-        clearRecoveredBackendRequestError();
-      } catch (error) {
-        if (!cancelled) {
-          setBackendConnectionIssueDetail(
-            describeBackendConnectionIssueDetail(error),
-          );
-          // A bad reconnect state payload must not leave the client marked as
-          // connected without a usable snapshot. Restore "reconnecting" so the
-          // retry affordance stays available (onopen already set "connected"),
-          // and re-arm fallback polling so recovery continues via /api/state.
-          if (sawReconnectOpenSinceLastError) {
-            setBackendConnectionState("reconnecting");
-            if (reconnectStateResyncTimeoutId === null) {
-              scheduleReconnectStateResync();
-            }
-          }
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
-      }
-    }
-
-    function handleDeltaEvent(event: MessageEvent<string>) {
-      if (cancelled) {
-        return;
-      }
-
-      try {
-        const delta = JSON.parse(event.data) as DeltaEvent;
-        const revisionAction = decideDeltaRevisionAction(
-          latestStateRevisionRef.current,
-          delta.revision,
-        );
-        if (revisionAction === "ignore") {
-          // An ignored delta proves the client already has data at this
-          // revision or newer — the snapshot that advanced the revision was
-          // authoritative. Transport is healthy and the client is caught up.
-          confirmReconnectRecoveryFromLiveEvent();
-          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
-          setBackendConnectionIssueDetail(null);
-          clearRecoveredBackendRequestError();
-          return;
-        }
-        if (revisionAction === "resync") {
-          // A revision gap means we missed events but the stream IS working.
-          // Do NOT confirm recovery yet — if the follow-up /api/state fetch
-          // fails, the client must stay in the reconnecting state. Use
-          // rearmOnFailure so a failed resync re-arms polling instead of
-          // stalling recovery.
-          requestStateResync({ rearmOnFailure: true });
-          return;
-        }
-
-        if (delta.type === "orchestratorsUpdated") {
-          // Global orchestrator updates prove the SSE stream is healthy enough to
-          // clear reconnect fallback state. When the delta also carries session
-          // snapshots, treat those specific ids as live data for watchdog baselines.
-          confirmReconnectRecoveryFromLiveEvent();
-          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
-          const appliedAt = Date.now();
-          if (delta.sessions?.length) {
-            const deltaSessionIds = delta.sessions.map((session) => session.id);
-            markLiveTransportActivity(deltaSessionIds, appliedAt);
-            markLiveSessionResumeWatchdogBaseline(deltaSessionIds, appliedAt);
-          }
-          latestStateRevisionRef.current = delta.revision;
-          const nextSessions = mergeOrchestratorDeltaSessions(
-            sessionsRef.current,
-            delta.sessions,
-          );
-          sessionsRef.current = nextSessions;
-          orchestratorsRef.current = delta.orchestrators;
-          startTransition(() => {
-            setOrchestrators(delta.orchestrators);
-            setSessions(nextSessions);
-          });
-          setBackendConnectionIssueDetail(null);
-          clearRecoveredBackendRequestError();
-          return;
-        }
-
-        // Non-session deltas such as orchestratorsUpdated are handled above; the
-        // session reducer only accepts deltas that carry a concrete sessionId.
-        const result = applyDeltaToSessions(sessionsRef.current, delta);
-        if (result.kind === "applied") {
-          confirmReconnectRecoveryFromLiveEvent();
-          const appliedAt = Date.now();
-          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
-          // Every session-scoped delta proves liveness for that session, including
-          // any future delta shape that revives it back to "active".
-          markLiveTransportActivity([delta.sessionId], appliedAt);
-          markLiveSessionResumeWatchdogBaseline([delta.sessionId], appliedAt);
-          latestStateRevisionRef.current = delta.revision;
-          sessionsRef.current = result.sessions;
-          startTransition(() => {
-            setSessions(sessionsRef.current);
-          });
-          setBackendConnectionIssueDetail(null);
-          clearRecoveredBackendRequestError();
-          return;
-        }
-
-        // Unrecognized delta type — resync to get an authoritative snapshot.
-        requestStateResync({ rearmOnFailure: true });
-      } catch {
-        // Parse or reducer failure — restore reconnecting state so the retry
-        // affordance stays available, and re-arm polling.
-        if (sawReconnectOpenSinceLastError) {
-          setBackendConnectionState("reconnecting");
-          if (reconnectStateResyncTimeoutId === null) {
-            scheduleReconnectStateResync();
-          }
-        } else {
-          requestStateResync({ rearmOnFailure: true });
-        }
-      }
-    }
-
-    function handleWorkspaceFilesChangedEvent(event: MessageEvent<string>) {
-      if (cancelled) {
-        return;
-      }
-
-      try {
-        const filesChanged = JSON.parse(
-          event.data,
-        ) as WorkspaceFilesChangedEvent;
-        confirmReconnectRecoveryFromLiveEvent();
-        clearReconnectStateResyncTimeoutAfterConfirmedReopen();
-        setBackendConnectionIssueDetail(null);
-        clearRecoveredBackendRequestError();
-        enqueueWorkspaceFilesChangedEvent(filesChanged);
-      } catch {
-        // File-change events are non-authoritative hints. If one is malformed,
-        // keep the main state stream alive and wait for the next event/snapshot.
-      }
-    }
+    transportCoordinationRef.current = {
+      isCancelled: () => cancelled,
+      sawReconnectOpenSinceLastError: () => sawReconnectOpenSinceLastError,
+      hasReconnectStateResyncTimeout: () =>
+        reconnectStateResyncTimeoutId !== null,
+      confirmReconnectRecoveryFromLiveEvent,
+      clearInitialStateResyncRetryTimeout,
+      clearReconnectStateResyncTimeoutAfterConfirmedReopen,
+      scheduleReconnectStateResync,
+      requestStateResync,
+      markLiveTransportActivity,
+      markLiveSessionResumeWatchdogBaseline,
+      syncLiveTransportActivityFromState,
+      pruneLiveTransportActivitySessions: (sessions) =>
+        pruneLiveTransportActivitySessions(
+          lastLiveTransportActivityAtBySessionId,
+          sessions,
+        ),
+      syncLiveSessionResumeWatchdogBaselines,
+    };
 
     eventSource.addEventListener("state", handleStateEvent as EventListener);
     eventSource.addEventListener("delta", handleDeltaEvent as EventListener);
@@ -2874,6 +2266,8 @@ export default function App() {
       requestBackendReconnectRef.current = () => {};
       requestActionRecoveryResyncRef.current = () => {};
       syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current = () => {};
+      transportCoordinationRef.current =
+        createDefaultLiveTransportCoordination();
       clearInitialStateResyncRetryTimeout();
       clearReconnectStateResyncTimeout();
       if (workspaceFilesChangedEventFlushTimeoutRef.current !== null) {
