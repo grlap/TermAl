@@ -85,7 +85,10 @@ import {
 } from "./prompt-settings-cards";
 
 import { normalizeDisplayPath } from "./path-display";
-import { resolvePaneScrollCommand } from "./pane-keyboard";
+import {
+  resolvePaneScrollCommand,
+  shouldHandlePanePageKey,
+} from "./pane-keyboard";
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
@@ -166,6 +169,7 @@ import {
 } from "./workspace-file-events";
 
 const MAX_CACHED_SESSION_PAGES_PER_PANE = 3;
+const SESSION_PAGE_JUMP_VIEWPORT_FACTOR = 0.45;
 
 export function SessionPaneView({
   pane,
@@ -1096,6 +1100,57 @@ export function SessionPaneView({
     setNewResponseIndicator(scrollStateKey, false);
   }
 
+  function scrollMessageStackByDelta(deltaY: number) {
+    const node = messageStackRef.current;
+    if (!node) {
+      return;
+    }
+
+    const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+    if (maxScrollTop <= 0) {
+      return;
+    }
+
+    const nextScrollTop = clamp(node.scrollTop + deltaY, 0, maxScrollTop);
+    if (Math.abs(nextScrollTop - node.scrollTop) < 0.5) {
+      return;
+    }
+
+    node.scrollTop = nextScrollTop;
+    notifyMessageStackScrollWrite(node);
+    const { shouldStick } = syncMessageStackScrollPosition(
+      node,
+      scrollStateKey,
+      paneScrollPositions,
+    );
+    setShouldStickToBottom(shouldStick);
+    if (shouldStick) {
+      setNewResponseIndicator(scrollStateKey, false);
+    } else {
+      cancelSettledScrollToBottom();
+    }
+  }
+
+  function isMessageStackNearBottom() {
+    const node = messageStackRef.current;
+    if (!node) {
+      return true;
+    }
+    return node.scrollHeight - node.scrollTop - node.clientHeight < 72;
+  }
+
+  function followLatestMessageForPromptSend() {
+    if (isMessageStackNearBottom()) {
+      scrollToLatestMessage("smooth");
+      return undefined;
+    }
+
+    return scheduleSettledScrollToBottom("auto", {
+      maxAttempts: 24,
+      minAttempts: 4,
+    });
+  }
+
   function scrollMessageStackByPage(direction: -1 | 1) {
     const node = messageStackRef.current;
     if (!node) {
@@ -1108,6 +1163,19 @@ export function SessionPaneView({
       behavior: "smooth",
     });
     notifyMessageStackScrollWrite(node);
+  }
+
+  function scrollSessionMessageStackByPageJump(direction: -1 | 1) {
+    const node = messageStackRef.current;
+    if (!node) {
+      return;
+    }
+
+    const distance = Math.max(
+      Math.round(node.clientHeight * SESSION_PAGE_JUMP_VIEWPORT_FACTOR),
+      1,
+    );
+    scrollMessageStackByDelta(distance * direction);
   }
 
   function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
@@ -1147,6 +1215,17 @@ export function SessionPaneView({
 
   function handlePaneKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
     if (event.defaultPrevented) {
+      return;
+    }
+
+    if (
+      pane.viewMode === "session" &&
+      (event.key === "PageUp" || event.key === "PageDown")
+    ) {
+      event.preventDefault();
+      scrollSessionMessageStackByPageJump(
+        event.key === "PageUp" ? -1 : 1,
+      );
       return;
     }
 
@@ -1211,30 +1290,8 @@ export function SessionPaneView({
       return;
     }
 
-    const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-    if (maxScrollTop <= 0) {
-      return;
-    }
-
-    const nextScrollTop = clamp(node.scrollTop + deltaY, 0, maxScrollTop);
-    if (Math.abs(nextScrollTop - node.scrollTop) < 0.5) {
-      return;
-    }
-
     event.preventDefault();
-    node.scrollTop = nextScrollTop;
-    notifyMessageStackScrollWrite(node);
-    const { shouldStick } = syncMessageStackScrollPosition(
-      node,
-      scrollStateKey,
-      paneScrollPositions,
-    );
-    setShouldStickToBottom(shouldStick);
-    if (shouldStick) {
-      setNewResponseIndicator(scrollStateKey, false);
-    } else {
-      cancelSettledScrollToBottom();
-    }
+    scrollMessageStackByDelta(deltaY);
   };
 
   useEffect(() => {
@@ -1316,6 +1373,34 @@ export function SessionPaneView({
       window.removeEventListener("keydown", handleWindowKeyDown, true);
     };
   }, [canFindInSession, isActive]);
+
+  useEffect(() => {
+    if (!isActive || pane.viewMode !== "session") {
+      return;
+    }
+
+    function handleWindowPageJump(event: KeyboardEvent) {
+      if (event.defaultPrevented) {
+        return;
+      }
+      if (event.key !== "PageUp" && event.key !== "PageDown") {
+        return;
+      }
+      if (!shouldHandlePanePageKey(event.target)) {
+        return;
+      }
+
+      event.preventDefault();
+      scrollSessionMessageStackByPageJump(
+        event.key === "PageUp" ? -1 : 1,
+      );
+    }
+
+    window.addEventListener("keydown", handleWindowPageJump, true);
+    return () => {
+      window.removeEventListener("keydown", handleWindowPageJump, true);
+    };
+  }, [isActive, pane.viewMode]);
 
   function scheduleSettledScrollToBottom(
     behavior: ScrollBehavior,
@@ -1651,10 +1736,19 @@ export function SessionPaneView({
       return;
     }
 
-    const behavior = visibleLastMessageAuthor === "you" ? "smooth" : "auto";
+    if (visibleLastMessageAuthor === "you") {
+      setNewResponseIndicator(scrollStateKey, false);
+      const frameId = window.requestAnimationFrame(() => {
+        followLatestMessageForPromptSend();
+      });
+      return () => {
+        window.cancelAnimationFrame(frameId);
+      };
+    }
+
     setNewResponseIndicator(scrollStateKey, false);
     const frameId = window.requestAnimationFrame(() => {
-      scrollToLatestMessage(behavior);
+      scrollToLatestMessage("auto");
     });
 
     return () => {
@@ -1700,12 +1794,14 @@ export function SessionPaneView({
       return;
     }
 
+    let cleanup: (() => void) | undefined;
     const frameId = window.requestAnimationFrame(() => {
-      scrollToLatestMessage("smooth");
+      cleanup = followLatestMessageForPromptSend();
     });
 
     return () => {
       window.cancelAnimationFrame(frameId);
+      cleanup?.();
     };
   }, [isSending, pane.viewMode, scrollStateKey]);
 
