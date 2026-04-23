@@ -140,6 +140,117 @@ describe("MarkdownContent inline file links", () => {
 });
 
 describe("MarkdownContent Mermaid diagrams", () => {
+  it("renders heavy thinking markdown immediately when preferImmediateHeavyRender is enabled", async () => {
+    const originalIntersectionObserver = globalThis.IntersectionObserver;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    const unobserve = vi.fn();
+    const intersectionObserverMock = vi.fn(function IntersectionObserverMock() {
+      return {
+        disconnect,
+        observe,
+        unobserve,
+      };
+    });
+    vi.stubGlobal(
+      "IntersectionObserver",
+      intersectionObserverMock as unknown as typeof IntersectionObserver,
+    );
+    const lines = [
+      "```mermaid",
+      "flowchart TD",
+      ...Array.from({ length: 28 }, (_, index) => `  N${index} --> N${index + 1}`),
+      "```",
+    ];
+    const message = {
+      author: "assistant",
+      id: "message-heavy-thinking",
+      lines,
+      timestamp: "2026-04-15T00:00:00.000Z",
+      title: "Thinking",
+      type: "thinking",
+    } as const;
+    const noop = () => {};
+
+    try {
+      render(
+        <MessageCard
+          message={message}
+          onApprovalDecision={noop}
+          onUserInputSubmit={noop}
+          preferImmediateHeavyRender
+        />,
+      );
+
+      expect(await screen.findByTestId("mermaid-frame")).toBeInTheDocument();
+      expect(intersectionObserverMock).not.toHaveBeenCalled();
+    } finally {
+      if (originalIntersectionObserver === undefined) {
+        Reflect.deleteProperty(globalThis, "IntersectionObserver");
+      } else {
+        globalThis.IntersectionObserver = originalIntersectionObserver;
+      }
+    }
+  });
+
+  it("renders code-heavy approval content immediately when preferImmediateHeavyRender is enabled", () => {
+    const originalIntersectionObserver = globalThis.IntersectionObserver;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    const unobserve = vi.fn();
+    const intersectionObserverMock = vi.fn(function IntersectionObserverMock() {
+      return {
+        disconnect,
+        observe,
+        unobserve,
+      };
+    });
+    vi.stubGlobal(
+      "IntersectionObserver",
+      intersectionObserverMock as unknown as typeof IntersectionObserver,
+    );
+    const message = {
+      author: "assistant",
+      command: [
+        "cargo test --workspace --all-features",
+        ...Array.from({ length: 40 }, (_, index) => `echo line-${index}`),
+      ].join("\n"),
+      commandLanguage: "bash",
+      decision: "pending",
+      detail: "Run the full backend suite before merging.",
+      id: "message-heavy-approval",
+      timestamp: "2026-04-15T00:00:00.000Z",
+      title: "Approval",
+      type: "approval",
+    } as const;
+    const noop = () => {};
+
+    try {
+      const { container } = render(
+        <MessageCard
+          message={message}
+          onApprovalDecision={noop}
+          onUserInputSubmit={noop}
+          preferImmediateHeavyRender
+        />,
+      );
+
+      expect(
+        container.querySelector(".deferred-code-placeholder"),
+      ).toBeNull();
+      expect(container.textContent).toContain(
+        "cargo test --workspace --all-features",
+      );
+      expect(intersectionObserverMock).not.toHaveBeenCalled();
+    } finally {
+      if (originalIntersectionObserver === undefined) {
+        Reflect.deleteProperty(globalThis, "IntersectionObserver");
+      } else {
+        globalThis.IntersectionObserver = originalIntersectionObserver;
+      }
+    }
+  });
+
   it("rerenders memoized message cards when appearance changes", async () => {
     const message = {
       author: "assistant",

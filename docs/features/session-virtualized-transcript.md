@@ -6,27 +6,27 @@ Primary implementation:
 
 - `ui/src/panels/VirtualizedConversationMessageList.tsx`
 
-Supporting helpers:
+Supporting owners:
 
 - `ui/src/panels/conversation-virtualization.ts`
+- `ui/src/SessionPaneView.tsx`
+- `ui/src/message-stack-scroll-sync.ts`
 - `ui/src/message-cards.tsx`
 - `ui/src/ExpandedPromptPanel.tsx`
 
 ## Purpose
 
 The session transcript can contain long conversations, large command output,
-heavy Markdown, diffs, and expanded prompts. Rendering the full conversation all
-at once is too expensive, but the active scroll experience still needs to feel
-like normal browser scrolling through real DOM.
+heavy Markdown, diffs, and expanded prompts. Rendering the entire transcript is
+too expensive, but active reading still needs to feel like normal browser
+scrolling through real DOM.
 
-The virtualizer therefore separates the transcript into:
+The current model is:
 
-1. **Mounted pages** — real DOM the browser scrolls through directly.
-2. **Unseen space** — top and bottom spacer heights that stand in for pages that
-   are not mounted.
-
-The mounted DOM is the authoritative scroll surface. Virtual geometry only
-describes content outside the mounted band.
+1. **Mounted pages** are real DOM and own the live reading surface.
+2. **Unseen pages** are represented by top and bottom spacers.
+3. **Measured page heights** refine spacer geometry, but mounted DOM remains
+   authoritative while the user is actively reading.
 
 ## Core Model
 
@@ -35,6 +35,7 @@ describes content outside the mounted band.
 Messages are grouped into fixed-size pages.
 
 - Constant: `VIRTUALIZED_MESSAGES_PER_PAGE`
+- Current value: `8`
 - Builder: `buildMessagePages(...)`
 
 Each page stores:
@@ -44,8 +45,7 @@ Each page stores:
 - page messages
 - whether a trailing inter-page gap should be included
 
-The virtualizer measures and reasons about whole pages, not individual rows, as
-the primary mounted unit.
+The virtualizer reasons about whole pages as the mounted unit.
 
 ### Page layout
 
@@ -56,65 +56,59 @@ Each page has a height:
 
 `buildPageLayout(...)` converts page heights into:
 
-- `tops[]` — page start offsets
-- `totalHeight` — virtual document height
+- `tops[]` - page start offsets
+- `totalHeight` - virtual document height
 
 That layout is used to:
 
 - find the visible page range
 - compute top and bottom spacers
-- derive fallback scroll targets for search / initial placement when a page is
-  not yet mounted
+- derive fallback search positioning for messages outside the mounted band
 
-## Render Flow
+## Mounted Range Policy
 
-### 1. Viewport state
+### Working range
 
-The virtualizer tracks:
+The steady-state mounted target is `workingMountedPageRange`.
 
-- `viewport.height`
-- `viewport.scrollTop`
-- `viewport.width`
+It is computed from:
 
-This state is synchronized from the actual scroll container.
-
-### 2. Visible page range
-
-The current `visiblePageRange` is computed from:
-
-- page tops
-- page heights
 - current `scrollTop`
 - viewport height
+- a mounted reserve above the viewport
+- a mounted reserve below the viewport
+- one extra page below as bottom-edge hysteresis
 
-This is the minimal page range that intersects the viewport.
+Current reserves:
 
-### 3. Mounted page range
+- `ACTIVE_MOUNTED_RESERVE_ABOVE_VIEWPORTS = 3`
+- `ACTIVE_MOUNTED_RESERVE_BELOW_VIEWPORTS = 3`
+- `ACTIVE_MOUNTED_EXTRA_PAGES_BELOW = 1`
 
-The DOM mounts a larger `mountedPageRange` around the visible range.
+So active reading keeps several viewports of real DOM around the visible area
+instead of waiting until the user is already on a band edge.
 
-Mounted range goals:
+### Active scroll
 
-- keep enough real DOM above the viewport for upward scroll
-- keep enough real DOM below the viewport for downward scroll
-- avoid frequent prepend/append churn
-- still allow the DOM band to shrink back toward the desired range
+During active user scroll, mounted-range updates are grow-oriented:
 
-There are two mounted-range drivers:
+- incremental upward scroll can grow the start of the mounted band
+- incremental downward scroll can grow the end of the mounted band
+- the opposite side is not trimmed during the gesture
 
-1. **Desired range from virtual layout**
-   - a buffered range derived from `visiblePageRange`
-   - used as the normal steady-state target
+This avoids exposing spacer space during normal reading.
 
-2. **DOM-edge growth**
-   - checks how close the viewport is to the first/last mounted page in actual
-     DOM coordinates
-   - grows the mounted band early when the viewport approaches those edges
+### Idle compaction
 
-DOM-edge growth is the preferred path during active manual scroll because it is
-based on the real mounted band, not only on estimated layout.
+Mounted-range compaction is deferred until scroll idle.
 
-### 4. Spacer rendering
+- cooldown constant: `USER_SCROLL_ADJUSTMENT_COOLDOWN_MS`
+- current value: `200`
+
+Once input settles, the mounted band is allowed to shrink back toward
+`workingMountedPageRange`.
+
+## Render Flow
 
 The render output is:
 
@@ -124,200 +118,202 @@ The render output is:
 
 Only pages inside `mountedPageRange` are rendered as message cards.
 
+Mounted pages are wrapped in `MeasuredPageBand`, which reports the full
+rendered page height back to the virtualizer.
+
 ## Measurement
 
 ### Page measurement
 
-Each mounted page is wrapped in `MeasuredPageBand`.
+Each mounted page is measured as a whole.
 
-The page band:
-
-- observes itself and its mounted message slots with `ResizeObserver`
-- measures the total rendered height of the page
-- reports that height back to the virtualizer
-
-The page height includes:
+The measured height includes:
 
 - slot heights
 - in-page message gaps
 - the trailing inter-page gap when the page is not the last one
 
+Measurements are stored in `pageHeightsRef`.
+
 ### Heavy content inside mounted pages
 
 Mounted pages always render heavy content immediately.
 
-That includes content that would otherwise use deferred placeholders, such as
-highlighted code or heavy Markdown subtrees. Inside the mounted transcript band,
-placeholder-to-real-content transitions are not desirable because they change
-page height after the page is already part of active scrolling.
+That includes:
 
-The rule is:
+- highlighted code
+- heavy Markdown subtrees
+- expanded prompts
 
-- if a message is inside the mounted transcript band, render the real content
+Inside the mounted band, placeholder-to-real-content transitions are not
+desirable because they change page height after the page is already part of
+active reading.
 
 ## Scroll Behavior
 
-### Browser-driven active scroll
+### Native wheel / touch scroll
 
-While the user is scrolling through mounted content, the browser is expected to
-own the visible motion. The virtualizer should not continuously "correct" the
-scroll position based on message/page estimates.
+Normal wheel and touch movement are treated as incremental reading.
 
-### Prepending pages above the viewport
+The browser owns the visible motion; the virtualizer reacts by growing the
+mounted band and updating spacer geometry. It should not continuously rewrite
+the live scroll position during ordinary reading.
 
-When the mounted range grows upward, the virtualizer:
+### Keyboard `PgUp` / `PgDown`
 
-1. captures the first visible mounted message
-2. mounts the new pages above
-3. restores that same message to the same viewport offset
+Session transcript page navigation is custom.
 
-This prevents the visible transcript from sliding downward when new DOM is
-inserted above the current reading position.
+Ownership split:
 
-This path uses `pendingMountedRangeAnchorRef`.
+- `SessionPaneView.tsx` intercepts `PageUp` / `PageDown`
+- it applies a fixed `scrollTop` delta itself
+- it emits `MESSAGE_STACK_SCROLL_WRITE_EVENT` with optional explicit
+  `scrollKind` metadata so the virtualizer can classify the write correctly
 
-### Deferred page-layout corrections
+The jump is a fixed fraction of the viewport height:
 
-If a page measurement arrives during active manual scroll, the virtualizer does
-not immediately apply all layout fallout. Instead it:
+- `SESSION_PAGE_JUMP_VIEWPORT_FACTOR`
+- current value: `0.45`
 
-1. records the measured page height
-2. waits for the direct-scroll cooldown to elapse
-3. captures a visible-row anchor
-4. applies the deferred layout update
-5. restores the anchor
-
-This path uses `pendingDeferredLayoutAnchorRef`.
-
-The intent is to let the user scroll through real mounted DOM first, then let
-virtual space catch up once direct input has settled.
-
-### Bottom pin
-
-If the transcript is already near the bottom, page-height changes are allowed to
-keep the viewport pinned to the latest content.
-
-If the user scrolls away from the bottom, that pin is cleared by the native
-scroll path.
+This avoids browser-defined page-jump behavior and keeps keyboard page
+navigation closer to the wheel-scroll model.
 
 ### Search
 
 When session search activates a message:
 
-- if the message is already mounted, scroll targets the real mounted slot
-- otherwise the virtualizer falls back to an estimated scroll target derived
-  from the page layout
+- if the target message is mounted, scroll targets the real DOM slot
+- otherwise the virtualizer falls back to an estimated target from page layout
 
-This keeps search responsive even when the target is outside the mounted band.
+### Bottom follow
 
-## State And Refs
+There are two bottom-follow policies in the current system:
 
-Important long-lived refs:
+1. **Virtualizer bottom pin**
+   - used when the transcript is already near bottom
+   - keeps the viewport pinned as page heights settle
+
+2. **Pane-level jump to latest**
+   - owned by `SessionPaneView.tsx`
+   - used for explicit jump-to-bottom and some prompt-send cases
+
+For prompt send specifically:
+
+- if the pane is already near bottom, `SessionPaneView` keeps the lightweight
+  smooth follow
+- otherwise it uses the stronger settled jump-to-bottom path
+
+That split keeps prompt send visually pleasant when already pinned, but still
+reliable when the pane is away from bottom.
+
+## Important Refs And State
+
+Important refs:
 
 - `pageHeightsRef`
-  - measured heights for mounted or previously measured pages
-- `pendingMountedRangeAnchorRef`
-  - anchor used when prepending mounted pages
-- `pendingDeferredLayoutAnchorRef`
-  - anchor used when deferred layout updates are applied after scroll idle
 - `shouldKeepBottomAfterLayoutRef`
-  - sticky-bottom intent
+- `isDetachedFromBottomRef`
+- `skipNextMountedPrependRestoreRef`
 - `lastUserScrollInputTimeRef`
-  - used to distinguish active manual scroll from idle layout catch-up
+- `lastUserScrollKindRef`
+- `pendingMountedPrependRestoreRef`
 
 Important state:
 
 - `viewport`
 - `layoutVersion`
+- `scrollIdleVersion`
 - `mountedPageRange`
 - `isMeasuringPostActivation`
 
 ## Invariants
 
-These are the important behavioral rules for future work:
+These rules should remain true:
 
-1. Mounted transcript pages are real DOM and define the live reading surface.
-2. Spacer math must not become the primary source of truth for what the user is
-   currently reading.
-3. Upward prepend must preserve a visible-row anchor.
-4. Deferred page-height corrections must preserve a visible-row anchor.
-5. Heavy content inside mounted pages should not reintroduce placeholder-driven
-   height changes.
-6. The viewport must never escape the mounted page range for more than a commit;
-   if it does, the mounted range must catch up immediately.
+1. Mounted transcript pages are the live reading surface.
+2. Spacer math is allowed to describe unseen space, not replace mounted reading.
+3. Active reading is grow-first; trimming belongs to idle.
+4. Keyboard page jumps are deterministic and owned by the transcript, not the
+   browser default page-scroll path.
+5. Heavy content inside mounted pages should render directly.
+6. Bottom-follow logic must stop immediately once the user explicitly scrolls
+   away from the latest content.
 
 ## Known Limitations
 
-### Incremental upward reading is the sensitive path
+### Upward reading is still the sensitive path
 
-Scrollbar seek / drag behavior is acceptable for the current implementation.
-The path that still needs the most scrutiny is incremental upward reading from
-the bottom of a long conversation:
+The path that still deserves the most scrutiny is:
 
-- go to the bottom
-- press `PgUp`
-- continue scrolling upward
-- judge whether the transcript remains visually stable
+1. go to the bottom
+2. `PgUp`
+3. continue reading upward through a long conversation
 
-Anchor restoration currently uses an imperative `scrollTop` write. That keeps
-the visible row stable, but it can still interrupt the browser's native upward
-motion or land at a slightly different offset than expected when new pages are
-prepended above the viewport.
+The current implementation is much more stable than earlier revisions, but
+upward prepend remains more sensitive than downward append.
 
-### Unseen page geometry is still estimated
+### Unseen space is still estimated
 
-The virtualizer still needs estimated heights for pages outside the mounted DOM.
-Those estimates do not control the live mounted surface, but they still affect:
+Pages outside the mounted band still rely on estimated heights.
+
+Those estimates affect:
 
 - spacer sizes
 - virtual total height
 - search fallback positioning
-- initial page-range decisions
+- initial mounted-range decisions
 
-### Fixed page size is a compromise
+That is acceptable for unseen content, but it is still the main approximation
+in the system.
 
-Small pages increase mount churn. Large pages reduce churn but increase DOM
-cost and make each prepend/append more expensive.
+### Page identity is index-based
 
-The current page size is a pragmatic tradeoff, not a universal optimum.
+Page keys still include page start/end indices plus message ids.
+
+That is workable, but insertions ahead of a page can still invalidate
+downstream page identity more aggressively than a purely stable boundary key.
+
+## Cleanup Candidates
+
+These are the parts worth simplifying next.
+
+1. **Bottom-follow ownership**
+   - bottom behavior is split between the virtualizer and `SessionPaneView`
+   - that split is currently intentional, but still more complex than ideal
+
+2. **Mounted-range policy naming**
+   - `visiblePageRange`
+   - `workingMountedPageRange`
+   - `mountedPageRange`
+   are the right three concepts, but deserve short inline comments near the
+   declarations because they are easy to conflate when editing the file
+
+3. **Page identity**
+   - current page keys are pragmatic, not ideal
+   - a more stable page identity would make measurement retention easier to
+     reason about
+
+4. **`SessionPaneView` transcript scroll policy**
+   - page jumps, prompt-send follow, sticky-bottom, and settled bottom restore
+     all live there
+   - the behavior is correct enough today, but the ownership surface is broad
 
 ## Possible Improvements
 
-1. **Momentum-preserving prepend**
-   - avoid immediate `scrollTop` anchor writes during native upward momentum
-   - likely requires a prepend strategy that keeps the visible DOM stationary
-     without directly overriding the browser's current animation
+1. **Unify bottom-follow strategy**
+   - either keep the current split but document it inline more aggressively
+   - or move more of the transcript-specific follow policy behind one owner
 
-2. **Adaptive page sizing**
-   - use smaller pages near very heavy content or larger pages for homogeneous
-     lightweight transcripts
+2. **Stabilize page identity**
+   - reduce unnecessary page-height invalidation after insertions
 
-3. **Dedicated prepend / append policies**
-   - upward growth is more sensitive than downward growth
-   - the virtualizer may benefit from separate thresholds and batch sizes for
-     prepend vs append
+3. **Separate upward and downward range policies more explicitly**
+   - upward prepend remains more fragile than downward append
+   - separate helpers would make that asymmetry easier to maintain
 
-4. **Better instrumentation**
-   - log mounted-range changes, visible-range changes, anchor offsets, and page
-     measurement deltas in a debug mode
-   - useful for validating remaining edge cases without relying only on visual
-     repros
-
-5. **Separate incremental reading from random-access seek**
-   - treat wheel / `PgUp` / normal upward reading as the highest-fidelity path
-   - let scrollbar seek remain a simpler "jump, mount, settle" flow
-   - this matches how the transcript is currently evaluated in practice: the
-     important quality bar is visual stability while reading upward from the
-     bottom, not perfect pixel accuracy during arbitrary scrollbar seeks
-
-6. **Search-target prewarm**
-   - optionally mount the target page band before applying the search scroll, so
-     search can rely on real DOM more often and on estimated fallback less often
-
-7. **More regression coverage**
-   - long upward wheel scroll
-   - bottom → `PgUp` → continued upward read-through
-   - long upward smooth/page scroll
-   - prepend during very tall prompt / Markdown block
-   - mounted-range escape recovery
-   - momentum interruption detection in browser-level tests
+4. **Browser-level regression coverage**
+   - bottom -> first `PgUp`
+   - repeated `PgUp`
+   - long upward wheel read-through
+   - long top-to-bottom downward read-through
+   - prompt send while near bottom vs far from bottom

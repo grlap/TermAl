@@ -487,7 +487,9 @@ export default function App() {
   // `handleRetryBackendConnection` (which invoke these) are
   // declared before the hook is called.
   const requestBackendReconnectRef = useRef<() => void>(() => {});
-  const requestActionRecoveryResyncRef = useRef<() => void>(() => {});
+  const requestActionRecoveryResyncRef = useRef<
+    (options?: { openSessionId?: string; paneId?: string | null }) => void
+  >(() => {});
   const paneShouldStickToBottomRef = useRef<
     Record<string, boolean | undefined>
   >({});
@@ -866,6 +868,8 @@ export default function App() {
     adoptCreatedSessionResponse,
     applyControlPanelLayout,
     reportRequestError,
+    requestActionRecoveryResync: (options) =>
+      requestActionRecoveryResyncRef.current(options),
   });
   const {
     isSettingsOpen,

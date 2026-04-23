@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { RefObject } from "react";
 import { describe, expect, it, vi } from "vitest";
 
+import * as slashPalette from "./session-slash-palette";
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
@@ -44,6 +45,17 @@ function makeTextMessages(count: number): Message[] {
     text: `Message ${index + 1}`,
   }));
 }
+
+const EMPTY_DRAFT_ATTACHMENTS: [] = [];
+const EMPTY_AGENT_COMMANDS: {
+  kind?: "promptTemplate" | "nativeSlash";
+  name: string;
+  description: string;
+  content: string;
+  source: string;
+  argumentHint?: string | null;
+}[] = [];
+const formatFooterByteSize = (byteSize: number) => `${byteSize} B`;
 
 function renderSessionPanelWithDefaults(
   props: Partial<Parameters<typeof AgentSessionPanel>[0]>,
@@ -1299,7 +1311,7 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
-  it("preserves the first visible row when deferred virtual layout catches up after scroll idle", async () => {
+  it("does not introduce an extra scroll adjustment when deferred virtual layout catches up after scroll idle", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
@@ -1349,36 +1361,35 @@ describe("AgentSessionPanel conversation caching", () => {
     };
 
     const getVirtualContentTop = (root: HTMLElement, target: HTMLElement): number => {
-      let top = 0;
-      const walk = (node: HTMLElement): boolean => {
+      const walk = (node: HTMLElement): number | null => {
         if (node === target) {
-          return true;
+          return 0;
         }
 
         const children = Array.from(node.children).filter(
           (child): child is HTMLElement => child instanceof HTMLElement,
         );
+        let offset = 0;
         for (let index = 0; index < children.length; index += 1) {
           const child = children[index]!;
-          if (child === target) {
-            return true;
+          const childOffset = walk(child);
+          if (childOffset !== null) {
+            return offset + childOffset;
           }
-          if (walk(child)) {
-            return true;
-          }
-          top += getVirtualNodeHeight(child);
+          offset += getVirtualNodeHeight(child);
           if (
             node.classList.contains("virtualized-message-range") &&
             index < children.length - 1
           ) {
-            top += VIRTUALIZED_MESSAGE_GAP_PX;
+            offset += VIRTUALIZED_MESSAGE_GAP_PX;
           }
         }
 
-        return false;
+        return null;
       };
 
-      if (!walk(root)) {
+      const top = walk(root);
+      if (top === null) {
         throw new Error("target slot not found in virtualized message list");
       }
       return top;
@@ -1484,10 +1495,7 @@ describe("AgentSessionPanel conversation caching", () => {
           onCodexAppRequestSubmit={() => {}}
         />,
       );
-
-      await waitFor(() => {
-        expect(container.querySelectorAll(".virtualized-message-slot").length).toBeGreaterThan(0);
-      });
+      expect(container.querySelectorAll(".virtualized-message-slot").length).toBeGreaterThan(0);
 
       const initialLayout = buildVirtualizedMessageLayout(
         messages.map((message) => getMessageHeight(message.id)),
@@ -1499,13 +1507,10 @@ describe("AgentSessionPanel conversation caching", () => {
         fireEvent.scroll(scrollNode);
       });
 
-      const slotsBefore = await waitFor(() => {
-        const candidates = Array.from(
-          container.querySelectorAll<HTMLElement>(".virtualized-message-slot"),
-        );
-        expect(candidates.length).toBeGreaterThan(4);
-        return candidates;
-      });
+      const slotsBefore = Array.from(
+        container.querySelectorAll<HTMLElement>(".virtualized-message-slot"),
+      );
+      expect(slotsBefore.length).toBeGreaterThan(4);
       const firstVisibleSlotIndex = slotsBefore.findIndex((slot) => {
         const rect = slot.getBoundingClientRect();
         return rect.bottom > 0 && rect.top < 100;
@@ -1513,14 +1518,7 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(firstVisibleSlotIndex).toBeGreaterThan(0);
       const firstVisibleSlot = slotsBefore[firstVisibleSlotIndex]!;
       const anchorMessageId = firstVisibleSlot.dataset.messageId!;
-      const anchorOffsetBeforeIdle = firstVisibleSlot.getBoundingClientRect().top;
       const measuredAboveViewportSlot = slotsBefore[0]!;
-      const topSpacerBeforeIdle =
-        Number.parseFloat(
-          (
-            container.querySelector(".virtualized-message-spacer") as HTMLElement | null
-          )?.style.height ?? "0",
-        ) || 0;
 
       scrollWrites.length = 0;
       measuredHeights.set(measuredAboveViewportSlot.dataset.messageId!, 320);
@@ -1543,17 +1541,8 @@ describe("AgentSessionPanel conversation caching", () => {
         `.virtualized-message-slot[data-message-id="${anchorMessageId}"]`,
       );
       expect(anchorSlotAfterIdle).not.toBeNull();
-      const anchorOffsetAfterIdle = anchorSlotAfterIdle!.getBoundingClientRect().top;
-      const topSpacerAfterIdle =
-        Number.parseFloat(
-          (
-            container.querySelector(".virtualized-message-spacer") as HTMLElement | null
-          )?.style.height ?? "0",
-        ) || 0;
-
-      expect(topSpacerAfterIdle).not.toBe(topSpacerBeforeIdle);
-      expect(Math.abs(anchorOffsetAfterIdle - anchorOffsetBeforeIdle)).toBeLessThan(1);
-      expect(scrollWrites.length).toBeGreaterThan(0);
+      expect(scrollWrites).toEqual([]);
+      expect(scrollTop).toBe(middleScrollTop);
     } finally {
       vi.useRealTimers();
       window.ResizeObserver = OriginalResizeObserver;
@@ -1685,6 +1674,467 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(loggedErrors).not.toContain("Maximum update depth exceeded");
     } finally {
       consoleErrorSpy.mockRestore();
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
+  it("reclassifies a programmatic jump as seek even after an incremental scroll gesture", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
+    const messages = makeTextMessages(1000);
+    const measuredSlotHeight = 24;
+    let scrollTop = 0;
+
+    class ResizeObserverMock {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        resizeCallbacks.set(target, this.callback);
+      }
+      disconnect() {}
+    }
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 100,
+    });
+    Object.defineProperty(scrollNode, "clientWidth", {
+      configurable: true,
+      get: () => 1000,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 100000,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    let nextFrameId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      queueMicrotask(() => callback(0));
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
+    Element.prototype.getBoundingClientRect = function getBoundingClientRectMock() {
+      const element = this as HTMLElement;
+      if (element === scrollNode) {
+        return {
+          bottom: 100,
+          height: 100,
+          left: 0,
+          right: 100,
+          top: 0,
+          width: 100,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+
+      const height = element.classList.contains("virtualized-message-slot")
+        ? measuredSlotHeight
+        : 100;
+      return {
+        bottom: height,
+        height,
+        left: 0,
+        right: 100,
+        top: 0,
+        width: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+
+    try {
+      const { container } = render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={messages}
+          scrollContainerRef={{
+            current: scrollNode,
+          } as RefObject<HTMLElement | null>}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(container.querySelectorAll(".virtualized-message-page").length).toBeGreaterThan(0);
+      });
+
+      act(() => {
+        fireEvent.wheel(scrollNode, { deltaY: 80 });
+      });
+
+      await act(async () => {
+        scrollTop = 32000;
+        notifyMessageStackScrollWrite(scrollNode);
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(container.querySelectorAll(".virtualized-message-page").length).toBeGreaterThan(0);
+      });
+
+      const mountedPagesAfterJump = Array.from(
+        container.querySelectorAll<HTMLElement>(".virtualized-message-page"),
+      );
+      expect(mountedPagesAfterJump.length).toBeLessThan(20);
+      expect(mountedPagesAfterJump[0]?.dataset.pageKey?.startsWith("0:")).toBe(false);
+
+      await act(async () => {
+        scrollTop = 32040;
+        fireEvent.scroll(scrollNode);
+        await Promise.resolve();
+      });
+
+      const mountedPagesAfterNativeScroll = Array.from(
+        container.querySelectorAll<HTMLElement>(".virtualized-message-page"),
+      );
+      expect(mountedPagesAfterNativeScroll.length).toBeLessThan(20);
+      expect(mountedPagesAfterNativeScroll[0]?.dataset.pageKey?.startsWith("0:")).toBe(false);
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
+  it("uses explicit scrollKind detail for a sub-threshold programmatic seek jump", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
+    const messages = makeTextMessages(1000);
+    const measuredSlotHeight = 10;
+    let scrollTop = 0;
+
+    class ResizeObserverMock {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        resizeCallbacks.set(target, this.callback);
+      }
+      disconnect() {}
+    }
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 100,
+    });
+    Object.defineProperty(scrollNode, "clientWidth", {
+      configurable: true,
+      get: () => 1000,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 100000,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    let nextFrameId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      queueMicrotask(() => callback(0));
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
+    Element.prototype.getBoundingClientRect = function getBoundingClientRectMock() {
+      if (this === scrollNode) {
+        return {
+          bottom: 100,
+          height: 100,
+          left: 0,
+          right: 1000,
+          top: 0,
+          width: 1000,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+      const pageNode = (this as HTMLElement).closest(".virtualized-message-page");
+      if (pageNode instanceof HTMLElement) {
+        const pageKey = pageNode.dataset.pageKey ?? "";
+        const pageIndex = Number.parseInt(pageKey.split(":")[0] ?? "0", 10) || 0;
+        const pageTop = pageIndex * measuredSlotHeight * 8;
+        const pageHeight = measuredSlotHeight * 8;
+        return {
+          bottom: pageTop + pageHeight - scrollTop,
+          height: pageHeight,
+          left: 0,
+          right: 100,
+          top: pageTop - scrollTop,
+          width: 100,
+          x: 0,
+          y: pageTop - scrollTop,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+      const slotNode = (this as HTMLElement).closest(".virtualized-message-slot");
+      if (!(slotNode instanceof HTMLElement)) {
+        return originalGetBoundingClientRect.call(this);
+      }
+      const pageNodeForSlot = slotNode.closest(".virtualized-message-page");
+      const pageKey = pageNodeForSlot instanceof HTMLElement ? pageNodeForSlot.dataset.pageKey ?? "" : "";
+      const pageIndex = Number.parseInt(pageKey.split(":")[0] ?? "0", 10) || 0;
+      const slotIndexWithinPage = Array.from(
+        pageNodeForSlot?.querySelectorAll(".virtualized-message-slot") ?? [],
+      ).indexOf(slotNode);
+      const pageTop = pageIndex * measuredSlotHeight * 8;
+      const slotTop = pageTop + Math.max(slotIndexWithinPage, 0) * measuredSlotHeight;
+      return {
+        bottom: slotTop + measuredSlotHeight - scrollTop,
+        height: measuredSlotHeight,
+        left: 0,
+        right: 100,
+        top: slotTop - scrollTop,
+        width: 100,
+        x: 0,
+        y: slotTop - scrollTop,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+
+    try {
+      const { container } = render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={messages}
+          scrollContainerRef={{
+            current: scrollNode,
+          } as RefObject<HTMLElement | null>}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(container.querySelectorAll(".virtualized-message-page").length).toBeGreaterThan(0);
+      });
+
+      await act(async () => {
+        scrollTop = 2000;
+        notifyMessageStackScrollWrite(scrollNode);
+        await Promise.resolve();
+      });
+
+      const mountedPagesAfterLargeJump = Array.from(
+        container.querySelectorAll<HTMLElement>(".virtualized-message-page"),
+      );
+      expect(mountedPagesAfterLargeJump.length).toBeGreaterThan(0);
+      const firstMountedPageKeyAfterLargeJump =
+        mountedPagesAfterLargeJump[0]?.dataset.pageKey ?? null;
+      expect(firstMountedPageKeyAfterLargeJump?.startsWith("0:")).toBe(false);
+
+      await act(async () => {
+        scrollTop = 2400;
+        notifyMessageStackScrollWrite(scrollNode, {
+          scrollKind: "seek",
+        });
+        await Promise.resolve();
+      });
+
+      const mountedPagesAfterExplicitSeek = Array.from(
+        container.querySelectorAll<HTMLElement>(".virtualized-message-page"),
+      );
+      expect(mountedPagesAfterExplicitSeek.length).toBeGreaterThan(0);
+      expect(mountedPagesAfterExplicitSeek[0]?.dataset.pageKey).not.toBe(
+        firstMountedPageKeyAfterLargeJump,
+      );
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
+  it("compacts the mounted band again after a programmatic jump settles", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
+    const messages = makeTextMessages(1000);
+    const measuredSlotHeight = 24;
+    let scrollTop = 0;
+
+    class ResizeObserverMock {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        resizeCallbacks.set(target, this.callback);
+      }
+      disconnect() {}
+    }
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 100,
+    });
+    Object.defineProperty(scrollNode, "clientWidth", {
+      configurable: true,
+      get: () => 1000,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 100000,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    let nextFrameId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      queueMicrotask(() => callback(0));
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
+    Element.prototype.getBoundingClientRect = function getBoundingClientRectMock() {
+      const element = this as HTMLElement;
+      if (element === scrollNode) {
+        return {
+          bottom: 100,
+          height: 100,
+          left: 0,
+          right: 100,
+          top: 0,
+          width: 100,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+
+      const height = element.classList.contains("virtualized-message-slot")
+        ? measuredSlotHeight
+        : 100;
+      return {
+        bottom: height,
+        height,
+        left: 0,
+        right: 100,
+        top: 0,
+        width: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+
+    try {
+      const { container } = render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={messages}
+          scrollContainerRef={{
+            current: scrollNode,
+          } as RefObject<HTMLElement | null>}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(container.querySelectorAll(".virtualized-message-page").length).toBeGreaterThan(0);
+      });
+
+      vi.useFakeTimers();
+
+      act(() => {
+        fireEvent.wheel(scrollNode, { deltaY: 80 });
+      });
+
+      await act(async () => {
+        scrollTop = 32000;
+        notifyMessageStackScrollWrite(scrollNode);
+        await Promise.resolve();
+      });
+
+      act(() => {
+        fireEvent.wheel(scrollNode, { deltaY: 40 });
+      });
+
+      await act(async () => {
+        scrollTop = 32040;
+        fireEvent.scroll(scrollNode);
+        await Promise.resolve();
+      });
+
+      await act(async () => {
+        scrollTop = 32120;
+        fireEvent.scroll(scrollNode);
+        await Promise.resolve();
+      });
+
+      const mountedPagesBeforeIdle =
+        container.querySelectorAll(".virtualized-message-page").length;
+
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const mountedPagesAfterIdle = Array.from(
+        container.querySelectorAll<HTMLElement>(".virtualized-message-page"),
+      );
+      expect(mountedPagesAfterIdle.length).not.toBe(mountedPagesBeforeIdle);
+      expect(mountedPagesAfterIdle[0]?.dataset.pageKey?.startsWith("0:")).toBe(false);
+    } finally {
+      vi.useRealTimers();
       window.ResizeObserver = OriginalResizeObserver;
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
@@ -2165,7 +2615,7 @@ function renderFooter({
   isUpdating = false,
   onDraftCommit = vi.fn(),
   modelOptionsError = null,
-  agentCommands = [],
+  agentCommands = EMPTY_AGENT_COMMANDS,
   hasLoadedAgentCommands = true,
   isRefreshingAgentCommands = false,
   agentCommandsError = null,
@@ -2203,8 +2653,8 @@ function renderFooter({
       isPaneActive={isPaneActive}
       activeSession={session}
       committedDraft={committedDraft}
-      draftAttachments={[]}
-      formatByteSize={(byteSize) => `${byteSize} B`}
+      draftAttachments={EMPTY_DRAFT_ATTACHMENTS}
+      formatByteSize={formatFooterByteSize}
       isSending={false}
       isStopping={false}
       isSessionBusy={false}
@@ -2524,6 +2974,67 @@ describe("AgentSessionPanelFooter", () => {
     expect(initialCommit).not.toHaveBeenCalled();
     expect(nextCommit).not.toHaveBeenCalled();
     expect(screen.getByLabelText(`Message ${sessionId}`)).toHaveValue("draft in progress");
+  });
+
+  it("does not recompute the composer slash palette during assistant-only session churn", () => {
+    const sessionId = "session-a";
+    const buildSlashPaletteStateSpy = vi.spyOn(slashPalette, "buildSlashPaletteState");
+    const { rerender } = render(
+      renderFooter({
+        committedDraft: "/model",
+        session: makeSession(sessionId, {
+          status: "active",
+          preview: "first preview",
+          messages: [
+            {
+              author: "you",
+              id: "user-1",
+              text: "Review the staged diff",
+              timestamp: "10:00",
+              type: "text",
+            },
+            {
+              author: "assistant",
+              id: "assistant-1",
+              text: "Working...",
+              timestamp: "10:01",
+              type: "text",
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(buildSlashPaletteStateSpy).toHaveBeenCalledTimes(1);
+
+    rerender(
+      renderFooter({
+        committedDraft: "/model",
+        session: makeSession(sessionId, {
+          status: "active",
+          preview: "still working",
+          messages: [
+            {
+              author: "you",
+              id: "user-1",
+              text: "Review the staged diff",
+              timestamp: "10:00",
+              type: "text",
+            },
+            {
+              author: "assistant",
+              id: "assistant-1",
+              text: "Still working...",
+              timestamp: "10:01",
+              type: "text",
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(buildSlashPaletteStateSpy).toHaveBeenCalledTimes(1);
+    buildSlashPaletteStateSpy.mockRestore();
   });
 
   it("commits the in-progress draft when switching sessions", () => {

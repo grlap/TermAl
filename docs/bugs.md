@@ -1,10 +1,7 @@
-# Bugs & Known Issues
+﻿# Bugs & Known Issues
 
 This file tracks reproduced, current issues. Resolved work, speculative refactors,
 and cleanup notes do not belong here.
-
-[termal] skipping oversized shared Codex app-server stdout line (18279545 bytes, cap 16777216 bytes)
-[termal] skipping oversized shared Codex app-server stdout line (18279545 bytes, cap 16777216 bytes)
 
 ## Active Repo Bugs
 
@@ -18,6 +15,19 @@ Also fixed in the current tree: the Settings dialog shell tests now locate the
 backdrop through `screen.getByRole("dialog").parentElement` instead of repeated
 raw `.dialog-backdrop` selectors, and they cover macOS Ctrl-click, plain macOS
 primary click, and non-Apple Ctrl+primary behavior.
+
+Also fixed in the current tree: deferred heavy-content activation no longer
+depends on `.virtualized-message-list` DOM ancestry. `DeferredHeavyContent`
+accepts an explicit immediate-render flag, the message-card callers now thread
+`preferImmediateHeavyRender` through Markdown/code-heavy subcards, and Mermaid
+coverage pins that a heavy thinking card renders immediately without waiting
+for `IntersectionObserver`.
+
+Also fixed in the current tree: create-session and create-project backdrop
+handlers now have direct integration coverage in `ui/src/AppDialogs.test.tsx`.
+Primary-button backdrop mousedown dismisses each dialog only when idle;
+middle-click, right-click, and macOS Ctrl-click do not; and pending create
+operations keep the dialogs open.
 
 Also fixed in the current tree: rendered-diff complete-document coverage now
 asserts that the "Patch-only rendering" banner is absent, source-renderer math
@@ -36,15 +46,15 @@ Also fixed in the current tree: the near-bottom cooldown regression test is
 now load-bearing. `lastUserScrollInputTimeRef` initialises to
 `Number.NEGATIVE_INFINITY` so mount-time measurements never falsely register
 inside the cooldown, and the test itself now runs a two-phase negative /
-positive control — a no-input measurement must write the pin target, a
-post-wheel measurement must not — so an unbound or broken wheel listener can
+positive control â€” a no-input measurement must write the pin target, a
+post-wheel measurement must not â€” so an unbound or broken wheel listener can
 no longer leave the test passing.
 
 Also fixed in the current tree: dangerous-Markdown-link neutralization is
 now directly covered. A new `ui/src/markdown-links.test.ts` pins the
 `transformMarkdownLinkUri` contract with table-driven cases for `javascript:`
 (including mixed-case variants), `vbscript:`, non-image `data:`, and
-`data:image/*` all → `""`; safe `http`/`https`/`mailto`/`tel` round-trip
+`data:image/*` all â†’ `""`; safe `http`/`https`/`mailto`/`tel` round-trip
 unchanged; `#anchor` and relative paths bypass uriTransformer via the
 `isExternalMarkdownHref` early return. A new `MarkdownContent` render test
 pairs feeds Markdown like `[click me](javascript:alert(1))` through the full
@@ -54,22 +64,22 @@ and the link text still renders as plain content.
 Also fixed in the current tree: `adoptCreatedSessionResponse`
 no longer leaves a phantom workspace pane when the create
 response violates the wire contract. The function now returns
-a discriminated outcome — `"adopted" | "stale" | "recovering"`
-— instead of a boolean. The three call sites in `App.tsx`
+a discriminated outcome â€” `"adopted" | "stale" | "recovering"`
+â€” instead of a boolean. The three call sites in `App.tsx`
 (create-session, fork-Codex-thread, remote-project create)
 each fall through to the workspace-pane fallback ONLY on
 `"stale"` (an earlier SSE delta already raised the revision
 past the POST response, so the session IS in `sessionsRef`
 and the pane points at a real session). On `"recovering"`
 (the `created.session.id !== created.sessionId` mismatch
-branch) the fallback is skipped — the mismatched id was never
+branch) the fallback is skipped â€” the mismatched id was never
 inserted into `sessionsRef`, so opening a pane would leave a
 phantom that persists until the scheduled
 `requestActionRecoveryResyncRef.current()` reconciles. On
 `"adopted"` the function already opened the pane internally.
 The TypeScript compiler enforces the three-way distinction at
 every call site. A dedicated Vitest test for the recovering
-branch is tracked as a P2 task — the full-App integration
+branch is tracked as a P2 task â€” the full-App integration
 scaffolding for a mocked `api.createSession` mismatch response
 is heavier than the fix itself.
 
@@ -84,7 +94,7 @@ now (a) serializes each `SessionRecord` into a canonical shape
 (full `Session` JSON + `remote_id` + `remote_session_id`) and
 asserts pre/post equality, and (b) directly compares
 `inner.orchestrator_instances` (which already derives
-`PartialEq`) for full-payload equality — orchestrator id,
+`PartialEq`) for full-payload equality â€” orchestrator id,
 template id, project id, status, sessions, prompts, settings.
 The helper sidesteps needing `PartialEq` on `SessionRecord`
 (which contains runtime handles like `SessionRuntime`) by
@@ -93,13 +103,13 @@ comparing via `serde_json::Value`. 73 remote tests stay green.
 Also fixed in the current tree: the read-only rendered-Markdown
 flash regression test is now load-bearing. The previous test
 waited for the `readOnlyResetVersion` remount via `waitFor` and
-asserted the restored DOM — which would still pass if
+asserted the restored DOM â€” which would still pass if
 `event.currentTarget.textContent = segment.markdown` were
 reintroduced in `markdown-diff-change-section.tsx::handleInput`
 and subsequently overwritten by the remount. A new immediate
 post-input assertion runs BEFORE the `waitFor` yields:
 `expect(addedSections[1].querySelector("p")).not.toBeNull()`
-plus `toContain("Ready to save.")` — the raw-source regression
+plus `toContain("Ready to save.")` â€” the raw-source regression
 collapses the `<p>` wrapper to a plain-text node on the same
 tick, so reintroducing the assignment now fails the test on
 the first assertion before the remount can paper it over.
@@ -110,9 +120,9 @@ list is removed.
 
 Also fixed in the current tree: the Settings dialog tab bar
 (`ui/src/preferences/SettingsTabBar.tsx`) now implements the
-WAI-ARIA tablist keyboard pattern. Roving `tabIndex` — only
+WAI-ARIA tablist keyboard pattern. Roving `tabIndex` â€” only
 the active tab carries `tabIndex={0}`, every other tab is
-`tabIndex={-1}` — so `Tab` leaves the tablist after one stop
+`tabIndex={-1}` â€” so `Tab` leaves the tablist after one stop
 instead of visiting all seven tab buttons. `ArrowLeft` /
 `ArrowRight` wrap around the tablist; `Home` / `End` jump to
 the first and last tab. The handler lives on the tablist
@@ -120,7 +130,7 @@ wrapper and moves DOM focus imperatively via
 `document.getElementById(\`settings-tab-${id}\`).focus()` so
 selection and keyboard position stay in lockstep (a WAI-ARIA
 protocol requirement). Click / Enter / Space still work via
-native `<button>` semantics — only the keyboard navigation
+native `<button>` semantics â€” only the keyboard navigation
 surface changed. A new test file
 `SettingsTabBar.test.tsx` (8 tests) pins roving tabindex,
 Arrow wrapping at both ends, Home/End jumps, unrelated-key
@@ -138,7 +148,7 @@ caller can still move the owned `Session` into its
 `CreateSessionResponse` without an extra clone outside the
 `if changed` branch. The `remote_routes.rs` site that emits a
 `SessionCreated` delta unconditionally was deliberately left
-unchanged — it forwards an incoming SSE delta from a remote
+unchanged â€” it forwards an incoming SSE delta from a remote
 and must announce even when the local record did not change,
 so it has a different semantic from the two proxy sites. The
 full remote test suite (73 tests) stays green.
@@ -149,7 +159,7 @@ a user-visible request error toast. The hydration effect's
 catch branch now special-cases `ApiRequestError` with
 `status === 404` and calls
 `requestActionRecoveryResyncRef.current()` without
-`reportRequestError(error)` — matching the shape
+`reportRequestError(error)` â€” matching the shape
 `fetchWorkspaceLayout` already uses for 404. 404 is the benign
 race where a session is deleted, hidden, or renumbered between
 a delta event referencing it and the hydration fetch; the
@@ -159,7 +169,7 @@ when the backend emits `session.messagesLoaded === false`,
 which is forward-compat scaffolding today (backend still
 emits full transcripts), so the fix is a pre-landing correctness
 improvement rather than an active-bug repair. A direct Vitest
-test for the new 404 branch is tracked as a P2 task — it needs
+test for the new 404 branch is tracked as a P2 task â€” it needs
 a `messagesLoaded: false` fixture that the rest of the test
 suite does not exercise today.
 
@@ -169,7 +179,7 @@ block as a changed fence below it. Previously the
 `pushChangedRange` heuristic in
 `ui/src/panels/markdown-diff-segments.ts` only split into
 pre-fence + fence-onwards pairs when the REMOVED side started
-EXACTLY at a fence opener (`removedStartsWithFence`) — so a
+EXACTLY at a fence opener (`removedStartsWithFence`) â€” so a
 change like `docs/mermaid-demo.md` (a blank line above a
 Mermaid fence became "333", AND the fence's interior also
 changed) rendered as one red block with the old diagram and
@@ -178,28 +188,28 @@ together. The fix generalizes the heuristic to "both sides
 have a fence in the changed range": emit pre-fence
 removed/added as their own pair, then fence-onwards
 removed/added as a second pair. The renderer's change-block
-grouping breaks on the `added → removed` transition between
+grouping breaks on the `added â†’ removed` transition between
 the two pairs, so the view lands as two distinct visual
-blocks — the user's pre-fence edit (e.g. green "333") on top,
-the atomic fence swap (red old diagram → green new diagram)
+blocks â€” the user's pre-fence edit (e.g. green "333") on top,
+the atomic fence swap (red old diagram â†’ green new diagram)
 below. Five new Vitest cases in
 `markdown-diff-segments.test.ts` pin the full fence-split
-surface: (a) the primary regression — exactly one
-`added → removed` transition, no "333" bleed into the fence
+surface: (a) the primary regression â€” exactly one
+`added â†’ removed` transition, no "333" bleed into the fence
 segments, fence opener and interior all in the fence-onwards
 segments; (b) multi-line pre-fence edits stay together and
 land before the fence pair (via an explicit
 `preFenceAddedIndex < fenceRemovedIndex` assertion so
 reversing the emission order fails the test); (c) the
-heuristic applies to any fence language — a TypeScript
+heuristic applies to any fence language â€” a TypeScript
 fence with an intro paragraph added before it gets the same
 treatment as Mermaid, proving the logic keys on `fenceBlock`
 generally and not on a Mermaid-specific language tag;
 (d) negative control: a pure fence-content change with no
 pre-fence edit produces exactly `[removed, added]` non-normal
-kinds — no spurious empty pre-fence segments from the new
+kinds â€” no spurious empty pre-fence segments from the new
 code path; (e) line numbers (`oldStart` / `newStart`) on the
-emitted segments stay correct after the split — the
+emitted segments stay correct after the split â€” the
 `preFenceAdded.newStart`, `fenceRemoved.oldStart`, and
 `fenceAdded.newStart` all match their 1-based document
 positions so a future line-number-wiring regression would
@@ -213,8 +223,8 @@ Also fixed in the current tree: the session-find index now
 covers BOTH text variants of a `ConnectionRetryCard`. The
 live-card detail (the stored `message.text`) and the resolved
 card's synthesized past-tense copy ("Connection recovered",
-"Connection dropped briefly; the turn continued after …")
-previously drifted apart — the index only carried the stored
+"Connection dropped briefly; the turn continued after â€¦")
+previously drifted apart â€” the index only carried the stored
 text, so a search for terms visible only in the resolved card
 missed the message, and a search for live-card terms could
 land on a resolved card whose rendered copy didn't visibly
@@ -228,7 +238,7 @@ positions are still computed at render time against each
 variant's rendered text, so the card that is visible
 highlights correctly without double-render. Comment in the
 session-find helper flags the coupling to the rendered copy
-— keep the two in sync. New Vitest case pins all three
+â€” keep the two in sync. New Vitest case pins all three
 matches (live detail, resolved heading, resolved synthesized
 detail). Verified load-bearing by dropping the helper call
 and observing the resolved-card assertions fail.
@@ -250,7 +260,7 @@ later search landing on the same id still fires the pin.
 Separately, `shouldKeepBottomAfterLayoutRef.current = false`
 moved inside the `Math.abs(...) >= 1` guard so it only
 clears the bottom-pin intent when this effect actually
-overrides the viewport position — previously a no-op invocation
+overrides the viewport position â€” previously a no-op invocation
 (scrollTop already at the target) still cleared the ref, so
 closing search left sticky-bottom broken until the user
 nudged the viewport. All 55 AgentSessionPanel tests still
@@ -278,7 +288,7 @@ construction). The two other
 `clear_stopped_orchestrator_queued_prompts` sites
 (`orchestrator_lifecycle.rs:431` inside the aborted-stop
 cleanup loop and `orchestrator_transitions.rs:401` inside a
-batched per-instance-session loop) were left unchanged — both
+batched per-instance-session loop) were left unchanged â€” both
 run inside flows where neighboring mutations on the same
 sessions already bump the stamp, so the extra stamp on a
 no-clear session is amortized rather than wasted. 450-test
@@ -294,7 +304,7 @@ captures every `"wheel"` registration with its options, locates
 the one installed on `.workspace-pane.active .message-stack`
 after `renderAppWithProjectAndSession` settles, and asserts
 `{ passive: false }`. The `toBeDefined` on the registration
-itself also catches the coarser regression — React's delegated
+itself also catches the coarser regression â€” React's delegated
 `onWheel` prop would install through a document-level handler
 rather than on the message-stack node, so the filtered lookup
 would return `undefined`. Verified load-bearing by omitting the
@@ -310,11 +320,11 @@ returns `Err`. The next persist tick reopens fresh and re-runs
 `ensure_sqlite_state_schema`. Without invalidation, a cached
 connection poisoned by `SQLITE_BUSY` / `SQLITE_CORRUPT` / an
 unlinked backing file / a Windows-side handle glitch would be
-reused forever — every subsequent tick would log the same
+reused forever â€” every subsequent tick would log the same
 error with no way to recover short of a backend restart. The
 happy path still reuses one connection per process lifetime;
 only the error path pays the cost of one reopen. A direct
-regression test is tracked as a P2 — the entire SQLite cache
+regression test is tracked as a P2 â€” the entire SQLite cache
 is `#[cfg(not(test))]`-gated (test builds use JSON persistence
 instead), and exposing the cache to the test tree would be a
 larger refactor than the Medium-severity fix itself.
@@ -323,28 +333,28 @@ Also fixed in the current tree: `saveError` visibility is no
 longer over-gated by an informational `externalFileNotice`.
 Previously the "Save failed: <reason>" diagnostic in
 `DiffPanel.tsx` was gated on `!externalFileNotice &&
-!diffEditConflictOnDisk`, so any notice — including purely
+!diffEditConflictOnDisk`, so any notice â€” including purely
 informational ones like "Rendered Markdown edits will save this
 document to the worktree file." or "File reloaded from disk."
-— suppressed the diagnostic. A save failure while such a
+â€” suppressed the diagnostic. A save failure while such a
 notice was visible produced the "Save failed" pill with no
 explanation, the exact regression the diagnostic was added to
 prevent. The gate is now narrowed to `!diffEditConflictOnDisk`
-— the conflict path still renders its own recovery UI ("Apply
+â€” the conflict path still renders its own recovery UI ("Apply
 my edits to disk version" / "Save anyway" / "Reload from disk")
 in place of the raw diagnostic, and the informational notice
 now coexists with the diagnostic (the two stack). A new Vitest
 case (`DiffPanel.test.tsx::"surfaces the save-error diagnostic
 when an informational externalFileNotice is visible"`) pins the
-contract: rendered-Markdown edit → informational notice set →
-save rejects with non-stale error → assert "Save failed: ..."
+contract: rendered-Markdown edit â†’ informational notice set â†’
+save rejects with non-stale error â†’ assert "Save failed: ..."
 diagnostic AND the notice are both present, and the stale-save
 recovery UI is NOT (negative control). Verified load-bearing by
 reverting the gate to the old form and observing the test fail.
 
 Also fixed in the current tree: the only High-severity backend
-bug — `commit_session_created_locked` performing synchronous
-SQLite I/O under the state mutex — now routes through the
+bug â€” `commit_session_created_locked` performing synchronous
+SQLite I/O under the state mutex â€” now routes through the
 existing background persist channel. `src/sse_broadcast.rs`'s
 `commit_session_created_locked` sends `PersistRequest::Delta`
 instead of calling `persist_created_session` synchronously,
@@ -354,8 +364,8 @@ transaction (connection open, schema-ensure, metadata + session
 upsert, commit with fsync), so other requests that need
 `inner.lock()` no longer stall behind session-create disk I/O.
 The crash-before-persist window loses at most a just-created
-empty session shell — metadata + config, zero user content
-(messages are always `[]` at commit time) — which is the same
+empty session shell â€” metadata + config, zero user content
+(messages are always `[]` at commit time) â€” which is the same
 durability posture `persist_internal_locked` already has for
 every subsequent mutation. Test + shutdown fallback preserved:
 when `persist_tx.send` fails (tests construct `AppState` with a
@@ -373,8 +383,8 @@ Also fixed in the current tree: the synchronous persist path
 (`persist_persisted_state_to_sqlite` in `src/persist.rs`) no
 longer deep-clones every session transcript just to discard the
 clones. The previous `persisted.clone(); metadata.sessions.clear();`
-pattern paid a full `PersistedSessionRecord::clone` — and every
-message inside it — per call; a new
+pattern paid a full `PersistedSessionRecord::clone` â€” and every
+message inside it â€” per call; a new
 `PersistedState::metadata_only()` helper clones only the
 metadata fields and leaves `sessions: Vec::new()`, so the
 caller avoids touching session transcripts at all and feeds the
@@ -393,7 +403,7 @@ every startup even though the fallback value is only needed
 when the primary `SQLITE_METADATA_KEY` row is missing. The
 lookup now uses an `if let Some(...) else if let Some(...) else`
 chain so the legacy query only runs when the primary returns
-`None` — silent cost on every startup was a second query
+`None` â€” silent cost on every startup was a second query
 against a connection that's about to be dropped. The optional
 follow-up from the bug entry (sharing the cached connection
 across load/persist) is not done; it was explicitly marked
@@ -403,7 +413,7 @@ Also fixed in the current tree: the `/api/terminal` Unix spawn
 path now uses `sh -lc` instead of `sh -c`, restoring login-shell
 semantics. `build_terminal_shell_command` in `src/terminal.rs`
 passes `-l` so `sh` sources `/etc/profile` and `~/.profile`
-before executing the command — users who extend `PATH` from
+before executing the command â€” users who extend `PATH` from
 those files (`nvm`, `uv`, `poetry`, pyenv, rbenv, Homebrew on
 Apple Silicon, `cargo env`, gcloud shims, etc.) again see their
 tooling resolve from the terminal panel the same way it
@@ -411,7 +421,7 @@ resolves from their desktop terminal. The change is a revert of
 the incidental flag drop in commit `e208dde` ("Add terminal
 command execution support"), which did not document a reason
 for dropping `-l`. The Windows branch continues to use
-`powershell.exe -NoProfile` — the tradeoff tilts differently on
+`powershell.exe -NoProfile` â€” the tradeoff tilts differently on
 Windows (PS profiles commonly do heavy per-invocation work;
 `PATH` there comes from the registry, not the profile), and the
 comment in `build_terminal_shell_command` explains the
@@ -419,7 +429,7 @@ asymmetry for future readers.
 
 Also fixed in the current tree: a third small-items pass landed
 two more. (1) The dialog-backdrop platform fallback is now
-directly exercised — two new Vitest cases in
+directly exercised â€” two new Vitest cases in
 `ui/src/dialog-backdrop-dismiss.test.ts` delete
 `navigator.userAgentData` and stub only `navigator.platform`,
 verifying macOS and non-Apple detection both work through the
@@ -427,7 +437,7 @@ verifying macOS and non-Apple detection both work through the
 wrote both values, leaving the Safari/Firefox-style branch
 unpinned). (2) `markdown-diff-change-section.tsx::handleInput`
 no longer assigns `event.currentTarget.textContent = segment
-.markdown` in the read-only `allowReadOnlyCaret` branch — the
+.markdown` in the read-only `allowReadOnlyCaret` branch â€” the
 subsequent `onReadOnlyMutation()` remount already restores the
 rendered DOM under React's control, and the raw-source-text
 assignment was producing a one-frame "plain source flash" on
@@ -437,12 +447,12 @@ Also fixed in the current tree: a second small-items pass landed
 four more. (1) `.mermaid-diagram-frame` in `ui/src/styles.css`
 now sets `min-width: 0` (was `min-width: 100%`) so the iframe
 can shrink below its intrinsic 4096-px width inside a flex
-ancestor — fixes the "Mermaid iframe max-width: 100% defeated
+ancestor â€” fixes the "Mermaid iframe max-width: 100% defeated
 by a flex ancestor" entry at its root. (2) The dialog platform
 stub `afterEach` in `ui/src/dialog-backdrop-dismiss.test.ts`
 and `ui/src/preferences/SettingsDialogShell.test.tsx` now deletes
 the stubbed own `navigator.platform` property when there was no
-original own descriptor — previously the stub could leak into
+original own descriptor â€” previously the stub could leak into
 later tests on the same worker since jsdom inherits `platform`
 from the prototype. (3) The "Flagship deadline-guard test
 doesn't isolate the post-await check" entry is retired as
@@ -450,7 +460,7 @@ already-fixed: the main test was renamed to `"hard-cap
 \`stopped\` flag bails an in-flight await when the cap
 setTimeout fires"` and the post-await deadline check is
 covered independently by `"post-await \`now() >= deadlineMs\`
-check bails when the injected clock passes the deadline"` —
+check bails when the injected clock passes the deadline"` â€”
 both with clear docstrings.
 
 Also fixed in the current tree: four small ledger-polish items
@@ -458,7 +468,7 @@ landed together. (1) `MonacoCodeEditor.tsx`'s
 `computeInlineZoneStructureKey` doc comment and
 (2) `DiffPanel.tsx`'s `commitRenderedMarkdownDrafts` doc comment
 no longer reference-by-title the active `docs/bugs.md` headings
-they replaced — both comments now describe the invariant in
+they replaced â€” both comments now describe the invariant in
 situ so they don't rot when the matching ledger entry moves to
 preamble. (3) The scratch `docs/math-demo.md` edit left over
 from mid-session debugging has been reverted (it was never an
@@ -468,7 +478,7 @@ documented as intentional. (4) The
 `MarkdownDocumentEolStyle` / `detectMarkdownDocumentEolStyle` /
 `applyMarkdownDocumentEolStyle` docs in
 `markdown-diff-segments.ts` now describe the contract accurately
-— "detected dominant EOL style preserved across the round-trip",
+â€” "detected dominant EOL style preserved across the round-trip",
 not "original CRLF/LF mix preserved". Homogeneous inputs still
 round-trip byte-exact; heterogeneous inputs are normalised to
 the dominant style (documented trade-off, not a bug).
@@ -476,12 +486,12 @@ the dominant style (documented trade-off, not a bug).
 Also fixed in the current tree: React dep-array hygiene across
 three hot effects + timers. (1) `App.tsx`'s session-hydration
 `useEffect` dropped `activeSession?.messages.length` from its
-deps — the body reads only `activeSession?.id` and
+deps â€” the body reads only `activeSession?.id` and
 `activeSession?.messagesLoaded`, so streaming tokens no longer
 re-trigger the effect just to hit the "already hydrated /
 already hydrating" early-returns. (2) `message-cards.tsx`'s
 Markdown line-marker `useEffect` dropped `documentPath`,
-`hasOpenSourceLink`, `workspaceRoot` from its deps — those
+`hasOpenSourceLink`, `workspaceRoot` from its deps â€” those
 affect the `<a>` renderer (href resolution, click handlers), not
 the `[data-markdown-line-start]` attributes the ResizeObserver
 re-queries. Tearing down + rebuilding the observer on unrelated
@@ -493,7 +503,7 @@ helper that clears BOTH the chained and hard-cap timers and is
 called from every self-stop site; previously a completed prompt
 left a pending timer slot for up to 5 minutes. New co-located
 test in `active-prompt-poll.test.ts` uses `vi.getTimerCount()`
-to verify zero pending timers after a `shouldStop` exit —
+to verify zero pending timers after a `shouldStop` exit â€”
 verified load-bearing by temporarily dropping the shared
 `stopPoll()` call from the `shouldStop` branch and watching the
 test fail.
@@ -510,7 +520,7 @@ Investigated and closed (not the claimed bug): the "`MessageCard`
 default-prop inline arrows defeat memoization" entry was based
 on a misdiagnosis. React's `memo` comparator receives the RAW
 props object as passed by the parent, NOT the destructured
-values — so an optional prop the parent omits reads as
+values â€” so an optional prop the parent omits reads as
 `undefined` on both `prev` and `next` and passes the `===`
 identity check cleanly without any help from stable defaults.
 Verified empirically by temporarily reverting the "fix" and
@@ -521,13 +531,13 @@ the two no-op defaults on `MessageCard` (`onMcpElicitationSubmit`,
 `onCodexAppRequestSubmit`) are now hoisted to module-scope
 constants (`NOOP_MCP_ELICITATION_SUBMIT`,
 `NOOP_CODEX_APP_REQUEST_SUBMIT`) in `ui/src/message-cards.tsx`
-— named defaults, reusable across future call sites, one fewer
+â€” named defaults, reusable across future call sites, one fewer
 arrow allocation per render. Paired with a co-located test
 (`MarkdownContent.test.tsx::"skips re-rendering when a parent
 re-renders with identical props and no optional callbacks"`)
 that counts `parseConnectionRetryNotice` invocations across a
 rerender to prove the memo DOES hit for the omitted-optional
-case — a forward-looking regression guard for the memo
+case â€” a forward-looking regression guard for the memo
 comparator itself (e.g., a future change that forgets to
 compare a new prop) rather than for the cosmetic cleanup
 itself.
@@ -536,10 +546,10 @@ Also fixed in the current tree: inline-zone id stability is now
 directly exercised. Four new Vitest cases in
 `ui/src/panels/SourcePanel.test.tsx::"inline-zone id stability"`
 pin the current contract across Markdown-fence and `.mmd`
-whole-file ids — same-span-and-body → stable, body-edit →
-flipped, insert-above → flipped today (the latent gap is
+whole-file ids â€” same-span-and-body â†’ stable, body-edit â†’
+flipped, insert-above â†’ flipped today (the latent gap is
 tracked separately as an active bug entry with fix proposals),
-`.mmd` any-edit → flipped (intentional whole-file hashing).
+`.mmd` any-edit â†’ flipped (intentional whole-file hashing).
 
 Also fixed in the current tree: MonacoCodeEditor's inline-zone
 `ResizeObserver` no longer disconnects and rebuilds on every
@@ -548,22 +558,22 @@ keystroke. Previously the observer's `useEffect` depended on
 with a fresh array on every prop change (and `inlineZones` itself
 is rebuilt on every keystroke via `SourcePanel`'s
 `renderableRegions` memo, whose deps include `editorValue`). The
-observer was then torn down and re-built on every keystroke —
+observer was then torn down and re-built on every keystroke â€”
 correctness-preserving (diagram DOM survived via stable ids +
 portal key), but wasteful at O(zones) per keystroke. The fix
-extracts `computeInlineZoneStructureKey(hosts): string` — a pure
-function that joins the hosts' ids with `\n` — and depends the
+extracts `computeInlineZoneStructureKey(hosts): string` â€” a pure
+function that joins the hosts' ids with `\n` â€” and depends the
 observer effect on that string instead. Same ids in the same
-order → same string → `Object.is` passes → effect body is
+order â†’ same string â†’ `Object.is` passes â†’ effect body is
 skipped. Any zone added, removed, or re-hashed (the
 `mermaid:start:end:hash` / `mermaid-file:hash` id format in
 `source-renderers.ts` bakes a content hash into the id) flips the
 key and correctly rebuilds the observer. The portal-render path
 still writes `setInlineZoneHostState` unconditionally so
 appearance / workspaceRoot changes flow through to fresh
-`zone.render()` closures — only the observer is de-churned.
+`zone.render()` closures â€” only the observer is de-churned.
 Unit coverage in `ui/src/MonacoCodeEditor.test.ts` pins the
-key-derivation contract: structural equality in → equal strings
+key-derivation contract: structural equality in â†’ equal strings
 out (verified via `Object.is`), empty handled, add / remove /
 reorder / id-change all flip the key.
 
@@ -582,14 +592,14 @@ the active tracker entry was stale and has been removed.
 
 Also fixed in the current tree: MonacoCodeEditor inline-zone
 portal children are now wrapped in an `InlineZoneErrorBoundary`
-class component. A throw inside the zone's `render()` callback —
+class component. A throw inside the zone's `render()` callback â€”
 the common failure modes are a malformed Mermaid fence, a KaTeX
 parse error that escapes `throwOnError: false`, or any other
-synchronous render exception from the MarkdownContent subtree —
+synchronous render exception from the MarkdownContent subtree â€”
 no longer unmounts the whole Monaco editor. The boundary catches
 the error, logs it (with the zone id) to the dev console for
 diagnosability, and renders a compact fallback notice
-("Diagram failed to render — view the source below for details."
+("Diagram failed to render â€” view the source below for details."
 via `role="status"` + `aria-live="polite"`). The source text and
 the rest of the editor stay mounted; the user's unsaved buffer
 is preserved. The boundary resets its error state when the
@@ -629,14 +639,14 @@ conflicts before applying edits to the disk version.")` before
 touching `fetchFile` or rebase. Callers that ignore the new boolean
 (Save / reload / navigation flows) continue to treat the function
 as a best-effort flush and surface errors through the existing
-`saveError` banner — backward compatible. A new Vitest case pins
+`saveError` banner â€” backward compatible. A new Vitest case pins
 the empty-commits `return true` path (verified load-bearing by
 flipping it to `false` and watching the test fail): a
 rendered-Markdown save-then-apply-to-disk-version scenario where
 `handleSave`'s own internal commit already drained the draft so
 the apply-time flushSync has no work. The
 success-with-commits and conflict-short-circuit branches are
-tracked as a P2 task below — engineering those states reliably
+tracked as a P2 task below â€” engineering those states reliably
 through a React integration test is non-trivial.
 
 Also fixed in the current tree: the `isSafePastedMarkdownHref`
@@ -646,7 +656,7 @@ fall through the normal protocol-allowlist check and are rejected
 because `c:`, `d:`, etc. are not in the `http`/`https`/`mailto`
 allowlist. The `<a>` element itself stays (it's in ALLOWED), so its
 link text survives as plain content, but the `href` attribute is
-stripped — no latent path-handler-invocation risk if TermAl ever
+stripped â€” no latent path-handler-invocation risk if TermAl ever
 wraps in Tauri/Electron. Local-path file links that the user types
 or authors continue to work through
 `markdown-links.ts::resolveMarkdownFileLinkTarget`, which has its own
@@ -660,11 +670,11 @@ loses its href while the `<a>` element and link text survive.
 Also fixed in the current tree: the `markdown-diff-edit-pipeline` paste
 sanitizer now has direct Vitest coverage. A new
 `ui/src/panels/markdown-diff-edit-pipeline.test.ts` pins the
-`isSafePastedMarkdownHref` contract (empty/whitespace → reject;
+`isSafePastedMarkdownHref` contract (empty/whitespace â†’ reject;
 `javascript:` / `vbscript:` / `data:` / `file:` / `ftp:` / `blob:` /
-other non-allowlisted protocols → reject; mixed-case + control-byte
-obfuscation like `java\u0000script:` → reject after normalisation;
-`http` / `https` / `mailto` → accept; drive-letter paths accept per
+other non-allowlisted protocols â†’ reject; mixed-case + control-byte
+obfuscation like `java\u0000script:` â†’ reject after normalisation;
+`http` / `https` / `mailto` â†’ accept; drive-letter paths accept per
 current contract, with the tighter-allowlist follow-up tracked
 separately), and it covers `sanitizePastedMarkdownFragment`'s three
 gates end-to-end: every element in the 24-entry drop set is verified
@@ -673,7 +683,7 @@ audio/video, etc.), every element in the 31-entry allow set survives,
 unknown tags (`<section>`, `<mark>`, `<article>`, `<details>`,
 `<font>`, etc.) are unwrapped with their children preserved, and
 attribute scrubbing keeps only safe `href` on `<a>` plus normalised
-`language-*` class on `<code>` — `onclick` / `onmouseover` / `style` /
+`language-*` class on `<code>` â€” `onclick` / `onmouseover` / `style` /
 `data-*` / `id` are all stripped everywhere. Four smoke tests exercise
 `insertSanitizedMarkdownPaste` end-to-end, confirming the
 sanitize-before-insert ordering means no dropped tags ever reach the
@@ -685,12 +695,46 @@ new helpers (`detectMarkdownDocumentEolStyle` and
 `applyMarkdownDocumentEolStyle`) in `ui/src/panels/markdown-diff-segments.ts`
 capture the original EOL style at the source-content boundary and re-apply
 it after the segment math runs on LF, so `handleRenderedMarkdownSectionCommits`
-now round-trips CRLF → LF → CRLF transparently. A new Vitest integration
+now round-trips CRLF â†’ LF â†’ CRLF transparently. A new Vitest integration
 case loads a CRLF README, edits a rendered section, saves, and asserts the
 `onSaveFile` payload still has CRLF everywhere; unit tests pin the
-detection (pure LF, pure CRLF, mixed CRLF/LF dominant, ties → LF, bare
+detection (pure LF, pure CRLF, mixed CRLF/LF dominant, ties â†’ LF, bare
 `\r` legacy Mac ignored) and application (empty strings, LF identity,
 CRLF expansion, round-trip invariant) contracts.
+
+Also fixed in the current tree: the focused `AgentSessionPanel` suite is
+green again. The current transcript/page-band virtualization contract now
+passes `ui/src/panels/AgentSessionPanel.test.tsx` end to end, so mounted-range
+reconcile, startup resync, seek, idle compaction, and footer coverage are back
+to being a real release gate instead of a red known bug.
+
+Also fixed in the current tree: stale fork recovery now opens on the later
+authoritative state instead of stalling after the first empty recovery
+snapshot. `ui/src/App.session-lifecycle.test.tsx` now keeps both the stale
+create and stale fork deferred-open cases green, including the later-SSE
+adoption path.
+
+Also fixed in the current tree: the session composer no longer rerenders on
+assistant-only live-session churn. `SessionComposer` now compares only
+composer-relevant session fields plus user prompt history instead of raw
+`Session` identity, and `ui/src/panels/AgentSessionPanel.test.tsx` pins that
+assistant preview/output updates do not recompute the slash palette while a
+draft is in progress.
+
+Also fixed in the current tree: `adoptSessions(...)` no longer fans every
+authoritative snapshot through the full cleanup cascade. The current
+`ui/src/app-live-state.ts` change now gates `setSessions(...)`, per-session
+flag pruning, agent-command invalidation, and unknown-model confirmation
+cleanup behind explicit membership/workdir/key-set changes, so ordinary live
+session churn stops revalidating unrelated per-session stores on every state
+adoption turn. The focused live-state/lifecycle suites stayed green
+(`App.session-lifecycle`, `App.live-state.reconnect`,
+`App.live-state.visibility`, `App.live-state.watchdog`,
+`session-reconcile`), and a follow-up active-session typing profile dropped
+the sampled `TaskDuration` from about `1.45 s` to `0.29 s`, `ScriptDuration`
+from about `0.335 s` to `0.007 s`, and the worst keystroke frame from about
+`34.7 ms` to `13.3 ms`. The broader whole-tab adoption/render churn bug
+remains open below.
 
 ## Cross-window tab drag channel restarts on ordinary renders
 
@@ -708,91 +752,336 @@ The extracted drag/resize hook now owns the `BroadcastChannel` that carries `dra
 - Read the latest layout helper through a ref inside `channel.onmessage` rather than making it an effect dependency.
 - Add a regression test that forces a render between `drag-start` and `drop-commit` and asserts the source tab still closes cleanly.
 
-## Extracted session actions still update state after unmount
 
-**Severity:** Medium - several async handlers moved into `ui/src/app-session-actions.ts` still call setters after `await` without guarding against unmount.
 
-The split extracted a large set of session and project actions into `useAppSessionActions`, but a few handlers still do post-`await` state work unconditionally. `handleCreateProject`, `handlePickProjectRoot`, approval/user-input submission, queued-prompt cancellation, stop-session cleanup, and agent-command refresh all reach `adoptState(...)`, `reportRequestError(...)`, or local flag setters after awaiting network work without first checking `isMountedRef`. Neighboring extracted flows such as kill and rename already use that guard, so the module now has inconsistent unmount safety. If the app unmounts while one of these requests is in flight, the hook can still mutate a dead tree or repopulate UI flags during teardown.
+## Search-band range merging mutates mounted-page state during render
 
-**Current behavior:**
-- Multiple handlers in `ui/src/app-session-actions.ts` run post-`await` setters without `isMountedRef.current` checks.
-- Those setters include both adopted state writes and local cleanup/error flags.
-- Existing tests cover one unmount-sensitive delete-project path, but not the newly extracted create-project, approval, stop-session, or refresh-agent-commands paths.
+**Severity:** High - `mergeRanges(...)` reuses and mutates the first input range object, so an overlapping search band can mutate `mountedPageRange` React state during render.
 
-**Proposal:**
-- Apply the same `isMountedRef` guard pattern used by the extracted kill/rename flows to every post-`await` state update and `finally` cleanup setter.
-- Centralize the guard in small helper wrappers where possible so future extracted handlers do not drift.
-- Add unmount-focused regression tests for create-project, approval submission, stop-session, and refresh-agent-command flows.
-
-## Unix terminal login-shell behavior lacks regression coverage
-
-**Severity:** Medium - the Unix terminal spawn path now restores `sh -lc`, but the behavior is not pinned by a dedicated test.
-
-This is user-visible for Unix users whose PATH/tooling comes from login-shell setup such as `.profile`, `nvm`, `uv`, `poetry`, Homebrew, `cargo env`, or gcloud shims. The existing terminal smoke test proves a trivial command can run, but it would still pass if the `-l` flag were dropped again.
+`ui/src/panels/VirtualizedConversationMessageList.tsx` now merges the live
+viewport range with the pinned search-hit range, but `mergeRanges(...)`
+initializes `mergedRanges` with `sortedRanges[0]` and then updates
+`currentRange.endIndex` in place. When the first merged range is
+`mountedPageRange`, that mutation writes directly into the current React state
+object while the component is rendering. The same object also feeds mounted-band
+reconciliation and scroll-anchor bookkeeping, so the resulting corruption can
+be hard to reproduce and harder to reason about.
 
 **Current behavior:**
-- `build_terminal_shell_command` passes `sh -lc` on Unix.
-- Existing terminal tests exercise command execution, not the exact login-shell invocation.
-- Regressing to `sh -c` would not be caught by the current test suite.
+- `mergeRanges(...)` copies the input array but not the `VirtualizedRange`
+  objects inside it.
+- Overlapping ranges update `currentRange.endIndex` in place.
+- When the first merged range is `mountedPageRange`, React state is mutated
+  during render instead of producing a fresh derived range.
 
 **Proposal:**
-- Add a Unix-only regression test that pins login-shell behavior.
-- Prefer factoring shell construction into a testable helper and asserting the Unix argv includes `-lc`.
-- If practical, add a stronger integration test with PATH setup that is only visible through login-shell initialization.
+- Make `mergeRanges(...)` fully immutable by cloning the first range before
+  storing it in `mergedRanges`.
+- Keep all later merged ranges cloned as well so the helper never mutates an
+  input object.
+- Add a focused regression that overlaps the viewport band with the pinned
+  search band and asserts the original `mountedPageRange` object is unchanged.
 
-## Stale create responses can still open phantom workspace panes
+## Focused live sessions monopolize the main thread during state adoption
 
-**Severity:** Low - the `"stale"` `adoptCreatedSessionResponse` outcome is treated as safe to open, but a stale revision does not prove the created session is already present in `sessionsRef`.
+**Severity:** Medium - a visible, focused TermAl tab with an active Codex session can spend multiple seconds of an 8 s sample on main-thread work even when no requests fail and no exceptions fire.
 
-The current refactor correctly separates `"recovering"` from `"stale"`, but `"stale"` still means only that `shouldAdoptSnapshotRevision` rejected the create response. A single-session hydration response can advance `latestStateRevisionRef` without adopting a full session list, so a later create or fork response with an older revision can return `"stale"` even though `sessionsRef` does not contain `created.sessionId`.
+A live Chrome profile against the current dev tab showed no runtime exceptions, no failed network requests, and no framework error overlay, but the page still burned about `6.6 s` of `TaskDuration`, `0.97 s` of `ScriptDuration`, `372` style recalculations, and several long tasks above `2 s` while Codex was active. The hottest app frames were `handleStateEvent(...)` in `ui/src/app-live-state.ts`, `request(...)` / `looksLikeHtmlResponse(...)` in `ui/src/api.ts`, `reconcileSessions(...)` / `reconcileMessages(...)` in `ui/src/session-reconcile.ts`, `estimateConversationMessageHeight(...)` in `ui/src/panels/conversation-virtualization.ts`, and repeated `getBoundingClientRect()` reads in `ui/src/panels/VirtualizedConversationMessageList.tsx`. A second targeted typing profile pointed the same way: 16 simulated keystrokes averaged only about `1.0 ms` of synchronous input work and about `11 ms` to the next frame, while `handleStateEvent(...)` alone still consumed about `199 ms` of self time. Narrower composer-rerender and adoption-fan-out regressions have been fixed separately, but the remaining profile still points at broader whole-tab churn.
 
 **Current behavior:**
-- `adoptCreatedSessionResponse` returns `"stale"` when the revision gate rejects the create response.
-- Call sites treat `"stale"` as safe and open `created.sessionId` in the workspace fallback.
-- If the stale revision came from unrelated single-session hydration, the workspace can still open a phantom pane for a missing session.
+- A visible, focused active session still produces repeated long main-thread tasks while Codex is working or waiting for output.
+- `handleStateEvent(...)` still drives broad adoption work through `adoptState(...)` / `adoptSessions(...)`, transcript reconciliation, and follow-on measurement/render work even after the narrower cleanup fan-out cut.
+- `/api/state` resync currently reads full response bodies as text and runs `looksLikeHtmlResponse(...)` before JSON parsing, adding avoidable CPU on large successful snapshots.
+- Transcript virtualization still spends measurable time on regex-heavy height estimation and synchronous layout reads, so live session churn compounds with scroll/measure work instead of staying isolated to the active status surface.
 
 **Proposal:**
-- Before treating `"stale"` as openable, verify `sessionsRef.current.some((session) => session.id === created.sessionId)`.
-- If the session is absent, request action-recovery resync and skip the workspace fallback.
-- Add a Vitest regression test that advances the revision without inserting the created session, then asserts the fallback does not open a phantom pane.
+- Make the live state path more metadata-first so transcript arrays, workspace layout, and per-session maps are not reconciled or pruned when the incoming snapshot did not materially change those slices.
+- Split the `/api/state` response handling into a cheap JSON-first path and keep HTML sniffing on a narrow error/prefix check instead of scanning whole successful payloads.
+- Cache height-estimation inputs by message identity/revision and reduce repeated `getBoundingClientRect()` passes in the virtualized transcript.
+- Re-profile the focused active-session path after each cut and keep this issue open until long-task bursts drop back below user-visible jank thresholds.
 
-## Settings tab no-op Home/End keys can fall through to browser defaults
+**Plan:**
+- Start at the root of the profile: cut `handleStateEvent(...)` / `adoptState(...)` work first, because that is where both the passive and targeted rounds spend the most app CPU.
+- Break the work into independently measurable slices: state adoption fan-out, `/api/state` parsing path, and transcript virtualization measurement/estimation.
+- After each slice lands, rerun the live active-session profile and the focused typing round so reductions in `handleStateEvent(...)` self time, `TaskDuration`, and next-frame latency are verified instead of assumed.
 
-**Severity:** Low - `Home` on the first settings tab and `End` on the last settings tab are handled tablist keys, but the handler returns before calling `event.preventDefault()`.
+## `/api/state` success responses still pay full text + HTML-sniff cost
 
-The Settings tab bar now implements roving tabindex and WAI-ARIA keyboard navigation, but the no-op edges still let browser defaults run. That can scroll the page or dialog while focus remains inside the tablist, weakening the keyboard contract the change is meant to provide.
+**Severity:** Medium - `ui/src/api.ts::request(...)` still routes successful JSON snapshots through `response.text()` and `looksLikeHtmlResponse(...)` before `JSON.parse(...)`, so busy reconnect/resync flows burn CPU proportional to payload size even when the backend returns correct JSON.
+
+The profiler-backed active-session round surfaced `looksLikeHtmlResponse(...)` and `request(...)` among the hottest app frames during state-resync activity. That work is avoidable on the common path: successful `/api/state` responses already advertise JSON, but the client still allocates the full body as text, lowercases/trims/scans it for HTML, and only then parses it as JSON. On large metadata or transcript-bearing snapshots, that adds extra string churn exactly when the main thread is already busy.
 
 **Current behavior:**
-- `ArrowLeft`, `ArrowRight`, `Home`, and `End` are recognized by the tablist key handler.
-- When the computed destination equals the current tab, the handler returns before `preventDefault`.
-- Existing tests cover movement cases, not `Home` on the first tab or `End` on the last tab.
+- `request(...)` always reads the entire body as text, runs `looksLikeHtmlResponse(raw, contentType)`, and only then `JSON.parse(raw)`.
+- `fetchState()` inherits that path during live resync and reconnect work, so every successful snapshot pays the extra full-body text handling cost.
+- The hot path therefore does HTML-fallback detection work even when the response is already a normal `application/json` success.
 
 **Proposal:**
-- Call `event.preventDefault()` once a supported key is recognized and the active tab index is valid, before the no-op destination check.
-- Add tests for `Home` on the first tab and `End` on the last tab that assert selection stays put and default is prevented.
+- Treat successful JSON responses as JSON-first and reserve whole-body text scanning for error cases or obviously wrong content types.
+- Keep the dev-server HTML fallback detection, but move it onto a narrow path that does not penalize healthy successful snapshots.
+- Add explicit coverage for JSON success, HTML fallback, malformed JSON, and non-JSON error bodies so the cheaper fast path does not weaken the existing safety checks.
 
-## Rendered Markdown commit fallback path can disagree on offsets for CRLF files
+**Plan:**
+- In `request(...)`, branch on `response.ok` plus JSON-like content types and parse with `response.json()` immediately on the happy path.
+- Restrict `looksLikeHtmlResponse(...)` to responses whose content type is already suspicious or whose JSON parse failed, using at most a bounded prefix probe when the content type is missing.
+- Add targeted tests for `/api/state` success, Vite/dev-server HTML fallback, 404 text responses, and malformed JSON so the API helper stays robust while the fast path gets cheaper.
 
-**Severity:** Low - `ui/src/panels/markdown-diff-change-section.tsx::326` captures `commit.sourceContent` from the draft's rendered preview — which on a CRLF-on-disk document is the CRLF form (`markdownPreview.after.content`). `ui/src/panels/DiffPanel.tsx::handleRenderedMarkdownSectionCommits` then passes the LF-normalized `sourceContent` to `resolveRenderedMarkdownCommitRange`, whose fallback path calls `mapMarkdownRangeAcrossContentChange(commit.sourceContent, currentContent, ...)` with mismatched line-ending shapes.
+## Prompt-settings pane can keep a stale render callback behind SessionBody memoization
 
-In the happy path (strategy 1: the segment's original offsets still slice cleanly from `currentContent`), the mismatch is invisible because the fallback never runs. But when the user edits, saves, re-edits in the same session, or the watcher rebases mid-edit, the fallback path is the winning strategy — and on CRLF files it can compute the wrong character offsets, surfacing as "Rendered Markdown edit could not be applied" even when the change is benign.
+**Severity:** Medium - `SessionBody` excludes `renderPromptSettings` from its memo comparator even though prompt mode calls it through a ref, so prompt settings can keep an outdated parent closure until some unrelated prop forces a rerender.
+
+`ui/src/panels/AgentSessionPanel.tsx` memoizes `SessionBody` and intentionally
+excludes the render callbacks from its comparator. That works for the message
+renderers because the memoized subtree rerenders when their data props change,
+but prompt mode calls `renderPromptSettingsRef.current(...)` directly. The ref
+is only refreshed when `SessionBody` itself renders. If the parent recreates
+the `renderPromptSettings` closure while the compared props stay equal, the
+prompt-settings pane keeps using the stale callback.
 
 **Current behavior:**
-- `commit.sourceContent` carries CRLF for a CRLF-on-disk file.
-- `handleRenderedMarkdownSectionCommits`'s `sourceContent` is LF-normalized.
-- The offset-mapping fallback receives one CRLF input and one LF input and its `indexOf` / line-matching math drifts by one character per CRLF boundary that falls before the commit range.
+- `SessionBody` stores `renderPromptSettings` in a ref and reads that ref in
+  prompt mode.
+- The memo comparator explicitly excludes `renderPromptSettings`.
+- Parent renders that only change the prompt-settings closure do not update the
+  ref, so prompt mode can keep stale callback behavior.
 
 **Proposal:**
-- Normalize `commit.sourceContent` to LF before constructing the commit record (or at the call site where the fallback consumes it), so both arguments share the same line-ending shape.
-- Add a Vitest case that exercises strategy 2 (`mapMarkdownRangeAcrossContentChange`) on a CRLF document: edit a rendered section, apply an unrelated watcher rebase that shifts the anchor, commit again, and assert the commit lands without "could not be applied".
-- Surfaced by the CRLF-preservation review; out of scope for that change, tracked here as a follow-up.
+- Include `renderPromptSettings` in the memo comparator, or wrap it in a stable
+  ref-backed adapter that is refreshed outside the memo boundary.
+- Add a focused regression that re-creates the prompt-settings renderer while
+  the compared props stay equal and asserts prompt mode picks up the new
+  closure immediately.
 
+## Global Alt+PageUp/PageDown pane cycling outranks nested controls
+
+**Severity:** Medium - the new window-level capture handler for `Alt+PageUp` / `Alt+PageDown` switches pane tabs before focused descendants can consume those shortcuts.
+
+`ui/src/SessionPaneView.tsx` now installs a capture-phase `window` keydown
+listener for `Alt+PageUp/PageDown` whenever the pane is active. Because it runs
+above the focused widget boundary, nested editors, dialogs, or future
+pane-local controls cannot opt into those shortcuts even when they own focus.
+That makes the shortcut harder to scope and easier to break as more nested UI
+surfaces land inside a session pane.
+
+**Current behavior:**
+- Active panes register a capture-phase `window` listener for
+  `Alt+PageUp/PageDown`.
+- The listener prevents default and switches pane tabs before descendants see
+  the shortcut.
+- Nested controls therefore cannot claim or suppress the combo from inside the
+  active pane.
+
+**Proposal:**
+- Route the shortcut through the pane-root key handling path instead of a
+  window-global capture listener.
+- Or gate the capture listener with the same focused-target checks used for the
+  other page-key routing so descendants can opt out.
+- Add a focused regression with a nested focusable control that handles
+  `Alt+PageUp/PageDown` and assert pane cycling does not preempt it.
+
+Also fixed in the current tree: transcript search pinning no longer replaces
+the live mounted page band. `VirtualizedConversationMessageList.tsx` now renders
+the viewport band and the active search-hit band as separate page segments with
+spacers between them, so keeping a search result pinned does not force every
+page between the viewport and the hit into the DOM and does not let the live
+viewport fall into blank space. `AgentSessionPanel.test.tsx` now covers both the
+"typed search stays virtualized" path and the "search result stays pinned while
+the user scrolls elsewhere" path.
+
+Also fixed in the current tree: stale create/fork recovery no longer loses
+earlier pending opens when multiple recoveries overlap. `useAppLiveState` now
+tracks recovery open intent as a collection keyed by session id, partitions that
+collection against each adopted snapshot, and only consumes an intent once the
+authoritative session list actually contains the recovered session. Focused
+coverage in `ui/src/app-live-state.test.ts` now pins the cleanup-plan branches,
+intent partitioning, and duplicate-intent replacement semantics.
+
+Also fixed in the current tree: `SessionComposer` memoization now includes
+`session.workdir` and `session.agentCommandsRevision`, so slash-command refresh
+rerenders happen when the request key changes instead of leaving stale
+agent-command state in place. `AgentSessionPanel.test.tsx` now covers both the
+negative path (assistant-only churn stays memoized) and positive workdir /
+revision changes that must rebuild the slash palette.
+
+Also fixed in the current tree: session `PageUp` / `PageDown` routing now goes
+through `resolvePaneScrollCommand(...)` in `SessionPaneView.tsx` instead of the
+old session-only early return. Plain page-scroll commands still use the
+transcript-specific fixed-delta path, but `Ctrl+PageUp/PageDown` once again stay
+on the shared boundary-jump contract, and editable descendants only get the
+capture fallback when they would otherwise stop propagation before the pane
+shell can resolve the key.
+
+Also fixed in the current tree: programmatic transcript page jumps now keep the
+virtualizer's scroll bookkeeping in sync. The synthetic scroll-write path in
+`VirtualizedConversationMessageList.tsx` advances `lastNativeScrollTopRef`,
+preserves the current scroll delta, and re-arms idle compaction/reconciliation
+instead of clearing that state immediately and leaving the next real scroll to
+measure from a stale baseline.
+
+Also fixed in the current tree: the latest-user prompt-follow branch in
+`SessionPaneView.tsx` now preserves and invokes the cleanup returned by
+`followLatestMessageForPromptSend()`. Rerender/unmount no longer leaves the
+settled scroll-to-bottom loop running after the effect should have been torn
+down.
+
+Also fixed in the current tree: the nested-editable `PageUp` / `PageDown`
+fallback in `SessionPaneView.tsx` now uses a ref-backed window capture listener,
+so active-session switches no longer leave the global handler writing scroll
+state, stickiness, or new-response bookkeeping under the previous session key.
+`App.scroll-behavior.test.tsx` now restores a two-tab session pane, switches the
+active tab, and proves a nested editable `PageDown` still updates the current
+session instead of the stale one.
+
+Also fixed in the current tree: `syncProgrammaticScrollWrite(...)` in
+`VirtualizedConversationMessageList.tsx` now reclassifies every synthetic
+scroll from its current delta instead of only when `lastUserScrollKindRef` was
+already `null`. Programmatic jumps no longer inherit stale `"incremental"` /
+`"seek"` intent from the previous gesture, and
+`AgentSessionPanel.test.tsx` now drives a wheel gesture followed by a distant
+programmatic jump and a small native scroll to pin that reclassification.
+
+Also fixed in the current tree: the nested-editable `PageUp` / `PageDown`
+fallback in `SessionPaneView.tsx` is now scoped to the active pane root instead
+of acting as a global owner for any editable target in the window. The capture
+listener still rescues nested editors that stop propagation, but it now bails
+unless `event.target` lives under the active session pane. A focused
+`App.scroll-behavior.test.tsx` case proves an external textarea no longer pages
+the transcript.
+
+Also fixed in the current tree: programmatic transcript scroll writes now carry
+explicit scroll intent when the caller already knows it. `SessionPaneView.tsx`
+tags keyboard page jumps and boundary jumps as `"seek"` in the
+`MESSAGE_STACK_SCROLL_WRITE_EVENT` detail, and
+`VirtualizedConversationMessageList.tsx` consumes that detail before falling
+back to raw-delta classification. Smaller fixed-delta keyboard jumps no longer
+lose their seek semantics just because the synthetic delta is below the generic
+seek threshold.
+
+Also fixed in the current tree: the virtualizer no longer keeps sticky
+keyboard seek intent in a fallback ref. `pendingProgrammaticScrollKindRef`
+is gone from `VirtualizedConversationMessageList.tsx`, so no-op
+`PageUp` / `PageDown` / `Home` / `End` keys cannot arm a stale `"seek"`
+classification for a later unrelated programmatic scroll write. Synthetic
+scrolls now classify from explicit `scrollKind` metadata when provided and
+otherwise from the current delta only.
+
+Also fixed in the current tree: plain session-transcript `PageDown` now has
+focused positive-path coverage in `App.scroll-behavior.test.tsx`. The test
+drives an unmodified downward page jump against the real session transcript,
+pins the fixed-delta jump itself, and asserts the saved transcript bookkeeping
+still lands on the non-sticky path instead of falling back to browser-native
+paging.
+
+Also fixed in the current tree: the virtualizer's post-jump idle reconcile is
+now directly covered. `AgentSessionPanel.test.tsx` drives an incremental
+gesture, a distant programmatic jump, a follow-up small native scroll, then
+advances the idle timer and asserts the mounted page band changes again after
+settle while staying anchored to the jumped region.
+
+Also fixed in the current tree: the latest-user prompt-send follow branch now
+has direct coverage in `App.scroll-behavior.test.tsx`. The test drives a send
+while the newest visible message is user-authored, asserts the prompt-follow
+path scrolls immediately to the newest message, and proves rerender/unmount
+does not leave the settled-scroll loop running afterward.
+
+Also fixed in the current tree: the Windows-specific `Ctrl+PageUp` regression
+test in `App.scroll-behavior.test.tsx` now deletes the stubbed own
+`navigator.platform` property when the original value was inherited from the
+prototype, so the test no longer leaks `"Win32"` into later platform-sensitive
+cases.
+
+Also fixed in the current tree: the explicit `scrollKind` event-detail bridge
+now has direct regression coverage. `AgentSessionPanel.test.tsx` drives a
+sub-threshold synthetic transcript jump, dispatches
+`notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" })`, and pins
+that the virtualizer follows the seek reconciliation path instead of falling
+back to raw-delta incremental classification.
+
+Also fixed in the current tree: plain transcript `PageUp` now has focused
+positive-path coverage in `App.scroll-behavior.test.tsx`. The test starts near
+bottom, fires an unmodified `PageUp` against the real session transcript,
+asserts the fixed upward delta, and proves the pane stays detached from bottom
+by showing the next assistant update behind the `"New response"` affordance.
+
+Also fixed in the current tree: the remaining extracted session-action
+handlers in `ui/src/app-session-actions.ts` now honor unmount boundaries.
+Create-project, root-picker, approval/user-input submissions, queued-prompt
+cancel, stop-session cleanup, refresh-agent-commands, send, and
+session-settings flows all bail before post-`await` state adoption, error
+reporting, and `finally` cleanup when `isMountedRef.current` is false, so the
+hook no longer mutates torn-down UI after unmount.
+
+Also fixed in the current tree: Unix terminal login-shell behavior now has a
+dedicated regression test in `src/tests/terminal.rs`.
+`build_terminal_shell_command_uses_login_shell_on_unix` pins the Unix argv as
+`sh -lc <command>`, so a future regression back to `sh -c` fails fast instead
+of silently dropping login-shell PATH/tooling setup.
+
+Also fixed in the current tree: `docs/features/session-virtualized-transcript.md`
+now documents the current keyboard page-jump contract. The brief names
+`SESSION_PAGE_JUMP_VIEWPORT_FACTOR`, explains that `SessionPaneView.tsx`
+performs the `scrollTop` write directly, and records that
+`MESSAGE_STACK_SCROLL_WRITE_EVENT` can carry explicit scroll intent for the
+virtualizer.
+
+Also fixed in the current tree: `ui/src/message-stack-scroll-sync.ts` now has
+an inline contract comment documenting the producer/consumer seam for
+programmatic transcript scroll writes. The comment states that producers must
+emit the event immediately after direct message-stack scroll writes and that
+keyboard-owned seek jumps should provide explicit `detail.scrollKind` when raw
+delta size is not authoritative.
+
+Also fixed in the current tree: `SettingsTabBar.tsx` now prevents default for
+recognized `Home` / `End` keys before the no-op destination check. The first
+tab's `Home` and the last tab's `End` no longer fall through to browser scroll,
+and `SettingsTabBar.test.tsx` now pins both no-op edge cases.
+
+Also fixed in the current tree: code-heavy immediate-render coverage now
+reaches a real message-card path. `MarkdownContent.test.tsx` renders a
+code-heavy approval card with `preferImmediateHeavyRender`, asserts the real
+highlighted content appears immediately, and proves the deferred placeholder /
+`IntersectionObserver` fallback path never activates.
+
+Also fixed in the current tree: `AppDialogs.test.tsx` no longer weakens its own
+type signal with `as never` fixture coercions. The dialog integration fixture
+now uses real union literals and typed theme/style/config values, so prop drift
+surfaces at compile time instead of being masked inside the test harness.
+
+Also fixed in the current tree: stale create/fork recovery no longer consumes
+open-session intent before the session actually exists. `app-live-state.ts`
+now keeps recovery open intent pending, gates `openSessionInWorkspaceState(...)`
+on the reconciled session list containing the target id, and only consumes that
+intent once an adopted snapshot or SSE state really includes the recovered
+session. Missing recovery snapshots therefore stay phantom-free instead of
+reopening the tab later through `/api/state`.
+
+Also fixed in the current tree: the stale create/fork lifecycle tests now pin
+the pre-resync no-open invariant. `App.session-lifecycle.test.tsx` asserts
+immediately after the stale response resolves and before the recovery snapshot
+lands that the target session tab/composer is still absent, then separately
+asserts the recovered session appears only after the authoritative snapshot
+that actually includes it.
+
+Also fixed in the current tree: deferred stale create recovery opening is now
+covered after a missing recovery snapshot. `App.session-lifecycle.test.tsx`
+extends the stale create flow so the first recovery `fetchState` result still
+omits the target session, asserts nothing opens yet, then adopts a later SSE
+state that includes the session and proves the pending open fires exactly once
+at that point.
+
+Also fixed in the current tree: rendered-Markdown commit range resolution now
+normalizes `commit.sourceContent` before running the strategy-2
+`mapMarkdownRangeAcrossContentChange(...)` fallback. CRLF-on-disk documents no
+longer drift offsets in the fallback path just because the current document is
+already LF-normalized for segment math, and
+`markdown-commit-ranges.test.ts` now pins that prefix-shift mapping on a CRLF
+baseline.
 
 ## Conversation cards overlap for one frame during scroll through long messages
 
-**Severity:** Medium - `estimateConversationMessageHeight` in `ui/src/panels/conversation-virtualization.ts` produces an initial height for unmeasured cards using a per-line pixel heuristic with line-count caps (`Math.min(outputLineCount, 14)` for `command`, `Math.min(diffLineCount, 20)` for `diff`) and overall ceilings of 1400/1500/1600/1800/900 px. For heavy messages — review-tool output, build logs, large patches — the estimate is 20×-40× under the rendered height, so `layout.tops[index]` for cards below an under-priced neighbour places them inside the neighbour's rendered area. The user sees the cards painted on top of each other for one frame, until the `ResizeObserver` measurement lands and `setLayoutVersion` rebuilds the layout.
+**Severity:** Medium - `estimateConversationMessageHeight` in `ui/src/panels/conversation-virtualization.ts` produces an initial height for unmeasured cards using a per-line pixel heuristic with line-count caps (`Math.min(outputLineCount, 14)` for `command`, `Math.min(diffLineCount, 20)` for `diff`) and overall ceilings of 1400/1500/1600/1800/900 px. For heavy messages â€” review-tool output, build logs, large patches â€” the estimate is 20Ã—-40Ã— under the rendered height, so `layout.tops[index]` for cards below an under-priced neighbour places them inside the neighbour's rendered area. The user sees the cards painted on top of each other for one frame, until the `ResizeObserver` measurement lands and `setLayoutVersion` rebuilds the layout.
 
-An initial attempt to fix this by raising estimates to a single 40k px cap (and adding `visibility: hidden` per-card until measured) was reverted after it introduced two worse regressions: (1) per-card `visibility: hidden` combined with the wrapper's `is-measuring-post-activation` hide left the whole transcript empty for a frame whenever the virtualization window shifted before measurements landed; (2) raising the cap made the `getAdjustedVirtualizedScrollTopForHeightChange` shrink-adjustment huge (40k estimate → 8k actual = −32k scrollTop jump), so slow wheel-scrolling through heavy transcripts caused visible scroll jumps of tens of thousands of pixels. The revert restores the one-frame overlap as the known limitation.
+An initial attempt to fix this by raising estimates to a single 40k px cap (and adding `visibility: hidden` per-card until measured) was reverted after it introduced two worse regressions: (1) per-card `visibility: hidden` combined with the wrapper's `is-measuring-post-activation` hide left the whole transcript empty for a frame whenever the virtualization window shifted before measurements landed; (2) raising the cap made the `getAdjustedVirtualizedScrollTopForHeightChange` shrink-adjustment huge (40k estimate â†’ 8k actual = âˆ’32k scrollTop jump), so slow wheel-scrolling through heavy transcripts caused visible scroll jumps of tens of thousands of pixels. The revert restores the one-frame overlap as the known limitation.
 
 **Current behavior:**
 - Initial layout uses estimates that badly under-price long commands / diffs.
@@ -802,39 +1091,9 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
 
 **Proposal:**
 - Proper fix likely needs off-screen pre-measurement (render the card in a hidden measure-only tree, read `getBoundingClientRect` height, then place in the layout) rather than a formula-based estimate. This is a bigger change than a single pure-function tweak.
-- Alternative: batch-measurement pass when the virtualization window shifts — hide the wrapper briefly, mount the newly-entering cards, wait for all their measurements, then reveal.
+- Alternative: batch-measurement pass when the virtualization window shifts â€” hide the wrapper briefly, mount the newly-entering cards, wait for all their measurements, then reveal.
 - Not: raise the estimator cap. Large overshoots trade one visible artifact for a worse one.
 
-
-## Deferred heavy content virtualization relies on CSS ancestry
-
-**Severity:** Low - `ui/src/message-cards.tsx::DeferredHeavyContent` now checks `node.closest(".virtualized-message-list")` to decide whether heavy content should activate immediately inside virtualized conversations.
-
-The branch solves a real scroll-height jump, but it makes a reusable message renderer depend on a parent panel's CSS class. A class rename, alternate virtualizer, or reuse in another virtualized surface could silently change deferred-render behavior. The new branch is also untested.
-
-**Current behavior:**
-- Heavy content activates immediately when an ancestor has `.virtualized-message-list`.
-- The rendering policy is implicit in DOM ancestry instead of an explicit prop or context.
-- No test stubs `IntersectionObserver` and proves virtualized heavy content renders immediately.
-
-**Proposal:**
-- Thread an explicit `preferImmediateHeavyRender` style prop or provide a small React context from the virtualized list.
-- Add a regression test that renders heavy content inside a virtualized wrapper and asserts the real content appears immediately without the deferred placeholder.
-
-## App-owned dialog backdrop integrations lack coverage
-
-**Severity:** Medium - `ui/src/App.tsx` now uses `isDialogBackdropDismissMouseDown` in the create-session and create-project dialog backdrops, but the tests only cover the shared predicate and the Settings dialog shell.
-
-The App-owned handlers also gate dismissal on `!isCreating` and `!isCreatingProject`. A wiring regression in those inline modals could bypass the helper, close while a create action is pending, or fail to close on a valid primary-button backdrop click without being caught by the current test suite.
-
-**Current behavior:**
-- `dialog-backdrop-dismiss.test.ts` covers the pure predicate.
-- `SettingsDialogShell.test.tsx` covers the Settings shell integration.
-- `App.test.tsx` has create-dialog open/button-close coverage, but no backdrop-dismiss assertions for create-session or create-project.
-
-**Proposal:**
-- Add App-level tests for create-session and create-project backdrop mousedown behavior: primary closes when not creating; middle/right/macOS Ctrl-click do not.
-- If practical in the existing harness, also assert the creating-state guard leaves the dialog open when the action is pending.
 
 ## Rendered Markdown diff view cannot jump between changes
 
@@ -855,20 +1114,20 @@ This is especially noticeable because the same diff tab already has change navig
 
 ## Inline-zone id is line-number-dependent, reinitialises Mermaid diagrams on every edit above the fence
 
-**Severity:** Medium - `ui/src/source-renderers.ts::detectMarkdownRegions` builds each Mermaid fence region's id as `mermaid:${fence.startLine}:${fence.endLine}:${quickHash(fence.body)}`. `startLine` and `endLine` are 1-based ABSOLUTE line numbers in the source buffer, so inserting any line above the fence shifts both — and the id flips. The `MonacoCodeEditor` portal is keyed on the zone id (see `MonacoCodeEditor.tsx:~718-730`); when the id flips, the portal unmounts and remounts, which tears down the Mermaid iframe and reinitialises it from scratch. Every keystroke in the heading / paragraphs above a Mermaid fence triggers this reinitialisation, producing a visible flicker on slow machines and wasting GPU cycles on fast ones.
+**Severity:** Medium - `ui/src/source-renderers.ts::detectMarkdownRegions` builds each Mermaid fence region's id as `mermaid:${fence.startLine}:${fence.endLine}:${quickHash(fence.body)}`. `startLine` and `endLine` are 1-based ABSOLUTE line numbers in the source buffer, so inserting any line above the fence shifts both â€” and the id flips. The `MonacoCodeEditor` portal is keyed on the zone id (see `MonacoCodeEditor.tsx:~718-730`); when the id flips, the portal unmounts and remounts, which tears down the Mermaid iframe and reinitialises it from scratch. Every keystroke in the heading / paragraphs above a Mermaid fence triggers this reinitialisation, producing a visible flicker on slow machines and wasting GPU cycles on fast ones.
 
-The intent of the stable id was exactly the opposite — keep the diagram DOM alive across keystrokes outside the fence. A new test pinned the contract as it exists today (`SourcePanel.test.tsx::"inline-zone id stability" → "changes the zone id when lines are inserted above the fence (latent stability gap)"`) so a future fix has a clear assertion to flip from `.not.toBe` to `.toBe`.
+The intent of the stable id was exactly the opposite â€” keep the diagram DOM alive across keystrokes outside the fence. A new test pinned the contract as it exists today (`SourcePanel.test.tsx::"inline-zone id stability" â†’ "changes the zone id when lines are inserted above the fence (latent stability gap)"`) so a future fix has a clear assertion to flip from `.not.toBe` to `.toBe`.
 
 **Current behavior:**
 - Id format: `mermaid:${startLine}:${endLine}:${hash(body)}`.
-- Inserting a line above the fence shifts `startLine` → id changes → portal remounts → Mermaid reinitialises.
-- Typing inside the fence body changes the hash → id changes → portal remounts (correct — the diagram source changed).
-- Editing below the fence (or in-place edits above without line-count changes) preserves startLine/endLine/body → id stable (correct).
+- Inserting a line above the fence shifts `startLine` â†’ id changes â†’ portal remounts â†’ Mermaid reinitialises.
+- Typing inside the fence body changes the hash â†’ id changes â†’ portal remounts (correct â€” the diagram source changed).
+- Editing below the fence (or in-place edits above without line-count changes) preserves startLine/endLine/body â†’ id stable (correct).
 
 **Proposal:**
-- **Primary**: drop `startLine`/`endLine` from the id and use `mermaid:${hash(body)}` alone. This preserves id stability under line shifts. The id must stay globally unique per file (the portal-key dedupe via `new Set(inlineZones.map((zone) => zone.id))` in `MonacoCodeEditor.tsx::zone-sync effect` collapses collisions into one entry, so non-unique ids would lose zones), which means a tiebreaker is needed ONLY when two fences collide on body hash. Tiebreaker rule: within a file, take the ordinal position of this fence among all fences that share its body hash, in document order (i.e., `mermaid:0:${hash}` for the first fence with this body, `mermaid:1:${hash}` for the second, etc.). Collisions are rare in practice; when they do happen, reordering two identical-body fences remounts both — semantically a no-op because identical bodies render identical diagrams.
-- **Simpler but coarser alternative**: use `mermaid:${fenceOrdinal}:${hash}` where `fenceOrdinal` is the position among ALL Mermaid fences in the file (not just ones with the same body). This re-introduces a structural-remount problem the primary proposal avoids — inserting a new Mermaid fence BEFORE an existing one re-indexes every downstream fence and remounts them all. Listed for completeness; prefer the primary proposal.
-- Flip the assertion in the test from `.not.toBe(idsBeforeEdit)` to `.toBe(idsBeforeEdit)` when the fix lands. Update the describe-header comment too — drop the "latent stability gap" paragraph once case (c) passes as "id stable".
+- **Primary**: drop `startLine`/`endLine` from the id and use `mermaid:${hash(body)}` alone. This preserves id stability under line shifts. The id must stay globally unique per file (the portal-key dedupe via `new Set(inlineZones.map((zone) => zone.id))` in `MonacoCodeEditor.tsx::zone-sync effect` collapses collisions into one entry, so non-unique ids would lose zones), which means a tiebreaker is needed ONLY when two fences collide on body hash. Tiebreaker rule: within a file, take the ordinal position of this fence among all fences that share its body hash, in document order (i.e., `mermaid:0:${hash}` for the first fence with this body, `mermaid:1:${hash}` for the second, etc.). Collisions are rare in practice; when they do happen, reordering two identical-body fences remounts both â€” semantically a no-op because identical bodies render identical diagrams.
+- **Simpler but coarser alternative**: use `mermaid:${fenceOrdinal}:${hash}` where `fenceOrdinal` is the position among ALL Mermaid fences in the file (not just ones with the same body). This re-introduces a structural-remount problem the primary proposal avoids â€” inserting a new Mermaid fence BEFORE an existing one re-indexes every downstream fence and remounts them all. Listed for completeness; prefer the primary proposal.
+- Flip the assertion in the test from `.not.toBe(idsBeforeEdit)` to `.toBe(idsBeforeEdit)` when the fix lands. Update the describe-header comment too â€” drop the "latent stability gap" paragraph once case (c) passes as "id stable".
 
 ## Retry notice liveness ignores session lifecycle and retry sequencing
 
@@ -923,7 +1182,7 @@ If no later state mutation sends another `PersistRequest::Delta`, the restored t
 
 **Current behavior:**
 - Pass-in-isolation, fail-in-batch pattern when it surfaces.
-- Unlike the Gemini flakes, this test does not obviously share HOME-rooted fixtures — likely a temp-file path collision or a side effect of persist-thread teardown.
+- Unlike the Gemini flakes, this test does not obviously share HOME-rooted fixtures â€” likely a temp-file path collision or a side effect of persist-thread teardown.
 - Has not surfaced in recent multi-run verification, so concrete reproduction is not yet captured.
 
 **Proposal:**
@@ -936,7 +1195,7 @@ If no later state mutation sends another `PersistRequest::Delta`, the restored t
 
 **Severity:** Medium - restarting the backend process while the browser tab is still open can make the most recent assistant message disappear from the UI, because the persist thread has a small window between "commit fires" and "row is durably in SQLite" during which an un-drained mutation is lost on kill.
 
-Persistence is intentionally background and best-effort: every `commit_persisted_delta_locked` (and similar delta-producing commit helpers) signals `PersistRequest::Delta` to the persist thread and returns. The thread then locks `inner`, builds the delta, and writes. If the backend process is killed (SIGKILL, laptop sleep wedge, crash, manual restart of the dev process) between the signal fire and the SQLite commit, the mutation is lost. Old pre-delta-persistence behavior had the same window — the persist channel carried a full-state clone — so this is not a regression introduced by the delta refactor, but the symptom is visible now because the reconnect adoption path applies the persisted state with `allowRevisionDowngrade: true`: the browser's in-memory copy of the just-streamed last message is replaced by the freshly loaded (older) backend state, making the message disappear from the UI.
+Persistence is intentionally background and best-effort: every `commit_persisted_delta_locked` (and similar delta-producing commit helpers) signals `PersistRequest::Delta` to the persist thread and returns. The thread then locks `inner`, builds the delta, and writes. If the backend process is killed (SIGKILL, laptop sleep wedge, crash, manual restart of the dev process) between the signal fire and the SQLite commit, the mutation is lost. Old pre-delta-persistence behavior had the same window â€” the persist channel carried a full-state clone â€” so this is not a regression introduced by the delta refactor, but the symptom is visible now because the reconnect adoption path applies the persisted state with `allowRevisionDowngrade: true`: the browser's in-memory copy of the just-streamed last message is replaced by the freshly loaded (older) backend state, making the message disappear from the UI.
 
 The message is not hidden; it is genuinely gone from SQLite. No amount of frontend re-rendering will bring it back.
 
@@ -963,7 +1222,7 @@ Before the broadcaster thread, `commit_locked` published state synchronously (`s
 - `publish_delta` is sync.
 - Client can observe delta N+1 before state N.
 - Extra `/api/state` resync fetches fire under sustained mutation bursts.
-- Correctness preserved (resync fixes the view), but behavior is chatty and pushes load onto `/api/state` — which is exactly the path we just made cheaper.
+- Correctness preserved (resync fixes the view), but behavior is chatty and pushes load onto `/api/state` â€” which is exactly the path we just made cheaper.
 
 **Proposal:**
 - Route deltas through the same broadcaster thread so state and delta events for the same revision stream in order. Coalescing is fine because deltas are idempotent after a state snapshot.
@@ -996,7 +1255,7 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - `/api/state` returns all visible sessions with all historical messages (serialized inside `spawn_blocking`, so no tokio worker stall, but the response body is still O(all messages)).
 - `publish_state_locked` builds the same full transcript snapshot for SSE state events (serialized on the broadcaster thread).
 - The dedicated `GET /api/sessions/{id}` route exists, but state snapshots do not defer to it.
-- The frontend already has `Session.messagesLoaded?: boolean` scaffolding that treats `false` as "needs hydrate" — forward-compat for the planned backend change.
+- The frontend already has `Session.messagesLoaded?: boolean` scaffolding that treats `false` as "needs hydrate" â€” forward-compat for the planned backend change.
 
 **Proposal:**
 - Make state snapshots metadata-first: include session shell fields and mark transcript-bearing sessions as `messagesLoaded: false` with an empty `messages` array.
@@ -1008,7 +1267,7 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 **Severity:** Medium - session history including agent output, user prompts, and captured file contents is readable by other local users on default Unix systems, and a second sensitive copy is kept indefinitely at a predictable path.
 
-The new SQLite persistence path opens `~/.termal/termal.sqlite` via `rusqlite::Connection::open` without setting restrictive permissions; on Unix, the default `umask 0022` yields world-readable `0644`. The JSON→SQLite migration renames the legacy file to `sessions.imported-<timestamp>.json` (same permissions) and never deletes or surfaces it, so the full pre-migration history persists at a predictable path with no garbage collection or user notice.
+The new SQLite persistence path opens `~/.termal/termal.sqlite` via `rusqlite::Connection::open` without setting restrictive permissions; on Unix, the default `umask 0022` yields world-readable `0644`. The JSONâ†’SQLite migration renames the legacy file to `sessions.imported-<timestamp>.json` (same permissions) and never deletes or surfaces it, so the full pre-migration history persists at a predictable path with no garbage collection or user notice.
 
 **Current behavior:**
 - `rusqlite::Connection::open` creates the DB with the current umask (0644 by default on Unix).
@@ -1040,8 +1299,8 @@ The new SQLite persistence path opens `~/.termal/termal.sqlite` via `rusqlite::C
 **Severity:** Medium - the new hydration path has several bugs that will materialize once the backend starts emitting `messagesLoaded: false` sessions.
 
 Three distinct issues in and around the new `useEffect(... fetchSession ...)` in `ui/src/App.tsx`:
-1. The dep array includes `activeSession?.messages.length`, causing the effect to re-run on every SSE `textDelta` token for the active session. Today the body short-circuits via the hydrated-set, so no correctness issue — but the deps are a footgun for any future real work added to the effect.
-2. The async IIFE only guards against unmount. If the user switches away mid-fetch and the response's `session.id !== sessionId`, the code calls `requestActionRecoveryResyncRef.current()`. A transient server race can loop mismatch → resync → refetch → mismatch.
+1. The dep array includes `activeSession?.messages.length`, causing the effect to re-run on every SSE `textDelta` token for the active session. Today the body short-circuits via the hydrated-set, so no correctness issue â€” but the deps are a footgun for any future real work added to the effect.
+2. The async IIFE only guards against unmount. If the user switches away mid-fetch and the response's `session.id !== sessionId`, the code calls `requestActionRecoveryResyncRef.current()`. A transient server race can loop mismatch â†’ resync â†’ refetch â†’ mismatch.
 3. `adoptCreatedSessionResponse` (and `live-updates.ts`'s `sessionCreated` reducer) raw-replace an existing session without per-message identity preservation via `reconcileSession`. If SSE `sessionCreated` materializes the session before the API response lands (or vice versa), memoized `MessageCard` children see new identities and remount.
 
 **Current behavior:**
@@ -1057,6 +1316,14 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
 
 ## Implementation Tasks
 
+- [ ] P2: Add end-to-end recovery-open intent coverage in `useAppLiveState`:
+  queue overlapping `requestActionRecoveryResyncRef` opens, adopt snapshots in
+  stages, and assert each session opens only when the authoritative session list
+  actually contains it.
+- [ ] P2: Add a zero-height measurement regression for transcript virtualization:
+  force every mounted message slot to report `0` height on the first pass and
+  assert the virtualized list keeps a stable mounted window instead of
+  collapsing to gap-only page heights.
 - [ ] P2: Add App-level coverage for the extracted Add project flow:
   open the control-panel "Add project" action, exercise both local and
   remote remotes, assert `pickProjectRoot` only wires the local path,
@@ -1074,13 +1341,6 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   replace `expect(clearedWorkspaceSave).toBeTruthy()` with an assertion
   against the matching saved workspace payload so the test proves the
   target tab's `originProjectId` was actually cleared.
-- [ ] P2: Add Unix terminal login-shell regression coverage:
-  `build_terminal_shell_command` now uses `sh -lc` on Unix so
-  terminal commands see login-shell PATH setup, but the current
-  smoke test would still pass if `-l` were dropped. Add a Unix-only
-  test that asserts the constructed shell argv contains `-lc`, or
-  exercise a command that only resolves through login-shell
-  initialization.
 - [ ] P2: Extract a shared `navigator.platform` stub helper:
   `ui/src/dialog-backdrop-dismiss.test.ts` and
   `ui/src/preferences/SettingsDialogShell.test.tsx` duplicate
@@ -1091,19 +1351,19 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   `ui/src/test-support/stub-navigator-platform.ts` exporting
   `installPlatformStub()` that returns a `restore()` function
   would let each suite collapse to one `beforeEach` + one
-  `afterEach` call. Low priority — the duplication is small and
-  both call sites are close to their consumers — but any future
+  `afterEach` call. Low priority â€” the duplication is small and
+  both call sites are close to their consumers â€” but any future
   change to the jsdom workaround (e.g., if `navigator.userAgentData`
   stops being configurable on a jsdom bump) would otherwise need
   to be made twice.
 - [ ] P2: Add integration coverage for the inline-zone
   `ResizeObserver` stability fix:
   `MonacoCodeEditor.test.ts` pins the pure
-  `computeInlineZoneStructureKey` contract (same ids → same
+  `computeInlineZoneStructureKey` contract (same ids â†’ same
   string, verified via `Object.is`; add/remove/reorder/id-change
   all flip the key), but those tests would all still pass if
   someone reverted the observer `useEffect`'s dep from
-  `[inlineZoneStructureKey]` back to `[inlineZoneHostState]` —
+  `[inlineZoneStructureKey]` back to `[inlineZoneHostState]` â€”
   the helper is unchanged, only its caller is wrong. The
   genuine regression this fix prevents is "observer
   disconnects and rebuilds on every keystroke", which needs a
@@ -1112,7 +1372,7 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   `disconnect` / `new ResizeObserver` aren't called across a
   burst of keystrokes with the same zone set, or (b) extracts
   the observer body into a testable hook that can be driven
-  without mounting Monaco. Option (a) is cheaper — the existing
+  without mounting Monaco. Option (a) is cheaper â€” the existing
   MonacoCodeEditor mocks in `App.test.tsx` /
   `DiffPanel.test.tsx` / `SourcePanel.test.tsx` take a different
   path (full replace of the component), so a new dedicated
@@ -1122,24 +1382,24 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   Markdown commit coverage beyond the empty-commits path:
   `DiffPanel.test.tsx::"keeps apply-to-disk-version flowing when
   \`commitRenderedMarkdownDrafts\` has nothing to flush"`
-  currently pins the `commits.length === 0 → return true` path
+  currently pins the `commits.length === 0 â†’ return true` path
   (verified load-bearing by temporarily flipping the production
-  return to `false` — the test fails, confirming the empty-path
+  return to `false` â€” the test fails, confirming the empty-path
   plumbing is protected against that regression). Two branches
   remain uncovered:
   (A) Success-with-commits
-      (`handleRenderedMarkdownSectionCommits(commits) → true`):
+      (`handleRenderedMarkdownSectionCommits(commits) â†’ true`):
       `handleSave` synchronously commits drafts BEFORE
       `onSaveFile` rejects, so by the time a rendered-Markdown
       integration test clicks apply-to-disk-version the
       committers return `null` and the flushSync takes the
       empty-path. Re-editing a section after the failed save
-      doesn't help — the post-first-commit source buffer
+      doesn't help â€” the post-first-commit source buffer
       already advanced past the re-edited segment's original
       markdown, so the resolver fails and the commit returns
       `false` (the opposite of what we want to pin).
   (B) Failure
-      (`handleRenderedMarkdownSectionCommits(commits) → false`):
+      (`handleRenderedMarkdownSectionCommits(commits) â†’ false`):
       the conflict-short-circuit path where
       `externalFileNotice` is set and `fetchFile` is NOT called.
   Two cheap alternatives to integration testing:
@@ -1174,15 +1434,15 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   which is why the sanitize-before-insert ordering is safe. Add
   a test that pastes
   `<img src="/nonexistent" onerror="window.__xss=true">` and
-  asserts `window.__xss` stays undefined — it would pass today
+  asserts `window.__xss` stays undefined â€” it would pass today
   (template inert) and fail if the code is ever refactored to
   assign `innerHTML` on a live DOM node.
 - [ ] P2: Tighten the bare-CR detector test:
   `markdown-diff-segments.test.ts::detectMarkdownDocumentEolStyle`
   currently asserts `"line1\r\nline2\rline3\n"` picks `crlf` (one
-  CRLF, one LF, one bare CR → CRLF wins via `crlfCount > lfCount`),
+  CRLF, one LF, one bare CR â†’ CRLF wins via `crlfCount > lfCount`),
   but wouldn't catch a regression that accidentally counted bare
-  `\r` as a second CRLF — both the correct count (1) and the
+  `\r` as a second CRLF â€” both the correct count (1) and the
   over-count (2) land on `crlf`. Add a case with multiple bare
   `\r` and a single `\n` where the correct answer is `lf` but an
   over-count would flip to `crlf`.
@@ -1192,7 +1452,7 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   detected dominant document EOL style, not per-line EOL markers.
 - [ ] P2: Add fenced-code-block EOL-detection coverage:
   `detectMarkdownDocumentEolStyle` treats the document as a flat
-  byte stream — code fences, inline code, comments, etc. do not
+  byte stream â€” code fences, inline code, comments, etc. do not
   affect the count. A future refactor might assume CRLF inside a
   fenced block is "semantic" and skip it. Pin the flat-byte-stream
   contract with a test that feeds a document where CRLF appears
@@ -1221,13 +1481,6 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   window. The existing post-activation measurement path writes
   scrollTop on mount, so the harness also needs to reset
   scrollWrites after initial settlement.
-- [ ] P2: Add `DeferredHeavyContent` virtualized fast-path coverage:
-  render a `<DeferredMarkdownContent>` or `<DeferredHighlightedCodeBlock>`
-  inside a wrapper with class `"virtualized-message-list"` and assert
-  the real-content markup is present on the first render (no
-  `deferred-code-placeholder` class). Pair with the outside-virtualizer
-  case that still shows the placeholder until the intersection observer
-  activates.
 - [ ] P2: Add message-stack non-passive wheel listener coverage:
   dispatch a cancelable `WheelEvent` on the `.message-stack` `<section>`
   in `SessionPaneView.test.tsx`, assert `event.defaultPrevented === true`
@@ -1275,7 +1528,7 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   session or project" copy) has no dedicated test. Existing
   `DiffPanel.test.tsx` cases cover the happy-path fetch, the
   fetchFile rejection path, the watcher-deleted path, and the
-  save flow — but not the scope-missing case. Render the panel
+  save flow â€” but not the scope-missing case. Render the panel
   with `sessionId={null}`, `projectId={null}`, and a non-null
   `filePath`, then assert the specific error copy appears. The
   recently-landed `contentHash: null` tightening of `LatestFileState`
@@ -1303,9 +1556,9 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   `createControlPanelSectionLauncherTab` for the five `sectionId`
   branches + blank-root null-gating on `files` / `git`;
   `resolveWorkspaceScopedProjectId` three-way precedence
-  (explicit origin project → origin session's project → null) plus
+  (explicit origin project â†’ origin session's project â†’ null) plus
   trim semantics; `resolveWorkspaceScopedSessionId` precedence
-  (preferred session → active session → first-in-project → null);
+  (preferred session â†’ active session â†’ first-in-project â†’ null);
   `buildControlSurfaceSessionListState` no-search fast-path vs
   search-result-map branch; `mergeOrchestratorDeltaSessions`
   dedup + append-unknowns + `reconcileSessions` identity.
@@ -1320,11 +1573,11 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   `collectRestoredGitDiffDocumentContentRefreshes` test at
   `App.test.tsx:1489`.
 - [ ] P2: Add focused coverage for `source-file-state.ts`:
-  both exports untested. `sourceFileStateFromResponse` — assert
+  both exports untested. `sourceFileStateFromResponse` â€” assert
   the 13-field state-object mapping against a full `FileResponse`
   and against one with optional fields omitted, including `status`
   and `language`.
-  `isSourceFileMissingError` — assert `true` for
+  `isSourceFileMissingError` â€” assert `true` for
   `new Error("File Not Found")`, `new Error("thing was not FOUND")`,
   and a plain `"file not found"` string; `false` for other
   messages.
@@ -1340,9 +1593,9 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   `describeBackendConnectionIssueDetail`:
   `BACKEND_UNAVAILABLE_ISSUE_DETAIL` is already asserted
   indirectly in `backend-connection.test.tsx`, but the
-  `isBackendUnavailableError && error.restartRequired` branch —
+  `isBackendUnavailableError && error.restartRequired` branch â€”
   which surfaces the server's restart-required message verbatim
-  instead of the generic copy — is not confirmed tested. Add a
+  instead of the generic copy â€” is not confirmed tested. Add a
   small unit test covering all three branches (`restartRequired`
   true, `restartRequired` false, non-backend-unavailable error).
 - [ ] P2: Add focused coverage for
@@ -1414,7 +1667,7 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   `getMermaidDiagramFrameStyle` clamp caps, and
   `buildTermalMermaidConfig` palette-vs-match branches.
 - [ ] P2: Consolidate Apple-platform detection helpers:
-  the tree now has three near-duplicate platform sniffers —
+  the tree now has three near-duplicate platform sniffers â€”
   `ui/src/pane-keyboard.ts:122-136` and
   `ui/src/dialog-backdrop-dismiss.ts:62-76` both read
   `navigator.userAgentData?.platform ?? navigator.platform` and regex
@@ -1428,9 +1681,9 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
 - [ ] P2: Extract a shared `<DialogBackdrop>` primitive:
   `isDialogBackdropDismissMouseDown` is now consolidated, but the
   wiring (`onMouseDown={(event) => { if (!isDialogBackdropDismissMouseDown(event.nativeEvent)) return; ... }}`
-  is replicated verbatim at three sites —
+  is replicated verbatim at three sites â€”
   `ui/src/preferences/SettingsDialogShell.tsx:49`,
-  `ui/src/App.tsx:~7871`, and `ui/src/App.tsx:~8169` — along with
+  `ui/src/App.tsx:~7871`, and `ui/src/App.tsx:~8169` â€” along with
   the sibling `onMouseDown={(event) => event.stopPropagation()}` on
   each dialog body `<section>`. A `<DialogBackdrop onDismiss>`
   component that internalizes both patterns would retire ~30 lines
@@ -1451,12 +1704,12 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   tightening. First, the rev-2 SSE advance assertion
   `screen.getAllByText("Recover this prompt").length > 0` can pass
   even if adoption never rendered the transcript, because the
-  composer textarea still holds the typed value — scope the check
+  composer textarea still holds the typed value â€” scope the check
   to the message-list container (`within(messageList).getByText(...)`)
   or assert `length > 1` so both the composer echo and the transcript
   copy must be present. Second, the test advances timers once and
   asserts a single `/api/state` call, but does not prove the chain
-  stops after the session goes idle — add a second
+  stops after the session goes idle â€” add a second
   `advanceTimers(ACTIVE_PROMPT_POLL_INTERVAL_MS)` and assert
   `fetchMock` is still at 1 call so a regression that leaves the
   poll running after idle would fail loudly.
@@ -1517,14 +1770,6 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   have fake remotes return mismatched `sessionId` and `session.id` values for
   session create and Codex fork, then assert both paths fail with bad-gateway
   errors instead of localizing the wrong remote session.
-- [ ] P2: Add App coverage for stale create-response ordering:
-  leave `createSession` pending, apply a fresher SSE `sessionCreated` or
-  message delta for the same session, then resolve the create response with a
-  lower revision and assert the fresher session state remains intact.
-- [ ] P2: Add App coverage for create-response mismatch recovery:
-  resolve `api.createSession` with a mismatched `sessionId` and `session.id`,
-  then assert recovery resync is requested and no workspace tab is opened for a
-  session missing from `sessionsRef`.
 - [ ] P2: Strengthen remote rollback content assertions:
   extend `failed_remote_snapshot_sync_restores_session_tombstones` so rollback
   compares full session records and orchestrator instance contents, not only
@@ -1540,7 +1785,7 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   `metadata.sessions` is empty (metadata-only clone), (e) a second call
   with the returned watermark produces empty `changed_sessions` +
   `removed_session_ids` (idempotent). This is the core of the
-  delta-persist refactor and currently has zero regression protection —
+  delta-persist refactor and currently has zero regression protection â€”
   the `#[cfg(test)]` persist path writes full-state JSON so every
   existing persistence test bypasses the production code path.
 - [ ] P1: Add an integration-style test for the production persist path:
@@ -1598,7 +1843,7 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   so a regression to `wrapping_add` fails the test.
 - [ ] P2: Extend the Mermaid dimension-clamp tests with lower-bound cases:
   `ui/src/MarkdownContent.test.tsx` only covers the upper clamp
-  (huge viewBox → 4096). Add `viewBox="0 0 -100 -100"` (negative input)
+  (huge viewBox â†’ 4096). Add `viewBox="0 0 -100 -100"` (negative input)
   and `viewBox="0 0 0 0"` (zero input) and assert the rendered widthPx
   and heightPx fall in `[lowerBound, upperBound]`. The regex in
   `clampMermaidDiagramExtent` accepts `[-+]?` signs, so the lower clamp
@@ -1743,13 +1988,13 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   `expect(fetchGitDiffSpy).toHaveBeenCalledTimes(2)` after the stale
   resolve so the test pins the "exactly two fetches" guarantee that
   the `attemptedGitDiffDocumentContentRestoreKeysRef.current.add(requestKey)`
-  fix at `App.tsx:6020` actually provides — today the Monaco-content
+  fix at `App.tsx:6020` actually provides â€” today the Monaco-content
   assertion is satisfied by the separate version-counter guard and
   would still pass even if the dedupe fix regressed.
 - [ ] P2: Short-circuit the restored-document-content scan in
   `ui/src/App.tsx:3906-4015` when every `diffPreview` tab already has
   `documentContent`. The scan now runs on every `workspace.panes`
-  change; in workspaces with many diff tabs it is O(panes × tabs) per
+  change; in workspaces with many diff tabs it is O(panes Ã— tabs) per
   `setWorkspace`. An early-return when all tabs are fully hydrated
   keeps the fix for late-hydration restore without adding a per-update
   cost in common cases.
@@ -1767,7 +2012,7 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   already-present `queryByTestId("mermaid-svg")).not.toBeInTheDocument()`
   which is the real isolation invariant.
 - [ ] P2: Add live-updates.ts `sessionCreated` unit tests:
-  add three tests in the `applyDeltaToSessions` suite — (1) session is
+  add three tests in the `applyDeltaToSessions` suite â€” (1) session is
   appended when `sessionIndex === -1`, (2) session is replaced in place
   when it already exists, (3) `needsResync` is returned when
   `delta.session.id !== delta.sessionId`. Mirror the coverage pattern of
@@ -1782,17 +2027,17 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
 - [ ] P2: Add 404 tests for `GET /api/sessions/{id}`:
   `get_session_route_returns_not_found_for_unknown_id` and
   `get_session_route_returns_not_found_for_hidden_session`. The hidden
-  case is especially important — `find_visible_session_index` is the
+  case is especially important â€” `find_visible_session_index` is the
   load-bearing invariant that prevents hidden Claude spares from leaking
   through the public route.
 - [ ] P2: Add Rust coverage for `apply_remote_delta_event_locked::SessionCreated`:
   `remote_session_created_delta_creates_local_proxy_and_publishes_local_delta`
-  — feed a remote `SessionCreated` with a fresh remote session id, assert
+  â€” feed a remote `SessionCreated` with a fresh remote session id, assert
   a local proxy appears with remapped project id, the outbound local
   `SessionCreated` carries the local id, the revision bumps. Add an
   id-mismatch variant that returns the `anyhow!` error.
 - [ ] P2: Add conflict-batch test for `handleRenderedMarkdownSectionCommits`:
-  exercise the new boolean-`false` branch — make two sibling rendered
+  exercise the new boolean-`false` branch â€” make two sibling rendered
   Markdown edits, trigger a document refresh that unmaps one range,
   commit the batch, and assert (a) save-error banner visible,
   (b) both drafts still dirty, (c) `onSaveFile` not called. This pins
@@ -1823,7 +2068,7 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   check path; (3) assert the class is removed after 150 ms via the timeout
   fallback (use `vi.useFakeTimers()` + `vi.advanceTimersByTime(150)`);
   (4) render with `isActive={false}`, rerender with `isActive={true}`, and
-  assert the class appears on the inactive → active transition.
+  assert the class appears on the inactive â†’ active transition.
 - [ ] Add a shake-fix regression test for integer rounding and the `>= 1`
   no-op scrollTop guard in `handleHeightChange`: feed a fractional height
   (e.g., `measuredSlotHeight = 260.7`) through the existing bottom-pin test
@@ -1835,7 +2080,7 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   height commits" test to fire `ResizeObserver` for every visible slot
   before its assertions, so the test doesn't end with `isMeasuringPostActivation`
   still active. Current test survives the measuring-phase refactor only
-  because the re-pin effect fires independently — a fragile coincidence
+  because the re-pin effect fires independently â€” a fragile coincidence
   that could silently break under future refactors.
 - [ ] Extract a `pinScrollTopToBottomIfChanged(node)` helper in
   `ui/src/panels/AgentSessionPanel.tsx` and call it from the three sites
@@ -1873,8 +2118,8 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   and both branches of `handleHeightChange`) inherit
   correctness from the helper without a dedicated window-
   tracking assertion. The load-more anchor path in particular
-  has the same failure mode ("click Load N earlier →
-  `scrollTop` moves to anchor offset → stale window renders")
+  has the same failure mode ("click Load N earlier â†’
+  `scrollTop` moves to anchor offset â†’ stale window renders")
   but no direct test. Add a Vitest case that mounts with 200+
   messages at the top, scrolls up to `scrollTop = 0`, clicks
   "Load N earlier messages", and asserts both the anchor-
@@ -1886,9 +2131,9 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   the SQLite cache now drops its cached connection on any
   persist error so the next tick reopens fresh. The cache
   struct and its sole write path (`persist_delta_via_cache`)
-  are both `#[cfg(not(test))]`-gated today — test builds use
+  are both `#[cfg(not(test))]`-gated today â€” test builds use
   JSON persistence via the test variant of
-  `persist_state_from_persisted` instead — so a direct
+  `persist_state_from_persisted` instead â€” so a direct
   regression test requires either (a) removing the cfg gate
   (and accepting the rusqlite compile cost in test builds) or
   (b) adding a narrow integration-style test that opens a real
@@ -1897,38 +2142,7 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   transaction), and asserts the next call reopens and
   succeeds. Option (b) is cheaper; pick a single failure mode
   and pin the reopen.
-- [ ] P2: Pin the `adoptCreatedSessionResponse` "recovering"
-  outcome:
-  the three-way discriminated outcome (`"adopted" | "stale" |
-  "recovering"`) replaces a boolean return so the three call
-  sites in `App.tsx` can suppress the workspace-pane fallback
-  for the wire-contract-mismatch branch. The TypeScript
-  compiler enforces the discrimination, but no test exercises
-  the `"recovering"` path end-to-end. A Vitest case should
-  mock `api.createSession` to resolve with a mismatched
-  response (`created.session.id !== created.sessionId`),
-  submit the create-session dialog, and assert (a) no
-  workspace pane opens for the mismatched id, (b)
-  `api.fetchState` fires (the action-recovery resync), and
-  (c) `sessionsRef` is unchanged. Pair with a "stale"
-  scenario (earlier delta already bumped revision past the
-  POST response) to confirm the fallback still runs in that
-  case.
-- [ ] P2: Pin `"stale"` create-response fallback safety:
-  `adoptCreatedSessionResponse` now treats `"stale"` as safe to
-  open, but a stale revision can come from unrelated
-  single-session hydration that did not insert `created.sessionId`
-  into `sessionsRef`. Add a Vitest case that advances
-  `latestStateRevisionRef` without adopting the created session,
-  returns an older create response, and asserts the workspace
-  fallback does not open a pane unless `sessionsRef` already
-  contains the session id.
-- [ ] P2: Pin no-op Settings tab Home/End keyboard handling:
-  `SettingsTabBar.tsx` covers roving tabindex and movement keys,
-  but the no-op edges (`Home` on the first tab, `End` on the last
-  tab) need tests proving the handler still prevents browser
-  defaults while leaving selection and focus unchanged.
-- [ ] P2: Pin the `fetchSession` 404 → silent resync branch
+- [ ] P2: Pin the `fetchSession` 404 â†’ silent resync branch
   (`ui/src/App.tsx:1627`):
   the hydration effect's catch block now routes
   `ApiRequestError` with `status === 404` through
@@ -1947,8 +2161,8 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   non-404 failure case that DOES call `reportRequestError` to
   negative-control the branch.
 - [ ] P2: Pin the lazy legacy-key lookup in `load_state_from_sqlite`:
-  the `.or(...)` → `if let` refactor in `src/persist.rs` is a
-  pure startup-cost optimization — both the eager and lazy
+  the `.or(...)` â†’ `if let` refactor in `src/persist.rs` is a
+  pure startup-cost optimization â€” both the eager and lazy
   variants return identical values, so all 32 existing persist
   tests pass against either. A regression that restored `.or(...)`
   would silently reintroduce the redundant
@@ -1965,7 +2179,7 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   `PersistedState::metadata_only()`:
   the helper is currently `#[cfg(not(test))]`-gated so no test
   exercises it directly. Behavioral equivalence with
-  `metadata_from_inner` is load-bearing — if a future top-level
+  `metadata_from_inner` is load-bearing â€” if a future top-level
   field is added to `PersistedState` and only one of the two
   methods is updated, the production persist path silently
   drops the field from the SQLite `app_state` row. Either drop
@@ -1981,14 +2195,14 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   `src/tests/mod.rs::test_app_state` and
   `src/tests/persist.rs::test_app_state_with_live_persist_channel` now
   duplicate ~35 lines of `AppState` field construction. Only two
-  fields actually differ between them today — `persist_tx` (receiver
+  fields actually differ between them today â€” `persist_tx` (receiver
   dropped vs. kept alive) and the uniqueness of the `persistence_path`
   temp-file name. A shared constructor that takes a `Sender<PersistRequest>`
   and returns an `AppState` would let both callers collapse to
   `build_test_app_state(mpsc::channel().0)` vs. the live-receiver
   variant, and a future third variant (e.g., a test that wants a live
   broadcaster thread too) would not need to duplicate the field list
-  again. Low priority — the helper is small and only two call sites
+  again. Low priority â€” the helper is small and only two call sites
   share the shape today.
 
 ## Known Design Limitations
@@ -2034,7 +2248,7 @@ blocking remote HTTP body read in a dedicated OS thread that pushes chunks
 into an `mpsc::sync_channel(1)`. The main forwarding loop reads from the
 channel with `recv_timeout(10ms)` and observes the cancellation flag
 between polls, so the user-visible "4-in-flight remote permit" path is
-correctly released on client disconnect — the forwarder returns
+correctly released on client disconnect â€” the forwarder returns
 `terminal stream client disconnected`, drops its end of the channel,
 releases the semaphore permit, and exits. The spawned reader thread,
 however, is still parked inside `source.read(&mut scratch)` until the
@@ -2051,12 +2265,12 @@ until the remote eventually closes its side. Each thread holds a
 ~2-8 MB stack and a single TCP connection. The bound is set by the
 remote's own keepalive / TCP timeout behaviour, not by TermAl.
 
-**Accepted tradeoff.** The three real fixes — setting a per-read body
+**Accepted tradeoff.** The three real fixes â€” setting a per-read body
 timeout on reqwest (not supported by the blocking API), moving the read
 onto an async `tokio::select!` with a cancellation future (a large
 rewrite of the remote bridge), or manually `dup`ing the raw socket fd
 and closing it from outside (unsafe, platform-specific, bypasses reqwest
-encapsulation) — are all strictly larger than the bounded dormant-thread
+encapsulation) â€” are all strictly larger than the bounded dormant-thread
 cost. This mirrors the existing "Unix terminal clean-exit cleanup is a
 no-op" limitation below: both are bounded native-thread leaks that wait
 on an external event (grandchild pipe close, remote socket close), and

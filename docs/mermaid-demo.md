@@ -1,6 +1,6 @@
 # Mermaid Demo
 
-
+333
 ```mermaid
 flowchart TD
   Start([Open Markdown file]) --> Detect{Contains Mermaid fence?}
@@ -8,5 +8,5 @@ flowchart TD
   Detect -- no --> Code[Show normal code block]
   Render --> Edit[Edit source in Markdown diff editor]
   Code --> End2([Done])
-  Edit --> Stop2
+  Edit --> Stop
 ```

@@ -165,6 +165,9 @@ type UseAppSessionActionsParams = {
     error: unknown,
     options?: { message?: string },
   ) => void;
+  requestActionRecoveryResync: (
+    options?: { openSessionId?: string; paneId?: string | null },
+  ) => void;
 };
 
 type HandleNewSessionArgs = {
@@ -305,6 +308,7 @@ export function useAppSessionActions(
     adoptCreatedSessionResponse,
     applyControlPanelLayout,
     reportRequestError,
+    requestActionRecoveryResync,
   } = params;
 
   function startActivePromptRecoveryPoll(sessionId: string) {
@@ -540,18 +544,30 @@ export function useAppSessionActions(
     paneId: string | null,
     agent: AgentType,
   ) {
+    const canOpenStaleCreatedSession = () => {
+      if (sessionsRef.current.some((session) => session.id === created.sessionId)) {
+        return true;
+      }
+      requestActionRecoveryResync({
+        openSessionId: created.sessionId,
+        paneId,
+      });
+      return false;
+    };
     const adopted = adoptCreatedSessionResponse(created, {
       openSessionId: created.sessionId,
       paneId,
     });
-    if (adopted === "stale") {
+    const canUseCreatedSession =
+      adopted === "adopted" || (adopted === "stale" && canOpenStaleCreatedSession());
+    if (adopted === "stale" && canUseCreatedSession) {
       setWorkspace((current) =>
         applyControlPanelLayout(
           openSessionInWorkspaceState(current, created.sessionId, paneId),
         ),
       );
     }
-    if (sessionSupportsModelRefresh(agent)) {
+    if (canUseCreatedSession && sessionSupportsModelRefresh(agent)) {
       void handleRefreshSessionModelOptions(created.sessionId, {
         reportGlobalError: false,
       });
@@ -631,6 +647,10 @@ export function useAppSessionActions(
           })),
           normalizedExpandedText,
         );
+        if (!isMountedRef.current) {
+          releaseDraftAttachments(attachments);
+          return;
+        }
         const adopted = adoptState(state);
         releaseDraftAttachments(attachments);
         setRequestError(null);
@@ -639,6 +659,10 @@ export function useAppSessionActions(
           return;
         }
       } catch (error) {
+        if (!isMountedRef.current) {
+          releaseDraftAttachments(attachments);
+          return;
+        }
         let restoredDraft = false;
         let restoredAttachments = false;
 
@@ -672,9 +696,11 @@ export function useAppSessionActions(
         }
         reportRequestError(error);
       } finally {
-        setSendingSessionIds((current) =>
-          setSessionFlag(current, sessionId, false),
-        );
+        if (isMountedRef.current) {
+          setSendingSessionIds((current) =>
+            setSessionFlag(current, sessionId, false),
+          );
+        }
       }
     })();
 
@@ -901,6 +927,9 @@ export function useAppSessionActions(
         rootPath,
         remoteId: newProjectRemoteId,
       });
+      if (!isMountedRef.current) {
+        return false;
+      }
       adoptState(created.state);
       setSelectedProjectId(created.projectId);
       setNewProjectRootPath("");
@@ -908,10 +937,15 @@ export function useAppSessionActions(
       setRequestError(null);
       return true;
     } catch (error) {
+      if (!isMountedRef.current) {
+        return false;
+      }
       reportRequestError(error);
       return false;
     } finally {
-      setIsCreatingProject(false);
+      if (isMountedRef.current) {
+        setIsCreatingProject(false);
+      }
     }
   }
 
@@ -926,14 +960,22 @@ export function useAppSessionActions(
     setIsCreatingProject(true);
     try {
       const response = await pickProjectRoot();
+      if (!isMountedRef.current) {
+        return;
+      }
       if (response.path) {
         setNewProjectRootPath(response.path);
         setRequestError(null);
       }
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       reportRequestError(error);
     } finally {
-      setIsCreatingProject(false);
+      if (isMountedRef.current) {
+        setIsCreatingProject(false);
+      }
     }
   }
 
@@ -944,9 +986,15 @@ export function useAppSessionActions(
   ) {
     try {
       const state = await submitApproval(sessionId, messageId, decision);
+      if (!isMountedRef.current) {
+        return;
+      }
       adoptState(state);
       setRequestError(null);
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       reportRequestError(error);
     }
   }
@@ -958,9 +1006,15 @@ export function useAppSessionActions(
   ) {
     try {
       const state = await submitUserInput(sessionId, messageId, answers);
+      if (!isMountedRef.current) {
+        return;
+      }
       adoptState(state);
       setRequestError(null);
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       reportRequestError(error);
     }
   }
@@ -978,9 +1032,15 @@ export function useAppSessionActions(
         action,
         content,
       );
+      if (!isMountedRef.current) {
+        return;
+      }
       adoptState(state);
       setRequestError(null);
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       reportRequestError(error);
     }
   }
@@ -992,9 +1052,15 @@ export function useAppSessionActions(
   ) {
     try {
       const state = await submitCodexAppRequest(sessionId, messageId, result);
+      if (!isMountedRef.current) {
+        return;
+      }
       adoptState(state);
       setRequestError(null);
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       reportRequestError(error);
     }
   }
@@ -1007,14 +1073,25 @@ export function useAppSessionActions(
     });
     try {
       const state = await cancelQueuedPrompt(sessionId, promptId);
+      if (!isMountedRef.current) {
+        return;
+      }
       adoptState(state);
       setRequestError(null);
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       try {
         const state = await fetchState();
-        adoptState(state);
+        if (isMountedRef.current) {
+          adoptState(state);
+        }
       } catch {
         // Keep the original request error below; state refresh is best-effort.
+      }
+      if (!isMountedRef.current) {
+        return;
       }
       reportRequestError(error);
     }
@@ -1026,14 +1103,22 @@ export function useAppSessionActions(
     );
     try {
       const state = await stopSession(sessionId);
+      if (!isMountedRef.current) {
+        return;
+      }
       adoptState(state);
       setRequestError(null);
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       reportRequestError(error);
     } finally {
-      setStoppingSessionIds((current) =>
-        setSessionFlag(current, sessionId, false),
-      );
+      if (isMountedRef.current) {
+        setStoppingSessionIds((current) =>
+          setSessionFlag(current, sessionId, false),
+        );
+      }
     }
   }
 
@@ -1183,6 +1268,9 @@ export function useAppSessionActions(
     );
     try {
       const state = await updateSessionSettings(sessionId, payload);
+      if (!isMountedRef.current) {
+        return;
+      }
       adoptState(state);
       const updatedSession =
         state.sessions.find((entry) => entry.id === sessionId) ?? null;
@@ -1207,6 +1295,9 @@ export function useAppSessionActions(
       });
       setRequestError(null);
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       if (hasOptimisticUpdate) {
         updateSessionLocally(sessionId, (current) =>
           rollbackOptimisticSessionSettingsUpdate(
@@ -1218,9 +1309,11 @@ export function useAppSessionActions(
       }
       reportRequestError(error);
     } finally {
-      setUpdatingSessionIds((current) =>
-        setSessionFlag(current, sessionId, false),
-      );
+      if (isMountedRef.current) {
+        setUpdatingSessionIds((current) =>
+          setSessionFlag(current, sessionId, false),
+        );
+      }
     }
   }
 
@@ -1362,7 +1455,16 @@ export function useAppSessionActions(
         openSessionId: created.sessionId,
         paneId: preferredPaneId,
       });
-      if (adopted === "stale") {
+      const canOpenStaleCreatedSession =
+        adopted === "stale" &&
+        sessionsRef.current.some((session) => session.id === created.sessionId);
+      if (adopted === "stale" && !canOpenStaleCreatedSession) {
+        requestActionRecoveryResync({
+          openSessionId: created.sessionId,
+          paneId: preferredPaneId,
+        });
+      }
+      if (canOpenStaleCreatedSession) {
         setWorkspace((current) =>
           applyControlPanelLayout(
             openSessionInWorkspaceState(
@@ -1453,24 +1555,32 @@ export function useAppSessionActions(
 
     try {
       const response = await fetchAgentCommands(sessionId);
+      if (!isMountedRef.current) {
+        return;
+      }
       setAgentCommandsBySessionId((current) => ({
         ...current,
         [sessionId]: response.commands,
       }));
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       const message = getErrorMessage(error);
       setAgentCommandErrors((current) => ({
         ...current,
         [sessionId]: message,
       }));
     } finally {
-      const nextRefreshingSessionIds = setSessionFlag(
-        refreshingAgentCommandSessionIdsRef.current,
-        sessionId,
-        false,
-      );
-      refreshingAgentCommandSessionIdsRef.current = nextRefreshingSessionIds;
-      setRefreshingAgentCommandSessionIds(nextRefreshingSessionIds);
+      if (isMountedRef.current) {
+        const nextRefreshingSessionIds = setSessionFlag(
+          refreshingAgentCommandSessionIdsRef.current,
+          sessionId,
+          false,
+        );
+        refreshingAgentCommandSessionIdsRef.current = nextRefreshingSessionIds;
+        setRefreshingAgentCommandSessionIds(nextRefreshingSessionIds);
+      }
     }
   }
 

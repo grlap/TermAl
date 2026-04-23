@@ -75,7 +75,10 @@ import {
   resolveSettledScrollMinimumAttempts,
   syncMessageStackScrollPosition,
 } from "./scroll-position";
-import { notifyMessageStackScrollWrite } from "./message-stack-scroll-sync";
+import {
+  notifyMessageStackScrollWrite,
+  type MessageStackScrollWriteKind,
+} from "./message-stack-scroll-sync";
 
 import {
   CodexPromptSettingsCard,
@@ -87,7 +90,6 @@ import {
 import { normalizeDisplayPath } from "./path-display";
 import {
   resolvePaneScrollCommand,
-  shouldHandlePanePageKey,
 } from "./pane-keyboard";
 import {
   AgentSessionPanel,
@@ -644,6 +646,7 @@ export function SessionPaneView({
   const fileStateRef = useRef(fileState);
   const sourceEditorDirtyRef = useRef(false);
   const messageStackRef = useRef<HTMLElement | null>(null);
+  const paneRootRef = useRef<HTMLElement | null>(null);
   const settledScrollToBottomCancelRef = useRef<(() => void) | null>(null);
   const paneTopRef = useRef<HTMLDivElement | null>(null);
   const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<
@@ -1100,7 +1103,12 @@ export function SessionPaneView({
     setNewResponseIndicator(scrollStateKey, false);
   }
 
-  function scrollMessageStackByDelta(deltaY: number) {
+  function scrollMessageStackByDelta(
+    deltaY: number,
+    options: {
+      scrollKind?: MessageStackScrollWriteKind;
+    } = {},
+  ) {
     const node = messageStackRef.current;
     if (!node) {
       return;
@@ -1117,7 +1125,9 @@ export function SessionPaneView({
     }
 
     node.scrollTop = nextScrollTop;
-    notifyMessageStackScrollWrite(node);
+    notifyMessageStackScrollWrite(node, {
+      scrollKind: options.scrollKind,
+    });
     const { shouldStick } = syncMessageStackScrollPosition(
       node,
       scrollStateKey,
@@ -1175,7 +1185,9 @@ export function SessionPaneView({
       Math.round(node.clientHeight * SESSION_PAGE_JUMP_VIEWPORT_FACTOR),
       1,
     );
-    scrollMessageStackByDelta(distance * direction);
+    scrollMessageStackByDelta(distance * direction, {
+      scrollKind: "page_jump",
+    });
   }
 
   function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
@@ -1205,7 +1217,9 @@ export function SessionPaneView({
       top: 0,
       behavior: "auto",
     });
-    notifyMessageStackScrollWrite(node);
+    notifyMessageStackScrollWrite(node, {
+      scrollKind: "seek",
+    });
     setShouldStickToBottom(false);
     paneScrollPositions[scrollStateKey] = {
       top: 0,
@@ -1213,19 +1227,45 @@ export function SessionPaneView({
     };
   }
 
-  function handlePaneKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
-    if (event.defaultPrevented) {
+  function selectAdjacentPaneTab(direction: -1 | 1) {
+    if (pane.tabs.length <= 1) {
       return;
     }
 
+    const activeIndex = pane.tabs.findIndex((tab) => tab.id === activeTab?.id);
+    const currentIndex = activeIndex >= 0 ? activeIndex : 0;
+    const nextIndex =
+      (currentIndex + direction + pane.tabs.length) % pane.tabs.length;
+    const nextTab = pane.tabs[nextIndex];
+    if (!nextTab) {
+      return;
+    }
+    onSelectTab(pane.id, nextTab.id);
+  }
+
+  function isNestedEditablePageKeyTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+
     if (
-      pane.viewMode === "session" &&
-      (event.key === "PageUp" || event.key === "PageDown")
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLSelectElement
     ) {
-      event.preventDefault();
-      scrollSessionMessageStackByPageJump(
-        event.key === "PageUp" ? -1 : 1,
-      );
+      return true;
+    }
+
+    return (
+      target.isContentEditable ||
+      target.contentEditable === "true" ||
+      target.getAttribute("contenteditable") === "" ||
+      target.getAttribute("contenteditable") === "true"
+    );
+  }
+
+  function handlePaneKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.defaultPrevented) {
       return;
     }
 
@@ -1244,6 +1284,16 @@ export function SessionPaneView({
     }
 
     event.preventDefault();
+    if (
+      pane.viewMode === "session" &&
+      command.kind === "page" &&
+      (event.key === "PageUp" || event.key === "PageDown")
+    ) {
+      scrollSessionMessageStackByPageJump(
+        command.direction === "up" ? -1 : 1,
+      );
+      return;
+    }
     if (command.kind === "boundary") {
       scrollMessageStackToBoundary(
         command.direction === "up" ? "top" : "bottom",
@@ -1375,30 +1425,88 @@ export function SessionPaneView({
   }, [canFindInSession, isActive]);
 
   useEffect(() => {
-    if (!isActive || pane.viewMode !== "session") {
+    if (!isActive) {
       return;
     }
 
-    function handleWindowPageJump(event: KeyboardEvent) {
-      if (event.defaultPrevented) {
-        return;
-      }
-      if (event.key !== "PageUp" && event.key !== "PageDown") {
-        return;
-      }
-      if (!shouldHandlePanePageKey(event.target)) {
+    function handleWindowPaneTabCycle(event: KeyboardEvent) {
+      if (
+        event.defaultPrevented ||
+        !event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        (event.key !== "PageUp" && event.key !== "PageDown")
+      ) {
         return;
       }
 
       event.preventDefault();
-      scrollSessionMessageStackByPageJump(
-        event.key === "PageUp" ? -1 : 1,
-      );
+      selectAdjacentPaneTab(event.key === "PageUp" ? -1 : 1);
     }
 
-    window.addEventListener("keydown", handleWindowPageJump, true);
+    window.addEventListener("keydown", handleWindowPaneTabCycle, true);
     return () => {
-      window.removeEventListener("keydown", handleWindowPageJump, true);
+      window.removeEventListener("keydown", handleWindowPaneTabCycle, true);
+    };
+  }, [activeTab?.id, isActive, onSelectTab, pane.id, pane.tabs]);
+
+  const handleNestedTargetPageKeyRef = useRef<((event: KeyboardEvent) => void) | null>(null);
+  handleNestedTargetPageKeyRef.current = function handleNestedTargetPageKey(
+    event: KeyboardEvent,
+  ) {
+    if (
+      event.defaultPrevented ||
+      (event.key !== "PageUp" && event.key !== "PageDown") ||
+      !isNestedEditablePageKeyTarget(event.target)
+    ) {
+      return;
+    }
+    if (
+      !(event.target instanceof Node) ||
+      !paneRootRef.current?.contains(event.target)
+    ) {
+      return;
+    }
+
+    const command = resolvePaneScrollCommand(
+      {
+        altKey: event.altKey,
+        ctrlKey: event.ctrlKey,
+        key: event.key,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+      },
+      event.target,
+    );
+    if (!command) {
+      return;
+    }
+
+    event.preventDefault();
+    if (command.kind === "boundary") {
+      scrollMessageStackToBoundary(
+        command.direction === "up" ? "top" : "bottom",
+      );
+      return;
+    }
+
+    scrollSessionMessageStackByPageJump(
+      command.direction === "up" ? -1 : 1,
+    );
+  };
+
+  useEffect(() => {
+    if (!isActive || pane.viewMode !== "session") {
+      return;
+    }
+
+    const listener = (event: KeyboardEvent) => {
+      handleNestedTargetPageKeyRef.current?.(event);
+    };
+    window.addEventListener("keydown", listener, true);
+    return () => {
+      window.removeEventListener("keydown", listener, true);
     };
   }, [isActive, pane.viewMode]);
 
@@ -1738,11 +1846,13 @@ export function SessionPaneView({
 
     if (visibleLastMessageAuthor === "you") {
       setNewResponseIndicator(scrollStateKey, false);
+      let cleanup: (() => void) | undefined;
       const frameId = window.requestAnimationFrame(() => {
-        followLatestMessageForPromptSend();
+        cleanup = followLatestMessageForPromptSend();
       });
       return () => {
         window.cancelAnimationFrame(frameId);
+        cleanup?.();
       };
     }
 
@@ -2110,6 +2220,7 @@ export function SessionPaneView({
 
   return (
     <section
+      ref={paneRootRef}
       className={`workspace-pane thread panel ${isActive ? "active" : ""}`}
       onMouseDown={() => {
         if (!isActive) {

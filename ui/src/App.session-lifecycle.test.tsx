@@ -1836,6 +1836,829 @@ describe("App session lifecycle", () => {
     });
   });
 
+  it("does not open a phantom pane for a stale create response whose session is still absent", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const createSessionDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.createSession>>>();
+      const actionRecoveryDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => actionRecoveryDeferred.promise);
+      const createSessionSpy = vi
+        .spyOn(api, "createSession")
+        .mockImplementation(() => createSessionDeferred.promise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+
+        await act(async () => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }));
+          await flushUiWork();
+        });
+
+        await openCreateSessionDialog();
+        await settleAsyncUi();
+        await submitButtonAndSettle(
+          screen.getByRole("button", { name: "Create session" }),
+        );
+
+        await waitFor(() => {
+          expect(createSessionSpy).toHaveBeenCalledTimes(1);
+        });
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 3,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }));
+          await flushUiWork();
+        });
+
+        await act(async () => {
+          createSessionDeferred.resolve({
+            sessionId: "session-phantom",
+            revision: 2,
+            serverInstanceId: "test-instance",
+            session: makeSession("session-phantom", {
+              name: "Phantom Session",
+            }),
+          });
+          await flushUiWork();
+        });
+
+        expect(screen.queryByText("Phantom Session")).not.toBeInTheDocument();
+        expect(
+          screen.queryByLabelText("Message Phantom Session"),
+        ).not.toBeInTheDocument();
+
+        await waitFor(() => {
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+        });
+
+        await act(async () => {
+          actionRecoveryDeferred.resolve(makeStateResponse({
+            revision: 4,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }));
+          await flushUiWork();
+        });
+
+        expect(screen.queryByText("Phantom Session")).not.toBeInTheDocument();
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        createSessionSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("opens the created session after action-recovery resync adopts a stale create response", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const createSessionDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.createSession>>>();
+      const actionRecoveryDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => actionRecoveryDeferred.promise);
+      const createSessionSpy = vi
+        .spyOn(api, "createSession")
+        .mockImplementation(() => createSessionDeferred.promise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+
+        await act(async () => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }));
+          await flushUiWork();
+        });
+
+        await openCreateSessionDialog();
+        await settleAsyncUi();
+        await submitButtonAndSettle(
+          screen.getByRole("button", { name: "Create session" }),
+        );
+
+        await waitFor(() => {
+          expect(createSessionSpy).toHaveBeenCalledTimes(1);
+        });
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 3,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }));
+          await flushUiWork();
+        });
+
+        await act(async () => {
+          createSessionDeferred.resolve({
+            sessionId: "session-recovered",
+            revision: 2,
+            serverInstanceId: "test-instance",
+            session: makeSession("session-recovered", {
+              name: "Recovered Session",
+            }),
+          });
+          await flushUiWork();
+        });
+
+        expect(screen.queryByText("Recovered Session")).not.toBeInTheDocument();
+        expect(
+          screen.queryByLabelText("Message Recovered Session"),
+        ).not.toBeInTheDocument();
+
+        await waitFor(() => {
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+        });
+
+        await act(async () => {
+          actionRecoveryDeferred.resolve(makeStateResponse({
+            revision: 4,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-recovered", {
+                name: "Recovered Session",
+              }),
+            ],
+          }));
+          await flushUiWork();
+        });
+
+        expect(
+          await screen.findByLabelText("Message Recovered Session"),
+        ).toBeInTheDocument();
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        createSessionSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("opens the created session only after a later state event when the first recovery snapshot still omits it", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const createSessionDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.createSession>>>();
+      const actionRecoveryDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => actionRecoveryDeferred.promise);
+      const createSessionSpy = vi
+        .spyOn(api, "createSession")
+        .mockImplementation(() => createSessionDeferred.promise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+
+        await act(async () => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }));
+          await flushUiWork();
+        });
+
+        await openCreateSessionDialog();
+        await settleAsyncUi();
+        await submitButtonAndSettle(
+          screen.getByRole("button", { name: "Create session" }),
+        );
+
+        await waitFor(() => {
+          expect(createSessionSpy).toHaveBeenCalledTimes(1);
+        });
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 3,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }));
+          await flushUiWork();
+        });
+
+        await act(async () => {
+          createSessionDeferred.resolve({
+            sessionId: "session-recovered-late",
+            revision: 2,
+            serverInstanceId: "test-instance",
+            session: makeSession("session-recovered-late", {
+              name: "Recovered Later",
+            }),
+          });
+          await flushUiWork();
+        });
+
+        expect(screen.queryByText("Recovered Later")).not.toBeInTheDocument();
+        expect(
+          screen.queryByLabelText("Message Recovered Later"),
+        ).not.toBeInTheDocument();
+
+        await waitFor(() => {
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+        });
+
+        await act(async () => {
+          actionRecoveryDeferred.resolve(makeStateResponse({
+            revision: 4,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }));
+          await flushUiWork();
+        });
+
+        expect(screen.queryByText("Recovered Later")).not.toBeInTheDocument();
+        expect(
+          screen.queryByLabelText("Message Recovered Later"),
+        ).not.toBeInTheDocument();
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 5,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-recovered-late", {
+                name: "Recovered Later",
+              }),
+            ],
+          }));
+          await flushUiWork();
+        });
+
+        expect(
+          await screen.findByLabelText("Message Recovered Later"),
+        ).toBeInTheDocument();
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        createSessionSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("does not open a phantom pane for a stale fork response whose session is still absent", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const forkCodexThreadDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.forkCodexThread>>>();
+      const actionRecoveryDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => actionRecoveryDeferred.promise);
+      const forkCodexThreadSpy = vi
+        .spyOn(api, "forkCodexThread")
+        .mockImplementation(() => forkCodexThreadDeferred.promise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+
+        await act(async () => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                agent: "Codex",
+                name: "Codex Session",
+                externalSessionId: "thread-live",
+                codexThreadState: "active",
+              }),
+            ],
+          }));
+          await flushUiWork();
+        });
+
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        const sessionRowLabel = await within(sessionList).findByText(
+          "Codex Session",
+        );
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!(sessionRowButton instanceof HTMLButtonElement)) {
+          throw new Error("Session row button not found");
+        }
+        await clickAndSettle(sessionRowButton);
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Prompt" }),
+        );
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Fork thread" }),
+        );
+
+        await waitFor(() => {
+          expect(forkCodexThreadSpy).toHaveBeenCalledWith("session-1");
+        });
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 3,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                agent: "Codex",
+                name: "Codex Session",
+                externalSessionId: "thread-live",
+                codexThreadState: "active",
+              }),
+            ],
+          }));
+          await flushUiWork();
+        });
+
+        await act(async () => {
+          forkCodexThreadDeferred.resolve({
+            sessionId: "session-fork-phantom",
+            revision: 2,
+            serverInstanceId: "test-instance",
+            session: makeSession("session-fork-phantom", {
+              agent: "Codex",
+              name: "Phantom Fork",
+              externalSessionId: "thread-fork",
+              codexThreadState: "active",
+            }),
+          });
+          await flushUiWork();
+        });
+
+        expect(screen.queryByText("Phantom Fork")).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("tab", { name: "Phantom Fork" }),
+        ).not.toBeInTheDocument();
+
+        await waitFor(() => {
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+        });
+
+        await act(async () => {
+          actionRecoveryDeferred.resolve(makeStateResponse({
+            revision: 4,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                agent: "Codex",
+                name: "Codex Session",
+                externalSessionId: "thread-live",
+                codexThreadState: "active",
+              }),
+            ],
+          }));
+          await flushUiWork();
+        });
+
+        expect(screen.queryByText("Phantom Fork")).not.toBeInTheDocument();
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        forkCodexThreadSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("opens the forked session after action-recovery resync adopts a stale fork response", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const forkCodexThreadDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.forkCodexThread>>>();
+      const actionRecoveryDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => actionRecoveryDeferred.promise);
+      const forkCodexThreadSpy = vi
+        .spyOn(api, "forkCodexThread")
+        .mockImplementation(() => forkCodexThreadDeferred.promise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+
+        await act(async () => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                agent: "Codex",
+                name: "Codex Session",
+                externalSessionId: "thread-live",
+                codexThreadState: "active",
+              }),
+            ],
+          }));
+          await flushUiWork();
+        });
+
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        const sessionRowLabel = await within(sessionList).findByText(
+          "Codex Session",
+        );
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!(sessionRowButton instanceof HTMLButtonElement)) {
+          throw new Error("Session row button not found");
+        }
+        await clickAndSettle(sessionRowButton);
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Prompt" }),
+        );
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Fork thread" }),
+        );
+
+        await waitFor(() => {
+          expect(forkCodexThreadSpy).toHaveBeenCalledWith("session-1");
+        });
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 3,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                agent: "Codex",
+                name: "Codex Session",
+                externalSessionId: "thread-live",
+                codexThreadState: "active",
+              }),
+            ],
+          }));
+          await flushUiWork();
+        });
+
+        await act(async () => {
+          forkCodexThreadDeferred.resolve({
+            sessionId: "session-fork-recovered",
+            revision: 2,
+            serverInstanceId: "test-instance",
+            session: makeSession("session-fork-recovered", {
+              agent: "Codex",
+              name: "Recovered Fork",
+              externalSessionId: "thread-fork",
+              codexThreadState: "active",
+            }),
+          });
+          await flushUiWork();
+        });
+
+        expect(screen.queryByText("Recovered Fork")).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("tab", { name: "Recovered Fork" }),
+        ).not.toBeInTheDocument();
+
+        await waitFor(() => {
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+        });
+
+        await act(async () => {
+          actionRecoveryDeferred.resolve(makeStateResponse({
+            revision: 4,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                agent: "Codex",
+                name: "Codex Session",
+                externalSessionId: "thread-live",
+                codexThreadState: "active",
+              }),
+              makeSession("session-fork-recovered", {
+                agent: "Codex",
+                name: "Recovered Fork",
+                externalSessionId: "thread-fork",
+                codexThreadState: "active",
+              }),
+            ],
+          }));
+          await flushUiWork();
+        });
+
+        expect(
+          await screen.findByRole("tab", { name: "Recovered Fork" }),
+        ).toBeInTheDocument();
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        forkCodexThreadSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("opens the forked session only after a later state event when the first recovery snapshot still omits it", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const forkCodexThreadDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.forkCodexThread>>>();
+      const actionRecoveryDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => actionRecoveryDeferred.promise);
+      const forkCodexThreadSpy = vi
+        .spyOn(api, "forkCodexThread")
+        .mockImplementation(() => forkCodexThreadDeferred.promise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+
+        await act(async () => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                agent: "Codex",
+                name: "Codex Session",
+                externalSessionId: "thread-live",
+                codexThreadState: "active",
+              }),
+            ],
+          }));
+          await flushUiWork();
+        });
+
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        const sessionRowLabel = await within(sessionList).findByText(
+          "Codex Session",
+        );
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!(sessionRowButton instanceof HTMLButtonElement)) {
+          throw new Error("Session row button not found");
+        }
+        await clickAndSettle(sessionRowButton);
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Prompt" }),
+        );
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Fork thread" }),
+        );
+
+        await waitFor(() => {
+          expect(forkCodexThreadSpy).toHaveBeenCalledWith("session-1");
+        });
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 3,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                agent: "Codex",
+                name: "Codex Session",
+                externalSessionId: "thread-live",
+                codexThreadState: "active",
+              }),
+            ],
+          }));
+          await flushUiWork();
+        });
+
+        await act(async () => {
+          forkCodexThreadDeferred.resolve({
+            sessionId: "session-fork-recovered-late",
+            revision: 2,
+            serverInstanceId: "test-instance",
+            session: makeSession("session-fork-recovered-late", {
+              agent: "Codex",
+              name: "Recovered Fork Later",
+              externalSessionId: "thread-fork",
+              codexThreadState: "active",
+            }),
+          });
+          await flushUiWork();
+        });
+
+        expect(screen.queryByText("Recovered Fork Later")).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("tab", { name: "Recovered Fork Later" }),
+        ).not.toBeInTheDocument();
+
+        await waitFor(() => {
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+        });
+
+        await act(async () => {
+          actionRecoveryDeferred.resolve(makeStateResponse({
+            revision: 4,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                agent: "Codex",
+                name: "Codex Session",
+                externalSessionId: "thread-live",
+                codexThreadState: "active",
+              }),
+            ],
+          }));
+          await flushUiWork();
+        });
+
+        expect(screen.queryByText("Recovered Fork Later")).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("tab", { name: "Recovered Fork Later" }),
+        ).not.toBeInTheDocument();
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 5,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                agent: "Codex",
+                name: "Codex Session",
+                externalSessionId: "thread-live",
+                codexThreadState: "active",
+              }),
+              makeSession("session-fork-recovered-late", {
+                agent: "Codex",
+                name: "Recovered Fork Later",
+                externalSessionId: "thread-fork",
+                codexThreadState: "active",
+              }),
+            ],
+          }));
+          await flushUiWork();
+        });
+
+        expect(
+          await screen.findByRole("tab", { name: "Recovered Fork Later" }),
+        ).toBeInTheDocument();
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        forkCodexThreadSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("warns once before sending with an unknown model, then allows the retry", () => {
     const session = makeSession("session-1", {
       agent: "Codex",

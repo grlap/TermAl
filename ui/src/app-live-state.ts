@@ -142,11 +142,12 @@ import {
 //                   to do.
 //   - "stale":      revision gate rejected the write because a
 //                   newer snapshot already landed. The session
-//                   was NOT inserted here but an earlier delta
-//                   already saw it (that's how the revision got
-//                   ahead), so `sessionsRef` does contain
-//                   `created.sessionId`. The caller may still
-//                   open the workspace pane as a safe fallback.
+//                   was NOT inserted here. Callers must verify
+//                   `sessionsRef` already contains
+//                   `created.sessionId` before opening a pane;
+//                   unrelated state probes can advance the
+//                   revision without ever inserting the created
+//                   session locally.
 //   - "recovering": wire-contract violation
 //                   (`session.id !== sessionId`) — a resync was
 //                   scheduled and the caller MUST NOT open a
@@ -180,6 +181,8 @@ export type RequestStateResyncOptions = {
   preserveWatchdogCooldown?: boolean;
   rearmOnSuccess?: boolean;
   rearmOnFailure?: boolean;
+  openSessionId?: string;
+  paneId?: string | null;
 };
 
 export type UseAppLiveStateAdoptionRefs = {
@@ -269,7 +272,9 @@ export type UseAppLiveStateParams = {
    * one-off backend-unavailable error without touching SSE-level
    * reconnect state. Reset to a no-op on cleanup.
    */
-  requestActionRecoveryResyncRef: MutableRefObject<() => void>;
+  requestActionRecoveryResyncRef: MutableRefObject<
+    (options?: { openSessionId?: string; paneId?: string | null }) => void
+  >;
   activeSession: Session | null;
 };
 
@@ -293,6 +298,26 @@ export type UseAppLiveStateReturn = {
   workspaceFilesChangedEventFlushTimeoutRef: MutableRefObject<number | null>;
   resetWorkspaceFilesChangedEventGate: () => void;
 };
+
+function buildUnknownModelConfirmationKeySet(sessions: Session[]) {
+  return new Set(
+    sessions
+      .filter((session) => describeUnknownSessionModelWarning(session))
+      .map((session) =>
+        unknownSessionModelConfirmationKey(session.id, session.model),
+      ),
+  );
+}
+
+function setContainsOnlyValuesFrom<T>(current: Set<T>, allowed: Set<T>) {
+  for (const value of current) {
+    if (!allowed.has(value)) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 export function useAppLiveState(
   params: UseAppLiveStateParams,
@@ -374,6 +399,10 @@ export function useAppLiveState(
   const stateResyncPreserveWatchdogCooldownRef = useRef(false);
   const stateResyncRearmOnSuccessRef = useRef(false);
   const stateResyncRearmOnFailureRef = useRef(false);
+  const stateResyncOpenSessionIdRef = useRef<string | undefined>(undefined);
+  const stateResyncPaneIdRef = useRef<string | null | undefined>(undefined);
+  const pendingRecoveryOpenSessionIdRef = useRef<string | undefined>(undefined);
+  const pendingRecoveryPaneIdRef = useRef<string | null | undefined>(undefined);
   // Bridges `adoptState` (declared at the hook body so the
   // React render can call it) with the watchdog baseline
   // sync (defined inside the transport useEffect). Assigned on
@@ -394,6 +423,11 @@ export function useAppLiveState(
     const availableSessionIds = new Set(
       mergedSessions.map((session) => session.id),
     );
+    const removedSessionIds = new Set(
+      previousSessions.flatMap((session) =>
+        availableSessionIds.has(session.id) ? [] : [session.id],
+      ),
+    );
     const sessionsWithChangedWorkdir = new Set(
       mergedSessions.flatMap((session) => {
         const previousSession = previousSessionsById.get(session.id);
@@ -402,15 +436,28 @@ export function useAppLiveState(
           : [];
       }),
     );
+    const hasRemovedSessions = removedSessionIds.size > 0;
+    const hasWorkdirInvalidations = sessionsWithChangedWorkdir.size > 0;
+    const pendingOpenSessionId =
+      options?.openSessionId ?? pendingRecoveryOpenSessionIdRef.current;
+    const pendingPaneId =
+      options?.openSessionId !== undefined
+        ? (options.paneId ?? null)
+        : (pendingRecoveryPaneIdRef.current ?? null);
+    const canOpenPendingSession =
+      pendingOpenSessionId !== undefined &&
+      availableSessionIds.has(pendingOpenSessionId);
     // Avoid rewriting workspace state when an adopted snapshot preserves the
     // same reconciled sessions. Workspace autosave is keyed off `workspace`
     // identity, so an identity-only rewrite here can create a loop:
     // workspace PUT -> SSE state snapshot -> adoptSessions -> workspace save.
     const shouldReconcileWorkspace =
-      mergedSessions !== previousSessions || Boolean(options?.openSessionId);
+      mergedSessions !== previousSessions || canOpenPendingSession;
 
     sessionsRef.current = mergedSessions;
-    setSessions(mergedSessions);
+    if (mergedSessions !== previousSessions) {
+      setSessions(mergedSessions);
+    }
     if (shouldReconcileWorkspace) {
       setWorkspace((current) => {
         const reconciled =
@@ -419,98 +466,108 @@ export function useAppLiveState(
                 reconcileWorkspaceState(current, mergedSessions),
               )
             : current;
-        if (!options?.openSessionId) {
+        if (!canOpenPendingSession || !pendingOpenSessionId) {
           return reconciled;
         }
 
         return applyControlPanelLayout(
           openSessionInWorkspaceState(
             reconciled,
-            options.openSessionId,
-            options.paneId ?? null,
+            pendingOpenSessionId,
+            pendingPaneId,
           ),
         );
       });
     }
-    setDraftsBySessionId((current) =>
-      pruneSessionValues(current, availableSessionIds),
-    );
-    setDraftAttachmentsBySessionId((current) =>
-      pruneSessionAttachmentValues(current, availableSessionIds),
-    );
-    setSendingSessionIds((current) =>
-      pruneSessionFlags(current, availableSessionIds),
-    );
-    setStoppingSessionIds((current) =>
-      pruneSessionFlags(current, availableSessionIds),
-    );
-    setKillingSessionIds((current) =>
-      pruneSessionFlags(current, availableSessionIds),
-    );
-    setKillRevealSessionId((current) =>
-      current && availableSessionIds.has(current) ? current : null,
-    );
-    setPendingKillSessionId((current) =>
-      current && availableSessionIds.has(current) ? current : null,
-    );
-    setPendingSessionRename((current) =>
-      current && availableSessionIds.has(current.sessionId) ? current : null,
-    );
-    setUpdatingSessionIds((current) =>
-      pruneSessionFlags(current, availableSessionIds),
-    );
-    setAgentCommandsBySessionId((current) =>
-      pruneSessionCommandValues(
-        current,
-        availableSessionIds,
-        sessionsWithChangedWorkdir,
-      ),
-    );
-    setRefreshingAgentCommandSessionIds((current) =>
-      pruneSessionFlagsWithInvalidation(
-        current,
-        availableSessionIds,
-        sessionsWithChangedWorkdir,
-      ),
-    );
-    refreshingAgentCommandSessionIdsRef.current =
-      pruneSessionFlagsWithInvalidation(
-        refreshingAgentCommandSessionIdsRef.current,
-        availableSessionIds,
-        sessionsWithChangedWorkdir,
+    if (canOpenPendingSession) {
+      pendingRecoveryOpenSessionIdRef.current = undefined;
+      pendingRecoveryPaneIdRef.current = undefined;
+    }
+    if (hasRemovedSessions) {
+      setDraftsBySessionId((current) =>
+        pruneSessionValues(current, availableSessionIds),
       );
-    setAgentCommandErrors((current) =>
-      pruneSessionValues(
-        current,
-        availableSessionIds,
-        sessionsWithChangedWorkdir,
-      ),
-    );
-    setSessionSettingNotices((current) =>
-      pruneSessionValues(current, availableSessionIds),
-    );
-    const availableUnknownModelKeys = new Set(
-      mergedSessions
-        .filter((session) => describeUnknownSessionModelWarning(session))
-        .map((session) =>
-          unknownSessionModelConfirmationKey(session.id, session.model),
+      setDraftAttachmentsBySessionId((current) =>
+        pruneSessionAttachmentValues(current, availableSessionIds),
+      );
+      setSendingSessionIds((current) =>
+        pruneSessionFlags(current, availableSessionIds),
+      );
+      setStoppingSessionIds((current) =>
+        pruneSessionFlags(current, availableSessionIds),
+      );
+      setKillingSessionIds((current) =>
+        pruneSessionFlags(current, availableSessionIds),
+      );
+      setKillRevealSessionId((current) =>
+        current && availableSessionIds.has(current) ? current : null,
+      );
+      setPendingKillSessionId((current) =>
+        current && availableSessionIds.has(current) ? current : null,
+      );
+      setPendingSessionRename((current) =>
+        current && availableSessionIds.has(current.sessionId) ? current : null,
+      );
+      setUpdatingSessionIds((current) =>
+        pruneSessionFlags(current, availableSessionIds),
+      );
+      setSessionSettingNotices((current) =>
+        pruneSessionValues(current, availableSessionIds),
+      );
+      hydratingSessionIdsRef.current = new Set(
+        [...hydratingSessionIdsRef.current].filter((sessionId) =>
+          availableSessionIds.has(sessionId),
         ),
-    );
-    confirmedUnknownModelSendsRef.current = new Set(
-      [...confirmedUnknownModelSendsRef.current].filter((key) =>
-        availableUnknownModelKeys.has(key),
-      ),
-    );
-    hydratingSessionIdsRef.current = new Set(
-      [...hydratingSessionIdsRef.current].filter((sessionId) =>
-        availableSessionIds.has(sessionId),
-      ),
-    );
-    hydratedSessionIdsRef.current = new Set(
-      [...hydratedSessionIdsRef.current].filter((sessionId) =>
-        availableSessionIds.has(sessionId),
-      ),
-    );
+      );
+      hydratedSessionIdsRef.current = new Set(
+        [...hydratedSessionIdsRef.current].filter((sessionId) =>
+          availableSessionIds.has(sessionId),
+        ),
+      );
+    }
+    if (hasRemovedSessions || hasWorkdirInvalidations) {
+      setAgentCommandsBySessionId((current) =>
+        pruneSessionCommandValues(
+          current,
+          availableSessionIds,
+          sessionsWithChangedWorkdir,
+        ),
+      );
+      setRefreshingAgentCommandSessionIds((current) =>
+        pruneSessionFlagsWithInvalidation(
+          current,
+          availableSessionIds,
+          sessionsWithChangedWorkdir,
+        ),
+      );
+      refreshingAgentCommandSessionIdsRef.current =
+        pruneSessionFlagsWithInvalidation(
+          refreshingAgentCommandSessionIdsRef.current,
+          availableSessionIds,
+          sessionsWithChangedWorkdir,
+        );
+      setAgentCommandErrors((current) =>
+        pruneSessionValues(
+          current,
+          availableSessionIds,
+          sessionsWithChangedWorkdir,
+        ),
+      );
+    }
+    const availableUnknownModelKeys =
+      buildUnknownModelConfirmationKeySet(mergedSessions);
+    if (
+      !setContainsOnlyValuesFrom(
+        confirmedUnknownModelSendsRef.current,
+        availableUnknownModelKeys,
+      )
+    ) {
+      confirmedUnknownModelSendsRef.current = new Set(
+        [...confirmedUnknownModelSendsRef.current].filter((key) =>
+          availableUnknownModelKeys.has(key),
+        ),
+      );
+    }
   }
 
   function adoptCreatedSessionResponse(
@@ -793,16 +850,20 @@ export function useAppLiveState(
       workspaceSummariesRef.current = adoptedStateSlices.workspaces;
       setWorkspaceSummaries(adoptedStateSlices.workspaces);
     }
+    const requestedOpenSessionId =
+      options?.openSessionId ?? pendingRecoveryOpenSessionIdRef.current;
     adoptSessions(nextState.sessions, options);
     // Local state adoptions can resume or create active sessions before any SSE arrives.
     syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current(
       nextState.sessions,
     );
-    if (options?.openSessionId) {
+    if (requestedOpenSessionId) {
       const openedSession = nextState.sessions.find(
-        (session) => session.id === options.openSessionId,
+        (session) => session.id === requestedOpenSessionId,
       );
-      setSelectedProjectId(openedSession?.projectId ?? ALL_PROJECTS_FILTER_ID);
+      if (openedSession) {
+        setSelectedProjectId(openedSession.projectId ?? ALL_PROJECTS_FILTER_ID);
+      }
     }
     return true;
   }
@@ -877,6 +938,10 @@ export function useAppLiveState(
     stateResyncPreserveWatchdogCooldownRef.current = false;
     stateResyncRearmOnSuccessRef.current = false;
     stateResyncRearmOnFailureRef.current = false;
+    stateResyncOpenSessionIdRef.current = undefined;
+    stateResyncPaneIdRef.current = undefined;
+    pendingRecoveryOpenSessionIdRef.current = undefined;
+    pendingRecoveryPaneIdRef.current = undefined;
     // Track transport activity per session so one noisy active session cannot
     // mask another stalled one.
     let lastLiveTransportActivityAtBySessionId = new Map<string, number>();
@@ -1081,6 +1146,10 @@ export function useAppLiveState(
             stateResyncRearmOnSuccessRef.current = false;
             const rearmOnFailure = stateResyncRearmOnFailureRef.current;
             stateResyncRearmOnFailureRef.current = false;
+            const openSessionId = stateResyncOpenSessionIdRef.current;
+            stateResyncOpenSessionIdRef.current = undefined;
+            const paneId = stateResyncPaneIdRef.current;
+            stateResyncPaneIdRef.current = undefined;
             const requestedRevision = latestStateRevisionRef.current;
 
             try {
@@ -1089,19 +1158,40 @@ export function useAppLiveState(
                 break;
               }
 
-              const shouldForceRollback =
+              const shouldPreferAuthoritativeSnapshot =
+                preserveReconnectFallback ||
+                preserveWatchdogCooldown ||
+                rearmOnSuccess ||
+                rearmOnFailure;
+              const shouldForceAuthoritativeSnapshot =
                 allowAuthoritativeRollback &&
+                shouldPreferAuthoritativeSnapshot &&
                 requestedRevision !== null &&
                 latestStateRevisionRef.current === requestedRevision &&
                 state.revision <= requestedRevision;
+              const shouldForceRollback =
+                shouldForceAuthoritativeSnapshot &&
+                !!state.serverInstanceId &&
+                state.serverInstanceId !== lastSeenServerInstanceIdRef.current;
 
               const adopted = adoptState(state, {
                 // A reconnect fallback snapshot is authoritative if no newer SSE state landed
                 // while it was in flight, even when a crashed backend restarted below the last
-                // streamed client revision.
-                force: shouldForceRollback,
-                allowRevisionDowngrade: shouldForceRollback,
+                // streamed client revision. Keep this broader than restart-only rollback:
+                // reconnect/watchdog/manual-retry probes are explicitly asking `/api/state`
+                // to replace any buffered or non-session SSE view once the fetch resolves.
+                force: shouldForceAuthoritativeSnapshot,
+                allowRevisionDowngrade: shouldForceAuthoritativeSnapshot,
+                openSessionId,
+                paneId,
               });
+              const shouldRetryStaleSameInstanceSnapshot =
+                !adopted &&
+                allowAuthoritativeRollback &&
+                requestedRevision !== null &&
+                latestStateRevisionRef.current === requestedRevision &&
+                state.revision < requestedRevision &&
+                !reconnectStateResyncTimeoutId;
               if (adopted) {
                 clearInitialStateResyncRetryTimeout();
                 if (
@@ -1126,6 +1216,12 @@ export function useAppLiveState(
                   state.sessions,
                   adoptedAt,
                 );
+              } else if (shouldRetryStaleSameInstanceSnapshot) {
+                // A same-instance snapshot that still lags behind the client's
+                // locally adopted revision can arrive during create/fork wake-gap
+                // recovery. Do not roll back to it, but keep probing until the
+                // authoritative snapshot catches up.
+                scheduleReconnectStateResync();
               }
               setBackendConnectionIssueDetail(null);
               clearRecoveredBackendRequestError();
@@ -1192,13 +1288,7 @@ export function useAppLiveState(
       })();
     }
 
-    function requestStateResync(options?: {
-      allowAuthoritativeRollback?: boolean;
-      preserveReconnectFallback?: boolean;
-      preserveWatchdogCooldown?: boolean;
-      rearmOnSuccess?: boolean;
-      rearmOnFailure?: boolean;
-    }) {
+    function requestStateResync(options?: RequestStateResyncOptions) {
       if (cancelled) {
         return;
       }
@@ -1228,6 +1318,10 @@ export function useAppLiveState(
       if (options?.rearmOnFailure) {
         stateResyncRearmOnFailureRef.current = true;
       }
+      if (options?.openSessionId !== undefined) {
+        stateResyncOpenSessionIdRef.current = options.openSessionId;
+        stateResyncPaneIdRef.current = options.paneId ?? null;
+      }
       stateResyncPendingRef.current = true;
       startStateResyncLoop();
     }
@@ -1249,7 +1343,7 @@ export function useAppLiveState(
         rearmOnFailure: true,
       });
     };
-    requestActionRecoveryResyncRef.current = () => {
+    requestActionRecoveryResyncRef.current = (options) => {
       if (cancelled || !readNavigatorOnline()) {
         return;
       }
@@ -1262,8 +1356,14 @@ export function useAppLiveState(
       // state here would cause the successful probe to schedule reconnect
       // polling that never disarms until an unrelated EventSource onerror/onopen
       // cycle resets the flag.
+      if (options?.openSessionId !== undefined) {
+        pendingRecoveryOpenSessionIdRef.current = options.openSessionId;
+        pendingRecoveryPaneIdRef.current = options.paneId ?? null;
+      }
       requestStateResync({
         allowAuthoritativeRollback: latestStateRevisionRef.current !== null,
+        openSessionId: options?.openSessionId,
+        paneId: options?.paneId,
       });
     };
 

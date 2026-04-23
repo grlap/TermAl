@@ -287,6 +287,14 @@ describe("App scroll behaviour", () => {
 
   it("cancels a pending settle-to-bottom frame when Ctrl+PageUp jumps to the top", async () => {
     await withSuppressedActWarnings(async () => {
+      const originalPlatform = Object.getOwnPropertyDescriptor(
+        window.navigator,
+        "platform",
+      );
+      Object.defineProperty(window.navigator, "platform", {
+        configurable: true,
+        value: "Win32",
+      });
       const pendingFrames = new Map<number, FrameRequestCallback>();
       let nextFrameId = 1;
       vi.stubGlobal(
@@ -312,7 +320,9 @@ describe("App scroll behaviour", () => {
       const context = await renderAppWithProjectAndSession();
 
       try {
-        const messageStack = document.querySelector(".message-stack");
+        const messageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
         if (!(messageStack instanceof HTMLElement)) {
           throw new Error("Message stack not found");
         }
@@ -344,6 +354,507 @@ describe("App scroll behaviour", () => {
         expect(messageStack.scrollTop).toBe(0);
       } finally {
         context.cleanup();
+        restoreScrollGeometry();
+        if (originalPlatform) {
+          Object.defineProperty(window.navigator, "platform", originalPlatform);
+        } else {
+          Reflect.deleteProperty(window.navigator, "platform");
+        }
+      }
+    });
+  });
+
+  it("keeps plain PageDown inside the composer textarea when the caret is not at the start", async () => {
+    await withSuppressedActWarnings(async () => {
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+
+      try {
+        const messageStack = document.querySelector(".message-stack");
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+        const composer = await screen.findByLabelText("Message Session 1");
+        if (!(composer instanceof HTMLTextAreaElement)) {
+          throw new Error("Composer textarea not found");
+        }
+
+        await act(async () => {
+          fireEvent.change(composer, { target: { value: "hello world" } });
+        });
+
+        messageStack.scrollTop = 800;
+        composer.focus();
+        composer.setSelectionRange(5, 5);
+
+        await act(async () => {
+          fireEvent.keyDown(composer, {
+            key: "PageDown",
+            code: "PageDown",
+          });
+        });
+        await settleAsyncUi();
+
+        expect(messageStack.scrollTop).toBe(800);
+        expect(filterScrollToCallsAt(scrollToMock, 0, "auto")).toEqual([]);
+      } finally {
+        context.cleanup();
+        restoreScrollGeometry();
+      }
+    });
+  });
+
+  it("uses the current session when the nested editable PageDown fallback fires after a tab switch", async () => {
+    await withSuppressedActWarnings(async () => {
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [
+              {
+                id: "project-termal",
+                name: "TermAl",
+                rootPath: "/projects/termal",
+              },
+            ],
+            sessions: [
+              makeSession("session-1", {
+                name: "Session 1",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+              }),
+              makeSession("session-2", {
+                name: "Session 2",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+              }),
+            ],
+          });
+        }
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+
+      const layoutStorageKey = `${WORKSPACE_LAYOUT_STORAGE_KEY}:test-nested-page-fallback-session-switch`;
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=test-nested-page-fallback-session-switch",
+      );
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        layoutStorageKey,
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: {
+              type: "pane",
+              paneId: "pane-session",
+            },
+            panes: [
+              {
+                id: "pane-session",
+                tabs: [
+                  {
+                    id: "tab-session-1",
+                    kind: "session",
+                    sessionId: "session-1",
+                  },
+                  {
+                    id: "tab-session-2",
+                    kind: "session",
+                    sessionId: "session-2",
+                  },
+                ],
+                activeTabId: "tab-session-1",
+                activeSessionId: "session-1",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+            ],
+            activePaneId: "pane-session",
+          },
+        }),
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+        act(() => {
+          latestEventSource().dispatchError();
+        });
+        await settleAsyncUi();
+
+        const tablist = screen
+          .getAllByRole("tablist", { name: "Tile tabs" })
+          .find((candidate) => within(candidate).queryByRole("tab", { name: "Session 1" }));
+        if (!tablist) {
+          throw new Error("Session pane tablist not found");
+        }
+        const session1Tab = within(tablist).getByRole("tab", { name: "Session 1" });
+        const session2Tab = within(tablist).getByRole("tab", { name: "Session 2" });
+
+        await clickAndSettle(session1Tab);
+        const messageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Active message stack not found");
+        }
+
+        messageStack.scrollTop = 150;
+        act(() => {
+          fireEvent.scroll(messageStack);
+        });
+
+        await clickAndSettle(session2Tab);
+        messageStack.scrollTop = 400;
+        act(() => {
+          fireEvent.scroll(messageStack);
+        });
+
+        const composer = await screen.findByLabelText("Message Session 2");
+        if (!(composer instanceof HTMLTextAreaElement)) {
+          throw new Error("Session 2 composer not found");
+        }
+        await act(async () => {
+          fireEvent.change(composer, { target: { value: "hello world" } });
+        });
+        composer.focus();
+        composer.setSelectionRange(0, 0);
+        const stopPropagation = (event: KeyboardEvent) => {
+          event.stopPropagation();
+        };
+        composer.addEventListener("keydown", stopPropagation);
+
+        await act(async () => {
+          try {
+            fireEvent.keyDown(composer, {
+              key: "PageDown",
+              code: "PageDown",
+            });
+          } finally {
+            composer.removeEventListener("keydown", stopPropagation);
+          }
+        });
+        await settleAsyncUi();
+
+        expect(messageStack.scrollTop).toBe(490);
+
+        await clickAndSettle(session1Tab);
+        expect(messageStack.scrollTop).toBe(150);
+      } finally {
+        restoreScrollGeometry();
+      }
+    });
+  });
+
+  it("ignores nested editable PageDown targets outside the active pane", async () => {
+    await withSuppressedActWarnings(async () => {
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+
+      try {
+        const { cleanup: teardown } = await renderAppWithProjectAndSession();
+        try {
+          await settleAsyncUi();
+
+          const messageStack = document.querySelector(
+            ".workspace-pane.active .message-stack",
+          );
+          if (!(messageStack instanceof HTMLElement)) {
+            throw new Error("Active message stack not found");
+          }
+
+          messageStack.scrollTop = 320;
+          act(() => {
+            fireEvent.scroll(messageStack);
+          });
+
+          const externalTextarea = document.createElement("textarea");
+          externalTextarea.value = "outside";
+          document.body.appendChild(externalTextarea);
+          externalTextarea.focus();
+          externalTextarea.setSelectionRange(0, 0);
+
+          try {
+            await act(async () => {
+              fireEvent.keyDown(externalTextarea, {
+                key: "PageDown",
+                code: "PageDown",
+              });
+            });
+            await settleAsyncUi();
+          } finally {
+            externalTextarea.remove();
+          }
+
+          expect(messageStack.scrollTop).toBe(320);
+        } finally {
+          teardown();
+        }
+      } finally {
+        restoreScrollGeometry();
+      }
+    });
+  });
+
+  it("pages the session transcript by a fixed delta on plain PageDown", async () => {
+    await withSuppressedActWarnings(async () => {
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+
+      try {
+        const messageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+
+        scrollToMock.mockClear();
+        messageStack.scrollTop = 400;
+
+        await act(async () => {
+          fireEvent.keyDown(messageStack, {
+            key: "PageDown",
+            code: "PageDown",
+          });
+        });
+        await settleAsyncUi();
+
+        expect(messageStack.scrollTop).toBe(490);
+        expect(scrollToMock).not.toHaveBeenCalled();
+
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 2,
+          projects: [
+            {
+              id: "project-termal",
+              name: "TermAl",
+              rootPath: "/projects/termal",
+            },
+          ],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              preview: "Fresh assistant response.",
+              messages: [
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Fresh assistant response.",
+                },
+              ],
+            }),
+          ],
+        });
+
+        expect(
+          await screen.findByRole("button", { name: "New response" }),
+        ).toBeInTheDocument();
+      } finally {
+        context.cleanup();
+        restoreScrollGeometry();
+      }
+    });
+  });
+
+  it("pages the session transcript upward by a fixed delta on plain PageUp", async () => {
+    await withSuppressedActWarnings(async () => {
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+
+      try {
+        const messageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+
+        scrollToMock.mockClear();
+        messageStack.scrollTop = 800;
+
+        await act(async () => {
+          fireEvent.keyDown(messageStack, {
+            key: "PageUp",
+            code: "PageUp",
+          });
+        });
+        await settleAsyncUi();
+
+        expect(messageStack.scrollTop).toBe(710);
+        expect(scrollToMock).not.toHaveBeenCalled();
+
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 2,
+          projects: [
+            {
+              id: "project-termal",
+              name: "TermAl",
+              rootPath: "/projects/termal",
+            },
+          ],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              preview: "Fresh assistant response.",
+              messages: [
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Fresh assistant response.",
+                },
+              ],
+            }),
+          ],
+        });
+
+        expect(
+          await screen.findByRole("button", { name: "New response" }),
+        ).toBeInTheDocument();
+      } finally {
+        context.cleanup();
+        restoreScrollGeometry();
+      }
+    });
+  });
+
+  it("follows the latest user prompt immediately while a send is in flight", async () => {
+    await withSuppressedActWarnings(async () => {
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+      const pendingSend = createDeferred<Response>();
+      const baseState = {
+        revision: 2,
+        projects: [
+          {
+            id: "project-termal",
+            name: "TermAl",
+            rootPath: "/projects/termal",
+          },
+        ],
+        sessions: [
+          makeSession("session-1", {
+            name: "Session 1",
+            projectId: "project-termal",
+            workdir: "/projects/termal",
+            preview: "Latest user prompt.",
+            messages: [
+              {
+                id: "message-user-1",
+                type: "text",
+                timestamp: "10:01",
+                author: "you",
+                text: "Latest user prompt.",
+              },
+            ],
+          }),
+        ],
+      };
+
+      context.fetchMock.mockImplementation(
+        async (input: RequestInfo | URL) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse(baseState);
+          }
+          if (requestUrl.pathname === "/api/sessions/session-1/messages") {
+            return pendingSend.promise;
+          }
+          throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+        },
+      );
+
+      try {
+        await dispatchStateEvent(latestEventSource(), baseState);
+        await settleAsyncUi();
+
+        const messageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+
+        messageStack.scrollTop = 0;
+        act(() => {
+          fireEvent.scroll(messageStack);
+        });
+
+        const composer = await screen.findByLabelText("Message Session 1");
+        if (!(composer instanceof HTMLTextAreaElement)) {
+          throw new Error("Composer textarea not found");
+        }
+
+        await act(async () => {
+          fireEvent.change(composer, {
+            target: { value: "Follow this prompt" },
+          });
+        });
+
+        scrollToMock.mockClear();
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: "Send" }));
+          await Promise.resolve();
+        });
+        await settleAsyncUi();
+
+        const settledBottomCallCount = filterScrollToCallsAt(
+          scrollToMock,
+          800,
+          "auto",
+        ).length;
+        expect(settledBottomCallCount).toBeGreaterThan(0);
+
+        context.cleanup();
+        await flushUiWork();
+        expect(filterScrollToCallsAt(scrollToMock, 800, "auto").length).toBe(
+          settledBottomCallCount,
+        );
+      } finally {
         restoreScrollGeometry();
       }
     });

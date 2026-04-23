@@ -85,16 +85,16 @@ export function SettingsTabBar({
       nextIndex = count - 1;
     }
 
-    if (nextIndex === currentIndex) {
-      // No-op: every destination equals the source (a single-tab
-      // tablist is the only way this branch fires today, but
-      // short-circuiting keeps the behaviour obviously safe).
-      return;
-    }
-
     // Stop the browser from scrolling on Home/End and from moving
     // focus on arrow keys outside the tablist.
     event.preventDefault();
+
+    if (nextIndex === currentIndex) {
+      // No-op destinations still count as handled tablist keys. Preventing the
+      // default here keeps `Home` on the first tab and `End` on the last tab
+      // from falling through to browser/document scrolling.
+      return;
+    }
 
     const nextTab = PREFERENCES_TABS[nextIndex];
     if (!nextTab) {

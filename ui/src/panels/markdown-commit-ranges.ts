@@ -47,7 +47,10 @@
 // function bodies, same thresholds; consumers (including
 // `DiffPanel.test.tsx`) import directly from here.
 
-import type { MarkdownDiffDocumentSegment } from "./markdown-diff-segments";
+import {
+  normalizeMarkdownDocumentLineEndings,
+  type MarkdownDiffDocumentSegment,
+} from "./markdown-diff-segments";
 
 export type RenderedMarkdownSectionCommit = {
   currentSegment: MarkdownDiffDocumentSegment;
@@ -65,6 +68,9 @@ export function resolveRenderedMarkdownCommitRange(
   currentContent: string,
   commit: RenderedMarkdownSectionCommit,
 ): MarkdownDocumentRange | null {
+  const normalizedSourceContent = normalizeMarkdownDocumentLineEndings(
+    commit.sourceContent,
+  );
   const originalRange = {
     start: commit.segment.afterStartOffset,
     end: commit.segment.afterEndOffset,
@@ -74,7 +80,7 @@ export function resolveRenderedMarkdownCommitRange(
   }
 
   const mappedRange = mapMarkdownRangeAcrossContentChange(
-    commit.sourceContent,
+    normalizedSourceContent,
     currentContent,
     originalRange,
   );

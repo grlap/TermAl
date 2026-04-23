@@ -10,7 +10,7 @@
 // the first direct coverage of the keyboard pattern.
 
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen } from "@testing-library/react";
 
 import { SettingsTabBar } from "./SettingsTabBar";
 import { PREFERENCES_TABS } from "./preferences-tabs";
@@ -130,6 +130,18 @@ describe("SettingsTabBar keyboard navigation", () => {
     );
   });
 
+  it("prevents default on Home when the first tab is already active", () => {
+    const onSelectTab = vi.fn();
+    render(<SettingsTabBar activeTabId="themes" onSelectTab={onSelectTab} />);
+    const themes = screen.getByRole("tab", { name: "Themes" });
+    themes.focus();
+    const homeEvent = createEvent.keyDown(themes, { key: "Home" });
+    fireEvent(themes, homeEvent);
+    expect(homeEvent.defaultPrevented).toBe(true);
+    expect(onSelectTab).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(themes);
+  });
+
   it("jumps to the last tab on End and focuses it", () => {
     const onSelectTab = vi.fn();
     render(
@@ -148,6 +160,23 @@ describe("SettingsTabBar keyboard navigation", () => {
     expect(document.activeElement).toBe(
       screen.getByRole("tab", { name: lastTab.label }),
     );
+  });
+
+  it("prevents default on End when the last tab is already active", () => {
+    const onSelectTab = vi.fn();
+    const lastTab = PREFERENCES_TABS[PREFERENCES_TABS.length - 1];
+    expect(lastTab).toBeDefined();
+    if (!lastTab) {
+      return;
+    }
+    render(<SettingsTabBar activeTabId={lastTab.id} onSelectTab={onSelectTab} />);
+    const lastTabElement = screen.getByRole("tab", { name: lastTab.label });
+    lastTabElement.focus();
+    const endEvent = createEvent.keyDown(lastTabElement, { key: "End" });
+    fireEvent(lastTabElement, endEvent);
+    expect(endEvent.defaultPrevented).toBe(true);
+    expect(onSelectTab).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(lastTabElement);
   });
 
   it("ignores unrelated keys without calling onSelectTab", () => {

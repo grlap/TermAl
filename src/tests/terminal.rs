@@ -24,6 +24,20 @@
 
 use super::*;
 
+#[cfg(not(windows))]
+#[test]
+fn build_terminal_shell_command_uses_login_shell_on_unix() {
+    let (shell_label, child_command) = build_terminal_shell_command("printf test");
+
+    assert_eq!(shell_label, "sh");
+    assert_eq!(child_command.get_program(), std::ffi::OsStr::new("sh"));
+    let args = child_command
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(args, vec!["-lc".to_owned(), "printf test".to_owned()]);
+}
+
 // Pins `read_capped_child_stdout_line` returning each newline-delimited
 // record with its trailing `\n`, then the final newline-less tail at EOF.
 // Guards against regressions that drop the terminator or miss the last

@@ -434,4 +434,137 @@ describe("App smoke", () => {
       }
     });
   });
+
+  it("cycles active session tabs on Alt+PageUp and Alt+PageDown", async () => {
+    await withSuppressedActWarnings(async () => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [
+              {
+                id: "project-termal",
+                name: "TermAl",
+                rootPath: "/projects/termal",
+              },
+            ],
+            sessions: [
+              makeSession("session-1", {
+                name: "Session 1",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+              }),
+              makeSession("session-2", {
+                name: "Session 2",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+              }),
+            ],
+          });
+        }
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+
+      const layoutStorageKey = `${WORKSPACE_LAYOUT_STORAGE_KEY}:test-alt-page-tab-cycle`;
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=test-alt-page-tab-cycle",
+      );
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        layoutStorageKey,
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: {
+              type: "pane",
+              paneId: "pane-session",
+            },
+            panes: [
+              {
+                id: "pane-session",
+                tabs: [
+                  {
+                    id: "tab-session-1",
+                    kind: "session",
+                    sessionId: "session-1",
+                  },
+                  {
+                    id: "tab-session-2",
+                    kind: "session",
+                    sessionId: "session-2",
+                  },
+                ],
+                activeTabId: "tab-session-1",
+                activeSessionId: "session-1",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+            ],
+            activePaneId: "pane-session",
+          },
+        }),
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      await renderApp();
+      act(() => {
+        latestEventSource().dispatchError();
+      });
+      await settleAsyncUi();
+
+      const tablist = screen
+        .getAllByRole("tablist", { name: "Tile tabs" })
+        .find((candidate) => within(candidate).queryByRole("tab", { name: "Session 1" }));
+      if (!tablist) {
+        throw new Error("Session pane tablist not found");
+      }
+      const session1Tab = within(tablist).getByRole("tab", { name: "Session 1" });
+      const session2Tab = within(tablist).getByRole("tab", { name: "Session 2" });
+      const composer = await screen.findByLabelText("Message Session 1");
+
+      await clickAndSettle(session1Tab);
+
+      expect(session1Tab).toHaveAttribute("aria-selected", "true");
+      expect(composer).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.keyDown(window, {
+          key: "PageDown",
+          code: "PageDown",
+          altKey: true,
+        });
+      });
+      await settleAsyncUi();
+
+      expect(session1Tab).toHaveAttribute("aria-selected", "false");
+      expect(session2Tab).toHaveAttribute("aria-selected", "true");
+      expect(await screen.findByLabelText("Message Session 2")).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.keyDown(window, {
+          key: "PageUp",
+          code: "PageUp",
+          altKey: true,
+        });
+      });
+      await settleAsyncUi();
+
+      expect(session1Tab).toHaveAttribute("aria-selected", "true");
+      expect(session2Tab).toHaveAttribute("aria-selected", "false");
+      expect(await screen.findByLabelText("Message Session 1")).toBeInTheDocument();
+    });
+  });
 });

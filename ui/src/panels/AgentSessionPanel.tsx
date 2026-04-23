@@ -109,6 +109,95 @@ function isSpaceKey(event: {
   );
 }
 
+function sameStringArray(
+  previous: readonly string[] | undefined,
+  next: readonly string[] | undefined,
+) {
+  if (previous === next) {
+    return true;
+  }
+  if ((previous?.length ?? 0) !== (next?.length ?? 0)) {
+    return false;
+  }
+  for (let index = 0; index < (previous?.length ?? 0); index += 1) {
+    if (previous?.[index] !== next?.[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameSessionModelOptions(
+  previous: Session["modelOptions"],
+  next: Session["modelOptions"],
+) {
+  if (previous === next) {
+    return true;
+  }
+  if ((previous?.length ?? 0) !== (next?.length ?? 0)) {
+    return false;
+  }
+  for (let index = 0; index < (previous?.length ?? 0); index += 1) {
+    const previousOption = previous?.[index];
+    const nextOption = next?.[index];
+    if (!previousOption || !nextOption) {
+      return false;
+    }
+    if (
+      previousOption.label !== nextOption.label ||
+      previousOption.value !== nextOption.value ||
+      previousOption.description !== nextOption.description ||
+      !sameStringArray(previousOption.badges, nextOption.badges) ||
+      !sameStringArray(
+        previousOption.supportedClaudeEffortLevels,
+        nextOption.supportedClaudeEffortLevels,
+      ) ||
+      !sameStringArray(
+        previousOption.supportedReasoningEfforts,
+        nextOption.supportedReasoningEfforts,
+      ) ||
+      previousOption.defaultReasoningEffort !== nextOption.defaultReasoningEffort
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameUserPromptHistory(previous: Session, next: Session) {
+  if (previous.messages === next.messages) {
+    return true;
+  }
+  return sameStringArray(
+    collectUserPromptHistory(previous),
+    collectUserPromptHistory(next),
+  );
+}
+
+function sameComposerSession(previous: Session | null, next: Session | null) {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next) {
+    return previous === next;
+  }
+  return (
+    previous.id === next.id &&
+    previous.name === next.name &&
+    previous.agent === next.agent &&
+    previous.model === next.model &&
+    sameSessionModelOptions(previous.modelOptions, next.modelOptions) &&
+    previous.approvalPolicy === next.approvalPolicy &&
+    previous.claudeEffort === next.claudeEffort &&
+    previous.reasoningEffort === next.reasoningEffort &&
+    previous.sandboxMode === next.sandboxMode &&
+    previous.cursorMode === next.cursorMode &&
+    previous.claudeApprovalMode === next.claudeApprovalMode &&
+    previous.geminiApprovalMode === next.geminiApprovalMode &&
+    sameUserPromptHistory(previous, next)
+  );
+}
+
 
 export function AgentSessionPanel({
   paneId,
@@ -1646,7 +1735,7 @@ const SessionComposer = memo(function SessionComposer({
 }, (previous, next) =>
   previous.paneId === next.paneId &&
   previous.isPaneActive === next.isPaneActive &&
-  previous.session === next.session &&
+  sameComposerSession(previous.session, next.session) &&
   previous.committedDraft === next.committedDraft &&
   previous.draftAttachments === next.draftAttachments &&
   previous.formatByteSize === next.formatByteSize &&

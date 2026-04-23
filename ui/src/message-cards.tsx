@@ -289,6 +289,7 @@ export const MessageCard = memo(function MessageCard({
           appearance={appearance}
           message={message}
           onOpenSourceLink={onOpenSourceLink}
+          preferImmediateHeavyRender={preferImmediateHeavyRender}
           searchQuery={searchQuery}
           searchHighlightTone={searchHighlightTone}
           workspaceRoot={workspaceRoot}
@@ -298,6 +299,7 @@ export const MessageCard = memo(function MessageCard({
       return (
         <CommandCard
           message={message}
+          preferImmediateHeavyRender={preferImmediateHeavyRender}
           searchQuery={searchQuery}
           searchHighlightTone={searchHighlightTone}
         />
@@ -307,6 +309,7 @@ export const MessageCard = memo(function MessageCard({
         <DiffCard
           message={message}
           onOpenPreview={() => onOpenDiffPreview?.(message)}
+          preferImmediateHeavyRender={preferImmediateHeavyRender}
           searchQuery={searchQuery}
           searchHighlightTone={searchHighlightTone}
           workspaceRoot={workspaceRoot}
@@ -318,6 +321,7 @@ export const MessageCard = memo(function MessageCard({
           appearance={appearance}
           message={message}
           onOpenSourceLink={onOpenSourceLink}
+          preferImmediateHeavyRender={preferImmediateHeavyRender}
           searchQuery={searchQuery}
           searchHighlightTone={searchHighlightTone}
           workspaceRoot={workspaceRoot}
@@ -347,6 +351,7 @@ export const MessageCard = memo(function MessageCard({
           appearance={appearance}
           message={message}
           onOpenSourceLink={onOpenSourceLink}
+          preferImmediateHeavyRender={preferImmediateHeavyRender}
           searchQuery={searchQuery}
           searchHighlightTone={searchHighlightTone}
           workspaceRoot={workspaceRoot}
@@ -357,6 +362,7 @@ export const MessageCard = memo(function MessageCard({
         <ApprovalCard
           message={message}
           onApprovalDecision={onApprovalDecision}
+          preferImmediateHeavyRender={preferImmediateHeavyRender}
           searchQuery={searchQuery}
           searchHighlightTone={searchHighlightTone}
         />
@@ -526,10 +532,12 @@ function DeferredHeavyContent({
   children,
   estimatedHeight,
   placeholder,
+  preferImmediateRender = false,
 }: {
   children: ReactNode;
   estimatedHeight: number;
   placeholder: ReactNode;
+  preferImmediateRender?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isActivated, setIsActivated] = useState(false);
@@ -544,19 +552,17 @@ function DeferredHeavyContent({
       return;
     }
 
-    // Inside a virtualized conversation list the outer virtualizer
-    // (`VirtualizedConversationMessageList`) already limits mount to
-    // cards within its overscan window. Deferring heavy content on
-    // top of that just introduces a placeholder-to-real-content
-    // height jump when the IntersectionObserver below eventually
-    // fires, and that jump cascades into the layout:
+    // Virtualized callers already limit mount to a bounded working
+    // set. Deferring heavy content on top of that only creates a
+    // placeholder-to-real-content height jump when the observer later
+    // fires, and that jump cascades into virtualized layout
+    // corrections.
     // `ResizeObserver` on the virtualized slot → `handleHeightChange`
     // → `setLayoutVersion` → tops recomputed for every sibling →
     // scroll-position-visible cards shift under the user's cursor.
-    // Activate immediately when we can detect we're inside the
-    // virtualized wrapper so the card renders at its real height on
-    // the very first paint.
-    if (node.closest(".virtualized-message-list")) {
+    // Keep the policy explicit so callers can opt into first-paint
+    // activation without relying on CSS ancestry.
+    if (preferImmediateRender) {
       setIsActivated(true);
       return;
     }
@@ -565,10 +571,10 @@ function DeferredHeavyContent({
     if (isElementNearRenderViewport(node, root, DEFERRED_RENDER_ROOT_MARGIN_PX)) {
       setIsActivated(true);
     }
-  }, [isActivated]);
+  }, [isActivated, preferImmediateRender]);
 
   useEffect(() => {
-    if (isActivated) {
+    if (preferImmediateRender || isActivated) {
       return;
     }
 
@@ -600,7 +606,7 @@ function DeferredHeavyContent({
     return () => {
       observer.disconnect();
     };
-  }, [isActivated]);
+  }, [isActivated, preferImmediateRender]);
 
   return (
     <div
@@ -623,6 +629,7 @@ function DeferredHighlightedCodeBlock({
   commandHint,
   language,
   pathHint,
+  preferImmediateRender = false,
   searchQuery,
   searchHighlightTone = "match",
 }: {
@@ -631,6 +638,7 @@ function DeferredHighlightedCodeBlock({
   commandHint?: string | null;
   language?: string | null;
   pathHint?: string | null;
+  preferImmediateRender?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
@@ -657,6 +665,7 @@ function DeferredHighlightedCodeBlock({
   return (
     <DeferredHeavyContent
       estimatedHeight={estimateCodeBlockHeight(metrics.lineCount)}
+      preferImmediateRender={preferImmediateRender}
       placeholder={
         <pre className={`${className} syntax-block deferred-code-placeholder`}>
           <code>{buildDeferredPreviewText(code)}</code>
@@ -681,6 +690,7 @@ function DeferredMarkdownContent({
   documentPath = null,
   markdown,
   onOpenSourceLink,
+  preferImmediateRender = false,
   searchQuery = "",
   searchHighlightTone = "match",
   workspaceRoot = null,
@@ -689,6 +699,7 @@ function DeferredMarkdownContent({
   documentPath?: string | null;
   markdown: string;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
+  preferImmediateRender?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
   workspaceRoot?: string | null;
@@ -717,6 +728,7 @@ function DeferredMarkdownContent({
   return (
     <DeferredHeavyContent
       estimatedHeight={estimateMarkdownBlockHeight(metrics.lineCount)}
+      preferImmediateRender={preferImmediateRender}
       placeholder={
         <div className="markdown-copy deferred-markdown-placeholder">
           <p className="plain-text-copy">{buildMarkdownPreviewText(markdown)}</p>
@@ -1060,6 +1072,7 @@ function ThinkingCard({
   appearance = "dark",
   message,
   onOpenSourceLink,
+  preferImmediateHeavyRender = false,
   searchQuery = "",
   searchHighlightTone = "match",
   workspaceRoot = null,
@@ -1067,6 +1080,7 @@ function ThinkingCard({
   appearance?: MonacoAppearance;
   message: ThinkingMessage;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
+  preferImmediateHeavyRender?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
   workspaceRoot?: string | null;
@@ -1082,6 +1096,7 @@ function ThinkingCard({
         appearance={appearance}
         markdown={markdown}
         onOpenSourceLink={onOpenSourceLink}
+        preferImmediateRender={preferImmediateHeavyRender}
         searchQuery={searchQuery}
         searchHighlightTone={searchHighlightTone}
         workspaceRoot={workspaceRoot}
@@ -1092,10 +1107,12 @@ function ThinkingCard({
 
 export function CommandCard({
   message,
+  preferImmediateHeavyRender = false,
   searchQuery = "",
   searchHighlightTone = "match",
 }: {
   message: CommandMessage;
+  preferImmediateHeavyRender?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
@@ -1162,6 +1179,7 @@ export function CommandCard({
                 className="command-text command-text-input"
                 code={message.command}
                 language={message.commandLanguage ?? "bash"}
+                preferImmediateRender={preferImmediateHeavyRender}
                 searchQuery={searchQuery}
                 searchHighlightTone={searchHighlightTone}
               />
@@ -1204,6 +1222,7 @@ export function CommandCard({
                   code={displayOutput}
                   language={message.outputLanguage ?? null}
                   commandHint={message.output ? message.command : null}
+                  preferImmediateRender={preferImmediateHeavyRender}
                   searchQuery={searchQuery}
                   searchHighlightTone={searchHighlightTone}
                 />
@@ -1247,12 +1266,14 @@ export function CommandCard({
 export function DiffCard({
   message,
   onOpenPreview,
+  preferImmediateHeavyRender = false,
   searchQuery = "",
   searchHighlightTone = "match",
   workspaceRoot = null,
 }: {
   message: DiffMessage;
   onOpenPreview: () => void;
+  preferImmediateHeavyRender?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
   workspaceRoot?: string | null;
@@ -1336,6 +1357,7 @@ export function DiffCard({
                 code={message.diff}
                 language={message.language ?? "diff"}
                 pathHint={message.filePath}
+                preferImmediateRender={preferImmediateHeavyRender}
                 searchQuery={searchQuery}
                 searchHighlightTone={searchHighlightTone}
               />
@@ -1524,6 +1546,7 @@ function MarkdownCard({
   appearance = "dark",
   message,
   onOpenSourceLink,
+  preferImmediateHeavyRender = false,
   searchQuery = "",
   searchHighlightTone = "match",
   workspaceRoot = null,
@@ -1531,6 +1554,7 @@ function MarkdownCard({
   appearance?: MonacoAppearance;
   message: MarkdownMessage;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
+  preferImmediateHeavyRender?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
   workspaceRoot?: string | null;
@@ -1544,6 +1568,7 @@ function MarkdownCard({
         appearance={appearance}
         markdown={message.markdown}
         onOpenSourceLink={onOpenSourceLink}
+        preferImmediateRender={preferImmediateHeavyRender}
         searchQuery={searchQuery}
         searchHighlightTone={searchHighlightTone}
         workspaceRoot={workspaceRoot}
@@ -1729,6 +1754,7 @@ function SubagentResultCard({
   appearance = "dark",
   message,
   onOpenSourceLink,
+  preferImmediateHeavyRender = false,
   searchQuery = "",
   searchHighlightTone = "match",
   workspaceRoot = null,
@@ -1736,6 +1762,7 @@ function SubagentResultCard({
   appearance?: MonacoAppearance;
   message: SubagentResultMessage;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
+  preferImmediateHeavyRender?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
   workspaceRoot?: string | null;
@@ -1770,6 +1797,7 @@ function SubagentResultCard({
             appearance={appearance}
             markdown={message.summary}
             onOpenSourceLink={onOpenSourceLink}
+            preferImmediateRender={preferImmediateHeavyRender}
             searchQuery={searchQuery}
             searchHighlightTone={searchHighlightTone}
             workspaceRoot={workspaceRoot}
@@ -1783,11 +1811,13 @@ function SubagentResultCard({
 function ApprovalCard({
   message,
   onApprovalDecision,
+  preferImmediateHeavyRender = false,
   searchQuery = "",
   searchHighlightTone = "match",
 }: {
   message: ApprovalMessage;
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
+  preferImmediateHeavyRender?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
@@ -1804,6 +1834,7 @@ function ApprovalCard({
         className="approval-command"
         code={message.command}
         language={message.commandLanguage ?? "bash"}
+        preferImmediateRender={preferImmediateHeavyRender}
         searchQuery={searchQuery}
         searchHighlightTone={searchHighlightTone}
       />
