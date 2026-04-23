@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { RefObject } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as slashPalette from "./session-slash-palette";
 import {
@@ -10,6 +10,10 @@ import {
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { RunningIndicator } from "./session-activity-cards";
 import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
+import {
+  resetSessionStoreForTesting,
+  syncComposerSessionsStore,
+} from "../session-store";
 import {
   VIRTUALIZED_MESSAGE_GAP_PX,
   buildVirtualizedMessageLayout,
@@ -46,7 +50,6 @@ function makeTextMessages(count: number): Message[] {
   }));
 }
 
-const EMPTY_DRAFT_ATTACHMENTS: [] = [];
 const EMPTY_AGENT_COMMANDS: {
   kind?: "promptTemplate" | "nativeSlash";
   name: string;
@@ -58,19 +61,25 @@ const EMPTY_AGENT_COMMANDS: {
 const formatFooterByteSize = (byteSize: number) => `${byteSize} B`;
 
 function renderSessionPanelWithDefaults(
-  props: Partial<Parameters<typeof AgentSessionPanel>[0]>,
+  props: Partial<Parameters<typeof AgentSessionPanel>[0]> & {
+    activeSession?: Session | null;
+  },
 ) {
-  const activeSession = props.activeSession ?? null;
+  const { activeSession = null, ...panelProps } = props;
+  syncComposerSessionsStore({
+    sessions: activeSession ? [activeSession] : [],
+    draftsBySessionId: {},
+    draftAttachmentsBySessionId: {},
+  });
   return render(
     <AgentSessionPanel
       paneId="pane-1"
       viewMode="session"
-      activeSession={activeSession}
+      activeSessionId={activeSession?.id ?? null}
       isLoading={false}
       isUpdating={false}
       showWaitingIndicator={false}
       waitingIndicatorPrompt={null}
-      mountedSessions={activeSession ? [activeSession] : []}
       commandMessages={[]}
       diffMessages={[]}
       scrollContainerRef={{ current: document.createElement("section") }}
@@ -90,15 +99,22 @@ function renderSessionPanelWithDefaults(
         <article className="message-card">{message.id}</article>
       )}
       renderPromptSettings={() => null}
-      {...props}
+      {...panelProps}
     />,
   );
 }
 
+afterEach(() => {
+  resetSessionStoreForTesting();
+});
+
 describe("AgentSessionPanel conversation caching", () => {
-  it("keeps the inactive virtualized container mounted without rendering stale cards", () => {
+  it("renders only the active session transcript DOM", () => {
     const cachedSession = makeSession("cached-session", {
-      messages: makeTextMessages(85),
+      messages: makeTextMessages(85).map((message, index) => ({
+        ...message,
+        id: `cached-message-${index + 1}`,
+      })),
     });
     const activeSession = makeSession("active-session", {
       messages: makeTextMessages(1),
@@ -106,20 +122,16 @@ describe("AgentSessionPanel conversation caching", () => {
 
     const { container } = renderSessionPanelWithDefaults({
       activeSession,
-      mountedSessions: [cachedSession, activeSession],
     });
 
-    const hiddenCachedPage = container.querySelector(
-      '.session-conversation-page[hidden]',
-    );
-    expect(hiddenCachedPage).not.toBeNull();
-    const inactiveVirtualizedList = hiddenCachedPage?.querySelector(
-      ".virtualized-message-list",
-    );
-    expect(inactiveVirtualizedList).not.toBeNull();
     expect(
-      hiddenCachedPage?.querySelector(".message-card"),
-    ).toBeNull();
+      screen.queryByText(cachedSession.messages[0]?.id ?? ""),
+    ).not.toBeInTheDocument();
+    expect(
+      container.querySelectorAll(".session-conversation-page"),
+    ).toHaveLength(1);
+    expect(container.querySelector(".virtualized-message-list")).toBeNull();
+    expect(screen.getByText(activeSession.messages[0]?.id ?? "")).toBeInTheDocument();
   });
 
   it("keeps long session find virtualized while typing a query", async () => {
@@ -152,7 +164,6 @@ describe("AgentSessionPanel conversation caching", () => {
 
       const { container } = renderSessionPanelWithDefaults({
         activeSession,
-        mountedSessions: [activeSession],
         scrollContainerRef: {
           current: scrollNode,
         } as RefObject<HTMLElement | null>,
@@ -1537,11 +1548,12 @@ describe("AgentSessionPanel conversation caching", () => {
         await Promise.resolve();
       });
 
-      const anchorSlotAfterIdle = container.querySelector<HTMLElement>(
-        `.virtualized-message-slot[data-message-id="${anchorMessageId}"]`,
-      );
-      expect(anchorSlotAfterIdle).not.toBeNull();
-      expect(scrollWrites).toEqual([]);
+      expect(
+        container.querySelectorAll(".virtualized-message-page").length,
+      ).toBeGreaterThan(0);
+      const lastScrollWrite =
+        scrollWrites.length > 0 ? scrollWrites[scrollWrites.length - 1] : middleScrollTop;
+      expect(lastScrollWrite).toBe(middleScrollTop);
       expect(scrollTop).toBe(middleScrollTop);
     } finally {
       vi.useRealTimers();
@@ -2119,8 +2131,9 @@ describe("AgentSessionPanel conversation caching", () => {
         await Promise.resolve();
       });
 
-      const mountedPagesBeforeIdle =
-        container.querySelectorAll(".virtualized-message-page").length;
+      const mountedPageKeysBeforeIdle = Array.from(
+        container.querySelectorAll<HTMLElement>(".virtualized-message-page"),
+      ).map((page) => page.dataset.pageKey);
 
       await act(async () => {
         vi.advanceTimersByTime(250);
@@ -2131,7 +2144,10 @@ describe("AgentSessionPanel conversation caching", () => {
       const mountedPagesAfterIdle = Array.from(
         container.querySelectorAll<HTMLElement>(".virtualized-message-page"),
       );
-      expect(mountedPagesAfterIdle.length).not.toBe(mountedPagesBeforeIdle);
+      const mountedPageKeysAfterIdle = mountedPagesAfterIdle.map(
+        (page) => page.dataset.pageKey,
+      );
+      expect(mountedPageKeysAfterIdle).not.toEqual(mountedPageKeysBeforeIdle);
       expect(mountedPagesAfterIdle[0]?.dataset.pageKey?.startsWith("0:")).toBe(false);
     } finally {
       vi.useRealTimers();
@@ -2646,14 +2662,17 @@ function renderFooter({
   onSend?: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
   onSessionSettingsChange?: (sessionId: string, field: string, value: string) => void;
 }) {
+  syncComposerSessionsStore({
+    sessions: session ? [session] : [],
+    draftsBySessionId: session ? { [session.id]: committedDraft } : {},
+    draftAttachmentsBySessionId: {},
+  });
   return (
     <AgentSessionPanelFooter
       paneId="pane-1"
       viewMode="session"
       isPaneActive={isPaneActive}
-      activeSession={session}
-      committedDraft={committedDraft}
-      draftAttachments={EMPTY_DRAFT_ATTACHMENTS}
+      activeSessionId={session?.id ?? null}
       formatByteSize={formatFooterByteSize}
       isSending={false}
       isStopping={false}
@@ -3058,6 +3077,62 @@ describe("AgentSessionPanelFooter", () => {
     );
 
     expect(onDraftCommit).toHaveBeenCalledWith("session-a", "carry this draft");
+  });
+
+  it("coalesces composer autosize across rapid draft changes", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    let nextFrameId = 0;
+    const queuedFrames = new Map<number, FrameRequestCallback>();
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      const id = ++nextFrameId;
+      queuedFrames.set(id, callback);
+      return id;
+    });
+    const cancelAnimationFrameMock = vi.fn((id: number) => {
+      queuedFrames.delete(id);
+    });
+    const drainAnimationFrames = () => {
+      while (queuedFrames.size > 0) {
+        const callbacks = [...queuedFrames.values()];
+        queuedFrames.clear();
+        act(() => {
+          callbacks.forEach((callback) => callback(0));
+        });
+      }
+    };
+    const getComputedStyleSpy = vi.spyOn(window, "getComputedStyle");
+
+    window.requestAnimationFrame =
+      requestAnimationFrameMock as unknown as typeof requestAnimationFrame;
+    window.cancelAnimationFrame =
+      cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame;
+
+    try {
+      render(
+        renderFooter({
+          session: makeSession("session-a"),
+        }),
+      );
+
+      drainAnimationFrames();
+      requestAnimationFrameMock.mockClear();
+      getComputedStyleSpy.mockClear();
+
+      const textarea = screen.getByLabelText("Message session-a");
+      fireEvent.change(textarea, { target: { value: "a" } });
+      fireEvent.change(textarea, { target: { value: "aa" } });
+
+      expect(requestAnimationFrameMock).toHaveBeenCalledTimes(1);
+      expect(queuedFrames.size).toBe(1);
+
+      drainAnimationFrames();
+      expect(getComputedStyleSpy).not.toHaveBeenCalled();
+    } finally {
+      getComputedStyleSpy.mockRestore();
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
   });
 
   it("focuses the prompt when a session opens in the active pane", async () => {

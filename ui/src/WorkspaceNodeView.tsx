@@ -87,8 +87,6 @@ export function WorkspaceNodeView({
   sessionLookup,
   activePaneId,
   isLoading,
-  draftsBySessionId,
-  draftAttachmentsBySessionId,
   sendingSessionIds,
   stoppingSessionIds,
   killingSessionIds,
@@ -169,8 +167,6 @@ export function WorkspaceNodeView({
   sessionLookup: Map<string, Session>;
   activePaneId: string | null;
   isLoading: boolean;
-  draftsBySessionId: Record<string, string>;
-  draftAttachmentsBySessionId: Record<string, DraftImageAttachment[]>;
   sendingSessionIds: SessionFlagMap;
   stoppingSessionIds: SessionFlagMap;
   killingSessionIds: SessionFlagMap;
@@ -369,16 +365,6 @@ export function WorkspaceNodeView({
         sessionLookup={sessionLookup}
         isActive={pane.id === activePaneId}
         isLoading={isLoading}
-        draft={
-          pane.activeSessionId
-            ? (draftsBySessionId[pane.activeSessionId] ?? "")
-            : ""
-        }
-        draftAttachments={
-          pane.activeSessionId
-            ? (draftAttachmentsBySessionId[pane.activeSessionId] ?? [])
-            : []
-        }
         isSending={
           pane.activeSessionId
             ? Boolean(sendingSessionIds[pane.activeSessionId])
@@ -556,8 +542,6 @@ export function WorkspaceNodeView({
           sessionLookup={sessionLookup}
           activePaneId={activePaneId}
           isLoading={isLoading}
-          draftsBySessionId={draftsBySessionId}
-          draftAttachmentsBySessionId={draftAttachmentsBySessionId}
           sendingSessionIds={sendingSessionIds}
           stoppingSessionIds={stoppingSessionIds}
           killingSessionIds={killingSessionIds}
@@ -650,8 +634,6 @@ export function WorkspaceNodeView({
           sessionLookup={sessionLookup}
           activePaneId={activePaneId}
           isLoading={isLoading}
-          draftsBySessionId={draftsBySessionId}
-          draftAttachmentsBySessionId={draftAttachmentsBySessionId}
           sendingSessionIds={sendingSessionIds}
           stoppingSessionIds={stoppingSessionIds}
           killingSessionIds={killingSessionIds}

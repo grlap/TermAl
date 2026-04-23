@@ -20,11 +20,16 @@ import type {
 } from "./types";
 
 export function reconcileSessions(previous: Session[], next: Session[]): Session[] {
-  const previousById = new Map(previous.map((session) => [session.id, session]));
+  let previousById: Map<string, Session> | null = null;
   let changed = previous.length !== next.length;
 
   const merged = next.map((nextSession, index) => {
-    const previousSession = previousById.get(nextSession.id);
+    const previousSession =
+      previous[index]?.id === nextSession.id
+        ? previous[index]
+        : (previousById ??= new Map(
+            previous.map((session) => [session.id, session]),
+          )).get(nextSession.id);
     if (!previousSession) {
       changed = true;
       return nextSession;
@@ -40,11 +45,8 @@ export function reconcileSessions(previous: Session[], next: Session[]): Session
   return changed ? merged : previous;
 }
 
-function reconcileSession(previous: Session, next: Session): Session {
-  const messages = reconcileMessages(previous.messages, next.messages);
-  const pendingPrompts = reconcilePendingPrompts(previous.pendingPrompts, next.pendingPrompts);
-
-  if (
+function sameSessionSummary(previous: Session, next: Session) {
+  return (
     previous.name === next.name &&
     previous.emoji === next.emoji &&
     previous.agent === next.agent &&
@@ -63,10 +65,15 @@ function reconcileSession(previous: Session, next: Session): Session {
     previous.agentCommandsRevision === next.agentCommandsRevision &&
     previous.codexThreadState === next.codexThreadState &&
     previous.status === next.status &&
-    previous.preview === next.preview &&
-    messages === previous.messages &&
-    pendingPrompts === previous.pendingPrompts
-  ) {
+    previous.preview === next.preview
+  );
+}
+
+function reconcileSession(previous: Session, next: Session): Session {
+  const messages = reconcileMessages(previous.messages, next.messages);
+  const pendingPrompts = reconcilePendingPrompts(previous.pendingPrompts, next.pendingPrompts);
+
+  if (sameSessionSummary(previous, next) && messages === previous.messages && pendingPrompts === previous.pendingPrompts) {
     return previous;
   }
 
@@ -124,12 +131,16 @@ function sameModelOptions(previous?: Session["modelOptions"], next?: Session["mo
 }
 
 function reconcileMessages(previous: Message[], next: Message[]): Message[] {
-  const previousById = new Map(previous.map((message) => [message.id, message]));
+  let previousById: Map<string, Message> | null = null;
   let changed = previous.length !== next.length;
 
   const merged = next.map((nextMessage, index) => {
     const previousMessage =
-      previous[index]?.id === nextMessage.id ? previous[index] : previousById.get(nextMessage.id);
+      previous[index]?.id === nextMessage.id
+        ? previous[index]
+        : (previousById ??= new Map(
+            previous.map((message) => [message.id, message]),
+          )).get(nextMessage.id);
     if (!previousMessage) {
       changed = true;
       return nextMessage;
@@ -504,12 +515,16 @@ function reconcilePendingPrompts(
     return next;
   }
 
-  const previousById = new Map(previous.map((prompt) => [prompt.id, prompt]));
+  let previousById: Map<string, PendingPrompt> | null = null;
   let changed = previous.length !== next.length;
 
   const merged = next.map((nextPrompt, index) => {
     const previousPrompt =
-      previous[index]?.id === nextPrompt.id ? previous[index] : previousById.get(nextPrompt.id);
+      previous[index]?.id === nextPrompt.id
+        ? previous[index]
+        : (previousById ??= new Map(
+            previous.map((prompt) => [prompt.id, prompt]),
+          )).get(nextPrompt.id);
     if (!previousPrompt) {
       changed = true;
       return nextPrompt;

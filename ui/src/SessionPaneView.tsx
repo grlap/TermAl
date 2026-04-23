@@ -170,7 +170,6 @@ import {
   workspaceFilesChangedEventChangeForPath,
 } from "./workspace-file-events";
 
-const MAX_CACHED_SESSION_PAGES_PER_PANE = 3;
 const SESSION_PAGE_JUMP_VIEWPORT_FACTOR = 0.45;
 
 export function SessionPaneView({
@@ -181,8 +180,6 @@ export function SessionPaneView({
   sessionLookup,
   isActive,
   isLoading,
-  draft,
-  draftAttachments,
   isSending,
   isStopping,
   isKilling,
@@ -262,8 +259,6 @@ export function SessionPaneView({
   sessionLookup: Map<string, Session>;
   isActive: boolean;
   isLoading: boolean;
-  draft: string;
-  draftAttachments: DraftImageAttachment[];
   isSending: boolean;
   isStopping: boolean;
   isKilling: boolean;
@@ -658,7 +653,6 @@ export function SessionPaneView({
   const [visitedSessionIds, setVisitedSessionIds] = useState<
     Record<string, true | undefined>
   >({});
-  const [cachedSessionOrder, setCachedSessionOrder] = useState<string[]>([]);
   const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
     Record<string, true | undefined>
   >({});
@@ -748,34 +742,6 @@ export function SessionPaneView({
     () => activeSession?.pendingPrompts ?? [],
     [activeSession],
   );
-  const mountedSessionsRef = useRef<Session[]>([]);
-  const mountedSessions = useMemo(() => {
-    if (!activeSession) {
-      if (mountedSessionsRef.current.length === 0) {
-        return mountedSessionsRef.current;
-      }
-      mountedSessionsRef.current = [];
-      return mountedSessionsRef.current;
-    }
-
-    const cachedSessionIds = new Set(cachedSessionOrder);
-    for (const tab of pane.tabs) {
-      if (tab.kind === "session") {
-        cachedSessionIds.add(tab.sessionId);
-      }
-    }
-    cachedSessionIds.add(activeSession.id);
-    const next = sessions.filter((session) => cachedSessionIds.has(session.id));
-    const prev = mountedSessionsRef.current;
-    if (
-      next.length === prev.length &&
-      next.every((session, index) => session === prev[index])
-    ) {
-      return prev;
-    }
-    mountedSessionsRef.current = next;
-    return next;
-  }, [activeSession, cachedSessionOrder, pane.tabs, sessions]);
   const sessionConversationSignature = useMemo(
     () =>
       pane.viewMode === "session" && activeSession
@@ -1753,21 +1719,6 @@ export function SessionPaneView({
             [activeSession.id]: true,
           },
     );
-    setCachedSessionOrder((current) => {
-      const nextOrder = [
-        activeSession.id,
-        ...current.filter((sessionId) => sessionId !== activeSession.id),
-      ].slice(0, MAX_CACHED_SESSION_PAGES_PER_PANE);
-
-      if (
-        nextOrder.length === current.length &&
-        nextOrder.every((sessionId, index) => sessionId === current[index])
-      ) {
-        return current;
-      }
-
-      return nextOrder;
-    });
   }, [activeSession?.id]);
 
   useEffect(() => {
@@ -1775,19 +1726,6 @@ export function SessionPaneView({
     setVisitedSessionIds((current) =>
       pruneSessionFlags(current, availableSessionIds),
     );
-    setCachedSessionOrder((current) => {
-      const nextOrder = current.filter((sessionId) =>
-        availableSessionIds.has(sessionId),
-      );
-      if (
-        nextOrder.length === current.length &&
-        nextOrder.every((sessionId, index) => sessionId === current[index])
-      ) {
-        return current;
-      }
-
-      return nextOrder;
-    });
   }, [sessions]);
 
   useEffect(() => {
@@ -2365,7 +2303,6 @@ export function SessionPaneView({
               codexState={codexState}
               projectLookup={projectLookup}
               remoteLookup={remoteLookup}
-              sessionLookup={sessionLookup}
               draggedTab={draggedTab}
               getKnownDraggedTab={getKnownDraggedTab}
               tabDecorations={tabDecorations}
@@ -2978,12 +2915,11 @@ export function SessionPaneView({
             paneId={pane.id}
             viewMode={pane.viewMode}
             scrollContainerRef={messageStackRef}
-            activeSession={activeSession}
+            activeSessionId={activeSession?.id ?? null}
             isLoading={isLoading}
             isUpdating={isUpdating}
             showWaitingIndicator={showWaitingIndicator}
             waitingIndicatorPrompt={waitingIndicatorPrompt}
-            mountedSessions={mountedSessions}
             commandMessages={commandMessages}
             diffMessages={diffMessages}
             onApprovalDecision={onApprovalDecision}
@@ -3158,9 +3094,7 @@ export function SessionPaneView({
           paneId={pane.id}
           viewMode={pane.viewMode}
           isPaneActive={isActive}
-          activeSession={activeSession}
-          committedDraft={draft}
-          draftAttachments={draftAttachments}
+          activeSessionId={activeSession?.id ?? null}
           formatByteSize={formatByteSize}
           isSending={isSending}
           isStopping={isStopping}

@@ -1,7 +1,7 @@
 import type { Session } from "./types";
 
 export function matchingSessionModelOption(
-  modelOptions: Session["modelOptions"] | undefined,
+  modelOptions: readonly NonNullable<Session["modelOptions"]>[number][] | undefined,
   requestedModel: string,
 ) {
   const trimmedModel = requestedModel.trim();

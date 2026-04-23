@@ -736,6 +736,24 @@ from about `0.335 s` to `0.007 s`, and the worst keystroke frame from about
 `34.7 ms` to `13.3 ms`. The broader whole-tab adoption/render churn bug
 remains open below.
 
+Also fixed in the current tree: `/api/state` success responses now take a
+JSON-first fast path. `ui/src/api.ts::request(...)` sniffs the `Content-Type`
+via a new `isJsonResponseContentType(...)` helper (which accepts
+`application/json`, `application/json; charset=...`, and RFC 6838 `+json`
+structured suffixes like `application/problem+json`) and hands the healthy
+path directly to `response.json()`. The old `response.text()` +
+`looksLikeHtmlResponse(...)` + `JSON.parse(...)` chain now runs only when
+the content type is missing or suspicious, or when `response.json()` throws
+— `looksLikeHtmlResponse(...)` itself was also narrowed to a bounded
+256-character prefix probe. `ui/src/api.test.ts` pins the fast path: the
+text clone stays unconsumed on healthy `application/json` and
+`application/json; charset=utf-8` responses, and malformed JSON still
+routes through the HTML-fallback detection. Two residual follow-ups (the
+256-char slice dropping leading-whitespace tolerance in
+`looksLikeHtmlResponse`, and the unconditional `response.clone()` that
+buffers the body a second time on every successful response) are tracked
+as their own bug entries below.
+
 ## Cross-window tab drag channel restarts on ordinary renders
 
 **Severity:** High - `useAppDragResize` recreates its `BroadcastChannel` subscription on ordinary renders, which can drop cross-window tab drag coordination messages.
@@ -782,6 +800,129 @@ be hard to reproduce and harder to reason about.
 - Add a focused regression that overlaps the viewport band with the pinned
   search band and asserts the original `mountedPageRange` object is unchanged.
 
+## Session store subscribers can dispatch stale action callbacks
+
+**Severity:** High - `SessionBody` and `SessionComposer` now rerender from `session-store`, but their custom `memo` comparators still let mutating action callbacks stay frozen on older closures.
+
+The new store-backed session slices in `ui/src/panels/AgentSessionPanel.tsx`
+move transcript and composer data onto `useSessionRecordSnapshot(...)` /
+`useComposerSessionSnapshot(...)`, while the panel and footer still receive
+actions such as `onSend`, `onStopSession`, `onApprovalDecision`,
+`onCancelQueuedPrompt`, `onRefreshSessionModelOptions`,
+`onRefreshAgentCommands`, and `onSessionSettingsChange` from the parent. Unlike
+the render callbacks, those actions were not wrapped in ref-backed adapters, yet
+the `memo(...)` comparators still exclude them. That lets the store-driven UI
+show fresh session data while user actions continue to execute through stale
+closures captured before the latest parent render.
+
+**Current behavior:**
+- `SessionBody` and `SessionComposer` rerender from store subscriptions even
+  when their parent props comparator short-circuits.
+- The comparators at `ui/src/panels/AgentSessionPanel.tsx` omit mutating action
+  props such as `onSend`, `onStopSession`, `onApprovalDecision`, and related
+  refresh/settings callbacks.
+- Those actions come from `useAppSessionActions(...)` closures that still read
+  live lookups such as `sessionLookup`, `workspace`, and active session state,
+  so invoking them through stale closures can target older app state than the UI
+  currently renders.
+
+**Proposal:**
+- Treat mutating action props the same way the render callbacks are treated:
+  either include them in the memo comparators or route them through stable
+  ref-backed adapters inside `AgentSessionPanel`.
+- Add focused regression coverage that updates the parent action closures while
+  the store-backed composer/body rerender, then asserts send/approval/settings
+  actions hit the latest session/workspace state.
+
+## Session switches can briefly show the previous transcript and route actions to the new session
+
+**Severity:** High - the refactor reuses one `SessionConversationPage` across session switches while still deferring `messages` and `pendingPrompts`, so the UI can briefly render stale cards from the previous session under the new session id.
+
+`ui/src/panels/AgentSessionPanel.tsx` now keeps a single conversation page
+mounted for the active session instead of keying or remounting that subtree per
+session. At the same time, `SessionConversationPage` still runs
+`useDeferredValue(session.messages)` and `useDeferredValue(pendingPrompts)`.
+During a session switch, React can therefore keep the previous transcript data
+alive for a deferred frame while `session.id` and the action bindings already
+point at the newly selected session. That is no longer just a visual lag: cards
+from session A can momentarily render while approval, queued-prompt, or
+Codex-app actions are already bound to session B.
+
+**Current behavior:**
+- `SessionConversationPage` reuses the same component instance across session
+  switches.
+- `messages` and `pendingPrompts` are still deferred with `useDeferredValue(...)`.
+- A session switch can render stale cards from the previous session for a
+  deferred frame while action handlers are already bound to the newly selected
+  `session.id`.
+
+**Proposal:**
+- Cut over immediately on `session.id` changes instead of deferring transcript
+  arrays across session boundaries.
+- Key the conversation subtree by `session.id`, or only use deferred
+  message/prompt arrays when the session id is unchanged.
+- Add a regression that switches sessions while the previous one has visible
+  approval/pending cards and asserts no stale card is actionable under the new
+  session id.
+
+## Session store publication can race ahead of React session state
+
+**Severity:** Medium - the new `session-store` publishes some session slices before the corresponding React `sessions` state commits, so the UI can mix newer store-backed session data with older prop-derived session state in one render.
+
+The staged refactor publishes `session-store` updates directly from
+`ui/src/app-live-state.ts` and `ui/src/app-session-actions.ts`, while other
+parts of the active pane still derive session data from React state in
+`ui/src/SessionPaneView.tsx`. That leaves two live sources of truth on slightly
+different timelines: `AgentSessionPanel` / `PaneTabs` can read the new store
+snapshot immediately, while sibling props such as `commandMessages`,
+`diffMessages`, waiting-indicator state, and other session-derived metadata are
+still coming from the previous React `sessions` commit.
+
+**Current behavior:**
+- `session-store` is synced directly from live-state/action paths before some
+  `setSessions(...)` commits land.
+- `AgentSessionPanel` and `PaneTabs` read session data from the store.
+- `SessionPaneView` still derives other active-session slices from React state,
+  so the same active pane can render mixed-version session data within one
+  update.
+
+**Proposal:**
+- Keep store publication aligned with committed React state, or finish moving
+  the remaining active-session derivations in `SessionPaneView` onto the same
+  store boundary.
+- Document which layer is authoritative during the transition so later changes
+  do not deepen the split-brain state model.
+- Add an integration test that forces a store-backed session update plus a
+  lagging React-state-derived sibling prop and asserts the active pane never
+  renders a torn combination.
+
+## Transcript scroll state can leak across session switches
+
+**Severity:** Medium - the virtualized transcript now reuses stateful scroll/bottom-follow refs across session switches, so a new session can inherit the previous session's detached-from-bottom state.
+
+`ui/src/panels/VirtualizedConversationMessageList.tsx` keeps several refs such
+as `hasUserScrollInteractionRef`, `isDetachedFromBottomRef`, and
+`lastUserScrollKindRef` to preserve user scroll intent. After the staged
+session-pane refactor, that list is no longer necessarily remounted per session,
+and the post-activation reset path only keys off `isActive`. If a user scrolls
+away from bottom in session A, then switches to session B, the new session can
+inherit the old detached/bottom-disabled state instead of getting a fresh
+bottom-follow posture.
+
+**Current behavior:**
+- The virtualized transcript keeps scroll-intent refs alive across some
+  session-switch paths.
+- Those refs are not comprehensively reset on `sessionId` changes.
+- A newly selected session can behave as if the user already scrolled away from
+  bottom, breaking expected latest-message snap/follow behavior.
+
+**Proposal:**
+- Reset scroll-intent refs and related bottom-follow bookkeeping when
+  `sessionId` changes, or remount the virtualized transcript per session.
+- Add a regression that scrolls away from bottom in one session, switches to a
+  second session, and asserts the second session starts with fresh bottom-follow
+  state.
+
 ## Focused live sessions monopolize the main thread during state adoption
 
 **Severity:** Medium - a visible, focused TermAl tab with an active Codex session can spend multiple seconds of an 8 s sample on main-thread work even when no requests fail and no exceptions fire.
@@ -804,27 +945,6 @@ A live Chrome profile against the current dev tab showed no runtime exceptions, 
 - Start at the root of the profile: cut `handleStateEvent(...)` / `adoptState(...)` work first, because that is where both the passive and targeted rounds spend the most app CPU.
 - Break the work into independently measurable slices: state adoption fan-out, `/api/state` parsing path, and transcript virtualization measurement/estimation.
 - After each slice lands, rerun the live active-session profile and the focused typing round so reductions in `handleStateEvent(...)` self time, `TaskDuration`, and next-frame latency are verified instead of assumed.
-
-## `/api/state` success responses still pay full text + HTML-sniff cost
-
-**Severity:** Medium - `ui/src/api.ts::request(...)` still routes successful JSON snapshots through `response.text()` and `looksLikeHtmlResponse(...)` before `JSON.parse(...)`, so busy reconnect/resync flows burn CPU proportional to payload size even when the backend returns correct JSON.
-
-The profiler-backed active-session round surfaced `looksLikeHtmlResponse(...)` and `request(...)` among the hottest app frames during state-resync activity. That work is avoidable on the common path: successful `/api/state` responses already advertise JSON, but the client still allocates the full body as text, lowercases/trims/scans it for HTML, and only then parses it as JSON. On large metadata or transcript-bearing snapshots, that adds extra string churn exactly when the main thread is already busy.
-
-**Current behavior:**
-- `request(...)` always reads the entire body as text, runs `looksLikeHtmlResponse(raw, contentType)`, and only then `JSON.parse(raw)`.
-- `fetchState()` inherits that path during live resync and reconnect work, so every successful snapshot pays the extra full-body text handling cost.
-- The hot path therefore does HTML-fallback detection work even when the response is already a normal `application/json` success.
-
-**Proposal:**
-- Treat successful JSON responses as JSON-first and reserve whole-body text scanning for error cases or obviously wrong content types.
-- Keep the dev-server HTML fallback detection, but move it onto a narrow path that does not penalize healthy successful snapshots.
-- Add explicit coverage for JSON success, HTML fallback, malformed JSON, and non-JSON error bodies so the cheaper fast path does not weaken the existing safety checks.
-
-**Plan:**
-- In `request(...)`, branch on `response.ok` plus JSON-like content types and parse with `response.json()` immediately on the happy path.
-- Restrict `looksLikeHtmlResponse(...)` to responses whose content type is already suspicious or whose JSON parse failed, using at most a bounded prefix probe when the content type is missing.
-- Add targeted tests for `/api/state` success, Vite/dev-server HTML fallback, 404 text responses, and malformed JSON so the API helper stays robust while the fast path gets cheaper.
 
 ## Prompt-settings pane can keep a stale render callback behind SessionBody memoization
 
@@ -878,6 +998,152 @@ surfaces land inside a session pane.
   other page-key routing so descendants can opt out.
 - Add a focused regression with a nested focusable control that handles
   `Alt+PageUp/PageDown` and assert pane cycling does not preempt it.
+
+## Composer drafts have three authoritative stores
+
+**Severity:** Medium - committed composer drafts are tracked in React state (`draftsBySessionId`), a mutable ref (`draftsBySessionIdRef`), and the new `useSyncExternalStore`-backed `session-store`, with a post-commit effect mirroring state → ref and imperative paths writing the ref before React commits. Under concurrent draft updates the deferred effect can overwrite a newer ref value with a stale committed one, which then propagates to the composer snapshot via `syncComposerDraftForSession`.
+
+`ui/src/session-store.ts` added a third source of truth for per-session drafts. Imperative handlers in `ui/src/app-session-actions.ts` (`handleDraftChange`, `sendPromptForSession`, queue-prompt flows) and `ui/src/app-workspace-actions.ts` write `draftsBySessionIdRef.current` synchronously before calling `setDraftsBySessionId`, so the store sync reads the fresh value. A separate effect in `ui/src/App.tsx` copies `draftsBySessionId` back into the ref after each commit. When two draft updates land in the same tick, the later-committed effect can briefly regress the ref to an older snapshot, and the store's composer-snapshot slice (`syncComposerDraftForSession`) can publish that stale draft to subscribers.
+
+**Current behavior:**
+- Three stores own the same data: React state, the ref, and the `session-store` slice.
+- Imperative paths write ref → store before React commits; the effect writes state → ref after commit.
+- Under concurrent updates the effect can stomp a newer imperative write with a stale React-committed value.
+
+**Proposal:**
+- Pick one owner for the ref: either drop the post-commit effect and rely entirely on imperative writes, or remove the imperative ref mutations and let the store read through a ref that mirrors state exactly once per commit.
+- Document the invariant in the `session-store.ts` header so future changes do not reintroduce a third writer.
+- Add a regression test that drives two overlapping `handleDraftChange` calls in the same tick and asserts the store snapshot matches the last-written value.
+
+## Session-store subscriber closures allocate every render
+
+**Severity:** Medium - each hook in `ui/src/session-store.ts` (`useComposerSessionSnapshot`, `useSessionSummariesById`, `useSessionRecordById`, etc.) passes a fresh inline lambda as both `getSnapshot` and `getServerSnapshot` on every render, and `useSessionSummariesById` returns the entire `sessionSummariesById` dictionary — so any session-summary delta invalidates the subscription for every `PaneTabs` instance in the workspace.
+
+`useSyncExternalStore` re-reads whenever `getSnapshot`/`getServerSnapshot` identity changes, so an inline closure defeats the subscription-local memoization the store's structural sharing was designed to enable. `useSessionSummariesById` compounding this by returning the whole dictionary means a per-session status tick or model change invalidates every `PaneTabs` in the workspace at once — an O(N) renders-per-delta cost in a multi-pane layout, directly undoing the memoization the split was trying to achieve.
+
+**Current behavior:**
+- All subscriber hooks allocate a fresh `() => …` closure for `getSnapshot` on every render.
+- `useSessionSummariesById(tabSessionIds)` returns `currentState.sessionSummariesById` — the whole dictionary — even though callers only need a handful of ids.
+- A summary delta for one session re-renders every `PaneTabs` instance.
+
+**Proposal:**
+- Hoist the snapshot closures to module scope so their identity is stable across renders.
+- Replace `useSessionSummariesById` with a targeted selector (e.g. `useSessionSummarySnapshotsByIds(ids)`) that returns a stable per-id tuple keyed on the caller's id list.
+- Add a render-count regression that drives a single-session summary change and asserts unrelated `PaneTabs` instances do not re-render.
+
+## `startActivePromptRecoveryPoll` only armed when adoption is stale
+
+**Severity:** Medium - the recovery poll (renamed from `startActivePromptPoll`) previously armed on every successful `sendMessage` POST to cover the "POST acknowledged but SSE never streams" failure mode; it is now armed only when `adoptState(state)` returns false, removing the belt-and-suspenders check against silent SSE stalls following a successful POST.
+
+`ui/src/app-session-actions.ts` narrowed the recovery poll to the stale-adoption branch. The SSE watchdog (`handleLiveSessionResumeWatchdogTick`) may already cover the "POST succeeded + SSE delta never lands" scenario, but no test exercises that path end-to-end after the change. The pre-existing `active-prompt-poll.ts` docblock explicitly mentions covering the post-POST silent-stall case — so either the watchdog provides equivalent coverage (in which case the comment is wrong), or the change removes a defense that wasn't duplicated elsewhere.
+
+**Current behavior:**
+- A successful `sendMessage` POST whose response the revision gate adopts never arms the recovery poll.
+- Only stale POST responses (revision already exceeded by SSE) arm the poll.
+- No regression test distinguishes "POST succeeds + SSE eventually streams" from "POST succeeds + SSE never streams".
+
+**Proposal:**
+- Add a test that mocks a successful POST followed by a blocked SSE stream and asserts the watchdog (or the recovery poll) eventually restores progress.
+- If the watchdog provides the coverage, add a comment next to the new conditional documenting the reasoning and noting the `active-prompt-poll.ts` docblock that should be updated in step.
+- If no other path covers it, restore the unconditional arm.
+
+## `resolvePromptHistory` identity branches uncovered
+
+**Severity:** Medium - `ui/src/session-store.ts::resolvePromptHistory` gates when the composer's `promptHistory` snapshot keeps object identity, but `session-store.test.ts` exercises only the happy-path branches. Three identity-determining branches — message-list shrinkage, boundary-id mismatch (in-place substitution/reorder), and equal-length "last message is a user prompt" — have no direct coverage, so a regression there would silently force the composer to re-render on every streaming delta.
+
+`resolvePromptHistory` returns the previous `promptHistory` array (preserving identity) when the known-last-prompt still matches, and rebuilds a fresh array otherwise. Composer memoization depends on that identity preservation. If the function accidentally rebuilds on every call — or accidentally preserves identity when the history actually changed — the composer either re-renders on every assistant chunk or fails to refresh when the user edits history. Neither failure mode surfaces in the current tests.
+
+**Current behavior:**
+- Happy paths (assistant append, user prompt append, empty list) have tests.
+- `nextLength < previousLength` (full recollect), `nextLength === previousLength` with mismatched boundary id (in-place edit/reorder), and the same-length-last-is-user-prompt passthrough are uncovered.
+
+**Proposal:**
+- Add one test per uncovered branch, asserting on both the returned value and its identity relative to the prior call's result.
+
+## Session removal pruned only on the snapshot-adoption path
+
+**Severity:** Low - `ui/src/session-store.ts` has no `removeSessionFromStore(...)` entry point, and the delta paths (`orchestratorsUpdated`, session-scoped deltas) only `upsertSessionSlice` for ids present in the delta. Today deltas cannot remove sessions, so this is latent — but the store has no defensive pruning and nothing in the file header documents which caller is responsible for eviction.
+
+`syncComposerSessionsStore` handles pruning as a side effect of diffing `sessions[]`, so a full snapshot adoption cleans up orphans; the delta paths never do. If a future delta shape implies a session has been removed (e.g. a dropped slot in `mergeOrchestratorDeltaSessions`), the orphan slice would linger in `sessionRecordsById`, `sessionSummariesById`, and `composerSessionsById` until the next full snapshot.
+
+**Current behavior:**
+- Only `syncComposerSessionsStore` prunes the store; delta-scoped upserts never do.
+- No documented contract in `session-store.ts` for which caller owns eviction.
+
+**Proposal:**
+- Add a `removeSessionFromStore(sessionId)` helper and wire it to the same places `setSessions` drops a session, or document the pruning contract in the `session-store.ts` header so future delta code knows to call `syncComposerSessionsStore` (or equivalent) when a session is removed.
+
+## `looksLikeHtmlResponse` 256-char slice drops leading-whitespace tolerance
+
+**Severity:** Low - `ui/src/api.ts::looksLikeHtmlResponse(...)` now slices the first 256 raw characters before `trimStart().toLowerCase()`. A proxy or dev-server error page that emits more than 256 bytes of leading whitespace before `<html>` is no longer detected as HTML and falls through to `JSON.parse`, so the "Restart TermAl" guidance never surfaces for that response.
+
+The bounded prefix probe is a performance improvement over the old "scan the whole body" behaviour, but the old code trimmed leading whitespace before inspecting the prefix, which this version does not. Realistic proxies are unlikely to emit >256 bytes of whitespace, but when they do the user sees a generic parse error instead of the restart prompt.
+
+**Current behavior:**
+- `raw.slice(0, 256).trimStart().toLowerCase()` — whitespace that exceeds 256 bytes pushes the `<html>` marker past the probe window.
+
+**Proposal:**
+- Reorder the operations: `raw.trimStart().slice(0, 256).toLowerCase()` — preserves the old semantics while still bounding the slice cost.
+
+## `response.clone()` buffers every successful JSON response a second time
+
+**Severity:** Low - the new JSON fast-path in `ui/src/api.ts::request(...)` calls `response.clone()` eagerly before parsing so the rare JSON-parse-failure branch can read the body as text. For large responses (full state snapshots, file reads, terminal-run transcripts) this doubles the memory footprint of every healthy JSON response just to preserve a fallback that is never consumed.
+
+The existing `api.test.ts` case ("uses the JSON fast path for successful application/json responses") asserts the clone's `text()` call does NOT run on success — confirming the clone's buffered body is dead weight >99% of the time.
+
+**Current behavior:**
+- Every `response.ok` + JSON content-type path clones the response body immediately.
+- The clone is only read in the catch branch, which the fast path almost never reaches.
+
+**Proposal:**
+- Consume `response.text()` once and `JSON.parse` the string, trading one allocation for avoiding the double-buffering. The HTML-sniff fallback becomes a plain branch on the already-materialised text string.
+
+## `useDeferredValue(pendingPrompts)` receives a fresh `[]` each render
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:555-557` reads `session.pendingPrompts ?? []`, allocating a new empty array on every render when `pendingPrompts` is `undefined` (the common case). `useDeferredValue` treats each render as a changed value and schedules a transition even though the content is identical, which mildly defeats the purpose of deferring the value.
+
+**Current behavior:**
+- `pendingPrompts` is `session.pendingPrompts ?? []`.
+- Every render when `pendingPrompts` is absent allocates a fresh array.
+- `useDeferredValue` schedules a transition for identical empty content.
+
+**Proposal:**
+- Hoist a module-scope `const EMPTY_PENDING_PROMPTS: readonly PendingPrompt[] = [];` and use it as the fallback, so the deferred-value input has stable identity when the list is empty.
+
+## Composer sizing double-resets on session switch
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:918-931` runs `resizeComposerInput(true)` synchronously inside a `useLayoutEffect` keyed on `[activeSessionId]`, and a following `useEffect` keyed on `[composerDraft]` schedules another resize via `requestAnimationFrame` on the same first render. The rAF resize is redundant because the synchronous one already measured the new metrics.
+
+**Current behavior:**
+- Layout effect resets cached sizing state and calls `resizeComposerInput(true)` synchronously.
+- Draft effect schedules a second `requestAnimationFrame` resize on the same first render.
+- First render of any newly-activated session does two resize passes instead of one.
+
+**Proposal:**
+- Track a "just-resized-synchronously" flag set in the layout effect and checked at the top of `scheduleComposerResize`, or gate the draft effect with a prev-draft ref so the "initial draft equals committed" case is a no-op.
+
+## Duplicated `Session` projection types in `session-store.ts` and `session-slash-palette.ts`
+
+**Severity:** Low - `ComposerSessionSnapshot` (`ui/src/session-store.ts:36-83`) and `SlashPaletteSession` (`ui/src/panels/session-slash-palette.ts:51-65`) each re-pick overlapping-but-non-identical field sets from `Session`. Three `Session`-like shapes now exist (`Session`, `ComposerSessionSnapshot`, `SlashPaletteSession`) with no compile-time check that additions to `Session` reach both projections — a new agent setting added to `Session` could silently default to `undefined` in consumers that read through either projection.
+
+**Current behavior:**
+- Both projection types declare field lists by hand.
+- No `Pick<Session, ...>` derivation; nothing fails to compile when `Session` grows a new field.
+
+**Proposal:**
+- Derive both types via `Pick<Session, ...>`, or express `SlashPaletteSession` as `Omit<ComposerSessionSnapshot, ...>` where their field sets differ.
+- Colocate the derivations in `session-store.ts` so the projection contract is visible in one place.
+
+## `activeSessionId` vs. `session` dual identity in `SessionComposer`
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:791-797` computes `activeSessionId = session?.id ?? sessionId` so `activeSessionId` is truthy while the store is still catching up and `session` is still null. Other call sites guard differently (some check `!session`, some check `!activeSessionId || !session`). A future caller that guards only on `activeSessionId` will proceed with a null snapshot.
+
+**Current behavior:**
+- `activeSessionId` is truthy in a narrow window where `session` is still null.
+- The two notions of "active" diverge in that window, and nothing documents the invariant.
+
+**Proposal:**
+- Either treat "snapshot null but id truthy" as "no session" (fall back to `null`), or add a comment near the fallback documenting that `activeSessionId` is a best-effort fallback and callers must still check `session` before reading capability fields.
 
 Also fixed in the current tree: transcript search pinning no longer replaces
 the live mounted page band. `VirtualizedConversationMessageList.tsx` now renders
@@ -1324,6 +1590,51 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   force every mounted message slot to report `0` height on the first pass and
   assert the virtualized list keeps a stable mounted window instead of
   collapsing to gap-only page heights.
+- [ ] P2: Cover `session-store` prompt-history rollback and boundary-rewrite recomputation:
+  add `session-store.test.ts` cases where a transcript gets shorter or the
+  previous boundary message is replaced, and assert `promptHistory` is rebuilt
+  instead of being incorrectly preserved.
+- [ ] P2: Add post-mount composer store-sync coverage for workspace actions:
+  drive `handleInsertReviewIntoPrompt` and the draft-change sync path through a
+  mounted App / `SessionPaneView` flow and assert the active textarea updates
+  immediately without relying on a parent rerender.
+- [ ] P2: Add post-mount `PaneTabs` store subscription coverage:
+  mutate session summaries after initial render and assert tab labels, status
+  badges/tooltips, and context-menu-derived workdir/project data refresh from
+  the external store.
+- [ ] P2: Add `useDeferredValue` + `startTransition` adoption-path regression:
+  drive a rapid user-prompt → assistant-chunks → assistant-complete stream
+  through `AgentSessionPanel` while a second state adoption is pending, and
+  assert `findByText` resolves the newest assistant message without requiring
+  a follow-up keystroke or focus change. The existing `App.live-state.reconnect`
+  test pins reconnect-snapshot recovery, not the deferred-value boundary
+  introduced by the `startTransition`-wrapped `setSessions` in
+  `ui/src/app-live-state.ts`.
+- [ ] P2: Add `syncComposerDraftForSession` pruned-session no-op test:
+  in `session-store.test.ts`, sync the store with an empty session list, then
+  call `syncComposerDraftForSession` for the dropped id and assert the
+  composer snapshot is still `null` with no listener fires. Locks in the
+  silent-return contract at `session-store.ts:587-590`.
+- [ ] P2: Add `+json` structured-suffix coverage for `isJsonResponseContentType`:
+  extend `api.test.ts` with an `application/problem+json` case (and ideally an
+  `application/vnd.termal+json` case) to pin that the fast path accepts RFC
+  6838 structured suffixes, not just `application/json` literal.
+- [ ] P2: Add regression for "POST succeeds + SSE never streams" after
+  `startActivePromptRecoveryPoll` narrowing:
+  mock a successful `sendMessage` POST whose response adopts cleanly, then
+  block the SSE stream from advancing, and assert the session eventually
+  recovers (either via the watchdog or the recovery poll). Covers the scenario
+  the unconditional arm of `startActivePromptPoll` used to defend against.
+- [ ] P2: Re-indent the destructure at `ui/src/app-workspace-actions.ts:264-271`:
+  eight parameter lines are four-space-indented while the rest of the
+  destructure uses two spaces. Run Prettier (or hand-edit) so the block reads
+  as a flat destructure.
+- [ ] P2: Surface the `scripts/perf/*` smoke scripts from `ui/package.json`:
+  add `"perf": "node ../scripts/perf/prompt-responsiveness-smoke.js"` (or
+  equivalent) so contributors can discover the orchestrator without having to
+  find it by spelunking. This does not imply CI integration — the scripts
+  still require a live `127.0.0.1:4173` + Chrome DevTools Protocol at
+  `127.0.0.1:9222`.
 - [ ] P2: Add App-level coverage for the extracted Add project flow:
   open the control-panel "Add project" action, exercise both local and
   remote remotes, assert `pickProjectRoot` only wires the local path,

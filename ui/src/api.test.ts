@@ -1197,6 +1197,84 @@ describe("fetchState", () => {
       expect((error as Error).message).toContain("Restart TermAl");
     }
   });
+
+  it("uses the JSON fast path for successful application/json responses", async () => {
+    const payload = {
+      revision: 1,
+      serverInstanceId: "server-1",
+      codex: {},
+      agentReadiness: [],
+      preferences: {},
+      projects: [],
+      orchestrators: [],
+      workspaces: [],
+      sessions: [],
+    };
+    const json = vi.fn(async () => payload);
+    const text = vi.fn(async () => JSON.stringify(payload));
+    const cloneText = vi.fn(async () => JSON.stringify(payload));
+    const clone = vi.fn(
+      () =>
+        ({
+          text: cloneText,
+        }) as unknown as Response,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({
+          "Content-Type": "application/json; charset=utf-8",
+        }),
+        json,
+        text,
+        clone,
+      } as unknown as Response),
+    );
+
+    await expect(fetchState()).resolves.toEqual(payload);
+    expect(json).toHaveBeenCalledTimes(1);
+    expect(text).not.toHaveBeenCalled();
+    expect(cloneText).not.toHaveBeenCalled();
+  });
+
+  it("classifies mislabelled HTML JSON success responses as restart-required backend errors", async () => {
+    expect.assertions(5);
+    const html = "<!DOCTYPE html><html><body>Old backend</body></html>";
+    const json = vi.fn(async () => {
+      throw new SyntaxError("Unexpected token <");
+    });
+    const cloneText = vi.fn(async () => html);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({
+          "Content-Type": "application/json",
+        }),
+        json,
+        clone: vi.fn(
+          () =>
+            ({
+              text: cloneText,
+            }) as unknown as Response,
+        ),
+      } as unknown as Response),
+    );
+
+    try {
+      await fetchState();
+      throw new Error("Expected fetchState to reject");
+    } catch (error) {
+      expect(json).toHaveBeenCalledTimes(1);
+      expect(cloneText).toHaveBeenCalledTimes(1);
+      expect(isBackendUnavailableError(error)).toBe(true);
+      expect((error as ApiRequestError).restartRequired).toBe(true);
+      expect((error as Error).message).toContain("Restart TermAl");
+    }
+  });
 });
 
 describe("fetchWorkspaceLayout", () => {

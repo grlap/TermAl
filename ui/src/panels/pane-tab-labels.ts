@@ -30,10 +30,13 @@
 // bodies, same prefixes, same fallbacks; consumers import
 // directly from here.
 
-import type { Session } from "../types";
+import type { SessionSummarySnapshot } from "../session-store";
 import type { WorkspaceTab } from "../workspace";
 
-export function formatVisibleTabLabel(tab: WorkspaceTab, session: Session | null) {
+export function formatVisibleTabLabel(
+  tab: WorkspaceTab,
+  session: SessionSummarySnapshot | null,
+) {
   if (tab.kind === "filesystem") {
     return formatPathTabLabel(tab.rootPath, "Workspace");
   }
@@ -49,7 +52,10 @@ export function formatVisibleTabLabel(tab: WorkspaceTab, session: Session | null
   return formatTabLabel(tab, session);
 }
 
-export function formatTabLabel(tab: WorkspaceTab, session: Session | null) {
+export function formatTabLabel(
+  tab: WorkspaceTab,
+  session: SessionSummarySnapshot | null,
+) {
   if (tab.kind === "session") {
     return session?.name ?? tab.sessionId;
   }

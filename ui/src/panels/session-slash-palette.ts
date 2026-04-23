@@ -48,8 +48,25 @@ import type {
   CodexReasoningEffort,
   SandboxMode,
   Session,
+  SessionModelOption,
   SessionSettingsField,
 } from "../types";
+
+export type SlashPaletteSession = Readonly<{
+  approvalPolicy?: Session["approvalPolicy"];
+  agent: Session["agent"];
+  agentCommandsRevision?: Session["agentCommandsRevision"];
+  claudeApprovalMode?: Session["claudeApprovalMode"];
+  claudeEffort?: Session["claudeEffort"];
+  cursorMode?: Session["cursorMode"];
+  geminiApprovalMode?: Session["geminiApprovalMode"];
+  id: Session["id"];
+  model: Session["model"];
+  modelOptions?: readonly SessionModelOption[];
+  reasoningEffort?: Session["reasoningEffort"];
+  sandboxMode?: Session["sandboxMode"];
+  workdir: Session["workdir"];
+}>;
 
 export const STATIC_MODEL_OPTIONS: Readonly<Record<Session["agent"], readonly SessionModelChoice[]>> = {
   Claude: [],
@@ -267,18 +284,18 @@ export function claudeEffortChoice(effort: ClaudeEffortLevel) {
   );
 }
 
-export function currentSessionModelCapabilities(session: Session) {
+export function currentSessionModelCapabilities(session: SlashPaletteSession) {
   return matchingSessionModelOption(session.modelOptions, session.model);
 }
 
-export function supportedCodexReasoningEfforts(session: Session) {
+export function supportedCodexReasoningEfforts(session: SlashPaletteSession) {
   const option = currentSessionModelCapabilities(session);
   return option?.supportedReasoningEfforts?.length
     ? option.supportedReasoningEfforts
     : ALL_CODEX_REASONING_EFFORTS;
 }
 
-export function defaultCodexReasoningEffort(session: Session) {
+export function defaultCodexReasoningEffort(session: SlashPaletteSession) {
   const option = currentSessionModelCapabilities(session);
   const supportedEfforts = supportedCodexReasoningEfforts(session);
   if (
@@ -291,11 +308,11 @@ export function defaultCodexReasoningEffort(session: Session) {
   return supportedEfforts[0] ?? "medium";
 }
 
-export function currentClaudeEffort(session: Session): ClaudeEffortLevel {
+export function currentClaudeEffort(session: SlashPaletteSession): ClaudeEffortLevel {
   return session.claudeEffort ?? DEFAULT_CLAUDE_EFFORT;
 }
 
-export function supportedClaudeEffortLevels(session: Session) {
+export function supportedClaudeEffortLevels(session: SlashPaletteSession) {
   const option = currentSessionModelCapabilities(session);
   const currentEffort = currentClaudeEffort(session);
   if (option?.supportedClaudeEffortLevels?.length) {
@@ -312,7 +329,7 @@ export function supportedClaudeEffortLevels(session: Session) {
   return currentEffort === "max" ? ["max"] : [];
 }
 
-export function claudeEffortChoices(session: Session): SlashChoiceDefinition[] {
+export function claudeEffortChoices(session: SlashPaletteSession): SlashChoiceDefinition[] {
   const currentModel = currentSessionModelCapabilities(session);
   const levels = supportedClaudeEffortLevels(session);
   return ([DEFAULT_CLAUDE_EFFORT, ...levels] as ClaudeEffortLevel[]).map((effort) => {
@@ -330,7 +347,7 @@ export function claudeEffortChoices(session: Session): SlashChoiceDefinition[] {
   });
 }
 
-export function codexReasoningEffortChoices(session: Session): SlashChoiceDefinition[] {
+export function codexReasoningEffortChoices(session: SlashPaletteSession): SlashChoiceDefinition[] {
   const currentModel = currentSessionModelCapabilities(session);
   const defaultEffort = defaultCodexReasoningEffort(session);
   return supportedCodexReasoningEfforts(session).map((effort) => {
@@ -375,11 +392,11 @@ export function sessionModelChoiceDetail(
   return detailParts.join(" | ") || option.value;
 }
 
-export function slashCommandsForSession(session: Session) {
+export function slashCommandsForSession(session: SlashPaletteSession) {
   return SLASH_COMMANDS.filter((command) => command.supports.includes(session.agent));
 }
 
-export function supportsAgentSlashCommands(_session: Session): boolean {
+export function supportsAgentSlashCommands(_session: SlashPaletteSession): boolean {
   return true;
 }
 
@@ -422,7 +439,7 @@ export function parseAgentCommandDraft(draft: string) {
   };
 }
 
-export function supportsLiveSessionModelOptions(session: Session): boolean {
+export function supportsLiveSessionModelOptions(session: SlashPaletteSession): boolean {
   return (
     session.agent === "Claude" ||
     session.agent === "Codex" ||
@@ -449,7 +466,7 @@ export function ensureCurrentSessionModelChoice(
   ];
 }
 
-export function sessionModelChoicesForSlashCommand(session: Session): SessionModelChoice[] {
+export function sessionModelChoicesForSlashCommand(session: SlashPaletteSession): SessionModelChoice[] {
   const baseOptions =
     session.agent === "Claude" ||
     session.agent === "Codex" ||
@@ -469,7 +486,7 @@ export function sessionModelChoicesForSlashCommand(session: Session): SessionMod
 
 export function manualSessionModelSlashItem(
   options: readonly SessionModelChoice[],
-  session: Session,
+  session: SlashPaletteSession,
   rawQuery: string,
 ): SlashPaletteItem | null {
   const trimmedQuery = rawQuery.trim();
@@ -538,7 +555,7 @@ export function makeSlashChoices(
     }));
 }
 
-export function sessionModeSlashState(session: Session, query: string): SlashChoiceState | null {
+export function sessionModeSlashState(session: SlashPaletteSession, query: string): SlashChoiceState | null {
   switch (session.agent) {
     case "Claude": {
       const currentMode = session.claudeApprovalMode ?? "ask";
@@ -600,7 +617,7 @@ export function codexApprovalSlashState(query: string, currentValue: ApprovalPol
   };
 }
 
-export function codexReasoningEffortSlashState(session: Session, query: string): SlashChoiceState {
+export function codexReasoningEffortSlashState(session: SlashPaletteSession, query: string): SlashChoiceState {
   const currentValue = session.reasoningEffort ?? defaultCodexReasoningEffort(session);
   const currentModel = currentSessionModelCapabilities(session);
   const currentModelSupportHint = currentModel?.supportedReasoningEfforts?.length
@@ -614,7 +631,7 @@ export function codexReasoningEffortSlashState(session: Session, query: string):
   };
 }
 
-export function claudeEffortSlashState(session: Session, query: string): SlashChoiceState {
+export function claudeEffortSlashState(session: SlashPaletteSession, query: string): SlashChoiceState {
   const currentValue = currentClaudeEffort(session);
   const currentModel = currentSessionModelCapabilities(session);
   const supportedEfforts = supportedClaudeEffortLevels(session);
@@ -630,7 +647,7 @@ export function claudeEffortSlashState(session: Session, query: string): SlashCh
 }
 
 export function sessionModelSlashState(
-  session: Session,
+  session: SlashPaletteSession,
   query: string,
   rawQuery: string,
   isRefreshingModelOptions: boolean,
@@ -686,7 +703,7 @@ export function sessionModelSlashState(
 }
 
 export function buildSlashPaletteState(
-  session: Session | null,
+  session: SlashPaletteSession | null,
   draft: string,
   isRefreshingModelOptions: boolean,
   modelOptionsError: string | null,

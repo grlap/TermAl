@@ -48,7 +48,8 @@ import {
   normalizeDisplayPath,
   relativizePathToWorkspace,
 } from "../path-display";
-import type { Project, Session } from "../types";
+import type { SessionSummarySnapshot } from "../session-store";
+import type { Project } from "../types";
 import type { WorkspaceGitStatusTab, WorkspaceTab } from "../workspace";
 
 export type GitTabContextMenuAction = "push" | "sync";
@@ -163,20 +164,18 @@ export function canSyncGitTabContextMenu(menu: GitTabContextMenuState | null) {
 
 export function buildGitTabContextMenu(
   tab: WorkspaceTab,
-  sessionLookup: ReadonlyMap<string, Session>,
+  originSession: Pick<SessionSummarySnapshot, "projectId" | "workdir"> | null,
   projectLookup: ReadonlyMap<string, Project>,
 ) {
   if (tab.kind !== "gitStatus") {
     return null;
   }
 
-  const workdir = tab.workdir?.trim() || resolveGitTabWorkspaceRoot(tab, sessionLookup, projectLookup);
+  const workdir = tab.workdir?.trim() || resolveGitTabWorkspaceRoot(tab, originSession, projectLookup);
   if (!workdir) {
     return null;
   }
 
-  const originSession =
-    tab.originSessionId ? (sessionLookup.get(tab.originSessionId) ?? null) : null;
   const projectId = tab.originProjectId ?? originSession?.projectId ?? null;
   return {
     projectId,
@@ -187,11 +186,9 @@ export function buildGitTabContextMenu(
 
 export function resolveGitTabWorkspaceRoot(
   tab: WorkspaceGitStatusTab,
-  sessionLookup: ReadonlyMap<string, Session>,
+  originSession: Pick<SessionSummarySnapshot, "projectId" | "workdir"> | null,
   projectLookup: ReadonlyMap<string, Project>,
 ) {
-  const originSession =
-    tab.originSessionId ? (sessionLookup.get(tab.originSessionId) ?? null) : null;
   if (originSession?.workdir) {
     return originSession.workdir;
   }
@@ -202,7 +199,7 @@ export function resolveGitTabWorkspaceRoot(
 
 export function buildFileTabContextMenu(
   tab: WorkspaceTab,
-  sessionLookup: ReadonlyMap<string, Session>,
+  originSession: Pick<SessionSummarySnapshot, "projectId" | "workdir"> | null,
   projectLookup: ReadonlyMap<string, Project>,
 ) {
   const path = getFileTabPath(tab);
@@ -210,7 +207,7 @@ export function buildFileTabContextMenu(
     return null;
   }
 
-  const workspaceRoot = resolveFileTabWorkspaceRoot(tab, sessionLookup, projectLookup);
+  const workspaceRoot = resolveFileTabWorkspaceRoot(tab, originSession, projectLookup);
   return {
     path,
     relativePath: resolveRelativeTabPath(path, workspaceRoot),
@@ -231,15 +228,13 @@ export function getFileTabPath(tab: WorkspaceTab) {
 
 export function resolveFileTabWorkspaceRoot(
   tab: WorkspaceTab,
-  sessionLookup: ReadonlyMap<string, Session>,
+  originSession: Pick<SessionSummarySnapshot, "projectId" | "workdir"> | null,
   projectLookup: ReadonlyMap<string, Project>,
 ) {
   if (tab.kind !== "source" && tab.kind !== "diffPreview") {
     return null;
   }
 
-  const originSession =
-    tab.originSessionId ? (sessionLookup.get(tab.originSessionId) ?? null) : null;
   if (originSession?.workdir) {
     return originSession.workdir;
   }

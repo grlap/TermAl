@@ -68,6 +68,10 @@ import {
   usesSessionModelPicker,
 } from "./session-model-utils";
 import {
+  syncComposerDraftForSession,
+  upsertSessionStoreSession,
+} from "./session-store";
+import {
   findWorkspacePaneIdForSession,
   openSessionInWorkspaceState,
   reconcileWorkspaceState,
@@ -114,6 +118,10 @@ type UseAppSessionActionsDefaults = {
 type UseAppSessionActionsRefs = {
   isMountedRef: MutableRefObject<boolean>;
   sessionsRef: MutableRefObject<Session[]>;
+  draftsBySessionIdRef: MutableRefObject<Record<string, string>>;
+  draftAttachmentsBySessionIdRef: MutableRefObject<
+    Record<string, DraftImageAttachment[]>
+  >;
   confirmedUnknownModelSendsRef: MutableRefObject<Set<string>>;
   activePromptPollCancelRef: MutableRefObject<(() => void) | null>;
   refreshingSessionModelOptionIdsRef: MutableRefObject<SessionFlagMap>;
@@ -147,8 +155,6 @@ type UseAppSessionActionsSetters = {
 
 type UseAppSessionActionsParams = {
   lookups: UseAppSessionActionsLookups;
-  draftsBySessionId: Record<string, string>;
-  draftAttachmentsBySessionId: Record<string, DraftImageAttachment[]>;
   newProjectRootPath: string;
   newProjectRemoteId: string;
   newProjectUsesLocalRemote: boolean;
@@ -260,8 +266,6 @@ export function useAppSessionActions(
       activeSession,
       workspace,
     },
-    draftsBySessionId,
-    draftAttachmentsBySessionId,
     newProjectRootPath,
     newProjectRemoteId,
     newProjectUsesLocalRemote,
@@ -277,6 +281,8 @@ export function useAppSessionActions(
     refs: {
       isMountedRef,
       sessionsRef,
+      draftsBySessionIdRef,
+      draftAttachmentsBySessionIdRef,
       confirmedUnknownModelSendsRef,
       activePromptPollCancelRef,
       refreshingSessionModelOptionIdsRef,
@@ -311,7 +317,7 @@ export function useAppSessionActions(
     requestActionRecoveryResync,
   } = params;
 
-  function startActivePromptRecoveryPoll(sessionId: string) {
+  function startStaleSendResponseRecoveryPoll(sessionId: string) {
     activePromptPollCancelRef.current?.();
     activePromptPollCancelRef.current = startActivePromptPoll({
       fetchState,
@@ -322,6 +328,67 @@ export function useAppSessionActions(
           (session) => session.id === sessionId && session.status === "active",
         );
       },
+    });
+  }
+
+  function setDraftRefValue(sessionId: string, nextValue: string) {
+    const current = draftsBySessionIdRef.current;
+    if ((current[sessionId] ?? "") === nextValue) {
+      return;
+    }
+
+    draftsBySessionIdRef.current = {
+      ...current,
+      [sessionId]: nextValue,
+    };
+  }
+
+  function setDraftAttachmentRefs(
+    sessionId: string,
+    nextAttachments: readonly DraftImageAttachment[],
+  ) {
+    const current = draftAttachmentsBySessionIdRef.current;
+    const currentAttachments = current[sessionId] ?? [];
+    if (currentAttachments === nextAttachments) {
+      return;
+    }
+
+    if (nextAttachments.length === 0) {
+      if (!current[sessionId]) {
+        return;
+      }
+      const nextState = { ...current };
+      delete nextState[sessionId];
+      draftAttachmentsBySessionIdRef.current = nextState;
+      return;
+    }
+
+    draftAttachmentsBySessionIdRef.current = {
+      ...current,
+      [sessionId]: [...nextAttachments],
+    };
+  }
+
+  function syncComposerDraftSlice(
+    sessionId: string,
+    committedDraft: string,
+    draftAttachments: readonly DraftImageAttachment[],
+  ) {
+    setDraftRefValue(sessionId, committedDraft);
+    setDraftAttachmentRefs(sessionId, draftAttachments);
+    syncComposerDraftForSession({
+      sessionId,
+      committedDraft,
+      draftAttachments,
+    });
+  }
+
+  function syncSessionSlice(session: Session) {
+    upsertSessionStoreSession({
+      session,
+      committedDraft: draftsBySessionIdRef.current[session.id] ?? "",
+      draftAttachments:
+        draftAttachmentsBySessionIdRef.current[session.id] ?? [],
     });
   }
 
@@ -344,6 +411,11 @@ export function useAppSessionActions(
     }
 
     sessionsRef.current = nextSessions;
+    const updatedSession =
+      nextSessions.find((entry) => entry.id === sessionId) ?? null;
+    if (updatedSession) {
+      syncSessionSlice(updatedSession);
+    }
     setSessions(nextSessions);
     setWorkspace((current) =>
       applyControlPanelLayout(reconcileWorkspaceState(current, nextSessions)),
@@ -584,12 +656,14 @@ export function useAppSessionActions(
       return false;
     }
 
-    const draftText = draftTextOverride ?? draftsBySessionId[sessionId] ?? "";
+    const draftText =
+      draftTextOverride ?? draftsBySessionIdRef.current[sessionId] ?? "";
     const prompt = draftText.trim();
     const expandedText = expandedTextOverride?.trim() || null;
     const normalizedExpandedText =
       expandedText && expandedText !== prompt ? expandedText : null;
-    const attachments = draftAttachmentsBySessionId[sessionId] ?? [];
+    const attachments =
+      draftAttachmentsBySessionIdRef.current[sessionId] ?? [];
     if (!prompt && attachments.length === 0) {
       return false;
     }
@@ -615,6 +689,7 @@ export function useAppSessionActions(
     }
 
     setSendingSessionIds((current) => setSessionFlag(current, sessionId, true));
+    syncComposerDraftSlice(sessionId, "", []);
     setDraftsBySessionId((current) => {
       if ((current[sessionId] ?? "") === "") {
         return current;
@@ -654,8 +729,8 @@ export function useAppSessionActions(
         const adopted = adoptState(state);
         releaseDraftAttachments(attachments);
         setRequestError(null);
-        startActivePromptRecoveryPoll(sessionId);
         if (!adopted) {
+          startStaleSendResponseRecoveryPoll(sessionId);
           return;
         }
       } catch (error) {
@@ -691,6 +766,17 @@ export function useAppSessionActions(
             [sessionId]: attachments,
           };
         });
+        if (restoredDraft || restoredAttachments) {
+          syncComposerDraftSlice(
+            sessionId,
+            restoredDraft
+              ? draftText
+              : (draftsBySessionIdRef.current[sessionId] ?? ""),
+            restoredAttachments
+              ? attachments
+              : (draftAttachmentsBySessionIdRef.current[sessionId] ?? []),
+          );
+        }
         if (!restoredAttachments) {
           releaseDraftAttachments(attachments);
         }
@@ -711,6 +797,15 @@ export function useAppSessionActions(
     sessionId: string,
     attachments: DraftImageAttachment[],
   ) {
+    const nextAttachments = [
+      ...(draftAttachmentsBySessionIdRef.current[sessionId] ?? []),
+      ...attachments,
+    ];
+    syncComposerDraftSlice(
+      sessionId,
+      draftsBySessionIdRef.current[sessionId] ?? "",
+      nextAttachments,
+    );
     setDraftAttachmentsBySessionId((current) => ({
       ...current,
       [sessionId]: [...(current[sessionId] ?? []), ...attachments],
@@ -737,6 +832,11 @@ export function useAppSessionActions(
       releaseDraftAttachments(removed);
       const nextAttachments = existing.filter(
         (attachment) => attachment.id !== attachmentId,
+      );
+      syncComposerDraftSlice(
+        sessionId,
+        draftsBySessionIdRef.current[sessionId] ?? "",
+        nextAttachments,
       );
       if (nextAttachments.length === 0) {
         const nextState = { ...current };
@@ -1069,6 +1169,11 @@ export function useAppSessionActions(
     setSessions((current) => {
       const next = removeQueuedPromptFromSessions(current, sessionId, promptId);
       sessionsRef.current = next;
+      const updatedSession =
+        next.find((entry) => entry.id === sessionId) ?? null;
+      if (updatedSession) {
+        syncSessionSlice(updatedSession);
+      }
       return next;
     });
     try {

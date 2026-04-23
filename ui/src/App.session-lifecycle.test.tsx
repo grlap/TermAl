@@ -482,6 +482,126 @@ describe("App session lifecycle", () => {
     });
   });
 
+  it("does not arm the active-prompt poll when a successful send response is adopted", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalFetch = globalThis.fetch;
+      const project = {
+        id: "project-termal",
+        name: "TermAl",
+        rootPath: "/projects/termal",
+      };
+      const session = makeSession("session-1", {
+        name: "Session 1",
+        projectId: project.id,
+        workdir: project.rootPath,
+      });
+      const sendResponseState = makeStateResponse({
+        revision: 2,
+        projects: [project],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Session 1",
+            projectId: project.id,
+            workdir: project.rootPath,
+            status: "active",
+            preview: "Keep working",
+            messages: [
+              {
+                id: "message-1",
+                timestamp: "2026-04-19T10:00:00Z",
+                author: "you",
+                type: "text",
+                text: "Keep working",
+              },
+            ],
+          }),
+        ],
+      });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (
+            requestUrl.pathname === "/api/sessions/session-1/messages" &&
+            (init?.method ?? "GET").toUpperCase() === "POST"
+          ) {
+            return jsonResponse(sendResponseState);
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 1,
+            projects: [project],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [session],
+          }),
+        );
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        const sessionRowLabel = await within(sessionList).findByText(
+          "Session 1",
+        );
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+
+        await clickAndSettle(sessionRowButton);
+        const composer = await screen.findByLabelText("Message Session 1");
+        await act(async () => {
+          fireEvent.change(composer, {
+            target: { value: "Keep working" },
+          });
+        });
+        await settleAsyncUi();
+        vi.useFakeTimers();
+        await clickAndSettle(screen.getByRole("button", { name: "Send" }));
+        await settleAsyncUi();
+
+        expect(composer).toHaveValue("");
+        fetchMock.mockClear();
+
+        await advanceTimers(ACTIVE_PROMPT_POLL_INTERVAL_MS);
+        await settleAsyncUi();
+
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(screen.getAllByText("Keep working").length).toBeGreaterThan(0);
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("rewrites model refresh failures into agent-specific guidance", () => {
     expect(
       describeSessionModelRefreshError(

@@ -3,7 +3,6 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -442,6 +441,7 @@ export default function App() {
     new Set(),
   );
   const backendInlineRequestErrorMessageRef = useRef<string | null>(null);
+  const draftsRef = useRef<Record<string, string>>({});
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>(
     {},
   );
@@ -735,6 +735,8 @@ export default function App() {
       latestStateRevisionRef,
       lastSeenServerInstanceIdRef,
       sessionsRef,
+      draftsBySessionIdRef: draftsRef,
+      draftAttachmentsBySessionIdRef: draftAttachmentsRef,
       codexStateRef,
       agentReadinessRef,
       projectsRef,
@@ -820,8 +822,6 @@ export default function App() {
       activeSession,
       workspace,
     },
-    draftsBySessionId,
-    draftAttachmentsBySessionId,
     newProjectRootPath,
     newProjectRemoteId,
     newProjectUsesLocalRemote,
@@ -837,6 +837,8 @@ export default function App() {
     refs: {
       isMountedRef,
       sessionsRef,
+      draftsBySessionIdRef: draftsRef,
+      draftAttachmentsBySessionIdRef: draftAttachmentsRef,
       confirmedUnknownModelSendsRef,
       activePromptPollCancelRef,
       refreshingSessionModelOptionIdsRef,
@@ -1037,6 +1039,8 @@ export default function App() {
     setWorkspace,
     setStandaloneControlSurfaceViewStateByTabId,
     setDraftsBySessionId,
+    draftsBySessionIdRef: draftsRef,
+    draftAttachmentsBySessionIdRef: draftAttachmentsRef,
     setPendingScrollToBottomRequest,
     setRequestError,
     setPendingOrchestratorActionById,
@@ -1437,8 +1441,9 @@ export default function App() {
   }, [agentReadiness, codexState, orchestrators, projects]);
 
   useEffect(() => {
+    draftsRef.current = draftsBySessionId;
     draftAttachmentsRef.current = draftAttachmentsBySessionId;
-  }, [draftAttachmentsBySessionId]);
+  }, [draftAttachmentsBySessionId, draftsBySessionId]);
 
   // Re-fetch Git diff preview tabs restored from persisted workspace layout
   // without `documentContent`. Layout hydration can arrive after mount, so this
@@ -1855,8 +1860,6 @@ export default function App() {
               sessionLookup={sessionLookup}
               activePaneId={workspace.activePaneId}
               isLoading={isLoading}
-              draftsBySessionId={draftsBySessionId}
-              draftAttachmentsBySessionId={draftAttachmentsBySessionId}
               sendingSessionIds={sendingSessionIds}
               stoppingSessionIds={stoppingSessionIds}
               killingSessionIds={killingSessionIds}

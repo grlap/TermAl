@@ -17,7 +17,9 @@ import {
   getErrorMessage,
   pendingGitDiffPreviewChangeType,
   pendingGitDiffPreviewSummary,
+  type DraftImageAttachment,
 } from "./app-utils";
+import { syncComposerDraftForSession } from "./session-store";
 import {
   activatePane,
   closeWorkspaceTab,
@@ -82,6 +84,10 @@ type UseAppWorkspaceActionsParams = {
     SetStateAction<Record<string, StandaloneControlSurfaceViewState>>
   >;
   setDraftsBySessionId: Dispatch<SetStateAction<Record<string, string>>>;
+  draftsBySessionIdRef: MutableRefObject<Record<string, string>>;
+  draftAttachmentsBySessionIdRef: MutableRefObject<
+    Record<string, DraftImageAttachment[]>
+  >;
   setPendingScrollToBottomRequest: Dispatch<
     SetStateAction<PendingScrollToBottomRequest>
   >;
@@ -255,12 +261,14 @@ export function useAppWorkspaceActions({
   closePendingSessionRename,
   setKillRevealSessionId,
   setSelectedProjectId,
-  setWorkspace,
-  setStandaloneControlSurfaceViewStateByTabId,
-  setDraftsBySessionId,
-  setPendingScrollToBottomRequest,
-  setRequestError,
-  setPendingOrchestratorActionById,
+    setWorkspace,
+    setStandaloneControlSurfaceViewStateByTabId,
+    setDraftsBySessionId,
+    draftsBySessionIdRef,
+    draftAttachmentsBySessionIdRef,
+    setPendingScrollToBottomRequest,
+    setRequestError,
+    setPendingOrchestratorActionById,
   setIsCreateSessionOpen,
   applyControlPanelLayout,
   markSessionTabsForBottomAfterWorkspaceRebuild,
@@ -382,6 +390,24 @@ export function useAppWorkspaceActions({
     handleOpenConversationFromDiff(sessionId, preferredPaneId);
     if (!nextPrompt) {
       return;
+    }
+
+    const existingDraft = draftsBySessionIdRef.current[sessionId] ?? "";
+    const nextValue =
+      existingDraft.trim().length > 0
+        ? `${existingDraft.trimEnd()}\n\n${nextPrompt}`
+        : nextPrompt;
+    if (existingDraft !== nextValue) {
+      draftsBySessionIdRef.current = {
+        ...draftsBySessionIdRef.current,
+        [sessionId]: nextValue,
+      };
+      syncComposerDraftForSession({
+        sessionId,
+        committedDraft: nextValue,
+        draftAttachments:
+          draftAttachmentsBySessionIdRef.current[sessionId] ?? [],
+      });
     }
 
     setDraftsBySessionId((current) => {
@@ -551,6 +577,18 @@ export function useAppWorkspaceActions({
   }
 
   function handleDraftChange(sessionId: string, nextValue: string) {
+    if ((draftsBySessionIdRef.current[sessionId] ?? "") !== nextValue) {
+      draftsBySessionIdRef.current = {
+        ...draftsBySessionIdRef.current,
+        [sessionId]: nextValue,
+      };
+      syncComposerDraftForSession({
+        sessionId,
+        committedDraft: nextValue,
+        draftAttachments:
+          draftAttachmentsBySessionIdRef.current[sessionId] ?? [],
+      });
+    }
     setDraftsBySessionId((current) => {
       if ((current[sessionId] ?? "") === nextValue) {
         return current;

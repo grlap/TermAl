@@ -1,6 +1,7 @@
 import {
   memo,
   useCallback,
+  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -22,14 +23,12 @@ import {
 import {
   MessageSlot,
   PanelEmptyState,
-  collectUserPromptHistory,
 } from "./session-message-leaves";
 import {
   PendingPromptCard,
   RunningIndicator,
 } from "./session-activity-cards";
 import {
-  EMPTY_MATCHED_ITEM_KEYS,
   VirtualizedConversationMessageList,
   type CodexAppRequestSubmitHandler,
   type McpElicitationSubmitHandler,
@@ -40,6 +39,10 @@ import {
   renderHighlightedText,
   type SearchHighlightTone,
 } from "../search-highlight";
+import {
+  useComposerSessionSnapshot,
+  useSessionRecordSnapshot,
+} from "../session-store";
 import type {
   ApprovalDecision,
   AgentCommand,
@@ -92,6 +95,14 @@ type SessionSettingsValue =
   | GeminiApprovalMode;
 
 const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES = 80;
+const EMPTY_COMPOSER_ATTACHMENTS: readonly {
+  byteSize: number;
+  fileName: string;
+  id: string;
+  mediaType: string;
+  previewUrl: string;
+}[] = [];
+const EMPTY_COMPOSER_PROMPT_HISTORY: readonly string[] = [];
 
 function isSpaceKey(event: {
   key: string;
@@ -109,105 +120,15 @@ function isSpaceKey(event: {
   );
 }
 
-function sameStringArray(
-  previous: readonly string[] | undefined,
-  next: readonly string[] | undefined,
-) {
-  if (previous === next) {
-    return true;
-  }
-  if ((previous?.length ?? 0) !== (next?.length ?? 0)) {
-    return false;
-  }
-  for (let index = 0; index < (previous?.length ?? 0); index += 1) {
-    if (previous?.[index] !== next?.[index]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function sameSessionModelOptions(
-  previous: Session["modelOptions"],
-  next: Session["modelOptions"],
-) {
-  if (previous === next) {
-    return true;
-  }
-  if ((previous?.length ?? 0) !== (next?.length ?? 0)) {
-    return false;
-  }
-  for (let index = 0; index < (previous?.length ?? 0); index += 1) {
-    const previousOption = previous?.[index];
-    const nextOption = next?.[index];
-    if (!previousOption || !nextOption) {
-      return false;
-    }
-    if (
-      previousOption.label !== nextOption.label ||
-      previousOption.value !== nextOption.value ||
-      previousOption.description !== nextOption.description ||
-      !sameStringArray(previousOption.badges, nextOption.badges) ||
-      !sameStringArray(
-        previousOption.supportedClaudeEffortLevels,
-        nextOption.supportedClaudeEffortLevels,
-      ) ||
-      !sameStringArray(
-        previousOption.supportedReasoningEfforts,
-        nextOption.supportedReasoningEfforts,
-      ) ||
-      previousOption.defaultReasoningEffort !== nextOption.defaultReasoningEffort
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function sameUserPromptHistory(previous: Session, next: Session) {
-  if (previous.messages === next.messages) {
-    return true;
-  }
-  return sameStringArray(
-    collectUserPromptHistory(previous),
-    collectUserPromptHistory(next),
-  );
-}
-
-function sameComposerSession(previous: Session | null, next: Session | null) {
-  if (previous === next) {
-    return true;
-  }
-  if (!previous || !next) {
-    return previous === next;
-  }
-  return (
-    previous.id === next.id &&
-    previous.name === next.name &&
-    previous.agent === next.agent &&
-    previous.model === next.model &&
-    sameSessionModelOptions(previous.modelOptions, next.modelOptions) &&
-    previous.approvalPolicy === next.approvalPolicy &&
-    previous.claudeEffort === next.claudeEffort &&
-    previous.reasoningEffort === next.reasoningEffort &&
-    previous.sandboxMode === next.sandboxMode &&
-    previous.cursorMode === next.cursorMode &&
-    previous.claudeApprovalMode === next.claudeApprovalMode &&
-    previous.geminiApprovalMode === next.geminiApprovalMode &&
-    sameUserPromptHistory(previous, next)
-  );
-}
-
 
 export function AgentSessionPanel({
   paneId,
   viewMode,
-  activeSession,
+  activeSessionId,
   isLoading,
   isUpdating,
   showWaitingIndicator,
   waitingIndicatorPrompt,
-  mountedSessions,
   commandMessages,
   diffMessages,
   scrollContainerRef,
@@ -228,12 +149,11 @@ export function AgentSessionPanel({
 }: {
   paneId: string;
   viewMode: PaneViewMode;
-  activeSession: Session | null;
+  activeSessionId: string | null;
   isLoading: boolean;
   isUpdating: boolean;
   showWaitingIndicator: boolean;
   waitingIndicatorPrompt: string | null;
-  mountedSessions: Session[];
   commandMessages: CommandMessage[];
   diffMessages: DiffMessage[];
   scrollContainerRef: RefObject<HTMLElement | null>;
@@ -270,12 +190,11 @@ export function AgentSessionPanel({
       paneId={paneId}
       viewMode={viewMode}
       scrollContainerRef={scrollContainerRef}
-      activeSession={activeSession}
+      activeSessionId={activeSessionId}
       isLoading={isLoading}
       isUpdating={isUpdating}
       showWaitingIndicator={showWaitingIndicator}
       waitingIndicatorPrompt={waitingIndicatorPrompt}
-      mountedSessions={mountedSessions}
       commandMessages={commandMessages}
       diffMessages={diffMessages}
       onApprovalDecision={onApprovalDecision}
@@ -300,9 +219,7 @@ export function AgentSessionPanelFooter({
   paneId,
   viewMode,
   isPaneActive,
-  activeSession,
-  committedDraft,
-  draftAttachments,
+  activeSessionId,
   formatByteSize,
   isSending,
   isStopping,
@@ -329,9 +246,7 @@ export function AgentSessionPanelFooter({
   paneId: string;
   viewMode: PaneViewMode;
   isPaneActive: boolean;
-  activeSession: Session | null;
-  committedDraft: string;
-  draftAttachments: DraftImageAttachment[];
+  activeSessionId: string | null;
   formatByteSize: (byteSize: number) => string;
   isSending: boolean;
   isStopping: boolean;
@@ -364,9 +279,7 @@ export function AgentSessionPanelFooter({
       <SessionComposer
         paneId={paneId}
         isPaneActive={isPaneActive}
-        session={activeSession}
-        committedDraft={committedDraft}
-        draftAttachments={draftAttachments}
+        sessionId={activeSessionId}
         formatByteSize={formatByteSize}
         isSending={isSending}
         isStopping={isStopping}
@@ -405,12 +318,11 @@ const SessionBody = memo(function SessionBody({
   paneId,
   viewMode,
   scrollContainerRef,
-  activeSession,
+  activeSessionId,
   isLoading,
   isUpdating,
   showWaitingIndicator,
   waitingIndicatorPrompt,
-  mountedSessions,
   commandMessages,
   diffMessages,
   onApprovalDecision,
@@ -431,12 +343,11 @@ const SessionBody = memo(function SessionBody({
   paneId: string;
   viewMode: PaneViewMode;
   scrollContainerRef: RefObject<HTMLElement | null>;
-  activeSession: Session | null;
+  activeSessionId: string | null;
   isLoading: boolean;
   isUpdating: boolean;
   showWaitingIndicator: boolean;
   waitingIndicatorPrompt: string | null;
-  mountedSessions: Session[];
   commandMessages: CommandMessage[];
   diffMessages: DiffMessage[];
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
@@ -470,6 +381,7 @@ const SessionBody = memo(function SessionBody({
   // Stabilize render callbacks so children receive a constant function identity.
   // The latest version is always called through the ref, so closures stay fresh
   // even though the wrapper identity never changes.
+  const activeSession = useSessionRecordSnapshot(activeSessionId);
   const renderMessageCardRef = useRef(renderMessageCard);
   renderMessageCardRef.current = renderMessageCard;
   const stableRenderMessageCard = useCallback<RenderMessageCard>(
@@ -520,31 +432,24 @@ const SessionBody = memo(function SessionBody({
 
     return (
       <>
-        {mountedSessions.map((session) => (
-          <SessionConversationPage
-            key={session.id}
-            renderMessageCard={stableRenderMessageCard}
-            session={session}
-            scrollContainerRef={scrollContainerRef}
-            isActive={session.id === activeSession.id}
-            isLoading={isLoading && session.id === activeSession.id}
-            showWaitingIndicator={showWaitingIndicator && session.id === activeSession.id}
-            waitingIndicatorPrompt={session.id === activeSession.id ? waitingIndicatorPrompt : null}
-            onApprovalDecision={onApprovalDecision}
-            onUserInputSubmit={onUserInputSubmit}
-            onMcpElicitationSubmit={onMcpElicitationSubmit}
-            onCodexAppRequestSubmit={onCodexAppRequestSubmit}
-            onCancelQueuedPrompt={onCancelQueuedPrompt}
-            conversationSearchQuery={session.id === activeSession.id ? conversationSearchQuery : ""}
-            conversationSearchMatchedItemKeys={
-              session.id === activeSession.id ? conversationSearchMatchedItemKeys : EMPTY_MATCHED_ITEM_KEYS
-            }
-            conversationSearchActiveItemKey={
-              session.id === activeSession.id ? conversationSearchActiveItemKey : null
-            }
-            onConversationSearchItemMount={onConversationSearchItemMount}
-          />
-        ))}
+        <SessionConversationPage
+          renderMessageCard={stableRenderMessageCard}
+          session={activeSession}
+          scrollContainerRef={scrollContainerRef}
+          isActive
+          isLoading={isLoading}
+          showWaitingIndicator={showWaitingIndicator}
+          waitingIndicatorPrompt={waitingIndicatorPrompt}
+          onApprovalDecision={onApprovalDecision}
+          onUserInputSubmit={onUserInputSubmit}
+          onMcpElicitationSubmit={onMcpElicitationSubmit}
+          onCodexAppRequestSubmit={onCodexAppRequestSubmit}
+          onCancelQueuedPrompt={onCancelQueuedPrompt}
+          conversationSearchQuery={conversationSearchQuery}
+          conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
+          conversationSearchActiveItemKey={conversationSearchActiveItemKey}
+          onConversationSearchItemMount={onConversationSearchItemMount}
+        />
       </>
     );
   }
@@ -593,12 +498,11 @@ const SessionBody = memo(function SessionBody({
   previous.paneId === next.paneId &&
   previous.viewMode === next.viewMode &&
   previous.scrollContainerRef === next.scrollContainerRef &&
-  previous.activeSession === next.activeSession &&
+  previous.activeSessionId === next.activeSessionId &&
   previous.isLoading === next.isLoading &&
   previous.isUpdating === next.isUpdating &&
   previous.showWaitingIndicator === next.showWaitingIndicator &&
   previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
-  previous.mountedSessions === next.mountedSessions &&
   previous.commandMessages === next.commandMessages &&
   previous.diffMessages === next.diffMessages &&
   previous.onUserInputSubmit === next.onUserInputSubmit &&
@@ -649,8 +553,12 @@ const SessionConversationPage = memo(function SessionConversationPage({
   onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
 }) {
   const pendingPrompts = session.pendingPrompts ?? [];
+  const deferredMessages = useDeferredValue(session.messages);
+  const deferredPendingPrompts = useDeferredValue(pendingPrompts);
+  const visibleMessages = isActive ? deferredMessages : session.messages;
+  const visiblePendingPrompts = isActive ? deferredPendingPrompts : pendingPrompts;
 
-  if (session.messages.length === 0 && pendingPrompts.length === 0 && !showWaitingIndicator) {
+  if (visibleMessages.length === 0 && visiblePendingPrompts.length === 0 && !showWaitingIndicator) {
     return (
       <div className={`session-conversation-page${isActive ? " is-active" : ""}`} hidden={!isActive}>
         <PanelEmptyState
@@ -670,7 +578,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       <ConversationMessageList
         renderMessageCard={renderMessageCard}
         sessionId={session.id}
-        messages={session.messages}
+        messages={visibleMessages}
         scrollContainerRef={scrollContainerRef}
         isActive={isActive}
         onApprovalDecision={onApprovalDecision}
@@ -688,7 +596,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       ) : null}
 
       {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
-      {pendingPrompts.map((prompt) => (
+      {visiblePendingPrompts.map((prompt) => (
         <MessageSlot
           key={prompt.id}
           itemKey={isActive ? `pendingPrompt:${prompt.id}` : undefined}
@@ -806,9 +714,7 @@ function ConversationMessageList({
 const SessionComposer = memo(function SessionComposer({
   paneId,
   isPaneActive,
-  session,
-  committedDraft,
-  draftAttachments,
+  sessionId,
   formatByteSize,
   isSending,
   isStopping,
@@ -833,9 +739,7 @@ const SessionComposer = memo(function SessionComposer({
 }: {
   paneId: string;
   isPaneActive: boolean;
-  session: Session | null;
-  committedDraft: string;
-  draftAttachments: DraftImageAttachment[];
+  sessionId: string | null;
   formatByteSize: (byteSize: number) => string;
   isSending: boolean;
   isStopping: boolean;
@@ -863,6 +767,14 @@ const SessionComposer = memo(function SessionComposer({
   onPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
 }) {
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerResizeAnimationFrameRef = useRef<number | null>(null);
+  const composerResizeNeedsMetricRefreshRef = useRef(false);
+  const composerSizingStateRef = useRef<{
+    borderHeight: number;
+    minHeight: number;
+    panelElement: HTMLElement | null;
+    panelSlotElement: HTMLElement | null;
+  } | null>(null);
   const localDraftsRef = useRef<Record<string, string>>({});
   const committedDraftsRef = useRef<Record<string, string>>({});
   const onDraftCommitRef = useRef(onDraftCommit);
@@ -876,9 +788,13 @@ const SessionComposer = memo(function SessionComposer({
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashNavModality, setSlashNavModality] = useState<"keyboard" | "mouse">("keyboard");
 
-  const activeSessionId = session?.id ?? null;
+  const session = useComposerSessionSnapshot(sessionId);
+  const activeSessionId = session?.id ?? sessionId;
+  const committedDraft = session?.committedDraft ?? "";
+  const draftAttachments = session?.draftAttachments ?? EMPTY_COMPOSER_ATTACHMENTS;
+  const promptHistory = session?.promptHistory ?? EMPTY_COMPOSER_PROMPT_HISTORY;
   const composerDraft =
-    activeSessionId === null ? "" : (localDraftsBySessionId[activeSessionId] ?? committedDraft);
+    !activeSessionId ? "" : (localDraftsBySessionId[activeSessionId] ?? committedDraft);
   const slashPalette = useMemo(
     () =>
       buildSlashPaletteState(
@@ -919,41 +835,100 @@ const SessionComposer = memo(function SessionComposer({
     isUpdating ||
     (slashPalette.kind !== "none" && slashPalette.items.length === 0);
 
-  function resizeComposerInput() {
+  function cancelScheduledComposerResize() {
+    if (composerResizeAnimationFrameRef.current == null) {
+      return;
+    }
+
+    window.cancelAnimationFrame(composerResizeAnimationFrameRef.current);
+    composerResizeAnimationFrameRef.current = null;
+  }
+
+  function getComposerSizingState(
+    textarea: HTMLTextAreaElement,
+    forceRefreshMetrics = false,
+  ) {
+    if (!composerSizingStateRef.current || forceRefreshMetrics) {
+      const computedStyle = window.getComputedStyle(textarea);
+      const panelElement = textarea.closest(".workspace-pane");
+      const resolvedPanelElement =
+        panelElement instanceof HTMLElement ? panelElement : null;
+      const panelSlotElement =
+        resolvedPanelElement?.parentElement instanceof HTMLElement
+          ? resolvedPanelElement.parentElement
+          : null;
+
+      composerSizingStateRef.current = {
+        minHeight: parseFloat(computedStyle.minHeight) || 0,
+        borderHeight:
+          (parseFloat(computedStyle.borderTopWidth) || 0) +
+          (parseFloat(computedStyle.borderBottomWidth) || 0),
+        panelElement: resolvedPanelElement,
+        panelSlotElement,
+      };
+    }
+
+    return composerSizingStateRef.current;
+  }
+
+  function resizeComposerInput(forceRefreshMetrics = false) {
     const textarea = composerInputRef.current;
     if (!textarea) {
       return;
     }
 
-    const computedStyle = window.getComputedStyle(textarea);
-    const minHeight = parseFloat(computedStyle.minHeight) || 0;
-    const borderHeight =
-      (parseFloat(computedStyle.borderTopWidth) || 0) +
-      (parseFloat(computedStyle.borderBottomWidth) || 0);
-    const panelElement = textarea.closest(".workspace-pane");
-    const panelSlotElement =
-      panelElement instanceof HTMLElement && panelElement.parentElement instanceof HTMLElement
-        ? panelElement.parentElement
-        : null;
+    const sizingState = getComposerSizingState(textarea, forceRefreshMetrics);
     const availablePanelHeight =
-      panelSlotElement?.clientHeight ??
-      (panelElement instanceof HTMLElement ? panelElement.clientHeight : 0);
+      sizingState.panelSlotElement?.clientHeight ??
+      (sizingState.panelElement instanceof HTMLElement
+        ? sizingState.panelElement.clientHeight
+        : 0);
     const maxHeight = Math.max(
-      minHeight,
+      sizingState.minHeight,
       availablePanelHeight > 0 ? availablePanelHeight * 0.4 : Number.POSITIVE_INFINITY,
     );
 
     textarea.style.height = "0px";
 
-    const contentHeight = textarea.scrollHeight + borderHeight;
-    const nextHeight = Math.min(Math.max(contentHeight, minHeight), maxHeight);
+    const contentHeight = textarea.scrollHeight + sizingState.borderHeight;
+    const nextHeight = Math.min(Math.max(contentHeight, sizingState.minHeight), maxHeight);
     textarea.style.height = `${nextHeight}px`;
     textarea.style.overflowY = contentHeight > maxHeight + 1 ? "auto" : "hidden";
   }
 
+  function scheduleComposerResize(forceRefreshMetrics = false) {
+    if (!activeSessionId) {
+      return;
+    }
+
+    composerResizeNeedsMetricRefreshRef.current =
+      composerResizeNeedsMetricRefreshRef.current || forceRefreshMetrics;
+    if (composerResizeAnimationFrameRef.current != null) {
+      return;
+    }
+
+    composerResizeAnimationFrameRef.current = window.requestAnimationFrame(() => {
+      composerResizeAnimationFrameRef.current = null;
+      const shouldRefreshMetrics = composerResizeNeedsMetricRefreshRef.current;
+      composerResizeNeedsMetricRefreshRef.current = false;
+      resizeComposerInput(shouldRefreshMetrics);
+    });
+  }
+
   useLayoutEffect(() => {
-    resizeComposerInput();
-  }, [activeSessionId, composerDraft]);
+    composerSizingStateRef.current = null;
+    composerResizeNeedsMetricRefreshRef.current = false;
+    cancelScheduledComposerResize();
+    resizeComposerInput(true);
+
+    return () => {
+      cancelScheduledComposerResize();
+    };
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    scheduleComposerResize();
+  }, [composerDraft]);
 
   useEffect(() => {
     localDraftsRef.current = localDraftsBySessionId;
@@ -1092,7 +1067,7 @@ const SessionComposer = memo(function SessionComposer({
 
       previousWidth = nextWidth;
       previousAvailablePanelHeight = nextAvailablePanelHeight;
-      resizeComposerInput();
+      scheduleComposerResize(panelHeightChanged);
     });
 
     resizeObserver.observe(textarea);
@@ -1106,6 +1081,14 @@ const SessionComposer = memo(function SessionComposer({
       resizeObserver.disconnect();
     };
   }, [activeSessionId]);
+
+  useEffect(() => {
+    return () => {
+      composerSizingStateRef.current = null;
+      composerResizeNeedsMetricRefreshRef.current = false;
+      cancelScheduledComposerResize();
+    };
+  }, []);
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -1253,14 +1236,14 @@ const SessionComposer = memo(function SessionComposer({
   }
 
   function applySlashPaletteItem(item: SlashPaletteItem, keepPaletteOpen = false) {
-    if (!session || isSending || isStopping) {
+    if (!activeSessionId || !session || isSending || isStopping) {
       return;
     }
 
     if (item.kind === "command") {
-      resetPromptHistory(session.id);
+      resetPromptHistory(activeSessionId);
       const nextDraft = `${item.command} `;
-      updateLocalDraft(session.id, nextDraft);
+      updateLocalDraft(activeSessionId, nextDraft);
       focusComposerInput(nextDraft.length);
       return;
     }
@@ -1276,9 +1259,9 @@ const SessionComposer = memo(function SessionComposer({
       const matchesSelectedCommand =
         parsedDraft?.commandName.toLowerCase() === item.name.toLowerCase();
       if (item.hasArguments && !matchesSelectedCommand) {
-        resetPromptHistory(session.id);
+        resetPromptHistory(activeSessionId);
         const nextDraft = `/${item.name} `;
-        updateLocalDraft(session.id, nextDraft);
+        updateLocalDraft(activeSessionId, nextDraft);
         focusComposerInput(nextDraft.length);
         return;
       }
@@ -1288,9 +1271,9 @@ const SessionComposer = memo(function SessionComposer({
         : `/${item.name}`).trim();
       const accepted =
         normalizedAgentCommandKind(agentCommand) === "nativeSlash"
-          ? onSend(session.id, visiblePrompt)
+          ? onSend(activeSessionId, visiblePrompt)
           : onSend(
-              session.id,
+              activeSessionId,
               visiblePrompt,
               agentCommand.content.split("$ARGUMENTS").join(
                 matchesSelectedCommand ? (parsedDraft?.argumentsText ?? "") : "",
@@ -1301,9 +1284,9 @@ const SessionComposer = memo(function SessionComposer({
         return;
       }
 
-      resetPromptHistory(session.id);
-      updateLocalDraft(session.id, "");
-      commitDraft(session.id, "");
+      resetPromptHistory(activeSessionId);
+      updateLocalDraft(activeSessionId, "");
+      commitDraft(activeSessionId, "");
       focusComposerInput();
       return;
     }
@@ -1313,19 +1296,19 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    resetPromptHistory(session.id);
-    void onSessionSettingsChange(session.id, item.field, item.value);
+    resetPromptHistory(activeSessionId);
+    void onSessionSettingsChange(activeSessionId, item.field, item.value);
     if (keepPaletteOpen) {
       focusComposerInput(getComposerDraftValue().length);
     } else {
-      updateLocalDraft(session.id, "");
-      commitDraft(session.id, "");
+      updateLocalDraft(activeSessionId, "");
+      commitDraft(activeSessionId, "");
       focusComposerInput(0);
     }
   }
 
   function handleComposerSend() {
-    if (!session || isSending || isStopping) {
+    if (!activeSessionId || isSending || isStopping) {
       return;
     }
 
@@ -1346,29 +1329,29 @@ const SessionComposer = memo(function SessionComposer({
     }
 
     const draftToSend = getComposerDraftValue();
-    const accepted = onSend(session.id, draftToSend);
+    const accepted = onSend(activeSessionId, draftToSend);
     if (!accepted) {
       focusComposerInput();
       return;
     }
 
-    resetPromptHistory(session.id);
-    updateLocalDraft(session.id, "");
-    commitDraft(session.id, "");
+    resetPromptHistory(activeSessionId);
+    updateLocalDraft(activeSessionId, "");
+    commitDraft(activeSessionId, "");
     focusComposerInput();
   }
 
   function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (!session) {
+    if (!activeSessionId) {
       return;
     }
 
     if (slashPalette.kind !== "none") {
       if (event.key === "Escape") {
         event.preventDefault();
-        resetPromptHistory(session.id);
-        updateLocalDraft(session.id, "");
-        commitDraft(session.id, "");
+        resetPromptHistory(activeSessionId);
+        updateLocalDraft(activeSessionId, "");
+        commitDraft(activeSessionId, "");
         return;
       }
 
@@ -1439,12 +1422,11 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    const promptHistory = collectUserPromptHistory(session);
     if (promptHistory.length === 0) {
       return;
     }
 
-    const historyState = promptHistoryStateBySessionId[session.id];
+    const historyState = promptHistoryStateBySessionId[activeSessionId];
     if (event.key === "ArrowDown" && !historyState) {
       return;
     }
@@ -1459,12 +1441,12 @@ const SessionComposer = memo(function SessionComposer({
 
       setPromptHistoryStateBySessionId((current) => ({
         ...current,
-        [session.id]: {
+        [activeSessionId]: {
           index: nextIndex,
           draft: draftSnapshot,
         },
       }));
-      updateLocalDraft(session.id, promptHistory[nextIndex]);
+      updateLocalDraft(activeSessionId, promptHistory[nextIndex]);
     } else {
       const currentHistoryState = historyState;
       if (!currentHistoryState) {
@@ -1472,18 +1454,18 @@ const SessionComposer = memo(function SessionComposer({
       }
 
       if (currentHistoryState.index >= promptHistory.length - 1) {
-        resetPromptHistory(session.id);
-        updateLocalDraft(session.id, currentHistoryState.draft);
+        resetPromptHistory(activeSessionId);
+        updateLocalDraft(activeSessionId, currentHistoryState.draft);
       } else {
         const nextIndex = currentHistoryState.index + 1;
         setPromptHistoryStateBySessionId((current) => ({
           ...current,
-          [session.id]: {
+          [activeSessionId]: {
             index: nextIndex,
             draft: currentHistoryState.draft,
           },
         }));
-        updateLocalDraft(session.id, promptHistory[nextIndex]);
+        updateLocalDraft(activeSessionId, promptHistory[nextIndex]);
       }
     }
 
@@ -1540,7 +1522,7 @@ const SessionComposer = memo(function SessionComposer({
               <button
                 className="composer-attachment-remove"
                 type="button"
-                onClick={() => session && onDraftAttachmentRemove(session.id, attachment.id)}
+                onClick={() => activeSessionId && onDraftAttachmentRemove(activeSessionId, attachment.id)}
                 aria-label={`Remove ${attachment.fileName}`}
                 disabled={composerInputDisabled}
               >
@@ -1570,7 +1552,7 @@ const SessionComposer = memo(function SessionComposer({
             <button
               className="ghost-button composer-stop-button"
               type="button"
-              onClick={() => onStopSession(session.id)}
+              onClick={() => activeSessionId && onStopSession(activeSessionId)}
               disabled={isStopping}
             >
               {isStopping ? "Stopping..." : "Stop"}
@@ -1735,9 +1717,7 @@ const SessionComposer = memo(function SessionComposer({
 }, (previous, next) =>
   previous.paneId === next.paneId &&
   previous.isPaneActive === next.isPaneActive &&
-  sameComposerSession(previous.session, next.session) &&
-  previous.committedDraft === next.committedDraft &&
-  previous.draftAttachments === next.draftAttachments &&
+  previous.sessionId === next.sessionId &&
   previous.formatByteSize === next.formatByteSize &&
   previous.isSending === next.isSending &&
   previous.isStopping === next.isStopping &&

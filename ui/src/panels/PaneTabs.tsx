@@ -1,4 +1,5 @@
 import {
+  memo,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -46,6 +47,7 @@ import {
   formatCodexNoticeBadgeLabel,
   hasSessionTabStatusTooltip,
 } from "./session-tab-status-tooltip";
+import { useSessionSummariesById } from "../session-store";
 import { dataTransferHasSessionDragType } from "../session-drag";
 import {
   TAB_DRAG_MIME_TYPE,
@@ -55,7 +57,7 @@ import {
   type WorkspaceTabDrag,
 } from "../tab-drag";
 import { measurePaneTabStatusTooltipPosition } from "../pane-tab-status-tooltip";
-import type { CodexState, Project, RemoteConfig, Session } from "../types";
+import type { CodexState, Project, RemoteConfig } from "../types";
 import type { TabDropPlacement, WorkspaceGitStatusTab, WorkspaceTab } from "../workspace";
 
 type ActiveSessionTooltipState = {
@@ -79,7 +81,7 @@ export type PaneTabDecoration = {
   title: string;
 };
 
-export function PaneTabs({
+export const PaneTabs = memo(function PaneTabs({
   paneId,
   windowId,
   tabs,
@@ -87,7 +89,6 @@ export function PaneTabs({
   codexState,
   projectLookup,
   remoteLookup,
-  sessionLookup,
   draggedTab,
   getKnownDraggedTab,
   tabDecorations,
@@ -105,7 +106,6 @@ export function PaneTabs({
   codexState: CodexState;
   projectLookup: Map<string, Project>;
   remoteLookup: Map<string, RemoteConfig>;
-  sessionLookup: Map<string, Session>;
   draggedTab: WorkspaceTabDrag | null;
   getKnownDraggedTab: () => WorkspaceTabDrag | null;
   tabDecorations?: Record<string, PaneTabDecoration | undefined>;
@@ -126,6 +126,7 @@ export function PaneTabs({
     trigger?: HTMLElement | null,
   ) => void;
 }) {
+  const sessionSummariesById = useSessionSummariesById();
   const paneTabsRef = useRef<HTMLDivElement | null>(null);
   const activeStatusTooltipAnchorRef = useRef<HTMLElement | null>(null);
   const fileTabContextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -741,15 +742,18 @@ export function PaneTabs({
   }, [gitTabContextMenu]);
 
   useEffect(() => {
-    if (!activeStatusTooltip || sessionLookup.has(activeStatusTooltip.sessionId)) {
+    if (
+      !activeStatusTooltip ||
+      sessionSummariesById[activeStatusTooltip.sessionId]
+    ) {
       return;
     }
 
     closeStatusTooltip();
-  }, [activeStatusTooltip, sessionLookup]);
+  }, [activeStatusTooltip, sessionSummariesById]);
 
   const activeStatusTooltipSession = activeStatusTooltip
-    ? (sessionLookup.get(activeStatusTooltip.sessionId) ?? null)
+    ? (sessionSummariesById[activeStatusTooltip.sessionId] ?? null)
     : null;
 
   return (
@@ -779,7 +783,14 @@ export function PaneTabs({
       >
         {tabs.length > 0 ? (
           tabs.map((tab, index) => {
-            const session = tab.kind === "session" ? (sessionLookup.get(tab.sessionId) ?? null) : null;
+            const session =
+              tab.kind === "session"
+                ? (sessionSummariesById[tab.sessionId] ?? null)
+                : null;
+            const originSession =
+              "originSessionId" in tab && tab.originSessionId
+                ? (sessionSummariesById[tab.originSessionId] ?? null)
+                : null;
             const tabActive = tab.id === activeTabId;
             const showStatusTooltip = Boolean(session && hasSessionTabStatusTooltip(session));
             const showDropBefore = activeTabInsertIndex === index;
@@ -830,7 +841,11 @@ export function PaneTabs({
                   closeFileTabContextMenu();
                   closeGitTabContextMenu();
 
-                  const gitTabContext = buildGitTabContextMenu(tab, sessionLookup, projectLookup);
+                  const gitTabContext = buildGitTabContextMenu(
+                    tab,
+                    originSession,
+                    projectLookup,
+                  );
                   if (gitTabContext) {
                     event.preventDefault();
                     gitTabContextMenuRequestIdRef.current += 1;
@@ -854,7 +869,11 @@ export function PaneTabs({
                     return;
                   }
 
-                  const fileTabContext = buildFileTabContextMenu(tab, sessionLookup, projectLookup);
+                  const fileTabContext = buildFileTabContextMenu(
+                    tab,
+                    originSession,
+                    projectLookup,
+                  );
                   if (fileTabContext) {
                     event.preventDefault();
                     setFileTabContextMenu({
@@ -1129,7 +1148,7 @@ export function PaneTabs({
         : null}
     </div>
   );
-}
+});
 
 async function handleCopyTabPath(path: string | null, onDone: () => void) {
   if (!path) {

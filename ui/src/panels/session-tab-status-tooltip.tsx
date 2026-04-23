@@ -47,12 +47,12 @@ import {
   resolveProjectRemoteId,
 } from "../remotes";
 import { matchingSessionModelOption } from "../session-model-options";
+import type { SessionSummarySnapshot } from "../session-store";
 import type {
   CodexRateLimitWindow,
   CodexState,
   Project,
   RemoteConfig,
-  Session,
 } from "../types";
 
 export function SessionTabStatusTooltip({
@@ -67,7 +67,7 @@ export function SessionTabStatusTooltip({
   id: string;
   projectLookup: ReadonlyMap<string, Project>;
   remoteLookup: ReadonlyMap<string, RemoteConfig>;
-  session: Session;
+  session: SessionSummarySnapshot;
   style: CSSProperties;
 }) {
   const rateLimits = session.agent === "Codex" ? codexState.rateLimits : null;
@@ -136,12 +136,12 @@ export function formatCodexNoticeBadgeLabel(count: number) {
   return `${count} Codex notice${count === 1 ? "" : "s"}`;
 }
 
-export function hasSessionTabStatusTooltip(_session: Session) {
+export function hasSessionTabStatusTooltip(_session: SessionSummarySnapshot) {
   return true;
 }
 
 export function formatSessionTooltipProjectLabel(
-  session: Session,
+  session: SessionSummarySnapshot,
   projectLookup: ReadonlyMap<string, Project>,
 ) {
   const projectId = session.projectId?.trim() ?? "";
@@ -153,7 +153,7 @@ export function formatSessionTooltipProjectLabel(
 }
 
 export function formatSessionTooltipLocationLabel(
-  session: Session,
+  session: SessionSummarySnapshot,
   projectLookup: ReadonlyMap<string, Project>,
   remoteLookup: ReadonlyMap<string, RemoteConfig>,
 ) {
@@ -188,7 +188,9 @@ export type SessionTooltipRow = {
   mono?: boolean;
 };
 
-export function formatSessionTooltipModelRow(session: Session): SessionTooltipRow {
+export function formatSessionTooltipModelRow(
+  session: SessionSummarySnapshot,
+): SessionTooltipRow {
   const currentModel = session.model.trim();
   const modelOption = matchingSessionModelOption(session.modelOptions, session.model);
 
@@ -221,7 +223,7 @@ export function formatSessionTooltipModelRow(session: Session): SessionTooltipRo
 }
 
 export function buildSessionTooltipRows(
-  session: Session,
+  session: SessionSummarySnapshot,
   projectLookup: ReadonlyMap<string, Project>,
   remoteLookup: ReadonlyMap<string, RemoteConfig>,
 ): SessionTooltipRow[] {

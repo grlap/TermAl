@@ -108,6 +108,11 @@ type MessagePage = {
   messages: Message[];
 };
 
+type EstimatedPageHeightEntry = {
+  cacheKey: string;
+  height: number;
+};
+
 function rangesEqual(first: VirtualizedRange, second: VirtualizedRange) {
   return first.startIndex === second.startIndex && first.endIndex === second.endIndex;
 }
@@ -221,6 +226,27 @@ function estimatePageHeight(
   return total;
 }
 
+function buildPageEstimateCacheKey(
+  page: MessagePage,
+  availableWidthPx: number,
+) {
+  const widthBucket =
+    Number.isFinite(availableWidthPx) && availableWidthPx > 0
+      ? Math.round(availableWidthPx)
+      : 0;
+  const expandedPromptKey = page.messages
+    .flatMap((message) =>
+      message.type === "text" &&
+      message.author === "you" &&
+      message.expandedText &&
+      isExpandedPromptOpen(message.id)
+        ? [message.id]
+        : [],
+    )
+    .join(",");
+  return `${page.key}:${widthBucket}:${expandedPromptKey}`;
+}
+
 function estimateMessageOffsetWithinPage(
   page: MessagePage,
   messageLocalIndex: number,
@@ -270,6 +296,9 @@ export function VirtualizedConversationMessageList({
       : null;
 
   const pageHeightsRef = useRef<Record<string, number>>({});
+  const estimatedPageHeightsRef = useRef<Record<string, EstimatedPageHeightEntry>>(
+    {},
+  );
   const shouldKeepBottomAfterLayoutRef = useRef(false);
   const isDetachedFromBottomRef = useRef(false);
   const skipNextMountedPrependRestoreRef = useRef(false);
@@ -291,6 +320,7 @@ export function VirtualizedConversationMessageList({
   const pendingIdleCompactionTimerRef = useRef<number | null>(null);
   const pendingProgrammaticViewportSyncRef = useRef(false);
   const renderedListRef = useRef<HTMLDivElement | null>(null);
+  const hasUserScrollInteractionRef = useRef(false);
 
   const [viewport, setViewport] = useState({
     height: DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
@@ -441,10 +471,26 @@ export function VirtualizedConversationMessageList({
 
   const pageHeights = useMemo(
     () =>
-      pages.map(
-        (page) => pageHeightsRef.current[page.key] ?? estimatePageHeight(page, estimateMessageHeight),
-      ),
-    [estimateMessageHeight, layoutVersion, pages],
+      pages.map((page) => {
+        const measuredHeight = pageHeightsRef.current[page.key];
+        if (measuredHeight !== undefined) {
+          return measuredHeight;
+        }
+
+        const cacheKey = buildPageEstimateCacheKey(page, viewportWidth);
+        const cachedEstimate = estimatedPageHeightsRef.current[page.key];
+        if (cachedEstimate?.cacheKey === cacheKey) {
+          return cachedEstimate.height;
+        }
+
+        const estimatedHeight = estimatePageHeight(page, estimateMessageHeight);
+        estimatedPageHeightsRef.current[page.key] = {
+          cacheKey,
+          height: estimatedHeight,
+        };
+        return estimatedHeight;
+      }),
+    [estimateMessageHeight, layoutVersion, pages, viewportWidth],
   );
   const pageLayout = useMemo(() => buildPageLayout(pageHeights), [pageHeights]);
   const effectiveTotalHeight =
@@ -762,6 +808,11 @@ export function VirtualizedConversationMessageList({
     pageHeightsRef.current = Object.fromEntries(
       Object.entries(pageHeightsRef.current).filter(([pageKey]) => pageKeys.has(pageKey)),
     );
+    estimatedPageHeightsRef.current = Object.fromEntries(
+      Object.entries(estimatedPageHeightsRef.current).filter(([pageKey]) =>
+        pageKeys.has(pageKey),
+      ),
+    );
   }, [pageKeys]);
 
   useLayoutEffect(() => {
@@ -833,13 +884,6 @@ export function VirtualizedConversationMessageList({
       if (lastUserScrollKindRef.current === "seek" && viewportEscapedMountedBand) {
         setMountedPageRange(workingMountedPageRange);
       }
-      return;
-    }
-
-    if (
-      pendingDeferredLayoutAnchorRef.current &&
-      rangeContainsRange(mountedPageRange, visiblePageRange)
-    ) {
       return;
     }
 
@@ -1028,6 +1072,12 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
+    if (hasUserScrollInteractionRef.current) {
+      shouldKeepBottomAfterLayoutRef.current = false;
+      setIsMeasuringPostActivation(false);
+      return;
+    }
+
     if (isDetachedFromBottomRef.current) {
       setIsMeasuringPostActivation(false);
       return;
@@ -1055,6 +1105,11 @@ export function VirtualizedConversationMessageList({
     }
 
     const timeoutId = window.setTimeout(() => {
+      if (hasUserScrollInteractionRef.current) {
+        shouldKeepBottomAfterLayoutRef.current = false;
+        setIsMeasuringPostActivation(false);
+        return;
+      }
       if (isDetachedFromBottomRef.current) {
         setIsMeasuringPostActivation(false);
         return;
@@ -1085,6 +1140,10 @@ export function VirtualizedConversationMessageList({
 
     const node = scrollContainerRef.current;
     if (!node) {
+      return;
+    }
+    if (hasUserScrollInteractionRef.current && !isScrollContainerNearBottom(node)) {
+      shouldKeepBottomAfterLayoutRef.current = false;
       return;
     }
 
@@ -1119,11 +1178,12 @@ export function VirtualizedConversationMessageList({
           const scrollDelta = node.scrollTop - lastNativeScrollTopRef.current;
           lastNativeScrollTopRef.current = node.scrollTop;
           if (lastUserScrollKindRef.current === null) {
-            lastUserScrollKindRef.current = classifyScrollKind(
+          lastUserScrollKindRef.current = classifyScrollKind(
               scrollDelta,
               node.clientHeight,
             );
           }
+          hasUserScrollInteractionRef.current = true;
           lastUserScrollInputTimeRef.current = performance.now();
           scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
           reconcileMountedRangeForNativeScroll(
@@ -1185,6 +1245,7 @@ export function VirtualizedConversationMessageList({
         : isPageJumpKeyboardNavigation
           ? "page_jump"
           : "incremental";
+      hasUserScrollInteractionRef.current = true;
       lastUserScrollInputTimeRef.current = performance.now();
       scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
     };
@@ -1311,6 +1372,9 @@ export function VirtualizedConversationMessageList({
       pageHeightsRef.current[pageKey] = roundedHeight;
 
       const node = scrollContainerRef.current;
+      if (node && hasUserScrollInteractionRef.current && !isScrollContainerNearBottom(node)) {
+        shouldKeepBottomAfterLayoutRef.current = false;
+      }
       const shouldKeepBottom =
         isActive && node
           ? !isDetachedFromBottomRef.current &&
@@ -1323,12 +1387,6 @@ export function VirtualizedConversationMessageList({
       const timeSinceUserScroll = performance.now() - lastUserScrollInputTimeRef.current;
       const inUserScrollCooldown = timeSinceUserScroll < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
       if (inUserScrollCooldown) {
-        if (node && !shouldKeepBottom) {
-          pendingDeferredLayoutAnchorRef.current = captureFirstVisibleMountedMessageAnchor(
-            renderedListRef.current,
-            node,
-          );
-        }
         scheduleDeferredLayoutVersion(
           USER_SCROLL_ADJUSTMENT_COOLDOWN_MS - timeSinceUserScroll,
         );
@@ -1336,9 +1394,16 @@ export function VirtualizedConversationMessageList({
       }
 
       scheduleDeferredLayoutVersion(0);
-      if (node && shouldKeepBottom) {
+      if (node && shouldKeepBottom && !hasUserScrollInteractionRef.current) {
         window.requestAnimationFrame(() => {
           if (scrollContainerRef.current !== node) {
+            return;
+          }
+          if (
+            hasUserScrollInteractionRef.current ||
+            isDetachedFromBottomRef.current ||
+            !shouldKeepBottomAfterLayoutRef.current
+          ) {
             return;
           }
           const target = Math.max(node.scrollHeight - node.clientHeight, 0);
@@ -1391,6 +1456,7 @@ export function VirtualizedConversationMessageList({
           key={page.key}
           isActive={isActive}
           page={page}
+          preferImmediateHeavyRender={!isMeasuringPostActivation}
           renderMessageCard={renderMessageCard}
           conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
           conversationSearchActiveItemKey={conversationSearchActiveItemKey}
@@ -1412,6 +1478,7 @@ export function VirtualizedConversationMessageList({
 const MeasuredPageBand = memo(function MeasuredPageBand({
   isActive,
   page,
+  preferImmediateHeavyRender,
   renderMessageCard,
   conversationSearchMatchedItemKeys,
   conversationSearchActiveItemKey,
@@ -1424,6 +1491,7 @@ const MeasuredPageBand = memo(function MeasuredPageBand({
 }: {
   isActive: boolean;
   page: MessagePage;
+  preferImmediateHeavyRender: boolean;
   renderMessageCard: RenderMessageCard;
   conversationSearchMatchedItemKeys: ReadonlySet<string>;
   conversationSearchActiveItemKey?: string | null;
@@ -1514,7 +1582,7 @@ const MeasuredPageBand = memo(function MeasuredPageBand({
             >
               {renderMessageCard(
                 message,
-                true,
+                preferImmediateHeavyRender,
                 onApprovalDecision,
                 onUserInputSubmit,
                 onMcpElicitationSubmit,

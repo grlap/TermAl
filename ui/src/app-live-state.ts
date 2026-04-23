@@ -62,6 +62,10 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  syncComposerSessionsStore,
+  upsertSessionStoreSession,
+} from "./session-store";
+import {
   ApiRequestError,
   fetchSession,
   fetchState,
@@ -190,6 +194,10 @@ export type UseAppLiveStateAdoptionRefs = {
   latestStateRevisionRef: MutableRefObject<number | null>;
   lastSeenServerInstanceIdRef: MutableRefObject<string | null>;
   sessionsRef: MutableRefObject<Session[]>;
+  draftsBySessionIdRef: MutableRefObject<Record<string, string>>;
+  draftAttachmentsBySessionIdRef: MutableRefObject<
+    Record<string, DraftImageAttachment[]>
+  >;
   codexStateRef: MutableRefObject<CodexState>;
   agentReadinessRef: MutableRefObject<AgentReadiness[]>;
   projectsRef: MutableRefObject<Project[]>;
@@ -338,6 +346,8 @@ export function useAppLiveState(
     latestStateRevisionRef,
     lastSeenServerInstanceIdRef,
     sessionsRef,
+    draftsBySessionIdRef,
+    draftAttachmentsBySessionIdRef,
     codexStateRef,
     agentReadinessRef,
     projectsRef,
@@ -411,6 +421,22 @@ export function useAppLiveState(
     (sessions: Session[], now?: number) => void
   >(() => {});
 
+  function syncSessionSlices(nextSessions: readonly Session[]) {
+    syncComposerSessionsStore({
+      sessions: nextSessions,
+      draftsBySessionId: draftsBySessionIdRef.current,
+      draftAttachmentsBySessionId: draftAttachmentsBySessionIdRef.current,
+    });
+  }
+
+  function upsertSessionSlice(session: Session) {
+    upsertSessionStoreSession({
+      session,
+      committedDraft: draftsBySessionIdRef.current[session.id] ?? "",
+      draftAttachments: draftAttachmentsBySessionIdRef.current[session.id] ?? [],
+    });
+  }
+
   function adoptSessions(
     nextSessions: Session[],
     options?: AdoptSessionsOptions,
@@ -455,65 +481,93 @@ export function useAppLiveState(
       mergedSessions !== previousSessions || canOpenPendingSession;
 
     sessionsRef.current = mergedSessions;
-    if (mergedSessions !== previousSessions) {
-      setSessions(mergedSessions);
-    }
-    if (shouldReconcileWorkspace) {
-      setWorkspace((current) => {
-        const reconciled =
-          mergedSessions !== previousSessions
-            ? applyControlPanelLayout(
-                reconcileWorkspaceState(current, mergedSessions),
-              )
-            : current;
-        if (!canOpenPendingSession || !pendingOpenSessionId) {
-          return reconciled;
-        }
+    syncSessionSlices(mergedSessions);
+    startTransition(() => {
+      if (mergedSessions !== previousSessions) {
+        setSessions(mergedSessions);
+      }
+      if (shouldReconcileWorkspace) {
+        setWorkspace((current) => {
+          const reconciled =
+            mergedSessions !== previousSessions
+              ? applyControlPanelLayout(
+                  reconcileWorkspaceState(current, mergedSessions),
+                )
+              : current;
+          if (!canOpenPendingSession || !pendingOpenSessionId) {
+            return reconciled;
+          }
 
-        return applyControlPanelLayout(
-          openSessionInWorkspaceState(
-            reconciled,
-            pendingOpenSessionId,
-            pendingPaneId,
+          return applyControlPanelLayout(
+            openSessionInWorkspaceState(
+              reconciled,
+              pendingOpenSessionId,
+              pendingPaneId,
+            ),
+          );
+        });
+      }
+      if (hasRemovedSessions) {
+        setDraftsBySessionId((current) =>
+          pruneSessionValues(current, availableSessionIds),
+        );
+        setDraftAttachmentsBySessionId((current) =>
+          pruneSessionAttachmentValues(current, availableSessionIds),
+        );
+        setSendingSessionIds((current) =>
+          pruneSessionFlags(current, availableSessionIds),
+        );
+        setStoppingSessionIds((current) =>
+          pruneSessionFlags(current, availableSessionIds),
+        );
+        setKillingSessionIds((current) =>
+          pruneSessionFlags(current, availableSessionIds),
+        );
+        setKillRevealSessionId((current) =>
+          current && availableSessionIds.has(current) ? current : null,
+        );
+        setPendingKillSessionId((current) =>
+          current && availableSessionIds.has(current) ? current : null,
+        );
+        setPendingSessionRename((current) =>
+          current && availableSessionIds.has(current.sessionId) ? current : null,
+        );
+        setUpdatingSessionIds((current) =>
+          pruneSessionFlags(current, availableSessionIds),
+        );
+        setSessionSettingNotices((current) =>
+          pruneSessionValues(current, availableSessionIds),
+        );
+      }
+      if (hasRemovedSessions || hasWorkdirInvalidations) {
+        setAgentCommandsBySessionId((current) =>
+          pruneSessionCommandValues(
+            current,
+            availableSessionIds,
+            sessionsWithChangedWorkdir,
           ),
         );
-      });
-    }
+        setRefreshingAgentCommandSessionIds((current) =>
+          pruneSessionFlagsWithInvalidation(
+            current,
+            availableSessionIds,
+            sessionsWithChangedWorkdir,
+          ),
+        );
+        setAgentCommandErrors((current) =>
+          pruneSessionValues(
+            current,
+            availableSessionIds,
+            sessionsWithChangedWorkdir,
+          ),
+        );
+      }
+    });
     if (canOpenPendingSession) {
       pendingRecoveryOpenSessionIdRef.current = undefined;
       pendingRecoveryPaneIdRef.current = undefined;
     }
     if (hasRemovedSessions) {
-      setDraftsBySessionId((current) =>
-        pruneSessionValues(current, availableSessionIds),
-      );
-      setDraftAttachmentsBySessionId((current) =>
-        pruneSessionAttachmentValues(current, availableSessionIds),
-      );
-      setSendingSessionIds((current) =>
-        pruneSessionFlags(current, availableSessionIds),
-      );
-      setStoppingSessionIds((current) =>
-        pruneSessionFlags(current, availableSessionIds),
-      );
-      setKillingSessionIds((current) =>
-        pruneSessionFlags(current, availableSessionIds),
-      );
-      setKillRevealSessionId((current) =>
-        current && availableSessionIds.has(current) ? current : null,
-      );
-      setPendingKillSessionId((current) =>
-        current && availableSessionIds.has(current) ? current : null,
-      );
-      setPendingSessionRename((current) =>
-        current && availableSessionIds.has(current.sessionId) ? current : null,
-      );
-      setUpdatingSessionIds((current) =>
-        pruneSessionFlags(current, availableSessionIds),
-      );
-      setSessionSettingNotices((current) =>
-        pruneSessionValues(current, availableSessionIds),
-      );
       hydratingSessionIdsRef.current = new Set(
         [...hydratingSessionIdsRef.current].filter((sessionId) =>
           availableSessionIds.has(sessionId),
@@ -526,33 +580,12 @@ export function useAppLiveState(
       );
     }
     if (hasRemovedSessions || hasWorkdirInvalidations) {
-      setAgentCommandsBySessionId((current) =>
-        pruneSessionCommandValues(
-          current,
-          availableSessionIds,
-          sessionsWithChangedWorkdir,
-        ),
-      );
-      setRefreshingAgentCommandSessionIds((current) =>
-        pruneSessionFlagsWithInvalidation(
-          current,
-          availableSessionIds,
-          sessionsWithChangedWorkdir,
-        ),
-      );
       refreshingAgentCommandSessionIdsRef.current =
         pruneSessionFlagsWithInvalidation(
           refreshingAgentCommandSessionIdsRef.current,
           availableSessionIds,
           sessionsWithChangedWorkdir,
         );
-      setAgentCommandErrors((current) =>
-        pruneSessionValues(
-          current,
-          availableSessionIds,
-          sessionsWithChangedWorkdir,
-        ),
-      );
     }
     const availableUnknownModelKeys =
       buildUnknownModelConfirmationKeySet(mergedSessions);
@@ -626,6 +659,7 @@ export function useAppLiveState(
       lastSeenServerInstanceIdRef.current = created.serverInstanceId;
     }
     sessionsRef.current = nextSessions;
+    upsertSessionSlice(created.session);
     setSessions(nextSessions);
     setWorkspace((current) =>
       applyControlPanelLayout(
@@ -699,6 +733,7 @@ export function useAppLiveState(
       lastSeenServerInstanceIdRef.current = serverInstanceId;
     }
     sessionsRef.current = nextSessions;
+    upsertSessionSlice(hydratedSession);
     setSessions(nextSessions);
     return true;
   }
@@ -1590,6 +1625,14 @@ export function useAppLiveState(
             delta.sessions,
           );
           sessionsRef.current = nextSessions;
+          const deltaSessionIds = new Set(
+            (delta.sessions ?? []).map((session) => session.id),
+          );
+          nextSessions.forEach((session) => {
+            if (deltaSessionIds.has(session.id)) {
+              upsertSessionSlice(session);
+            }
+          });
           orchestratorsRef.current = delta.orchestrators;
           startTransition(() => {
             setOrchestrators(delta.orchestrators);
@@ -1613,6 +1656,12 @@ export function useAppLiveState(
           markLiveSessionResumeWatchdogBaseline([delta.sessionId], appliedAt);
           latestStateRevisionRef.current = delta.revision;
           sessionsRef.current = result.sessions;
+          const updatedSession =
+            result.sessions.find((session) => session.id === delta.sessionId) ??
+            null;
+          if (updatedSession) {
+            upsertSessionSlice(updatedSession);
+          }
           startTransition(() => {
             setSessions(sessionsRef.current);
           });

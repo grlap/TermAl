@@ -16,6 +16,10 @@ import {
 } from "../api";
 import { copyTextToClipboard } from "../clipboard";
 import { SESSION_DRAG_MIME_TYPE } from "../session-drag";
+import {
+  resetSessionStoreForTesting,
+  syncComposerSessionsStore,
+} from "../session-store";
 import type { WorkspaceTabDrag } from "../tab-drag";
 import { PaneTabs, type PaneTabDecoration } from "./PaneTabs";
 import { formatVisibleTabLabel } from "./pane-tab-labels";
@@ -109,6 +113,7 @@ describe("PaneTabs", () => {
 
   afterEach(() => {
     cleanup();
+    resetSessionStoreForTesting();
     if (originalResizeObserver === undefined) {
       delete (globalThis as Partial<typeof globalThis>).ResizeObserver;
     } else {
@@ -989,6 +994,12 @@ function renderPaneTabs({
   tabDecorations?: Record<string, PaneTabDecoration | undefined>;
   tabs: WorkspaceTab[];
 }) {
+  syncComposerSessionsStore({
+    draftAttachmentsBySessionId: {},
+    draftsBySessionId: {},
+    sessions: Array.from(sessionLookup.values()),
+  });
+
   return render(
     <PaneTabs
       activeTabId={tabs[0]?.id ?? null}
@@ -1004,7 +1015,6 @@ function renderPaneTabs({
       paneId="pane-1"
       projectLookup={projectLookup}
       remoteLookup={remoteLookup}
-      sessionLookup={sessionLookup}
       tabDecorations={tabDecorations}
       tabs={tabs}
       windowId="window-1"
