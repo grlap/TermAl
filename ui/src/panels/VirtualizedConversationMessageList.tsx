@@ -84,7 +84,8 @@ export type RenderMessageCard = (
 const VIRTUALIZED_MESSAGES_PER_PAGE = 8;
 const ACTIVE_MOUNTED_RESERVE_ABOVE_VIEWPORTS = 3;
 const ACTIVE_MOUNTED_RESERVE_BELOW_VIEWPORTS = 3;
-const ACTIVE_MOUNTED_EXTRA_PAGES_BELOW = 1;
+const ACTIVE_MOUNTED_EXTRA_PAGES_BELOW = 2;
+const IDLE_MOUNTED_COMPACTION_PAGE_HYSTERESIS = 2;
 const ACTIVE_VIEWPORT_STARTUP_RESYNC_FRAMES = 12;
 const USER_SCROLL_ADJUSTMENT_COOLDOWN_MS = 200;
 
@@ -275,6 +276,7 @@ export function VirtualizedConversationMessageList({
   const lastPinnedConversationSearchIdRef = useRef<string | null>(null);
   const lastUserScrollInputTimeRef = useRef(Number.NEGATIVE_INFINITY);
   const lastUserScrollKindRef = useRef<UserScrollKind>(null);
+  const pendingAggressiveIdleCompactionRef = useRef(false);
   const lastNativeScrollTopRef = useRef(0);
   const pendingProgrammaticScrollTopRef = useRef<number | null>(null);
   const pendingMountedPrependRestoreRef = useRef<{
@@ -720,6 +722,10 @@ export function VirtualizedConversationMessageList({
         return;
       }
 
+      if (scrollKind === "seek" || scrollKind === "page_jump") {
+        pendingAggressiveIdleCompactionRef.current = true;
+      }
+
       if (
         scrollKind === "incremental" &&
         nextRange.startIndex < currentRange.startIndex &&
@@ -830,6 +836,36 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
+    if (
+      pendingDeferredLayoutAnchorRef.current &&
+      rangeContainsRange(mountedPageRange, visiblePageRange)
+    ) {
+      return;
+    }
+
+    const mountedStillCoversViewport = rangeContainsRange(
+      mountedPageRange,
+      visiblePageRange,
+    );
+    const excessAbovePages = Math.max(
+      workingMountedPageRange.startIndex - mountedPageRange.startIndex,
+      0,
+    );
+    const excessBelowPages = Math.max(
+      mountedPageRange.endIndex - workingMountedPageRange.endIndex,
+      0,
+    );
+    const allowHysteresis = !pendingAggressiveIdleCompactionRef.current;
+    if (
+      allowHysteresis &&
+      mountedStillCoversViewport &&
+      excessAbovePages <= IDLE_MOUNTED_COMPACTION_PAGE_HYSTERESIS &&
+      excessBelowPages <= IDLE_MOUNTED_COMPACTION_PAGE_HYSTERESIS
+    ) {
+      return;
+    }
+
+    pendingAggressiveIdleCompactionRef.current = false;
     setMountedPageRange(workingMountedPageRange);
   }, [
     mountedPageRange,
@@ -1299,14 +1335,18 @@ export function VirtualizedConversationMessageList({
         return;
       }
 
-      bumpLayoutVersion();
+      scheduleDeferredLayoutVersion(0);
       if (node && shouldKeepBottom) {
-        const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-        writeScrollTopAndSyncViewport(node, target);
+        window.requestAnimationFrame(() => {
+          if (scrollContainerRef.current !== node) {
+            return;
+          }
+          const target = Math.max(node.scrollHeight - node.clientHeight, 0);
+          writeScrollTopAndSyncViewport(node, target);
+        });
       }
     },
     [
-      bumpLayoutVersion,
       isActive,
       scheduleDeferredLayoutVersion,
       scrollContainerRef,
@@ -1455,7 +1495,7 @@ const MeasuredPageBand = memo(function MeasuredPageBand({
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [isActive, onHeightChange, page.hasTrailingGap, page.key, page.messages]);
+  }, [isActive, onHeightChange, page.hasTrailingGap, page.key]);
 
   return (
     <div ref={pageRef} className="virtualized-message-page" data-page-key={page.key}>
