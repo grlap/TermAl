@@ -711,7 +711,10 @@ fn import_discovered_codex_threads_stamps_newly_discovered_sessions() {
             .iter()
             .find(|entry| entry.external_session_id.as_deref() == Some("thread-fresh"))
             .expect("freshly discovered thread should be imported");
-        assert_eq!(record.session.project_id.as_deref(), Some(project.id.as_str()));
+        assert_eq!(
+            record.session.project_id.as_deref(),
+            Some(project.id.as_str())
+        );
         (record.session.id.clone(), record.mutation_stamp)
     };
     assert!(

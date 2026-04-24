@@ -26,6 +26,7 @@ fn delta_event_revision(event: &DeltaEvent) -> u64 {
         | DeltaEvent::TextReplace { revision, .. }
         | DeltaEvent::CommandUpdate { revision, .. }
         | DeltaEvent::ParallelAgentsUpdate { revision, .. }
+        | DeltaEvent::CodexUpdated { revision, .. }
         | DeltaEvent::OrchestratorsUpdated { revision, .. } => *revision,
     }
 }

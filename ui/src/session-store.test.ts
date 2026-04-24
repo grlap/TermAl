@@ -6,6 +6,7 @@ import {
   resetSessionStoreForTesting,
   syncComposerDraftForSession,
   syncComposerSessionsStore,
+  syncComposerSessionsStoreIncremental,
   upsertSessionStoreSession,
 } from "./session-store";
 import type { DraftImageAttachment } from "./app-utils";
@@ -141,6 +142,34 @@ describe("session-store composer snapshots", () => {
     expect(secondSnapshot?.committedDraft).toBe("Draft update");
     expect(secondSnapshot?.draftAttachments).toHaveLength(1);
     expect(secondSnapshot?.promptHistory).toBe(firstSnapshot?.promptHistory);
+  });
+
+  it("incrementally preserves prompt history identity for assistant-only transcript churn", () => {
+    const initialSession = createSession();
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [initialSession],
+    });
+    const firstSnapshot = getComposerSessionSnapshotForTesting(initialSession.id);
+
+    const assistantOnlyUpdate = createSession({
+      messages: [
+        ...initialSession.messages,
+        createTextMessage("assistant-1", "assistant", "Still working"),
+      ],
+      preview: "Still working",
+    });
+    syncComposerSessionsStoreIncremental({
+      changedSessions: [assistantOnlyUpdate],
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+    });
+    const secondSnapshot = getComposerSessionSnapshotForTesting(initialSession.id);
+
+    expect(secondSnapshot).toBe(firstSnapshot);
+    expect(secondSnapshot?.promptHistory).toEqual(["First prompt"]);
   });
 
   it("patches only the targeted draft slice without replacing the session record", () => {
@@ -344,6 +373,43 @@ describe("session-store record snapshots", () => {
     );
   });
 
+  it("incrementally updates only the targeted session slices", () => {
+    const firstSession = createSession();
+    const secondSession = createSession({
+      id: "session-2",
+      name: "Other session",
+    });
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [firstSession, secondSession],
+    });
+    const firstRecord = getSessionRecordSnapshotForTesting(firstSession.id);
+    const firstSummary = getSessionSummarySnapshotForTesting(firstSession.id);
+    const secondRecord = getSessionRecordSnapshotForTesting(secondSession.id);
+
+    const updatedSecondSession = {
+      ...secondSession,
+      status: "active" as const,
+    };
+    syncComposerSessionsStoreIncremental({
+      changedSessions: [updatedSecondSession],
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+    });
+
+    expect(getSessionRecordSnapshotForTesting(firstSession.id)).toBe(firstRecord);
+    expect(getSessionSummarySnapshotForTesting(firstSession.id)).toBe(firstSummary);
+    expect(getSessionRecordSnapshotForTesting(secondSession.id)).not.toBe(secondRecord);
+    expect(getSessionRecordSnapshotForTesting(secondSession.id)).toBe(
+      updatedSecondSession,
+    );
+    expect(getSessionSummarySnapshotForTesting(secondSession.id)?.status).toBe(
+      "active",
+    );
+  });
+
   it("prunes removed sessions from the record slice", () => {
     const initialSession = createSession();
 
@@ -361,5 +427,33 @@ describe("session-store record snapshots", () => {
     });
 
     expect(getSessionRecordSnapshotForTesting(initialSession.id)).toBeNull();
+  });
+
+  it("incrementally prunes removed sessions from every store slice", () => {
+    const firstSession = createSession();
+    const secondSession = createSession({
+      id: "session-2",
+      name: "Other session",
+    });
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [firstSession, secondSession],
+    });
+
+    syncComposerSessionsStoreIncremental({
+      changedSessions: [],
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      removedSessionIds: [secondSession.id],
+    });
+
+    expect(getComposerSessionSnapshotForTesting(firstSession.id)).not.toBeNull();
+    expect(getSessionRecordSnapshotForTesting(firstSession.id)).not.toBeNull();
+    expect(getSessionSummarySnapshotForTesting(firstSession.id)).not.toBeNull();
+    expect(getComposerSessionSnapshotForTesting(secondSession.id)).toBeNull();
+    expect(getSessionRecordSnapshotForTesting(secondSession.id)).toBeNull();
+    expect(getSessionSummarySnapshotForTesting(secondSession.id)).toBeNull();
   });
 });

@@ -4,7 +4,6 @@ import {
   memo,
   useContext,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -169,252 +168,281 @@ type MarkdownLineMarker = {
   top: number;
 };
 
-export const MessageCard = memo(function MessageCard({
-  appearance = "dark",
-  message,
-  onOpenDiffPreview,
-  onOpenSourceLink,
-  preferImmediateHeavyRender = false,
-  onApprovalDecision,
-  onUserInputSubmit,
-  onMcpElicitationSubmit = NOOP_MCP_ELICITATION_SUBMIT,
-  onCodexAppRequestSubmit = NOOP_CODEX_APP_REQUEST_SUBMIT,
-  searchQuery = "",
-  searchHighlightTone = "match",
-  isLatestAssistantMessage = true,
-  workspaceRoot = null,
-}: {
-  appearance?: MonacoAppearance;
-  message: Message;
-  onOpenDiffPreview?: (message: DiffMessage) => void;
-  onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
-  preferImmediateHeavyRender?: boolean;
-  onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
-  onUserInputSubmit: (messageId: string, answers: Record<string, string[]>) => void;
-  onMcpElicitationSubmit?: (
-    messageId: string,
-    action: McpElicitationAction,
-    content?: JsonValue,
-  ) => void;
-  onCodexAppRequestSubmit?: (messageId: string, result: JsonValue) => void;
-  searchQuery?: string;
-  searchHighlightTone?: SearchHighlightTone;
-  // When false, `ConnectionRetryCard` renders the resolved (static, past-tense)
-  // variant because later assistant output exists and the reconnect obviously
-  // succeeded. Defaults to true so tests and callers that have not opted in
-  // keep the pre-existing "live spinner" behaviour.
-  isLatestAssistantMessage?: boolean;
-  workspaceRoot?: string | null;
-}) {
-  switch (message.type) {
-    case "text": {
-      const connectionRetryNotice =
-        message.author === "assistant" ? parseConnectionRetryNotice(message.text) : null;
-      const commandLabel =
-        message.author === "you"
-          ? promptCommandMetaLabel(message.text, message.expandedText)
-          : null;
+export const MessageCard = memo(
+  function MessageCard({
+    appearance = "dark",
+    message,
+    onOpenDiffPreview,
+    onOpenSourceLink,
+    preferImmediateHeavyRender = false,
+    preferStreamingPlainTextRender = false,
+    onApprovalDecision,
+    onUserInputSubmit,
+    onMcpElicitationSubmit = NOOP_MCP_ELICITATION_SUBMIT,
+    onCodexAppRequestSubmit = NOOP_CODEX_APP_REQUEST_SUBMIT,
+    searchQuery = "",
+    searchHighlightTone = "match",
+    isLatestAssistantMessage = true,
+    workspaceRoot = null,
+  }: {
+    appearance?: MonacoAppearance;
+    message: Message;
+    onOpenDiffPreview?: (message: DiffMessage) => void;
+    onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
+    preferImmediateHeavyRender?: boolean;
+    preferStreamingPlainTextRender?: boolean;
+    onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
+    onUserInputSubmit: (
+      messageId: string,
+      answers: Record<string, string[]>,
+    ) => void;
+    onMcpElicitationSubmit?: (
+      messageId: string,
+      action: McpElicitationAction,
+      content?: JsonValue,
+    ) => void;
+    onCodexAppRequestSubmit?: (messageId: string, result: JsonValue) => void;
+    searchQuery?: string;
+    searchHighlightTone?: SearchHighlightTone;
+    // When false, `ConnectionRetryCard` renders the resolved (static, past-tense)
+    // variant because later assistant output exists and the reconnect obviously
+    // succeeded. Defaults to true so tests and callers that have not opted in
+    // keep the pre-existing "live spinner" behaviour.
+    isLatestAssistantMessage?: boolean;
+    workspaceRoot?: string | null;
+  }) {
+    switch (message.type) {
+      case "text": {
+        const connectionRetryNotice =
+          message.author === "assistant"
+            ? parseConnectionRetryNotice(message.text)
+            : null;
+        const commandLabel =
+          message.author === "you"
+            ? promptCommandMetaLabel(message.text, message.expandedText)
+            : null;
+        const shouldPreferStreamingPlainTextRender =
+          preferStreamingPlainTextRender &&
+          message.author === "assistant" &&
+          searchQuery.trim().length === 0;
 
-      if (connectionRetryNotice) {
-        return (
-          <ConnectionRetryCard
-            message={message}
-            notice={connectionRetryNotice}
-            searchQuery={searchQuery}
-            searchHighlightTone={searchHighlightTone}
-            isLive={isLatestAssistantMessage}
-          />
-        );
-      }
-
-      return (
-        <article className={`message-card bubble bubble-${message.author}`}>
-          <MessageMeta
-            author={message.author}
-            timestamp={message.timestamp}
-            trailing={
-              commandLabel ? <span className="message-meta-tag">{commandLabel}</span> : undefined
-            }
-          />
-          {message.attachments && message.attachments.length > 0 ? (
-            <MessageAttachmentList
-              attachments={message.attachments}
+        if (connectionRetryNotice) {
+          return (
+            <ConnectionRetryCard
+              message={message}
+              notice={connectionRetryNotice}
               searchQuery={searchQuery}
               searchHighlightTone={searchHighlightTone}
+              isLive={isLatestAssistantMessage}
             />
-          ) : null}
-          {message.author === "assistant" ? (
-            preferImmediateHeavyRender ? (
-              <MarkdownContent
-                appearance={appearance}
-                markdown={message.text}
-                onOpenSourceLink={onOpenSourceLink}
+          );
+        }
+
+        return (
+          <article className={`message-card bubble bubble-${message.author}`}>
+            <MessageMeta
+              author={message.author}
+              timestamp={message.timestamp}
+              trailing={
+                commandLabel ? (
+                  <span className="message-meta-tag">{commandLabel}</span>
+                ) : undefined
+              }
+            />
+            {message.attachments && message.attachments.length > 0 ? (
+              <MessageAttachmentList
+                attachments={message.attachments}
                 searchQuery={searchQuery}
                 searchHighlightTone={searchHighlightTone}
-                workspaceRoot={workspaceRoot}
               />
-            ) : (
-              <DeferredMarkdownContent
-                appearance={appearance}
-                markdown={message.text}
-                onOpenSourceLink={onOpenSourceLink}
-                searchQuery={searchQuery}
-                searchHighlightTone={searchHighlightTone}
-                workspaceRoot={workspaceRoot}
-              />
-            )
-          ) : message.text ? (
-            <>
-              <p className="plain-text-copy">
-                {renderHighlightedText(message.text, searchQuery, searchHighlightTone)}
-              </p>
-              {message.expandedText ? (
-                <ExpandedPromptPanel
-                  expandedText={message.expandedText}
-                  storageKey={message.id}
+            ) : null}
+            {message.author === "assistant" ? (
+              shouldPreferStreamingPlainTextRender ? (
+                <StreamingAssistantTextShell text={message.text} />
+              ) : preferImmediateHeavyRender ? (
+                <MarkdownContent
+                  appearance={appearance}
+                  markdown={message.text}
+                  onOpenSourceLink={onOpenSourceLink}
                   searchQuery={searchQuery}
                   searchHighlightTone={searchHighlightTone}
+                  workspaceRoot={workspaceRoot}
                 />
-              ) : null}
-            </>
-          ) : (
-            <p className="support-copy">{imageAttachmentSummaryLabel(message.attachments?.length ?? 0)}</p>
-          )}
-        </article>
-      );
+              ) : (
+                <DeferredMarkdownContent
+                  appearance={appearance}
+                  markdown={message.text}
+                  onOpenSourceLink={onOpenSourceLink}
+                  searchQuery={searchQuery}
+                  searchHighlightTone={searchHighlightTone}
+                  workspaceRoot={workspaceRoot}
+                />
+              )
+            ) : message.text ? (
+              <>
+                <p className="plain-text-copy">
+                  {renderHighlightedText(
+                    message.text,
+                    searchQuery,
+                    searchHighlightTone,
+                  )}
+                </p>
+                {message.expandedText ? (
+                  <ExpandedPromptPanel
+                    expandedText={message.expandedText}
+                    storageKey={message.id}
+                    searchQuery={searchQuery}
+                    searchHighlightTone={searchHighlightTone}
+                  />
+                ) : null}
+              </>
+            ) : (
+              <p className="support-copy">
+                {imageAttachmentSummaryLabel(message.attachments?.length ?? 0)}
+              </p>
+            )}
+          </article>
+        );
+      }
+      case "thinking":
+        return (
+          <ThinkingCard
+            appearance={appearance}
+            message={message}
+            onOpenSourceLink={onOpenSourceLink}
+            preferImmediateHeavyRender={preferImmediateHeavyRender}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+            workspaceRoot={workspaceRoot}
+          />
+        );
+      case "command":
+        return (
+          <CommandCard
+            message={message}
+            preferImmediateHeavyRender={preferImmediateHeavyRender}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+          />
+        );
+      case "diff":
+        return (
+          <DiffCard
+            message={message}
+            onOpenPreview={() => onOpenDiffPreview?.(message)}
+            preferImmediateHeavyRender={preferImmediateHeavyRender}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+            workspaceRoot={workspaceRoot}
+          />
+        );
+      case "markdown":
+        return (
+          <MarkdownCard
+            appearance={appearance}
+            message={message}
+            onOpenSourceLink={onOpenSourceLink}
+            preferImmediateHeavyRender={preferImmediateHeavyRender}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+            workspaceRoot={workspaceRoot}
+          />
+        );
+      case "parallelAgents":
+        return (
+          <ParallelAgentsCard
+            message={message}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+          />
+        );
+      case "fileChanges":
+        return (
+          <FileChangesCard
+            message={message}
+            onOpenSourceLink={onOpenSourceLink}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+            workspaceRoot={workspaceRoot}
+          />
+        );
+      case "subagentResult":
+        return (
+          <SubagentResultCard
+            appearance={appearance}
+            message={message}
+            onOpenSourceLink={onOpenSourceLink}
+            preferImmediateHeavyRender={preferImmediateHeavyRender}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+            workspaceRoot={workspaceRoot}
+          />
+        );
+      case "approval":
+        return (
+          <ApprovalCard
+            message={message}
+            onApprovalDecision={onApprovalDecision}
+            preferImmediateHeavyRender={preferImmediateHeavyRender}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+          />
+        );
+      case "userInputRequest":
+        return (
+          <UserInputRequestCard
+            message={message}
+            onSubmit={onUserInputSubmit}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+          />
+        );
+      case "mcpElicitationRequest":
+        return (
+          <McpElicitationRequestCard
+            message={message}
+            onSubmit={onMcpElicitationSubmit}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+          />
+        );
+      case "codexAppRequest":
+        return (
+          <CodexAppRequestCard
+            message={message}
+            onSubmit={onCodexAppRequestSubmit}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+          />
+        );
+      default:
+        return null;
     }
-    case "thinking":
-      return (
-        <ThinkingCard
-          appearance={appearance}
-          message={message}
-          onOpenSourceLink={onOpenSourceLink}
-          preferImmediateHeavyRender={preferImmediateHeavyRender}
-          searchQuery={searchQuery}
-          searchHighlightTone={searchHighlightTone}
-          workspaceRoot={workspaceRoot}
-        />
-      );
-    case "command":
-      return (
-        <CommandCard
-          message={message}
-          preferImmediateHeavyRender={preferImmediateHeavyRender}
-          searchQuery={searchQuery}
-          searchHighlightTone={searchHighlightTone}
-        />
-      );
-    case "diff":
-      return (
-        <DiffCard
-          message={message}
-          onOpenPreview={() => onOpenDiffPreview?.(message)}
-          preferImmediateHeavyRender={preferImmediateHeavyRender}
-          searchQuery={searchQuery}
-          searchHighlightTone={searchHighlightTone}
-          workspaceRoot={workspaceRoot}
-        />
-      );
-    case "markdown":
-      return (
-        <MarkdownCard
-          appearance={appearance}
-          message={message}
-          onOpenSourceLink={onOpenSourceLink}
-          preferImmediateHeavyRender={preferImmediateHeavyRender}
-          searchQuery={searchQuery}
-          searchHighlightTone={searchHighlightTone}
-          workspaceRoot={workspaceRoot}
-        />
-      );
-    case "parallelAgents":
-      return (
-        <ParallelAgentsCard
-          message={message}
-          searchQuery={searchQuery}
-          searchHighlightTone={searchHighlightTone}
-        />
-      );
-    case "fileChanges":
-      return (
-        <FileChangesCard
-          message={message}
-          onOpenSourceLink={onOpenSourceLink}
-          searchQuery={searchQuery}
-          searchHighlightTone={searchHighlightTone}
-          workspaceRoot={workspaceRoot}
-        />
-      );
-    case "subagentResult":
-      return (
-        <SubagentResultCard
-          appearance={appearance}
-          message={message}
-          onOpenSourceLink={onOpenSourceLink}
-          preferImmediateHeavyRender={preferImmediateHeavyRender}
-          searchQuery={searchQuery}
-          searchHighlightTone={searchHighlightTone}
-          workspaceRoot={workspaceRoot}
-        />
-      );
-    case "approval":
-      return (
-        <ApprovalCard
-          message={message}
-          onApprovalDecision={onApprovalDecision}
-          preferImmediateHeavyRender={preferImmediateHeavyRender}
-          searchQuery={searchQuery}
-          searchHighlightTone={searchHighlightTone}
-        />
-      );
-    case "userInputRequest":
-      return (
-        <UserInputRequestCard
-          message={message}
-          onSubmit={onUserInputSubmit}
-          searchQuery={searchQuery}
-          searchHighlightTone={searchHighlightTone}
-        />
-      );
-    case "mcpElicitationRequest":
-      return (
-        <McpElicitationRequestCard
-          message={message}
-          onSubmit={onMcpElicitationSubmit}
-          searchQuery={searchQuery}
-          searchHighlightTone={searchHighlightTone}
-        />
-      );
-    case "codexAppRequest":
-      return (
-        <CodexAppRequestCard
-          message={message}
-          onSubmit={onCodexAppRequestSubmit}
-          searchQuery={searchQuery}
-          searchHighlightTone={searchHighlightTone}
-        />
-      );
-    default:
-      return null;
-  }
-}, (previous, next) =>
-  previous.appearance === next.appearance &&
-  previous.message === next.message &&
-  previous.onOpenDiffPreview === next.onOpenDiffPreview &&
-  previous.onOpenSourceLink === next.onOpenSourceLink &&
-  previous.preferImmediateHeavyRender === next.preferImmediateHeavyRender &&
-  previous.onApprovalDecision === next.onApprovalDecision &&
-  previous.onUserInputSubmit === next.onUserInputSubmit &&
-  previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
-  previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
-  previous.searchQuery === next.searchQuery &&
-  previous.searchHighlightTone === next.searchHighlightTone &&
-  previous.isLatestAssistantMessage === next.isLatestAssistantMessage &&
-  previous.workspaceRoot === next.workspaceRoot
+  },
+  (previous, next) =>
+    previous.appearance === next.appearance &&
+    previous.message === next.message &&
+    previous.onOpenDiffPreview === next.onOpenDiffPreview &&
+    previous.onOpenSourceLink === next.onOpenSourceLink &&
+    previous.preferImmediateHeavyRender === next.preferImmediateHeavyRender &&
+    previous.preferStreamingPlainTextRender ===
+      next.preferStreamingPlainTextRender &&
+    previous.onApprovalDecision === next.onApprovalDecision &&
+    previous.onUserInputSubmit === next.onUserInputSubmit &&
+    previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
+    previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
+    previous.searchQuery === next.searchQuery &&
+    previous.searchHighlightTone === next.searchHighlightTone &&
+    previous.isLatestAssistantMessage === next.isLatestAssistantMessage &&
+    previous.workspaceRoot === next.workspaceRoot,
 );
 
 function promptCommandMetaLabel(text: string, expandedText?: string | null) {
   return expandedText && text.trim().startsWith("/") ? "Command" : null;
+}
+
+function StreamingAssistantTextShell({ text }: { text: string }) {
+  return <p className="plain-text-copy">{text}</p>;
 }
 
 function ConnectionRetryCard({
@@ -457,7 +485,10 @@ function ConnectionRetryCard({
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="connection-notice-body">
         {isLive ? (
-          <div className="activity-spinner connection-notice-spinner" aria-hidden="true" />
+          <div
+            className="activity-spinner connection-notice-spinner"
+            aria-hidden="true"
+          />
         ) : null}
         <div className="connection-notice-copy">
           <div className="card-label">Connection</div>
@@ -488,13 +519,24 @@ function MessageAttachmentList({
   return (
     <div className="message-attachment-list">
       {attachments.map((attachment, index) => (
-        <div key={`${attachment.fileName}-${attachment.byteSize}-${index}`} className="message-attachment-chip">
+        <div
+          key={`${attachment.fileName}-${attachment.byteSize}-${index}`}
+          className="message-attachment-chip"
+        >
           <strong className="message-attachment-name">
-            {renderHighlightedText(attachment.fileName, searchQuery, searchHighlightTone)}
+            {renderHighlightedText(
+              attachment.fileName,
+              searchQuery,
+              searchHighlightTone,
+            )}
           </strong>
           <span className="message-attachment-meta">
             {formatByteSize(attachment.byteSize)} {"\u00b7"}{" "}
-            {renderHighlightedText(attachment.mediaType, searchQuery, searchHighlightTone)}
+            {renderHighlightedText(
+              attachment.mediaType,
+              searchQuery,
+              searchHighlightTone,
+            )}
           </span>
         </div>
       ))}
@@ -528,6 +570,22 @@ function MessageMeta({
   );
 }
 
+const DeferredHeavyContentActivationContext = createContext(true);
+
+export function DeferredHeavyContentActivationProvider({
+  allowActivation,
+  children,
+}: {
+  allowActivation: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <DeferredHeavyContentActivationContext.Provider value={allowActivation}>
+      {children}
+    </DeferredHeavyContentActivationContext.Provider>
+  );
+}
+
 function DeferredHeavyContent({
   children,
   estimatedHeight,
@@ -540,41 +598,14 @@ function DeferredHeavyContent({
   preferImmediateRender?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [isActivated, setIsActivated] = useState(false);
-
-  useLayoutEffect(() => {
-    if (isActivated) {
-      return;
-    }
-
-    const node = containerRef.current;
-    if (!node) {
-      return;
-    }
-
-    // Virtualized callers already limit mount to a bounded working
-    // set. Deferring heavy content on top of that only creates a
-    // placeholder-to-real-content height jump when the observer later
-    // fires, and that jump cascades into virtualized layout
-    // corrections.
-    // `ResizeObserver` on the virtualized slot → `handleHeightChange`
-    // → `setLayoutVersion` → tops recomputed for every sibling →
-    // scroll-position-visible cards shift under the user's cursor.
-    // Keep the policy explicit so callers can opt into first-paint
-    // activation without relying on CSS ancestry.
-    if (preferImmediateRender) {
-      setIsActivated(true);
-      return;
-    }
-
-    const root = resolveDeferredRenderRoot(node);
-    if (isElementNearRenderViewport(node, root, DEFERRED_RENDER_ROOT_MARGIN_PX)) {
-      setIsActivated(true);
-    }
-  }, [isActivated, preferImmediateRender]);
+  const allowDeferredActivation = useContext(
+    DeferredHeavyContentActivationContext,
+  );
+  const [isActivated, setIsActivated] = useState(() => preferImmediateRender);
+  const shouldRenderContent = preferImmediateRender || isActivated;
 
   useEffect(() => {
-    if (preferImmediateRender || isActivated) {
+    if (shouldRenderContent || !allowDeferredActivation) {
       return;
     }
 
@@ -583,16 +614,56 @@ function DeferredHeavyContent({
       return;
     }
 
-    if (typeof window === "undefined" || typeof window.IntersectionObserver === "undefined") {
+    const root = resolveDeferredRenderRoot(node);
+    if (
+      isElementNearRenderViewport(node, root, DEFERRED_RENDER_ROOT_MARGIN_PX)
+    ) {
+      const frameId = window.requestAnimationFrame(() => {
+        setIsActivated(true);
+      });
+      return () => {
+        window.cancelAnimationFrame(frameId);
+      };
+    }
+  }, [allowDeferredActivation, shouldRenderContent]);
+
+  useEffect(() => {
+    if (shouldRenderContent || !allowDeferredActivation) {
+      return;
+    }
+
+    const node = containerRef.current;
+    if (!node) {
+      return;
+    }
+
+    if (
+      typeof window === "undefined" ||
+      typeof window.IntersectionObserver === "undefined"
+    ) {
       setIsActivated(true);
       return;
     }
 
     const root = resolveDeferredRenderRoot(node);
+    let activationFrameId: number | null = null;
+    const activate = () => {
+      if (activationFrameId !== null) {
+        return;
+      }
+      activationFrameId = window.requestAnimationFrame(() => {
+        activationFrameId = null;
+        setIsActivated(true);
+      });
+    };
     const observer = new window.IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting || entry.intersectionRatio > 0)) {
-          setIsActivated(true);
+        if (
+          entries.some(
+            (entry) => entry.isIntersecting || entry.intersectionRatio > 0,
+          )
+        ) {
+          activate();
         }
       },
       {
@@ -604,21 +675,26 @@ function DeferredHeavyContent({
 
     observer.observe(node);
     return () => {
+      if (activationFrameId !== null) {
+        window.cancelAnimationFrame(activationFrameId);
+      }
       observer.disconnect();
     };
-  }, [isActivated, preferImmediateRender]);
+  }, [allowDeferredActivation, shouldRenderContent]);
 
   return (
     <div
       ref={containerRef}
       className="deferred-heavy-content"
       style={
-        isActivated
+        shouldRenderContent
           ? undefined
-          : ({ "--deferred-min-height": `${estimatedHeight}px` } as CSSProperties)
+          : ({
+              "--deferred-min-height": `${estimatedHeight}px`,
+            } as CSSProperties)
       }
     >
-      {isActivated ? children : placeholder}
+      {shouldRenderContent ? children : placeholder}
     </div>
   );
 }
@@ -646,7 +722,8 @@ function DeferredHighlightedCodeBlock({
   const showSearchHighlight = containsSearchMatch(code, searchQuery ?? "");
   const shouldDefer =
     !showSearchHighlight &&
-    (metrics.lineCount >= HEAVY_CODE_LINE_THRESHOLD || code.length >= HEAVY_CODE_CHARACTER_THRESHOLD);
+    (metrics.lineCount >= HEAVY_CODE_LINE_THRESHOLD ||
+      code.length >= HEAVY_CODE_CHARACTER_THRESHOLD);
 
   if (!shouldDefer) {
     return (
@@ -731,7 +808,9 @@ function DeferredMarkdownContent({
       preferImmediateRender={preferImmediateRender}
       placeholder={
         <div className="markdown-copy deferred-markdown-placeholder">
-          <p className="plain-text-copy">{buildMarkdownPreviewText(markdown)}</p>
+          <p className="plain-text-copy">
+            {buildMarkdownPreviewText(markdown)}
+          </p>
         </div>
       }
     >
@@ -780,7 +859,8 @@ function HighlightedCodeBlock({
       }),
     [code, commandHint, language, pathHint],
   );
-  const codeLanguage = highlighted.language ?? normalizeCodeLanguageClass(language);
+  const codeLanguage =
+    highlighted.language ?? normalizeCodeLanguageClass(language);
 
   useEffect(() => {
     if (!copied) {
@@ -825,12 +905,14 @@ function HighlightedCodeBlock({
           {copied ? <CheckIcon /> : <CopyIcon />}
         </button>
       ) : null}
-      <code className={`hljs${codeLanguage ? ` language-${codeLanguage}` : ""}`}>
-        {showSearchHighlight
-          ? renderHighlightedText(code, searchQuery, searchHighlightTone)
-          : (
-            <span dangerouslySetInnerHTML={{ __html: highlighted.html }} />
-          )}
+      <code
+        className={`hljs${codeLanguage ? ` language-${codeLanguage}` : ""}`}
+      >
+        {showSearchHighlight ? (
+          renderHighlightedText(code, searchQuery, searchHighlightTone)
+        ) : (
+          <span dangerouslySetInnerHTML={{ __html: highlighted.html }} />
+        )}
       </code>
     </pre>
   );
@@ -872,7 +954,11 @@ function MermaidDiagram({
       })
       .catch((error) => {
         if (!cancelled) {
-          setRenderState({ error: getErrorMessage(error), status: "error", svg: null });
+          setRenderState({
+            error: getErrorMessage(error),
+            status: "error",
+            svg: null,
+          });
         }
       });
 
@@ -901,14 +987,21 @@ function MermaidDiagram({
     [readySvg],
   );
   const iframeStyle = useMemo(
-    () => (readySvg === null ? undefined : getMermaidDiagramFrameStyle(readySvg)),
+    () =>
+      readySvg === null ? undefined : getMermaidDiagramFrameStyle(readySvg),
     [readySvg],
   );
 
   if (renderState.status === "error") {
     return (
-      <div className="mermaid-diagram-fallback" contentEditable={false} data-markdown-serialization="skip">
-        <p className="support-copy">Mermaid render failed: {renderState.error}</p>
+      <div
+        className="mermaid-diagram-fallback"
+        contentEditable={false}
+        data-markdown-serialization="skip"
+      >
+        <p className="support-copy">
+          Mermaid render failed: {renderState.error}
+        </p>
         {showSourceOnError ? (
           <HighlightedCodeBlock
             className="code-block"
@@ -1041,7 +1134,11 @@ function MermaidRenderBudgetFallback({
   showSource?: boolean;
 }) {
   return (
-    <div className="mermaid-diagram-fallback" contentEditable={false} data-markdown-serialization="skip">
+    <div
+      className="mermaid-diagram-fallback"
+      contentEditable={false}
+      data-markdown-serialization="skip"
+    >
       <p className="support-copy">{message}</p>
       {showSource ? (
         <HighlightedCodeBlock
@@ -1064,7 +1161,11 @@ function MermaidRenderBudgetFallback({
 // to re-import through `message-cards.tsx`.
 
 function normalizeCodeLanguageClass(language: string | null | undefined) {
-  const normalized = language?.trim().toLowerCase().replace(/^language-/, "") ?? "";
+  const normalized =
+    language
+      ?.trim()
+      .toLowerCase()
+      .replace(/^language-/, "") ?? "";
   return /^[a-z0-9_-]+$/.test(normalized) ? normalized : null;
 }
 
@@ -1091,7 +1192,9 @@ function ThinkingCard({
     <article className="message-card reasoning-card">
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">Thinking</div>
-      <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
+      <h3>
+        {renderHighlightedText(message.title, searchQuery, searchHighlightTone)}
+      </h3>
       <DeferredMarkdownContent
         appearance={appearance}
         markdown={markdown}
@@ -1118,7 +1221,9 @@ export function CommandCard({
 }) {
   const [inputExpanded, setInputExpanded] = useState(false);
   const [outputExpanded, setOutputExpanded] = useState(false);
-  const [copiedSection, setCopiedSection] = useState<"command" | "output" | null>(null);
+  const [copiedSection, setCopiedSection] = useState<
+    "command" | "output" | null
+  >(null);
   const hasOutput = message.output.trim().length > 0;
   const displayOutput = hasOutput
     ? message.output
@@ -1128,7 +1233,8 @@ export function CommandCard({
   const canExpandCommand =
     message.command.split("\n").length > 10 || message.command.length > 480;
   const canExpandOutput =
-    hasOutput && (message.output.split("\n").length > 10 || message.output.length > 480);
+    hasOutput &&
+    (message.output.split("\n").length > 10 || message.output.length > 480);
   const statusTone = mapCommandStatus(message.status);
   const isSearchExpanded = searchQuery.trim().length > 0;
   const isInputExpanded = inputExpanded || isSearchExpanded;
@@ -1163,7 +1269,9 @@ export function CommandCard({
         author={message.author}
         timestamp={message.timestamp}
         trailing={
-          <span className={`chip chip-status chip-status-${statusTone} command-status-chip`}>
+          <span
+            className={`chip chip-status chip-status-${statusTone} command-status-chip`}
+          >
             {message.status}
           </span>
         }
@@ -1174,7 +1282,9 @@ export function CommandCard({
         <div className="command-row">
           <div className="command-row-label">IN</div>
           <div className="command-row-body">
-            <div className={`command-input-shell ${isInputExpanded ? "expanded" : "collapsed"}`}>
+            <div
+              className={`command-input-shell ${isInputExpanded ? "expanded" : "collapsed"}`}
+            >
               <DeferredHighlightedCodeBlock
                 className="command-text command-text-input"
                 code={message.command}
@@ -1190,7 +1300,9 @@ export function CommandCard({
               className={`command-icon-button${copiedSection === "command" ? " copied" : ""}`}
               type="button"
               onClick={() => void handleCopy("command", message.command)}
-              aria-label={copiedSection === "command" ? "Command copied" : "Copy command"}
+              aria-label={
+                copiedSection === "command" ? "Command copied" : "Copy command"
+              }
               title={copiedSection === "command" ? "Copied" : "Copy command"}
             >
               {copiedSection === "command" ? <CheckIcon /> : <CopyIcon />}
@@ -1200,7 +1312,9 @@ export function CommandCard({
                 className="command-icon-button"
                 type="button"
                 onClick={() => setInputExpanded((open) => !open)}
-                aria-label={isInputExpanded ? "Collapse command" : "Expand command"}
+                aria-label={
+                  isInputExpanded ? "Collapse command" : "Expand command"
+                }
                 aria-pressed={isInputExpanded}
                 title={isInputExpanded ? "Collapse command" : "Expand command"}
               >
@@ -1238,7 +1352,9 @@ export function CommandCard({
               className={`command-icon-button${copiedSection === "output" ? " copied" : ""}`}
               type="button"
               onClick={() => void handleCopy("output", message.output)}
-              aria-label={copiedSection === "output" ? "Output copied" : "Copy output"}
+              aria-label={
+                copiedSection === "output" ? "Output copied" : "Copy output"
+              }
               title={copiedSection === "output" ? "Copied" : "Copy output"}
               disabled={!message.output}
             >
@@ -1249,7 +1365,9 @@ export function CommandCard({
                 className="command-icon-button"
                 type="button"
                 onClick={() => setOutputExpanded((open) => !open)}
-                aria-label={isOutputExpanded ? "Collapse output" : "Expand output"}
+                aria-label={
+                  isOutputExpanded ? "Collapse output" : "Expand output"
+                }
                 aria-pressed={isOutputExpanded}
                 title={isOutputExpanded ? "Collapse output" : "Expand output"}
               >
@@ -1281,18 +1399,25 @@ export function DiffCard({
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const diffStats = useMemo(() => {
-    const changeSummary = buildDiffPreviewModel(message.diff, message.changeType).changeSummary;
+    const changeSummary = buildDiffPreviewModel(
+      message.diff,
+      message.changeType,
+    ).changeSummary;
     return {
-      addedLineCount: changeSummary.changedLineCount + changeSummary.addedLineCount,
-      removedLineCount: changeSummary.changedLineCount + changeSummary.removedLineCount,
+      addedLineCount:
+        changeSummary.changedLineCount + changeSummary.addedLineCount,
+      removedLineCount:
+        changeSummary.changedLineCount + changeSummary.removedLineCount,
     };
   }, [message.changeType, message.diff]);
   const displayPath = useMemo(
     () => relativizePathToWorkspace(message.filePath, workspaceRoot),
     [message.filePath, workspaceRoot],
   );
-  const canExpandDiff = message.diff.split("\n").length > 14 || message.diff.length > 900;
-  const isExpanded = !canExpandDiff || expanded || searchQuery.trim().length > 0;
+  const canExpandDiff =
+    message.diff.split("\n").length > 14 || message.diff.length > 900;
+  const isExpanded =
+    !canExpandDiff || expanded || searchQuery.trim().length > 0;
 
   useEffect(() => {
     if (!copied) {
@@ -1320,7 +1445,9 @@ export function DiffCard({
   return (
     <article className="message-card utility-card diff-card">
       <MessageMeta author={message.author} timestamp={message.timestamp} />
-      <div className="card-label">{message.changeType === "create" ? "New file" : "File edit"}</div>
+      <div className="card-label">
+        {message.changeType === "create" ? "New file" : "File edit"}
+      </div>
       <div className="command-panel diff-panel">
         <div className="command-row diff-file-row">
           <div className="command-row-label diff-file-label">
@@ -1328,10 +1455,14 @@ export function DiffCard({
             {diffStats.addedLineCount > 0 || diffStats.removedLineCount > 0 ? (
               <div className="diff-file-stats">
                 {diffStats.addedLineCount > 0 ? (
-                  <span className="diff-preview-stat diff-preview-stat-added">+{diffStats.addedLineCount}</span>
+                  <span className="diff-preview-stat diff-preview-stat-added">
+                    +{diffStats.addedLineCount}
+                  </span>
                 ) : null}
                 {diffStats.removedLineCount > 0 ? (
-                  <span className="diff-preview-stat diff-preview-stat-removed">-{diffStats.removedLineCount}</span>
+                  <span className="diff-preview-stat diff-preview-stat-removed">
+                    -{diffStats.removedLineCount}
+                  </span>
                 ) : null}
               </div>
             ) : null}
@@ -1339,19 +1470,31 @@ export function DiffCard({
           <div className="command-row-body">
             <div
               className="diff-file-path"
-              title={displayPath !== message.filePath ? message.filePath : undefined}
+              title={
+                displayPath !== message.filePath ? message.filePath : undefined
+              }
             >
-              {renderHighlightedText(displayPath, searchQuery, searchHighlightTone)}
+              {renderHighlightedText(
+                displayPath,
+                searchQuery,
+                searchHighlightTone,
+              )}
             </div>
             <p className="diff-file-summary">
-              {renderHighlightedText(message.summary, searchQuery, searchHighlightTone)}
+              {renderHighlightedText(
+                message.summary,
+                searchQuery,
+                searchHighlightTone,
+              )}
             </p>
           </div>
         </div>
         <div className="command-row diff-row">
           <div className="command-row-label">DIFF</div>
           <div className="command-row-body">
-            <div className={`diff-preview-shell ${isExpanded ? "expanded" : "collapsed"}`}>
+            <div
+              className={`diff-preview-shell ${isExpanded ? "expanded" : "collapsed"}`}
+            >
               <DeferredHighlightedCodeBlock
                 className="diff-block diff-preview-text"
                 code={message.diff}
@@ -1419,7 +1562,9 @@ function FileChangesCard({
   const canExpandFiles = message.files.length > FILE_CHANGES_COLLAPSE_THRESHOLD;
   const isSearchExpanded = searchQuery.trim().length > 0;
   const isFilesExpanded = !canExpandFiles || filesExpanded || isSearchExpanded;
-  const collapseControlLabel = filesExpanded ? "Collapse changed files" : "Expand changed files";
+  const collapseControlLabel = filesExpanded
+    ? "Collapse changed files"
+    : "Expand changed files";
 
   useEffect(() => {
     if (!copiedPath) {
@@ -1463,7 +1608,11 @@ function FileChangesCard({
           <div className="command-row-label">TURN</div>
           <div className="command-row-body">
             <p className="file-changes-title">
-              {renderHighlightedText(message.title, searchQuery, searchHighlightTone)}
+              {renderHighlightedText(
+                message.title,
+                searchQuery,
+                searchHighlightTone,
+              )}
             </p>
           </div>
           {canExpandFiles && !isSearchExpanded ? (
@@ -1481,55 +1630,73 @@ function FileChangesCard({
             </div>
           ) : null}
         </div>
-        {isFilesExpanded ? message.files.map((file) => {
-          const displayPath = relativizePathToWorkspace(file.path, workspaceRoot);
-          const copied = copiedPath === file.path;
+        {isFilesExpanded
+          ? message.files.map((file) => {
+              const displayPath = relativizePathToWorkspace(
+                file.path,
+                workspaceRoot,
+              );
+              const copied = copiedPath === file.path;
 
-          return (
-            <div className="command-row file-change-row" key={`${file.kind}:${file.path}`}>
-              <div className="command-row-label">
-                <span className={`file-change-kind file-change-kind-${file.kind}`}>
-                  {fileChangeKindLabel(file.kind)}
-                </span>
-              </div>
-              <div className="command-row-body">
+              return (
                 <div
-                  className="file-change-path"
-                  title={displayPath !== file.path ? file.path : undefined}
+                  className="command-row file-change-row"
+                  key={`${file.kind}:${file.path}`}
                 >
-                  {renderHighlightedText(displayPath, searchQuery, searchHighlightTone)}
+                  <div className="command-row-label">
+                    <span
+                      className={`file-change-kind file-change-kind-${file.kind}`}
+                    >
+                      {fileChangeKindLabel(file.kind)}
+                    </span>
+                  </div>
+                  <div className="command-row-body">
+                    <div
+                      className="file-change-path"
+                      title={displayPath !== file.path ? file.path : undefined}
+                    >
+                      {renderHighlightedText(
+                        displayPath,
+                        searchQuery,
+                        searchHighlightTone,
+                      )}
+                    </div>
+                  </div>
+                  <div className="command-row-actions">
+                    <button
+                      className="command-icon-button"
+                      type="button"
+                      onClick={(event) => handleOpenPath(file.path, event)}
+                      disabled={!onOpenSourceLink}
+                      aria-label={`Open ${displayPath}`}
+                      title="Open file"
+                    >
+                      <PreviewIcon />
+                    </button>
+                    <button
+                      className={`command-icon-button${copied ? " copied" : ""}`}
+                      type="button"
+                      onClick={() => void handleCopyPath(file.path)}
+                      aria-label={
+                        copied ? "Path copied" : `Copy ${displayPath}`
+                      }
+                      title={copied ? "Copied" : "Copy path"}
+                    >
+                      {copied ? <CheckIcon /> : <CopyIcon />}
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div className="command-row-actions">
-                <button
-                  className="command-icon-button"
-                  type="button"
-                  onClick={(event) => handleOpenPath(file.path, event)}
-                  disabled={!onOpenSourceLink}
-                  aria-label={`Open ${displayPath}`}
-                  title="Open file"
-                >
-                  <PreviewIcon />
-                </button>
-                <button
-                  className={`command-icon-button${copied ? " copied" : ""}`}
-                  type="button"
-                  onClick={() => void handleCopyPath(file.path)}
-                  aria-label={copied ? "Path copied" : `Copy ${displayPath}`}
-                  title={copied ? "Copied" : "Copy path"}
-                >
-                  {copied ? <CheckIcon /> : <CopyIcon />}
-                </button>
-              </div>
-            </div>
-          );
-        }) : null}
+              );
+            })
+          : null}
       </div>
     </article>
   );
 }
 
-function fileChangeKindLabel(kind: FileChangesMessage["files"][number]["kind"]) {
+function fileChangeKindLabel(
+  kind: FileChangesMessage["files"][number]["kind"],
+) {
   switch (kind) {
     case "created":
       return "A";
@@ -1563,7 +1730,9 @@ function MarkdownCard({
     <article className="message-card markdown-card">
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">Markdown</div>
-      <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
+      <h3>
+        {renderHighlightedText(message.title, searchQuery, searchHighlightTone)}
+      </h3>
       <DeferredMarkdownContent
         appearance={appearance}
         markdown={message.markdown}
@@ -1587,7 +1756,9 @@ function parallelAgentsHeading(message: ParallelAgentsMessage) {
     return `Running ${count} ${label}`;
   }
 
-  const errorCount = message.agents.filter((agent) => agent.status === "error").length;
+  const errorCount = message.agents.filter(
+    (agent) => agent.status === "error",
+  ).length;
   if (errorCount > 0) {
     return `${count} ${label} finished with ${errorCount} error${errorCount === 1 ? "" : "s"}`;
   }
@@ -1599,8 +1770,12 @@ function parallelAgentsSummary(message: ParallelAgentsMessage) {
   const activeCount = message.agents.filter(
     (agent) => agent.status === "initializing" || agent.status === "running",
   ).length;
-  const completedCount = message.agents.filter((agent) => agent.status === "completed").length;
-  const errorCount = message.agents.filter((agent) => agent.status === "error").length;
+  const completedCount = message.agents.filter(
+    (agent) => agent.status === "completed",
+  ).length;
+  const errorCount = message.agents.filter(
+    (agent) => agent.status === "error",
+  ).length;
 
   if (activeCount > 0) {
     const parts = [];
@@ -1624,7 +1799,9 @@ function parallelAgentsSummary(message: ParallelAgentsMessage) {
   return "All task agents completed.";
 }
 
-function parallelAgentStatusLabel(status: ParallelAgentsMessage["agents"][number]["status"]) {
+function parallelAgentStatusLabel(
+  status: ParallelAgentsMessage["agents"][number]["status"],
+) {
   switch (status) {
     case "initializing":
       return "initializing";
@@ -1637,7 +1814,9 @@ function parallelAgentStatusLabel(status: ParallelAgentsMessage["agents"][number
   }
 }
 
-function parallelAgentStatusTone(status: ParallelAgentsMessage["agents"][number]["status"]) {
+function parallelAgentStatusTone(
+  status: ParallelAgentsMessage["agents"][number]["status"],
+) {
   switch (status) {
     case "initializing":
     case "running":
@@ -1682,7 +1861,9 @@ function ParallelAgentsCard({
   const summary = parallelAgentsSummary(message);
 
   return (
-    <article className={`message-card reasoning-card parallel-agents-card${isExpanded ? " is-expanded" : ""}`}>
+    <article
+      className={`message-card reasoning-card parallel-agents-card${isExpanded ? " is-expanded" : ""}`}
+    >
       <MessageMeta
         author={message.author}
         timestamp={message.timestamp}
@@ -1699,9 +1880,13 @@ function ParallelAgentsCard({
           ) : undefined
         }
       />
-      <div className="card-label parallel-agents-card-label">Parallel agents</div>
+      <div className="card-label parallel-agents-card-label">
+        Parallel agents
+      </div>
       <div className="parallel-agents-header">
-        <h3>{renderHighlightedText(heading, searchQuery, searchHighlightTone)}</h3>
+        <h3>
+          {renderHighlightedText(heading, searchQuery, searchHighlightTone)}
+        </h3>
         <span className="parallel-agents-summary">{summary}</span>
       </div>
       {isExpanded ? (
@@ -1720,7 +1905,11 @@ function ParallelAgentsCard({
                   <div className="parallel-agent-copy">
                     <div className="parallel-agent-title-row">
                       <span className="parallel-agent-title">
-                        {renderHighlightedText(agent.title, searchQuery, searchHighlightTone)}
+                        {renderHighlightedText(
+                          agent.title,
+                          searchQuery,
+                          searchHighlightTone,
+                        )}
                       </span>
                       <span
                         className={`parallel-agent-status parallel-agent-status-${parallelAgentStatusTone(agent.status)}`}
@@ -1729,7 +1918,10 @@ function ParallelAgentsCard({
                       </span>
                     </div>
                     <div className="parallel-agent-detail-row">
-                      <span className="parallel-agent-branch-child" aria-hidden="true">
+                      <span
+                        className="parallel-agent-branch-child"
+                        aria-hidden="true"
+                      >
                         {isLast ? " " : "\u2502"}
                       </span>
                       <span className="parallel-agent-detail">
@@ -1772,7 +1964,9 @@ function SubagentResultCard({
   const isExpanded = expanded || isSearchExpanded;
 
   return (
-    <article className={`message-card reasoning-card subagent-result-card${isExpanded ? " is-expanded" : ""}`}>
+    <article
+      className={`message-card reasoning-card subagent-result-card${isExpanded ? " is-expanded" : ""}`}
+    >
       <MessageMeta
         author={message.author}
         timestamp={message.timestamp}
@@ -1791,7 +1985,13 @@ function SubagentResultCard({
       {isExpanded ? (
         <>
           <div className="subagent-result-header">
-            <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
+            <h3>
+              {renderHighlightedText(
+                message.title,
+                searchQuery,
+                searchHighlightTone,
+              )}
+            </h3>
           </div>
           <DeferredMarkdownContent
             appearance={appearance}
@@ -1822,14 +2022,20 @@ function ApprovalCard({
   searchHighlightTone?: SearchHighlightTone;
 }) {
   const decided = message.decision !== "pending";
-  const chosen = (d: ApprovalDecision) => (message.decision === d ? " chosen" : "");
-  const resolvedDecision = message.decision === "pending" ? null : message.decision;
+  const chosen = (d: ApprovalDecision) =>
+    message.decision === d ? " chosen" : "";
+  const resolvedDecision =
+    message.decision === "pending" ? null : message.decision;
 
   return (
-    <article className={`message-card approval-card${decided ? " decided" : ""}`}>
+    <article
+      className={`message-card approval-card${decided ? " decided" : ""}`}
+    >
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">Approval</div>
-      <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
+      <h3>
+        {renderHighlightedText(message.title, searchQuery, searchHighlightTone)}
+      </h3>
       <DeferredHighlightedCodeBlock
         className="approval-command"
         code={message.command}
@@ -1839,7 +2045,11 @@ function ApprovalCard({
         searchHighlightTone={searchHighlightTone}
       />
       <p className="support-copy">
-        {renderHighlightedText(message.detail, searchQuery, searchHighlightTone)}
+        {renderHighlightedText(
+          message.detail,
+          searchQuery,
+          searchHighlightTone,
+        )}
       </p>
       <div className="approval-actions">
         <button
@@ -1868,7 +2078,9 @@ function ApprovalCard({
         </button>
       </div>
       {resolvedDecision ? (
-        <p className="approval-result">Decision: {renderDecision(resolvedDecision)}</p>
+        <p className="approval-result">
+          Decision: {renderDecision(resolvedDecision)}
+        </p>
       ) : null}
     </article>
   );
@@ -1892,7 +2104,9 @@ function buildUserInputDraft(
   const next: Record<string, UserInputDraftField> = {};
   for (const question of questions) {
     const answer = submittedAnswers?.[question.id]?.[0] ?? "";
-    const optionLabels = new Set((question.options ?? []).map((option) => option.label));
+    const optionLabels = new Set(
+      (question.options ?? []).map((option) => option.label),
+    );
     if (optionLabels.has(answer)) {
       next[question.id] = {
         customAnswer: "",
@@ -1920,7 +2134,11 @@ function buildUserInputSummary(
     .map((question) => (
       <div key={question.id} className="user-input-summary-row">
         <div className="user-input-summary-header">
-          {renderHighlightedText(question.header, searchQuery, searchHighlightTone)}
+          {renderHighlightedText(
+            question.header,
+            searchQuery,
+            searchHighlightTone,
+          )}
         </div>
         <div className="user-input-summary-value">
           {renderHighlightedText(
@@ -1955,7 +2173,10 @@ function UserInputRequestCard({
     setValidationError(null);
   }, [message.id, message.questions, message.state, message.submittedAnswers]);
 
-  function updateField(questionId: string, nextField: Partial<UserInputDraftField>) {
+  function updateField(
+    questionId: string,
+    nextField: Partial<UserInputDraftField>,
+  ) {
     setDraft((current) => ({
       ...current,
       [questionId]: {
@@ -1969,8 +2190,13 @@ function UserInputRequestCard({
   function handleSubmit() {
     const answers: Record<string, string[]> = {};
     for (const question of message.questions) {
-      const field = draft[question.id] ?? { customAnswer: "", selectedOption: "" };
-      const optionLabels = new Set((question.options ?? []).map((option) => option.label));
+      const field = draft[question.id] ?? {
+        customAnswer: "",
+        selectedOption: "",
+      };
+      const optionLabels = new Set(
+        (question.options ?? []).map((option) => option.label),
+      );
       let answer = "";
       if (field.selectedOption && field.selectedOption !== "__other__") {
         answer = field.selectedOption;
@@ -1982,8 +2208,14 @@ function UserInputRequestCard({
         setValidationError(`Answer "${question.header}" before submitting.`);
         return;
       }
-      if (optionLabels.size > 0 && !optionLabels.has(answer) && !question.isOther) {
-        setValidationError(`"${question.header}" must use one of the provided options.`);
+      if (
+        optionLabels.size > 0 &&
+        !optionLabels.has(answer) &&
+        !question.isOther
+      ) {
+        setValidationError(
+          `"${question.header}" must use one of the provided options.`,
+        );
         return;
       }
 
@@ -1995,29 +2227,49 @@ function UserInputRequestCard({
   }
 
   return (
-    <article className={`message-card user-input-card${pending ? "" : " decided"}`}>
+    <article
+      className={`message-card user-input-card${pending ? "" : " decided"}`}
+    >
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">Input request</div>
-      <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
+      <h3>
+        {renderHighlightedText(message.title, searchQuery, searchHighlightTone)}
+      </h3>
       <p className="support-copy">
-        {renderHighlightedText(message.detail, searchQuery, searchHighlightTone)}
+        {renderHighlightedText(
+          message.detail,
+          searchQuery,
+          searchHighlightTone,
+        )}
       </p>
 
       <div className="user-input-questions">
         {message.questions.map((question) => {
-          const field = draft[question.id] ?? { customAnswer: "", selectedOption: "" };
+          const field = draft[question.id] ?? {
+            customAnswer: "",
+            selectedOption: "",
+          };
           const options = question.options ?? [];
           const inputType = question.isSecret ? "password" : "text";
           const usesOther = !!question.isOther;
-          const showFreeform = options.length === 0 || field.selectedOption === "__other__";
+          const showFreeform =
+            options.length === 0 || field.selectedOption === "__other__";
 
           return (
             <section key={question.id} className="user-input-question">
               <div className="user-input-question-header">
-                {renderHighlightedText(question.header, searchQuery, searchHighlightTone)}
+                {renderHighlightedText(
+                  question.header,
+                  searchQuery,
+                  searchHighlightTone,
+                )}
               </div>
               <p className="support-copy">
-                {renderHighlightedText(question.question, searchQuery, searchHighlightTone)}
+                {renderHighlightedText(
+                  question.question,
+                  searchQuery,
+                  searchHighlightTone,
+                )}
               </p>
 
               {options.length > 0 ? (
@@ -2038,7 +2290,11 @@ function UserInputRequestCard({
                       />
                       <span>
                         <strong>
-                          {renderHighlightedText(option.label, searchQuery, searchHighlightTone)}
+                          {renderHighlightedText(
+                            option.label,
+                            searchQuery,
+                            searchHighlightTone,
+                          )}
                         </strong>
                         <span className="user-input-option-description">
                           {renderHighlightedText(
@@ -2057,7 +2313,11 @@ function UserInputRequestCard({
                         name={`user-input-${message.id}-${question.id}`}
                         checked={field.selectedOption === "__other__"}
                         disabled={!pending}
-                        onChange={() => updateField(question.id, { selectedOption: "__other__" })}
+                        onChange={() =>
+                          updateField(question.id, {
+                            selectedOption: "__other__",
+                          })
+                        }
                       />
                       <span>Other</span>
                     </label>
@@ -2072,7 +2332,9 @@ function UserInputRequestCard({
                   value={field.customAnswer}
                   disabled={!pending}
                   onChange={(event) =>
-                    updateField(question.id, { customAnswer: event.target.value })
+                    updateField(question.id, {
+                      customAnswer: event.target.value,
+                    })
                   }
                 />
               ) : null}
@@ -2087,11 +2349,17 @@ function UserInputRequestCard({
         </div>
       ) : null}
 
-      {validationError ? <p className="approval-result">{validationError}</p> : null}
+      {validationError ? (
+        <p className="approval-result">{validationError}</p>
+      ) : null}
 
       {pending ? (
         <div className="approval-actions">
-          <button className="approval-button" type="button" onClick={handleSubmit}>
+          <button
+            className="approval-button"
+            type="button"
+            onClick={handleSubmit}
+          >
             Submit answers
           </button>
         </div>
@@ -2113,7 +2381,10 @@ function mcpSingleSelectOptions(schema: McpElicitationPrimitiveSchema) {
     return [];
   }
   if (schema.oneOf?.length) {
-    return schema.oneOf.map((option) => ({ label: option.title, value: option.const }));
+    return schema.oneOf.map((option) => ({
+      label: option.title,
+      value: option.const,
+    }));
   }
   return (schema.enum ?? []).map((value, index) => ({
     label: schema.enumNames?.[index] ?? value,
@@ -2126,7 +2397,10 @@ function mcpMultiSelectOptions(schema: McpElicitationPrimitiveSchema) {
     return [];
   }
   if (schema.items.anyOf?.length) {
-    return schema.items.anyOf.map((option) => ({ label: option.title, value: option.const }));
+    return schema.items.anyOf.map((option) => ({
+      label: option.title,
+      value: option.const,
+    }));
   }
   return (schema.items.enum ?? []).map((value) => ({ label: value, value }));
 }
@@ -2138,9 +2412,13 @@ function buildMcpElicitationDraft(
     return {};
   }
 
-  const submitted = isJsonObject(message.submittedContent) ? message.submittedContent : {};
+  const submitted = isJsonObject(message.submittedContent)
+    ? message.submittedContent
+    : {};
   const next: Record<string, McpElicitationDraftField> = {};
-  for (const [fieldName, schema] of Object.entries(message.request.requestedSchema.properties)) {
+  for (const [fieldName, schema] of Object.entries(
+    message.request.requestedSchema.properties,
+  )) {
     if (!schema) {
       continue;
     }
@@ -2162,7 +2440,9 @@ function buildMcpElicitationDraft(
         next[fieldName] = {
           selectedOption: "",
           selections: Array.isArray(submittedValue)
-            ? submittedValue.filter((value): value is string => typeof value === "string")
+            ? submittedValue.filter(
+                (value): value is string => typeof value === "string",
+              )
             : (schema.default ?? []),
           text: "",
         };
@@ -2182,9 +2462,14 @@ function buildMcpElicitationDraft(
         break;
       case "string": {
         const options = mcpSingleSelectOptions(schema);
-        const submittedText = typeof submittedValue === "string" ? submittedValue : "";
+        const submittedText =
+          typeof submittedValue === "string" ? submittedValue : "";
         next[fieldName] = {
-          selectedOption: options.some((option) => option.value === submittedText) ? submittedText : "",
+          selectedOption: options.some(
+            (option) => option.value === submittedText,
+          )
+            ? submittedText
+            : "",
           selections: [],
           text:
             submittedText ||
@@ -2218,7 +2503,10 @@ function buildMcpElicitationSummary(
   searchQuery: string,
   searchHighlightTone: SearchHighlightTone,
 ) {
-  if (!isJsonObject(message.submittedContent) || message.request.mode !== "form") {
+  if (
+    !isJsonObject(message.submittedContent) ||
+    message.request.mode !== "form"
+  ) {
     return null;
   }
   const submittedContent = message.submittedContent;
@@ -2233,7 +2521,11 @@ function buildMcpElicitationSummary(
       return (
         <div key={fieldName} className="user-input-summary-row">
           <div className="user-input-summary-header">
-            {renderHighlightedText(schema.title ?? fieldName, searchQuery, searchHighlightTone)}
+            {renderHighlightedText(
+              schema.title ?? fieldName,
+              searchQuery,
+              searchHighlightTone,
+            )}
           </div>
           <div className="user-input-summary-value">
             {renderHighlightedText(
@@ -2254,12 +2546,16 @@ function McpElicitationRequestCard({
   searchHighlightTone = "match",
 }: {
   message: McpElicitationRequestMessage;
-  onSubmit: (messageId: string, action: McpElicitationAction, content?: JsonValue) => void;
+  onSubmit: (
+    messageId: string,
+    action: McpElicitationAction,
+    content?: JsonValue,
+  ) => void;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
-  const [draft, setDraft] = useState<Record<string, McpElicitationDraftField>>(() =>
-    buildMcpElicitationDraft(message),
+  const [draft, setDraft] = useState<Record<string, McpElicitationDraftField>>(
+    () => buildMcpElicitationDraft(message),
   );
   const [validationError, setValidationError] = useState<string | null>(null);
   const pending = message.state === "pending";
@@ -2269,7 +2565,10 @@ function McpElicitationRequestCard({
     setValidationError(null);
   }, [message]);
 
-  function updateField(fieldName: string, nextField: Partial<McpElicitationDraftField>) {
+  function updateField(
+    fieldName: string,
+    nextField: Partial<McpElicitationDraftField>,
+  ) {
     setDraft((current) => ({
       ...current,
       [fieldName]: {
@@ -2291,25 +2590,40 @@ function McpElicitationRequestCard({
     const required = new Set(message.request.requestedSchema.required ?? []);
     const content: Record<string, JsonValue> = {};
 
-    for (const [fieldName, schema] of Object.entries(message.request.requestedSchema.properties)) {
+    for (const [fieldName, schema] of Object.entries(
+      message.request.requestedSchema.properties,
+    )) {
       if (!schema) {
         continue;
       }
-      const field = draft[fieldName] ?? { selectedOption: "", selections: [], text: "" };
+      const field = draft[fieldName] ?? {
+        selectedOption: "",
+        selections: [],
+        text: "",
+      };
       switch (schema.type) {
         case "string": {
           const options = mcpSingleSelectOptions(schema);
           const hasOptions = options.length > 0;
-          const rawValue = hasOptions ? field.selectedOption : field.text.trim();
+          const rawValue = hasOptions
+            ? field.selectedOption
+            : field.text.trim();
           if (!rawValue) {
             if (required.has(fieldName)) {
-              setValidationError(`Answer "${schema.title ?? fieldName}" before accepting.`);
+              setValidationError(
+                `Answer "${schema.title ?? fieldName}" before accepting.`,
+              );
               return;
             }
             break;
           }
-          if (hasOptions && !options.some((option) => option.value === rawValue)) {
-            setValidationError(`"${schema.title ?? fieldName}" must use one of the provided options.`);
+          if (
+            hasOptions &&
+            !options.some((option) => option.value === rawValue)
+          ) {
+            setValidationError(
+              `"${schema.title ?? fieldName}" must use one of the provided options.`,
+            );
             return;
           }
           const valueLength = Array.from(rawValue).length;
@@ -2333,18 +2647,24 @@ function McpElicitationRequestCard({
           const rawValue = field.text.trim();
           if (!rawValue) {
             if (required.has(fieldName)) {
-              setValidationError(`Answer "${schema.title ?? fieldName}" before accepting.`);
+              setValidationError(
+                `Answer "${schema.title ?? fieldName}" before accepting.`,
+              );
               return;
             }
             break;
           }
           const numericValue = Number(rawValue);
           if (!Number.isFinite(numericValue)) {
-            setValidationError(`"${schema.title ?? fieldName}" must be a valid number.`);
+            setValidationError(
+              `"${schema.title ?? fieldName}" must be a valid number.`,
+            );
             return;
           }
           if (schema.type === "integer" && !Number.isInteger(numericValue)) {
-            setValidationError(`"${schema.title ?? fieldName}" must be a whole number.`);
+            setValidationError(
+              `"${schema.title ?? fieldName}" must be a whole number.`,
+            );
             return;
           }
           if (schema.minimum != null && numericValue < schema.minimum) {
@@ -2365,7 +2685,9 @@ function McpElicitationRequestCard({
         case "boolean": {
           if (!field.selectedOption) {
             if (required.has(fieldName)) {
-              setValidationError(`Answer "${schema.title ?? fieldName}" before accepting.`);
+              setValidationError(
+                `Answer "${schema.title ?? fieldName}" before accepting.`,
+              );
               return;
             }
             break;
@@ -2377,22 +2699,36 @@ function McpElicitationRequestCard({
           const options = mcpMultiSelectOptions(schema);
           if (field.selections.length === 0) {
             if (required.has(fieldName) || (schema.minItems ?? 0) > 0) {
-              setValidationError(`Choose at least one option for "${schema.title ?? fieldName}".`);
+              setValidationError(
+                `Choose at least one option for "${schema.title ?? fieldName}".`,
+              );
               return;
             }
             break;
           }
-          if (!field.selections.every((selection) => options.some((option) => option.value === selection))) {
-            setValidationError(`"${schema.title ?? fieldName}" must use one of the provided options.`);
+          if (
+            !field.selections.every((selection) =>
+              options.some((option) => option.value === selection),
+            )
+          ) {
+            setValidationError(
+              `"${schema.title ?? fieldName}" must use one of the provided options.`,
+            );
             return;
           }
-          if (schema.minItems != null && field.selections.length < schema.minItems) {
+          if (
+            schema.minItems != null &&
+            field.selections.length < schema.minItems
+          ) {
             setValidationError(
               `"${schema.title ?? fieldName}" must include at least ${schema.minItems} selections.`,
             );
             return;
           }
-          if (schema.maxItems != null && field.selections.length > schema.maxItems) {
+          if (
+            schema.maxItems != null &&
+            field.selections.length > schema.maxItems
+          ) {
             setValidationError(
               `"${schema.title ?? fieldName}" must include at most ${schema.maxItems} selections.`,
             );
@@ -2409,122 +2745,194 @@ function McpElicitationRequestCard({
   }
 
   return (
-    <article className={`message-card user-input-card${pending ? "" : " decided"}`}>
+    <article
+      className={`message-card user-input-card${pending ? "" : " decided"}`}
+    >
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">MCP input</div>
-      <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
+      <h3>
+        {renderHighlightedText(message.title, searchQuery, searchHighlightTone)}
+      </h3>
       <p className="support-copy">
-        {renderHighlightedText(message.detail, searchQuery, searchHighlightTone)}
+        {renderHighlightedText(
+          message.detail,
+          searchQuery,
+          searchHighlightTone,
+        )}
       </p>
 
       {message.request.mode === "url" ? (
         <p className="support-copy">
           <a href={message.request.url} target="_blank" rel="noreferrer">
-            {renderHighlightedText(message.request.url, searchQuery, searchHighlightTone)}
+            {renderHighlightedText(
+              message.request.url,
+              searchQuery,
+              searchHighlightTone,
+            )}
           </a>
         </p>
       ) : (
         <div className="user-input-questions">
-          {Object.entries(message.request.requestedSchema.properties).map(([fieldName, schema]) => {
-            if (!schema) {
-              return null;
-            }
-            const field = draft[fieldName] ?? { selectedOption: "", selections: [], text: "" };
-            const label = schema.title ?? fieldName;
-            const description = schema.description ?? message.request.message;
-            const singleOptions = mcpSingleSelectOptions(schema);
-            const multiOptions = mcpMultiSelectOptions(schema);
-            return (
-              <section key={fieldName} className="user-input-question">
-                <div className="user-input-question-header">
-                  {renderHighlightedText(label, searchQuery, searchHighlightTone)}
-                </div>
-                {description ? (
-                  <p className="support-copy">
-                    {renderHighlightedText(description, searchQuery, searchHighlightTone)}
-                  </p>
-                ) : null}
+          {Object.entries(message.request.requestedSchema.properties).map(
+            ([fieldName, schema]) => {
+              if (!schema) {
+                return null;
+              }
+              const field = draft[fieldName] ?? {
+                selectedOption: "",
+                selections: [],
+                text: "",
+              };
+              const label = schema.title ?? fieldName;
+              const description = schema.description ?? message.request.message;
+              const singleOptions = mcpSingleSelectOptions(schema);
+              const multiOptions = mcpMultiSelectOptions(schema);
+              return (
+                <section key={fieldName} className="user-input-question">
+                  <div className="user-input-question-header">
+                    {renderHighlightedText(
+                      label,
+                      searchQuery,
+                      searchHighlightTone,
+                    )}
+                  </div>
+                  {description ? (
+                    <p className="support-copy">
+                      {renderHighlightedText(
+                        description,
+                        searchQuery,
+                        searchHighlightTone,
+                      )}
+                    </p>
+                  ) : null}
 
-                {schema.type === "string" && singleOptions.length > 0 ? (
-                  <div className="user-input-options">
-                    {singleOptions.map((option) => (
-                      <label key={option.value} className="user-input-option">
+                  {schema.type === "string" && singleOptions.length > 0 ? (
+                    <div className="user-input-options">
+                      {singleOptions.map((option) => (
+                        <label key={option.value} className="user-input-option">
+                          <input
+                            type="radio"
+                            name={`mcp-elicitation-${message.id}-${fieldName}`}
+                            checked={field.selectedOption === option.value}
+                            disabled={!pending}
+                            onChange={() =>
+                              updateField(fieldName, {
+                                selectedOption: option.value,
+                              })
+                            }
+                          />
+                          <span>
+                            {renderHighlightedText(
+                              option.label,
+                              searchQuery,
+                              searchHighlightTone,
+                            )}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {schema.type === "array" ? (
+                    <div className="user-input-options">
+                      {multiOptions.map((option) => (
+                        <label key={option.value} className="user-input-option">
+                          <input
+                            type="checkbox"
+                            checked={field.selections.includes(option.value)}
+                            disabled={!pending}
+                            onChange={(event) =>
+                              updateField(fieldName, {
+                                selections: event.target.checked
+                                  ? [...field.selections, option.value]
+                                  : field.selections.filter(
+                                      (value) => value !== option.value,
+                                    ),
+                              })
+                            }
+                          />
+                          <span>
+                            {renderHighlightedText(
+                              option.label,
+                              searchQuery,
+                              searchHighlightTone,
+                            )}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {schema.type === "boolean" ? (
+                    <div className="user-input-options">
+                      <label className="user-input-option">
                         <input
                           type="radio"
                           name={`mcp-elicitation-${message.id}-${fieldName}`}
-                          checked={field.selectedOption === option.value}
+                          checked={field.selectedOption === "true"}
                           disabled={!pending}
-                          onChange={() => updateField(fieldName, { selectedOption: option.value })}
-                        />
-                        <span>{renderHighlightedText(option.label, searchQuery, searchHighlightTone)}</span>
-                      </label>
-                    ))}
-                  </div>
-                ) : null}
-
-                {schema.type === "array" ? (
-                  <div className="user-input-options">
-                    {multiOptions.map((option) => (
-                      <label key={option.value} className="user-input-option">
-                        <input
-                          type="checkbox"
-                          checked={field.selections.includes(option.value)}
-                          disabled={!pending}
-                          onChange={(event) =>
-                            updateField(fieldName, {
-                              selections: event.target.checked
-                                ? [...field.selections, option.value]
-                                : field.selections.filter((value) => value !== option.value),
-                            })
+                          onChange={() =>
+                            updateField(fieldName, { selectedOption: "true" })
                           }
                         />
-                        <span>{renderHighlightedText(option.label, searchQuery, searchHighlightTone)}</span>
+                        <span>Yes</span>
                       </label>
-                    ))}
-                  </div>
-                ) : null}
+                      <label className="user-input-option">
+                        <input
+                          type="radio"
+                          name={`mcp-elicitation-${message.id}-${fieldName}`}
+                          checked={field.selectedOption === "false"}
+                          disabled={!pending}
+                          onChange={() =>
+                            updateField(fieldName, { selectedOption: "false" })
+                          }
+                        />
+                        <span>No</span>
+                      </label>
+                    </div>
+                  ) : null}
 
-                {schema.type === "boolean" ? (
-                  <div className="user-input-options">
-                    <label className="user-input-option">
-                      <input
-                        type="radio"
-                        name={`mcp-elicitation-${message.id}-${fieldName}`}
-                        checked={field.selectedOption === "true"}
-                        disabled={!pending}
-                        onChange={() => updateField(fieldName, { selectedOption: "true" })}
-                      />
-                      <span>Yes</span>
-                    </label>
-                    <label className="user-input-option">
-                      <input
-                        type="radio"
-                        name={`mcp-elicitation-${message.id}-${fieldName}`}
-                        checked={field.selectedOption === "false"}
-                        disabled={!pending}
-                        onChange={() => updateField(fieldName, { selectedOption: "false" })}
-                      />
-                      <span>No</span>
-                    </label>
-                  </div>
-                ) : null}
-
-                {(schema.type === "number" || schema.type === "integer" || (schema.type === "string" && singleOptions.length === 0)) ? (
-                  <input
-                    className="user-input-text"
-                    type={schema.type === "number" || schema.type === "integer" ? "number" : "text"}
-                    value={field.text}
-                    min={schema.type === "number" || schema.type === "integer" ? (schema.minimum ?? undefined) : undefined}
-                    max={schema.type === "number" || schema.type === "integer" ? (schema.maximum ?? undefined) : undefined}
-                    minLength={schema.type === "string" ? (schema.minLength ?? undefined) : undefined}
-                    maxLength={schema.type === "string" ? (schema.maxLength ?? undefined) : undefined}
-                    disabled={!pending}
-                    onChange={(event) => updateField(fieldName, { text: event.target.value })}
-                  />
-                ) : null}
-              </section>
-            );
-          })}
+                  {schema.type === "number" ||
+                  schema.type === "integer" ||
+                  (schema.type === "string" && singleOptions.length === 0) ? (
+                    <input
+                      className="user-input-text"
+                      type={
+                        schema.type === "number" || schema.type === "integer"
+                          ? "number"
+                          : "text"
+                      }
+                      value={field.text}
+                      min={
+                        schema.type === "number" || schema.type === "integer"
+                          ? (schema.minimum ?? undefined)
+                          : undefined
+                      }
+                      max={
+                        schema.type === "number" || schema.type === "integer"
+                          ? (schema.maximum ?? undefined)
+                          : undefined
+                      }
+                      minLength={
+                        schema.type === "string"
+                          ? (schema.minLength ?? undefined)
+                          : undefined
+                      }
+                      maxLength={
+                        schema.type === "string"
+                          ? (schema.maxLength ?? undefined)
+                          : undefined
+                      }
+                      disabled={!pending}
+                      onChange={(event) =>
+                        updateField(fieldName, { text: event.target.value })
+                      }
+                    />
+                  ) : null}
+                </section>
+              );
+            },
+          )}
         </div>
       )}
 
@@ -2532,20 +2940,36 @@ function McpElicitationRequestCard({
         <div className="user-input-summary">
           <div className="user-input-summary-row">
             <div className="user-input-summary-header">Decision</div>
-            <div className="user-input-summary-value">{message.submittedAction ?? message.state}</div>
+            <div className="user-input-summary-value">
+              {message.submittedAction ?? message.state}
+            </div>
           </div>
-          {buildMcpElicitationSummary(message, searchQuery, searchHighlightTone)}
+          {buildMcpElicitationSummary(
+            message,
+            searchQuery,
+            searchHighlightTone,
+          )}
         </div>
       ) : null}
 
-      {validationError ? <p className="approval-result">{validationError}</p> : null}
+      {validationError ? (
+        <p className="approval-result">{validationError}</p>
+      ) : null}
 
       {pending ? (
         <div className="approval-actions">
-          <button className="approval-button" type="button" onClick={() => handleSubmit("accept")}>
+          <button
+            className="approval-button"
+            type="button"
+            onClick={() => handleSubmit("accept")}
+          >
             Accept
           </button>
-          <button className="approval-button" type="button" onClick={() => handleSubmit("decline")}>
+          <button
+            className="approval-button"
+            type="button"
+            onClick={() => handleSubmit("decline")}
+          >
             Decline
           </button>
           <button
@@ -2579,7 +3003,9 @@ function CodexAppRequestCard({
   searchHighlightTone?: SearchHighlightTone;
 }) {
   const pending = message.state === "pending";
-  const [draft, setDraft] = useState(() => formatJsonValueForEditor(message.submittedResult));
+  const [draft, setDraft] = useState(() =>
+    formatJsonValueForEditor(message.submittedResult),
+  );
   const [validationError, setValidationError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -2598,12 +3024,20 @@ function CodexAppRequestCard({
   }
 
   return (
-    <article className={`message-card user-input-card${pending ? "" : " decided"}`}>
+    <article
+      className={`message-card user-input-card${pending ? "" : " decided"}`}
+    >
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="card-label">Codex request</div>
-      <h3>{renderHighlightedText(message.title, searchQuery, searchHighlightTone)}</h3>
+      <h3>
+        {renderHighlightedText(message.title, searchQuery, searchHighlightTone)}
+      </h3>
       <p className="support-copy">
-        {renderHighlightedText(message.detail, searchQuery, searchHighlightTone)}
+        {renderHighlightedText(
+          message.detail,
+          searchQuery,
+          searchHighlightTone,
+        )}
       </p>
 
       <div className="user-input-summary">
@@ -2635,11 +3069,17 @@ function CodexAppRequestCard({
         </div>
       )}
 
-      {validationError ? <p className="approval-result">{validationError}</p> : null}
+      {validationError ? (
+        <p className="approval-result">{validationError}</p>
+      ) : null}
 
       {pending ? (
         <div className="approval-actions">
-          <button className="approval-button" type="button" onClick={handleSubmit}>
+          <button
+            className="approval-button"
+            type="button"
+            onClick={handleSubmit}
+          >
             Submit JSON result
           </button>
         </div>
@@ -2706,7 +3146,10 @@ function remarkAutolinkBareFileReferences() {
 }
 
 function autolinkMarkdownBareFileReferences(node: MarkdownAstNode) {
-  if (!Array.isArray(node.children) || MARKDOWN_BARE_FILE_REFERENCE_IGNORED_NODE_TYPES.has(node.type)) {
+  if (
+    !Array.isArray(node.children) ||
+    MARKDOWN_BARE_FILE_REFERENCE_IGNORED_NODE_TYPES.has(node.type)
+  ) {
     return;
   }
 
@@ -2757,7 +3200,9 @@ function buildAutolinkedMarkdownTextNodes(text: string) {
     nodes.push(createMarkdownTextNode(text.slice(lastIndex)));
   }
 
-  return nodes.filter((node) => node.type !== "text" || (node.value?.length ?? 0) > 0);
+  return nodes.filter(
+    (node) => node.type !== "text" || (node.value?.length ?? 0) > 0,
+  );
 }
 
 function createMarkdownLinkNode(reference: string): MarkdownAstNode {
@@ -2810,7 +3255,8 @@ export function MarkdownContent({
   // rendered tree changes structurally when the prop goes from absent to present
   // or vice versa.  The ref handles identity-only changes without rememoizing.
   const hasOpenSourceLink = onOpenSourceLink != null;
-  const normalizedStartLineNumber = normalizeMarkdownStartLineNumber(startLineNumber);
+  const normalizedStartLineNumber =
+    normalizeMarkdownStartLineNumber(startLineNumber);
   const mermaidDiagramCount = useMemo(
     () => (renderMermaidDiagrams ? countMermaidFences(markdown) : 0),
     [markdown, renderMermaidDiagrams],
@@ -2861,13 +3307,17 @@ export function MarkdownContent({
           return {
             line,
             range: element.dataset.markdownLineRange ?? String(line),
-            top: Math.round(elementRect.top + elementRect.height / 2 - rootRect.top),
+            top: Math.round(
+              elementRect.top + elementRect.height / 2 - rootRect.top,
+            ),
           };
         })
         .filter((marker): marker is MarkdownLineMarker => marker != null);
 
       setLineMarkers((currentMarkers) =>
-        areMarkdownLineMarkersEqual(currentMarkers, nextMarkers) ? currentMarkers : nextMarkers,
+        areMarkdownLineMarkersEqual(currentMarkers, nextMarkers)
+          ? currentMarkers
+          : nextMarkers,
       );
     };
     const scheduleLineMarkerUpdate = () => {
@@ -2905,18 +3355,38 @@ export function MarkdownContent({
   const rendered = useMemo(() => {
     const highlightChildren = (children: ReactNode) =>
       highlightReactNodeText(children, searchQuery, searchHighlightTone);
-    const getLineAttributes = (sourcePosition: MarkdownSourcePosition | undefined) =>
-      getMarkdownLineAttributes(sourcePosition, normalizedStartLineNumber, showLineNumbers);
+    const getLineAttributes = (
+      sourcePosition: MarkdownSourcePosition | undefined,
+    ) =>
+      getMarkdownLineAttributes(
+        sourcePosition,
+        normalizedStartLineNumber,
+        showLineNumbers,
+      );
 
     return (
       <ReactMarkdown
         rawSourcePos={showLineNumbers}
         transformLinkUri={transformMarkdownLinkUri}
         components={{
-          a: ({ href, children, sourcePosition: _sourcePosition, ...props }) => {
+          a: ({
+            href,
+            children,
+            sourcePosition: _sourcePosition,
+            ...props
+          }) => {
             const isExternalLink = isExternalMarkdownHref(href ?? "");
-            const fileLinkTarget = resolveMarkdownFileLinkTarget(href, workspaceRoot, documentPath);
-            const displayLabel = buildMarkdownHrefDisplayLabel(href, children, workspaceRoot, documentPath);
+            const fileLinkTarget = resolveMarkdownFileLinkTarget(
+              href,
+              workspaceRoot,
+              documentPath,
+            );
+            const displayLabel = buildMarkdownHrefDisplayLabel(
+              href,
+              children,
+              workspaceRoot,
+              documentPath,
+            );
             // `transformMarkdownLinkUri` returns "" for URIs that
             // `react-markdown` would otherwise neutralize to
             // `javascript:void(0)` (the placeholder React now warns
@@ -2935,7 +3405,11 @@ export function MarkdownContent({
             }
             const handleClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
               props.onClick?.(event);
-              if (event.defaultPrevented || !fileLinkTarget || !onOpenSourceLinkRef.current) {
+              if (
+                event.defaultPrevented ||
+                !fileLinkTarget ||
+                !onOpenSourceLinkRef.current
+              ) {
                 return;
               }
 
@@ -2963,7 +3437,9 @@ export function MarkdownContent({
           },
           code: ({ children, className, inline, sourcePosition, ...props }) => {
             const isInsideMarkdownLink = useContext(MarkdownLinkContext);
-            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            const suppressLineNumber = useContext(
+              MarkdownLineNumberSuppressedContext,
+            );
             const language = className?.match(/language-([\w-]+)/)?.[1] ?? null;
             const code = String(children).replace(/\n$/, "");
             const inlineFileLinkTarget = inline
@@ -2971,8 +3447,14 @@ export function MarkdownContent({
               : null;
 
             if (inline) {
-              if (inlineFileLinkTarget && hasOpenSourceLink && !isInsideMarkdownLink) {
-                const handleInlineCodeClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+              if (
+                inlineFileLinkTarget &&
+                hasOpenSourceLink &&
+                !isInsideMarkdownLink
+              ) {
+                const handleInlineCodeClick = (
+                  event: ReactMouseEvent<HTMLAnchorElement>,
+                ) => {
                   event.preventDefault();
                   onOpenSourceLinkRef.current?.({
                     ...inlineFileLinkTarget,
@@ -2981,7 +3463,12 @@ export function MarkdownContent({
                 };
 
                 return (
-                  <a className="inline-code-link" href={code} draggable={false} onClick={handleInlineCodeClick}>
+                  <a
+                    className="inline-code-link"
+                    href={code}
+                    draggable={false}
+                    onClick={handleInlineCodeClick}
+                  >
                     <code className={className} {...props}>
                       {highlightChildren(children)}
                     </code>
@@ -2997,7 +3484,9 @@ export function MarkdownContent({
             }
 
             if (renderMermaidDiagrams && isMermaidFenceLanguage(language)) {
-              const lineAttributes = suppressLineNumber ? null : getLineAttributes(sourcePosition);
+              const lineAttributes = suppressLineNumber
+                ? null
+                : getLineAttributes(sourcePosition);
               const budgetMessage =
                 code.length > MAX_MERMAID_SOURCE_CHARS
                   ? `Mermaid render skipped: diagram exceeds the ${MAX_MERMAID_SOURCE_CHARS.toLocaleString()} character render budget.`
@@ -3071,7 +3560,9 @@ export function MarkdownContent({
               <HighlightedCodeBlock
                 className="code-block"
                 code={code}
-                lineAttributes={suppressLineNumber ? null : getLineAttributes(sourcePosition)}
+                lineAttributes={
+                  suppressLineNumber ? null : getLineAttributes(sourcePosition)
+                }
                 language={language}
                 showCopyButton
                 searchQuery={searchQuery}
@@ -3080,9 +3571,16 @@ export function MarkdownContent({
             );
           },
           p: ({ children, sourcePosition, ...props }) => {
-            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            const suppressLineNumber = useContext(
+              MarkdownLineNumberSuppressedContext,
+            );
             return (
-              <p {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+              <p
+                {...props}
+                {...(suppressLineNumber
+                  ? {}
+                  : (getLineAttributes(sourcePosition) ?? {}))}
+              >
                 {highlightChildren(children)}
               </p>
             );
@@ -3095,25 +3593,47 @@ export function MarkdownContent({
             sourcePosition,
             ...props
           }) => {
-            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            const suppressLineNumber = useContext(
+              MarkdownLineNumberSuppressedContext,
+            );
             return (
-              <li {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+              <li
+                {...props}
+                {...(suppressLineNumber
+                  ? {}
+                  : (getLineAttributes(sourcePosition) ?? {}))}
+              >
                 <MarkdownLineNumberSuppressedContext.Provider value>
                   {highlightChildren(children)}
                 </MarkdownLineNumberSuppressedContext.Provider>
               </li>
             );
           },
-          ul: ({ children, ordered: _ordered, depth: _depth, sourcePosition: _sourcePosition, ...props }) => (
-            <ul {...props}>{children}</ul>
-          ),
-          ol: ({ children, ordered: _ordered, depth: _depth, sourcePosition: _sourcePosition, ...props }) => (
-            <ol {...props}>{children}</ol>
-          ),
+          ul: ({
+            children,
+            ordered: _ordered,
+            depth: _depth,
+            sourcePosition: _sourcePosition,
+            ...props
+          }) => <ul {...props}>{children}</ul>,
+          ol: ({
+            children,
+            ordered: _ordered,
+            depth: _depth,
+            sourcePosition: _sourcePosition,
+            ...props
+          }) => <ol {...props}>{children}</ol>,
           blockquote: ({ children, sourcePosition, ...props }) => {
-            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            const suppressLineNumber = useContext(
+              MarkdownLineNumberSuppressedContext,
+            );
             return (
-              <blockquote {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+              <blockquote
+                {...props}
+                {...(suppressLineNumber
+                  ? {}
+                  : (getLineAttributes(sourcePosition) ?? {}))}
+              >
                 <MarkdownLineNumberSuppressedContext.Provider value>
                   {highlightChildren(children)}
                 </MarkdownLineNumberSuppressedContext.Provider>
@@ -3121,49 +3641,91 @@ export function MarkdownContent({
             );
           },
           h1: ({ children, sourcePosition, ...props }) => {
-            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            const suppressLineNumber = useContext(
+              MarkdownLineNumberSuppressedContext,
+            );
             return (
-              <h1 {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+              <h1
+                {...props}
+                {...(suppressLineNumber
+                  ? {}
+                  : (getLineAttributes(sourcePosition) ?? {}))}
+              >
                 {highlightChildren(children)}
               </h1>
             );
           },
           h2: ({ children, sourcePosition, ...props }) => {
-            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            const suppressLineNumber = useContext(
+              MarkdownLineNumberSuppressedContext,
+            );
             return (
-              <h2 {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+              <h2
+                {...props}
+                {...(suppressLineNumber
+                  ? {}
+                  : (getLineAttributes(sourcePosition) ?? {}))}
+              >
                 {highlightChildren(children)}
               </h2>
             );
           },
           h3: ({ children, sourcePosition, ...props }) => {
-            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            const suppressLineNumber = useContext(
+              MarkdownLineNumberSuppressedContext,
+            );
             return (
-              <h3 {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+              <h3
+                {...props}
+                {...(suppressLineNumber
+                  ? {}
+                  : (getLineAttributes(sourcePosition) ?? {}))}
+              >
                 {highlightChildren(children)}
               </h3>
             );
           },
           h4: ({ children, sourcePosition, ...props }) => {
-            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            const suppressLineNumber = useContext(
+              MarkdownLineNumberSuppressedContext,
+            );
             return (
-              <h4 {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+              <h4
+                {...props}
+                {...(suppressLineNumber
+                  ? {}
+                  : (getLineAttributes(sourcePosition) ?? {}))}
+              >
                 {highlightChildren(children)}
               </h4>
             );
           },
           h5: ({ children, sourcePosition, ...props }) => {
-            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            const suppressLineNumber = useContext(
+              MarkdownLineNumberSuppressedContext,
+            );
             return (
-              <h5 {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+              <h5
+                {...props}
+                {...(suppressLineNumber
+                  ? {}
+                  : (getLineAttributes(sourcePosition) ?? {}))}
+              >
                 {highlightChildren(children)}
               </h5>
             );
           },
           h6: ({ children, sourcePosition, ...props }) => {
-            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            const suppressLineNumber = useContext(
+              MarkdownLineNumberSuppressedContext,
+            );
             return (
-              <h6 {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}>
+              <h6
+                {...props}
+                {...(suppressLineNumber
+                  ? {}
+                  : (getLineAttributes(sourcePosition) ?? {}))}
+              >
                 {highlightChildren(children)}
               </h6>
             );
@@ -3178,31 +3740,48 @@ export function MarkdownContent({
             <del {...props}>{highlightChildren(children)}</del>
           ),
           table: ({ children, sourcePosition, ...props }) => {
-            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            const suppressLineNumber = useContext(
+              MarkdownLineNumberSuppressedContext,
+            );
             return (
               <div
                 className="markdown-table-scroll"
-                {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})}
+                {...(suppressLineNumber
+                  ? {}
+                  : (getLineAttributes(sourcePosition) ?? {}))}
               >
                 <table {...props}>{children}</table>
               </div>
             );
           },
           hr: ({ sourcePosition, ...props }) => {
-            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
+            const suppressLineNumber = useContext(
+              MarkdownLineNumberSuppressedContext,
+            );
             return (
-              <hr {...props} {...(suppressLineNumber ? {} : getLineAttributes(sourcePosition) ?? {})} />
+              <hr
+                {...props}
+                {...(suppressLineNumber
+                  ? {}
+                  : (getLineAttributes(sourcePosition) ?? {}))}
+              />
             );
           },
           img: ({ alt, sourcePosition: _sourcePosition, ...props }) => (
             <img {...props} alt={alt ?? ""} draggable={false} />
           ),
-          td: ({ children, isHeader: _isHeader, sourcePosition: _sourcePosition, ...props }) => (
-            <td {...props}>{highlightChildren(children)}</td>
-          ),
-          th: ({ children, isHeader: _isHeader, sourcePosition: _sourcePosition, ...props }) => (
-            <th {...props}>{highlightChildren(children)}</th>
-          ),
+          td: ({
+            children,
+            isHeader: _isHeader,
+            sourcePosition: _sourcePosition,
+            ...props
+          }) => <td {...props}>{highlightChildren(children)}</td>,
+          th: ({
+            children,
+            isHeader: _isHeader,
+            sourcePosition: _sourcePosition,
+            ...props
+          }) => <th {...props}>{highlightChildren(children)}</th>,
           // `remark-math` annotates math nodes with the `math` /
           // `inlineMath` class on the emitted `<span>` / `<div>`.
           // `rehype-katex` then replaces the contents with KaTeX HTML.
@@ -3216,8 +3795,18 @@ export function MarkdownContent({
           // is by className rather than a node-type check because
           // react-markdown@8 dispatches all hast elements through the
           // matching tag name (`span` for inline, `div` for block).
-          span: ({ children, className, node: _node, sourcePosition: _sourcePosition, ...props }) => {
-            if (typeof className === "string" && /(^|\s)math(\s|$)/.test(className) && /inline/.test(className)) {
+          span: ({
+            children,
+            className,
+            node: _node,
+            sourcePosition: _sourcePosition,
+            ...props
+          }) => {
+            if (
+              typeof className === "string" &&
+              /(^|\s)math(\s|$)/.test(className) &&
+              /inline/.test(className)
+            ) {
               return renderSafeKatexElement(
                 "span",
                 className,
@@ -3233,10 +3822,23 @@ export function MarkdownContent({
               </span>
             );
           },
-          div: ({ children, className, node: _node, sourcePosition, ...props }) => {
-            const suppressLineNumber = useContext(MarkdownLineNumberSuppressedContext);
-            if (typeof className === "string" && /(^|\s)math(\s|$)/.test(className)) {
-              const lineAttributes = suppressLineNumber ? null : getLineAttributes(sourcePosition);
+          div: ({
+            children,
+            className,
+            node: _node,
+            sourcePosition,
+            ...props
+          }) => {
+            const suppressLineNumber = useContext(
+              MarkdownLineNumberSuppressedContext,
+            );
+            if (
+              typeof className === "string" &&
+              /(^|\s)math(\s|$)/.test(className)
+            ) {
+              const lineAttributes = suppressLineNumber
+                ? null
+                : getLineAttributes(sourcePosition);
               return renderSafeKatexElement(
                 "div",
                 className,
@@ -3277,16 +3879,26 @@ export function MarkdownContent({
   ]);
 
   return (
-    <div className={`markdown-copy-shell${showLineNumbers ? " markdown-copy-shell-with-line-numbers" : ""}`}>
+    <div
+      className={`markdown-copy-shell${showLineNumbers ? " markdown-copy-shell-with-line-numbers" : ""}`}
+    >
       {showLineNumbers ? (
-        <div className="markdown-line-gutter" aria-hidden="true" contentEditable={false}>
+        <div
+          className="markdown-line-gutter"
+          aria-hidden="true"
+          contentEditable={false}
+        >
           {lineMarkers.map((marker) => (
             <span
               className="markdown-line-number"
               data-markdown-gutter-line={marker.line}
               key={`${marker.line}:${marker.top}`}
               style={{ top: `${marker.top}px` }}
-              title={marker.range === String(marker.line) ? `Line ${marker.line}` : `Lines ${marker.range}`}
+              title={
+                marker.range === String(marker.line)
+                  ? `Line ${marker.line}`
+                  : `Lines ${marker.range}`
+              }
             >
               {marker.line}
             </span>
@@ -3304,7 +3916,11 @@ export function MarkdownContent({
 }
 
 function normalizeMarkdownStartLineNumber(startLineNumber: number | null) {
-  if (startLineNumber == null || !Number.isFinite(startLineNumber) || startLineNumber < 1) {
+  if (
+    startLineNumber == null ||
+    !Number.isFinite(startLineNumber) ||
+    startLineNumber < 1
+  ) {
     return null;
   }
 
@@ -3320,13 +3936,22 @@ function getMarkdownLineAttributes(
     return null;
   }
 
-  const lineNumber = getMarkdownRenderedLineNumber(sourcePosition, startLineNumber);
+  const lineNumber = getMarkdownRenderedLineNumber(
+    sourcePosition,
+    startLineNumber,
+  );
   if (lineNumber == null) {
     return null;
   }
 
-  const rangeLabel = getMarkdownRenderedLineRangeLabel(sourcePosition, startLineNumber);
-  const title = rangeLabel === String(lineNumber) ? `Line ${lineNumber}` : `Lines ${rangeLabel}`;
+  const rangeLabel = getMarkdownRenderedLineRangeLabel(
+    sourcePosition,
+    startLineNumber,
+  );
+  const title =
+    rangeLabel === String(lineNumber)
+      ? `Line ${lineNumber}`
+      : `Lines ${rangeLabel}`;
 
   return {
     "data-markdown-line-start": lineNumber,
@@ -3340,7 +3965,11 @@ function getMarkdownRenderedLineNumber(
   startLineNumber: number,
 ) {
   const sourceLine = sourcePosition?.start?.line;
-  if (typeof sourceLine !== "number" || !Number.isFinite(sourceLine) || sourceLine < 1) {
+  if (
+    typeof sourceLine !== "number" ||
+    !Number.isFinite(sourceLine) ||
+    sourceLine < 1
+  ) {
     return null;
   }
 
@@ -3382,5 +4011,3 @@ export function areMarkdownLineMarkersEqual(
     );
   });
 }
-
-

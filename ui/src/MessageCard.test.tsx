@@ -1,7 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { MessageCard } from "./message-cards";
+import {
+  DeferredHeavyContentActivationProvider,
+  MessageCard,
+} from "./message-cards";
 import type {
   ApprovalMessage,
   CodexAppRequestMessage,
@@ -58,6 +61,87 @@ describe("MessageCard", () => {
     expect(await screen.findByRole("heading", { name: "Summary of Changes" })).toBeInTheDocument();
     expect(screen.getByText("Added markdown rendering")).toBeInTheDocument();
     expect(screen.getByText("Preserved list formatting")).toBeInTheDocument();
+  });
+
+  it("uses a plain-text shell for the active streaming assistant message", () => {
+    const message: TextMessage = {
+      id: "message-streaming",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: "## Summary of Changes\n- Preserved literal markdown while streaming",
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        preferStreamingPlainTextRender
+      />,
+    );
+
+    expect(
+      screen.queryByRole("heading", { name: "Summary of Changes" }),
+    ).not.toBeInTheDocument();
+    expect(container.querySelector(".plain-text-copy")?.textContent).toBe(
+      "## Summary of Changes\n- Preserved literal markdown while streaming",
+    );
+  });
+
+  it("keeps full markdown rendering for settled assistant text", async () => {
+    const message: TextMessage = {
+      id: "message-settled",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: "## Summary of Changes\n- Render markdown after the turn settles",
+    };
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Summary of Changes" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Render markdown after the turn settles"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps heavy markdown deferred when activation is disabled", () => {
+    const message: TextMessage = {
+      id: "message-heavy-deferred",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: [
+        "# Deferred heading",
+        ...Array.from({ length: 28 }, (_, index) => `Line ${index + 1}`),
+      ].join("\n"),
+    };
+
+    const { container } = render(
+      <DeferredHeavyContentActivationProvider allowActivation={false}>
+        <MessageCard
+          message={message}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+        />
+      </DeferredHeavyContentActivationProvider>,
+    );
+
+    expect(
+      screen.queryByRole("heading", { name: "Deferred heading" }),
+    ).not.toBeInTheDocument();
+    expect(
+      container.querySelector(".deferred-markdown-placeholder"),
+    ).toBeInTheDocument();
   });
 
   it("shows relative paths and diff counts for diff cards", () => {

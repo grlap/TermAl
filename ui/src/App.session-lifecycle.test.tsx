@@ -482,6 +482,204 @@ describe("App session lifecycle", () => {
     });
   });
 
+  it("cancels the active-prompt poll once live updates resume for that session", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalFetch = globalThis.fetch;
+      const project = {
+        id: "project-termal",
+        name: "TermAl",
+        rootPath: "/projects/termal",
+      };
+      const session = makeSession("session-1", {
+        name: "Session 1",
+        projectId: project.id,
+        workdir: project.rootPath,
+      });
+      const initialState = makeStateResponse({
+        revision: 1,
+        projects: [project],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [session],
+      });
+      const resumedLiveState = makeStateResponse({
+        revision: 3,
+        projects: [project],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Session 1",
+            projectId: project.id,
+            workdir: project.rootPath,
+            status: "active",
+            preview: "Recovered via live event",
+            messages: [
+              {
+                id: "message-1",
+                timestamp: "2026-04-19T10:00:00Z",
+                author: "you",
+                type: "text",
+                text: "Recover this prompt",
+              },
+              {
+                id: "message-2",
+                timestamp: "2026-04-19T10:00:01Z",
+                author: "assistant",
+                type: "text",
+                text: "Recovered via live event",
+              },
+            ],
+          }),
+        ],
+      });
+      const pollState = makeStateResponse({
+        revision: 4,
+        projects: [project],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Session 1",
+            projectId: project.id,
+            workdir: project.rootPath,
+            status: "idle",
+            preview: "Poll should not fire",
+            messages: [
+              {
+                id: "message-1",
+                timestamp: "2026-04-19T10:00:00Z",
+                author: "you",
+                type: "text",
+                text: "Recover this prompt",
+              },
+              {
+                id: "message-2",
+                timestamp: "2026-04-19T10:00:01Z",
+                author: "assistant",
+                type: "text",
+                text: "Poll should not fire",
+              },
+            ],
+          }),
+        ],
+      });
+      const sendMessageDeferred = createDeferred<Response>();
+      let stateResponse = pollState;
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse(stateResponse);
+          }
+
+          if (
+            requestUrl.pathname === "/api/sessions/session-1/messages" &&
+            (init?.method ?? "GET").toUpperCase() === "POST"
+          ) {
+            return sendMessageDeferred.promise;
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(eventSource, initialState);
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        const sessionRowLabel = await within(sessionList).findByText(
+          "Session 1",
+        );
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+
+        await clickAndSettle(sessionRowButton);
+        const composer = await screen.findByLabelText("Message Session 1");
+        await act(async () => {
+          fireEvent.change(composer, {
+            target: { value: "Recover this prompt" },
+          });
+        });
+        await settleAsyncUi();
+        vi.useFakeTimers();
+        await clickAndSettle(screen.getByRole("button", { name: "Send" }));
+
+        await dispatchStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 2,
+            projects: [project],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Session 1",
+                projectId: project.id,
+                workdir: project.rootPath,
+                status: "active",
+                preview: "Recover this prompt",
+                messages: [
+                  {
+                    id: "message-1",
+                    timestamp: "2026-04-19T10:00:00Z",
+                    author: "you",
+                    type: "text",
+                    text: "Recover this prompt",
+                  },
+                ],
+              }),
+            ],
+          }),
+        );
+
+        await act(async () => {
+          sendMessageDeferred.resolve(jsonResponse(initialState));
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        fetchMock.mockClear();
+        await dispatchStateEvent(eventSource, resumedLiveState);
+        await settleAsyncUi();
+
+        await advanceTimers(ACTIVE_PROMPT_POLL_INTERVAL_MS);
+        await settleAsyncUi();
+
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(
+          screen.getAllByText("Recovered via live event").length,
+        ).toBeGreaterThan(0);
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("does not arm the active-prompt poll when a successful send response is adopted", async () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;

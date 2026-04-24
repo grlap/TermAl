@@ -91,7 +91,7 @@ impl AppState {
                 .and_then(|index| inner.sessions.get(index))
                 .cloned()
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
-            let local_session = local_record.session.clone();
+            let local_session = AppState::wire_session_from_record(&local_record);
             let revision = if changed {
                 self.commit_session_created_locked(&mut inner, &local_record)
                     .map_err(|err| {

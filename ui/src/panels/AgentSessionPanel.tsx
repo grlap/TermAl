@@ -769,6 +769,9 @@ const SessionComposer = memo(function SessionComposer({
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const composerResizeAnimationFrameRef = useRef<number | null>(null);
   const composerResizeNeedsMetricRefreshRef = useRef(false);
+  const composerLastMeasuredDraftLengthRef = useRef(0);
+  const composerLastAppliedHeightRef = useRef<number | null>(null);
+  const composerLastAppliedOverflowYRef = useRef<"auto" | "hidden" | null>(null);
   const composerSizingStateRef = useRef<{
     borderHeight: number;
     minHeight: number;
@@ -781,20 +784,43 @@ const SessionComposer = memo(function SessionComposer({
   const requestedSlashModelOptionsRef = useRef<string | null>(null);
   const requestedSlashAgentCommandsRef = useRef<string | null>(null);
   const slashOptionsRef = useRef<HTMLDivElement | null>(null);
-  const [localDraftsBySessionId, setLocalDraftsBySessionId] = useState<Record<string, string>>({});
+  const session = useComposerSessionSnapshot(sessionId);
+  const [currentLocalDraftState, setCurrentLocalDraftState] = useState<{
+    draft: string;
+    sessionId: string | null;
+  }>(() => {
+    const initialSessionId = session?.id ?? sessionId;
+    if (!initialSessionId) {
+      return { draft: "", sessionId: null };
+    }
+
+    const initialCommittedDraft = session?.committedDraft ?? "";
+    committedDraftsRef.current[initialSessionId] = initialCommittedDraft;
+    const initialLocalDraft = localDraftsRef.current[initialSessionId];
+    const initialDraft =
+      initialLocalDraft !== undefined ? initialLocalDraft : initialCommittedDraft;
+    return {
+      draft: initialDraft,
+      sessionId: initialSessionId,
+    };
+  });
   const [promptHistoryStateBySessionId, setPromptHistoryStateBySessionId] = useState<
     Record<string, PromptHistoryState | undefined>
   >({});
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashNavModality, setSlashNavModality] = useState<"keyboard" | "mouse">("keyboard");
 
-  const session = useComposerSessionSnapshot(sessionId);
   const activeSessionId = session?.id ?? sessionId;
   const committedDraft = session?.committedDraft ?? "";
   const draftAttachments = session?.draftAttachments ?? EMPTY_COMPOSER_ATTACHMENTS;
   const promptHistory = session?.promptHistory ?? EMPTY_COMPOSER_PROMPT_HISTORY;
   const composerDraft =
-    !activeSessionId ? "" : (localDraftsBySessionId[activeSessionId] ?? committedDraft);
+    currentLocalDraftState.sessionId === activeSessionId
+      ? currentLocalDraftState.draft
+      : "";
+  const initialComposerDraft = activeSessionId
+    ? (localDraftsRef.current[activeSessionId] ?? committedDraft)
+    : "";
   const slashPalette = useMemo(
     () =>
       buildSlashPaletteState(
@@ -887,13 +913,28 @@ const SessionComposer = memo(function SessionComposer({
       sizingState.minHeight,
       availablePanelHeight > 0 ? availablePanelHeight * 0.4 : Number.POSITIVE_INFINITY,
     );
-
-    textarea.style.height = "0px";
+    const currentDraftLength = textarea.value.length;
+    const shouldAllowShrink =
+      forceRefreshMetrics ||
+      currentDraftLength < composerLastMeasuredDraftLengthRef.current;
+    if (shouldAllowShrink) {
+      textarea.style.height = "auto";
+    }
 
     const contentHeight = textarea.scrollHeight + sizingState.borderHeight;
     const nextHeight = Math.min(Math.max(contentHeight, sizingState.minHeight), maxHeight);
-    textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = contentHeight > maxHeight + 1 ? "auto" : "hidden";
+    const nextOverflowY: "auto" | "hidden" =
+      contentHeight > maxHeight + 1 ? "auto" : "hidden";
+
+    if (composerLastAppliedHeightRef.current !== nextHeight) {
+      textarea.style.height = `${nextHeight}px`;
+      composerLastAppliedHeightRef.current = nextHeight;
+    }
+    if (composerLastAppliedOverflowYRef.current !== nextOverflowY) {
+      textarea.style.overflowY = nextOverflowY;
+      composerLastAppliedOverflowYRef.current = nextOverflowY;
+    }
+    composerLastMeasuredDraftLengthRef.current = currentDraftLength;
   }
 
   function scheduleComposerResize(forceRefreshMetrics = false) {
@@ -918,6 +959,9 @@ const SessionComposer = memo(function SessionComposer({
   useLayoutEffect(() => {
     composerSizingStateRef.current = null;
     composerResizeNeedsMetricRefreshRef.current = false;
+    composerLastMeasuredDraftLengthRef.current = 0;
+    composerLastAppliedHeightRef.current = null;
+    composerLastAppliedOverflowYRef.current = null;
     cancelScheduledComposerResize();
     resizeComposerInput(true);
 
@@ -925,14 +969,6 @@ const SessionComposer = memo(function SessionComposer({
       cancelScheduledComposerResize();
     };
   }, [activeSessionId]);
-
-  useEffect(() => {
-    scheduleComposerResize();
-  }, [composerDraft]);
-
-  useEffect(() => {
-    localDraftsRef.current = localDraftsBySessionId;
-  }, [localDraftsBySessionId]);
 
   useEffect(() => {
     onDraftCommitRef.current = onDraftCommit;
@@ -1086,12 +1122,24 @@ const SessionComposer = memo(function SessionComposer({
     return () => {
       composerSizingStateRef.current = null;
       composerResizeNeedsMetricRefreshRef.current = false;
+      composerLastMeasuredDraftLengthRef.current = 0;
+      composerLastAppliedHeightRef.current = null;
+      composerLastAppliedOverflowYRef.current = null;
       cancelScheduledComposerResize();
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!activeSessionId) {
+      if (composerInputRef.current && composerInputRef.current.value !== "") {
+        composerInputRef.current.value = "";
+      }
+      setCurrentLocalDraftState((current) =>
+        current.sessionId === null && current.draft === ""
+          ? current
+          : { draft: "", sessionId: null },
+      );
+      scheduleComposerResize(true);
       return;
     }
 
@@ -1100,20 +1148,27 @@ const SessionComposer = memo(function SessionComposer({
 
     committedDraftsRef.current[activeSessionId] = committedDraft;
 
-    if (localDraft !== undefined && localDraft !== previousCommitted) {
-      return;
+    const nextDraft =
+      localDraft !== undefined && localDraft !== previousCommitted
+        ? localDraft
+        : committedDraft;
+    if (composerInputRef.current && composerInputRef.current.value !== nextDraft) {
+      composerInputRef.current.value = nextDraft;
     }
-
-    setLocalDraftsBySessionId((current) => {
-      if ((current[activeSessionId] ?? "") === committedDraft) {
-        return current;
-      }
-
-      return {
-        ...current,
-        [activeSessionId]: committedDraft,
-      };
-    });
+    setCurrentLocalDraftState((current) =>
+      (!nextDraft.startsWith("/") &&
+        current.sessionId === null &&
+        current.draft === "") ||
+      (current.sessionId === activeSessionId && current.draft === nextDraft)
+        ? current
+        : nextDraft.startsWith("/")
+          ? {
+              draft: nextDraft,
+              sessionId: activeSessionId,
+            }
+          : { draft: "", sessionId: null },
+    );
+    scheduleComposerResize(true);
   }, [activeSessionId, committedDraft]);
 
   useEffect(() => {
@@ -1152,21 +1207,26 @@ const SessionComposer = memo(function SessionComposer({
   }
 
   function updateLocalDraft(sessionId: string, nextValue: string) {
-    localDraftsRef.current = {
-      ...localDraftsRef.current,
-      [sessionId]: nextValue,
-    };
-
-    setLocalDraftsBySessionId((current) => {
-      if ((current[sessionId] ?? "") === nextValue) {
-        return current;
+    localDraftsRef.current[sessionId] = nextValue;
+    if (sessionId === activeSessionId) {
+      if (composerInputRef.current && composerInputRef.current.value !== nextValue) {
+        composerInputRef.current.value = nextValue;
       }
-
-      return {
-        ...current,
-        [sessionId]: nextValue,
-      };
-    });
+      setCurrentLocalDraftState((current) =>
+        (!nextValue.startsWith("/") &&
+          current.sessionId === null &&
+          current.draft === "") ||
+        (current.sessionId === sessionId && current.draft === nextValue)
+          ? current
+          : nextValue.startsWith("/")
+            ? {
+                draft: nextValue,
+                sessionId,
+              }
+            : { draft: "", sessionId: null },
+      );
+      scheduleComposerResize();
+    }
   }
 
   function commitDraft(sessionId: string, nextValue: string) {
@@ -1538,7 +1598,7 @@ const SessionComposer = memo(function SessionComposer({
           ref={composerInputRef}
           className="composer-input"
           aria-label={session ? `Message ${session.name}` : "Message session"}
-          value={composerDraft}
+          defaultValue={initialComposerDraft}
           onChange={(event) => handleComposerChange(event.target.value)}
           onBlur={handleComposerBlur}
           disabled={composerInputDisabled}

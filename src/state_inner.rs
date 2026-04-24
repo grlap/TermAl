@@ -156,6 +156,7 @@ impl StateInner {
                 preview: "Ready for a prompt.".to_owned(),
                 messages: Vec::new(),
                 pending_prompts: Vec::new(),
+                session_mutation_stamp: None,
             },
         };
 

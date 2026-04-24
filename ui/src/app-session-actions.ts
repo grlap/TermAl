@@ -124,6 +124,7 @@ type UseAppSessionActionsRefs = {
   >;
   confirmedUnknownModelSendsRef: MutableRefObject<Set<string>>;
   activePromptPollCancelRef: MutableRefObject<(() => void) | null>;
+  activePromptPollSessionIdRef: MutableRefObject<string | null>;
   refreshingSessionModelOptionIdsRef: MutableRefObject<SessionFlagMap>;
   refreshingAgentCommandSessionIdsRef: MutableRefObject<SessionFlagMap>;
 };
@@ -285,6 +286,7 @@ export function useAppSessionActions(
       draftAttachmentsBySessionIdRef,
       confirmedUnknownModelSendsRef,
       activePromptPollCancelRef,
+      activePromptPollSessionIdRef,
       refreshingSessionModelOptionIdsRef,
       refreshingAgentCommandSessionIdsRef,
     },
@@ -317,18 +319,38 @@ export function useAppSessionActions(
     requestActionRecoveryResync,
   } = params;
 
-  function startStaleSendResponseRecoveryPoll(sessionId: string) {
+  function stopStaleSendResponseRecoveryPoll() {
     activePromptPollCancelRef.current?.();
-    activePromptPollCancelRef.current = startActivePromptPoll({
+    activePromptPollCancelRef.current = null;
+    activePromptPollSessionIdRef.current = null;
+  }
+
+  function startStaleSendResponseRecoveryPoll(sessionId: string) {
+    stopStaleSendResponseRecoveryPoll();
+    const cancelPoll = startActivePromptPoll({
       fetchState,
       isMounted: () => isMountedRef.current,
       onState: (freshState) => {
         adoptState(freshState);
-        return !freshState.sessions?.some(
+        const shouldStop = !freshState.sessions?.some(
           (session) => session.id === sessionId && session.status === "active",
         );
+        if (shouldStop && activePromptPollSessionIdRef.current === sessionId) {
+          activePromptPollSessionIdRef.current = null;
+        }
+        return shouldStop;
       },
     });
+    activePromptPollSessionIdRef.current = sessionId;
+    activePromptPollCancelRef.current = () => {
+      cancelPoll();
+      if (activePromptPollSessionIdRef.current === sessionId) {
+        activePromptPollSessionIdRef.current = null;
+      }
+      if (activePromptPollCancelRef.current) {
+        activePromptPollCancelRef.current = null;
+      }
+    };
   }
 
   function setDraftRefValue(sessionId: string, nextValue: string) {

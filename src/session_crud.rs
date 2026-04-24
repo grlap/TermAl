@@ -293,7 +293,11 @@ impl AppState {
         }
         let revision = self.commit_session_created_locked(&mut inner, &record)
             .map_err(|err| ApiError::internal(format!("failed to persist session: {err:#}")))?;
-        let session = record.session.clone();
+        let session = inner
+            .find_session_index(&record.session.id)
+            .and_then(|index| inner.sessions.get(index))
+            .map(AppState::wire_session_from_record)
+            .unwrap_or_else(|| AppState::wire_session_from_record(&record));
         drop(inner);
         self.publish_delta(&DeltaEvent::SessionCreated {
             revision,

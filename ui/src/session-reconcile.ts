@@ -19,7 +19,15 @@ import type {
   UserInputRequestMessage,
 } from "./types";
 
-export function reconcileSessions(previous: Session[], next: Session[]): Session[] {
+type ReconcileSessionsOptions = {
+  disableMutationStampFastPath?: boolean;
+};
+
+export function reconcileSessions(
+  previous: Session[],
+  next: Session[],
+  options?: ReconcileSessionsOptions,
+) {
   let previousById: Map<string, Session> | null = null;
   let changed = previous.length !== next.length;
 
@@ -35,7 +43,11 @@ export function reconcileSessions(previous: Session[], next: Session[]): Session
       return nextSession;
     }
 
-    const mergedSession = reconcileSession(previousSession, nextSession);
+    const mergedSession = reconcileSession(
+      previousSession,
+      nextSession,
+      options,
+    );
     if (mergedSession !== previousSession || previous[index]?.id !== nextSession.id) {
       changed = true;
     }
@@ -64,12 +76,25 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.externalSessionId === next.externalSessionId &&
     previous.agentCommandsRevision === next.agentCommandsRevision &&
     previous.codexThreadState === next.codexThreadState &&
+    previous.sessionMutationStamp === next.sessionMutationStamp &&
     previous.status === next.status &&
     previous.preview === next.preview
   );
 }
 
-function reconcileSession(previous: Session, next: Session): Session {
+function reconcileSession(
+  previous: Session,
+  next: Session,
+  options?: ReconcileSessionsOptions,
+): Session {
+  if (
+    !options?.disableMutationStampFastPath &&
+    previous.sessionMutationStamp !== null &&
+    previous.sessionMutationStamp !== undefined &&
+    previous.sessionMutationStamp === next.sessionMutationStamp
+  ) {
+    return previous;
+  }
   const messages = reconcileMessages(previous.messages, next.messages);
   const pendingPrompts = reconcilePendingPrompts(previous.pendingPrompts, next.pendingPrompts);
 
@@ -131,6 +156,52 @@ function sameModelOptions(previous?: Session["modelOptions"], next?: Session["mo
 }
 
 function reconcileMessages(previous: Message[], next: Message[]): Message[] {
+  if (previous === next) {
+    return previous;
+  }
+
+  if (previous.length === next.length && previous.length > 0) {
+    const previousLastMessage = previous[previous.length - 1];
+    const nextLastMessage = next[next.length - 1];
+    if (
+      previousLastMessage &&
+      nextLastMessage &&
+      previousLastMessage.id === nextLastMessage.id
+    ) {
+      let firstChangedIndex = -1;
+      for (let index = 0; index < next.length; index += 1) {
+        if (previous[index]?.id !== next[index]?.id) {
+          firstChangedIndex = index;
+          break;
+        }
+        if (reconcileMessage(previous[index]!, next[index]!) !== previous[index]) {
+          firstChangedIndex = index;
+          break;
+        }
+      }
+
+      if (firstChangedIndex === -1) {
+        return previous;
+      }
+
+      const merged = previous.slice(0, firstChangedIndex);
+      for (let index = firstChangedIndex; index < next.length; index += 1) {
+        const previousMessage = previous[index];
+        const nextMessage = next[index];
+        if (previousMessage?.id === nextMessage?.id) {
+          merged.push(reconcileMessage(previousMessage, nextMessage));
+          continue;
+        }
+        return reconcileMessagesById(previous, next);
+      }
+      return merged;
+    }
+  }
+
+  return reconcileMessagesById(previous, next);
+}
+
+function reconcileMessagesById(previous: Message[], next: Message[]): Message[] {
   let previousById: Map<string, Message> | null = null;
   let changed = previous.length !== next.length;
 

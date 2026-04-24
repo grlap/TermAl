@@ -16,7 +16,6 @@
 
 use super::*;
 
-
 // Pins codex_windows_shell_warning() to the current platform: Some(_) mentioning
 // "WSL" on Windows, None elsewhere. Guards against accidentally surfacing the
 // warning on non-Windows builds or dropping the WSL hint on Windows.

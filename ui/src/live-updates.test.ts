@@ -433,6 +433,7 @@ describe("applyDeltaToSessions", () => {
       },
       preview: "Waiting for activity.",
       status: "active",
+      sessionMutationStamp: 101,
     };
 
     const result = applyDeltaToSessions(sessions, delta);
@@ -443,6 +444,7 @@ describe("applyDeltaToSessions", () => {
     }
 
     expect(result.sessions[0].status).toBe("active");
+    expect(result.sessions[0].sessionMutationStamp).toBe(101);
     expect(result.sessions[0].messages).toHaveLength(1);
     expect(result.sessions[0].messages[0]).toMatchObject({
       id: "message-1",

@@ -48,12 +48,12 @@ impl AppState {
     /// path (see `src/recorders.rs`) for whole-block events (text,
     /// thinking, diff, approval, subagent result, etc.).
     fn push_message(&self, session_id: &str, message: Message) -> Result<()> {
-        let (revision, message, message_index, preview, status) = {
+        let (revision, message, message_index, preview, status, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let (message_index, preview, status) = {
+            let (message_index, preview, status, session_mutation_stamp) = {
                 let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -74,10 +74,18 @@ impl AppState {
                     message_index,
                     record.session.preview.clone(),
                     record.session.status,
+                    record.mutation_stamp,
                 )
             };
             let revision = self.commit_persisted_delta_locked(&mut inner)?;
-            (revision, message, message_index, preview, status)
+            (
+                revision,
+                message,
+                message_index,
+                preview,
+                status,
+                session_mutation_stamp,
+            )
         };
 
         self.publish_delta(&DeltaEvent::MessageCreated {
@@ -88,6 +96,7 @@ impl AppState {
             message,
             preview,
             status,
+            session_mutation_stamp: Some(session_mutation_stamp),
         });
         Ok(())
     }
@@ -116,12 +125,12 @@ impl AppState {
         anchor_message_id: &str,
         message: Message,
     ) -> Result<()> {
-        let (revision, message, message_index, preview, status) = {
+        let (revision, message, message_index, preview, status, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let (message_index, preview, status) = {
+            let (message_index, preview, status, session_mutation_stamp) = {
                 let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -139,10 +148,18 @@ impl AppState {
                     message_index,
                     record.session.preview.clone(),
                     record.session.status,
+                    record.mutation_stamp,
                 )
             };
             let revision = self.commit_persisted_delta_locked(&mut inner)?;
-            (revision, message, message_index, preview, status)
+            (
+                revision,
+                message,
+                message_index,
+                preview,
+                status,
+                session_mutation_stamp,
+            )
         };
 
         self.publish_delta(&DeltaEvent::MessageCreated {
@@ -153,6 +170,7 @@ impl AppState {
             message,
             preview,
             status,
+            session_mutation_stamp: Some(session_mutation_stamp),
         });
         Ok(())
     }
@@ -169,45 +187,48 @@ impl AppState {
     /// reasoning/assistant deltas in `src/codex_events.rs`, ACP
     /// `text_delta` in `src/acp.rs`).
     fn append_text_delta(&self, session_id: &str, message_id: &str, delta: &str) -> Result<()> {
-        let (preview, revision, message_index) = {
+        let (preview, revision, message_index, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-            let message_index = message_index_on_record(record, message_id).ok_or_else(|| {
-                anyhow!("session `{session_id}` message `{message_id}` not found")
-            })?;
-            let session = &mut record.session;
-
             let mut preview = None;
-            let Some(message) = session.messages.get_mut(message_index) else {
-                return Err(anyhow!(
-                    "session `{session_id}` message index `{message_index}` is out of bounds"
-                ));
-            };
-            match message {
-                Message::Text { id, text, .. } if id == message_id => {
-                    text.push_str(delta);
-                    let trimmed = text.trim();
-                    if !trimmed.is_empty() {
-                        preview = Some(make_preview(trimmed));
+            let (message_index, session_mutation_stamp) = {
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                let message_index = message_index_on_record(record, message_id).ok_or_else(|| {
+                    anyhow!("session `{session_id}` message `{message_id}` not found")
+                })?;
+                let session = &mut record.session;
+
+                let Some(message) = session.messages.get_mut(message_index) else {
+                    return Err(anyhow!(
+                        "session `{session_id}` message index `{message_index}` is out of bounds"
+                    ));
+                };
+                match message {
+                    Message::Text { id, text, .. } if id == message_id => {
+                        text.push_str(delta);
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            preview = Some(make_preview(trimmed));
+                        }
+                    }
+                    _ => {
+                        return Err(anyhow!(
+                            "session `{session_id}` message `{message_id}` is not a text message"
+                        ));
                     }
                 }
-                _ => {
-                    return Err(anyhow!(
-                        "session `{session_id}` message `{message_id}` is not a text message"
-                    ));
-                }
-            }
 
-            if let Some(next_preview) = preview.as_ref() {
-                session.preview = next_preview.clone();
-            }
+                if let Some(next_preview) = preview.as_ref() {
+                    session.preview = next_preview.clone();
+                }
+                (message_index, record.mutation_stamp)
+            };
             let revision = self.commit_delta_locked(&mut inner)?;
-            (preview, revision, message_index)
+            (preview, revision, message_index, session_mutation_stamp)
         };
 
         self.publish_delta(&DeltaEvent::TextDelta {
@@ -217,6 +238,7 @@ impl AppState {
             message_index,
             delta: delta.to_owned(),
             preview,
+            session_mutation_stamp: Some(session_mutation_stamp),
         });
 
         Ok(())
@@ -234,50 +256,59 @@ impl AppState {
     /// `append_text_delta` when their message-stop handler detects a
     /// mismatch.
     fn replace_text_message(&self, session_id: &str, message_id: &str, text: &str) -> Result<()> {
-        let (preview, revision, message_index, replacement_text) = {
+        let (preview, revision, message_index, replacement_text, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-            let message_index = message_index_on_record(record, message_id).ok_or_else(|| {
-                anyhow!("session `{session_id}` message `{message_id}` not found")
-            })?;
-            let session = &mut record.session;
-
             let mut preview = None;
-            let Some(message) = session.messages.get_mut(message_index) else {
-                return Err(anyhow!(
-                    "session `{session_id}` message index `{message_index}` is out of bounds"
-                ));
-            };
-            match message {
-                Message::Text {
-                    id,
-                    text: current_text,
-                    ..
-                } if id == message_id => {
-                    current_text.clear();
-                    current_text.push_str(text);
-                    let trimmed = current_text.trim();
-                    if !trimmed.is_empty() {
-                        preview = Some(make_preview(trimmed));
+            let (message_index, session_mutation_stamp) = {
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                let message_index = message_index_on_record(record, message_id).ok_or_else(|| {
+                    anyhow!("session `{session_id}` message `{message_id}` not found")
+                })?;
+                let session = &mut record.session;
+
+                let Some(message) = session.messages.get_mut(message_index) else {
+                    return Err(anyhow!(
+                        "session `{session_id}` message index `{message_index}` is out of bounds"
+                    ));
+                };
+                match message {
+                    Message::Text {
+                        id,
+                        text: current_text,
+                        ..
+                    } if id == message_id => {
+                        current_text.clear();
+                        current_text.push_str(text);
+                        let trimmed = current_text.trim();
+                        if !trimmed.is_empty() {
+                            preview = Some(make_preview(trimmed));
+                        }
+                    }
+                    _ => {
+                        return Err(anyhow!(
+                            "session `{session_id}` message `{message_id}` is not a text message"
+                        ));
                     }
                 }
-                _ => {
-                    return Err(anyhow!(
-                        "session `{session_id}` message `{message_id}` is not a text message"
-                    ));
-                }
-            }
 
-            if let Some(next_preview) = preview.as_ref() {
-                session.preview = next_preview.clone();
-            }
+                if let Some(next_preview) = preview.as_ref() {
+                    session.preview = next_preview.clone();
+                }
+                (message_index, record.mutation_stamp)
+            };
             let revision = self.commit_delta_locked(&mut inner)?;
-            (preview, revision, message_index, text.to_owned())
+            (
+                preview,
+                revision,
+                message_index,
+                text.to_owned(),
+                session_mutation_stamp,
+            )
         };
 
         self.publish_delta(&DeltaEvent::TextReplace {
@@ -287,6 +318,7 @@ impl AppState {
             message_index,
             text: replacement_text,
             preview,
+            session_mutation_stamp: Some(session_mutation_stamp),
         });
 
         Ok(())
@@ -313,12 +345,25 @@ impl AppState {
         let command_language = Some(shell_language().to_owned());
         let output_language = infer_command_output_language(command).map(str::to_owned);
 
-        let (preview, revision, message_index, created_message, session_status) = {
+        let (
+            preview,
+            revision,
+            message_index,
+            created_message,
+            session_status,
+            session_mutation_stamp,
+        ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let (message_index, created_message, preview, session_status) = {
+            let (
+                message_index,
+                created_message,
+                preview,
+                session_status,
+                session_mutation_stamp,
+            ) = {
                 let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -391,6 +436,7 @@ impl AppState {
                     created_message,
                     preview,
                     record.session.status,
+                    record.mutation_stamp,
                 )
             };
             let revision = if created_message.is_some() {
@@ -404,6 +450,7 @@ impl AppState {
                 message_index,
                 created_message,
                 session_status,
+                session_mutation_stamp,
             )
         };
 
@@ -416,6 +463,7 @@ impl AppState {
                 message,
                 preview,
                 status: session_status,
+                session_mutation_stamp: Some(session_mutation_stamp),
             });
         } else {
             self.publish_delta(&DeltaEvent::CommandUpdate {
@@ -429,6 +477,7 @@ impl AppState {
                 output_language,
                 status,
                 preview,
+                session_mutation_stamp: Some(session_mutation_stamp),
             });
         }
 
@@ -452,12 +501,25 @@ impl AppState {
         message_id: &str,
         agents: Vec<ParallelAgentProgress>,
     ) -> Result<()> {
-        let (preview, revision, message_index, created_message, session_status) = {
+        let (
+            preview,
+            revision,
+            message_index,
+            created_message,
+            session_status,
+            session_mutation_stamp,
+        ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let (message_index, created_message, preview, session_status) = {
+            let (
+                message_index,
+                created_message,
+                preview,
+                session_status,
+                session_mutation_stamp,
+            ) = {
                 let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -503,6 +565,7 @@ impl AppState {
                     created_message,
                     preview,
                     record.session.status,
+                    record.mutation_stamp,
                 )
             };
             let revision = if created_message.is_some() {
@@ -516,6 +579,7 @@ impl AppState {
                 message_index,
                 created_message,
                 session_status,
+                session_mutation_stamp,
             )
         };
 
@@ -528,6 +592,7 @@ impl AppState {
                 message,
                 preview,
                 status: session_status,
+                session_mutation_stamp: Some(session_mutation_stamp),
             });
         } else {
             self.publish_delta(&DeltaEvent::ParallelAgentsUpdate {
@@ -537,6 +602,7 @@ impl AppState {
                 message_index,
                 agents,
                 preview,
+                session_mutation_stamp: Some(session_mutation_stamp),
             });
         }
 

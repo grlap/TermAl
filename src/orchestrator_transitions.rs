@@ -342,7 +342,7 @@ fn referenced_sessions_for_orchestrators(
         .sessions
         .iter()
         .filter(|record| referenced_session_ids.contains(record.session.id.as_str()))
-        .map(|record| record.session.clone())
+        .map(AppState::wire_session_from_record)
         .collect()
 }
 

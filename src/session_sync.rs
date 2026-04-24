@@ -165,13 +165,17 @@ impl AppState {
     /// shared Codex runtime so the UI can render "N requests remaining"
     /// / "resets at T" without polling the upstream API itself.
     fn note_codex_rate_limits(&self, rate_limits: CodexRateLimits) -> Result<()> {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        if inner.codex.rate_limits.as_ref() == Some(&rate_limits) {
-            return Ok(());
-        }
+        let (revision, codex) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if inner.codex.rate_limits.as_ref() == Some(&rate_limits) {
+                return Ok(());
+            }
 
-        inner.codex.rate_limits = Some(rate_limits);
-        self.commit_locked(&mut inner)?;
+            inner.codex.rate_limits = Some(rate_limits);
+            let revision = self.commit_persisted_delta_locked(&mut inner)?;
+            (revision, inner.codex.clone())
+        };
+        self.publish_delta(&DeltaEvent::CodexUpdated { revision, codex });
         Ok(())
     }
 
@@ -179,28 +183,32 @@ impl AppState {
     /// update hints, login reminders, etc.) on `AppState` so the UI
     /// can render it as a banner on the next state broadcast.
     fn note_codex_notice(&self, notice: CodexNotice) -> Result<()> {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        if inner
-            .codex
-            .notices
-            .first()
-            .is_some_and(|existing| same_codex_notice_identity(existing, &notice))
-        {
-            return Ok(());
-        }
+        let (revision, codex) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if inner
+                .codex
+                .notices
+                .first()
+                .is_some_and(|existing| same_codex_notice_identity(existing, &notice))
+            {
+                return Ok(());
+            }
 
-        if let Some(index) = inner
-            .codex
-            .notices
-            .iter()
-            .position(|existing| same_codex_notice_identity(existing, &notice))
-        {
-            inner.codex.notices.remove(index);
-        }
+            if let Some(index) = inner
+                .codex
+                .notices
+                .iter()
+                .position(|existing| same_codex_notice_identity(existing, &notice))
+            {
+                inner.codex.notices.remove(index);
+            }
 
-        inner.codex.notices.insert(0, notice);
-        inner.codex.notices.truncate(5);
-        self.commit_locked(&mut inner)?;
+            inner.codex.notices.insert(0, notice);
+            inner.codex.notices.truncate(5);
+            let revision = self.commit_persisted_delta_locked(&mut inner)?;
+            (revision, inner.codex.clone())
+        };
+        self.publish_delta(&DeltaEvent::CodexUpdated { revision, codex });
         Ok(())
     }
 

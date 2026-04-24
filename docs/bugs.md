@@ -865,6 +865,38 @@ Codex-app actions are already bound to session B.
   approval/pending cards and asserts no stale card is actionable under the new
   session id.
 
+## Partial responses can consume restart detection before full snapshot adoption
+
+**Severity:** High - the mutation-stamp fast path disables deep session
+reconciliation only when `adoptState(...)` sees a server-instance change, but
+partial create/fetch responses can update `lastSeenServerInstanceIdRef` first.
+
+Backend `SessionRecord::mutation_stamp` values reset every process lifetime.
+If a restarted backend returns a partial `CreateSessionResponse` or
+`SessionResponse` before the next full `/api/state` snapshot, the partial
+adoption updates `lastSeenServerInstanceIdRef`. The following full snapshot
+then appears to come from the same instance, so `adoptState(...)` may leave the
+mutation-stamp fast path enabled. Existing sessions whose stamps collide with
+the previous process, especially stamp `0`, can keep stale client objects after
+restart.
+
+**Current behavior:**
+- `adoptCreatedSessionResponse(...)` and `adoptFetchedSession(...)` can update
+  `lastSeenServerInstanceIdRef` before a full state snapshot adopts.
+- `adoptState(...)` computes `serverInstanceChanged` from that same ref.
+- A full restart snapshot can therefore skip the deep reconcile that should
+  run when process-local mutation stamps reset.
+
+**Proposal:**
+- Track "server instance changed since last full snapshot" separately from the
+  latest instance id observed by any response.
+- Or keep a full-state-specific server instance marker and compare full
+  snapshots against that marker when deciding whether to disable the
+  mutation-stamp fast path.
+- Add App/live-state coverage where a partial response from instance B arrives
+  before a full instance-B snapshot with colliding stamps, and assert the full
+  snapshot still replaces stale session content.
+
 ## Session store publication can race ahead of React session state
 
 **Severity:** Medium - the new `session-store` publishes some session slices before the corresponding React `sessions` state commits, so the UI can mix newer store-backed session data with older prop-derived session state in one render.
@@ -898,30 +930,51 @@ still coming from the previous React `sessions` commit.
 
 ## Transcript scroll state can leak across session switches
 
-**Severity:** Medium - the virtualized transcript now reuses stateful scroll/bottom-follow refs across session switches, so a new session can inherit the previous session's detached-from-bottom state.
+**Severity:** High - the virtualized transcript is instantiated once and reused across every session in the pane, so ten-plus stateful scroll/intent refs persist from one session into the next. A new session inherits the previous session's "user has scrolled", "detached from bottom", "last scroll kind", "last native scrollTop", and search-pin bookkeeping, which breaks bottom-pinning on first activation, misclassifies the first native scroll, and can suppress idle compaction and auto-pinning until the user scrolls again.
 
-`ui/src/panels/VirtualizedConversationMessageList.tsx` keeps several refs such
-as `hasUserScrollInteractionRef`, `isDetachedFromBottomRef`, and
-`lastUserScrollKindRef` to preserve user scroll intent. After the staged
-session-pane refactor, that list is no longer necessarily remounted per session,
-and the post-activation reset path only keys off `isActive`. If a user scrolls
-away from bottom in session A, then switches to session B, the new session can
-inherit the old detached/bottom-disabled state instead of getting a fresh
-bottom-follow posture.
+`ui/src/panels/AgentSessionPanel.tsx:695` renders `<VirtualizedConversationMessageList …/>` without a `key={sessionId}` prop, and the parent `SessionConversationPage` is similarly unkeyed. `sessionId` is threaded as a plain prop, so React keeps the same component instance mounted across every session change in that pane — and every `useRef` inside `ui/src/panels/VirtualizedConversationMessageList.tsx` persists with it. The main scroll-listener / ResizeObserver effect at line 1310 has `sessionId` in its deps, so it tears down and resubscribes on switch, but the cleanup only removes listeners — it never resets the scroll-intent refs.
 
 **Current behavior:**
-- The virtualized transcript keeps scroll-intent refs alive across some
-  session-switch paths.
-- Those refs are not comprehensively reset on `sessionId` changes.
-- A newly selected session can behave as if the user already scrolled away from
-  bottom, breaking expected latest-message snap/follow behavior.
+- `VirtualizedConversationMessageList` is not remounted per session; `sessionId` is a prop, not a key.
+- The following refs have no reset path keyed on `sessionId` or on the `isActive` false → true transition:
+  - `hasUserScrollInteractionRef` (line 323) — only flips `false → true` (lines 1186, 1248). Gates post-activation bottom-pin (1075), the setTimeout fallback (1108), `scrollToBottom` (1145), and `handlePageHeightChange` re-pin (1375, 1397, 1403).
+  - `shouldKeepBottomAfterLayoutRef` (302), `isDetachedFromBottomRef` (303), `skipNextMountedPrependRestoreRef` (304), `lastPinnedConversationSearchIdRef` (305), `lastUserScrollInputTimeRef` (306), `lastUserScrollKindRef` (307), `pendingAggressiveIdleCompactionRef` (308), `lastNativeScrollTopRef` (309), `pendingProgrammaticScrollTopRef` (310).
+  - `pendingDeferredLayoutAnchorRef` (315-318) is nullable with explicit reset paths (1019, 1177, 1216, 1264), but none of those fires on session change — a stale anchor (`messageId`, `viewportOffsetPx`) carried across a switch is applied against the new session's DOM, usually a no-op but wasteful.
+- The consequence: session B starts with the bottom-pin disabled if the user was scrolled up in A; the first scroll in B computes `scrollDelta` against A's `scrollTop` and misclassifies as seek/incremental; cooldowns stay armed and suppress idle compaction in B.
 
 **Proposal:**
-- Reset scroll-intent refs and related bottom-follow bookkeeping when
-  `sessionId` changes, or remount the virtualized transcript per session.
-- Add a regression that scrolls away from bottom in one session, switches to a
-  second session, and asserts the second session starts with fresh bottom-follow
-  state.
+- Simplest fix: add `key={sessionId}` to `<VirtualizedConversationMessageList …/>` at `ui/src/panels/AgentSessionPanel.tsx:695`. React then unmounts the virtualizer on session switch and every `useRef` resets on the new mount — no targeted reset effect needed.
+- Alternative: add a single `useLayoutEffect` keyed on `[sessionId]` inside `VirtualizedConversationMessageList` that resets the full ref cluster listed above (plus nulls `pendingDeferredLayoutAnchorRef` and `pendingMountedPrependRestoreRef`). More surgical but wider surface to keep in sync on every future ref addition.
+- Regression coverage: scroll away from bottom in session A, switch to B, assert (a) the new session renders at bottom, (b) the "New response" indicator behaves correctly on the next delta, (c) the first native scroll in B is classified against a `scrollTop=0` baseline.
+
+## Virtualized transcript timers can fire against a newly-switched session
+
+**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx` keeps `pendingDeferredLayoutTimerRef` (line 319) and `pendingIdleCompactionTimerRef` (line 320) alive in component scope with a cleanup effect at lines 800-805 whose deps are the stable `clearPendingDeferredLayoutTimer` / `clearPendingIdleCompactionTimer` callbacks. Those callbacks never change identity, so the cleanup runs on component mount/unmount only — not on `sessionId` change. A timer armed in session A can fire after the user switches to session B and call `setMountedPageRange` or bump the layout version against B's state.
+
+The timer callbacks do read `scrollContainerRef.current` and gate on `isActive`, which neutralizes the common case (deactivation plus unmount). But on a session switch the pane stays active and the scroll container stays the same, so a late-firing deferred-layout or idle-compaction tick can legitimately reach `setMountedPageRange(nextRange)` or `bumpLayoutVersion(...)` against the new session's `pageKeys`, using a `nextRange` computed from A's mounted-range bookkeeping. Under the "key the virtualizer by sessionId" fix to the preceding bug this disappears automatically because the timers are cleared on unmount; under the surgical fix it has to be handled explicitly.
+
+**Current behavior:**
+- Deferred-layout and idle-compaction timers are cleared only when the component unmounts.
+- On `sessionId` change, both timers can fire later with state derived from the previous session.
+- The callbacks are defensive enough that no observable bug has been reported, but the contract is fragile.
+
+**Proposal:**
+- If the primary fix is `key={sessionId}`, this bug is covered as a side-effect and no extra work is needed.
+- If the primary fix is a surgical reset effect, also cancel both timers inside that effect: `clearPendingDeferredLayoutTimer(); clearPendingIdleCompactionTimer();` alongside the ref resets.
+- Either way, add a regression that primes a pending deferred-layout tick, switches sessions, and asserts no `setMountedPageRange` or `bumpLayoutVersion` call lands with the previous session's range data.
+
+## Page-height cache cleanup assumes UUID message IDs without documenting the contract
+
+**Severity:** Low - `pageHeightsRef` / `estimatedPageHeightsRef` in `ui/src/panels/VirtualizedConversationMessageList.tsx` (lines 298-301) are keyed on `${startIndex}:${endIndex}:${firstMessageId}:${lastMessageId}` (line 132). The cleanup at lines 807-816 is a plain `useEffect`, so it runs after the first render of a new session — meaning the first render of session B could consume a cached height from session A if their page keys happened to match. Today that collision is impossible because message IDs are UUIDs, but the key-construction comment does not call that out, and a future perf-motivated refactor that drops the UUID suffix from the key (e.g. switching to index-only keys for "simplicity") would regress to wrong initial heights on the first frame of every new session.
+
+**Current behavior:**
+- Page keys embed both message IDs; UUIDs make cross-session collisions practically impossible.
+- Cleanup runs as `useEffect`, after the first render of the new `pageKeys`.
+- Nothing in the file or nearby helpers notes that the UUID component of the key is load-bearing for cross-session safety.
+
+**Proposal:**
+- Add a short comment at the key construction site (line 132) documenting that the message-id component prevents stale heights from leaking across sessions.
+- Optionally promote the cleanup to `useLayoutEffect` so the invariant holds even if the message-id safety net ever shrinks.
 
 ## Focused live sessions monopolize the main thread during state adoption
 
@@ -1073,6 +1126,35 @@ surfaces land inside a session pane.
 **Proposal:**
 - Add a `removeSessionFromStore(sessionId)` helper and wire it to the same places `setSessions` drops a session, or document the pruning contract in the `session-store.ts` header so future delta code knows to call `syncComposerSessionsStore` (or equivalent) when a session is removed.
 
+## Runtime-only session mutation stamps can leak into persisted sessions
+
+**Severity:** Low - `session_mutation_stamp` is now represented on the shared
+`Session` wire struct, but that same struct is embedded in persisted
+`PersistedSessionRecord` values.
+
+The intended ownership is that `SessionRecord::mutation_stamp` is process-local
+runtime metadata and `wire_session_from_record(...)` is the only outbound source
+for the frontend-facing `sessionMutationStamp`. Remote proxy localization can
+clone an inbound remote session payload into local `record.session`; if that
+payload includes a remote process stamp, persistence can serialize it as part
+of the local session. That does not break current behavior, but it blurs local
+vs. remote stamp ownership and makes durable state carry a meaningless
+process-local marker.
+
+**Current behavior:**
+- `Session` includes optional `session_mutation_stamp`.
+- `PersistedSessionRecord` persists a `Session` value directly.
+- Remote-localized sessions can arrive with a remote stamp unless every inbound
+  path scrubs it.
+
+**Proposal:**
+- Clear `session_mutation_stamp` before persistence and after localizing inbound
+  remote sessions.
+- Keep `AppState::wire_session_from_record(...)` as the only path that sets the
+  outbound stamp.
+- Add a backend serialization/localization regression that proves persisted
+  sessions do not contain `sessionMutationStamp`.
+
 ## `looksLikeHtmlResponse` 256-char slice drops leading-whitespace tolerance
 
 **Severity:** Low - `ui/src/api.ts::looksLikeHtmlResponse(...)` now slices the first 256 raw characters before `trimStart().toLowerCase()`. A proxy or dev-server error page that emits more than 256 bytes of leading whitespace before `<html>` is no longer detected as HTML and falls through to `JSON.parse`, so the "Restart TermAl" guidance never surfaces for that response.
@@ -1121,6 +1203,30 @@ The existing `api.test.ts` case ("uses the JSON fast path for successful applica
 
 **Proposal:**
 - Track a "just-resized-synchronously" flag set in the layout effect and checked at the top of `scheduleComposerResize`, or gate the draft effect with a prev-draft ref so the "initial draft equals committed" case is a no-op.
+
+## Composer autosize does not shrink on width-only pane resize
+
+**Severity:** Low - the optimized composer resize path no longer forces a
+shrink-capable measurement when only the textarea width changes.
+
+`ui/src/panels/AgentSessionPanel.tsx` coalesces autosize work and only forces
+`height = auto` for session switches or panel-height changes. Widening a pane
+can reduce text wrapping and therefore reduce the required textarea height, but
+a width-only `ResizeObserver` update calls `scheduleComposerResize(...)`
+without the force flag. The measured height can remain taller than its content
+until another draft or session change triggers a full reset.
+
+**Current behavior:**
+- Pane width changes can alter wrapping without changing panel height.
+- The resize scheduler does not force the textarea through an auto-height pass
+  for width-only changes.
+- The composer can stay over-tall after widening the pane.
+
+**Proposal:**
+- Treat `widthChanged || panelHeightChanged` as a shrink-capable resize input,
+  or otherwise force an auto-height measurement whenever wrapping can change.
+- Add a focused test that widens the composer container and asserts the textarea
+  height can shrink without requiring another keystroke.
 
 ## Duplicated `Session` projection types in `session-store.ts` and `session-slash-palette.ts`
 
@@ -1610,6 +1716,29 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   test pins reconnect-snapshot recovery, not the deferred-value boundary
   introduced by the `startTransition`-wrapped `setSessions` in
   `ui/src/app-live-state.ts`.
+- [ ] P2: Add App/live-state coverage for restart snapshots with colliding
+  session mutation stamps:
+  seed one `serverInstanceId`, adopt a partial create/fetch response from a
+  different instance, then adopt a full snapshot from that new instance with
+  the same `sessionMutationStamp` but changed session content. Assert the full
+  snapshot still disables the stamp fast path and replaces stale content.
+- [ ] P2: Add active-prompt poll cancellation coverage for session deltas:
+  arm the stale-send recovery poll, dispatch a `messageCreated` or `textDelta`
+  SSE delta for the same session, advance `ACTIVE_PROMPT_POLL_INTERVAL_MS`,
+  and assert `/api/state` is not fetched.
+- [ ] P2: Add table-driven session-mutation-stamp propagation tests for
+  `applyDeltaToSessions`:
+  cover `textDelta`, `textReplace`, `commandUpdate`, and
+  `parallelAgentsUpdate`, including the fallback where a missing delta stamp
+  preserves the existing session stamp.
+- [ ] P2: Add incremental session-store creation coverage:
+  call `syncComposerSessionsStoreIncremental({ changedSessions: [newSession] })`
+  for a previously unknown session and assert the composer, record, and summary
+  slices are all populated.
+- [ ] P2: Add pane-level streaming plain-text selection coverage:
+  render a session with an active latest assistant message and a settled or
+  non-latest assistant message, then assert only the active latest card uses
+  the cheap plain-text streaming shell.
 - [ ] P2: Add `syncComposerDraftForSession` pruned-session no-op test:
   in `session-store.test.ts`, sync the store with an empty session list, then
   call `syncComposerDraftForSession` for the dropped id and assert the
@@ -1635,6 +1764,20 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   find it by spelunking. This does not imply CI integration — the scripts
   still require a live `127.0.0.1:4173` + Chrome DevTools Protocol at
   `127.0.0.1:9222`.
+- [ ] P2: Add a module-header comment to
+  `ui/src/panels/VirtualizedConversationMessageList.tsx`:
+  the file sits at ~1600 lines and owns non-obvious invariants
+  (page-band virtualization, scroll-intent classification, search-hit
+  pinning, deferred-layout anchoring, mounted-range reconciliation,
+  post-activation measurement) with no header explaining any of them.
+  Write a 20-30 line block covering what the file owns, what it
+  deliberately does NOT own (the scroll container itself — owned by
+  `SessionPaneView`; message rendering — delegated via
+  `renderMessageCard`; session-state mutations — pushed up to
+  `AgentSessionPanel`), and the load-bearing ref contracts (which
+  refs latch in one direction, which require session-switch reset,
+  which timers must be cancelled on unmount vs. on `sessionId`
+  change). Matches the CLAUDE.md guidance for large subsystems.
 - [ ] P2: Add App-level coverage for the extracted Add project flow:
   open the control-panel "Add project" action, exercise both local and
   remote remotes, assert `pickProjectRoot` only wires the local path,

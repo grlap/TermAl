@@ -29,6 +29,12 @@
 // identical snapshots back to clients.
 
 impl AppState {
+    fn wire_session_from_record(record: &SessionRecord) -> Session {
+        let mut session = record.session.clone();
+        session.session_mutation_stamp = Some(record.mutation_stamp);
+        session
+    }
+
     /// Builds a full state snapshot with guaranteed-fresh agent readiness.
     ///
     /// The cache is refreshed (filesystem I/O) *before* locking `inner`, then
@@ -89,7 +95,7 @@ impl AppState {
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         Ok(SessionResponse {
             revision: inner.revision,
-            session: inner.sessions[index].session.clone(),
+            session: Self::wire_session_from_record(&inner.sessions[index]),
             server_instance_id: self.server_instance_id.clone(),
         })
     }
@@ -205,7 +211,7 @@ impl AppState {
                 .sessions
                 .iter()
                 .filter(|record| !record.hidden)
-                .map(|record| record.session.clone())
+                .map(Self::wire_session_from_record)
                 .collect(),
         }
     }

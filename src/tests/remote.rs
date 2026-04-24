@@ -905,10 +905,8 @@ fn failed_remote_snapshot_sync_restores_session_tombstones() {
             "remote_session_id": record.remote_session_id.clone(),
         })
     }
-    let pre_sessions_summary: Vec<Value> =
-        pre_sessions.iter().map(session_comparable).collect();
-    let post_sessions_summary: Vec<Value> =
-        inner.sessions.iter().map(session_comparable).collect();
+    let pre_sessions_summary: Vec<Value> = pre_sessions.iter().map(session_comparable).collect();
+    let post_sessions_summary: Vec<Value> = inner.sessions.iter().map(session_comparable).collect();
     assert_eq!(
         post_sessions_summary, pre_sessions_summary,
         "rollback should restore full session content (Session fields + remote metadata), not just IDs"
@@ -1654,6 +1652,7 @@ fn remote_same_revision_deltas_apply_in_sequence() {
                 },
                 preview: "First remote message.".to_owned(),
                 status: SessionStatus::Active,
+                session_mutation_stamp: None,
             },
         )
         .expect("first same-revision delta should apply");
@@ -1671,6 +1670,7 @@ fn remote_same_revision_deltas_apply_in_sequence() {
                 output_language: Some("text".to_owned()),
                 status: CommandStatus::Success,
                 preview: "echo ok".to_owned(),
+                session_mutation_stamp: None,
             },
         )
         .expect("second same-revision delta should apply");
@@ -3801,8 +3801,6 @@ fn state_inner_remote_applied_revision_methods_cover_monotonic_cases() {
     assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab-2", 1));
 }
 
-
-
 // Pins that decode_remote_json strips control characters, replaces
 // CRLF with spaces, and truncates raw non-JSON error bodies past the
 // MAX_REMOTE_ERROR_BODY_CHARS limit before surfacing them.
@@ -4224,7 +4222,6 @@ fn remote_review_put_sends_scope_via_query_params() {
 
     join_test_server(server);
 }
-
 
 // Pins that when a remote responds 200 OK to /api/terminal/run/stream
 // with a non-SSE content-type (e.g. text/html), the local proxy emits
@@ -5490,4 +5487,3 @@ async fn terminal_run_route_proxies_valid_remote_multibyte_commands() {
 
     join_test_server(server);
 }
-

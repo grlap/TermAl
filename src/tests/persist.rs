@@ -21,7 +21,6 @@
 
 use super::*;
 
-
 fn persisted_state_load_error_after_mutation<F>(inner: StateInner, mutate: F) -> String
 where
     F: FnOnce(&mut Value),
@@ -672,8 +671,7 @@ fn persisted_state_requires_queued_prompt_source() {
 // returns `Err(Disconnected)` and tests automatically take the
 // synchronous fallback path — which is good for JSON round-trip
 // tests but hides whether a code path correctly routes async.
-fn test_app_state_with_live_persist_channel()
--> (AppState, mpsc::Receiver<PersistRequest>) {
+fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<PersistRequest>) {
     let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
     let persistence_path =
         std::env::temp_dir().join(format!("termal-test-{}.json", Uuid::new_v4()));

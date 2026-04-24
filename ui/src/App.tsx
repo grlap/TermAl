@@ -457,6 +457,7 @@ export default function App() {
   // unmount cleanup and the "new prompt replaces prior poll" path in
   // `handleSend` can stop an in-progress chain.
   const activePromptPollCancelRef = useRef<(() => void) | null>(null);
+  const activePromptPollSessionIdRef = useRef<string | null>(null);
   const sessionListSearchInputRef = useRef<HTMLInputElement>(null);
   const confirmedUnknownModelSendsRef = useRef<Set<string>>(new Set());
   const refreshingSessionModelOptionIdsRef = useRef<SessionFlagMap>({});
@@ -744,6 +745,8 @@ export default function App() {
       workspaceSummariesRef,
       refreshingAgentCommandSessionIdsRef,
       confirmedUnknownModelSendsRef,
+      activePromptPollCancelRef,
+      activePromptPollSessionIdRef,
     },
     stateSetters: {
       setSessions,
@@ -841,6 +844,7 @@ export default function App() {
       draftAttachmentsBySessionIdRef: draftAttachmentsRef,
       confirmedUnknownModelSendsRef,
       activePromptPollCancelRef,
+      activePromptPollSessionIdRef,
       refreshingSessionModelOptionIdsRef,
       refreshingAgentCommandSessionIdsRef,
     },
@@ -1248,25 +1252,24 @@ export default function App() {
   }, [clearRecoveredBackendRequestError, setBackendConnectionState]);
 
   useEffect(() => {
-    setSelectedProjectId((current) => {
-      if (current === ALL_PROJECTS_FILTER_ID) {
-        return current;
-      }
+    if (selectedProjectId === ALL_PROJECTS_FILTER_ID) {
+      return;
+    }
 
-      if (projects.some((project) => project.id === current)) {
-        return current;
-      }
+    if (projects.some((project) => project.id === selectedProjectId)) {
+      return;
+    }
 
-      if (
-        activeSession?.projectId &&
-        projects.some((project) => project.id === activeSession.projectId)
-      ) {
-        return activeSession.projectId;
-      }
+    if (
+      activeSession?.projectId &&
+      projects.some((project) => project.id === activeSession.projectId)
+    ) {
+      setSelectedProjectId(activeSession.projectId);
+      return;
+    }
 
-      return projects[0]?.id ?? ALL_PROJECTS_FILTER_ID;
-    });
-  }, [activeSession?.projectId, projects]);
+    setSelectedProjectId(projects[0]?.id ?? ALL_PROJECTS_FILTER_ID);
+  }, [activeSession?.projectId, projects, selectedProjectId]);
 
   useEffect(() => {
     const openStandaloneControlSurfaceTabIds = new Set(
@@ -1280,6 +1283,14 @@ export default function App() {
           .map((tab) => tab.id),
       ),
     );
+    if (
+      Object.keys(standaloneControlSurfaceViewStateByTabId).every((tabId) =>
+        openStandaloneControlSurfaceTabIds.has(tabId),
+      )
+    ) {
+      return;
+    }
+
     setStandaloneControlSurfaceViewStateByTabId((current) => {
       let changed = false;
       const next: Record<string, StandaloneControlSurfaceViewState> = {};
@@ -1292,7 +1303,7 @@ export default function App() {
       }
       return changed ? next : current;
     });
-  }, [workspace.panes]);
+  }, [standaloneControlSurfaceViewStateByTabId, workspace.panes]);
 
   useEffect(() => {
     const validSurfaceIds = new Set(
@@ -1307,6 +1318,14 @@ export default function App() {
         return surfaceIds;
       }),
     );
+    if (
+      Object.keys(collapsedSessionOrchestratorIdsBySurfaceId).every(
+        (surfaceId) => validSurfaceIds.has(surfaceId),
+      )
+    ) {
+      return;
+    }
+
     setCollapsedSessionOrchestratorIdsBySurfaceId((current) => {
       let changed = false;
       const next: Record<string, string[]> = {};
@@ -1319,13 +1338,13 @@ export default function App() {
       }
       return changed ? next : current;
     });
-  }, [workspace.panes]);
+  }, [collapsedSessionOrchestratorIdsBySurfaceId, workspace.panes]);
 
   useEffect(() => {
-    if (activeSession) {
+    if (activeSession && newSessionAgent !== activeSession.agent) {
       setNewSessionAgent(activeSession.agent);
     }
-  }, [activeSession?.id]);
+  }, [activeSession?.agent, activeSession?.id, newSessionAgent]);
 
   useEffect(() => {
     if (!isWorkspaceSwitcherOpen) {
@@ -1654,6 +1673,7 @@ export default function App() {
       isMountedRef.current = false;
       activePromptPollCancelRef.current?.();
       activePromptPollCancelRef.current = null;
+      activePromptPollSessionIdRef.current = null;
     };
   }, []);
 

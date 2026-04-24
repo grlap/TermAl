@@ -2998,6 +2998,10 @@ export function SessionPaneView({
                     ? "active"
                     : "match"
                 }
+                preferStreamingPlainTextRender={
+                  activeSession?.status === "active" &&
+                  message.id === latestAssistantMessageId
+                }
                 isLatestAssistantMessage={
                   message.id === latestAssistantMessageId
                 }

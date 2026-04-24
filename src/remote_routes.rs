@@ -557,7 +557,7 @@ impl AppState {
                         .ok_or_else(|| {
                             anyhow!("local proxy session `{local_session_id}` not found")
                         })?;
-                    let local_session = local_record.session.clone();
+                    let local_session = AppState::wire_session_from_record(&local_record);
                     let revision = if changed {
                         self.commit_session_created_locked(&mut inner, &local_record)?
                     } else {
@@ -581,7 +581,7 @@ impl AppState {
                 status,
                 ..
             } => {
-                let (local_session_id, revision) = {
+                let (local_session_id, revision, session_mutation_stamp) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
                     if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
                         return Ok(());
@@ -589,18 +589,20 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let record = inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid");
-                    if message_index_on_record(record, &message_id).is_none() {
-                        insert_message_on_record(record, message_index, message.clone());
-                    }
-                    record.session.preview = preview.clone();
-                    record.session.status = status;
-                    let local_session_id = record.session.id.clone();
+                    let (local_session_id, session_mutation_stamp) = {
+                        let record = inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid");
+                        if message_index_on_record(record, &message_id).is_none() {
+                            insert_message_on_record(record, message_index, message.clone());
+                        }
+                        record.session.preview = preview.clone();
+                        record.session.status = status;
+                        (record.session.id.clone(), record.mutation_stamp)
+                    };
                     let revision = self.commit_persisted_delta_locked(&mut inner)?;
                     inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (local_session_id, revision)
+                    (local_session_id, revision, session_mutation_stamp)
                 };
                 self.publish_delta(&DeltaEvent::MessageCreated {
                     revision,
@@ -610,6 +612,7 @@ impl AppState {
                     message,
                     preview,
                     status,
+                    session_mutation_stamp: Some(session_mutation_stamp),
                 });
             }
             DeltaEvent::TextDelta {
@@ -619,7 +622,7 @@ impl AppState {
                 session_id,
                 ..
             } => {
-                let (local_session_id, message_index, revision) = {
+                let (local_session_id, message_index, revision, session_mutation_stamp) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
                     if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
                         return Ok(());
@@ -627,31 +630,37 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let record = inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid");
-                    let message_index = message_index_on_record(record, &message_id)
-                        .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
-                    let Some(message) = record.session.messages.get_mut(message_index) else {
-                        return Err(anyhow!(
-                            "remote message index `{message_index}` is out of bounds"
-                        ));
-                    };
-                    match message {
-                        Message::Text { text, .. } => text.push_str(&delta),
-                        _ => {
+                    let (local_session_id, message_index, session_mutation_stamp) = {
+                        let record = inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid");
+                        let message_index = message_index_on_record(record, &message_id)
+                            .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
+                        let Some(message) = record.session.messages.get_mut(message_index) else {
                             return Err(anyhow!(
-                                "remote message `{message_id}` is not a text message"
+                                "remote message index `{message_index}` is out of bounds"
                             ));
+                        };
+                        match message {
+                            Message::Text { text, .. } => text.push_str(&delta),
+                            _ => {
+                                return Err(anyhow!(
+                                    "remote message `{message_id}` is not a text message"
+                                ));
+                            }
                         }
-                    }
-                    if let Some(next_preview) = preview.as_ref() {
-                        record.session.preview = next_preview.clone();
-                    }
-                    let local_session_id = record.session.id.clone();
+                        if let Some(next_preview) = preview.as_ref() {
+                            record.session.preview = next_preview.clone();
+                        }
+                        (
+                            record.session.id.clone(),
+                            message_index,
+                            record.mutation_stamp,
+                        )
+                    };
                     let revision = self.commit_delta_locked(&mut inner)?;
                     inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (local_session_id, message_index, revision)
+                    (local_session_id, message_index, revision, session_mutation_stamp)
                 };
                 self.publish_delta(&DeltaEvent::TextDelta {
                     revision,
@@ -660,6 +669,7 @@ impl AppState {
                     message_index,
                     delta,
                     preview,
+                    session_mutation_stamp: Some(session_mutation_stamp),
                 });
             }
             DeltaEvent::TextReplace {
@@ -669,7 +679,7 @@ impl AppState {
                 text,
                 ..
             } => {
-                let (local_session_id, message_index, revision) = {
+                let (local_session_id, message_index, revision, session_mutation_stamp) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
                     if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
                         return Ok(());
@@ -677,36 +687,42 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let record = inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid");
-                    let message_index = message_index_on_record(record, &message_id)
-                        .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
-                    let Some(message) = record.session.messages.get_mut(message_index) else {
-                        return Err(anyhow!(
-                            "remote message index `{message_index}` is out of bounds"
-                        ));
-                    };
-                    match message {
-                        Message::Text {
-                            text: current_text, ..
-                        } => {
-                            current_text.clear();
-                            current_text.push_str(&text);
-                        }
-                        _ => {
+                    let (local_session_id, message_index, session_mutation_stamp) = {
+                        let record = inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid");
+                        let message_index = message_index_on_record(record, &message_id)
+                            .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
+                        let Some(message) = record.session.messages.get_mut(message_index) else {
                             return Err(anyhow!(
-                                "remote message `{message_id}` is not a text message"
+                                "remote message index `{message_index}` is out of bounds"
                             ));
+                        };
+                        match message {
+                            Message::Text {
+                                text: current_text, ..
+                            } => {
+                                current_text.clear();
+                                current_text.push_str(&text);
+                            }
+                            _ => {
+                                return Err(anyhow!(
+                                    "remote message `{message_id}` is not a text message"
+                                ));
+                            }
                         }
-                    }
-                    if let Some(next_preview) = preview.as_ref() {
-                        record.session.preview = next_preview.clone();
-                    }
-                    let local_session_id = record.session.id.clone();
+                        if let Some(next_preview) = preview.as_ref() {
+                            record.session.preview = next_preview.clone();
+                        }
+                        (
+                            record.session.id.clone(),
+                            message_index,
+                            record.mutation_stamp,
+                        )
+                    };
                     let revision = self.commit_delta_locked(&mut inner)?;
                     inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (local_session_id, message_index, revision)
+                    (local_session_id, message_index, revision, session_mutation_stamp)
                 };
                 self.publish_delta(&DeltaEvent::TextReplace {
                     revision,
@@ -715,6 +731,7 @@ impl AppState {
                     message_index,
                     text,
                     preview,
+                    session_mutation_stamp: Some(session_mutation_stamp),
                 });
             }
             DeltaEvent::CommandUpdate {
@@ -729,7 +746,13 @@ impl AppState {
                 status,
                 ..
             } => {
-                let (local_session_id, created_message, revision, session_status) = {
+                let (
+                    local_session_id,
+                    created_message,
+                    revision,
+                    session_status,
+                    session_mutation_stamp,
+                ) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
                     if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
                         return Ok(());
@@ -737,63 +760,75 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let record = inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid");
-                    let created_message = if let Some(existing_index) =
-                        message_index_on_record(record, &message_id)
-                    {
-                        let Some(message) = record.session.messages.get_mut(existing_index) else {
-                            return Err(anyhow!(
-                                "remote message index `{existing_index}` is out of bounds"
-                            ));
-                        };
-                        match message {
-                            Message::Command {
-                                command: existing_command,
-                                command_language: existing_command_language,
-                                output: existing_output,
-                                output_language: existing_output_language,
-                                status: existing_status,
-                                ..
-                            } => {
-                                *existing_command = command.clone();
-                                *existing_command_language = command_language.clone();
-                                *existing_output = output.clone();
-                                *existing_output_language = output_language.clone();
-                                *existing_status = status;
-                                None
-                            }
-                            _ => {
+                    let (local_session_id, created_message, session_status, session_mutation_stamp) = {
+                        let record = inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid");
+                        let created_message = if let Some(existing_index) =
+                            message_index_on_record(record, &message_id)
+                        {
+                            let Some(message) = record.session.messages.get_mut(existing_index) else {
                                 return Err(anyhow!(
-                                    "remote message `{message_id}` is not a command message"
+                                    "remote message index `{existing_index}` is out of bounds"
                                 ));
+                            };
+                            match message {
+                                Message::Command {
+                                    command: existing_command,
+                                    command_language: existing_command_language,
+                                    output: existing_output,
+                                    output_language: existing_output_language,
+                                    status: existing_status,
+                                    ..
+                                } => {
+                                    *existing_command = command.clone();
+                                    *existing_command_language = command_language.clone();
+                                    *existing_output = output.clone();
+                                    *existing_output_language = output_language.clone();
+                                    *existing_status = status;
+                                    None
+                                }
+                                _ => {
+                                    return Err(anyhow!(
+                                        "remote message `{message_id}` is not a command message"
+                                    ));
+                                }
                             }
-                        }
-                    } else {
-                        let message = Message::Command {
-                            id: message_id.clone(),
-                            timestamp: stamp_now(),
-                            author: Author::Assistant,
-                            command: command.clone(),
-                            command_language: command_language.clone(),
-                            output: output.clone(),
-                            output_language: output_language.clone(),
-                            status,
+                        } else {
+                            let message = Message::Command {
+                                id: message_id.clone(),
+                                timestamp: stamp_now(),
+                                author: Author::Assistant,
+                                command: command.clone(),
+                                command_language: command_language.clone(),
+                                output: output.clone(),
+                                output_language: output_language.clone(),
+                                status,
+                            };
+                            insert_message_on_record(record, message_index, message.clone());
+                            Some(message)
                         };
-                        insert_message_on_record(record, message_index, message.clone());
-                        Some(message)
+                        record.session.preview = preview.clone();
+                        (
+                            record.session.id.clone(),
+                            created_message,
+                            record.session.status,
+                            record.mutation_stamp,
+                        )
                     };
-                    record.session.preview = preview.clone();
-                    let local_session_id = record.session.id.clone();
-                    let session_status = record.session.status;
                     let revision = if created_message.is_some() {
                         self.commit_persisted_delta_locked(&mut inner)?
                     } else {
                         self.commit_delta_locked(&mut inner)?
                     };
                     inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (local_session_id, created_message, revision, session_status)
+                    (
+                        local_session_id,
+                        created_message,
+                        revision,
+                        session_status,
+                        session_mutation_stamp,
+                    )
                 };
                 if let Some(message) = created_message {
                     self.publish_delta(&DeltaEvent::MessageCreated {
@@ -804,6 +839,7 @@ impl AppState {
                         message,
                         preview,
                         status: session_status,
+                        session_mutation_stamp: Some(session_mutation_stamp),
                     });
                 } else {
                     self.publish_delta(&DeltaEvent::CommandUpdate {
@@ -817,6 +853,7 @@ impl AppState {
                         output_language,
                         status,
                         preview,
+                        session_mutation_stamp: Some(session_mutation_stamp),
                     });
                 }
             }
@@ -828,7 +865,13 @@ impl AppState {
                 session_id,
                 ..
             } => {
-                let (local_session_id, created_message, revision, session_status) = {
+                let (
+                    local_session_id,
+                    created_message,
+                    revision,
+                    session_status,
+                    session_mutation_stamp,
+                ) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
                     if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
                         return Ok(());
@@ -836,51 +879,63 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let record = inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid");
-                    let created_message = if let Some(existing_index) =
-                        message_index_on_record(record, &message_id)
-                    {
-                        let Some(message) = record.session.messages.get_mut(existing_index) else {
-                            return Err(anyhow!(
-                                "remote message index `{existing_index}` is out of bounds"
-                            ));
-                        };
-                        match message {
-                            Message::ParallelAgents {
-                                agents: existing_agents,
-                                ..
-                            } => {
-                                *existing_agents = agents.clone();
-                                None
-                            }
-                            _ => {
+                    let (local_session_id, created_message, session_status, session_mutation_stamp) = {
+                        let record = inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid");
+                        let created_message = if let Some(existing_index) =
+                            message_index_on_record(record, &message_id)
+                        {
+                            let Some(message) = record.session.messages.get_mut(existing_index) else {
                                 return Err(anyhow!(
-                                    "remote message `{message_id}` is not a parallel-agents message"
+                                    "remote message index `{existing_index}` is out of bounds"
                                 ));
+                            };
+                            match message {
+                                Message::ParallelAgents {
+                                    agents: existing_agents,
+                                    ..
+                                } => {
+                                    *existing_agents = agents.clone();
+                                    None
+                                }
+                                _ => {
+                                    return Err(anyhow!(
+                                        "remote message `{message_id}` is not a parallel-agents message"
+                                    ));
+                                }
                             }
-                        }
-                    } else {
-                        let message = Message::ParallelAgents {
-                            id: message_id.clone(),
-                            timestamp: stamp_now(),
-                            author: Author::Assistant,
-                            agents: agents.clone(),
+                        } else {
+                            let message = Message::ParallelAgents {
+                                id: message_id.clone(),
+                                timestamp: stamp_now(),
+                                author: Author::Assistant,
+                                agents: agents.clone(),
+                            };
+                            insert_message_on_record(record, message_index, message.clone());
+                            Some(message)
                         };
-                        insert_message_on_record(record, message_index, message.clone());
-                        Some(message)
+                        record.session.preview = preview.clone();
+                        (
+                            record.session.id.clone(),
+                            created_message,
+                            record.session.status,
+                            record.mutation_stamp,
+                        )
                     };
-                    record.session.preview = preview.clone();
-                    let local_session_id = record.session.id.clone();
-                    let session_status = record.session.status;
                     let revision = if created_message.is_some() {
                         self.commit_persisted_delta_locked(&mut inner)?
                     } else {
                         self.commit_delta_locked(&mut inner)?
                     };
                     inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (local_session_id, created_message, revision, session_status)
+                    (
+                        local_session_id,
+                        created_message,
+                        revision,
+                        session_status,
+                        session_mutation_stamp,
+                    )
                 };
                 if let Some(message) = created_message {
                     self.publish_delta(&DeltaEvent::MessageCreated {
@@ -891,6 +946,7 @@ impl AppState {
                         message,
                         preview,
                         status: session_status,
+                        session_mutation_stamp: Some(session_mutation_stamp),
                     });
                 } else {
                     self.publish_delta(&DeltaEvent::ParallelAgentsUpdate {
@@ -900,6 +956,7 @@ impl AppState {
                         message_index,
                         agents,
                         preview,
+                        session_mutation_stamp: Some(session_mutation_stamp),
                     });
                 }
             }
@@ -943,6 +1000,16 @@ impl AppState {
                     (revision, inner.orchestrator_instances.clone())
                 };
                 self.publish_orchestrators_updated(revision, localized_orchestrators);
+            }
+            DeltaEvent::CodexUpdated { .. } => {
+                // CodexState is process-global runtime metadata, not localized
+                // remote proxy state. Mark the remote revision consumed so this
+                // informational delta does not force a snapshot resync.
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
+                if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                    return Ok(());
+                }
+                inner.note_remote_applied_revision(remote_id, remote_revision);
             }
         }
         Ok(())

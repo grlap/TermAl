@@ -18,6 +18,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { isExpandedPromptOpen } from "../ExpandedPromptPanel";
+import { DeferredHeavyContentActivationProvider } from "../message-cards";
 import {
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   type MessageStackScrollWriteDetail,
@@ -332,7 +333,7 @@ export function VirtualizedConversationMessageList({
   const [isMeasuringPostActivation, setIsMeasuringPostActivation] = useState(
     () => isActive && messages.length > 0,
   );
-  const [prevIsActive, setPrevIsActive] = useState(isActive);
+  const previousIsActiveRef = useRef(isActive);
 
   const syncViewportFromScrollNode = useCallback((node: HTMLElement) => {
     const nextState = {
@@ -422,12 +423,13 @@ export function VirtualizedConversationMessageList({
     setIsMeasuringPostActivation(false);
   }, []);
 
-  if (prevIsActive !== isActive) {
-    setPrevIsActive(isActive);
-    if (!prevIsActive && isActive && messages.length > 0) {
+  useEffect(() => {
+    const previousIsActive = previousIsActiveRef.current;
+    previousIsActiveRef.current = isActive;
+    if (!previousIsActive && isActive && messages.length > 0) {
       setIsMeasuringPostActivation(true);
     }
-  }
+  }, [isActive, messages.length]);
 
   const activeViewport = isActive ? scrollContainerRef.current : null;
   const viewportHeight =
@@ -659,6 +661,11 @@ export function VirtualizedConversationMessageList({
       : (pageLayout.tops[renderedMountedPageRange.endIndex - 1] ?? topSpacerHeight) +
         (pageHeights[renderedMountedPageRange.endIndex - 1] ?? 0);
   const bottomSpacerHeight = Math.max(pageLayout.totalHeight - mountedPageEndOffset, 0);
+  const isUserScrollAdjustmentCooldownActive =
+    performance.now() - lastUserScrollInputTimeRef.current < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
+  const preferImmediateHeavyRender =
+    !isMeasuringPostActivation && !hasUserScrollInteractionRef.current;
+  const allowDeferredHeavyActivation = !isUserScrollAdjustmentCooldownActive;
 
   const buildWorkingMountedRangeForScrollTop = useCallback(
     (scrollTop: number, clientHeight: number) => {
@@ -1456,7 +1463,8 @@ export function VirtualizedConversationMessageList({
           key={page.key}
           isActive={isActive}
           page={page}
-          preferImmediateHeavyRender={!isMeasuringPostActivation}
+          preferImmediateHeavyRender={preferImmediateHeavyRender}
+          allowDeferredHeavyActivation={allowDeferredHeavyActivation}
           renderMessageCard={renderMessageCard}
           conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
           conversationSearchActiveItemKey={conversationSearchActiveItemKey}
@@ -1479,6 +1487,7 @@ const MeasuredPageBand = memo(function MeasuredPageBand({
   isActive,
   page,
   preferImmediateHeavyRender,
+  allowDeferredHeavyActivation,
   renderMessageCard,
   conversationSearchMatchedItemKeys,
   conversationSearchActiveItemKey,
@@ -1492,6 +1501,7 @@ const MeasuredPageBand = memo(function MeasuredPageBand({
   isActive: boolean;
   page: MessagePage;
   preferImmediateHeavyRender: boolean;
+  allowDeferredHeavyActivation: boolean;
   renderMessageCard: RenderMessageCard;
   conversationSearchMatchedItemKeys: ReadonlySet<string>;
   conversationSearchActiveItemKey?: string | null;
@@ -1580,14 +1590,18 @@ const MeasuredPageBand = memo(function MeasuredPageBand({
               isSearchActive={conversationSearchActiveItemKey === `message:${message.id}`}
               onSearchItemMount={onSearchItemMount}
             >
-              {renderMessageCard(
-                message,
-                preferImmediateHeavyRender,
-                onApprovalDecision,
-                onUserInputSubmit,
-                onMcpElicitationSubmit,
-                onCodexAppRequestSubmit,
-              )}
+              <DeferredHeavyContentActivationProvider
+                allowActivation={allowDeferredHeavyActivation}
+              >
+                {renderMessageCard(
+                  message,
+                  preferImmediateHeavyRender,
+                  onApprovalDecision,
+                  onUserInputSubmit,
+                  onMcpElicitationSubmit,
+                  onCodexAppRequestSubmit,
+                )}
+              </DeferredHeavyContentActivationProvider>
             </MessageSlot>
           </div>
         ))}

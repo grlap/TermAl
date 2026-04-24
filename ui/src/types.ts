@@ -273,6 +273,7 @@ export type Session = {
   messages: Message[];
   messagesLoaded?: boolean | null;
   pendingPrompts?: PendingPrompt[];
+  sessionMutationStamp?: number | null;
 };
 
 export type CodexThreadState = "active" | "archived";
@@ -552,6 +553,7 @@ export type TextDeltaEvent = {
   messageIndex: number;
   delta: string;
   preview?: string | null;
+  sessionMutationStamp?: number | null;
 };
 
 export type TextReplaceEvent = {
@@ -562,6 +564,7 @@ export type TextReplaceEvent = {
   messageIndex: number;
   text: string;
   preview?: string | null;
+  sessionMutationStamp?: number | null;
 };
 
 export type MessageCreatedEvent = {
@@ -573,6 +576,7 @@ export type MessageCreatedEvent = {
   message: Message;
   preview: string;
   status: SessionStatus;
+  sessionMutationStamp?: number | null;
 };
 
 export type SessionCreatedEvent = {
@@ -594,6 +598,7 @@ export type CommandUpdateEvent = {
   outputLanguage?: string | null;
   status: "running" | "success" | "error";
   preview: string;
+  sessionMutationStamp?: number | null;
 };
 
 export type ParallelAgentsUpdateEvent = {
@@ -604,6 +609,7 @@ export type ParallelAgentsUpdateEvent = {
   messageIndex: number;
   agents: ParallelAgentProgress[];
   preview: string;
+  sessionMutationStamp?: number | null;
 };
 
 export type OrchestratorsUpdatedEvent = {
@@ -611,6 +617,12 @@ export type OrchestratorsUpdatedEvent = {
   revision: number;
   orchestrators: OrchestratorInstance[];
   sessions?: Session[];
+};
+
+export type CodexUpdatedEvent = {
+  type: "codexUpdated";
+  revision: number;
+  codex: CodexState;
 };
 
 export type WorkspaceFileChangeKind =
@@ -640,6 +652,7 @@ export type DeltaEvent =
   | TextReplaceEvent
   | CommandUpdateEvent
   | ParallelAgentsUpdateEvent
+  | CodexUpdatedEvent
   | OrchestratorsUpdatedEvent;
 
 export type SessionSettingsField =

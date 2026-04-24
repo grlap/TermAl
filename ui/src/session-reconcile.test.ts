@@ -136,6 +136,90 @@ describe("reconcileSessions", () => {
     expect(merged[0].messages[0]).toBe(previous[0].messages[0]);
   });
 
+  it("reuses the existing session object when the mutation stamp matches", () => {
+    const previous = [
+      makeSession("session-a", {
+        preview: "ready",
+        sessionMutationStamp: 42,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Hello",
+          },
+        ],
+      }),
+    ];
+
+    const next = [
+      makeSession("session-a", {
+        preview: "ready",
+        sessionMutationStamp: 42,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Hello",
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).toBe(previous);
+    expect(merged[0]).toBe(previous[0]);
+  });
+
+  it("can disable the mutation-stamp fast path after a server restart", () => {
+    const previous = [
+      makeSession("session-a", {
+        preview: "ready",
+        sessionMutationStamp: 42,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Old server text",
+          },
+        ],
+      }),
+    ];
+
+    const next = [
+      makeSession("session-a", {
+        preview: "ready",
+        sessionMutationStamp: 42,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Restarted server text",
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next, {
+      disableMutationStampFastPath: true,
+    });
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0]).not.toBe(previous[0]);
+    expect(merged[0].messages[0]).toMatchObject({
+      id: "message-1",
+      text: "Restarted server text",
+    });
+  });
+
   it("reuses unchanged messages when only the streaming tail message changed", () => {
     const previous = [
       makeSession("session-a", {

@@ -472,7 +472,6 @@ fn resolves_project_scoped_paths_without_a_session() {
     fs::remove_dir_all(outside_root).unwrap();
 }
 
-
 // pins the required-identifier precondition in
 // `resolve_project_scoped_requested_path`: calling with both session_id and
 // project_id as None must fail with the exact "sessionId or projectId is

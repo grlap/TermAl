@@ -72,11 +72,21 @@ export function pruneLiveTransportActivitySessions(
   }
 }
 
-type SessionDeltaEvent = Exclude<DeltaEvent, { type: "orchestratorsUpdated" }>;
+type SessionDeltaEvent = Exclude<
+  DeltaEvent,
+  { type: "codexUpdated" } | { type: "orchestratorsUpdated" }
+>;
 
 export type DeltaApplyResult =
   | { kind: "applied"; sessions: Session[] }
   | { kind: "needsResync" };
+
+function resolveSessionMutationStamp(
+  session: Session,
+  sessionMutationStamp: number | null | undefined,
+) {
+  return sessionMutationStamp ?? session.sessionMutationStamp ?? null;
+}
 
 export function applyDeltaToSessions(
   sessions: Session[],
@@ -144,6 +154,10 @@ export function applyDeltaToSessions(
           messages: updatedMessages,
           preview: delta.preview,
           status: delta.status,
+          sessionMutationStamp: resolveSessionMutationStamp(
+            session,
+            delta.sessionMutationStamp,
+          ),
         }),
       };
     }
@@ -183,6 +197,10 @@ export function applyDeltaToSessions(
           ...session,
           messages: updatedMessages,
           preview: delta.preview ?? session.preview,
+          sessionMutationStamp: resolveSessionMutationStamp(
+            session,
+            delta.sessionMutationStamp,
+          ),
         }),
       };
     }
@@ -222,6 +240,10 @@ export function applyDeltaToSessions(
           ...session,
           messages: updatedMessages,
           preview: delta.preview ?? session.preview,
+          sessionMutationStamp: resolveSessionMutationStamp(
+            session,
+            delta.sessionMutationStamp,
+          ),
         }),
       };
     }
@@ -265,6 +287,10 @@ export function applyDeltaToSessions(
           ...session,
           messages: updatedMessages,
           preview: delta.preview,
+          sessionMutationStamp: resolveSessionMutationStamp(
+            session,
+            delta.sessionMutationStamp,
+          ),
         }),
       };
     }
@@ -304,6 +330,10 @@ export function applyDeltaToSessions(
           ...session,
           messages: updatedMessages,
           preview: delta.preview,
+          sessionMutationStamp: resolveSessionMutationStamp(
+            session,
+            delta.sessionMutationStamp,
+          ),
         }),
       };
     }

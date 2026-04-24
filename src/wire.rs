@@ -325,6 +325,8 @@ struct Session {
     messages: Vec<Message>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pending_prompts: Vec<PendingPrompt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_mutation_stamp: Option<u64>,
 }
 
 /// Tracks Codex thread state.
@@ -1213,6 +1215,12 @@ enum DeltaEvent {
         message: Message,
         preview: String,
         status: SessionStatus,
+        #[serde(
+            rename = "sessionMutationStamp",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_mutation_stamp: Option<u64>,
     },
     TextDelta {
         revision: u64,
@@ -1225,6 +1233,12 @@ enum DeltaEvent {
         delta: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         preview: Option<String>,
+        #[serde(
+            rename = "sessionMutationStamp",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_mutation_stamp: Option<u64>,
     },
     TextReplace {
         revision: u64,
@@ -1237,6 +1251,12 @@ enum DeltaEvent {
         text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         preview: Option<String>,
+        #[serde(
+            rename = "sessionMutationStamp",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_mutation_stamp: Option<u64>,
     },
     CommandUpdate {
         revision: u64,
@@ -1254,6 +1274,12 @@ enum DeltaEvent {
         output_language: Option<String>,
         status: CommandStatus,
         preview: String,
+        #[serde(
+            rename = "sessionMutationStamp",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_mutation_stamp: Option<u64>,
     },
     ParallelAgentsUpdate {
         revision: u64,
@@ -1265,6 +1291,16 @@ enum DeltaEvent {
         message_index: usize,
         agents: Vec<ParallelAgentProgress>,
         preview: String,
+        #[serde(
+            rename = "sessionMutationStamp",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_mutation_stamp: Option<u64>,
+    },
+    CodexUpdated {
+        revision: u64,
+        codex: CodexState,
     },
     OrchestratorsUpdated {
         revision: u64,

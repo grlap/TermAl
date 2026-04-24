@@ -529,7 +529,6 @@ fn updating_existing_workspace_layout_advances_global_revision_and_publishes_sta
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-
 // Pins that a Delete+Create pair in either order folds into Modified
 // when coalesced inside the debounce window.
 // Guards against misreporting atomic-rename saves (common on editors
@@ -702,4 +701,3 @@ fn workspace_file_changes_from_path_emits_unscoped_fallback() {
 
     fs::remove_dir_all(root).unwrap();
 }
-

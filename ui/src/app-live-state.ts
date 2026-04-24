@@ -62,7 +62,7 @@ import {
   type SetStateAction,
 } from "react";
 import {
-  syncComposerSessionsStore,
+  syncComposerSessionsStoreIncremental,
   upsertSessionStoreSession,
 } from "./session-store";
 import {
@@ -177,6 +177,7 @@ export type AdoptStateOptions = {
 export type AdoptSessionsOptions = {
   openSessionId?: string;
   paneId?: string | null;
+  disableMutationStampFastPath?: boolean;
 };
 
 export type RequestStateResyncOptions = {
@@ -205,6 +206,8 @@ export type UseAppLiveStateAdoptionRefs = {
   workspaceSummariesRef: MutableRefObject<WorkspaceLayoutSummary[]>;
   refreshingAgentCommandSessionIdsRef: MutableRefObject<SessionFlagMap>;
   confirmedUnknownModelSendsRef: MutableRefObject<Set<string>>;
+  activePromptPollCancelRef: MutableRefObject<(() => void) | null>;
+  activePromptPollSessionIdRef: MutableRefObject<string | null>;
 };
 
 export type UseAppLiveStateStateSetters = {
@@ -215,9 +218,7 @@ export type UseAppLiveStateStateSetters = {
   setProjects: Dispatch<SetStateAction<Project[]>>;
   setOrchestrators: Dispatch<SetStateAction<OrchestratorInstance[]>>;
   setWorkspaceSummaries: Dispatch<SetStateAction<WorkspaceLayoutSummary[]>>;
-  setDraftsBySessionId: Dispatch<
-    SetStateAction<Record<string, string>>
-  >;
+  setDraftsBySessionId: Dispatch<SetStateAction<Record<string, string>>>;
   setDraftAttachmentsBySessionId: Dispatch<
     SetStateAction<Record<string, DraftImageAttachment[]>>
   >;
@@ -230,12 +231,8 @@ export type UseAppLiveStateStateSetters = {
     SetStateAction<PendingSessionRename | null>
   >;
   setUpdatingSessionIds: Dispatch<SetStateAction<SessionFlagMap>>;
-  setAgentCommandsBySessionId: Dispatch<
-    SetStateAction<SessionAgentCommandMap>
-  >;
-  setRefreshingAgentCommandSessionIds: Dispatch<
-    SetStateAction<SessionFlagMap>
-  >;
+  setAgentCommandsBySessionId: Dispatch<SetStateAction<SessionAgentCommandMap>>;
+  setRefreshingAgentCommandSessionIds: Dispatch<SetStateAction<SessionFlagMap>>;
   setAgentCommandErrors: Dispatch<SetStateAction<SessionErrorMap>>;
   setSessionSettingNotices: Dispatch<SetStateAction<SessionNoticeMap>>;
   setSelectedProjectId: Dispatch<SetStateAction<string>>;
@@ -245,7 +242,9 @@ export type UseAppLiveStateStateSetters = {
 };
 
 export type UseAppLiveStatePreferenceSetters = {
-  setDefaultCodexReasoningEffort: Dispatch<SetStateAction<CodexReasoningEffort>>;
+  setDefaultCodexReasoningEffort: Dispatch<
+    SetStateAction<CodexReasoningEffort>
+  >;
   setDefaultClaudeApprovalMode: Dispatch<SetStateAction<ClaudeApprovalMode>>;
   setDefaultClaudeEffort: Dispatch<SetStateAction<ClaudeEffortLevel>>;
   setRemoteConfigs: Dispatch<SetStateAction<RemoteConfig[]>>;
@@ -260,10 +259,7 @@ export type UseAppLiveStateParams = {
     side?: ControlPanelSide,
   ) => WorkspaceState;
   clearRecoveredBackendRequestError: () => void;
-  reportRequestError: (
-    error: unknown,
-    options?: { message?: string },
-  ) => void;
+  reportRequestError: (error: unknown, options?: { message?: string }) => void;
   /**
    * Populated by the hook's transport useEffect on mount so the
    * App.tsx manual-retry button and browser-online handler (which
@@ -300,9 +296,7 @@ export type UseAppLiveStateReturn = {
   hydratingSessionIdsRef: MutableRefObject<Set<string>>;
   forceAdoptNextStateEventRef: MutableRefObject<boolean>;
   workspaceFilesChangedEvent: WorkspaceFilesChangedEvent | null;
-  workspaceFilesChangedEventBufferRef: MutableRefObject<
-    WorkspaceFilesChangedEvent | null
-  >;
+  workspaceFilesChangedEventBufferRef: MutableRefObject<WorkspaceFilesChangedEvent | null>;
   workspaceFilesChangedEventFlushTimeoutRef: MutableRefObject<number | null>;
   resetWorkspaceFilesChangedEventGate: () => void;
 };
@@ -355,6 +349,8 @@ export function useAppLiveState(
     workspaceSummariesRef,
     refreshingAgentCommandSessionIdsRef,
     confirmedUnknownModelSendsRef,
+    activePromptPollCancelRef,
+    activePromptPollSessionIdRef,
   } = adoptionRefs;
   const {
     setSessions,
@@ -421,20 +417,32 @@ export function useAppLiveState(
     (sessions: Session[], now?: number) => void
   >(() => {});
 
-  function syncSessionSlices(nextSessions: readonly Session[]) {
-    syncComposerSessionsStore({
-      sessions: nextSessions,
-      draftsBySessionId: draftsBySessionIdRef.current,
-      draftAttachmentsBySessionId: draftAttachmentsBySessionIdRef.current,
-    });
-  }
-
   function upsertSessionSlice(session: Session) {
     upsertSessionStoreSession({
       session,
       committedDraft: draftsBySessionIdRef.current[session.id] ?? "",
-      draftAttachments: draftAttachmentsBySessionIdRef.current[session.id] ?? [],
+      draftAttachments:
+        draftAttachmentsBySessionIdRef.current[session.id] ?? [],
     });
+  }
+
+  function cancelStaleSendResponseRecoveryPollForSessions(
+    sessionIds: Iterable<string>,
+  ) {
+    const polledSessionId = activePromptPollSessionIdRef.current;
+    if (!polledSessionId) {
+      return;
+    }
+
+    for (const sessionId of sessionIds) {
+      if (sessionId !== polledSessionId) {
+        continue;
+      }
+      activePromptPollCancelRef.current?.();
+      activePromptPollCancelRef.current = null;
+      activePromptPollSessionIdRef.current = null;
+      return;
+    }
   }
 
   function adoptSessions(
@@ -445,7 +453,12 @@ export function useAppLiveState(
     const previousSessionsById = new Map(
       previousSessions.map((session) => [session.id, session]),
     );
-    const mergedSessions = reconcileSessions(previousSessions, nextSessions);
+    const mergedSessions = reconcileSessions(previousSessions, nextSessions, {
+      disableMutationStampFastPath: options?.disableMutationStampFastPath,
+    });
+    const changedSessions = mergedSessions.filter(
+      (session) => previousSessionsById.get(session.id) !== session,
+    );
     const availableSessionIds = new Set(
       mergedSessions.map((session) => session.id),
     );
@@ -481,7 +494,14 @@ export function useAppLiveState(
       mergedSessions !== previousSessions || canOpenPendingSession;
 
     sessionsRef.current = mergedSessions;
-    syncSessionSlices(mergedSessions);
+    if (changedSessions.length > 0 || hasRemovedSessions) {
+      syncComposerSessionsStoreIncremental({
+        changedSessions,
+        draftsBySessionId: draftsBySessionIdRef.current,
+        draftAttachmentsBySessionId: draftAttachmentsBySessionIdRef.current,
+        removedSessionIds: [...removedSessionIds],
+      });
+    }
     startTransition(() => {
       if (mergedSessions !== previousSessions) {
         setSessions(mergedSessions);
@@ -530,7 +550,9 @@ export function useAppLiveState(
           current && availableSessionIds.has(current) ? current : null,
         );
         setPendingSessionRename((current) =>
-          current && availableSessionIds.has(current.sessionId) ? current : null,
+          current && availableSessionIds.has(current.sessionId)
+            ? current
+            : null,
         );
         setUpdatingSessionIds((current) =>
           pruneSessionFlags(current, availableSessionIds),
@@ -739,10 +761,7 @@ export function useAppLiveState(
   }
 
   useEffect(() => {
-    if (
-      !activeSession ||
-      activeSession.messagesLoaded !== false
-    ) {
+    if (!activeSession || activeSession.messagesLoaded !== false) {
       return;
     }
 
@@ -789,10 +808,7 @@ export function useAppLiveState(
         // layout yet"; here `fetchSession` throws
         // `ApiRequestError` and we branch on `instanceof` + status
         // at the call site).
-        if (
-          error instanceof ApiRequestError &&
-          error.status === 404
-        ) {
+        if (error instanceof ApiRequestError && error.status === 404) {
           requestActionRecoveryResyncRef.current();
           return;
         }
@@ -823,10 +839,7 @@ export function useAppLiveState(
     );
   }
 
-  function adoptState(
-    nextState: StateResponse,
-    options?: AdoptStateOptions,
-  ) {
+  function adoptState(nextState: StateResponse, options?: AdoptStateOptions) {
     if (!isMountedRef.current) {
       return false;
     }
@@ -845,6 +858,9 @@ export function useAppLiveState(
       return false;
     }
 
+    const serverInstanceChanged =
+      !!nextState.serverInstanceId &&
+      nextState.serverInstanceId !== lastSeenServerInstanceIdRef.current;
     latestStateRevisionRef.current = nextState.revision;
     if (nextState.serverInstanceId) {
       lastSeenServerInstanceIdRef.current = nextState.serverInstanceId;
@@ -887,7 +903,10 @@ export function useAppLiveState(
     }
     const requestedOpenSessionId =
       options?.openSessionId ?? pendingRecoveryOpenSessionIdRef.current;
-    adoptSessions(nextState.sessions, options);
+    adoptSessions(nextState.sessions, {
+      ...options,
+      disableMutationStampFastPath: serverInstanceChanged,
+    });
     // Local state adoptions can resume or create active sessions before any SSE arrives.
     syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current(
       nextState.sessions,
@@ -1533,6 +1552,9 @@ export function useAppLiveState(
           allowRevisionDowngrade: force,
         });
         forceAdoptNextStateEventRef.current = false;
+        cancelStaleSendResponseRecoveryPollForSessions(
+          state.sessions.map((session) => session.id),
+        );
         // Confirm recovery only after adoption succeeds. If adoptState throws
         // (bad payload, reducer error), the catch block must keep the client in
         // the reconnecting state with fallback polling armed rather than
@@ -1588,6 +1610,16 @@ export function useAppLiveState(
           delta.revision,
         );
         if (revisionAction === "ignore") {
+          if ("sessionId" in delta && typeof delta.sessionId === "string") {
+            cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
+          } else if (
+            delta.type === "orchestratorsUpdated" &&
+            delta.sessions?.length
+          ) {
+            cancelStaleSendResponseRecoveryPollForSessions(
+              delta.sessions.map((session) => session.id),
+            );
+          }
           // An ignored delta proves the client already has data at this
           // revision or newer — the snapshot that advanced the revision was
           // authoritative. Transport is healthy and the client is caught up.
@@ -1598,12 +1630,35 @@ export function useAppLiveState(
           return;
         }
         if (revisionAction === "resync") {
+          if ("sessionId" in delta && typeof delta.sessionId === "string") {
+            cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
+          } else if (
+            delta.type === "orchestratorsUpdated" &&
+            delta.sessions?.length
+          ) {
+            cancelStaleSendResponseRecoveryPollForSessions(
+              delta.sessions.map((session) => session.id),
+            );
+          }
           // A revision gap means we missed events but the stream IS working.
           // Do NOT confirm recovery yet — if the follow-up /api/state fetch
           // fails, the client must stay in the reconnecting state. Use
           // rearmOnFailure so a failed resync re-arms polling instead of
           // stalling recovery.
           requestStateResync({ rearmOnFailure: true });
+          return;
+        }
+
+        if (delta.type === "codexUpdated") {
+          confirmReconnectRecoveryFromLiveEvent();
+          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+          latestStateRevisionRef.current = delta.revision;
+          codexStateRef.current = delta.codex;
+          startTransition(() => {
+            setCodexState(delta.codex);
+          });
+          setBackendConnectionIssueDetail(null);
+          clearRecoveredBackendRequestError();
           return;
         }
 
@@ -1616,6 +1671,7 @@ export function useAppLiveState(
           const appliedAt = Date.now();
           if (delta.sessions?.length) {
             const deltaSessionIds = delta.sessions.map((session) => session.id);
+            cancelStaleSendResponseRecoveryPollForSessions(deltaSessionIds);
             markLiveTransportActivity(deltaSessionIds, appliedAt);
             markLiveSessionResumeWatchdogBaseline(deltaSessionIds, appliedAt);
           }
@@ -1643,7 +1699,7 @@ export function useAppLiveState(
           return;
         }
 
-        // Non-session deltas such as orchestratorsUpdated are handled above; the
+        // Non-session deltas such as codexUpdated/orchestratorsUpdated are handled above; the
         // session reducer only accepts deltas that carry a concrete sessionId.
         const result = applyDeltaToSessions(sessionsRef.current, delta);
         if (result.kind === "applied") {
@@ -1652,6 +1708,7 @@ export function useAppLiveState(
           clearReconnectStateResyncTimeoutAfterConfirmedReopen();
           // Every session-scoped delta proves liveness for that session, including
           // any future delta shape that revives it back to "active".
+          cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
           markLiveTransportActivity([delta.sessionId], appliedAt);
           markLiveSessionResumeWatchdogBaseline([delta.sessionId], appliedAt);
           latestStateRevisionRef.current = delta.revision;

@@ -109,7 +109,6 @@ fn stamp_now_includes_seconds() {
     );
 }
 
-
 #[test]
 fn truncate_child_stdout_log_line_appends_ellipsis_only_when_needed() {
     assert_eq!(truncate_child_stdout_log_line("abcdef", 4), "abcd...");
@@ -433,7 +432,6 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
     assert!(session_state.recorder.parallel_agents_messages.is_empty());
     assert_eq!(session_state.recorder.streaming_text_message_id, None);
 }
-
 
 fn accept_test_connection_with_timeout(
     listener: &std::net::TcpListener,
@@ -862,6 +860,7 @@ fn sample_remote_orchestrator_state(
                 preview: format!("Remote {} ready.", template_session.name),
                 messages: Vec::new(),
                 pending_prompts: Vec::new(),
+                session_mutation_stamp: None,
             };
             if session.agent.supports_codex_prompt_settings() {
                 session.approval_policy = Some(default_codex_approval_policy());
@@ -1188,8 +1187,6 @@ fn cursor_permission_request(request_id: &str) -> Value {
     })
 }
 
-
-
 fn test_shared_codex_runtime(
     runtime_id: &str,
 ) -> (
@@ -1423,10 +1420,6 @@ fn shutdown_repl_codex_process_forces_running_process_after_timeout() {
     assert!(!status.success());
 }
 
-
-
-
-
 // Tests that Gemini falls back from a rejected session/load to a new ACP session.
 #[test]
 fn gemini_invalid_session_load_falls_back_to_session_new() {
@@ -1641,6 +1634,72 @@ fn shared_codex_global_notices_update_codex_state() {
     ));
 }
 
+// Tests that shared Codex rate-limit updates use a narrow delta rather
+// than publishing a full state snapshot with every transcript attached.
+#[test]
+fn shared_codex_rate_limits_publish_codex_delta_without_full_state_snapshot() {
+    let state = test_app_state();
+    let mut state_events = state.subscribe_events();
+    let mut delta_events = state.subscribe_delta_events();
+    let (runtime, _input_rx, _process) = test_shared_codex_runtime("shared-codex-rate-limits");
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+
+    let rate_limit_update = json!({
+        "method": "account/rateLimits/updated",
+        "params": {
+            "rateLimits": {
+                "planType": "pro",
+                "primary": {
+                    "resetsAt": 12345,
+                    "usedPercent": 42,
+                    "windowDurationMins": 300
+                }
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &rate_limit_update,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        state_events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+    let payload = delta_events
+        .try_recv()
+        .expect("Codex rate-limit update should publish a delta");
+    let delta: DeltaEvent = serde_json::from_str(&payload).expect("delta should decode");
+    match delta {
+        DeltaEvent::CodexUpdated { revision, codex } => {
+            assert_eq!(revision, state.snapshot().revision);
+            assert_eq!(
+                codex
+                    .rate_limits
+                    .as_ref()
+                    .and_then(|rate_limits| rate_limits.plan_type.as_deref()),
+                Some("pro")
+            );
+            assert_eq!(
+                codex
+                    .rate_limits
+                    .as_ref()
+                    .and_then(|rate_limits| rate_limits.primary.as_ref())
+                    .and_then(|primary| primary.used_percent),
+                Some(42)
+            );
+        }
+        _ => panic!("expected CodexUpdated delta"),
+    }
+}
+
 // Tests that shared Codex threadless runtime notice is recorded.
 #[test]
 fn shared_codex_threadless_runtime_notice_is_recorded() {
@@ -1682,8 +1741,6 @@ fn shared_codex_threadless_runtime_notice_is_recorded() {
             && code.as_deref() == Some("auth_required")
     ));
 }
-
-
 
 // Tests that shared Codex agent message event uses conversation ID for session routing.
 #[test]
@@ -1865,9 +1922,6 @@ fn clear_runtime_commits_revision_when_it_resets_state() {
     state.clear_runtime(&session_id).unwrap();
     assert_eq!(state.snapshot().revision, stable_revision);
 }
-
-
-
 
 // Tests that canonicalizes session model updates from live model labels.
 #[test]
@@ -2318,7 +2372,6 @@ async fn health_route_reports_inline_orchestrator_template_support() {
     );
 }
 
-
 // Tests that read and write file accept project ID without session.
 #[tokio::test]
 async fn read_and_write_file_accept_project_id_without_session() {
@@ -2621,7 +2674,6 @@ async fn read_directory_returns_not_found_for_missing_project_path() {
     fs::remove_dir_all(root).unwrap();
 }
 
-
 // Tests that read file rejects content over size limit.
 #[tokio::test]
 async fn read_file_rejects_content_over_size_limit() {
@@ -2705,6 +2757,3 @@ async fn write_file_rejects_content_over_size_limit() {
 
     fs::remove_dir_all(root).unwrap();
 }
-
-
-

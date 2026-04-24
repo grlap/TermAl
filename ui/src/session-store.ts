@@ -94,6 +94,13 @@ type SyncComposerSessionsParams = Readonly<{
   sessions: readonly Session[];
 }>;
 
+type SyncComposerSessionsStoreIncrementalParams = Readonly<{
+  changedSessions: readonly Session[];
+  draftAttachmentsBySessionId: Readonly<Record<string, DraftImageAttachment[]>>;
+  draftsBySessionId: Readonly<Record<string, string>>;
+  removedSessionIds?: readonly string[];
+}>;
+
 type SyncComposerDraftForSessionParams = Readonly<{
   draftAttachments: readonly DraftImageAttachment[];
   committedDraft: string;
@@ -496,6 +503,88 @@ export function syncComposerSessionsStore({
     }
     nextSummaryById ??= { ...previousSummaryById };
     delete nextSummaryById[sessionId];
+  });
+
+  if (!nextComposerById && !nextRecordsById && !nextSummaryById) {
+    return;
+  }
+
+  currentState = {
+    composerSessionsById:
+      nextComposerById
+        ? (Object.keys(nextComposerById).length === 0
+            ? EMPTY_COMPOSER_SESSIONS_BY_ID
+            : nextComposerById)
+        : previousComposerById,
+    sessionRecordsById:
+      nextRecordsById
+        ? (Object.keys(nextRecordsById).length === 0
+            ? EMPTY_SESSION_RECORDS_BY_ID
+            : nextRecordsById)
+        : previousRecordsById,
+    sessionSummariesById:
+      nextSummaryById
+        ? (Object.keys(nextSummaryById).length === 0
+            ? EMPTY_SESSION_SUMMARIES_BY_ID
+            : nextSummaryById)
+        : previousSummaryById,
+  };
+  emitStoreChange();
+}
+
+export function syncComposerSessionsStoreIncremental({
+  changedSessions,
+  draftsBySessionId,
+  draftAttachmentsBySessionId,
+  removedSessionIds = [],
+}: SyncComposerSessionsStoreIncrementalParams) {
+  const previousComposerById = currentState.composerSessionsById;
+  const previousRecordsById = currentState.sessionRecordsById;
+  const previousSummaryById = currentState.sessionSummariesById;
+  let nextComposerById: Record<string, ComposerSessionSnapshot> | null = null;
+  let nextRecordsById: Record<string, Session> | null = null;
+  let nextSummaryById: Record<string, SessionSummarySnapshot> | null = null;
+
+  changedSessions.forEach((session) => {
+    const previousComposer = previousComposerById[session.id];
+    const previousRecord = previousRecordsById[session.id];
+    const previousSummary = previousSummaryById[session.id];
+    const nextComposer = buildComposerSessionSnapshot(
+      session,
+      draftsBySessionId[session.id] ?? "",
+      draftAttachmentsBySessionId[session.id] ?? [],
+      previousRecord,
+      previousComposer,
+    );
+    const nextSummary = buildSessionSummarySnapshot(session, previousSummary);
+
+    if (nextComposer !== previousComposer) {
+      nextComposerById ??= { ...previousComposerById };
+      nextComposerById[session.id] = nextComposer;
+    }
+    if (previousRecord !== session) {
+      nextRecordsById ??= { ...previousRecordsById };
+      nextRecordsById[session.id] = session;
+    }
+    if (nextSummary !== previousSummary) {
+      nextSummaryById ??= { ...previousSummaryById };
+      nextSummaryById[session.id] = nextSummary;
+    }
+  });
+
+  removedSessionIds.forEach((sessionId) => {
+    if (sessionId in previousComposerById) {
+      nextComposerById ??= { ...previousComposerById };
+      delete nextComposerById[sessionId];
+    }
+    if (sessionId in previousRecordsById) {
+      nextRecordsById ??= { ...previousRecordsById };
+      delete nextRecordsById[sessionId];
+    }
+    if (sessionId in previousSummaryById) {
+      nextSummaryById ??= { ...previousSummaryById };
+      delete nextSummaryById[sessionId];
+    }
   });
 
   if (!nextComposerById && !nextRecordsById && !nextSummaryById) {

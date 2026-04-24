@@ -28,7 +28,6 @@
 
 use super::*;
 
-
 // Pins that a subagent task_complete summary is buffered until the final
 // agent_message lands, then inserted BEFORE the final assistant text.
 // Guards against surfacing the subagent result out of narrative order
@@ -4759,4 +4758,3 @@ fn shared_codex_app_server_request_waits_for_turn_started() {
                 && *state == InteractionRequestState::Pending
     ));
 }
-
