@@ -23,6 +23,44 @@ accepts an explicit immediate-render flag, the message-card callers now thread
 coverage pins that a heavy thinking card renders immediately without waiting
 for `IntersectionObserver`.
 
+Also fixed in the current tree: virtualized transcript mounted-range
+reconciliation no longer calls `flushSync` from native/custom scroll listeners,
+so programmatic scroll notifications fired during layout/effect work no longer
+trip React's "flushSync was called from inside a lifecycle method" warning. The
+same patch gates heavy Markdown/code activation synchronously on the first
+active render instead of waiting for a passive post-activation effect.
+
+Also fixed in the current tree: composer draft publication no longer emits the
+external `session-store` from inside React state updater callbacks. Send-failure
+draft restore, draft-attachment removal, and queued-prompt cancellation now
+compute ref/store updates before scheduling React state, avoiding the
+"Cannot update SessionComposer2 while rendering App" warning.
+
+Also fixed in the current tree: active Codex/Claude streaming deltas no longer
+publish full-session React/store updates for every output chunk. Session refs
+and revisions still advance immediately, but the active transcript's
+`session-store` record and broad `sessions` render update now flush together at
+most once per animation frame; `ui/src/App.live-state.deltas.test.tsx` pins
+that a burst of live deltas schedules a single frame render.
+
+Also fixed in the current tree: live Codex global-state deltas and repeated
+transport recovery no-ops no longer force immediate React work on every event.
+`codexUpdated` updates its ref immediately but batches the visible
+`CodexState` render to one animation frame, and the App-level backend
+connection-state setter now ignores same-value writes before entering React.
+
+Also fixed in the current tree: slow SSE `state` handling now reports a
+development-only phase breakdown (`parse`, `adoptState`, `postAdoption`,
+`clearErrors`) when total handling exceeds 50 ms, and rejected stale snapshots
+no longer walk every session just to cancel active-prompt recovery polls.
+
+Also fixed in the current tree: stale same-instance SSE `state` snapshots now
+use a raw-payload revision/server-instance peek before `JSON.parse`. When the
+peek proves the snapshot is stale and not an `_sseFallback`, the handler
+rejects it without parsing the full transcript-bearing payload. The metadata
+peek is capped to the first 4 KB so rejected snapshots do not trade parse
+latency for a full-payload regex scan.
+
 Also fixed in the current tree: create-session and create-project backdrop
 handlers now have direct integration coverage in `ui/src/AppDialogs.test.tsx`.
 Primary-button backdrop mousedown dismisses each dialog only when idle;
@@ -976,6 +1014,229 @@ The timer callbacks do read `scrollContainerRef.current` and gate on `isActive`,
 - Add a short comment at the key construction site (line 132) documenting that the message-id component prevents stale heights from leaking across sessions.
 - Optionally promote the cleanup to `useLayoutEffect` so the invariant holds even if the message-id safety net ever shrinks.
 
+## `codexUpdated` SSE delta is missing contract documentation
+
+**Severity:** Note - the backend and frontend now implement a `codexUpdated`
+delta for Codex global state, but `docs/architecture.md` and the wire-level
+comments do not document the new SSE payload.
+
+`DeltaEvent::CodexUpdated { revision, codex }` is part of the current client
+contract. Without documentation beside the other SSE delta variants, future
+remote implementers and frontend maintainers have to infer the payload shape
+from scattered Rust and TypeScript code.
+
+**Current behavior:**
+- `codexUpdated` is emitted and consumed as a valid SSE delta.
+- The architecture docs still describe only the older delta variants.
+- The wire comments do not call out the payload shape or intended usage.
+
+**Proposal:**
+- Add `codexUpdated` to the SSE delta contract in `docs/architecture.md`.
+- Update the nearby `DeltaEvent`/wire comments to state that the payload is the
+  latest `CodexState` plus the monotonic `revision`.
+
+## Deferred heavy-content activation is coupled into the message-card renderer
+
+**Severity:** Low - `ui/src/message-cards.tsx` now owns deferred heavy-content
+activation policy in addition to Markdown, code, Mermaid, KaTeX, diff, and
+message-card composition concerns.
+
+The new provider/hook is useful, but keeping the virtualization activation
+contract embedded in the same large renderer increases coupling between scroll
+policy and message rendering. Future performance fixes will have to reason
+through a broad module instead of a small boundary with a clear contract.
+
+**Current behavior:**
+- Deferred activation context, heavy Markdown/code rendering, and message-card
+  composition live in one large module.
+- Virtualization policy reaches into message rendering through exported
+  activation context.
+- The ownership boundary is not documented near the exported provider.
+
+**Proposal:**
+- Extract the deferred activation provider/hook into a focused module with a
+  short contract comment.
+- Consider extracting the heavy Markdown/code rendering path separately so
+  virtualization policy and content rendering can evolve independently.
+
+## Create Session dialog reverts the user's agent pick while a session is active
+
+**Severity:** High - `ui/src/App.tsx:1343-1347` syncs `newSessionAgent` to `activeSession.agent` inside a `useEffect` whose deps include `newSessionAgent` itself. The effect therefore re-fires whenever the user changes the agent in the dialog and snaps the pick back to the active session's agent. With a session active in the pane, the user cannot actually change the agent in the Create Session dialog.
+
+Before the current-tree refactor, the deps were keyed on `[activeSession?.id]` so the initialization only ran on session switch. Adding `newSessionAgent` to the deps (likely to satisfy an exhaustive-deps lint) introduced a feedback loop: `setNewSessionAgent(...)` changes the state → effect runs again → guard `newSessionAgent !== activeSession.agent` is true → state is overwritten back to `activeSession.agent`. The guard was meant to avoid a no-op `setState`, but it does not prevent the user's valid override from being undone.
+
+**Current behavior:**
+- Opening the Create Session dialog while any session is active initializes `newSessionAgent` to that session's agent. Correct.
+- The user changes the agent selector. `onChangeNewSessionAgent={setNewSessionAgent}` fires. Correct.
+- The effect immediately re-runs, sees `newSessionAgent !== activeSession.agent`, and sets the agent back. Incorrect.
+- Net effect: the agent selector visibly flickers to the new pick and snaps back before the user sees their choice take.
+
+**Proposal:**
+- Track the last-seen `activeSession.id` in a ref and only sync when the id transitions. Sketch:
+  ```tsx
+  const lastSyncedSessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (activeSession && lastSyncedSessionIdRef.current !== activeSession.id) {
+      lastSyncedSessionIdRef.current = activeSession.id;
+      setNewSessionAgent(activeSession.agent);
+    }
+  }, [activeSession?.id, activeSession?.agent]);
+  ```
+- Alternatively, drop `newSessionAgent` from deps with an explicit `eslint-disable-next-line` comment explaining the init-on-session-switch intent.
+- Add a regression test: mount with an active session, open the Create Session dialog, change the agent to a different value, assert the pick sticks.
+
+## `adoptState` silently overwrites caller's `disableMutationStampFastPath`
+
+**Severity:** Medium - `ui/src/app-live-state.ts:906-909` computes `serverInstanceChanged` locally and builds adoption options as `{ ...options, disableMutationStampFastPath: serverInstanceChanged }`. The spread order means the caller's explicit `disableMutationStampFastPath: true` is silently overwritten when the local computation produces `false`.
+
+No external caller sets this option today, so the bug is latent. But `AdoptStateOptions` declares the flag, and a future caller that passes `disableMutationStampFastPath: true` (e.g. to force a deep reconcile after suspected transcript corruption, independently of server-instance change) will be confused when the flag has no effect.
+
+**Current behavior:**
+- `{ ...options, disableMutationStampFastPath: serverInstanceChanged }` — the local computation always wins.
+- A caller-passed `true` with `serverInstanceChanged === false` is dropped.
+
+**Proposal:**
+- OR the values: `disableMutationStampFastPath: serverInstanceChanged || options?.disableMutationStampFastPath ?? false`.
+- Once fixed, add a test that passes `disableMutationStampFastPath: true` through `AdoptStateOptions` and asserts the deep reconcile runs even when `serverInstanceChanged === false`.
+
+## `useState` initializer in `SessionComposer` writes to a shared ref
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:788-806` includes `committedDraftsRef.current[initialSessionId] = initialCommittedDraft;` inside a `useState(() => { ... })` initializer. React's documentation explicitly warns against side effects in state initializers because the initializer can run more than once (StrictMode double-invoke, discarded concurrent renders). The write is idempotent today, but the pattern is a known footgun and any future code making the initialization non-idempotent would silently double-apply.
+
+**Current behavior:**
+- The `useState` initializer writes the initial committed draft into `committedDraftsRef.current[initialSessionId]`.
+- Under React 18 StrictMode the initializer runs twice; the write is idempotent so no observable difference today.
+- Any future non-idempotent logic (e.g. appending to an array, incrementing a counter, allocating a derived id) added to the initializer would silently double-apply.
+
+**Proposal:**
+- Move the `committedDraftsRef.current[initialSessionId] = initialCommittedDraft` write into the first `useLayoutEffect` keyed on `[activeSessionId]`.
+- The state initializer can still compute the initial draft from `session?.committedDraft ?? ""` without writing the ref.
+
+## `preferImmediateHeavyRender` is computed from a non-reactive ref during render
+
+**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:666-667` computes the `preferImmediateHeavyRender` prop for `MeasuredPageBand` by reading `hasUserScrollInteractionRef.current` during render. Refs are not reactive, so the computed value only propagates when something else forces a re-render. Today that works because every scroll-event path that flips the ref to `true` also triggers `setViewport(...)` via `syncViewportFromScrollNode` within the same handler, which causes a re-render and re-reads the ref. But the coupling is implicit, undocumented, and brittle.
+
+Any future scroll path that flips `hasUserScrollInteractionRef.current = true` without triggering a React state update will leave memoized pages with the stale `preferImmediateHeavyRender={true}` value until a different render trigger arrives — at which point heavy cards that should have stayed deferred will activate, defeating the purpose of the cooldown gate.
+
+**Current behavior:**
+- `preferImmediateHeavyRender` is computed each render from `hasUserScrollInteractionRef.current`.
+- The ref is mutated in two handlers that also call `syncViewportFromScrollNode`, which updates `viewport` state and forces a re-render.
+- If a future contributor adds a third setter without a matching state update, memoized pages will stay on a stale value.
+
+**Proposal:**
+- Promote `hasUserScrollInteraction` to component state (or state+ref pair), so every mutation triggers a re-render automatically.
+- Alternatively, expose a helper like `setHasUserScrollInteraction(true)` that both writes the ref and calls a dedicated state-setter, and use that everywhere. Add a comment at the two existing setter sites naming the invariant.
+
+## Composer switched to uncontrolled `<textarea>` without documenting the narrow-state contract
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:1132-1172` migrated the composer from a controlled input (`value={composerDraft}`) to an uncontrolled input (`defaultValue={initialComposerDraft}`) with imperative `composerInputRef.current.value = ...` writes for everything but slash-prefixed drafts. The React state `composerDraft` is populated only when the current input starts with `/`; plain-text drafts live exclusively in the DOM and `composerDraft` reads `""`.
+
+Today this is intentional — only the slash palette cares about the draft, and it only cares about slash drafts. But any future consumer of `composerDraft` through props, memo deps, or a derived state calculation will see empty strings for plain text and not understand why. The invariant "current draft text must be read via `getComposerDraftValue()`, not `composerDraft`" is implicit.
+
+**Current behavior:**
+- `<textarea>` is uncontrolled; `defaultValue={initialComposerDraft}` sets the first paint, imperative `ref.current.value = ...` handles later writes.
+- `composerDraft` (React state) tracks only slash-prefixed drafts for palette rendering.
+- Any non-slash reader of `composerDraft` observes empty strings for typed plain text.
+- Nothing in code documents that current draft text MUST be read via `getComposerDraftValue()` / `composerInputRef.current?.value`.
+
+**Proposal:**
+- Add a block comment at the `currentLocalDraftState` declaration explaining the narrow slash-only meaning and that readers of current draft text MUST use `getComposerDraftValue()`.
+- Rename `composerDraft` → `composerSlashDraft` (or `trackedSlashDraft`) to make the narrow purpose visible at every call site.
+
+## `disableMutationStampFastPath` is not threaded through `sameSessionSummary`
+
+**Severity:** Medium - `ui/src/session-reconcile.ts:76-110` passes `disableMutationStampFastPath` down to `reconcileSession(...)` but not to `sameSessionSummary(...)`. The summary comparator already checks `previous.sessionMutationStamp === next.sessionMutationStamp` directly (line 79). When the caller requests a deep reconcile (`disableMutationStampFastPath: true`) but the pre/post-restart summaries happen to be equal AND the stamps happen to collide (e.g. both `0` on fresh runtimes, or an unrelated u64 match), `sameSessionSummary` returns `true` and `reconcileSession` early-returns `previous` before `reconcileMessages` runs.
+
+The existing test (`can disable the mutation-stamp fast path after a server restart` in `session-reconcile.test.ts`) forces a summary difference (preview text or messages length), so it passes even though the failure mode — summary-equal with colliding stamps and divergent messages — is the scenario the flag is supposed to address.
+
+**Current behavior:**
+- `sameSessionSummary(prev, next)` checks the stamp at line 79, outside any `options` gate.
+- When `disableMutationStampFastPath` is `true` but summaries and stamps happen to match, the fast path is re-entered through a different door.
+- The restart-divergent-transcript scenario is unprotected when summaries don't change.
+
+**Proposal:**
+- Pass `options` through to `sameSessionSummary` and, when `disableMutationStampFastPath` is `true`, treat the stamps as non-equal there too. Alternatively, factor the stamp check out of `sameSessionSummary` entirely and gate it in `reconcileSession` only.
+- Add a regression test: two sessions with identical summaries, identical stamps, but diverging message arrays; assert that `disableMutationStampFastPath: true` causes `reconcileMessages` to produce the new messages.
+
+## `CodexUpdated` delta carries a full subsystem snapshot despite the "delta" name
+
+**Severity:** Medium - `src/wire.rs::DeltaEvent::CodexUpdated { revision, codex: CodexState }` publishes the entire `CodexState` on every rate-limit tick and every notice addition. The architectural contract the codebase otherwise respects is "state events for full snapshots, delta events for scoped changes". `CodexUpdated` is small today (rate_limits + notices capped at 5), but the naming invites future bulky additions to `CodexState` (login state, model-availability maps, per-provider metadata) to be broadcast in full on every tiny change.
+
+**Current behavior:**
+- The variant ships a full `CodexState` payload.
+- Two publish sites in `src/session_sync.rs` send the complete snapshot even when only the rate limits changed.
+- Wire name and shape set a precedent for "delta = tiny changes" that this variant violates.
+
+**Proposal:**
+- Split into narrower variants: `CodexRateLimitsUpdated { revision, rate_limits }` and `CodexNoticesUpdated { revision, notices }`. The two call sites in `session_sync.rs` already pick their publish trigger, so split dispatch is straightforward.
+- Alternatively, add a source-level comment on the `CodexUpdated` variant stating that `codex` is intentionally the full subsystem snapshot and any future field addition to `CodexState` must reconsider whether a narrower event is needed.
+
+## `CodexState.notices` 5-item cap is enforced in the mutator, not the type
+
+**Severity:** Medium - `src/session_sync.rs::note_codex_notice` calls `notices.truncate(5)` to bound the notices vector, but the cap lives only at that call site. `CodexState.notices: Vec<CodexNotice>` in `src/wire.rs` declares no bound. A future caller that assembles a `CodexState` differently (constructing it directly, deserializing from a remote, or adding a second mutator) will bypass the cap and broadcast an unbounded vector over SSE.
+
+**Current behavior:**
+- `notices.truncate(5)` runs only inside `note_codex_notice`.
+- Any other path that produces a `CodexState` is unconstrained.
+
+**Proposal:**
+- Extract a `const CODEX_NOTICE_CAP: usize = 5;` at module scope and use it at both the mutator and any future assembler. Document it in a doc comment on `CodexState.notices`.
+- Alternatively, wrap the field in a newtype (`NoticeRingBuffer`) that enforces the cap on insertion.
+
+## `DeferredHeavyContent` near-viewport activation now deferred by one paint
+
+**Severity:** Low - `ui/src/message-cards.tsx:607-628` replaced `useLayoutEffect` with `useEffect` + a `requestAnimationFrame` before `setIsActivated(true)` for the near-viewport fast-activation branch. The previous sync layout-effect path activated heavy content that was already in-viewport before paint, avoiding a placeholder → content height jump. The new path defers activation by at least one paint, so on initial mount near the viewport the user may now see the placeholder for one frame before the heavy content replaces it. The deleted comment specifically warned about this risk for virtualized callers.
+
+**Current behavior:**
+- `useEffect` + `requestAnimationFrame` defers activation by ≥1 paint even when the card is already near viewport on mount.
+- The deferral was added as part of the `allowDeferredActivation` cooldown gate (to avoid layout thrash during active scrolls).
+- Near-viewport mount activation now produces a one-frame placeholder flicker in place of the previous zero-frame activation.
+
+**Proposal:**
+- Use `useLayoutEffect` when `allowDeferredActivation === true` (or for the near-viewport branch generally). Keep the `requestAnimationFrame` in the IntersectionObserver entry path for rapid-entry de-dupe.
+- Alternatively, add a targeted comment explaining the deliberate trade-off if the new behavior is intended.
+
+## Remote `DeltaEvent::CodexUpdated { .. }` arm uses a silent wildcard destructure
+
+**Severity:** Low - `src/remote_routes.rs:1004-1013` matches `DeltaEvent::CodexUpdated { .. } => { ... }` in the remote dispatch loop. The `..` wildcard silently hides the `codex` field. If a future field is added to the variant, a reviewer walking the remote arm will not notice the new field is being dropped.
+
+The intent ("process-global, not localized") is clearly documented in the comment and is correct — remote Codex state should not be absorbed locally. The hazard is purely in future-proofing.
+
+**Current behavior:**
+- `DeltaEvent::CodexUpdated { .. } => { /* no-op except revision bookkeeping */ }`.
+- Adding a new field to the variant would not force a compiler or reviewer nudge at this call site.
+
+**Proposal:**
+- Use explicit-field destructure: `DeltaEvent::CodexUpdated { revision: _, codex: _ } => { ... }`. Adding a field becomes a compile error.
+- Optionally add a doc comment on the variant in `wire.rs` clarifying the localization asymmetry.
+
+## `"sessionId" in delta` poll-cancel branches are not extensible
+
+**Severity:** Low - `ui/src/app-live-state.ts:1613, 1633` handle delta-event poll cancellations by structurally checking `"sessionId" in delta`. The two `revisionAction === "ignore"` / `"resync"` branches each hard-code the knowledge that only `SessionDeltaEvent` variants carry `sessionId`. Adding a third non-session delta type requires remembering to update both branches, and a new session-scoped delta that uses a different key (e.g. `sessionIds: string[]`) would silently miss both gates.
+
+**Current behavior:**
+- Two branches each run `"sessionId" in delta && typeof delta.sessionId === "string"`.
+- The `SessionDeltaEvent` exclude type in `ui/src/live-updates.ts:76` exists but is not used here.
+
+**Proposal:**
+- Extract a `cancelPollsForDelta(delta: DeltaEvent)` helper that switches on `delta.type` (or uses the same `SessionDeltaEvent` narrowing). Call it from both branches.
+- That also centralizes the "which deltas cancel which polls" contract in one place.
+
+## `prevIsActive`-in-render replaced with post-commit effect delays the first-activation measurement pass
+
+**Severity:** Low - `ui/src/panels/VirtualizedConversationMessageList.tsx:426-432` converted the `prevIsActive !== isActive` render-time derived-state update into a post-commit `useEffect`. Under the previous pattern, a session switching from `isActive: false → true` flipped `setIsMeasuringPostActivation(true)` during render, so the first frame rendered the measuring shell with the correct `preferImmediateHeavyRender` value. The new effect defers that flip to after commit — the first paint of the newly-active session briefly shows `isMeasuringPostActivation: false`, flipping to the measurement shell only on the next render.
+
+Usually invisible (the effect runs the same tick). Under slow devices this may cause a one-frame flicker on session activation.
+
+**Current behavior:**
+- Post-commit effect fires after the first frame of the reactivated session.
+- First paint uses `isMeasuringPostActivation: false` regardless of the actual transition.
+
+**Proposal:**
+- Restore the render-time pattern: `if (prevIsActive !== isActive) { setPrevIsActive(isActive); ... }` (the established React "derived state" form).
+- Or upgrade the effect to `useLayoutEffect` so it runs before paint.
+- The P2 task for `key={sessionId}` on the virtualizer supersedes this if that fix lands first.
+
 ## Focused live sessions monopolize the main thread during state adoption
 
 **Severity:** Medium - a visible, focused TermAl tab with an active Codex session can spend multiple seconds of an 8 s sample on main-thread work even when no requests fail and no exceptions fire.
@@ -984,6 +1245,10 @@ A live Chrome profile against the current dev tab showed no runtime exceptions, 
 
 **Current behavior:**
 - A visible, focused active session still produces repeated long main-thread tasks while Codex is working or waiting for output.
+- Per-chunk session deltas now coalesce their full-session store publication and broad `sessions` render update to one animation frame, but full state snapshots and transcript measurement still need separate cuts.
+- `codexUpdated` deltas and same-value backend connection-state updates are now coalesced or ignored, but snapshot adoption remains the dominant unresolved path.
+- Slow `state` events now log per-phase timings in development, so the next profiling round should use the `[TermAl perf] slow state event ...` line to pick the next cut.
+- Stale same-instance snapshots now avoid full JSON parse, so the remaining problematic lines should be adopted snapshots or server-restart/fallback snapshots.
 - `handleStateEvent(...)` still drives broad adoption work through `adoptState(...)` / `adoptSessions(...)`, transcript reconciliation, and follow-on measurement/render work even after the narrower cleanup fan-out cut.
 - `/api/state` resync currently reads full response bodies as text and runs `looksLikeHtmlResponse(...)` before JSON parsing, adding avoidable CPU on large successful snapshots.
 - Transcript virtualization still spends measurable time on regex-heavy height estimation and synchronous layout reads, so live session churn compounds with scroll/measure work instead of staying isolated to the active status surface.
@@ -1688,6 +1953,86 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
 
 ## Implementation Tasks
 
+- [ ] P2: Extend `live-updates.test.ts` stamp-propagation coverage to the four untested delta branches:
+  existing test only covers `messageCreated`. Production (`live-updates.ts:157-336`)
+  adds `resolveSessionMutationStamp(...)` to `textDelta`, `textReplace`,
+  `commandUpdate`, and `parallelAgentsUpdate`. Extend the existing four tests
+  with a `sessionMutationStamp` input and matching output assertion. Add one
+  case for the `??` fallback where `delta.sessionMutationStamp` is `undefined`
+  and the session's prior stamp must be preserved.
+- [ ] P2: Add Rust tests asserting `session_mutation_stamp` on every published delta:
+  thirteen production sites (`session_messages.rs`, `session_sync.rs`, etc.) now
+  publish `DeltaEvent::*` with `session_mutation_stamp: Some(record.mutation_stamp)`.
+  Existing tests pattern-match with `{ message_id, .. }` and ignore the stamp
+  entirely. Subscribe to the state event broadcast channel, drive one mutation
+  per type (`push_message`, `append_text_delta`, `replace_text_message`,
+  `update_command_output`, `update_parallel_agents`), and assert the resulting
+  delta's `session_mutation_stamp` matches `record.mutation_stamp` on the wire
+  session. Prevents silent stamp-drop regressions.
+- [ ] P2: Add a remote-proxy test for `DeltaEvent::CodexUpdated`:
+  `apply_remote_delta_event` in `remote_routes.rs:1004-1013` advances remote
+  revision bookkeeping and early-returns (no state broadcast). Feed the event
+  through and assert (a) no state broadcast is emitted, (b)
+  `applied_revision_by_remote` advances. Covers the "process-global, do not
+  localize" contract against accidental removal.
+- [ ] P2: Add `serverInstanceChanged → disableMutationStampFastPath` integration test:
+  `session-reconcile.test.ts:178` covers the option in isolation but nothing
+  verifies that `adoptState` computes `serverInstanceChanged` correctly and
+  threads it down. Mount → adopt with `serverInstanceId: "a"` → reconnect with
+  `"b"` and identical stamps but divergent message text → assert the UI shows
+  the new text. Locks the restart-rewind contract.
+- [ ] P2: Add a `codexUpdated` SSE delta UI test:
+  `ui/src/app-live-state.ts:1652-1694` performs five side effects
+  (`confirmReconnectRecoveryFromLiveEvent`, revision advance, `codexStateRef`
+  write, `startTransition(setCodexState)`, clear connection-issue state) with
+  zero test coverage. Dispatch a `codexUpdated` SSE event and assert the
+  CodexState ref update took effect via an observable consumer (the rate-limit
+  chip or a direct ref read through a test harness).
+- [ ] P2: Broaden `cancelStaleSendResponseRecoveryPollForSessions` call-site coverage:
+  `App.session-lifecycle.test.tsx` covers one of five call sites (applied
+  session delta). Add tests for (a) the revision-ignored live-delta path
+  cancelling the poll, and (b) the `orchestratorsUpdated`-sessions fan-out
+  calling `cancelStaleSendResponseRecoveryPollForSessions(deltaSessionIds)`.
+- [ ] P2: Tighten `MessageCard.test.tsx` streaming-plain-text guards:
+  current tests set `preferStreamingPlainTextRender=true` with
+  `searchQuery=""` and `author="assistant"`. Add one case with a non-empty
+  `searchQuery` (expecting fallback to `MarkdownContent` to preserve
+  highlighting) and one with `author="you"` (expecting fallback so user
+  prompts keep the `ExpandedPromptPanel`).
+- [ ] P2: Strengthen the first stamp-fast-path test in `session-reconcile.test.ts`:
+  the current `"reuses the existing session object when the mutation stamp matches"`
+  test uses `previous` and `next` with identical content, so `reconcileSessions`
+  would return `previous` even without the fast path. Make `next` differ (e.g.,
+  change the last message's text) and assert `merged[0]` still has the old
+  text — which is only possible if the stamp fast path actually ran.
+- [ ] P2: Cover `reconcileMessages` tail-same fallback branches:
+  the new optimisation has four branches; only the tail-same one is covered.
+  Add tests for (a) length mismatch (message appended) and (b) an interior
+  message deleted or reordered so a mid-iteration id mismatch forces the
+  fallback to `reconcileMessagesById`.
+- [ ] P2: Add `session-store.test.ts` no-op bailout listener-count assertion:
+  `syncComposerSessionsStoreIncremental` returns before calling
+  `emitStoreChange` when `changedSessions === []` and
+  `removedSessionIds === []`. Subscribe a spy, call the incremental function
+  with empty changes, assert the spy's call count is `0`. Locks the perf claim
+  that drives the new API.
+- [ ] P2: Positive-direction test for `DeferredHeavyContent` with
+  `allowActivation={true}`:
+  `MessageCard.test.tsx:117-145` covers only the negative direction. Stub
+  `IntersectionObserver` to fire immediately (JSDOM lacks it), or assert that
+  without the provider the placeholder resolves. Otherwise the context wiring
+  could be inverted and both branches may still land on the fallback.
+- [ ] P2: Add a `note_codex_notice` publish-path test parallel to the
+  rate-limits test:
+  `shared_codex_rate_limits_publish_codex_delta_without_full_state_snapshot`
+  covers the rate-limit path. The notice publish path in `session_sync.rs:211`
+  follows the same pattern but has no dedicated test. Mirror the assertions:
+  narrow `CodexUpdated` delta emitted, no full-state broadcast.
+- [ ] P2: Tighten `shared_codex_rate_limits_publish_codex_delta_without_full_state_snapshot`:
+  the test currently asserts a delta arrives, but does not re-check
+  `state_events.try_recv()` returns `Empty` after the delta handling. Add a
+  second `try_recv` after draining the delta so a regression that accidentally
+  emitted a full-state broadcast alongside the delta would fail.
 - [ ] P2: Add end-to-end recovery-open intent coverage in `useAppLiveState`:
   queue overlapping `requestActionRecoveryResyncRef` opens, adopt snapshots in
   stages, and assert each session opens only when the authoritative session list
@@ -1722,6 +2067,9 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   different instance, then adopt a full snapshot from that new instance with
   the same `sessionMutationStamp` but changed session content. Assert the full
   snapshot still disables the stamp fast path and replaces stale content.
+- [ ] P2: Add App/live-state coverage for `codexUpdated` deltas:
+  dispatch a `codexUpdated` SSE delta with changed Codex global state and
+  assert the UI/store adopts it without fetching `/api/state`.
 - [ ] P2: Add active-prompt poll cancellation coverage for session deltas:
   arm the stale-send recovery poll, dispatch a `messageCreated` or `textDelta`
   SSE delta for the same session, advance `ACTIVE_PROMPT_POLL_INTERVAL_MS`,
@@ -1763,7 +2111,8 @@ Three distinct issues in and around the new `useEffect(... fetchSession ...)` in
   equivalent) so contributors can discover the orchestrator without having to
   find it by spelunking. This does not imply CI integration — the scripts
   still require a live `127.0.0.1:4173` + Chrome DevTools Protocol at
-  `127.0.0.1:9222`.
+  `127.0.0.1:9222`. On Windows, start Chrome for MCP/CDP profiling with:
+  `"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%TEMP%\chrome-profile-stable"`.
 - [ ] P2: Add a module-header comment to
   `ui/src/panels/VirtualizedConversationMessageList.tsx`:
   the file sits at ~1600 lines and owns non-obvious invariants

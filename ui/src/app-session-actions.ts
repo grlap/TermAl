@@ -760,15 +760,26 @@ export function useAppSessionActions(
           releaseDraftAttachments(attachments);
           return;
         }
-        let restoredDraft = false;
-        let restoredAttachments = false;
+        const currentDraft = draftsBySessionIdRef.current[sessionId] ?? "";
+        const currentAttachments =
+          draftAttachmentsBySessionIdRef.current[sessionId] ?? [];
+        const restoredDraft = !!draftText && currentDraft === "";
+        const restoredAttachments =
+          attachments.length > 0 && currentAttachments.length === 0;
+
+        if (restoredDraft || restoredAttachments) {
+          syncComposerDraftSlice(
+            sessionId,
+            restoredDraft ? draftText : currentDraft,
+            restoredAttachments ? attachments : currentAttachments,
+          );
+        }
 
         setDraftsBySessionId((current) => {
           if (!draftText || (current[sessionId] ?? "") !== "") {
             return current;
           }
 
-          restoredDraft = true;
           return {
             ...current,
             [sessionId]: draftText,
@@ -782,23 +793,11 @@ export function useAppSessionActions(
             return current;
           }
 
-          restoredAttachments = true;
           return {
             ...current,
             [sessionId]: attachments,
           };
         });
-        if (restoredDraft || restoredAttachments) {
-          syncComposerDraftSlice(
-            sessionId,
-            restoredDraft
-              ? draftText
-              : (draftsBySessionIdRef.current[sessionId] ?? ""),
-            restoredAttachments
-              ? attachments
-              : (draftAttachmentsBySessionIdRef.current[sessionId] ?? []),
-          );
-        }
         if (!restoredAttachments) {
           releaseDraftAttachments(attachments);
         }
@@ -838,28 +837,36 @@ export function useAppSessionActions(
     sessionId: string,
     attachmentId: string,
   ) {
+    const existingAttachments =
+      draftAttachmentsBySessionIdRef.current[sessionId] ?? [];
+    const removed = existingAttachments.filter(
+      (attachment) => attachment.id === attachmentId,
+    );
+    if (removed.length === 0) {
+      return;
+    }
+
+    releaseDraftAttachments(removed);
+    const nextRefAttachments = existingAttachments.filter(
+      (attachment) => attachment.id !== attachmentId,
+    );
+    syncComposerDraftSlice(
+      sessionId,
+      draftsBySessionIdRef.current[sessionId] ?? "",
+      nextRefAttachments,
+    );
     setDraftAttachmentsBySessionId((current) => {
       const existing = current[sessionId];
       if (!existing) {
         return current;
       }
 
-      const removed = existing.filter(
-        (attachment) => attachment.id === attachmentId,
-      );
-      if (removed.length === 0) {
-        return current;
-      }
-
-      releaseDraftAttachments(removed);
       const nextAttachments = existing.filter(
         (attachment) => attachment.id !== attachmentId,
       );
-      syncComposerDraftSlice(
-        sessionId,
-        draftsBySessionIdRef.current[sessionId] ?? "",
-        nextAttachments,
-      );
+      if (nextAttachments.length === existing.length) {
+        return current;
+      }
       if (nextAttachments.length === 0) {
         const nextState = { ...current };
         delete nextState[sessionId];
@@ -1188,16 +1195,24 @@ export function useAppSessionActions(
   }
 
   async function handleCancelQueuedPrompt(sessionId: string, promptId: string) {
-    setSessions((current) => {
-      const next = removeQueuedPromptFromSessions(current, sessionId, promptId);
+    const previousSessions = sessionsRef.current;
+    const next = removeQueuedPromptFromSessions(
+      previousSessions,
+      sessionId,
+      promptId,
+    );
+    const hasChanged = next.some(
+      (entry, index) => entry !== previousSessions[index],
+    );
+    if (hasChanged) {
       sessionsRef.current = next;
       const updatedSession =
         next.find((entry) => entry.id === sessionId) ?? null;
       if (updatedSession) {
         syncSessionSlice(updatedSession);
       }
-      return next;
-    });
+      setSessions(next);
+    }
     try {
       const state = await cancelQueuedPrompt(sessionId, promptId);
       if (!isMountedRef.current) {

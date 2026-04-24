@@ -43,6 +43,7 @@ import {
   useComposerSessionSnapshot,
   useSessionRecordSnapshot,
 } from "../session-store";
+import { useStableEvent } from "./use-stable-event";
 import type {
   ApprovalDecision,
   AgentCommand,
@@ -215,7 +216,7 @@ export function AgentSessionPanel({
   );
 }
 
-export function AgentSessionPanelFooter({
+export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
   paneId,
   viewMode,
   isPaneActive,
@@ -274,6 +275,18 @@ export function AgentSessionPanelFooter({
   onStopSession: (sessionId: string) => void;
   onPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
 }): JSX.Element {
+  const stableOnScrollToLatest = useStableEvent(onScrollToLatest);
+  const stableOnDraftCommit = useStableEvent(onDraftCommit);
+  const stableOnDraftAttachmentRemove = useStableEvent(onDraftAttachmentRemove);
+  const stableOnRefreshSessionModelOptions = useStableEvent(
+    onRefreshSessionModelOptions,
+  );
+  const stableOnRefreshAgentCommands = useStableEvent(onRefreshAgentCommands);
+  const stableOnSend = useStableEvent(onSend);
+  const stableOnSessionSettingsChange = useStableEvent(onSessionSettingsChange);
+  const stableOnStopSession = useStableEvent(onStopSession);
+  const stableOnPaste = useStableEvent(onPaste);
+
   if (viewMode === "session") {
     return (
       <SessionComposer
@@ -286,21 +299,21 @@ export function AgentSessionPanelFooter({
         isSessionBusy={isSessionBusy}
         isUpdating={isUpdating}
         showNewResponseIndicator={showNewResponseIndicator}
-        onScrollToLatest={onScrollToLatest}
-        onDraftCommit={onDraftCommit}
-        onDraftAttachmentRemove={onDraftAttachmentRemove}
+        onScrollToLatest={stableOnScrollToLatest}
+        onDraftCommit={stableOnDraftCommit}
+        onDraftAttachmentRemove={stableOnDraftAttachmentRemove}
         isRefreshingModelOptions={isRefreshingModelOptions}
         modelOptionsError={modelOptionsError}
         agentCommands={agentCommands}
         hasLoadedAgentCommands={hasLoadedAgentCommands}
         isRefreshingAgentCommands={isRefreshingAgentCommands}
         agentCommandsError={agentCommandsError}
-        onRefreshSessionModelOptions={onRefreshSessionModelOptions}
-        onRefreshAgentCommands={onRefreshAgentCommands}
-        onSend={onSend}
-        onSessionSettingsChange={onSessionSettingsChange}
-        onStopSession={onStopSession}
-        onPaste={onPaste}
+        onRefreshSessionModelOptions={stableOnRefreshSessionModelOptions}
+        onRefreshAgentCommands={stableOnRefreshAgentCommands}
+        onSend={stableOnSend}
+        onSessionSettingsChange={stableOnSessionSettingsChange}
+        onStopSession={stableOnStopSession}
+        onPaste={stableOnPaste}
       />
     );
   }
@@ -312,7 +325,7 @@ export function AgentSessionPanelFooter({
       </p>
     </footer>
   );
-}
+});
 
 const SessionBody = memo(function SessionBody({
   paneId,

@@ -196,6 +196,15 @@ ownership.
   latency scenarios, even if it remains a local checked-in script rather than a
   CI gate
 
+**Local Chrome/MCP setup:**
+
+Start Chrome with the DevTools Protocol port that the `chrome-devtools` MCP
+server attaches to:
+
+```powershell
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%TEMP%\chrome-profile-stable"
+```
+
 **Completion criteria:**
 - there is a repeatable local measurement path for:
   - active Codex waiting while typing

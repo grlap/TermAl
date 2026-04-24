@@ -279,6 +279,260 @@ describe("App live state - delta-gap core", () => {
     vi.unstubAllGlobals();
   });
 
+  it("coalesces live session delta renders through one animation frame", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Codex Session",
+                status: "active",
+                preview: "Partial output.",
+                messages: [
+                  {
+                    id: "message-user-1",
+                    type: "text",
+                    timestamp: "10:00",
+                    author: "you",
+                    text: "test",
+                  },
+                  {
+                    id: "message-assistant-1",
+                    type: "text",
+                    timestamp: "10:01",
+                    author: "assistant",
+                    text: "Partial output.",
+                  },
+                ],
+              }),
+            ],
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(eventSource, {
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "Partial output.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Partial output.",
+                },
+              ],
+            }),
+          ],
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        const sessionRowLabel = within(sessionList).getByText("Codex Session");
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+
+        await clickAndSettle(sessionRowButton);
+        expect(screen.getAllByText("Partial output.").length).toBeGreaterThan(
+          0,
+        );
+
+        let nextFrameId = 1;
+        const pendingFrames = new Map<number, FrameRequestCallback>();
+        const requestAnimationFrameMock = vi.fn(
+          (callback: FrameRequestCallback) => {
+            const frameId = nextFrameId;
+            nextFrameId += 1;
+            pendingFrames.set(frameId, callback);
+            return frameId;
+          },
+        );
+        const cancelAnimationFrameMock = vi.fn((frameId: number) => {
+          pendingFrames.delete(frameId);
+        });
+        vi.stubGlobal(
+          "requestAnimationFrame",
+          requestAnimationFrameMock as unknown as typeof requestAnimationFrame,
+        );
+        vi.stubGlobal(
+          "cancelAnimationFrame",
+          cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame,
+        );
+
+        act(() => {
+          for (let revision = 2; revision <= 4; revision += 1) {
+            eventSource.dispatchNamedEvent("delta", {
+              type: "textReplace",
+              revision,
+              sessionId: "session-1",
+              messageId: "message-assistant-1",
+              messageIndex: 1,
+              text: `Live output ${revision}`,
+              preview: `Live output ${revision}`,
+            });
+          }
+        });
+
+        expect(requestAnimationFrameMock).toHaveBeenCalledTimes(1);
+        expect(screen.queryByText("Live output 4")).not.toBeInTheDocument();
+
+        await act(async () => {
+          const callbacks = [...pendingFrames.values()];
+          pendingFrames.clear();
+          callbacks.forEach((callback) => {
+            callback(Date.now());
+          });
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        expect(screen.getAllByText("Live output 4").length).toBeGreaterThan(0);
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("coalesces Codex global-state delta renders through one animation frame", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [],
+            sessions: [],
+            codex: {},
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(eventSource, {
+          revision: 1,
+          projects: [],
+          sessions: [],
+          codex: {},
+        });
+
+        const pendingFrames = new Map<number, FrameRequestCallback>();
+        const requestAnimationFrameMock = vi.fn(
+          (callback: FrameRequestCallback) => {
+            const frameId = pendingFrames.size + 1;
+            pendingFrames.set(frameId, callback);
+            return frameId;
+          },
+        );
+        const cancelAnimationFrameMock = vi.fn((frameId: number) => {
+          pendingFrames.delete(frameId);
+        });
+        vi.stubGlobal(
+          "requestAnimationFrame",
+          requestAnimationFrameMock as unknown as typeof requestAnimationFrame,
+        );
+        vi.stubGlobal(
+          "cancelAnimationFrame",
+          cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame,
+        );
+
+        act(() => {
+          for (let revision = 2; revision <= 4; revision += 1) {
+            eventSource.dispatchNamedEvent("delta", {
+              type: "codexUpdated",
+              revision,
+              codex: {
+                notices: [
+                  {
+                    kind: "runtimeNotice",
+                    level: "warning",
+                    title: `Codex notice ${revision}`,
+                    detail: "Rendered through a coalesced frame.",
+                    timestamp: "2026-04-06T00:00:00Z",
+                  },
+                ],
+              },
+            });
+          }
+        });
+
+        expect(requestAnimationFrameMock).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+          const callbacks = [...pendingFrames.values()];
+          pendingFrames.clear();
+          callbacks.forEach((callback) => {
+            callback(Date.now());
+          });
+          await flushUiWork();
+        });
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("watchdog-resyncs when repeated ignored deltas arrive for an active session", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;

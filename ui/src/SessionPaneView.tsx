@@ -60,6 +60,7 @@ import {
   ThemedCombobox,
 } from "./preferences-panels";
 import { SessionFindBar } from "./SessionFindBar";
+import { useStableEvent } from "./panels/use-stable-event";
 import {
   resolveWorkspaceScopedProjectId,
   resolveWorkspaceScopedSessionId,
@@ -908,6 +909,26 @@ export function SessionPaneView({
         onComposerError(getErrorMessage(error));
       });
   }
+
+  const handleScrollToLatestFromFooter = useStableEvent(() => {
+    scrollMessageStackToBoundary("bottom");
+  });
+  const handleDraftCommitFromFooter = useStableEvent(onDraftCommit);
+  const handleDraftAttachmentRemoveFromFooter = useStableEvent(
+    onDraftAttachmentRemove,
+  );
+  const handleRefreshSessionModelOptionsFromFooter = useStableEvent(
+    onRefreshSessionModelOptions,
+  );
+  const handleRefreshAgentCommandsFromFooter = useStableEvent(
+    onRefreshAgentCommands,
+  );
+  const handleSendFromFooter = useStableEvent(onSend);
+  const handleSessionSettingsChangeFromFooter = useStableEvent(
+    onSessionSettingsChange,
+  );
+  const handleStopSessionFromFooter = useStableEvent(onStopSession);
+  const handleComposerPasteFromFooter = useStableEvent(handleComposerPaste);
 
   async function handleSourceFileSave(
     path: string,
@@ -3106,21 +3127,21 @@ export function SessionPaneView({
           isUpdating={isUpdating}
           showNewResponseIndicator={showNewResponseIndicator}
           footerModeLabel={labelForPaneViewMode(pane.lastSessionViewMode)}
-          onScrollToLatest={() => scrollMessageStackToBoundary("bottom")}
-          onDraftCommit={onDraftCommit}
-          onDraftAttachmentRemove={onDraftAttachmentRemove}
+          onScrollToLatest={handleScrollToLatestFromFooter}
+          onDraftCommit={handleDraftCommitFromFooter}
+          onDraftAttachmentRemove={handleDraftAttachmentRemoveFromFooter}
           isRefreshingModelOptions={isRefreshingModelOptions}
           modelOptionsError={modelOptionsError}
           agentCommands={agentCommands}
           hasLoadedAgentCommands={hasLoadedAgentCommands}
           isRefreshingAgentCommands={isRefreshingAgentCommands}
           agentCommandsError={agentCommandsError}
-          onRefreshSessionModelOptions={onRefreshSessionModelOptions}
-          onRefreshAgentCommands={onRefreshAgentCommands}
-          onSend={onSend}
-          onSessionSettingsChange={onSessionSettingsChange}
-          onStopSession={onStopSession}
-          onPaste={handleComposerPaste}
+          onRefreshSessionModelOptions={handleRefreshSessionModelOptionsFromFooter}
+          onRefreshAgentCommands={handleRefreshAgentCommandsFromFooter}
+          onSend={handleSendFromFooter}
+          onSessionSettingsChange={handleSessionSettingsChangeFromFooter}
+          onStopSession={handleStopSessionFromFooter}
+          onPaste={handleComposerPasteFromFooter}
         />
       )}
     </section>

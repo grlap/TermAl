@@ -16,7 +16,6 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { flushSync } from "react-dom";
 import { isExpandedPromptOpen } from "../ExpandedPromptPanel";
 import { DeferredHeavyContentActivationProvider } from "../message-cards";
 import {
@@ -430,6 +429,8 @@ export function VirtualizedConversationMessageList({
       setIsMeasuringPostActivation(true);
     }
   }, [isActive, messages.length]);
+  const isActivatingWithMessages =
+    !previousIsActiveRef.current && isActive && messages.length > 0;
 
   const activeViewport = isActive ? scrollContainerRef.current : null;
   const viewportHeight =
@@ -664,7 +665,9 @@ export function VirtualizedConversationMessageList({
   const isUserScrollAdjustmentCooldownActive =
     performance.now() - lastUserScrollInputTimeRef.current < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
   const preferImmediateHeavyRender =
-    !isMeasuringPostActivation && !hasUserScrollInteractionRef.current;
+    !isMeasuringPostActivation &&
+    !isActivatingWithMessages &&
+    !hasUserScrollInteractionRef.current;
   const allowDeferredHeavyActivation = !isUserScrollAdjustmentCooldownActive;
 
   const buildWorkingMountedRangeForScrollTop = useCallback(
@@ -797,9 +800,7 @@ export function VirtualizedConversationMessageList({
         skipNextMountedPrependRestoreRef.current = false;
       }
 
-      flushSync(() => {
-        setMountedPageRange(nextRange);
-      });
+      setMountedPageRange(nextRange);
     },
     [buildWorkingMountedRangeForScrollTop, expandRangeToRenderedPageEdges],
   );

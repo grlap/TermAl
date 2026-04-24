@@ -10,7 +10,6 @@ import {
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { flushSync } from "react-dom";
 import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
 import { DialogCloseIcon } from "./message-card-icons";
 import {
@@ -346,6 +345,10 @@ export default function App() {
   );
   const setBackendConnectionState = useCallback(
     (next: BackendConnectionState) => {
+      if (backendConnectionStateRef.current === next) {
+        return;
+      }
+
       // Write the ref eagerly so same-tick online/offline handlers observe the
       // next connection state before React commits.
       backendConnectionStateRef.current = next;
@@ -566,6 +569,10 @@ export default function App() {
     [workspace.panes],
   );
   function setBackendInlineRequestError(message: string | null) {
+    if (backendInlineRequestErrorMessageRef.current === message) {
+      return;
+    }
+
     backendInlineRequestErrorMessageRef.current = message;
     setBackendInlineRequestErrorMessage(message);
   }

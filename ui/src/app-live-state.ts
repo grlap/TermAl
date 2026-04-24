@@ -190,6 +190,88 @@ export type RequestStateResyncOptions = {
   paneId?: string | null;
 };
 
+const SLOW_STATE_EVENT_WARNING_MS = 50;
+const STATE_EVENT_METADATA_PEEK_CHARS = 4096;
+
+function createStateEventProfiler() {
+  if (
+    !import.meta.env.DEV ||
+    typeof performance === "undefined" ||
+    typeof console === "undefined"
+  ) {
+    return null;
+  }
+
+  const startedAt = performance.now();
+  let lastMarkAt = startedAt;
+  const steps: string[] = [];
+
+  return {
+    mark(label: string) {
+      const now = performance.now();
+      steps.push(`${label}=${(now - lastMarkAt).toFixed(1)}ms`);
+      lastMarkAt = now;
+    },
+    finish(details: {
+      adopted?: boolean;
+      revision?: number;
+      sessionCount?: number;
+    }) {
+      const now = performance.now();
+      const totalMs = now - startedAt;
+      if (totalMs < SLOW_STATE_EVENT_WARNING_MS) {
+        return;
+      }
+
+      const suffix = [
+        `total=${totalMs.toFixed(1)}ms`,
+        details.revision !== undefined ? `revision=${details.revision}` : null,
+        details.adopted !== undefined ? `adopted=${details.adopted}` : null,
+        details.sessionCount !== undefined
+          ? `sessions=${details.sessionCount}`
+          : null,
+        ...steps,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      console.warn(`[TermAl perf] slow state event ${suffix}`);
+    },
+  };
+}
+
+function extractTopLevelJsonNumber(payload: string, key: string) {
+  const match = new RegExp(`"${key}"\\s*:\\s*(-?\\d+)`).exec(
+    payload.slice(0, STATE_EVENT_METADATA_PEEK_CHARS),
+  );
+  if (!match?.[1]) {
+    return null;
+  }
+
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function extractTopLevelJsonString(payload: string, key: string) {
+  const match = new RegExp(
+    `"${key}"\\s*:\\s*"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)"`,
+  ).exec(payload.slice(0, STATE_EVENT_METADATA_PEEK_CHARS));
+  if (!match?.[1]) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(`"${match[1]}"`) as string;
+  } catch {
+    return null;
+  }
+}
+
+function payloadHasTopLevelTrueBoolean(payload: string, key: string) {
+  return new RegExp(`"${key}"\\s*:\\s*true(?:\\s*[,}])`).test(
+    payload.slice(0, STATE_EVENT_METADATA_PEEK_CHARS),
+  );
+}
+
 export type UseAppLiveStateAdoptionRefs = {
   isMountedRef: MutableRefObject<boolean>;
   latestStateRevisionRef: MutableRefObject<number | null>;
@@ -416,6 +498,11 @@ export function useAppLiveState(
   const syncAdoptedLiveSessionResumeWatchdogBaselinesRef = useRef<
     (sessions: Session[], now?: number) => void
   >(() => {});
+  const pendingSessionRenderFrameRef = useRef<number | null>(null);
+  const hasPendingSessionRenderRef = useRef(false);
+  const pendingSessionStoreSyncIdsRef = useRef<Set<string>>(new Set());
+  const pendingCodexStateRenderFrameRef = useRef<number | null>(null);
+  const hasPendingCodexStateRenderRef = useRef(false);
 
   function upsertSessionSlice(session: Session) {
     upsertSessionStoreSession({
@@ -425,6 +512,131 @@ export function useAppLiveState(
         draftAttachmentsBySessionIdRef.current[session.id] ?? [],
     });
   }
+
+  function queueSessionSliceForRender(sessionId: string) {
+    pendingSessionStoreSyncIdsRef.current.add(sessionId);
+  }
+
+  function flushPendingSessionStoreSync(sessionSnapshot = sessionsRef.current) {
+    const pendingSessionIds = pendingSessionStoreSyncIdsRef.current;
+    if (pendingSessionIds.size === 0) {
+      return;
+    }
+
+    const sessionsById = new Map(
+      sessionSnapshot.map((session) => [session.id, session]),
+    );
+    const changedSessions = [...pendingSessionIds].flatMap((sessionId) => {
+      const session = sessionsById.get(sessionId);
+      return session ? [session] : [];
+    });
+    pendingSessionIds.clear();
+    if (changedSessions.length === 0) {
+      return;
+    }
+
+    syncComposerSessionsStoreIncremental({
+      changedSessions,
+      draftsBySessionId: draftsBySessionIdRef.current,
+      draftAttachmentsBySessionId: draftAttachmentsBySessionIdRef.current,
+    });
+  }
+
+  function cancelPendingSessionRender() {
+    if (pendingSessionRenderFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingSessionRenderFrameRef.current);
+      pendingSessionRenderFrameRef.current = null;
+    }
+    hasPendingSessionRenderRef.current = false;
+    pendingSessionStoreSyncIdsRef.current.clear();
+  }
+
+  function cancelPendingCodexStateRender() {
+    if (pendingCodexStateRenderFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingCodexStateRenderFrameRef.current);
+      pendingCodexStateRenderFrameRef.current = null;
+    }
+    hasPendingCodexStateRenderRef.current = false;
+  }
+
+  function flushPendingCodexStateRender() {
+    pendingCodexStateRenderFrameRef.current = null;
+    if (!hasPendingCodexStateRenderRef.current || !isMountedRef.current) {
+      return;
+    }
+
+    hasPendingCodexStateRenderRef.current = false;
+    const nextCodexState = codexStateRef.current;
+    startTransition(() => {
+      setCodexState(nextCodexState);
+    });
+  }
+
+  function scheduleCodexStateRender() {
+    hasPendingCodexStateRenderRef.current = true;
+    if (pendingCodexStateRenderFrameRef.current !== null) {
+      return;
+    }
+    if (
+      typeof window === "undefined" ||
+      typeof window.requestAnimationFrame !== "function"
+    ) {
+      flushPendingCodexStateRender();
+      return;
+    }
+
+    pendingCodexStateRenderFrameRef.current =
+      window.requestAnimationFrame(flushPendingCodexStateRender);
+  }
+
+  function flushAndCancelPendingSessionRender(
+    sessionSnapshot = sessionsRef.current,
+  ) {
+    if (pendingSessionRenderFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingSessionRenderFrameRef.current);
+      pendingSessionRenderFrameRef.current = null;
+    }
+    flushPendingSessionStoreSync(sessionSnapshot);
+    hasPendingSessionRenderRef.current = false;
+  }
+
+  function flushPendingSessionRender() {
+    pendingSessionRenderFrameRef.current = null;
+    if (!hasPendingSessionRenderRef.current || !isMountedRef.current) {
+      return;
+    }
+
+    hasPendingSessionRenderRef.current = false;
+    const nextSessions = sessionsRef.current;
+    flushPendingSessionStoreSync(nextSessions);
+    startTransition(() => {
+      setSessions(nextSessions);
+    });
+  }
+
+  function scheduleSessionRender() {
+    hasPendingSessionRenderRef.current = true;
+    if (pendingSessionRenderFrameRef.current !== null) {
+      return;
+    }
+    if (
+      typeof window === "undefined" ||
+      typeof window.requestAnimationFrame !== "function"
+    ) {
+      flushPendingSessionRender();
+      return;
+    }
+
+    pendingSessionRenderFrameRef.current =
+      window.requestAnimationFrame(flushPendingSessionRender);
+  }
+
+  useEffect(() => {
+    return () => {
+      cancelPendingSessionRender();
+      cancelPendingCodexStateRender();
+    };
+  }, []);
 
   function cancelStaleSendResponseRecoveryPollForSessions(
     sessionIds: Iterable<string>,
@@ -501,6 +713,9 @@ export function useAppLiveState(
         draftAttachmentsBySessionId: draftAttachmentsBySessionIdRef.current,
         removedSessionIds: [...removedSessionIds],
       });
+    }
+    if (mergedSessions !== previousSessions) {
+      flushAndCancelPendingSessionRender(mergedSessions);
     }
     startTransition(() => {
       if (mergedSessions !== previousSessions) {
@@ -682,6 +897,7 @@ export function useAppLiveState(
     }
     sessionsRef.current = nextSessions;
     upsertSessionSlice(created.session);
+    flushAndCancelPendingSessionRender(nextSessions);
     setSessions(nextSessions);
     setWorkspace((current) =>
       applyControlPanelLayout(
@@ -756,6 +972,7 @@ export function useAppLiveState(
     }
     sessionsRef.current = nextSessions;
     upsertSessionSlice(hydratedSession);
+    flushAndCancelPendingSessionRender(nextSessions);
     setSessions(nextSessions);
     return true;
   }
@@ -882,6 +1099,7 @@ export function useAppLiveState(
     );
     if (adoptedStateSlices.codex !== currentCodexState) {
       codexStateRef.current = adoptedStateSlices.codex;
+      cancelPendingCodexStateRender();
       setCodexState(adoptedStateSlices.codex);
     }
     if (adoptedStateSlices.agentReadiness !== currentAgentReadiness) {
@@ -1529,12 +1747,56 @@ export function useAppLiveState(
         return;
       }
 
+      const profiler = createStateEventProfiler();
+      let profiledRevision: number | undefined;
+      let profiledSessionCount: number | undefined;
+      let profiledAdopted: boolean | undefined;
       try {
-        const state = JSON.parse(event.data) as StateEventPayload;
+        const payload = event.data;
+        const rawRevision = extractTopLevelJsonNumber(payload, "revision");
+        const rawServerInstanceId = extractTopLevelJsonString(
+          payload,
+          "serverInstanceId",
+        );
+        const rawIsFallback = payloadHasTopLevelTrueBoolean(
+          payload,
+          "_sseFallback",
+        );
+        profiler?.mark("peek");
+        if (
+          rawRevision !== null &&
+          !rawIsFallback &&
+          !shouldAdoptSnapshotRevision(
+            latestStateRevisionRef.current,
+            rawRevision,
+            {
+              force: forceAdoptNextStateEventRef.current,
+              allowRevisionDowngrade: forceAdoptNextStateEventRef.current,
+              lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
+              nextServerInstanceId: rawServerInstanceId,
+            },
+          )
+        ) {
+          profiledRevision = rawRevision;
+          profiledAdopted = false;
+          forceAdoptNextStateEventRef.current = false;
+          confirmReconnectRecoveryFromLiveEvent();
+          profiler?.mark("stalePeekReject");
+          setBackendConnectionIssueDetail(null);
+          clearRecoveredBackendRequestError();
+          profiler?.mark("clearErrors");
+          return;
+        }
+
+        const state = JSON.parse(payload) as StateEventPayload;
+        profiler?.mark("parse");
+        profiledRevision = state.revision;
+        profiledSessionCount = state.sessions?.length;
         if (state._sseFallback) {
           // Marked fallback payloads only signal that the client should refetch
           // the authoritative snapshot from /api/state.
           forceAdoptNextStateEventRef.current = false;
+          profiler?.mark("fallback");
           requestStateResync({
             allowAuthoritativeRollback: true,
             preserveReconnectFallback: true,
@@ -1551,16 +1813,18 @@ export function useAppLiveState(
           force,
           allowRevisionDowngrade: force,
         });
+        profiler?.mark("adoptState");
+        profiledAdopted = adopted;
         forceAdoptNextStateEventRef.current = false;
-        cancelStaleSendResponseRecoveryPollForSessions(
-          state.sessions.map((session) => session.id),
-        );
         // Confirm recovery only after adoption succeeds. If adoptState throws
         // (bad payload, reducer error), the catch block must keep the client in
         // the reconnecting state with fallback polling armed rather than
         // prematurely marking the connection as healthy.
         confirmReconnectRecoveryFromLiveEvent();
         if (adopted) {
+          cancelStaleSendResponseRecoveryPollForSessions(
+            state.sessions.map((session) => session.id),
+          );
           clearInitialStateResyncRetryTimeout();
           const adoptedAt = Date.now();
           clearReconnectStateResyncTimeoutAfterConfirmedReopen();
@@ -1573,8 +1837,10 @@ export function useAppLiveState(
           );
           syncLiveSessionResumeWatchdogBaselines(state.sessions, adoptedAt);
         }
+        profiler?.mark("postAdoption");
         setBackendConnectionIssueDetail(null);
         clearRecoveredBackendRequestError();
+        profiler?.mark("clearErrors");
       } catch (error) {
         if (!cancelled) {
           setBackendConnectionIssueDetail(
@@ -1595,6 +1861,11 @@ export function useAppLiveState(
         if (!cancelled) {
           setIsLoading(false);
         }
+        profiler?.finish({
+          adopted: profiledAdopted,
+          revision: profiledRevision,
+          sessionCount: profiledSessionCount,
+        });
       }
     }
 
@@ -1654,9 +1925,7 @@ export function useAppLiveState(
           clearReconnectStateResyncTimeoutAfterConfirmedReopen();
           latestStateRevisionRef.current = delta.revision;
           codexStateRef.current = delta.codex;
-          startTransition(() => {
-            setCodexState(delta.codex);
-          });
+          scheduleCodexStateRender();
           setBackendConnectionIssueDetail(null);
           clearRecoveredBackendRequestError();
           return;
@@ -1684,16 +1953,14 @@ export function useAppLiveState(
           const deltaSessionIds = new Set(
             (delta.sessions ?? []).map((session) => session.id),
           );
-          nextSessions.forEach((session) => {
-            if (deltaSessionIds.has(session.id)) {
-              upsertSessionSlice(session);
-            }
+          deltaSessionIds.forEach((sessionId) => {
+            queueSessionSliceForRender(sessionId);
           });
           orchestratorsRef.current = delta.orchestrators;
           startTransition(() => {
             setOrchestrators(delta.orchestrators);
-            setSessions(nextSessions);
           });
+          scheduleSessionRender();
           setBackendConnectionIssueDetail(null);
           clearRecoveredBackendRequestError();
           return;
@@ -1717,11 +1984,9 @@ export function useAppLiveState(
             result.sessions.find((session) => session.id === delta.sessionId) ??
             null;
           if (updatedSession) {
-            upsertSessionSlice(updatedSession);
+            queueSessionSliceForRender(updatedSession.id);
           }
-          startTransition(() => {
-            setSessions(sessionsRef.current);
-          });
+          scheduleSessionRender();
           setBackendConnectionIssueDetail(null);
           clearRecoveredBackendRequestError();
           return;
