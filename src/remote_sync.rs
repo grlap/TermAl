@@ -22,6 +22,7 @@ fn delta_event_revision(event: &DeltaEvent) -> u64 {
     match event {
         DeltaEvent::SessionCreated { revision, .. }
         | DeltaEvent::MessageCreated { revision, .. }
+        | DeltaEvent::MessageUpdated { revision, .. }
         | DeltaEvent::TextDelta { revision, .. }
         | DeltaEvent::TextReplace { revision, .. }
         | DeltaEvent::CommandUpdate { revision, .. }
@@ -304,7 +305,13 @@ fn apply_remote_session_to_record(
     remote_session: &Session,
 ) {
     let local_session_id = record.session.id.clone();
+    let previous_messages = (!remote_session.messages_loaded).then(|| record.session.messages.clone());
+    let previous_messages_loaded = record.session.messages_loaded;
     record.session = localize_remote_session(&local_session_id, local_project_id, remote_session);
+    if let Some(messages) = previous_messages {
+        record.session.messages = messages;
+        record.session.messages_loaded = previous_messages_loaded;
+    }
     record.external_session_id = record.session.external_session_id.clone();
     sync_codex_thread_state(record);
     record.codex_approval_policy = record
@@ -322,7 +329,9 @@ fn apply_remote_session_to_record(
     record.runtime = SessionRuntime::None;
     record.runtime_reset_required = false;
     clear_all_pending_requests(record);
-    record.message_positions = build_message_positions(&record.session.messages);
+    if remote_session.messages_loaded {
+        record.message_positions = build_message_positions(&record.session.messages);
+    }
 }
 
 /// Upserts remote proxy session record.

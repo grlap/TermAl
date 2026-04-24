@@ -4,18 +4,18 @@ export const MESSAGE_STACK_SCROLL_WRITE_EVENT =
 export type MessageStackScrollWriteKind =
   | "incremental"
   | "page_jump"
-  | "seek";
+  | "seek"
+  | "bottom_boundary";
 
 export type MessageStackScrollWriteDetail = {
   scrollKind?: MessageStackScrollWriteKind;
 };
 
-// Shared seam between pane-owned programmatic transcript scroll writes and the
-// virtualizer's reconciliation path. Producers must dispatch this immediately
-// after any direct message-stack `scrollTop` / `scrollTo` write so the
-// virtualizer can update its bookkeeping without waiting for a native scroll
-// event. Provide `detail.scrollKind` for keyboard-owned seek jumps where raw
-// delta size alone is not authoritative.
+// Shared seam between pane-owned transcript scroll intent and the virtualizer's
+// reconciliation path. Producers normally dispatch this immediately after any
+// direct message-stack `scrollTop` / `scrollTo` write. `bottom_boundary` is the
+// exception: it asks the virtualizer to mount the bottom range first, then
+// perform the scroll after the target pages exist.
 export function notifyMessageStackScrollWrite(
   node: HTMLElement,
   detail?: MessageStackScrollWriteDetail,

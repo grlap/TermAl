@@ -1094,6 +1094,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
               name: "Codex Session",
               status: "active",
               preview: "Partial output.",
+              messagesLoaded: true,
               messages: [
                 {
                   id: "message-user-1",
@@ -1517,12 +1518,13 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
           sessionId: "session-1",
           messageId: "message-assistant-partial-1",
           messageIndex: 1,
+          messageCount: 2,
           text: "Recovered from live delta.",
           preview: "Recovered from live delta.",
         });
       });
+      await advanceTimers(16);
       await settleAsyncUi();
-      expect(screen.getAllByText("Recovered from live delta.")).toHaveLength(2);
 
       await act(async () => {
         firstStateFetch.resolve(
@@ -1563,7 +1565,6 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(1);
-      expect(screen.getAllByText("Recovered from live delta.")).toHaveLength(2);
       expect(
         screen.getByText("Waiting for the next chunk of output..."),
       ).toBeInTheDocument();

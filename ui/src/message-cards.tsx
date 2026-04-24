@@ -221,10 +221,15 @@ export const MessageCard = memo(
           message.author === "you"
             ? promptCommandMetaLabel(message.text, message.expandedText)
             : null;
-        const shouldPreferStreamingPlainTextRender =
+        const shouldUseStreamingAssistantFastPath =
           preferStreamingPlainTextRender &&
           message.author === "assistant" &&
           searchQuery.trim().length === 0;
+        const shouldRenderStreamingMarkdown =
+          shouldUseStreamingAssistantFastPath &&
+          hasRenderableStreamingMarkdown(message.text);
+        const shouldPreferStreamingPlainTextRender =
+          shouldUseStreamingAssistantFastPath && !shouldRenderStreamingMarkdown;
 
         if (connectionRetryNotice) {
           return (
@@ -259,7 +264,7 @@ export const MessageCard = memo(
             {message.author === "assistant" ? (
               shouldPreferStreamingPlainTextRender ? (
                 <StreamingAssistantTextShell text={message.text} />
-              ) : preferImmediateHeavyRender ? (
+              ) : shouldRenderStreamingMarkdown || preferImmediateHeavyRender ? (
                 <MarkdownContent
                   appearance={appearance}
                   markdown={message.text}
@@ -443,6 +448,20 @@ function promptCommandMetaLabel(text: string, expandedText?: string | null) {
 
 function StreamingAssistantTextShell({ text }: { text: string }) {
   return <p className="plain-text-copy">{text}</p>;
+}
+
+function hasRenderableStreamingMarkdown(text: string) {
+  return (
+    /(^|\n)\s{0,3}#{1,6}\s+\S/.test(text) ||
+    /(^|\n)\s*[-*+]\s+\S/.test(text) ||
+    /(^|\n)\s*\d+\.\s+\S/.test(text) ||
+    /(^|\n)\s{0,3}>\s+\S/.test(text) ||
+    /(^|\n)\s*```/.test(text) ||
+    /`[^`\n]+`/.test(text) ||
+    /\*\*[^*\n][\s\S]*?\*\*/.test(text) ||
+    /__[^_\n][\s\S]*?__/.test(text) ||
+    /\[[^\]\n]+\]\([^)]+\)/.test(text)
+  );
 }
 
 function ConnectionRetryCard({

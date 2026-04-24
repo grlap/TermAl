@@ -31,6 +31,7 @@
 // being a moving target.
 
 import {
+  startTransition,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -1003,19 +1004,21 @@ export function SessionPaneView({
   }
 
   function setNewResponseIndicator(key: string, visible: boolean) {
-    setNewResponseIndicatorByKey((current) => {
-      const isVisible = Boolean(current[key]);
-      if (isVisible === visible) {
-        return current;
-      }
+    startTransition(() => {
+      setNewResponseIndicatorByKey((current) => {
+        const isVisible = Boolean(current[key]);
+        if (isVisible === visible) {
+          return current;
+        }
 
-      const nextState = { ...current };
-      if (visible) {
-        nextState[key] = true;
-      } else {
-        delete nextState[key];
-      }
-      return nextState;
+        const nextState = { ...current };
+        if (visible) {
+          nextState[key] = true;
+        } else {
+          delete nextState[key];
+        }
+        return nextState;
+      });
     });
   }
 
@@ -1068,19 +1071,25 @@ export function SessionPaneView({
     });
   }
 
-  function scrollToLatestMessage(behavior: ScrollBehavior, force = false) {
+  function scrollToLatestMessage(
+    behavior: ScrollBehavior,
+    force = false,
+    scrollKind?: MessageStackScrollWriteKind,
+  ) {
     const node = messageStackRef.current;
     if (!node) {
       return;
     }
 
     const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-    if (force || Math.abs(node.scrollTop - nextScrollTop) > 1) {
+    if (Math.abs(node.scrollTop - nextScrollTop) > (force ? 0.5 : 1)) {
       node.scrollTo({
         top: nextScrollTop,
         behavior,
       });
-      notifyMessageStackScrollWrite(node);
+      notifyMessageStackScrollWrite(node, {
+        scrollKind,
+      });
     }
     setShouldStickToBottom(true);
     paneScrollPositions[scrollStateKey] = {
@@ -1179,12 +1188,24 @@ export function SessionPaneView({
 
   function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
     if (boundary === "bottom") {
-      // Expected for long virtualized sessions: jump-to-latest keeps correcting
-      // for a few frames while message measurements settle.
-      scheduleSettledScrollToBottom("auto", {
-        maxAttempts: 60,
-        minAttempts: 8,
-      });
+      cancelSettledScrollToBottom();
+      const node = messageStackRef.current;
+      if (node) {
+        if (node.querySelector(".virtualized-message-list")) {
+          const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+          if (Math.abs(node.scrollTop - nextScrollTop) > 0.5) {
+            node.scrollTo({
+              top: nextScrollTop,
+              behavior: "auto",
+            });
+          }
+          notifyMessageStackScrollWrite(node, {
+            scrollKind: "bottom_boundary",
+          });
+        } else {
+          scrollToLatestMessage("auto", true, "seek");
+        }
+      }
       setShouldStickToBottom(true);
       paneScrollPositions[scrollStateKey] = {
         top: Number.MAX_SAFE_INTEGER,
@@ -1503,6 +1524,7 @@ export function SessionPaneView({
       maxAttempts?: number;
       minAttempts?: number;
       onComplete?: () => void;
+      scrollKind?: MessageStackScrollWriteKind;
     } = {},
   ) {
     cancelSettledScrollToBottom();
@@ -1546,7 +1568,11 @@ export function SessionPaneView({
         return;
       }
 
-      scrollToLatestMessage(behavior, attemptCount <= minimumAttempts);
+      scrollToLatestMessage(
+        behavior,
+        attemptCount <= minimumAttempts,
+        options.scrollKind,
+      );
 
       const bottomGap = Math.max(
         node.scrollHeight - node.clientHeight - node.scrollTop,
@@ -1584,7 +1610,7 @@ export function SessionPaneView({
     };
 
     settledScrollToBottomCancelRef.current = cancel;
-    tick();
+    frameId = window.requestAnimationFrame(tick);
     return cancel;
   }
 

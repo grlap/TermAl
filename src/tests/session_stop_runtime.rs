@@ -868,10 +868,9 @@ fn fail_turn_if_runtime_matches_publishes_error_state_when_persist_fails() {
     assert_eq!(published.revision, snapshot.revision);
     assert_eq!(published_session.status, SessionStatus::Error);
     assert_eq!(published_session.preview, "persist fallback failure");
-    assert!(matches!(
-        published_session.messages.last(),
-        Some(Message::Text { text, .. }) if text == "Turn failed: persist fallback failure"
-    ));
+    assert!(!published_session.messages_loaded);
+    assert!(published_session.messages.is_empty());
+    assert_eq!(published_session.message_count, session.message_count);
 
     let _ = fs::remove_dir_all(failing_persistence_path);
 }

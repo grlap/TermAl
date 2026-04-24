@@ -29,7 +29,37 @@
 // spawns a fresh one. Codex cannot be reset this way since it is
 // shared across all Codex sessions (see `shared_codex_mgr.rs`).
 
+struct StartedTurn {
+    dispatch: TurnDispatch,
+    message_delta: StartedTurnMessageDelta,
+}
+
+struct StartedTurnMessageDelta {
+    session_id: String,
+    message_id: String,
+    message_index: usize,
+    message_count: u32,
+    message: Message,
+    preview: String,
+    status: SessionStatus,
+    session_mutation_stamp: u64,
+}
+
 impl AppState {
+    fn publish_started_turn_message_delta(&self, revision: u64, delta: StartedTurnMessageDelta) {
+        self.publish_delta(&DeltaEvent::MessageCreated {
+            revision,
+            session_id: delta.session_id,
+            message_id: delta.message_id,
+            message_index: delta.message_index,
+            message_count: delta.message_count,
+            message: delta.message,
+            preview: delta.preview,
+            status: delta.status,
+            session_mutation_stamp: Some(delta.session_mutation_stamp),
+        });
+    }
+
     /// Kicks off a turn against the given `SessionRecord`, spawning or
     /// reusing the agent runtime as needed and returning the
     /// [`TurnDispatch`] that the caller wires into the runtime.
@@ -62,7 +92,7 @@ impl AppState {
         prompt: String,
         attachments: Vec<PromptImageAttachment>,
         expanded_prompt: Option<String>,
-    ) -> std::result::Result<TurnDispatch, ApiError> {
+    ) -> std::result::Result<StartedTurn, ApiError> {
         if record.is_remote_proxy() {
             return Err(ApiError::internal(
                 "remote proxy sessions must dispatch through the remote backend",
@@ -288,21 +318,32 @@ impl AppState {
         record.orchestrator_auto_dispatch_blocked = false;
         record.active_turn_file_changes.clear();
         record.active_turn_file_change_grace_deadline = None;
-        push_message_on_record(
-            record,
-            Message::Text {
-                attachments: message_attachments.clone(),
-                id: message_id,
-                timestamp: stamp_now(),
-                author: Author::You,
-                text: prompt.clone(),
-                expanded_text: expanded_prompt,
-            },
-        );
+        let message = Message::Text {
+            attachments: message_attachments.clone(),
+            id: message_id.clone(),
+            timestamp: stamp_now(),
+            author: Author::You,
+            text: prompt.clone(),
+            expanded_text: expanded_prompt,
+        };
+        let message_index = push_message_on_record(record, message.clone());
         record.session.status = SessionStatus::Active;
         record.session.preview = prompt_preview_text(&prompt, &message_attachments);
+        let message_delta = StartedTurnMessageDelta {
+            session_id: record.session.id.clone(),
+            message_id,
+            message_index,
+            message_count: session_message_count(record),
+            message,
+            preview: record.session.preview.clone(),
+            status: record.session.status,
+            session_mutation_stamp: record.mutation_stamp,
+        };
 
-        Ok(dispatch)
+        Ok(StartedTurn {
+            dispatch,
+            message_delta,
+        })
     }
 
     /// Re-kicks queued prompts whose owning session landed back at
@@ -396,7 +437,7 @@ impl AppState {
             return Ok(None);
         };
 
-        let dispatch = self
+        let started = self
             .start_turn_on_record(
                 inner
             .session_mut_by_index(index)
@@ -415,8 +456,10 @@ impl AppState {
         sync_pending_prompts(inner
             .session_mut_by_index(index)
             .expect("session index should be valid"));
-        self.commit_locked(&mut inner)?;
-        Ok(Some(dispatch))
+        let revision = self.commit_persisted_delta_locked(&mut inner)?;
+        drop(inner);
+        self.publish_started_turn_message_delta(revision, started.message_delta);
+        Ok(Some(started.dispatch))
     }
 
     /// The inner dispatch that actually hands a ready turn to the agent
@@ -531,7 +574,7 @@ impl AppState {
 
         if prioritize_manual_dispatch_over_blocked_queue {
             let message_id = inner.next_message_id();
-            let dispatch = self.start_turn_on_record(
+            let started = self.start_turn_on_record(
                 inner
             .session_mut_by_index(index)
             .expect("session index should be valid"),
@@ -541,10 +584,12 @@ impl AppState {
                 expanded_prompt,
             )?;
 
-            self.commit_locked(&mut inner).map_err(|err| {
+            let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
-            return Ok(DispatchTurnResult::Dispatched(dispatch));
+            drop(inner);
+            self.publish_started_turn_message_delta(revision, started.message_delta);
+            return Ok(DispatchTurnResult::Dispatched(started.dispatch));
         }
 
         if session_is_busy || has_queued_prompts {
@@ -583,7 +628,7 @@ impl AppState {
         }
 
         let message_id = inner.next_message_id();
-        let dispatch = self.start_turn_on_record(
+        let started = self.start_turn_on_record(
             inner
             .session_mut_by_index(index)
             .expect("session index should be valid"),
@@ -593,10 +638,12 @@ impl AppState {
             expanded_prompt,
         )?;
 
-        self.commit_locked(&mut inner).map_err(|err| {
+        let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
+        drop(inner);
+        self.publish_started_turn_message_delta(revision, started.message_delta);
 
-        Ok(DispatchTurnResult::Dispatched(dispatch))
+        Ok(DispatchTurnResult::Dispatched(started.dispatch))
     }
 }

@@ -11,9 +11,9 @@ session view through `GET /api/sessions/{id}` and live session deltas.
 This is the structural fix for prompt stutter caused by main-thread JSON parsing
 of large full-state payloads while Codex or Claude sessions are active.
 
-## Current Problem
+## Original Problem
 
-The current contract treats `StateResponse` as a full app snapshot:
+The pre-refactor contract treated `StateResponse` as a full app snapshot:
 
 - `docs/architecture.md` documents `/api/state` and SSE `state` as full state.
 - `src/wire.rs::StateResponse.sessions` is `Vec<Session>`.
@@ -61,6 +61,28 @@ not depend on remote `/api/state` for transcript repair after this refactor; it
 must hydrate the targeted remote session and then localize the returned session
 id/project/session references before writing the local proxy record.
 
+## Implementation Status - 2026-04-24
+
+The current tree has landed the first metadata-first transport slice:
+
+- `/api/state` and SSE `state` snapshots now emit adapter-compatible session
+  summaries (`messages: []`, `messagesLoaded: false`, `messageCount` from the
+  real transcript) instead of full transcripts.
+- `GET /api/sessions/{id}` remains the full transcript hydration route and
+  returns `messagesLoaded: true`.
+- Frontend snapshot reconciliation preserves already-hydrated messages when a
+  summary snapshot arrives.
+- Deltas for `messagesLoaded: false` sessions update metadata and do not force
+  `/api/state` resync loops.
+- Remote snapshot sync preserves an existing local proxy transcript when the
+  incoming remote session is summary-only.
+
+Still open from this plan: replace the temporary `Session`-envelope summary
+with a dedicated `StateSessionSummary` type, convert
+`OrchestratorsUpdated.sessions` away from transcript-bearing sessions, finish
+the hydration retry/error state machine, add targeted remote transcript
+hydration, and complete the reader inventory / transcript eviction work.
+
 ## Wire Model
 
 Introduce an explicit summary type instead of relying on "empty messages" as the
@@ -92,8 +114,14 @@ struct StateSessionSummary {
     preview: String,
     pending_prompts: Vec<PendingPrompt>,
     session_mutation_stamp: Option<u64>,
-    messages_loaded: bool, // always false in StateResponse summaries
-    message_count: usize,
+    // `messages_loaded` is present on the wire only during the Phase 2 → Phase 3
+    // transitional adapter window. See Contract Precisions → Field semantics:
+    // the field is always `false` in summaries and is removed from the wire
+    // type at Phase 5.
+    messages_loaded: bool,
+    // `u32` on the wire, not `usize`. See Contract Precisions → Field semantics
+    // for the rationale (`usize` has no portable wire width).
+    message_count: u32,
 }
 
 struct StateResponse {
@@ -161,6 +189,14 @@ decided ad hoc during implementation.
   filtering. Not monotone — compaction can reduce it. Used by the UI as a
   loading-skeleton height estimate and as the count half of the gap-detection
   tuple. `u32` is picked deliberately; `usize` has no portable wire width.
+- **Wire compatibility decision:** Phase 1 treats `messageCount` as a
+  coordinated current-tree wire bump. Current emitters serialize it on full
+  `Session` snapshots and every session-scoped `DeltaEvent`; current delta
+  deserializers require it. Mixed-version remote bridges across pre/post
+  `messageCount` binaries are not supported during the local-only development
+  phase. `Session.messageCount` still has a Rust serde default so older
+  persisted local JSON can load before the wire projection recomputes the
+  outbound value from the transcript.
 - **`messagesLoaded`**: always `false` in `StateSessionSummary` and is wire
   redundant — the type itself is the discriminant. Keep it on the wire only
   during the transitional adapter window (Phase 2 → Phase 3). It MUST be removed
@@ -301,6 +337,11 @@ Before any production code changes, capture the "before" picture so subsequent
 phases can verify they improved it and didn't regress invariants that weren't
 previously tested.
 
+Phase 0 artifacts:
+
+- `docs/metadata-first-baseline.json`
+- `docs/metadata-first-phase0-inventory.md`
+
 Work:
 
 - **Perf baseline.** Run `scripts/perf/prompt-responsiveness-smoke.js` and
@@ -388,17 +429,18 @@ Work:
   companion delta alongside the existing `commit_locked`.
 - Introduce new `DeltaEvent` variants when an existing variant does not fit
   an audited mutation. Candidates likely required:
-  - `DeltaEvent::MessageReplaced { session_id, message_id, message, revision, session_mutation_stamp }`
-    for in-place edits (approval decision, interaction state transitions).
+  - `DeltaEvent::MessageUpdated { session_id, message_id, message_index, message_count, message, preview, status, revision, session_mutation_stamp }`
+    for in-place edits (approval decision, interaction state transitions). The
+    first Phase 1 implementation slice added this variant and moved
+    approval/user-input/MCP/app-request submissions off full `state` SSE
+    snapshots.
   - `DeltaEvent::MessagesCancelled { session_id, message_ids, revision, session_mutation_stamp }`
     for `cancel_pending_interaction_messages`.
   - Or a narrower `TextReplace` generalization — pick one and document it.
-- Extend each session-scoped `DeltaEvent` variant that today carries only
-  the content change to also carry (at least) `session_mutation_stamp` plus
-  the fields the summary needs to keep fresh without hydration
-  (`message_count`, and `preview` when a new message becomes the latest).
-  Rationale: frontend step 3 of "Delta arrival for un-hydrated sessions"
-  (above) depends on this.
+- Current tree: session-scoped delta variants now carry
+  `session_mutation_stamp` and `message_count`; variants that update summary
+  text/status also carry `preview` / `status`. Frontend step 3 of "Delta
+  arrival for un-hydrated sessions" (above) depends on preserving this.
 - Convert transcript-bearing delta payloads that are not truly message
   deltas to summary payloads or id-only invalidation. In particular,
   `DeltaEvent::OrchestratorsUpdated { sessions: Vec<Session> }` and

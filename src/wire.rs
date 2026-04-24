@@ -323,10 +323,18 @@ struct Session {
     status: SessionStatus,
     preview: String,
     messages: Vec<Message>,
+    #[serde(default = "session_messages_loaded_default", rename = "messagesLoaded")]
+    messages_loaded: bool,
+    #[serde(default, rename = "messageCount")]
+    message_count: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pending_prompts: Vec<PendingPrompt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     session_mutation_stamp: Option<u64>,
+}
+
+fn session_messages_loaded_default() -> bool {
+    true
 }
 
 /// Tracks Codex thread state.
@@ -1212,6 +1220,28 @@ enum DeltaEvent {
         message_id: String,
         #[serde(rename = "messageIndex")]
         message_index: usize,
+        #[serde(rename = "messageCount")]
+        message_count: u32,
+        message: Message,
+        preview: String,
+        status: SessionStatus,
+        #[serde(
+            rename = "sessionMutationStamp",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_mutation_stamp: Option<u64>,
+    },
+    MessageUpdated {
+        revision: u64,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "messageId")]
+        message_id: String,
+        #[serde(rename = "messageIndex")]
+        message_index: usize,
+        #[serde(rename = "messageCount")]
+        message_count: u32,
         message: Message,
         preview: String,
         status: SessionStatus,
@@ -1230,6 +1260,8 @@ enum DeltaEvent {
         message_id: String,
         #[serde(rename = "messageIndex")]
         message_index: usize,
+        #[serde(rename = "messageCount")]
+        message_count: u32,
         delta: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         preview: Option<String>,
@@ -1248,6 +1280,8 @@ enum DeltaEvent {
         message_id: String,
         #[serde(rename = "messageIndex")]
         message_index: usize,
+        #[serde(rename = "messageCount")]
+        message_count: u32,
         text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         preview: Option<String>,
@@ -1266,6 +1300,8 @@ enum DeltaEvent {
         message_id: String,
         #[serde(rename = "messageIndex")]
         message_index: usize,
+        #[serde(rename = "messageCount")]
+        message_count: u32,
         command: String,
         #[serde(rename = "commandLanguage", skip_serializing_if = "Option::is_none")]
         command_language: Option<String>,
@@ -1289,6 +1325,8 @@ enum DeltaEvent {
         message_id: String,
         #[serde(rename = "messageIndex")]
         message_index: usize,
+        #[serde(rename = "messageCount")]
+        message_count: u32,
         agents: Vec<ParallelAgentProgress>,
         preview: String,
         #[serde(

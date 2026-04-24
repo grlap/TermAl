@@ -106,7 +106,7 @@ All client-visible state changes go through `commit_locked()`:
 commit_locked(&mut inner)
   → inner.revision += 1
   → persist_tx.send(PersistRequest::Delta) // wake the background persist thread
-  → publish_state_locked(inner)            // broadcast full StateResponse on SSE
+  → publish_state_locked(inner)            // broadcast metadata-first StateResponse on SSE
   → Ok(revision)
 ```
 
@@ -152,7 +152,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/git/sync` | Pull, rebase, or otherwise sync the current repo |
 | POST | `/api/terminal/run` | Run a shell command in a project- or session-scoped working directory. Request body enforces `command` ≤ 20,000 chars and `workdir` ≤ 4,096 chars (no interior NUL bytes), and captured output is capped. There is no process timeout. Returns 429 (`{ "error": ... }`) when the concurrency cap for that destination is exhausted; local and remote commands have independent budgets of 4 in-flight requests each. When the destination is remote, a 429 emitted by the remote host is re-emitted locally with the remote's display name prefixed onto the error message (e.g. `remote alice: too many local terminal commands are already running; limit is 4`), so the caller can distinguish a local cap rejection from a remote-side propagation. |
 | POST | `/api/terminal/run/stream` | Run the same terminal command as `/api/terminal/run`, but return an SSE stream. `output` events carry `{ "stream": "stdout" \| "stderr", "text": string }`, `complete` carries the normal terminal response, and `error` carries `{ "error": string, "status": number }` for failures after the stream has started. Validation, workdir/scope resolution, and local concurrency-cap failures are returned as normal HTTP errors before the stream starts; local cap failures use HTTP 429 with `{ "error": ... }` and the same independent local/remote 4-in-flight budgets as the JSON route. Remote 429s discovered by the proxy are surfaced with `status: 429` and the remote display-name prefix in the error message; after the local SSE response has started they travel as SSE `error` frames rather than changing the local HTTP status. There is no process timeout. Remote-scoped commands proxy this streamed route when the remote supports it and fall back to the JSON route only for 404/405 older-remotes responses; successful non-SSE stream responses are treated as remote protocol errors to avoid double-running commands. |
-| GET | `/api/state` | Full state snapshot |
+| GET | `/api/state` | Metadata-first state snapshot; sessions are summary shells with `messagesLoaded: false` and no transcript payload |
 | GET | `/api/workspaces` | List saved workspace layout summaries |
 | GET | `/api/workspaces/{id}` | Read a persisted workspace layout |
 | PUT | `/api/workspaces/{id}` | Save a persisted workspace layout |
@@ -227,7 +227,7 @@ Design constraints:
 
 `GET /api/events` returns a Server-Sent Events stream with three event types:
 
-- **`state`** — full `StateResponse` JSON. Sent on initial connect, after `commit_locked()`, and as a recovery when the client falls behind.
+- **`state`** — metadata-first `StateResponse` JSON. Sent on initial connect, after `commit_locked()`, and as a recovery when the client falls behind. Session entries carry shell metadata, `messageCount`, and `messagesLoaded: false`; full transcripts are loaded through `GET /api/sessions/{id}`.
 - **`delta`** ? incremental `DeltaEvent` JSON. Sent during streaming (text deltas, text replacements, command output updates). Cheaper than full state.
 - **`workspaceFilesChanged`** - coalesced local workspace file watcher hints. Sent outside the main state revision stream with its own monotonically increasing file-event revision so source, diff, file tree, and git-preview panels can refresh only when touched paths match their scope.
 
@@ -235,12 +235,24 @@ All three carry a `revision: u64` field. `state` and `delta` share the main stat
 
 `state` events and every snapshot-bearing response (`StateResponse`, `HealthResponse`, `CreateSessionResponse`, `SessionResponse`) additionally carry a `serverInstanceId: string` — a per-process UUID generated once via `Uuid::new_v4()` at `AppState::new_with_paths`. The id is not a secret and not a protocol boundary; it exists so the frontend can detect a server restart deterministically. After a restart, the revision counter rewinds to whatever SQLite held (usually lower than the browser's last-seen revision), which would otherwise cause every monotonic check in `shouldAdoptStateRevision` to reject the fresh state. `isServerInstanceMismatch` in `ui/src/state-revision.ts` returns `true` only when both the last-seen and incoming ids are non-empty AND differ; `shouldAdoptSnapshotRevision` routes that branch unconditionally, overriding both the monotonic check and any `allowRevisionDowngrade` gate. The empty-string sentinel (`#[serde(default)]` on Rust, `""` fallback on older servers or fallback SSE payloads) means "unknown instance" and cannot trigger a restart branch — this is what lets `empty_state_events_response()` send a fallback payload without masquerading as a restart. New endpoints that return state-shaped responses must emit a non-empty `serverInstanceId` sourced from `AppState::server_instance_id`; otherwise a session hydration in flight across a restart gets silently rejected by the revision guard until the safety-net pollers re-fetch.
 
+Every `Session` or session summary serialized on the wire carries
+`messageCount: u32`. `StateResponse.sessions` are metadata-first summary
+shells: they retain normal session metadata, set `messagesLoaded: false`, and
+keep `messages: []` only as a temporary adapter-compatible shape while the
+frontend migration is in progress. Full transcript-bearing sessions still come
+from `SessionResponse`, `CreateSessionResponse`, `SessionCreated`, and
+`OrchestratorsUpdated.sessions`. The backend computes `messageCount` from the
+session record's transcript at wire-projection time; the frontend keeps it on
+the session summary so reconnect/state adoption can preserve transcript height
+and gap-detection metadata without waiting for another session-scoped delta.
+
 ```
-DeltaEvent::TextDelta            { revision, session_id, message_id, delta, preview }
-DeltaEvent::TextReplace          { revision, session_id, message_id, message_index, text, preview }
-DeltaEvent::CommandUpdate        { revision, session_id, message_id, command, output, status, preview, ... }
-DeltaEvent::ParallelAgentsUpdate { revision, session_id, message_id, message_index, agents, preview }
-DeltaEvent::MessageCreated       { revision, session_id, message } // replaces a streaming placeholder with the authoritative finalized message
+DeltaEvent::TextDelta            { revision, session_id, message_id, message_index, message_count, delta, preview, session_mutation_stamp? }
+DeltaEvent::TextReplace          { revision, session_id, message_id, message_index, message_count, text, preview, session_mutation_stamp? }
+DeltaEvent::CommandUpdate        { revision, session_id, message_id, message_index, message_count, command, output, status, preview, session_mutation_stamp?, ... }
+DeltaEvent::ParallelAgentsUpdate { revision, session_id, message_id, message_index, message_count, agents, preview, session_mutation_stamp? }
+DeltaEvent::MessageCreated       { revision, session_id, message_id, message_index, message_count, message, preview, status, session_mutation_stamp? } // inserts a new message at message_index; if the id already exists, remove and reinsert it at that literal index
+DeltaEvent::MessageUpdated       { revision, session_id, message_id, message_index, message_count, message, preview, status, session_mutation_stamp? } // replaces an existing message in place; message_index is a fast-path hint and must not reorder the transcript
 DeltaEvent::SessionCreated       { revision, session_id, session } // local + remote-proxied session creation; forwarded by remote backends after id localization
 DeltaEvent::OrchestratorsUpdated { revision, orchestrators[] } // IDs inside each instance are scoped to the originating server; translate via sync_remote_state_inner before forwarding remotely.
 ```
@@ -712,7 +724,7 @@ No external state library. State lives in `App.tsx` via `useState` and `useRef`:
 
 On mount, the frontend opens an `EventSource` to `/api/events`:
 
-1. **`state` events** — full state snapshot. Accepted only if `revision > latestRevision` (via `shouldAdoptStateRevision`), OR if the carried `serverInstanceId` differs from the last-seen id (via `isServerInstanceMismatch`) — the restart branch accepts a revision downgrade because the monotonic check is meaningless across a counter rewind.
+1. **`state` events** — metadata-first state snapshot. Accepted only if `revision > latestRevision` (via `shouldAdoptStateRevision`), OR if the carried `serverInstanceId` differs from the last-seen id (via `isServerInstanceMismatch`) — the restart branch accepts a revision downgrade because the monotonic check is meaningless across a counter rewind.
 2. **`delta` events** — incremental updates. Accepted only if `revision === latestRevision + 1` (via `decideDeltaRevisionAction`). Session-scoped deltas use the session reducer; `orchestratorsUpdated` is handled separately because it carries orchestrator state without a `sessionId`, and remote forwarding must translate the embedded server-scoped IDs before re-publishing it locally. If a gap is detected, triggers a full state resync.
 
 Applied deltas update the specific session/message in-place via `applyDeltaToSessions()`, avoiding full reconciliation.

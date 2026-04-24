@@ -31,21 +31,59 @@
 impl AppState {
     fn wire_session_from_record(record: &SessionRecord) -> Session {
         let mut session = record.session.clone();
+        session.messages_loaded = true;
+        session.message_count = session_message_count(record);
         session.session_mutation_stamp = Some(record.mutation_stamp);
         session
     }
 
-    /// Builds a full state snapshot with guaranteed-fresh agent readiness.
+    fn wire_session_summary_from_record(record: &SessionRecord) -> Session {
+        let mut session = Self::wire_session_from_record(record);
+        session.messages.clear();
+        session.messages_loaded = false;
+        session
+    }
+
+    /// Builds a metadata-first state snapshot with guaranteed-fresh agent readiness.
     ///
     /// The cache is refreshed (filesystem I/O) *before* locking `inner`, then
     /// the snapshot reads `cached_agent_readiness()` *under* the `inner` lock —
     /// the same path used by `commit_locked` / `publish_state_locked`.  This
     /// ensures that a `snapshot()` call at revision N uses the same cached
     /// readiness value that was published in the SSE event for revision N.
+    #[cfg(not(test))]
     fn snapshot(&self) -> StateResponse {
+        self.summary_snapshot()
+    }
+
+    /// Test-only full snapshot inspection helper.
+    ///
+    /// Production `/api/state` and SSE state events are metadata-first. The
+    /// Rust unit suite historically uses `state.snapshot()` to assert internal
+    /// transcript mutations directly, so test builds keep that inspection shape
+    /// while route/SSE tests call `summary_snapshot()` through the real handlers.
+    #[cfg(test)]
+    fn snapshot(&self) -> StateResponse {
+        self.full_snapshot()
+    }
+
+    fn summary_snapshot(&self) -> StateResponse {
         let _ = self.agent_readiness_snapshot();
         let inner = self.inner.lock().expect("state mutex poisoned");
         self.snapshot_from_inner(&inner)
+    }
+
+    fn summary_snapshot_with_full_session(&self, session_id: &str) -> StateResponse {
+        let agent_readiness = self.agent_readiness_snapshot();
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        self.snapshot_from_inner_with_full_session(&inner, agent_readiness, session_id)
+    }
+
+    #[cfg(test)]
+    fn full_snapshot(&self) -> StateResponse {
+        let _ = self.agent_readiness_snapshot();
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        self.full_snapshot_from_inner(&inner)
     }
 
     fn agent_readiness_snapshot(&self) -> Vec<AgentReadiness> {
@@ -194,6 +232,65 @@ impl AppState {
     }
 
     fn snapshot_from_inner_with_agent_readiness(
+        &self,
+        inner: &StateInner,
+        agent_readiness: Vec<AgentReadiness>,
+    ) -> StateResponse {
+        StateResponse {
+            revision: inner.revision,
+            server_instance_id: self.server_instance_id.clone(),
+            codex: inner.codex.clone(),
+            agent_readiness,
+            preferences: inner.preferences.clone(),
+            projects: inner.projects.clone(),
+            orchestrators: inner.orchestrator_instances.clone(),
+            workspaces: collect_workspace_layout_summaries(inner.workspace_layouts.values()),
+            sessions: inner
+                .sessions
+                .iter()
+                .filter(|record| !record.hidden)
+                .map(Self::wire_session_summary_from_record)
+                .collect(),
+        }
+    }
+
+    fn snapshot_from_inner_with_full_session(
+        &self,
+        inner: &StateInner,
+        agent_readiness: Vec<AgentReadiness>,
+        full_session_id: &str,
+    ) -> StateResponse {
+        StateResponse {
+            revision: inner.revision,
+            server_instance_id: self.server_instance_id.clone(),
+            codex: inner.codex.clone(),
+            agent_readiness,
+            preferences: inner.preferences.clone(),
+            projects: inner.projects.clone(),
+            orchestrators: inner.orchestrator_instances.clone(),
+            workspaces: collect_workspace_layout_summaries(inner.workspace_layouts.values()),
+            sessions: inner
+                .sessions
+                .iter()
+                .filter(|record| !record.hidden)
+                .map(|record| {
+                    if record.session.id == full_session_id {
+                        Self::wire_session_from_record(record)
+                    } else {
+                        Self::wire_session_summary_from_record(record)
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    #[cfg(test)]
+    fn full_snapshot_from_inner(&self, inner: &StateInner) -> StateResponse {
+        self.full_snapshot_from_inner_with_agent_readiness(inner, self.cached_agent_readiness())
+    }
+
+    #[cfg(test)]
+    fn full_snapshot_from_inner_with_agent_readiness(
         &self,
         inner: &StateInner,
         agent_readiness: Vec<AgentReadiness>,

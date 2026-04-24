@@ -231,11 +231,19 @@ async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
     assert!(matches!(planner_record.runtime, SessionRuntime::None));
     assert!(planner_record.queued_prompts.is_empty());
     assert!(planner_record.session.pending_prompts.is_empty());
+    assert!(
+        planner_record
+            .session
+            .messages
+            .iter()
+            .any(|message| matches!(
+                message,
+                Message::Text { text, .. } if text == "Turn stopped by user."
+            ))
+    );
     drop(inner);
-    assert!(planner_session.messages.iter().any(|message| matches!(
-        message,
-        Message::Text { text, .. } if text == "Turn stopped by user."
-    )));
+    assert!(!planner_session.messages_loaded);
+    assert!(planner_session.messages.is_empty());
 
     let _ = fs::remove_dir_all(project_root);
     let _ = fs::remove_file(state.persistence_path.as_path());

@@ -216,7 +216,7 @@ fn set_approval_decision_on_record(
     record: &mut SessionRecord,
     message_id: &str,
     decision: ApprovalDecision,
-) -> Result<()> {
+) -> Result<usize> {
     let Some(message_index) = message_index_on_record(record, message_id) else {
         return Err(anyhow!("approval message `{message_id}` not found"));
     };
@@ -230,7 +230,7 @@ fn set_approval_decision_on_record(
             ..
         } if id == message_id => {
             *current = decision;
-            Ok(())
+            Ok(message_index)
         }
         _ => Err(anyhow!("approval message `{message_id}` not found")),
     }
@@ -242,7 +242,7 @@ fn set_user_input_request_state_on_record(
     message_id: &str,
     state: InteractionRequestState,
     submitted_answers: Option<BTreeMap<String, Vec<String>>>,
-) -> Result<()> {
+) -> Result<usize> {
     let Some(message_index) = message_index_on_record(record, message_id) else {
         return Err(anyhow!("user input request `{message_id}` not found"));
     };
@@ -258,7 +258,7 @@ fn set_user_input_request_state_on_record(
         } if id == message_id => {
             *current_state = state;
             *current_answers = submitted_answers;
-            Ok(())
+            Ok(message_index)
         }
         _ => Err(anyhow!("user input request `{message_id}` not found")),
     }
@@ -271,7 +271,7 @@ fn set_mcp_elicitation_request_state_on_record(
     state: InteractionRequestState,
     submitted_action: Option<McpElicitationAction>,
     submitted_content: Option<Value>,
-) -> Result<()> {
+) -> Result<usize> {
     let Some(message_index) = message_index_on_record(record, message_id) else {
         return Err(anyhow!("MCP elicitation request `{message_id}` not found"));
     };
@@ -289,7 +289,7 @@ fn set_mcp_elicitation_request_state_on_record(
             *current_state = state;
             *current_action = submitted_action;
             *current_content = submitted_content;
-            Ok(())
+            Ok(message_index)
         }
         _ => Err(anyhow!("MCP elicitation request `{message_id}` not found")),
     }
@@ -301,7 +301,7 @@ fn set_codex_app_request_state_on_record(
     message_id: &str,
     state: InteractionRequestState,
     submitted_result: Option<Value>,
-) -> Result<()> {
+) -> Result<usize> {
     let Some(message_index) = message_index_on_record(record, message_id) else {
         return Err(anyhow!("Codex app request `{message_id}` not found"));
     };
@@ -317,7 +317,7 @@ fn set_codex_app_request_state_on_record(
         } if id == message_id => {
             *current_state = state;
             *current_result = submitted_result;
-            Ok(())
+            Ok(message_index)
         }
         _ => Err(anyhow!("Codex app request `{message_id}` not found")),
     }

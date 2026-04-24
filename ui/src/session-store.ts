@@ -18,7 +18,7 @@
 //   - Full session rendering or transcript data. This store is intentionally
 //     narrow and exists to decouple the prompt path first.
 
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import type {
   AgentType,
   ApprovalPolicy,
@@ -135,6 +135,90 @@ function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
+  };
+}
+
+function getSessionSummariesByIdSnapshot() {
+  return currentState.sessionSummariesById;
+}
+
+function makeSessionSummarySnapshotGetter(sessionId: string | null) {
+  return () =>
+    sessionId ? currentState.sessionSummariesById[sessionId] ?? null : null;
+}
+
+function makeSessionRecordSnapshotGetter(sessionId: string | null) {
+  return () =>
+    sessionId ? currentState.sessionRecordsById[sessionId] ?? null : null;
+}
+
+function makeComposerSessionSnapshotGetter(sessionId: string | null) {
+  return () =>
+    sessionId ? currentState.composerSessionsById[sessionId] ?? null : null;
+}
+
+function uniqueSessionSummaryIds(sessionIds: readonly string[]) {
+  const seen = new Set<string>();
+  const uniqueIds: string[] = [];
+  sessionIds.forEach((sessionId) => {
+    if (!sessionId || seen.has(sessionId)) {
+      return;
+    }
+    seen.add(sessionId);
+    uniqueIds.push(sessionId);
+  });
+  return uniqueIds;
+}
+
+function selectedSessionSummariesAreSame(
+  previous: Readonly<Record<string, SessionSummarySnapshot>>,
+  sessionIds: readonly string[],
+) {
+  let nextCount = 0;
+  for (const sessionId of sessionIds) {
+    const nextSummary = currentState.sessionSummariesById[sessionId];
+    if (!nextSummary) {
+      if (previous[sessionId] !== undefined) {
+        return false;
+      }
+      continue;
+    }
+    nextCount += 1;
+    if (previous[sessionId] !== nextSummary) {
+      return false;
+    }
+  }
+  return Object.keys(previous).length === nextCount;
+}
+
+function buildSelectedSessionSummaries(sessionIds: readonly string[]) {
+  let nextSummaries: Record<string, SessionSummarySnapshot> | null = null;
+  sessionIds.forEach((sessionId) => {
+    const summary = currentState.sessionSummariesById[sessionId];
+    if (!summary) {
+      return;
+    }
+    nextSummaries ??= {};
+    nextSummaries[sessionId] = summary;
+  });
+  return nextSummaries ?? EMPTY_SESSION_SUMMARIES_BY_ID;
+}
+
+function makeSessionSummarySelectionGetter(sessionIds: readonly string[]) {
+  const selectedSessionIds = uniqueSessionSummaryIds(sessionIds);
+  let previousSnapshot: Readonly<Record<string, SessionSummarySnapshot>> =
+    EMPTY_SESSION_SUMMARIES_BY_ID;
+
+  return () => {
+    if (selectedSessionIds.length === 0) {
+      previousSnapshot = EMPTY_SESSION_SUMMARIES_BY_ID;
+      return previousSnapshot;
+    }
+    if (selectedSessionSummariesAreSame(previousSnapshot, selectedSessionIds)) {
+      return previousSnapshot;
+    }
+    previousSnapshot = buildSelectedSessionSummaries(selectedSessionIds);
+    return previousSnapshot;
   };
 }
 
@@ -704,32 +788,57 @@ export function syncComposerDraftForSession({
 export function useSessionSummariesById() {
   return useSyncExternalStore(
     subscribe,
-    () => currentState.sessionSummariesById,
-    () => currentState.sessionSummariesById,
+    getSessionSummariesByIdSnapshot,
+    getSessionSummariesByIdSnapshot,
   );
 }
 
+export function useSessionSummarySnapshots(sessionIds: readonly string[]) {
+  const sessionIdsKey = sessionIds.join("\u0000");
+  const getSnapshot = useMemo(
+    () => makeSessionSummarySelectionGetter(sessionIds),
+    [sessionIdsKey],
+  );
+
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
 export function useSessionSummarySnapshot(sessionId: string | null) {
+  const getSnapshot = useMemo(
+    () => makeSessionSummarySnapshotGetter(sessionId),
+    [sessionId],
+  );
+
   return useSyncExternalStore(
     subscribe,
-    () => (sessionId ? currentState.sessionSummariesById[sessionId] ?? null : null),
-    () => (sessionId ? currentState.sessionSummariesById[sessionId] ?? null : null),
+    getSnapshot,
+    getSnapshot,
   );
 }
 
 export function useSessionRecordSnapshot(sessionId: string | null) {
+  const getSnapshot = useMemo(
+    () => makeSessionRecordSnapshotGetter(sessionId),
+    [sessionId],
+  );
+
   return useSyncExternalStore(
     subscribe,
-    () => (sessionId ? currentState.sessionRecordsById[sessionId] ?? null : null),
-    () => (sessionId ? currentState.sessionRecordsById[sessionId] ?? null : null),
+    getSnapshot,
+    getSnapshot,
   );
 }
 
 export function useComposerSessionSnapshot(sessionId: string | null) {
+  const getSnapshot = useMemo(
+    () => makeComposerSessionSnapshotGetter(sessionId),
+    [sessionId],
+  );
+
   return useSyncExternalStore(
     subscribe,
-    () => (sessionId ? currentState.composerSessionsById[sessionId] ?? null : null),
-    () => (sessionId ? currentState.composerSessionsById[sessionId] ?? null : null),
+    getSnapshot,
+    getSnapshot,
   );
 }
 

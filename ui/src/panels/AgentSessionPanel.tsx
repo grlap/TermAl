@@ -39,6 +39,7 @@ import {
   renderHighlightedText,
   type SearchHighlightTone,
 } from "../search-highlight";
+import { findLastUserPrompt } from "../app-utils";
 import {
   useComposerSessionSnapshot,
   useSessionRecordSnapshot,
@@ -395,6 +396,12 @@ const SessionBody = memo(function SessionBody({
   // The latest version is always called through the ref, so closures stay fresh
   // even though the wrapper identity never changes.
   const activeSession = useSessionRecordSnapshot(activeSessionId);
+  const resolvedWaitingIndicatorPrompt =
+    showWaitingIndicator &&
+    activeSession &&
+    (activeSession.status === "active" || activeSession.status === "approval")
+      ? findLastUserPrompt(activeSession)
+      : waitingIndicatorPrompt;
   const renderMessageCardRef = useRef(renderMessageCard);
   renderMessageCardRef.current = renderMessageCard;
   const stableRenderMessageCard = useCallback<RenderMessageCard>(
@@ -452,7 +459,7 @@ const SessionBody = memo(function SessionBody({
           isActive
           isLoading={isLoading}
           showWaitingIndicator={showWaitingIndicator}
-          waitingIndicatorPrompt={waitingIndicatorPrompt}
+          waitingIndicatorPrompt={resolvedWaitingIndicatorPrompt}
           onApprovalDecision={onApprovalDecision}
           onUserInputSubmit={onUserInputSubmit}
           onMcpElicitationSubmit={onMcpElicitationSubmit}
@@ -931,7 +938,8 @@ const SessionComposer = memo(function SessionComposer({
       forceRefreshMetrics ||
       currentDraftLength < composerLastMeasuredDraftLengthRef.current;
     if (shouldAllowShrink) {
-      textarea.style.height = "auto";
+      textarea.style.height = "0px";
+      composerLastAppliedHeightRef.current = null;
     }
 
     const contentHeight = textarea.scrollHeight + sizingState.borderHeight;
@@ -1165,8 +1173,10 @@ const SessionComposer = memo(function SessionComposer({
       localDraft !== undefined && localDraft !== previousCommitted
         ? localDraft
         : committedDraft;
-    if (composerInputRef.current && composerInputRef.current.value !== nextDraft) {
-      composerInputRef.current.value = nextDraft;
+    const textarea = composerInputRef.current;
+    const didUpdateDomValue = Boolean(textarea && textarea.value !== nextDraft);
+    if (didUpdateDomValue && textarea) {
+      textarea.value = nextDraft;
     }
     setCurrentLocalDraftState((current) =>
       (!nextDraft.startsWith("/") &&
@@ -1181,7 +1191,9 @@ const SessionComposer = memo(function SessionComposer({
             }
           : { draft: "", sessionId: null },
     );
-    scheduleComposerResize(true);
+    if (didUpdateDomValue) {
+      scheduleComposerResize(true);
+    }
   }, [activeSessionId, committedDraft]);
 
   useEffect(() => {

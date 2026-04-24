@@ -133,11 +133,11 @@ static EMPTY_STATE_EVENTS_PAYLOAD: LazyLock<String> = LazyLock::new(|| {
     fallback_state_events_payload(0).expect("empty SSE state payload should serialize")
 });
 
-/// Serializes a full state snapshot for SSE on the blocking pool because snapshot()
-/// acquires the synchronous app-state mutex.
+/// Serializes a metadata-first state snapshot for SSE on the blocking pool
+/// because summary_snapshot() acquires the synchronous app-state mutex.
 async fn state_snapshot_payload_for_sse(state: AppState) -> String {
     run_blocking_api(move || {
-        let snapshot = state.snapshot();
+        let snapshot = state.summary_snapshot();
         match serde_json::to_string(&snapshot) {
             Ok(payload) => Ok(payload),
             Err(err) => {

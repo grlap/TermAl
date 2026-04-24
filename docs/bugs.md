@@ -5,6 +5,152 @@ and cleanup notes do not belong here.
 
 ## Active Repo Bugs
 
+Also fixed in the current tree: remote `MessageUpdated` deltas now behave as
+true in-place replacements. Existing local proxy messages are replaced and
+republished as localized `MessageUpdated` events, while missing targets are
+treated as remote sync gaps instead of being synthesized as `MessageCreated`;
+the handler returns a recoverable error before advancing the remote applied
+revision so the event bridge can resync. Focused remote tests cover
+existing-target replacement, missing-target gap handling, stale revision
+skips, payload-id mismatch, and stale remote `messageIndex` hints.
+
+Also fixed in the current tree: local Codex interaction submissions now have
+route-level regression coverage for `MessageUpdated`. The user-input, MCP
+elicitation, and generic app-request POST routes each assert the runtime
+JSON-RPC response is delivered, no full `StateResponse` SSE snapshot is
+published, exactly one `MessageUpdated` delta is emitted with the same
+`sessionMutationStamp` as the route response, and the pending map is cleared.
+The shared route-test helper now also asserts the delta `revision`,
+`message_index`, `message_count`, `preview`, and `status`, and the route tests
+cover the user-input, MCP-elicitation, and Codex app-request payload shapes
+directly.
+
+Also fixed in the current tree: `commit_interaction_message_update` now uses
+the visible-session lookup expected for user-facing routes, and its impossible
+"updated index is out of bounds / points at another message" branches now
+panic-fast with explicit invariant messages instead of surfacing as recoverable
+API errors. The dead approval-status check after the public pending-decision
+guard was removed.
+
+Also fixed in the current tree: the frontend `messageUpdated` reducer now has
+edge coverage for applying by message id when the supplied index is stale,
+rejecting payload/event id mismatches, and rejecting unsafe indexes. The
+frontend `messageCreated` branch now has matching negative and non-integer index
+coverage, plus a forward-reorder regression that pins the supplied insertion
+index semantics. The reducer also documents that `messageUpdated` is an
+in-place replacement and must not copy the `messageCreated` reordering behavior.
+Follow-up coverage now also pins the missing-`sessionMutationStamp` fallback.
+
+Also fixed in the current tree: `messageUpdated` is documented in the SSE
+contract in `docs/architecture.md`, including the whole-message replacement
+semantics and the rule that `messageIndex` is only a fast-path hint.
+
+Also fixed in the current tree: session-scoped delta events now carry
+`messageCount` on the wire. `MessageCreated`, `MessageUpdated`, `TextDelta`,
+`TextReplace`, `CommandUpdate`, and `ParallelAgentsUpdate` source the value
+from the mutated session record after each change, and the frontend keeps it
+on the session projection for metadata-first state adoption.
+
+Also fixed in the current tree: full `Session` snapshots and metadata-first
+state summaries now carry `messageCount`. `SessionResponse` and
+`CreateSessionResponse` serialize the count computed by
+`wire_session_from_record` from the current transcript, while `StateResponse`
+serializes the same count on transcript-free session summaries.
+`snapshot_bearing_routes_include_message_count` pins the JSON shape for both
+`/api/state` and `/api/sessions/{id}`.
+
+Also fixed in the current tree: `/api/state` responses and SSE `state`
+snapshots no longer include transcript payloads. The snapshot builder now emits
+metadata-first session shells with `messages: []`, `messagesLoaded: false`, and
+the transcript-derived `messageCount`, while `GET /api/sessions/{id}` remains
+the full hydration route. The frontend reconciler preserves already-hydrated
+messages when summary snapshots arrive, and unhydrated session deltas update
+metadata without forcing `/api/state` resync loops.
+
+Also fixed in the current tree: `docs/architecture.md` now documents
+`messageCount` as a property of every full `Session` or state-session summary
+serialized on the wire, including snapshot-bearing responses plus
+delta-carried `SessionCreated` and `OrchestratorsUpdated.sessions` payloads.
+
+Also fixed in the current tree: raw create-session route coverage now pins
+`CreateSessionResponse.session.messageCount` before typed decoding, so the test
+would fail if the field disappeared from the POST `/api/sessions` wire JSON
+despite `Session.message_count` having a serde default.
+
+Also fixed in the current tree: the `messageCount` compatibility story is now
+explicitly documented as a coordinated current-tree wire bump for local-only
+Phase 1. Current session-scoped deltas require the field, full session
+snapshots serialize it, and older persisted local JSON can still load because
+the `Session` field has a serde default before outbound projection recomputes
+the value.
+
+Also fixed in the current tree: `MessageCreated` / `MessageUpdated` contract
+docs now list `message_count` and `session_mutation_stamp`, and the
+`MessageCreated` entry explicitly documents that it may reorder the transcript
+to the supplied insertion index while `MessageUpdated` must stay in-place.
+
+Also fixed in the current tree: the frontend `messageUpdated` and
+`messageCreated` guards now reject unsafe, non-integer, or negative
+`messageIndex` hints before falling back to id lookup. `live-updates.test.ts`
+pins the unsafe-integer and non-integer `messageUpdated` and `messageCreated`
+resync paths.
+
+Also fixed in the current tree: remote `MessageCreated` replay now normalizes
+existing-message creates server-side before rebroadcasting. Existing proxy
+messages are replaced and moved to the applied local index, impossible insertion
+gaps fail before the remote applied revision advances, and the localized delta
+publishes the actual applied `message_index` plus `message_count`. Focused
+remote tests cover existing-id replacement/reorder, payload-id mismatch,
+existing-message bounds rejection, and gap rejection.
+
+Also fixed in the current tree: missing-target remote `CommandUpdate` and
+`ParallelAgentsUpdate` deltas now use the same remote sync-gap guard as
+`MessageCreated`. Impossible insertion gaps fail before the local proxy
+transcript mutates or the remote applied revision advances, and synthesized
+`MessageCreated` deltas publish the actual applied local index. Focused remote
+tests cover both command and parallel-agent gap rejection.
+
+Also fixed in the current tree: the remote `MessageUpdated` missing-target path
+no longer writes remote-supplied ids directly to stderr before returning its
+recoverable sync-gap error. It now matches the sibling `CommandUpdate` and
+`ParallelAgentsUpdate` branches by relying on the central remote-event failure
+logging path, closing both duplicate-log noise and unsanitized id interpolation.
+
+Also fixed in the current tree: stale remote `MessageUpdated` frames now hit
+the applied-revision guard before payload-id validation. A stale frame with a
+mismatched embedded message id is skipped without requesting recovery, and the
+stale-delta tests now assert the applied-revision tracker state.
+
+Also fixed in the current tree: `live-updates.test.ts` now asserts
+`messageCount` propagation on the `textDelta`, `textReplace`, `commandUpdate`,
+and `parallelAgentsUpdate` reducer branches, so all six session-scoped delta
+branches lock the metadata-first count update.
+
+Also fixed in the current tree: the local-route delta tests
+(`src/tests/review.rs`) now pin `revision`, `message_index`, `message_count`,
+`preview`, and `status` on every published `MessageUpdated` delta through the
+extended `assert_no_state_and_one_message_updated_delta` helper. The four
+interaction-submission tests (approval, user-input, MCP elicitation, Codex
+app-request) each assert the full wire shape, including equality with the
+route response's revision, so a regression that leaked a `preview` or drifted
+a `revision` would fail loudly.
+
+Also fixed in the current tree:
+`remote_message_updated_delta_uses_message_id_when_remote_index_is_stale` is
+now load-bearing. It asserts that the untouched message at index 0 retains
+its original text (not just its id), pins the published delta's `revision`,
+`message_id`, `message_index`, `message_count`, `preview`, and `status`, and
+checks that `should_skip_remote_applied_delta_revision` advanced for the
+applied remote revision. A regression overwriting message-1 while moving
+message-2 to the right slot, or skipping the revision advance, would fail
+the test.
+
+Also fixed in the current tree: `interaction_message_update_parts` no longer
+pretends to have a recoverable `ApiError` path. It returns the replacement
+message metadata directly, and `commit_interaction_message_update` now has a
+contract comment documenting that invalid returned indexes are internal
+invariant violations.
+
 Also fixed in the current tree: the dialog backdrop mouse-button contract now
 runs through `isDialogBackdropDismissMouseDown` for Settings, create-session,
 and create-project dialogs. Middle-click, physical right-click, and macOS
@@ -42,6 +188,12 @@ and revisions still advance immediately, but the active transcript's
 `session-store` record and broad `sessions` render update now flush together at
 most once per animation frame; `ui/src/App.live-state.deltas.test.tsx` pins
 that a burst of live deltas schedules a single frame render.
+
+Also fixed in the current tree: `session-store` subscribers no longer allocate
+fresh `useSyncExternalStore` snapshot closures on every render, and pane tab
+rails now subscribe only to the session summaries referenced by their own tabs.
+Unrelated session-summary changes can no longer invalidate every `PaneTabs`
+instance through the whole `sessionSummariesById` dictionary.
 
 Also fixed in the current tree: live Codex global-state deltas and repeated
 transport recovery no-ops no longer force immediate React work on every event.
@@ -87,6 +239,16 @@ inside the cooldown, and the test itself now runs a two-phase negative /
 positive control â€” a no-input measurement must write the pin target, a
 post-wheel measurement must not â€” so an unbound or broken wheel listener can
 no longer leave the test passing.
+
+Also fixed in the current tree: compact command-heavy virtualized transcripts
+no longer expose blank pages inside the viewport when measured command pages
+shrink during an active user-scroll cooldown. The virtualizer now clamps range
+selection to its current virtual layout instead of a stale larger DOM
+`scrollHeight`, and it grows the mounted page band from real DOM bounds when
+the visible viewport would otherwise fall into the bottom spacer. A focused
+`AgentSessionPanel.test.tsx` regression covers short command pages shrinking
+under cooldown and asserts the list mounts enough pages below to keep content
+visible.
 
 Also fixed in the current tree: dangerous-Markdown-link neutralization is
 now directly covered. A new `ui/src/markdown-links.test.ts` pins the
@@ -792,6 +954,269 @@ routes through the HTML-fallback detection. Two residual follow-ups (the
 buffers the body a second time on every successful response) are tracked
 as their own bug entries below.
 
+## Remote proxy recovery treats metadata-only `/api/state` as full transcript repair
+
+**Severity:** High - remote SSE gap recovery can advance the applied remote revision after only a summary snapshot, leaving proxy transcripts stale or empty.
+
+The metadata-first state path changed `/api/state` and SSE `state` events to
+carry transcript-free session summaries. Remote sync still uses that same
+snapshot path as an authoritative recovery source after remote gaps or failed
+delta application. That means the local proxy can record a remote revision as
+applied even though it has not repaired the transcript messages for the affected
+remote session.
+
+**Current behavior:**
+- `src/api.rs` returns summary-only state from `/api/state`.
+- `src/remote_sync.rs` still treats remote `/api/state` as recovery input for
+  proxy sessions and can preserve stale cached messages or mark recovery
+  progress from summary-only data.
+- `src/state_accessors.rs` projects local proxy records as loaded sessions based
+  on the local cached transcript, and `src/remote_routes.rs` still enforces
+  local transcript index contiguity for remote `MessageCreated` deltas.
+
+**Proposal:**
+- Add a remote full-transcript recovery path for affected sessions, likely by
+  fetching remote `/api/sessions/{id}` before marking the remote revision as
+  applied.
+- Until a proxy transcript is repaired, preserve explicit unhydrated metadata
+  with the remote `messageCount` instead of presenting an empty local transcript
+  as loaded.
+- Relax or defer local index-contiguity checks for unhydrated proxy sessions so
+  a metadata-first summary cannot create a permanent resync loop.
+
+## Single-session hydration can load stale transcripts after newer deltas
+
+**Severity:** High - an older `GET /api/sessions/{id}` response can mark a metadata-only session loaded after a newer delta or summary already advanced the session.
+
+Lazy hydration fetches a single full session for metadata-only panes. The
+current adoption path allows same-server revision downgrades when the current
+session is not loaded, and single-session hydration participates in the same
+global revision flow as full state adoption. If a newer delta lands while the
+fetch is in flight, the older fetch can overwrite newer metadata and mark stale
+messages as fully loaded.
+
+**Current behavior:**
+- `ui/src/app-live-state.ts` permits hydration adoption when the target session
+  is metadata-only, even if the response is older than newer session metadata.
+- A session hydration response can update global revision bookkeeping even
+  though it only contains one session.
+- The stale response can suppress the later need to hydrate, because the session
+  now appears loaded.
+
+**Proposal:**
+- Capture request-start freshness using `sessionMutationStamp`, `messageCount`,
+  and/or the current revision, then reject stale hydration responses.
+- Do not advance global state revision from a single-session hydration response
+  unless the response is proven safe for the whole app revision stream.
+- On stale hydration, keep the session metadata-only and request a normal state
+  resync or retry hydration from the newer session metadata.
+
+## Interaction request routes can hide same-revision `MessageUpdated` deltas
+
+**Severity:** Medium - route responses can advance the client past the same-revision SSE delta that contains the actual card replacement.
+
+The interaction submission routes publish `MessageUpdated` deltas, but the
+initiating client also adopts the POST response. If that response is
+metadata-only and carries the same revision, the client can ignore the matching
+SSE delta as already seen, leaving approval, user-input, MCP elicitation, or
+Codex app-request cards stale until another hydration path repairs them.
+
+**Current behavior:**
+- `src/codex_submissions.rs` interaction routes publish a `MessageUpdated`
+  delta for the resolved interaction card.
+- The route response can be adopted by the frontend before the same-revision
+  SSE delta is processed.
+- The response does not necessarily include the fully mutated session content
+  needed to make skipping the delta safe.
+
+**Proposal:**
+- Return a snapshot with the mutated session fully hydrated, matching the
+  `send_message` response shape used for the active session.
+- Or have the frontend apply the returned message update directly without
+  advancing past the same-revision SSE delta.
+- Add a regression where the POST response arrives before the SSE delta and the
+  resolved card is still visible immediately.
+
+## Queued-turn dispatch publishes stale `sessionMutationStamp`
+
+**Severity:** Medium - the `MessageCreated` delta for a queued turn can carry a mutation stamp from before pending-prompt cleanup.
+
+Queued-turn dispatch builds the started-turn delta before all queued-prompt
+state has been popped and synced. Those later mutations restamp the session
+record, so the published delta can advertise a stale `sessionMutationStamp`.
+The next metadata snapshot may then look like a new unseen mutation and trigger
+unnecessary transcript invalidation or hydration.
+
+**Current behavior:**
+- `src/turn_dispatch.rs` captures the delta stamp before the queued prompt list
+  reaches its final state for the dispatch.
+- The session record can be restamped by pending-prompt cleanup after the delta
+  payload was built.
+- Metadata-first reconciliation relies on those stamps to decide whether a
+  cached transcript is still complete.
+
+**Proposal:**
+- Build or refresh the `StartedTurnMessageDelta` after all queued-prompt
+  mutations are complete.
+- Assert in tests that the published delta stamp equals the final session
+  record's `mutation_stamp`.
+
+## Live-delta recovery test no longer proves the recovered message is visible
+
+**Severity:** Medium - a watchdog regression test can pass even if the latest recovered assistant message is hidden.
+
+One App-level live-delta recovery test no longer asserts that the recovered text
+is actually rendered after the delta flush and after the stale fetch is
+rejected. That weakens coverage for the same class of bug where the newest
+assistant message only appears after another prompt, focus change, or unrelated
+rerender.
+
+**Current behavior:**
+- `ui/src/App.live-state.watchdog.test.tsx` still exercises the recovery flow.
+- The test does not prove `"Recovered from live delta."` is visible at the
+  critical points.
+
+**Proposal:**
+- Restore non-brittle visibility assertions after the delta is applied and
+  after the stale fetch resolves.
+- Prefer `screen.getAllByText(...).length > 0` when duplicate text can appear in
+  both message content and previews.
+
+## Backend streaming delta wire tests do not pin `messageCount`
+
+**Severity:** Medium - four backend delta emitters can drop `message_count` without failing Rust wire-contract tests.
+
+`messageCount` now drives metadata-first reconciliation and hydration decisions,
+but backend tests currently pin the field strongly for `MessageCreated` /
+`MessageUpdated` paths and not for every streaming delta variant. Frontend
+reducer tests help, but they cannot catch a backend serialization omission on a
+specific emitter path.
+
+**Current behavior:**
+- Local backend coverage does not assert `message_count` for representative
+  `TextDelta`, `TextReplace`, `CommandUpdate`, and `ParallelAgentsUpdate`
+  broadcasts.
+- A future Rust-side omission could still produce current-looking frontend unit
+  test fixtures.
+
+**Proposal:**
+- Add backend tests that subscribe to delta events and drive one representative
+  local mutation for each missing delta type.
+- Assert the emitted `message_count` matches the transcript length or expected
+  metadata count for that mutation.
+
+## Visible-session hydration failures have no retry path
+
+**Severity:** Medium - a transient full-session hydration failure can leave a visible metadata-only pane without a transcript until unrelated state changes.
+
+Metadata-first state makes `GET /api/sessions/{id}` the primary path for
+loading visible transcripts after `/api/state` has delivered summary shells. A
+non-404 hydration failure currently reports the request error and clears the
+in-flight marker, but it does not update any retry state or schedule another
+attempt. If the active and visible session identities stay stable, the
+hydration effect may not run again.
+
+**Current behavior:**
+- `ui/src/app-live-state.ts` catches non-404 `fetchSession` failures, reports
+  the error, and removes the session id from the in-flight hydration set.
+- The session can remain `messagesLoaded: false` with no timer, backoff state,
+  or dependency change to force another hydration attempt.
+
+**Proposal:**
+- Track hydration failures explicitly and retry with bounded backoff for
+  transient errors.
+- Keep the current 404 recovery-resync behavior for deleted or renamed
+  sessions.
+- Add a regression where hydration fails once, then succeeds without requiring
+  a tab switch, prompt send, or unrelated state event.
+
+## Metadata-first summaries make transcript search incomplete
+
+**Severity:** Medium - search can silently miss transcript matches for sessions that have only metadata summaries loaded.
+
+`/api/state` now returns session summaries with `messages: []` and
+`messagesLoaded: false`. The session search index still walks
+`session.messages` directly, so non-visible sessions can be treated as having
+no searchable transcript even though the transcript simply has not been
+hydrated in this browser view.
+
+**Current behavior:**
+- `ui/src/session-find.ts` builds transcript search items from
+  `session.messages`.
+- Metadata-first session summaries clear `messages` before reaching the
+  frontend.
+- Search has no "transcript not loaded" state and no on-demand hydration path
+  before concluding that there are no message matches.
+
+**Proposal:**
+- Gate transcript search to hydrated sessions and surface incomplete results
+  when a session summary is not loaded.
+- Or hydrate/index target sessions on demand when search needs transcript
+  content.
+- Add coverage proving metadata-only summaries do not silently produce false
+  "no transcript match" results.
+
+## Metadata-first state summaries still broadcast full pending prompts
+
+**Severity:** Low - transcript payloads were removed from global state, but queued prompt text can still ride along with every session summary.
+
+Metadata-first state summaries clear `messages`, but the session summary still
+includes full pending-prompt data. Queued prompts can contain user-authored
+instructions or expanded prompt content, so this remains a smaller but real
+data-minimization leak in `/api/state` and SSE `state` broadcasts.
+
+**Current behavior:**
+- `src/state_accessors.rs` builds transcript-free summaries but keeps the full
+  `pending_prompts` projection.
+- Every listening tab can receive pending prompt content for sessions it is not
+  actively hydrating.
+
+**Proposal:**
+- Project pending prompts to a bounded metadata-only summary in `StateResponse`.
+- Keep full queued-prompt content on targeted full-session responses where the
+  active pane actually needs it.
+
+## App-level delta fixtures omit required `messageCount`
+
+**Severity:** Low - some tests still dispatch impossible delta payloads after the protocol made `messageCount` required.
+
+Several App-level delta tests construct `delta` events by hand and omit
+`messageCount`. Those fixtures no longer match the current `DeltaEvent` wire
+contract, so they can pass through behavior that production SSE cannot produce
+and miss metadata-first regressions.
+
+**Current behavior:**
+- Some `ui/src/App.live-state.deltas.test.tsx` fixtures dispatch current
+  protocol delta types without `messageCount`.
+- The tests are not forced through a typed helper that requires the full
+  current event shape.
+
+**Proposal:**
+- Introduce a typed test helper for `DeltaEvent` fixtures and require
+  `messageCount` on all session-scoped deltas.
+- Update hand-written fixtures to match the current SSE contract.
+
+## Reconnect fallback test no longer proves applied delta is visible
+
+**Severity:** Low - reconnect coverage can pass even if the session delta in the scenario is ignored.
+
+One backend connection test still describes an applied session delta, but the
+assertion that proved the delta changed the visible session state was removed.
+That leaves the reconnect/fallback path with weaker coverage for the same class
+of bug where transport recovery appears healthy while the transcript remains
+stale.
+
+**Current behavior:**
+- `ui/src/backend-connection.test.tsx` exercises the reconnect fallback flow.
+- The test no longer proves that the session delta updates the visible preview,
+  transcript, or store state while reconnect remains active.
+
+**Proposal:**
+- Restore an assertion against the visible preview, transcript text, or
+  session-store state after the delta is dispatched.
+- Keep the reconnect-state assertions so the test proves both facts: the UI is
+  still recovering and the live delta was applied.
+
 ## Cross-window tab drag channel restarts on ordinary renders
 
 **Severity:** High - `useAppDragResize` recreates its `BroadcastChannel` subscription on ordinary renders, which can drop cross-window tab drag coordination messages.
@@ -1333,22 +1758,6 @@ surfaces land inside a session pane.
 - Document the invariant in the `session-store.ts` header so future changes do not reintroduce a third writer.
 - Add a regression test that drives two overlapping `handleDraftChange` calls in the same tick and asserts the store snapshot matches the last-written value.
 
-## Session-store subscriber closures allocate every render
-
-**Severity:** Medium - each hook in `ui/src/session-store.ts` (`useComposerSessionSnapshot`, `useSessionSummariesById`, `useSessionRecordById`, etc.) passes a fresh inline lambda as both `getSnapshot` and `getServerSnapshot` on every render, and `useSessionSummariesById` returns the entire `sessionSummariesById` dictionary — so any session-summary delta invalidates the subscription for every `PaneTabs` instance in the workspace.
-
-`useSyncExternalStore` re-reads whenever `getSnapshot`/`getServerSnapshot` identity changes, so an inline closure defeats the subscription-local memoization the store's structural sharing was designed to enable. `useSessionSummariesById` compounding this by returning the whole dictionary means a per-session status tick or model change invalidates every `PaneTabs` in the workspace at once — an O(N) renders-per-delta cost in a multi-pane layout, directly undoing the memoization the split was trying to achieve.
-
-**Current behavior:**
-- All subscriber hooks allocate a fresh `() => …` closure for `getSnapshot` on every render.
-- `useSessionSummariesById(tabSessionIds)` returns `currentState.sessionSummariesById` — the whole dictionary — even though callers only need a handful of ids.
-- A summary delta for one session re-renders every `PaneTabs` instance.
-
-**Proposal:**
-- Hoist the snapshot closures to module scope so their identity is stable across renders.
-- Replace `useSessionSummariesById` with a targeted selector (e.g. `useSessionSummarySnapshotsByIds(ids)`) that returns a stable per-id tuple keyed on the caller's id list.
-- Add a render-count regression that drives a single-session summary change and asserts unrelated `PaneTabs` instances do not re-render.
-
 ## `startActivePromptRecoveryPoll` only armed when adoption is stale
 
 **Severity:** Medium - the recovery poll (renamed from `startActivePromptPoll`) previously armed on every successful `sendMessage` POST to cover the "POST acknowledged but SSE never streams" failure mode; it is now armed only when `adoptState(state)` returns false, removing the belt-and-suspenders check against silent SSE stalls following a successful POST.
@@ -1475,7 +1884,8 @@ The existing `api.test.ts` case ("uses the JSON fast path for successful applica
 shrink-capable measurement when only the textarea width changes.
 
 `ui/src/panels/AgentSessionPanel.tsx` coalesces autosize work and only forces
-`height = auto` for session switches or panel-height changes. Widening a pane
+the shrink-capable measurement (previously `height = "auto"`, now
+`height = "0px"`) for session switches or panel-height changes. Widening a pane
 can reduce text wrapping and therefore reduce the required textarea height, but
 a width-only `ResizeObserver` update calls `scheduleComposerResize(...)`
 without the force flag. The measured height can remain taller than its content
@@ -1483,13 +1893,13 @@ until another draft or session change triggers a full reset.
 
 **Current behavior:**
 - Pane width changes can alter wrapping without changing panel height.
-- The resize scheduler does not force the textarea through an auto-height pass
-  for width-only changes.
+- The resize scheduler does not force the textarea through a shrink-capable
+  measurement pass for width-only changes.
 - The composer can stay over-tall after widening the pane.
 
 **Proposal:**
 - Treat `widthChanged || panelHeightChanged` as a shrink-capable resize input,
-  or otherwise force an auto-height measurement whenever wrapping can change.
+  or otherwise force a shrink-capable measurement whenever wrapping can change.
 - Add a focused test that widens the composer container and asserts the textarea
   height can shrink without requiring another keystroke.
 
@@ -1515,6 +1925,145 @@ until another draft or session change triggers a full reset.
 
 **Proposal:**
 - Either treat "snapshot null but id truthy" as "no session" (fall back to `null`), or add a comment near the fallback documenting that `activeSessionId` is a best-effort fallback and callers must still check `session` before reading capability fields.
+
+## `session_message_count` silently saturates at `u32::MAX`
+
+**Severity:** Low - `src/messages.rs:23-25` defines `session_message_count(record)` as `u32::try_from(record.session.messages.len()).unwrap_or(u32::MAX)`. A session with more than 4.29 billion messages silently reports `u32::MAX` rather than failing or surfacing the invariant violation. Practically unreachable (the process would OOM long before), but silent saturation defeats the Contract Precisions choice of `u32` over `usize` if the assumption ever breaks.
+
+The frontend would then treat `4294967295` as truth, which would mis-represent session metadata in a way that's hard to diagnose.
+
+**Current behavior:**
+- `.unwrap_or(u32::MAX)` silently caps.
+- No `debug_assert!` surfaces the assumption in test runs.
+- No comment explaining the intentional saturation.
+
+**Proposal:**
+- Add `debug_assert!(record.session.messages.len() <= u32::MAX as usize)` above the conversion so tests catch the impossible.
+- Alternatively, leave as-is but add a one-line comment explaining the intentional saturation so a future reviewer doesn't reach for checked arithmetic.
+
+## HTTP-route tests leak persistence and orchestrator-template files into `temp_dir`
+
+**Severity:** Medium - three new `tokio::test`s in `src/tests/http_routes.rs` leak `termal-test-*.json` and `termal-orchestrators-test-*.json` files into `std::env::temp_dir()` on every run. The tests move `state` into `app_router(state)` before capturing `state.persistence_path` / `state.orchestrator_templates_path`, so the `fs::remove_file` cleanup at the end of each test never executes.
+
+Affected tests: `codex_thread_action_routes_update_session_state` (`:510`), `codex_thread_rollback_route_falls_back_when_history_is_unavailable` (`:670`), and `codex_thread_fork_route_returns_created_response` (`:757`). Over repeated local test runs this accumulates test artifacts that persist across development sessions.
+
+**Current behavior:**
+- Each test constructs `state`, reads fields off it, then moves `state` into `app_router(state)`.
+- No file paths are captured before the move, so cleanup can't run.
+- `%TEMP%` accumulates `termal-test-*.json` + `termal-orchestrators-test-*.json` files.
+- Sibling tests in the same file that do clean up take the opposite approach (capture paths first).
+
+**Proposal:**
+- Clone `state` once at the top of each test (or destructure `state.persistence_path` and `state.orchestrator_templates_path` into local `PathBuf`s) before moving `state` into the router.
+- In the cleanup block, call `fs::remove_file` on both the persistence path and the orchestrator-templates path.
+- Extend the pattern to any other `http_routes.rs` tests that currently miss cleaning the orchestrator-templates file — this is a cross-cutting cleanup.
+
+## SSE delta test doesn't pin `messageCount` on the delta payload
+
+**Severity:** Low - `src/tests/http_routes.rs::state_events_route_streams_initial_state_and_live_deltas` (`:214-271`) asserts the SSE frame ordering (initial `state`, then `delta`) and the `type: "messageCreated"` discriminator, but does not assert `messageCount` on the delta payload itself. The snapshot test (`snapshot_bearing_routes_include_message_count`) pins `messageCount` on `StateResponse` / `SessionResponse`; the SSE delta wire contract is not pinned at the HTTP layer.
+
+**Current behavior:**
+- `snapshot_bearing_routes_include_message_count` pins `messageCount` on snapshot shapes.
+- `state_events_route_streams_initial_state_and_live_deltas` asserts frame order and discriminator but not `messageCount` on the delta.
+- The `tests/remote.rs` layer covers delta `messageCount` end-to-end, but the HTTP-level wire shape is unpinned for deltas.
+
+**Proposal:**
+- Add `assert_eq!(delta["messageCount"], 1);` (or an appropriate expected value) to `state_events_route_streams_initial_state_and_live_deltas` after the `type: "messageCreated"` assertion. One-line addition that closes the symmetry with the snapshot test.
+
+## `docs/architecture.md` documents soft-rollout but not the `DeltaEvent` hard-break
+
+**Severity:** Low - `docs/architecture.md:238-243` describes that `Session.messageCount` now rides on the wire with `#[serde(default)]` (soft rollout), but does not document the companion `DeltaEvent.*.messageCount` hard-break stance. A reader looking only at `architecture.md` cannot tell that mixed-version remote SSE bridges will hard-fail on missing `messageCount`. The policy is recorded in `docs/metadata-first-state-plan.md` Contract Precisions → Field semantics, but not cross-referenced from the architecture doc.
+
+**Current behavior:**
+- `architecture.md` describes the `Session.messageCount` soft-rollout.
+- It does NOT mention that `DeltaEvent.*.messageCount` is required (no `#[serde(default)]`) and that mixed-version remote bridges are out of scope.
+- `docs/metadata-first-state-plan.md:170-175` has the policy; `architecture.md` doesn't link to it.
+
+**Proposal:**
+- Add one sentence to the delta section: "Note: `DeltaEvent.*.messageCount` is required on the wire (no `#[serde(default)]`) — see `docs/metadata-first-state-plan.md` Contract Precisions → Field semantics for the intentional soft-rollout-on-Session + hard-break-on-Delta asymmetry."
+
+## `DeltaEvent::SessionCreated` and `OrchestratorsUpdated` still carry full transcripts
+
+**Severity:** High - Phase 2 made `/api/state` and SSE `state` metadata-first, but `DeltaEvent::SessionCreated { session: Session }` in `src/wire.rs` and `DeltaEvent::OrchestratorsUpdated.sessions: Vec<Session>` still ship full `Session` objects (with `messages_loaded: true` and populated `messages`) over SSE. Every new remote-session materialization (`src/sse_broadcast.rs::announce_remote_session_created_if_changed`), every `apply_remote_delta_event::SessionCreated` branch (`src/remote_routes.rs:524-574`), and every orchestrator burst that references existing sessions now ships unbounded transcripts through the delta channel — the exact transport the metadata-first plan aimed to remove.
+
+On a chained remote topology, or when a fresh proxy materializes for a long-lived remote session, one of these deltas can exceed the size of the full-state snapshot we just removed. The metadata-first invariant the frontend now depends on for SSE JSON.parse time is broken through these regressive channels.
+
+**Current behavior:**
+- `/api/state` and SSE `state` ship session summaries (no `messages`).
+- `DeltaEvent::SessionCreated` carries a full `Session` with populated `messages`.
+- `DeltaEvent::OrchestratorsUpdated.sessions` carries `Vec<Session>` with populated `messages`.
+- Every remote-session materialization through these channels ships the full transcript.
+
+**Proposal:**
+- Per `docs/metadata-first-state-plan.md`: introduce `StateSessionSummary` as a typed summary struct in `src/wire.rs` and change these two variants to carry summaries, OR ship ids only and have receivers targeted-hydrate via `GET /api/sessions/{id}`.
+- This must land before Phase 5's transitional-adapter removal deadline. Worth elevating in the plan's Implementation Status as the single remaining wire-shape gap.
+
+## `#[cfg(test)] snapshot()` creates test-vs-production contract divergence
+
+**Severity:** High - `src/state_accessors.rs:54-87` defines `snapshot()` as `full_snapshot()` in test builds and `summary_snapshot()` in production. Tests read `state.snapshot()` and rely on the full-transcript form (~40 sites in `src/tests/remote.rs` read `session.messages` directly from the snapshot), while production emits the summary shape. This is a silent behavioral split: a regression that flips a production code path from summary → full transcript (e.g. a new snapshot builder that forgets `wire_session_summary_from_record`) does not surface in any unit test that uses `snapshot()`.
+
+Two HTTP-route contract tests (`snapshot_bearing_routes_include_message_count`) pin the route-level shape, but everything else in `src/tests/` continues to exercise a shape production never emits. The split was introduced as a transitional bridge so existing transcript-reading tests don't have to be rewritten, but the intent is invisible at every call site.
+
+**Current behavior:**
+- `#[cfg(test)] fn snapshot(&self) -> StateResponse { self.full_snapshot() }`
+- `#[cfg(not(test))] fn snapshot(&self) -> StateResponse { self.summary_snapshot() }`
+- ~40 test call sites rely on the full-transcript form.
+- Two HTTP-route tests pin the production shape; everything else is legacy coverage.
+
+**Proposal:**
+- Rename the cfg-split helpers so intent is audible at every call site: tests explicitly call `full_snapshot_for_test()`; production paths explicitly call `summary_snapshot()`. Same body, different names.
+- Or migrate the ~40 `state.snapshot().sessions[...].messages` call sites to read `state.inner.lock().sessions[...]` directly so tests assert against record state rather than wire state. Safer — transcript mutation checks don't route through the wire-projection helper at all.
+- Either fix closes the latent cliff. The cfg-split without renames is deprecated.
+
+## Stale hydration response can overwrite state after a server restart
+
+**Severity:** High - `ui/src/app-live-state.ts:942-993`'s hydration path dispatches `fetchSession(sessionId)` and on resolution calls `adoptFetchedSession(response.session, response.revision, response.serverInstanceId)`. The adoption check uses `shouldAdoptSnapshotRevision` against `lastSeenServerInstanceIdRef.current` at **resolve time**, not a value captured at **send time**. If a server restart completes during the in-flight fetch, `adoptState` clears `hydratingSessionIdsRef` / `hydratedSessionIdsRef` and updates `lastSeenServerInstanceIdRef` to the new instance id. The stale pre-restart response's `serverInstanceId` then differs from the current ref — but the mitigation at `ui/src/app-live-state.ts:1119-1121` just re-kicks a fresh hydration; the outstanding async IIFE still calls `adoptFetchedSession` and can adopt pre-restart session data.
+
+The review instructions for Phase 2 asked for "capture-at-send / reject-at-receive" and it is not implemented. The race window is narrow (needs restart during an in-flight fetch) but the consequence — rendering pre-restart transcript content against a new server — is user-visible.
+
+**Current behavior:**
+- Hydration fetch dispatches without capturing `lastSeenServerInstanceIdRef.current`.
+- `adoptFetchedSession` compares `response.serverInstanceId` against the current ref at resolve time.
+- `adoptState` clears hydrating/hydrated refs on server-instance change but does not abort in-flight promises.
+- A stale pre-restart response fails `isServerInstanceMismatch` and is adopted.
+
+**Proposal:**
+- At fetch dispatch: `const sentAgainstInstanceId = lastSeenServerInstanceIdRef.current;`.
+- After `await fetchSession(...)`: if `response.serverInstanceId !== sentAgainstInstanceId` OR `lastSeenServerInstanceIdRef.current !== sentAgainstInstanceId`, short-circuit to `requestActionRecoveryResyncRef.current()` without calling `adoptFetchedSession`.
+- A generation counter incremented on the `hydratingSessionIdsRef.current.clear()` path would make this bulletproof and also covers the case where `serverInstanceId` happens to match across restart instances.
+
+## Backend `wire_session_summary_from_record` clones full session under the state mutex
+
+**Severity:** Medium - `src/state_accessors.rs:40-45` implements `wire_session_summary_from_record` as "call `wire_session_from_record` (which clones the full session including `messages`), then clear `messages` and set `messages_loaded: false`." On a `/api/state` snapshot with N sessions × M messages, the helper allocates and drops O(N·M) `Message` clones that are immediately discarded. For the plan's baseline fixture (10 sessions × 500 messages), every snapshot clones and drops ~5,000 messages just to produce a summary payload.
+
+This runs on every `commit_locked` inside `sse_broadcast.rs:384-388`'s state-mutex critical section. The explicit goal of Phase 2 was to make snapshot cost scale with session count, not transcript size. The frontend `JSON.parse` cost is fixed (since `messages: []` on the wire), but the backend build path still scales `O(N·M)` under the mutex.
+
+**Current behavior:**
+- `wire_session_summary_from_record` clones the full session, then discards `messages`.
+- Under the state mutex.
+- On every `commit_locked` in production.
+
+**Proposal:**
+- Inline a summary builder that clones each metadata field individually and sets `messages: Vec::new()` + `messages_loaded: false` directly from `record`. No intermediate full clone.
+- Long-term: introduce the typed `StateSessionSummary` struct the plan calls for. A narrower struct that literally cannot have a `messages` field prevents both the allocation cost and the "forgot to clear" class of regression.
+
+## `resolvedWaitingIndicatorPrompt` duplicates `findLastUserPrompt` derivation across `SessionBody` and `SessionPaneView`
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:399-404` computes `resolvedWaitingIndicatorPrompt` by calling `findLastUserPrompt(activeSession)` inside `SessionBody` whenever the live turn indicator is showing, overriding the `waitingIndicatorPrompt` prop that `ui/src/SessionPaneView.tsx:795-805` already computed via the same helper and `useMemo`. The override was added to pick up store-subscriber updates between parent renders (correct intent), but it leaves two parallel code paths that must be kept in sync.
+
+Two smaller concerns ride along:
+- The override's condition includes an `"approval"` status arm (`status === "active" || status === "approval"`) that is presently unreachable: `SessionPaneView` only sets `showWaitingIndicator=true` when `status === "active"` or (`!isSessionBusy && isSending`), and `isSessionBusy` is true for `"approval"`, so `showWaitingIndicator && status === "approval"` never holds. Harmless defensive check but misleading for readers inferring the truth table.
+- The resolution is not wrapped in `useMemo`, so it re-runs on every `SessionBody` re-render — once per streaming chunk. `findLastUserPrompt` scans from the tail, so it usually stops early, but sessions dominated by trailing tool/assistant output could scan deep.
+
+**Current behavior:**
+- `SessionBody` (`AgentSessionPanel.tsx:399-404`) and `SessionPaneView` (`SessionPaneView.tsx:795-805`) both derive the waiting-indicator prompt by calling `findLastUserPrompt(activeSession)` on the same store record.
+- The override runs on every `SessionBody` render, uncached.
+- The `status === "approval"` arm of the override's condition is unreachable under current upstream gating.
+
+**Proposal:**
+- Collapse to one computation at the store-subscriber boundary. Either `SessionBody` becomes the sole resolver (drop the `useMemo` and prop passthrough in `SessionPaneView`), or add a one-line cross-reference comment on both sites so future readers know the two are paired.
+- Narrow the override's condition to `status === "active"` to match the upstream truth table.
+- Wrap the override in `useMemo(() => findLastUserPrompt(activeSession), [activeSession.messages])` to avoid re-scanning on every streaming chunk.
 
 Also fixed in the current tree: transcript search pinning no longer replaces
 the live mounted page band. `VirtualizedConversationMessageList.tsx` now renders
@@ -1882,24 +2431,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - Drop or overwrite superseded snapshots before they can accumulate in memory.
 - Add a burst test that publishes multiple large snapshots while the broadcaster is delayed and asserts only the latest snapshot is retained.
 
-## State snapshots still include full session transcripts on the wire
-
-**Severity:** Medium - `/api/state` response bodies and SSE state broadcasts still include every session's full `messages` vector. The serialization CPU cost is now off the mutex and off the tokio workers (broadcaster thread + `spawn_blocking`), but the payload size itself is unchanged.
-
-`snapshot_from_inner_with_agent_readiness` continues to clone every visible `Session` with its full `messages` vector into `StateResponse`. The HTTP `/api/state` handler and SSE state publisher then serialize those full transcripts even when the frontend only needs session metadata. Reconnect and tab-restore payloads still scale with total transcript size; individual active-prompt latency is unblocked (per the delta-persist and broadcaster fixes above), but network/client time to apply a full-state snapshot still scales.
-
-**Current behavior:**
-- `/api/state` returns all visible sessions with all historical messages (serialized inside `spawn_blocking`, so no tokio worker stall, but the response body is still O(all messages)).
-- `publish_state_locked` builds the same full transcript snapshot for SSE state events (serialized on the broadcaster thread).
-- The dedicated `GET /api/sessions/{id}` route exists, but state snapshots do not defer to it.
-- The frontend already has `Session.messagesLoaded?: boolean` scaffolding that treats `false` as "needs hydrate" â€” forward-compat for the planned backend change.
-
-**Proposal:**
-- Make state snapshots metadata-first: include session shell fields and mark transcript-bearing sessions as `messagesLoaded: false` with an empty `messages` array.
-- Keep `GET /api/sessions/{id}` as the authoritative full-transcript route, and keep session-create/prompt flows returning enough data that the active prompt UI remains reliable.
-- **Before landing** (per the earlier revert): audit every `commit_locked` caller and ensure a matching `publish_delta` exists for any state change that adds/edits messages, so stripped state events do not drop the change.
-- Add backend and App-level regression coverage proving `/api/state` omits transcripts, session hydration restores the full transcript, and metadata snapshots do not clear an already-hydrated active session.
-
 ## SQLite persistence lacks file permission hardening and indefinite backup retention
 
 **Severity:** Medium - session history including agent output, user prompts, and captured file contents is readable by other local users on default Unix systems, and a second sensitive copy is kept indefinitely at a predictable path.
@@ -1931,28 +2462,259 @@ The new SQLite persistence path opens `~/.termal/termal.sqlite` via `rusqlite::C
 - Include all sessions whose in-memory state changed during the create (the created record plus any newly spawned hidden spares) in the `persist_created_session` call.
 - Or follow the delta-style write with a `persist_internal_locked` snapshot once the spare pool is settled.
 
-## Lazy hydration effect: missing retry guard, over-eager deps, unreconciled replace
+## Lazy hydration effect: missing retry guard and unreconciled replace
 
-**Severity:** Medium - the new hydration path has several bugs that will materialize once the backend starts emitting `messagesLoaded: false` sessions.
+**Severity:** Medium - the metadata-first hydration path still has two edge-case bugs around failed hydration and duplicate session materialization.
 
-Three distinct issues in and around the new `useEffect(... fetchSession ...)` in `ui/src/App.tsx`:
-1. The dep array includes `activeSession?.messages.length`, causing the effect to re-run on every SSE `textDelta` token for the active session. Today the body short-circuits via the hydrated-set, so no correctness issue â€” but the deps are a footgun for any future real work added to the effect.
-2. The async IIFE only guards against unmount. If the user switches away mid-fetch and the response's `session.id !== sessionId`, the code calls `requestActionRecoveryResyncRef.current()`. A transient server race can loop mismatch â†’ resync â†’ refetch â†’ mismatch.
-3. `adoptCreatedSessionResponse` (and `live-updates.ts`'s `sessionCreated` reducer) raw-replace an existing session without per-message identity preservation via `reconcileSession`. If SSE `sessionCreated` materializes the session before the API response lands (or vice versa), memoized `MessageCard` children see new identities and remount.
+Two distinct issues remain in and around the one-shot `fetchSession` hydration path:
+1. The async IIFE only guards against unmount. If the user switches away mid-fetch and the response's `session.id !== sessionId`, the code calls `requestActionRecoveryResyncRef.current()`. A transient server race can loop mismatch -> resync -> refetch -> mismatch.
+2. `adoptCreatedSessionResponse` (and `live-updates.ts`'s `sessionCreated` reducer) raw-replace an existing session without per-message identity preservation via `reconcileSession`. If SSE `sessionCreated` materializes the session before the API response lands (or vice versa), memoized `MessageCard` children see new identities and remount.
 
 **Current behavior:**
-- Deps: `activeSession?.id`, `activeSession?.messages.length`, `activeSession?.messagesLoaded`.
-- Mismatch branch triggers action-recovery resync without a "tried once" marker.
+- The hydration effect is correctly keyed only by `activeSession?.id` and `activeSession?.messagesLoaded`, but the mismatch branch still triggers action-recovery resync without a "tried once" marker.
 - Raw `[...previousSessions, created.session]` / `replaceSession(..., delta.session)` on the `existingIndex !== -1` branch.
 
 **Proposal:**
-- Drop `activeSession?.messages.length` from the dep array; comment the deliberate exclusion.
 - Add a `hydrationMismatchSessionIdsRef` (or count attempts) to avoid re-firing after one mismatch until an authoritative state event arrives.
 - Route the existing-session replace branch through `reconcileSession` (or a similar identity-preserving merge) so memoized children keep stable identity.
 
 
 ## Implementation Tasks
 
+- [ ] P2: Remove inline `expect(...)` inside `onDraftCommit` mock body:
+  `ui/src/panels/AgentSessionPanel.test.tsx:3464-3467` asserts
+  `expect(sessionId).toBe(session.id)` inside a jest mock function that
+  runs within an `act()` block. A failing assertion inside a mock can be
+  swallowed or surface as an uninformative React error rather than the
+  original expect-failure. The test already asserts
+  `expect(onDraftCommit).toHaveBeenCalledWith(session.id, ...)` externally
+  on line 3525, so the inline guard is redundant. Drop the inline `expect`.
+- [ ] P2: Loosen exact-pixel composer-height assertions:
+  `ui/src/panels/AgentSessionPanel.test.tsx:3473-3482, 3584-3597` assert
+  `toBe("96px")` / `toBe("124px")`. Both values depend on jsdom resolving
+  the textarea's `borderHeight` to `0` (CSS unloaded). A future
+  `computedStyle` polyfill or inline-border styled-jsx change flips the
+  assertions silently without signaling what broke. Derive expected from
+  constants (`${40 + 2 * 28}px`), use a permissive regex, or comment the
+  implicit jsdom assumption so future readers know the coupling.
+- [ ] P2: Broaden the composer-shrink mock predicate in `AgentSessionPanel.test.tsx`:
+  the "line is deleted" test at
+  `ui/src/panels/AgentSessionPanel.test.tsx:3584-3597` branches its
+  `scrollHeight` mock on `textarea.style.height !== "0px"`, coupling the
+  test to the production shrink-marker string. A refactor that swaps the
+  marker to `"auto"` / `"1px"` / sets `rows = 1` silently un-triggers the
+  mock branch. Broaden to
+  `style.height === "" || style.height === "auto" || style.height === "0px"`,
+  or drive the assertion off a production-exposed helper. At minimum, add
+  a brief comment explaining the dependency on production's exact shrink
+  marker.
+- [ ] P2: Extract a shared `createResizeObserverMock()` helper in
+  `AgentSessionPanel.test.tsx`:
+  this iteration added a 21st inline `ResizeObserverMock` class at
+  `ui/src/panels/AgentSessionPanel.test.tsx:1651-1653`. Pre-existing debt
+  (20 copies existed before this round), but each new test compounds it —
+  none of the 21 implementations handle `unobserve`, so a future production
+  change that relies on it would silently pass every test in the file.
+  Extract alongside the other harness utilities already factored out of this
+  file.
+- [ ] P2: Fix UTF-8 mojibake in `docs/architecture.md:230`:
+  the `state` vs `delta` contrast line ("**`delta`** ? incremental") has
+  a corrupted long-dash character. Pre-existing but re-rendered during
+  this round's docs edit — worth a sweep when the file is next touched.
+- [ ] P2: Extend `applyMetadataOnlySessionDelta` reducer coverage to the
+  five non-`messageCreated` delta branches:
+  `ui/src/live-updates.ts:168-177, 226-235, 277-286, 331-340, 385-394, 443-452`
+  now routes six delta types through the metadata-only policy when
+  `session.messagesLoaded === false`, but `ui/src/live-updates.test.ts:505-551`
+  only pins the `messageCreated` branch. A regression in `messageUpdated`,
+  `textDelta`, `textReplace`, `commandUpdate`, or `parallelAgentsUpdate`
+  would silently drop back to the "apply message content to empty transcript"
+  failure mode. Add `it.each` over the five remaining types asserting
+  `messagesLoaded` stays `false`, `messages` stays `[]`, and `messageCount`/
+  `preview`/`sessionMutationStamp` advance, with no `needsResync`.
+- [ ] P2: Harden summary-only delta handlers against malformed payloads:
+  `ui/src/live-updates.ts` at the six session-scoped branches forwards to
+  `applyMetadataOnlySessionDelta` without running the `delta.message.id ===
+  delta.messageId` guard, `isValidMessageIndex(delta.messageIndex)` guard,
+  or `messageIndex > messages.length` guard that the hydrated path uses. A
+  drifted delta silently advances `messageCount` and `sessionMutationStamp`
+  on summary sessions. Keep the minimal invariant guards (id match +
+  safe-integer + non-negative index) on the summary path too; on violation,
+  return `needsResync` to repair local state.
+- [ ] P2: Add `sessionCreated` reducer id-guard coverage:
+  `ui/src/live-updates.ts:144-161` has payload-id-mismatch rejection logic
+  for `sessionCreated`, but `ui/src/live-updates.test.ts` has no dedicated
+  tests. `messageUpdated` has explicit id-mismatch coverage; `messageCreated`
+  got coverage this iteration; `sessionCreated` is now the only id-guard
+  without unit tests. Add three cases mirroring the existing `messageUpdated`
+  id tests: no existing session (append), existing session replaced, and
+  `delta.session.id !== delta.sessionId` (needsResync).
+- [ ] P2: Close summary-mutation helper pattern duplication:
+  `src/session_messages.rs:50-104`, `src/codex_submissions.rs:80-118`,
+  `src/turn_dispatch.rs`, and the `remote_routes.rs::apply_remote_delta_event`
+  branches all re-derive the tuple `(message, message_index, message_count,
+  preview, status, session_mutation_stamp)` by hand. Any future field added
+  to a session-scoped `DeltaEvent` means N+ sites to edit. Extract
+  `fn commit_message_delta_locked(&mut inner, index, message_id)
+  -> DeltaEventFields` and migrate call sites in one commit. Non-urgent;
+  tracks maintenance debt.
+- [ ] P2: Cache `hasRenderableStreamingMarkdown` per message id:
+  `ui/src/message-cards.tsx:453-465` runs up to nine regex scans over the
+  full message text on every streaming render. Result is monotonic (once
+  true, stays true). Memoize via `useMemo([message.text])` or latch on
+  detection so regexes stop firing after the first positive. Hot path:
+  every `textDelta` triggers a re-render, which triggers the scan.
+- [ ] P2: Rename or restructure `#[cfg(test)] snapshot()`:
+  `src/state_accessors.rs:54-87` silently splits the `snapshot()` contract
+  between test builds (full transcripts) and production (summaries). Rename
+  the test-side helper to `full_snapshot_for_test()` so the intent is
+  explicit at every call site; or migrate the ~40 `state.snapshot().sessions
+  [...].messages` test call sites to read `state.inner.lock().sessions[...]`
+  directly so transcript-mutation assertions bypass the wire projection
+  entirely. Either fix closes the latent test-vs-prod divergence.
+- [ ] P2: Capture-at-send / reject-at-receive for hydration `fetchSession`:
+  `ui/src/app-live-state.ts:942-993` compares the incoming
+  `response.serverInstanceId` against `lastSeenServerInstanceIdRef.current`
+  at resolve time, not at send time. A server restart during an in-flight
+  hydration can let a stale pre-restart response slip past
+  `isServerInstanceMismatch`. Capture the ref value into
+  `sentAgainstInstanceId` at dispatch; short-circuit to
+  `requestActionRecoveryResyncRef.current()` on mismatch at resolve.
+- [ ] P2: Memoize `visibleSessionHydrationTargets` more aggressively:
+  `ui/src/App.tsx:536-559`'s `useMemo([sessionLookup, workspace.panes])`
+  loses reference equality because `sessionLookup` is rebuilt upstream each
+  render. The hydration effect in `app-live-state.ts` therefore runs its
+  body on most renders (the `hydratingSessionIdsRef` guard prevents
+  re-fetching, but the for-loop + `Map` + `flatMap` allocation runs each
+  time). Either memoize `sessionLookup` upstream or compute a structural
+  key from the visible pane ids + `messagesLoaded` flags.
+- [ ] P2: Document the `reconcileSummarySession` invariant:
+  `ui/src/session-reconcile.ts:125-176` silently overrides `next.messages`
+  with `previous.messages` when `messagesLoaded === false`. Correct per
+  Phase 2 design but undocumented. Add a 2-line header comment stating
+  "summary payloads carry `messages: []`; we preserve the
+  previously-hydrated transcript to avoid accidental truncation."
+- [ ] P2: Restore live-delta recovery visibility assertions:
+  `ui/src/App.live-state.watchdog.test.tsx` should assert that the recovered
+  assistant text is rendered after the SSE delta flush and remains rendered
+  after the stale fetch path resolves. Use a duplicate-tolerant assertion such as
+  `screen.getAllByText(...).length > 0`.
+- [ ] P2: Restore reconnect fallback applied-delta assertions:
+  `ui/src/backend-connection.test.tsx` should assert that the dispatched
+  session delta changes visible transcript, preview, or session-store state
+  while reconnect recovery remains active. This prevents fallback coverage from
+  passing when delta adoption silently does nothing.
+- [ ] P2: Add backend `message_count` wire coverage for streaming deltas:
+  subscribe to local delta events and drive representative `TextDelta`,
+  `TextReplace`, `CommandUpdate`, and `ParallelAgentsUpdate` mutations, then
+  assert the emitted `message_count` matches the expected transcript count.
+- [ ] P2: Migrate App-level delta fixtures to a typed `DeltaEvent` helper:
+  update `ui/src/App.live-state.deltas.test.tsx` fixtures so every
+  session-scoped delta includes required protocol fields such as `messageCount`,
+  preventing tests from dispatching impossible current-tree SSE payloads.
+- [ ] P2: Lock remote `MessageUpdated` stamp assertion to `record.mutation_stamp`:
+  `src/tests/remote.rs:710-797` asserts the delta's `session_mutation_stamp`
+  matches the wire session's stamp via the snapshot. Correct today (snapshot
+  helper always builds the wire stamp from `record.mutation_stamp`) but
+  transitively — a future change to `snapshot_from_inner` could break the
+  real contract without failing this test. Look up the mutation stamp
+  directly on `inner.sessions[index]` and compare to the delta to pin the
+  contract to the record state. This iteration's three new/strengthened
+  remote tests also use the transitive form (`src/tests/remote.rs:1753,
+  1907, 2023`), so this refactor should cover all five sites.
+- [ ] P2: Extend `messageUpdated` reducer coverage to the three non-approval
+  `Message` payload shapes:
+  `ui/src/live-updates.test.ts` exercises the `applyDeltaToSessions`
+  branch for `messageUpdated` only with the `approval` payload. The Rust
+  emitter publishes `MessageUpdated` for four shapes (approval, user-input,
+  MCP elicitation, Codex app-request) — the other three are covered on the
+  Rust route-test side (`src/tests/review.rs:782-1033`) but a serde
+  round-trip regression on `userInputRequest`, `mcpElicitationRequest`, or
+  `codexAppRequest` deserialization in the TS reducer would not be caught.
+  Add `it.each(resolvedInteractionBoundaryCases)` over a `messageUpdated`
+  scenario asserting `preview`, `status`, `messageCount`,
+  `sessionMutationStamp`, and the resulting message for each shape.
+- [ ] P2: Add a frontend test for `messageCreated` payload id-mismatch:
+  `ui/src/live-updates.ts:128` rejects `delta.messageId !== delta.message.id`
+  with `needsResync`. The symmetric `messageUpdated` case has a test at
+  `ui/src/live-updates.test.ts:661` (`"requests a resync when a whole-message
+  update payload id mismatches the event id"`), but `messageCreated` now
+  lacks the matching rejection test even though the guard exists. Clone the
+  `messageUpdated` variant to close the parity.
+- [ ] P2: Pin interaction-request preview helper outputs independently:
+  the route tests in `src/tests/review.rs` compute expected preview strings
+  with the same production helpers used by the route path, so a broken
+  helper can make expected and actual values drift together. Either replace
+  those expectations with literals at each route-test call site, or add
+  direct unit tests for `user_input_request_preview_text`,
+  `mcp_elicitation_request_preview_text`, and
+  `codex_app_request_preview_text`.
+- [ ] P2: Document `apply_remote_created_text_message_at`'s inert
+  `message_count` parameter:
+  `src/tests/remote.rs:1630-1665`'s helper takes `message_count: u32` but
+  the value is effectively informational — the remote router recomputes
+  the count via `session_message_count(record)` before publishing the
+  localized delta. Callers still pass a plausible value (`:1681` passes
+  `2` for the second seed), which reads like an assertion contract but
+  isn't. Add a `///` doc comment on the parameter noting that the value
+  is ignored on the emitter side and only affects the incoming-delta
+  JSON, so future readers don't mistake it for load-bearing.
+- [ ] P2: Decode typed `StateResponse` / `SessionResponse` in
+  `snapshot_bearing_routes_include_message_count`:
+  `src/tests/http_routes.rs:107-181` deserializes responses into
+  `serde_json::Value` and looks up `sessions[...]["messageCount"]` via
+  string keys, missing the primary regression class this test is supposed
+  to pin (field-rename drift on `StateResponse` / `SessionResponse`).
+  Deserialize into the typed structs instead so serde renames fail at
+  compile time rather than silently at runtime.
+- [ ] P2: Raise or split `recv_timeout` in
+  `codex_thread_action_routes_update_session_state`:
+  `src/tests/http_routes.rs:510` drives three sequential HTTP calls
+  through a single spawned thread that calls
+  `recv_timeout(Duration::from_secs(1))` between iterations. Under load
+  a slow first archive round-trip could blow the timeout and manifest as
+  "expected shared Codex JSON-RPC request" rather than a clear timing
+  failure. Bump to 5s (matching other SSE helpers) or split the three
+  actions into three separate tests.
+- [ ] P2: Add `debug_assert_eq!` in `wire_session_from_record` pinning
+  that the recomputed `message_count` matches `record.session.messages.len()`:
+  `src/state_accessors.rs::wire_session_from_record` recomputes the wire
+  count via `session_message_count(record)` on every projection, which
+  means the in-memory `record.session.message_count` field is a cache
+  that's always overwritten. If a future code path ever reads
+  `record.session.message_count` directly without going through this
+  projection, the value can silently drift from `messages.len()`.
+  Add a `debug_assert_eq!(session.message_count as usize, session.messages.len())`
+  after the recompute so tests surface any invariant violation. A larger
+  refactor (drop the field from the in-memory `Session`, only set it on a
+  dedicated wire DTO) is Phase 2 material.
+- [ ] P2: Extract `test_remote_config()` helper in `src/tests/remote.rs`
+  (actively regressing — **total now 46 duplicate literals**, +10 this
+  iteration at `src/tests/remote.rs:1670, 1773, 1830, 1892, 1960, 2052,
+  2172, 2234, 2292, 2353, 2421`). Each new `RemoteConfig` field
+  (e.g. a future transport flag) requires a 46-site sweep. Extract a
+  `fn test_remote_config() -> RemoteConfig` next to
+  `seed_remote_proxy_session_for_delta_test` and fold at least the 10 new
+  literals in one commit; older sites can follow.
+- [ ] P2: Migrate `cancel_pending_interaction_messages` off `commit_locked`
+  (Phase 1 outstanding gap):
+  `src/turn_lifecycle.rs:581` still calls `commit_locked` for interaction
+  cancellation, which publishes a full-state snapshot instead of the narrow
+  delta the plan calls for (`DeltaEvent::MessagesCancelled { session_id,
+  message_ids, revision, session_mutation_stamp }`, or a narrower
+  generalization). Until migrated, cancellation remains the only interaction
+  path still producing full-state SSE fan-outs. Leave a
+  `// TODO(metadata-first-phase1): replace commit_locked with a MessagesCancelled delta`
+  breadcrumb above the call so the gap surfaces in future grep sweeps.
+- [ ] P2: Audit publish-vs-lock ordering for the remaining
+  `commit_persisted_delta_locked` sites:
+  `commit_interaction_message_update` and the remote `MessageUpdated` replay
+  path now publish under the state lock, but older persisted-delta paths in
+  `session_messages.rs` still commit under the lock and publish afterward. A
+  concurrent reader can observe the revision bump via `/api/state` before the
+  matching delta arrives on SSE. Either move the remaining `publish_delta`
+  calls into the locked blocks or explicitly document the "publish after
+  commit" ordering as the project contract.
 - [ ] P2: Extend `live-updates.test.ts` stamp-propagation coverage to the four untested delta branches:
   existing test only covers `messageCreated`. Production (`live-updates.ts:157-336`)
   adds `resolveSessionMutationStamp(...)` to `textDelta`, `textReplace`,

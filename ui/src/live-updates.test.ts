@@ -29,8 +29,14 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
 
 const resolvedInteractionBoundaryCases: {
   label: string;
-  pending: UserInputRequestMessage | McpElicitationRequestMessage | CodexAppRequestMessage;
-  resolved: UserInputRequestMessage | McpElicitationRequestMessage | CodexAppRequestMessage;
+  pending:
+    | UserInputRequestMessage
+    | McpElicitationRequestMessage
+    | CodexAppRequestMessage;
+  resolved:
+    | UserInputRequestMessage
+    | McpElicitationRequestMessage
+    | CodexAppRequestMessage;
 }[] = [
   {
     label: "user input request",
@@ -400,7 +406,9 @@ describe("session transport helpers", () => {
 
     pruneLiveTransportActivitySessions(liveTransportActivityAtBySessionId, []);
 
-    expect(Array.from(liveTransportActivityAtBySessionId.entries())).toEqual([]);
+    expect(Array.from(liveTransportActivityAtBySessionId.entries())).toEqual(
+      [],
+    );
   });
 
   it("does nothing when transport activity is already empty", () => {
@@ -410,9 +418,10 @@ describe("session transport helpers", () => {
       makeSession("session-1"),
     ]);
 
-    expect(Array.from(liveTransportActivityAtBySessionId.entries())).toEqual([]);
+    expect(Array.from(liveTransportActivityAtBySessionId.entries())).toEqual(
+      [],
+    );
   });
-
 });
 
 describe("applyDeltaToSessions", () => {
@@ -424,6 +433,7 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
       messageId: "message-1",
       messageIndex: 0,
+      messageCount: 1,
       message: {
         id: "message-1",
         type: "text",
@@ -444,6 +454,7 @@ describe("applyDeltaToSessions", () => {
     }
 
     expect(result.sessions[0].status).toBe("active");
+    expect(result.sessions[0].messageCount).toBe(1);
     expect(result.sessions[0].sessionMutationStamp).toBe(101);
     expect(result.sessions[0].messages).toHaveLength(1);
     expect(result.sessions[0].messages[0]).toMatchObject({
@@ -451,6 +462,90 @@ describe("applyDeltaToSessions", () => {
       type: "text",
       text: "",
     });
+  });
+
+  it("removes a queued prompt when its user message is created", () => {
+    const sessions = [
+      makeSession("session-a", {
+        pendingPrompts: [
+          {
+            id: "message-queued-1",
+            timestamp: "10:00",
+            text: "Queued prompt",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 1,
+      sessionId: "session-a",
+      messageId: "message-queued-1",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "message-queued-1",
+        type: "text",
+        timestamp: "10:00",
+        author: "you",
+        text: "Queued prompt",
+      },
+      preview: "Queued prompt",
+      status: "active",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+    expect(result.sessions[0].pendingPrompts).toBeUndefined();
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
+      "message-queued-1",
+    ]);
+  });
+
+  it("updates metadata for unhydrated summaries without forcing a state resync", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 0,
+        messages: [],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 1,
+      sessionId: "session-a",
+      messageId: "message-1",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "different-payload-id",
+        type: "text",
+        timestamp: "10:00",
+        author: "assistant",
+        text: "Dropped until hydration",
+      },
+      preview: "Waiting for activity.",
+      status: "active",
+      sessionMutationStamp: 101,
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta metadata to apply");
+    }
+
+    expect(result.sessions[0].messagesLoaded).toBe(false);
+    expect(result.sessions[0].messages).toEqual([]);
+    expect(result.sessions[0].status).toBe("active");
+    expect(result.sessions[0].preview).toBe("Waiting for activity.");
+    expect(result.sessions[0].messageCount).toBe(1);
+    expect(result.sessions[0].sessionMutationStamp).toBe(101);
   });
 
   it("inserts created messages at the provided index", () => {
@@ -473,6 +568,7 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
       messageId: "message-1",
       messageIndex: 0,
+      messageCount: 2,
       message: {
         id: "message-1",
         type: "subagentResult",
@@ -492,7 +588,376 @@ describe("applyDeltaToSessions", () => {
       throw new Error("expected delta to apply");
     }
 
-    expect(result.sessions[0].messages.map((message) => message.id)).toEqual(["message-1", "message-2"]);
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
+      "message-1",
+      "message-2",
+    ]);
+  });
+
+  it("applies whole-message updates for resolved interaction requests", () => {
+    const sessions = [
+      makeSession("session-a", {
+        status: "approval",
+        preview: "Approval needed",
+        messages: [
+          {
+            id: "approval-1",
+            type: "approval",
+            timestamp: "10:00",
+            author: "assistant",
+            title: "Run command?",
+            command: "cargo check",
+            detail: "Allow this command",
+            decision: "pending",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageUpdated",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "approval-1",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "approval-1",
+        type: "approval",
+        timestamp: "10:00",
+        author: "assistant",
+        title: "Run command?",
+        command: "cargo check",
+        detail: "Allow this command",
+        decision: "accepted",
+      },
+      preview: "Approved",
+      status: "active",
+      sessionMutationStamp: 202,
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+
+    expect(result.sessions[0].status).toBe("active");
+    expect(result.sessions[0].preview).toBe("Approved");
+    expect(result.sessions[0].messageCount).toBe(1);
+    expect(result.sessions[0].sessionMutationStamp).toBe(202);
+    expect(result.sessions[0].messages[0]).toMatchObject({
+      id: "approval-1",
+      type: "approval",
+      decision: "accepted",
+    });
+  });
+
+  it("requests a resync when a whole-message update target is missing", () => {
+    const sessions = [makeSession("session-a")];
+    const delta: DeltaEvent = {
+      type: "messageUpdated",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "missing-message",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "missing-message",
+        type: "text",
+        timestamp: "10:00",
+        author: "assistant",
+        text: "Final",
+      },
+      preview: "Final",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("applies whole-message updates when the message exists at a different index", () => {
+    const sessions = [
+      makeSession("session-a", {
+        preview: "Pending approval",
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Earlier message",
+          },
+          {
+            id: "approval-1",
+            type: "approval",
+            timestamp: "10:01",
+            author: "assistant",
+            title: "Run command?",
+            command: "cargo check",
+            detail: "Allow this command",
+            decision: "pending",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageUpdated",
+      revision: 4,
+      sessionId: "session-a",
+      messageId: "approval-1",
+      messageIndex: 0,
+      messageCount: 2,
+      message: {
+        id: "approval-1",
+        type: "approval",
+        timestamp: "10:01",
+        author: "assistant",
+        title: "Run command?",
+        command: "cargo check",
+        detail: "Allow this command",
+        decision: "accepted",
+      },
+      preview: "Approved",
+      status: "active",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
+      "message-1",
+      "approval-1",
+    ]);
+    expect(result.sessions[0].messages[1]).toMatchObject({
+      id: "approval-1",
+      type: "approval",
+      decision: "accepted",
+    });
+  });
+
+  it("requests a resync when a whole-message update payload id mismatches the event id", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "approval-1",
+            type: "approval",
+            timestamp: "10:00",
+            author: "assistant",
+            title: "Run command?",
+            command: "cargo check",
+            detail: "Allow this command",
+            decision: "pending",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageUpdated",
+      revision: 4,
+      sessionId: "session-a",
+      messageId: "approval-1",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "different-message",
+        type: "text",
+        timestamp: "10:00",
+        author: "assistant",
+        text: "Wrong payload",
+      },
+      preview: "Wrong payload",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("requests a resync when a whole-message update carries a negative index", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "approval-1",
+            type: "approval",
+            timestamp: "10:00",
+            author: "assistant",
+            title: "Run command?",
+            command: "cargo check",
+            detail: "Allow this command",
+            decision: "pending",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageUpdated",
+      revision: 4,
+      sessionId: "session-a",
+      messageId: "approval-1",
+      messageIndex: -1,
+      messageCount: 1,
+      message: {
+        id: "approval-1",
+        type: "approval",
+        timestamp: "10:00",
+        author: "assistant",
+        title: "Run command?",
+        command: "cargo check",
+        detail: "Allow this command",
+        decision: "accepted",
+      },
+      preview: "Approved",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("requests a resync when a whole-message update carries a non-integer index", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "approval-1",
+            type: "approval",
+            timestamp: "10:00",
+            author: "assistant",
+            title: "Run command?",
+            command: "cargo check",
+            detail: "Allow this command",
+            decision: "pending",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageUpdated",
+      revision: 4,
+      sessionId: "session-a",
+      messageId: "approval-1",
+      messageIndex: 0.5,
+      messageCount: 1,
+      message: {
+        id: "approval-1",
+        type: "approval",
+        timestamp: "10:00",
+        author: "assistant",
+        title: "Run command?",
+        command: "cargo check",
+        detail: "Allow this command",
+        decision: "accepted",
+      },
+      preview: "Approved",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("requests a resync when a whole-message update carries an unsafe integer index", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "approval-1",
+            type: "approval",
+            timestamp: "10:00",
+            author: "assistant",
+            title: "Run command?",
+            command: "cargo check",
+            detail: "Allow this command",
+            decision: "pending",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageUpdated",
+      revision: 4,
+      sessionId: "session-a",
+      messageId: "approval-1",
+      messageIndex: Number.MAX_SAFE_INTEGER + 1,
+      messageCount: 1,
+      message: {
+        id: "approval-1",
+        type: "approval",
+        timestamp: "10:00",
+        author: "assistant",
+        title: "Run command?",
+        command: "cargo check",
+        detail: "Allow this command",
+        decision: "accepted",
+      },
+      preview: "Approved",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("preserves the prior session stamp when a whole-message update omits it", () => {
+    const sessions = [
+      makeSession("session-a", {
+        sessionMutationStamp: 777,
+        messages: [
+          {
+            id: "approval-1",
+            type: "approval",
+            timestamp: "10:00",
+            author: "assistant",
+            title: "Run command?",
+            command: "cargo check",
+            detail: "Allow this command",
+            decision: "pending",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageUpdated",
+      revision: 4,
+      sessionId: "session-a",
+      messageId: "approval-1",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "approval-1",
+        type: "approval",
+        timestamp: "10:00",
+        author: "assistant",
+        title: "Run command?",
+        command: "cargo check",
+        detail: "Allow this command",
+        decision: "accepted",
+      },
+      preview: "Approved",
+      status: "active",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+
+    expect(result.sessions[0].sessionMutationStamp).toBe(777);
   });
 
   it("applies text deltas to an existing message", () => {
@@ -516,6 +981,7 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
       messageId: "message-1",
       messageIndex: 0,
+      messageCount: 1,
       delta: " there",
       preview: "Hi there",
     };
@@ -528,6 +994,7 @@ describe("applyDeltaToSessions", () => {
     }
 
     expect(result.sessions[0].preview).toBe("Hi there");
+    expect(result.sessions[0].messageCount).toBe(1);
     expect(result.sessions[0].messages[0]).toMatchObject({
       id: "message-1",
       type: "text",
@@ -557,6 +1024,7 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
       messageId: "message-1",
       messageIndex: 0,
+      messageCount: 1,
       text: "Final answer",
       preview: "Final answer",
     };
@@ -569,6 +1037,7 @@ describe("applyDeltaToSessions", () => {
     }
 
     expect(result.sessions[0].preview).toBe("Final answer");
+    expect(result.sessions[0].messageCount).toBe(1);
     expect(result.sessions[0].messages[0]).toMatchObject({
       id: "message-1",
       type: "text",
@@ -576,7 +1045,6 @@ describe("applyDeltaToSessions", () => {
       timestamp: "10:00",
     });
   });
-
 
   it("applies text deltas when the message exists at a different index", () => {
     const sessions = [
@@ -607,6 +1075,7 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
       messageId: "message-1",
       messageIndex: 0,
+      messageCount: 2,
       delta: " there",
       preview: "Hi there",
     };
@@ -633,10 +1102,13 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
       messageId: "missing-message",
       messageIndex: 0,
+      messageCount: 1,
       delta: "hello",
     };
 
-    expect(applyDeltaToSessions(sessions, delta)).toEqual({ kind: "needsResync" });
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
   });
 
   it("preserves command timestamps while updating an existing command message", () => {
@@ -662,6 +1134,7 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
       messageId: "command-1",
       messageIndex: 0,
+      messageCount: 1,
       command: "pwd",
       output: "/tmp",
       status: "success",
@@ -676,6 +1149,7 @@ describe("applyDeltaToSessions", () => {
     }
 
     expect(result.sessions[0].preview).toBe("/tmp");
+    expect(result.sessions[0].messageCount).toBe(1);
     expect(result.sessions[0].messages[0]).toMatchObject({
       id: "command-1",
       type: "command",
@@ -715,6 +1189,7 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
       messageId: "command-1",
       messageIndex: 0,
+      messageCount: 2,
       command: "pwd",
       output: "/tmp",
       status: "success",
@@ -745,13 +1220,16 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
       messageId: "command-1",
       messageIndex: 0,
+      messageCount: 1,
       command: "pwd",
       output: "",
       status: "running",
       preview: "Running pwd",
     };
 
-    expect(applyDeltaToSessions(sessions, delta)).toEqual({ kind: "needsResync" });
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
   });
 
   it("applies parallel-agent deltas when the message exists at a different index", () => {
@@ -788,6 +1266,7 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
       messageId: "parallel-1",
       messageIndex: 0,
+      messageCount: 2,
       agents: [
         {
           id: "reviewer",
@@ -807,6 +1286,7 @@ describe("applyDeltaToSessions", () => {
     }
 
     expect(result.sessions[0].preview).toBe("Running 1 agent");
+    expect(result.sessions[0].messageCount).toBe(2);
     expect(result.sessions[0].messages[1]).toMatchObject({
       id: "parallel-1",
       type: "parallelAgents",
@@ -830,6 +1310,7 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
       messageId: "parallel-1",
       messageIndex: 0,
+      messageCount: 1,
       agents: [
         {
           id: "reviewer",
@@ -840,7 +1321,9 @@ describe("applyDeltaToSessions", () => {
       preview: "Running 1 agent",
     };
 
-    expect(applyDeltaToSessions(sessions, delta)).toEqual({ kind: "needsResync" });
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
   });
 
   it("reorders an existing message when a replayed messageCreated arrives with the correct index", () => {
@@ -871,6 +1354,7 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
       messageId: "message-1",
       messageIndex: 0,
+      messageCount: 2,
       message: {
         id: "message-1",
         type: "subagentResult",
@@ -890,8 +1374,177 @@ describe("applyDeltaToSessions", () => {
       throw new Error("expected delta to apply");
     }
 
-    expect(result.sessions[0].messages.map((message) => message.id)).toEqual(["message-1", "message-2"]);
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
+      "message-1",
+      "message-2",
+    ]);
   });
+
+  it("moves an existing messageCreated replay forward to the supplied index", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "message-1",
+            type: "subagentResult",
+            timestamp: "10:00",
+            author: "assistant",
+            title: "Subagent completed",
+            summary: "Hidden thinking",
+          },
+          {
+            id: "message-2",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Final answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 5,
+      sessionId: "session-a",
+      messageId: "message-1",
+      messageIndex: 1,
+      messageCount: 2,
+      message: {
+        id: "message-1",
+        type: "subagentResult",
+        timestamp: "10:00",
+        author: "assistant",
+        title: "Subagent completed",
+        summary: "Hidden thinking",
+      },
+      preview: "",
+      status: "active",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
+      "message-2",
+      "message-1",
+    ]);
+  });
+
+  it("requests a resync when a message create carries a negative index", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Existing",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 5,
+      sessionId: "session-a",
+      messageId: "message-2",
+      messageIndex: -1,
+      messageCount: 2,
+      message: {
+        id: "message-2",
+        type: "text",
+        timestamp: "10:01",
+        author: "assistant",
+        text: "Created",
+      },
+      preview: "Created",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("requests a resync when a message create carries a non-integer index", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Existing",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 5,
+      sessionId: "session-a",
+      messageId: "message-2",
+      messageIndex: 0.5,
+      messageCount: 2,
+      message: {
+        id: "message-2",
+        type: "text",
+        timestamp: "10:01",
+        author: "assistant",
+        text: "Created",
+      },
+      preview: "Created",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("requests a resync when a message create carries an unsafe integer index", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Existing",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 5,
+      sessionId: "session-a",
+      messageId: "message-2",
+      messageIndex: Number.MAX_SAFE_INTEGER + 1,
+      messageCount: 2,
+      message: {
+        id: "message-2",
+        type: "text",
+        timestamp: "10:01",
+        author: "assistant",
+        text: "Created",
+      },
+      preview: "Created",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
   it("returns needsResync for an unsupported session delta payload", () => {
     const sessions = [makeSession("session-a")];
     const delta = {
@@ -900,6 +1553,8 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
     } as unknown as Parameters<typeof applyDeltaToSessions>[1];
 
-    expect(applyDeltaToSessions(sessions, delta)).toEqual({ kind: "needsResync" });
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
   });
 });

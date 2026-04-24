@@ -1,0 +1,80 @@
+{
+  "generatedAt": "2026-04-23T20:23:15.8940000-07:00",
+  "phase": "metadata-first-state-phase-0",
+  "smokeCommand": "node scripts/perf/prompt-responsiveness-smoke.js",
+  "smokeStatus": "captured_threshold_failures",
+  "smokeFailure": {
+    "scenario": "prompt-responsiveness-smoke",
+    "exitCode": 1,
+    "error": "Capture succeeded, but thresholds failed. This is the authoritative Phase 0 baseline."
+  },
+  "capturedArtifacts": {
+    "authoritative": true,
+    "sampledAt": "2026-04-24T03:23:15.894Z",
+    "activeCodexTyping": {
+      "path": ".tmp/active-codex-typing-profile.json",
+      "sampledAt": "2026-04-24T03:23:13.487Z",
+      "setup": {
+        "bodyHasCodexWorking": true,
+        "bodyHasWaitingForChunk": true,
+        "textareaCount": 1
+      },
+      "summary": {
+        "keystrokes": 17,
+        "averageNextFrameDelayMs": 28.69,
+        "maxNextFrameDelayMs": 384.26,
+        "keystrokesOver16Ms": 3,
+        "keystrokesOver32Ms": 2
+      },
+      "metricsDelta": {
+        "TaskDuration": 3.952,
+        "ScriptDuration": 0.482,
+        "LayoutDuration": 0.016,
+        "RecalcStyleDuration": 0.024
+      },
+      "topFrames": [
+        { "functionName": "handleStateEvent", "url": "src/app-live-state.ts", "line": 1085, "selfMs": 281.0 },
+        { "functionName": "garbage collector", "url": "(no url)", "line": 0, "selfMs": 80.8 },
+        { "functionName": "jsxDEV", "url": "react_jsx-dev-runtime", "line": 605, "selfMs": 18.5 },
+        { "functionName": "diffProperties", "url": "chunk-KRRNBJ34.js", "line": 7650, "selfMs": 9.3 },
+        { "functionName": "anonymous", "url": "src/session-reconcile.ts", "line": 114, "selfMs": 9.1 }
+      ],
+      "thresholdFailures": [
+        "average next-frame delay 28.69ms exceeds 20ms",
+        "worst next-frame delay 384.26ms exceeds 40ms",
+        "TaskDuration delta 3.952s exceeds 0.8s",
+        "keystrokes over 32ms (2) exceed 0"
+      ]
+    },
+    "firstKeyAfterTabSwitch": {
+      "path": ".tmp/termal-first-key-after-tab-switch.json",
+      "sampledAt": "2026-04-24T03:23:15.881Z",
+      "summary": {
+        "nextFrameDelay": 4.200000071548857,
+        "sinceSwitchMs": 239.09999990463257,
+        "valueLength": 1
+      },
+      "metricsDelta": {
+        "TaskDuration": 1.935,
+        "ScriptDuration": 0.701,
+        "LayoutDuration": 0.021,
+        "RecalcStyleDuration": 0.017
+      },
+      "topFrames": [
+        { "functionName": "handleStateEvent", "url": "src/app-live-state.ts", "line": 1085, "selfMs": 459.7 },
+        { "functionName": "garbage collector", "url": "(no url)", "line": 0, "selfMs": 44.9 },
+        { "functionName": "reconcileMessages", "url": "src/session-reconcile.ts", "line": 74, "selfMs": 38.5 },
+        { "functionName": "mark", "url": "src/app-live-state.ts", "line": 69, "selfMs": 21.5 },
+        { "functionName": "reconcileSession", "url": "src/session-reconcile.ts", "line": 27, "selfMs": 16.7 }
+      ],
+      "thresholdFailures": [
+        "TaskDuration delta 1.935s exceeds 0.9s"
+      ]
+    }
+  },
+  "rerunPrerequisite": {
+    "chromeCommand": "\"C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe\" --remote-debugging-port=9222 --user-data-dir=\"%TEMP%\\\\chrome-profile-stable\"",
+    "termalPage": "A production/Vite preview page must be open at http://127.0.0.1:4173 with a visible active Codex tab.",
+    "lastAttempt": "Ran successfully against http://127.0.0.1:4173/?workspace=workspace-aaa32351-3b17-4224-8441-b0a43c787637 with visible Codex tab `Codex 9772`."
+  }
+}

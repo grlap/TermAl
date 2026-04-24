@@ -871,7 +871,7 @@ describe("App scroll behaviour", () => {
     expect(resolveSettledScrollMinimumAttempts(0)).toBe(0);
   });
 
-  it("keeps the new-response button scroll correction alive for the explicit minAttempts floor", async () => {
+  it("jumps the new-response button to the virtualized bottom without settled-scroll spam", async () => {
     await withSuppressedActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -915,15 +915,13 @@ describe("App scroll behaviour", () => {
                 projectId: "project-termal",
                 workdir: "/projects/termal",
                 preview: "Fresh assistant response.",
-                messages: [
-                  {
-                    id: "message-assistant-1",
-                    type: "text",
-                    timestamp: "10:01",
-                    author: "assistant",
-                    text: "Fresh assistant response.",
-                  },
-                ],
+                messages: Array.from({ length: 90 }, (_, index) => ({
+                  id: `message-assistant-${index + 1}`,
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: `Fresh assistant response ${index + 1}.`,
+                })),
               }),
             ],
           });
@@ -937,13 +935,8 @@ describe("App scroll behaviour", () => {
             await settleAsyncUi();
           }
 
-          const callsAtBottom = filterScrollToCallsAt(
-            scrollToMock,
-            800,
-            "auto",
-          );
-          expect(callsAtBottom.length).toBeGreaterThanOrEqual(8);
-          expect(callsAtBottom.length).toBeLessThan(60);
+          expect(messageStack.scrollTop).toBe(800);
+          expect(filterScrollToCallsAt(scrollToMock, 800, "auto")).toEqual([]);
         } finally {
           teardown();
         }

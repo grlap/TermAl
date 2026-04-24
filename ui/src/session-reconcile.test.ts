@@ -220,6 +220,138 @@ describe("reconcileSessions", () => {
     });
   });
 
+  it("marks hydrated messages stale when a metadata-only summary reports a higher message count", () => {
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: true,
+        preview: "Old preview",
+        messageCount: 1,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Loaded transcript",
+          },
+        ],
+      }),
+    ];
+
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        preview: "New preview",
+        status: "active",
+        messageCount: 2,
+        messages: [],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0].messagesLoaded).toBe(false);
+    expect(merged[0].preview).toBe("New preview");
+    expect(merged[0].status).toBe("active");
+    expect(merged[0].messageCount).toBe(2);
+    expect(merged[0].messages).toBe(previous[0].messages);
+  });
+
+  it("preserves hydrated messages when a metadata-only session summary has no count gap", () => {
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: true,
+        preview: "Old preview",
+        messageCount: 1,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Loaded transcript",
+          },
+        ],
+      }),
+    ];
+
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        preview: "New preview",
+        status: "active",
+        messageCount: 1,
+        messages: [],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0].messagesLoaded).toBe(true);
+    expect(merged[0].preview).toBe("New preview");
+    expect(merged[0].status).toBe("active");
+    expect(merged[0].messageCount).toBe(1);
+    expect(merged[0].messages).toBe(previous[0].messages);
+  });
+
+  it("marks hydrated messages stale when a metadata-only summary reports a newer mutation stamp", () => {
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: true,
+        preview: "Old preview",
+        messageCount: 1,
+        sessionMutationStamp: 10,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Loaded transcript before delayed delta.",
+          },
+        ],
+      }),
+    ];
+
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        preview: "Preview from delayed delta.",
+        status: "active",
+        messageCount: 1,
+        sessionMutationStamp: 11,
+        messages: [],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0].messagesLoaded).toBe(false);
+    expect(merged[0].preview).toBe("Preview from delayed delta.");
+    expect(merged[0].messageCount).toBe(1);
+    expect(merged[0].sessionMutationStamp).toBe(11);
+    expect(merged[0].messages).toBe(previous[0].messages);
+  });
+
+  it("keeps new metadata-only session summaries unhydrated", () => {
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 3,
+        messages: [],
+      }),
+    ];
+
+    const merged = reconcileSessions([], next);
+
+    expect(merged[0].messagesLoaded).toBe(false);
+    expect(merged[0].messageCount).toBe(3);
+    expect(merged[0].messages).toEqual([]);
+  });
+
   it("reuses unchanged messages when only the streaming tail message changed", () => {
     const previous = [
       makeSession("session-a", {

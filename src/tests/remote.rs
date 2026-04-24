@@ -1584,6 +1584,1022 @@ fn remote_orchestrators_updated_delta_rolls_back_proxy_sessions_when_localizatio
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+fn seed_remote_proxy_session_for_delta_test(state: &AppState, remote: &RemoteConfig) -> String {
+    let local_project_id = create_test_remote_project(
+        state,
+        remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let local_session_id = upsert_remote_proxy_session_record(
+        &mut inner,
+        &remote.id,
+        &remote_session,
+        Some(local_project_id),
+    );
+    state
+        .commit_locked(&mut inner)
+        .expect("remote proxy session should persist");
+    local_session_id
+}
+
+fn remote_text_message(message_id: &str, text: &str) -> Message {
+    Message::Text {
+        attachments: Vec::new(),
+        id: message_id.to_owned(),
+        timestamp: "2026-04-05 10:00:00".to_owned(),
+        author: Author::Assistant,
+        text: text.to_owned(),
+        expanded_text: None,
+    }
+}
+
+fn apply_remote_created_text_message_at(
+    state: &AppState,
+    remote_id: &str,
+    revision: u64,
+    message_id: &str,
+    message_index: usize,
+    message_count: u32,
+    text: &str,
+) {
+    state
+        .apply_remote_delta_event(
+            remote_id,
+            DeltaEvent::MessageCreated {
+                revision,
+                session_id: "remote-session-1".to_owned(),
+                message_id: message_id.to_owned(),
+                message_index,
+                message_count,
+                message: remote_text_message(message_id, text),
+                preview: text.to_owned(),
+                status: SessionStatus::Active,
+                session_mutation_stamp: None,
+            },
+        )
+        .expect("remote message create delta should apply");
+}
+
+fn apply_remote_created_text_message(
+    state: &AppState,
+    remote_id: &str,
+    revision: u64,
+    message_id: &str,
+    text: &str,
+) {
+    apply_remote_created_text_message_at(state, remote_id, revision, message_id, 0, 1, text);
+}
+
+#[test]
+fn remote_summary_state_snapshot_preserves_existing_proxy_transcript() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    apply_remote_created_text_message(
+        &state,
+        &remote.id,
+        2,
+        "message-1",
+        "Hydrated remote transcript.",
+    );
+
+    let mut remote_state = state.snapshot();
+    remote_state.revision = 3;
+    let mut remote_session = remote_state
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .cloned()
+        .expect("local proxy should be present in snapshot");
+    remote_session.id = "remote-session-1".to_owned();
+    remote_session.preview = "Summary-only remote update.".to_owned();
+    remote_session.messages.clear();
+    remote_session.messages_loaded = false;
+    remote_state.sessions = vec![remote_session];
+
+    state
+        .apply_remote_state_snapshot(&remote.id, remote_state)
+        .expect("summary remote snapshot should apply");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&local_session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("local proxy should remain");
+    assert_eq!(record.session.preview, "Summary-only remote update.");
+    assert!(record.session.messages_loaded);
+    assert_eq!(record.session.messages.len(), 1);
+    assert_eq!(record.session.messages[0].id(), "message-1");
+    assert_eq!(record.message_positions.get("message-1").copied(), Some(0));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_message_created_delta_replaces_and_reorders_existing_message() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    apply_remote_created_text_message(&state, &remote.id, 2, "message-1", "First remote message.");
+    apply_remote_created_text_message_at(&state, &remote.id, 3, "message-2", 1, 2, "Second draft.");
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::MessageCreated {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "message-2".to_owned(),
+                message_index: 0,
+                message_count: 2,
+                message: remote_text_message("message-2", "Second final."),
+                preview: "Second final.".to_owned(),
+                status: SessionStatus::Idle,
+                session_mutation_stamp: None,
+            },
+        )
+        .expect("remote message create replay should replace and reorder by id");
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("localized remote session should exist");
+    assert_eq!(session.preview, "Second final.");
+    assert_eq!(session.status, SessionStatus::Idle);
+    let message_ids: Vec<_> = session
+        .messages
+        .iter()
+        .map(|message| message.id().to_owned())
+        .collect();
+    assert_eq!(message_ids, vec!["message-2", "message-1"]);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Second final."
+    ));
+    assert!(matches!(
+        session.messages.get(1),
+        Some(Message::Text { text, .. }) if text == "First remote message."
+    ));
+
+    let delta: DeltaEvent = serde_json::from_str(
+        &delta_receiver
+            .try_recv()
+            .expect("remote message create replay should publish a localized delta"),
+    )
+    .expect("message create delta should decode");
+    match delta {
+        DeltaEvent::MessageCreated {
+            revision,
+            session_id,
+            message_id,
+            message_index,
+            message_count,
+            message,
+            preview,
+            status,
+            session_mutation_stamp,
+        } => {
+            assert_eq!(revision, snapshot.revision);
+            assert_eq!(session_id, local_session_id);
+            assert_eq!(message_id, "message-2");
+            assert_eq!(message_index, 0);
+            assert_eq!(message_count, 2);
+            assert!(matches!(
+                message,
+                Message::Text { text, .. } if text == "Second final."
+            ));
+            assert_eq!(preview, "Second final.");
+            assert_eq!(status, SessionStatus::Idle);
+            assert_eq!(session_mutation_stamp, session.session_mutation_stamp);
+        }
+        _ => panic!("expected localized MessageCreated delta"),
+    }
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "remote message create replay should publish exactly one delta"
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.should_skip_remote_applied_delta_revision(&remote.id, 4));
+    assert!(inner.should_skip_remote_applied_delta_revision(&remote.id, 3));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_message_created_delta_rejects_gap_without_advancing_revision() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let initial_revision = state.snapshot().revision;
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    let error = state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::MessageCreated {
+                revision: 2,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "message-1".to_owned(),
+                message_index: 1,
+                message_count: 1,
+                message: remote_text_message("message-1", "Gap message."),
+                preview: "Gap message.".to_owned(),
+                status: SessionStatus::Active,
+                session_mutation_stamp: None,
+            },
+        )
+        .expect_err("gap remote MessageCreated should request resync");
+    assert!(
+        error.to_string().contains("leaves a gap"),
+        "unexpected error: {error:#}"
+    );
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "gap MessageCreated should not publish a local delta"
+    );
+
+    let snapshot = state.snapshot();
+    assert_eq!(snapshot.revision, initial_revision);
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("localized remote session should exist");
+    assert!(session.messages.is_empty());
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.should_skip_remote_applied_delta_revision(&remote.id, 2));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_message_created_delta_rejects_payload_id_mismatch_without_advancing_revision() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let initial_revision = state.snapshot().revision;
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    let error = state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::MessageCreated {
+                revision: 2,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                message: remote_text_message("different-message", "Wrong message."),
+                preview: "Wrong message.".to_owned(),
+                status: SessionStatus::Active,
+                session_mutation_stamp: None,
+            },
+        )
+        .expect_err("id-mismatched remote MessageCreated should request resync");
+    assert!(
+        error.to_string().contains("payload id"),
+        "unexpected error: {error:#}"
+    );
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "id-mismatched MessageCreated should not publish a local delta"
+    );
+
+    let snapshot = state.snapshot();
+    assert_eq!(snapshot.revision, initial_revision);
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("localized remote session should exist");
+    assert!(session.messages.is_empty());
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.should_skip_remote_applied_delta_revision(&remote.id, 2));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_message_created_delta_rejects_existing_message_out_of_bounds_without_advancing_revision()
+{
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    apply_remote_created_text_message(&state, &remote.id, 2, "message-1", "First message.");
+    apply_remote_created_text_message_at(
+        &state,
+        &remote.id,
+        3,
+        "message-2",
+        1,
+        2,
+        "Second message.",
+    );
+    let initial_revision = state.snapshot().revision;
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    let error = state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::MessageCreated {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "message-2".to_owned(),
+                message_index: 2,
+                message_count: 2,
+                message: remote_text_message("message-2", "Second final."),
+                preview: "Second final.".to_owned(),
+                status: SessionStatus::Idle,
+                session_mutation_stamp: None,
+            },
+        )
+        .expect_err("out-of-bounds existing remote MessageCreated should request resync");
+    assert!(
+        error
+            .to_string()
+            .contains("out of bounds for existing message"),
+        "unexpected error: {error:#}"
+    );
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "out-of-bounds existing MessageCreated should not publish a local delta"
+    );
+
+    let snapshot = state.snapshot();
+    assert_eq!(snapshot.revision, initial_revision);
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("localized remote session should exist");
+    let message_ids: Vec<_> = session
+        .messages
+        .iter()
+        .map(|message| message.id().to_owned())
+        .collect();
+    assert_eq!(message_ids, vec!["message-1", "message-2"]);
+    assert!(matches!(
+        session.messages.get(1),
+        Some(Message::Text { text, .. }) if text == "Second message."
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.should_skip_remote_applied_revision(&remote.id, 4));
+    assert!(inner.should_skip_remote_applied_revision(&remote.id, 3));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_command_update_missing_target_rejects_gap_without_advancing_revision() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let initial_revision = state.snapshot().revision;
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    let error = state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::CommandUpdate {
+                revision: 2,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "command-1".to_owned(),
+                message_index: 1,
+                message_count: 1,
+                command: "cargo check".to_owned(),
+                command_language: Some("bash".to_owned()),
+                output: String::new(),
+                output_language: Some("text".to_owned()),
+                status: CommandStatus::Running,
+                preview: "cargo check".to_owned(),
+                session_mutation_stamp: None,
+            },
+        )
+        .expect_err("gap remote CommandUpdate should request resync");
+    assert!(
+        error
+            .to_string()
+            .contains("remote CommandUpdate index `1` leaves a gap"),
+        "unexpected error: {error:#}"
+    );
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "gap CommandUpdate should not publish a local delta"
+    );
+
+    let snapshot = state.snapshot();
+    assert_eq!(snapshot.revision, initial_revision);
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("localized remote session should exist");
+    assert!(session.messages.is_empty());
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.should_skip_remote_applied_delta_revision(&remote.id, 2));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_parallel_agents_update_missing_target_rejects_gap_without_advancing_revision() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let initial_revision = state.snapshot().revision;
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    let error = state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ParallelAgentsUpdate {
+                revision: 2,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "parallel-1".to_owned(),
+                message_index: 1,
+                message_count: 1,
+                agents: vec![ParallelAgentProgress {
+                    detail: Some("Collecting context".to_owned()),
+                    id: "reviewer".to_owned(),
+                    status: ParallelAgentStatus::Running,
+                    title: "Reviewer".to_owned(),
+                }],
+                preview: "Running reviewer".to_owned(),
+                session_mutation_stamp: None,
+            },
+        )
+        .expect_err("gap remote ParallelAgentsUpdate should request resync");
+    assert!(
+        error
+            .to_string()
+            .contains("remote ParallelAgentsUpdate index `1` leaves a gap"),
+        "unexpected error: {error:#}"
+    );
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "gap ParallelAgentsUpdate should not publish a local delta"
+    );
+
+    let snapshot = state.snapshot();
+    assert_eq!(snapshot.revision, initial_revision);
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("localized remote session should exist");
+    assert!(session.messages.is_empty());
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.should_skip_remote_applied_delta_revision(&remote.id, 2));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins that a remote MessageUpdated delta is an in-place replacement:
+// the local proxy keeps the existing transcript position, republishes a
+// localized MessageUpdated delta, and advances the remote applied
+// revision only after the replacement commits.
+// Guards against regressing back to MessageCreated-style insertion.
+#[test]
+fn remote_message_updated_delta_replaces_existing_message_and_publishes_local_delta() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    apply_remote_created_text_message(&state, &remote.id, 2, "message-1", "Draft remote message.");
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::MessageUpdated {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                message: remote_text_message("message-1", "Final remote message."),
+                preview: "Final remote message.".to_owned(),
+                status: SessionStatus::Idle,
+                session_mutation_stamp: None,
+            },
+        )
+        .expect("remote message update delta should apply");
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("localized remote session should exist");
+    assert_eq!(session.preview, "Final remote message.");
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Final remote message."
+    ));
+
+    let delta: DeltaEvent = serde_json::from_str(
+        &delta_receiver
+            .try_recv()
+            .expect("remote message update should publish a localized delta"),
+    )
+    .expect("message update delta should decode");
+    match delta {
+        DeltaEvent::MessageUpdated {
+            revision,
+            session_id,
+            message_id,
+            message_index,
+            message_count,
+            message,
+            preview,
+            status,
+            session_mutation_stamp,
+        } => {
+            assert_eq!(revision, snapshot.revision);
+            assert_eq!(session_id, local_session_id);
+            assert_eq!(message_id, "message-1");
+            assert_eq!(message_index, 0);
+            assert_eq!(message_count, 1);
+            assert!(matches!(
+                message,
+                Message::Text { text, .. } if text == "Final remote message."
+            ));
+            assert_eq!(preview, "Final remote message.");
+            assert_eq!(status, SessionStatus::Idle);
+            assert_eq!(session_mutation_stamp, session.session_mutation_stamp);
+        }
+        _ => panic!("expected localized MessageUpdated delta"),
+    }
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "remote message update should publish exactly one delta"
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.should_skip_remote_applied_delta_revision(&remote.id, 3));
+    assert!(inner.should_skip_remote_applied_delta_revision(&remote.id, 2));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_message_updated_delta_uses_message_id_when_remote_index_is_stale() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    apply_remote_created_text_message(&state, &remote.id, 2, "message-1", "First message.");
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::MessageCreated {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "message-2".to_owned(),
+                message_index: 1,
+                message_count: 2,
+                message: remote_text_message("message-2", "Second draft."),
+                preview: "Second draft.".to_owned(),
+                status: SessionStatus::Active,
+                session_mutation_stamp: None,
+            },
+        )
+        .expect("second remote message create delta should apply");
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::MessageUpdated {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "message-2".to_owned(),
+                message_index: 0,
+                message_count: 2,
+                message: remote_text_message("message-2", "Second final."),
+                preview: "Second final.".to_owned(),
+                status: SessionStatus::Idle,
+                session_mutation_stamp: None,
+            },
+        )
+        .expect("remote message update with stale index should apply by id");
+
+    let snapshot = state.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("localized remote session should exist");
+    let message_ids: Vec<_> = session
+        .messages
+        .iter()
+        .map(|message| message.id().to_owned())
+        .collect();
+    assert_eq!(message_ids, vec!["message-1", "message-2"]);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "First message."
+    ));
+    assert!(matches!(
+        session.messages.get(1),
+        Some(Message::Text { text, .. }) if text == "Second final."
+    ));
+
+    let delta: DeltaEvent = serde_json::from_str(
+        &delta_receiver
+            .try_recv()
+            .expect("remote stale-index update should publish a localized delta"),
+    )
+    .expect("message update delta should decode");
+    match delta {
+        DeltaEvent::MessageUpdated {
+            revision,
+            session_id,
+            message_id,
+            message_index,
+            message_count,
+            message,
+            preview,
+            status,
+            session_mutation_stamp,
+        } => {
+            assert_eq!(revision, snapshot.revision);
+            assert_eq!(session_id, local_session_id);
+            assert_eq!(message_id, "message-2");
+            assert_eq!(message_index, 1);
+            assert_eq!(message_count, 2);
+            assert!(matches!(
+                message,
+                Message::Text { text, .. } if text == "Second final."
+            ));
+            assert_eq!(preview, "Second final.");
+            assert_eq!(status, SessionStatus::Idle);
+            assert_eq!(session_mutation_stamp, session.session_mutation_stamp);
+        }
+        _ => panic!("expected localized MessageUpdated delta"),
+    }
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "remote stale-index update should publish exactly one delta"
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.should_skip_remote_applied_delta_revision(&remote.id, 4));
+    assert!(inner.should_skip_remote_applied_delta_revision(&remote.id, 3));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins that a remote MessageUpdated targeting an unknown local message is
+// treated as a sync gap. It must not synthesize MessageCreated, publish a
+// partial local delta, or advance the remote applied revision.
+// Guards against masking missed transcript state.
+#[test]
+fn remote_message_updated_delta_missing_target_errors_without_creating_or_advancing_revision() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let initial_revision = state.snapshot().revision;
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    let error = state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::MessageUpdated {
+                revision: 5,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "missing-message".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                message: remote_text_message("missing-message", "Remote drift."),
+                preview: "Remote drift.".to_owned(),
+                status: SessionStatus::Active,
+                session_mutation_stamp: None,
+            },
+        )
+        .expect_err("missing-target remote MessageUpdated should request resync");
+    assert!(
+        error
+            .to_string()
+            .contains("remote MessageUpdated for unknown message `missing-message`"),
+        "unexpected error: {error:#}"
+    );
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "missing-target MessageUpdated should not publish a local delta"
+    );
+
+    let snapshot = state.snapshot();
+    assert_eq!(snapshot.revision, initial_revision);
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("localized remote session should exist");
+    assert!(session.messages.is_empty());
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.should_skip_remote_applied_delta_revision(&remote.id, 5));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins that stale remote MessageUpdated deltas are ignored before any
+// local transcript mutation or republish.
+// Guards against delayed SSE replay rolling back a newer local proxy.
+#[test]
+fn stale_remote_message_updated_delta_is_ignored() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    apply_remote_created_text_message(&state, &remote.id, 4, "message-1", "Current text.");
+    let revision_after_create = state.snapshot().revision;
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::MessageUpdated {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                message: remote_text_message("message-1", "Stale text."),
+                preview: "Stale text.".to_owned(),
+                status: SessionStatus::Active,
+                session_mutation_stamp: None,
+            },
+        )
+        .expect("stale remote message update should be ignored");
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "stale MessageUpdated should not publish a local delta"
+    );
+
+    let snapshot = state.snapshot();
+    assert_eq!(snapshot.revision, revision_after_create);
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("localized remote session should exist");
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Current text."
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(inner.should_skip_remote_applied_delta_revision(&remote.id, 3));
+    assert!(!inner.should_skip_remote_applied_delta_revision(&remote.id, 4));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn stale_remote_message_updated_delta_with_mismatched_payload_id_is_ignored() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    apply_remote_created_text_message(&state, &remote.id, 4, "message-1", "Current text.");
+    let revision_after_create = state.snapshot().revision;
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::MessageUpdated {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                message: remote_text_message("different-message", "Stale wrong text."),
+                preview: "Stale wrong text.".to_owned(),
+                status: SessionStatus::Active,
+                session_mutation_stamp: None,
+            },
+        )
+        .expect("stale id-mismatched remote message update should be ignored");
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "stale id-mismatched MessageUpdated should not publish a local delta"
+    );
+
+    let snapshot = state.snapshot();
+    assert_eq!(snapshot.revision, revision_after_create);
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("localized remote session should exist");
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Current text."
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(inner.should_skip_remote_applied_delta_revision(&remote.id, 3));
+    assert!(!inner.should_skip_remote_applied_delta_revision(&remote.id, 4));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins that a malformed MessageUpdated payload is rejected before state
+// mutation: the event id and embedded message id must match.
+// Guards against localizing the wrong remote message.
+#[test]
+fn remote_message_updated_delta_rejects_payload_id_mismatch() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    apply_remote_created_text_message(&state, &remote.id, 2, "message-1", "Current text.");
+    let revision_after_create = state.snapshot().revision;
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    let error = state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::MessageUpdated {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                message: remote_text_message("different-message", "Wrong text."),
+                preview: "Wrong text.".to_owned(),
+                status: SessionStatus::Active,
+                session_mutation_stamp: None,
+            },
+        )
+        .expect_err("id-mismatched remote MessageUpdated should fail");
+    assert!(
+        error
+            .to_string()
+            .contains("did not match event id `message-1`"),
+        "unexpected error: {error:#}"
+    );
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "id-mismatched MessageUpdated should not publish a local delta"
+    );
+
+    let snapshot = state.snapshot();
+    assert_eq!(snapshot.revision, revision_after_create);
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("localized remote session should exist");
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Current text."
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.should_skip_remote_applied_delta_revision(&remote.id, 3));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Pins that two deltas sharing the same remote revision both apply in
 // order when they affect different fields; applied-revision dedupe
 // recognizes only strictly-older revisions as stale.
@@ -1642,6 +2658,7 @@ fn remote_same_revision_deltas_apply_in_sequence() {
                 session_id: "remote-session-1".to_owned(),
                 message_id: "message-1".to_owned(),
                 message_index: 0,
+                message_count: 1,
                 message: Message::Text {
                     attachments: Vec::new(),
                     id: "message-1".to_owned(),
@@ -1664,6 +2681,7 @@ fn remote_same_revision_deltas_apply_in_sequence() {
                 session_id: "remote-session-1".to_owned(),
                 message_id: "command-1".to_owned(),
                 message_index: 1,
+                message_count: 2,
                 command: "echo ok".to_owned(),
                 command_language: Some("bash".to_owned()),
                 output: "ok".to_owned(),

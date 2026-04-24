@@ -190,6 +190,11 @@ export type RequestStateResyncOptions = {
   paneId?: string | null;
 };
 
+export type SessionHydrationTarget = {
+  id: string;
+  messagesLoaded?: boolean | null;
+};
+
 const SLOW_STATE_EVENT_WARNING_MS = 50;
 const STATE_EVENT_METADATA_PEEK_CHARS = 4096;
 
@@ -362,6 +367,7 @@ export type UseAppLiveStateParams = {
     (options?: { openSessionId?: string; paneId?: string | null }) => void
   >;
   activeSession: Session | null;
+  visibleSessionHydrationTargets: readonly SessionHydrationTarget[];
 };
 
 export type UseAppLiveStateReturn = {
@@ -416,6 +422,7 @@ export function useAppLiveState(
     requestBackendReconnectRef,
     requestActionRecoveryResyncRef,
     activeSession,
+    visibleSessionHydrationTargets,
   } = params;
   const {
     isMountedRef,
@@ -679,6 +686,11 @@ export function useAppLiveState(
         availableSessionIds.has(session.id) ? [] : [session.id],
       ),
     );
+    const unhydratedSessionIds = new Set(
+      mergedSessions.flatMap((session) =>
+        session.messagesLoaded === false ? [session.id] : [],
+      ),
+    );
     const sessionsWithChangedWorkdir = new Set(
       mergedSessions.flatMap((session) => {
         const previousSession = previousSessionsById.get(session.id);
@@ -810,9 +822,12 @@ export function useAppLiveState(
           availableSessionIds.has(sessionId),
         ),
       );
+    }
+    if (hasRemovedSessions || unhydratedSessionIds.size > 0) {
       hydratedSessionIdsRef.current = new Set(
         [...hydratedSessionIdsRef.current].filter((sessionId) =>
-          availableSessionIds.has(sessionId),
+          availableSessionIds.has(sessionId) &&
+          !unhydratedSessionIds.has(sessionId),
         ),
       );
     }
@@ -954,7 +969,7 @@ export function useAppLiveState(
         lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
         nextServerInstanceId: serverInstanceId,
         force: true,
-        allowRevisionDowngrade: currentSession.messages.length === 0,
+        allowRevisionDowngrade: currentSession.messagesLoaded !== true,
       })
     ) {
       return false;
@@ -978,71 +993,89 @@ export function useAppLiveState(
   }
 
   useEffect(() => {
-    if (!activeSession || activeSession.messagesLoaded !== false) {
-      return;
+    const targetMessagesLoadedBySessionId = new Map<
+      string,
+      boolean | null | undefined
+    >();
+    if (activeSession) {
+      targetMessagesLoadedBySessionId.set(
+        activeSession.id,
+        activeSession.messagesLoaded,
+      );
     }
-
-    const sessionId = activeSession.id;
-    if (
-      hydratedSessionIdsRef.current.has(sessionId) ||
-      hydratingSessionIdsRef.current.has(sessionId)
-    ) {
-      return;
-    }
-
-    hydratingSessionIdsRef.current.add(sessionId);
-    void (async () => {
-      try {
-        const response = await fetchSession(sessionId);
-        if (!isMountedRef.current) {
-          return;
-        }
-        if (response.session.id !== sessionId) {
-          requestActionRecoveryResyncRef.current();
-          return;
-        }
-        if (
-          adoptFetchedSession(
-            response.session,
-            response.revision,
-            response.serverInstanceId,
-          )
-        ) {
-          hydratedSessionIdsRef.current.add(sessionId);
-        }
-      } catch (error) {
-        if (!isMountedRef.current) {
-          return;
-        }
-        // 404 is a benign race: the session was deleted, hidden,
-        // or renumbered between a delta event that referenced it
-        // and this hydration fetch. The action-recovery resync
-        // will repair our local view on the next SSE tick without
-        // dropping a toast on the user. Mirrors
-        // `fetchWorkspaceLayout`'s "404 → silent recovery" UX
-        // posture; the transport shape differs (that one returns
-        // `null` at the API boundary so callers treat it as "no
-        // layout yet"; here `fetchSession` throws
-        // `ApiRequestError` and we branch on `instanceof` + status
-        // at the call site).
-        if (error instanceof ApiRequestError && error.status === 404) {
-          requestActionRecoveryResyncRef.current();
-          return;
-        }
-        reportRequestError(error);
-      } finally {
-        hydratingSessionIdsRef.current.delete(sessionId);
+    for (const target of visibleSessionHydrationTargets) {
+      if (!targetMessagesLoadedBySessionId.has(target.id)) {
+        targetMessagesLoadedBySessionId.set(target.id, target.messagesLoaded);
       }
-    })();
-    // Deps intentionally do NOT include `activeSession?.messages.length`:
-    // the body only reads `activeSession?.id` and
-    // `activeSession?.messagesLoaded`, so re-triggering on every
-    // streamed token (which bumps `messages.length`) just to hit
-    // the "already hydrated / already hydrating" early-returns is
-    // wasted work. Session swap (id change) and the one-shot
-    // `messagesLoaded: false → true` transition are the only
+    }
+
+    const sessionIdsToHydrate = [...targetMessagesLoadedBySessionId.entries()]
+      .filter(([, messagesLoaded]) => messagesLoaded === false)
+      .map(([sessionId]) => sessionId);
+    if (sessionIdsToHydrate.length === 0) {
+      return;
+    }
+
+    for (const sessionId of sessionIdsToHydrate) {
+      if (hydratingSessionIdsRef.current.has(sessionId)) {
+        continue;
+      }
+
+      hydratingSessionIdsRef.current.add(sessionId);
+      void (async () => {
+        try {
+          const response = await fetchSession(sessionId);
+          if (!isMountedRef.current) {
+            return;
+          }
+          if (response.session.id !== sessionId) {
+            requestActionRecoveryResyncRef.current();
+            return;
+          }
+          if (
+            adoptFetchedSession(
+              response.session,
+              response.revision,
+              response.serverInstanceId,
+            )
+          ) {
+            hydratedSessionIdsRef.current.add(sessionId);
+          }
+        } catch (error) {
+          if (!isMountedRef.current) {
+            return;
+          }
+          // 404 is a benign race: the session was deleted, hidden,
+          // or renumbered between a delta event that referenced it
+          // and this hydration fetch. The action-recovery resync
+          // will repair our local view on the next SSE tick without
+          // dropping a toast on the user. Mirrors
+          // `fetchWorkspaceLayout`'s "404 -> silent recovery" UX
+          // posture; the transport shape differs (that one returns
+          // `null` at the API boundary so callers treat it as "no
+          // layout yet"; here `fetchSession` throws
+          // `ApiRequestError` and we branch on `instanceof` + status
+          // at the call site).
+          if (error instanceof ApiRequestError && error.status === 404) {
+            requestActionRecoveryResyncRef.current();
+            return;
+          }
+          reportRequestError(error);
+        } finally {
+          hydratingSessionIdsRef.current.delete(sessionId);
+        }
+      })();
+    }
+    // Deps intentionally do NOT include message counts:
+    // the body only reads target ids and `messagesLoaded` flags.
+    // Visible session pane changes and the one-shot
+    // `messagesLoaded: false -> true` transition are the only
     // signals this effect cares about.
-  }, [activeSession?.id, activeSession?.messagesLoaded]);
+  }, [
+    activeSession?.id,
+    activeSession?.messagesLoaded,
+    visibleSessionHydrationTargets,
+  ]);
 
   function syncPreferencesFromState(nextState: StateResponse) {
     const preferences = resolveAppPreferences(nextState.preferences);
@@ -1081,6 +1114,10 @@ export function useAppLiveState(
     latestStateRevisionRef.current = nextState.revision;
     if (nextState.serverInstanceId) {
       lastSeenServerInstanceIdRef.current = nextState.serverInstanceId;
+    }
+    if (serverInstanceChanged) {
+      hydratingSessionIdsRef.current.clear();
+      hydratedSessionIdsRef.current.clear();
     }
     const currentCodexState = codexStateRef.current;
     const currentAgentReadiness = agentReadinessRef.current;

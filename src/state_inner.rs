@@ -155,6 +155,8 @@ impl StateInner {
                 status: SessionStatus::Idle,
                 preview: "Ready for a prompt.".to_owned(),
                 messages: Vec::new(),
+                messages_loaded: true,
+                message_count: 0,
                 pending_prompts: Vec::new(),
                 session_mutation_stamp: None,
             },

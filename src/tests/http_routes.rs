@@ -32,7 +32,7 @@ async fn create_session_route_returns_created_response() {
         "workdir": "/tmp"
     }))
     .expect("create session route body should serialize");
-    let (status, response): (StatusCode, CreateSessionResponse) = request_json(
+    let (status, response_body): (StatusCode, Value) = request_json(
         &app,
         Request::builder()
             .method("POST")
@@ -43,6 +43,9 @@ async fn create_session_route_returns_created_response() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(response_body["session"]["messageCount"], 0);
+    let response: CreateSessionResponse =
+        serde_json::from_value(response_body).expect("create session response should decode");
     let created_session = &response.session;
     assert_eq!(response.session_id, created_session.id);
     assert!(response.revision > 0);
@@ -101,6 +104,187 @@ async fn get_session_route_returns_full_session() {
     // and cannot trigger the restart branch on it).
     assert_eq!(response.server_instance_id, state.server_instance_id);
     assert!(!response.server_instance_id.is_empty());
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins `messageCount` on full snapshot-bearing routes. The count is computed
+// from the transcript at wire-projection time so reconnect/state adoption can
+// keep summary metadata without waiting for the next delta.
+#[tokio::test]
+async fn snapshot_bearing_routes_include_message_count() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            name: Some("Counted Session".to_owned()),
+            agent: None,
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("session should be created");
+    let session_id = created.session_id;
+    for text in ["First counted message", "Second counted message"] {
+        let message_id = state.allocate_message_id();
+        state
+            .push_message(
+                &session_id,
+                Message::Text {
+                    attachments: Vec::new(),
+                    id: message_id,
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: text.to_owned(),
+                    expanded_text: None,
+                },
+            )
+            .expect("message should be recorded");
+    }
+    let app = app_router(state.clone());
+
+    let (state_status, state_body): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/state")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(state_status, StatusCode::OK);
+    let state_session = state_body["sessions"]
+        .as_array()
+        .expect("state sessions should be an array")
+        .iter()
+        .find(|session| session["id"] == session_id)
+        .expect("state should include counted session");
+    assert_eq!(state_session["messageCount"], 2);
+    assert_eq!(state_session["messagesLoaded"], false);
+    assert!(
+        state_session["messages"]
+            .as_array()
+            .expect("state session messages should stay adapter-compatible")
+            .is_empty()
+    );
+
+    let (session_status, session_body): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/sessions/{session_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(session_status, StatusCode::OK);
+    assert_eq!(session_body["session"]["id"], session_id);
+    assert_eq!(session_body["session"]["messageCount"], 2);
+    assert_eq!(session_body["session"]["messagesLoaded"], true);
+    assert_eq!(
+        session_body["session"]["messages"]
+            .as_array()
+            .expect("session response should include full transcript")
+            .len(),
+        2
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins `POST /api/sessions/{id}/messages`: prompt start must not advance the
+// UI with a metadata-only session. The HTTP response carries the target
+// transcript, and SSE carries a narrow `messageCreated` delta for other
+// subscribers.
+#[tokio::test]
+async fn send_message_route_returns_full_session_and_publishes_prompt_delta() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, _input_rx) = test_claude_runtime_handle("send-message-route-full-session");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+    }
+    let mut state_events = state.subscribe_events();
+    let mut delta_events = state.subscribe_delta_events();
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "text": "Visible route prompt"
+    }))
+    .expect("message route body should serialize");
+
+    let (status, response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{session_id}/messages"))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let session = response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("prompt session should be present");
+    assert!(session.messages_loaded);
+    assert_eq!(session.message_count, 1);
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        &session.messages[0],
+        Message::Text {
+            author: Author::You,
+            text,
+            ..
+        } if text == "Visible route prompt"
+    ));
+
+    assert!(matches!(
+        state_events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+    let payload = delta_events
+        .try_recv()
+        .expect("prompt start should publish a message delta");
+    let delta: DeltaEvent = serde_json::from_str(&payload).expect("delta should decode");
+    match delta {
+        DeltaEvent::MessageCreated {
+            revision,
+            session_id: delta_session_id,
+            message_index,
+            message_count,
+            message,
+            status,
+            ..
+        } => {
+            assert_eq!(revision, response.revision);
+            assert_eq!(delta_session_id, session_id);
+            assert_eq!(message_index, 0);
+            assert_eq!(message_count, 1);
+            assert_eq!(status, SessionStatus::Active);
+            assert!(matches!(
+                message,
+                Message::Text {
+                    author: Author::You,
+                    text,
+                    ..
+                } if text == "Visible route prompt"
+            ));
+        }
+        _ => panic!("expected prompt messageCreated delta"),
+    }
+
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -169,6 +353,13 @@ async fn state_events_route_streams_initial_state_and_live_deltas() {
             .iter()
             .any(|session| session.id == session_id)
     );
+    let initial_session = initial_state
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("initial state should include test session");
+    assert!(!initial_session.messages_loaded);
+    assert!(initial_session.messages.is_empty());
     let message_id = state.allocate_message_id();
     state
         .push_message(
@@ -510,7 +701,7 @@ async fn codex_thread_action_routes_update_session_state() {
         }
     });
 
-    let app = app_router(state);
+    let app = app_router(state.clone());
     let (archive_status, archive_response): (StatusCode, StateResponse) = request_json(
         &app,
         Request::builder()
@@ -567,6 +758,12 @@ async fn codex_thread_action_routes_update_session_state() {
         .iter()
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
+    assert!(!rollback_session.messages_loaded);
+    assert!(rollback_session.messages.is_empty());
+    let rollback_session = state
+        .get_session(&session_id)
+        .expect("rolled back session should hydrate")
+        .session;
     assert!(matches!(
         rollback_session.messages.first(),
         Some(Message::Text { author: Author::You, text, .. }) if text == "Current diff state"
@@ -642,7 +839,7 @@ async fn codex_thread_rollback_route_falls_back_when_history_is_unavailable() {
         }
     });
 
-    let app = app_router(state);
+    let app = app_router(state.clone());
     let (status, response): (StatusCode, StateResponse) = request_json(
         &app,
         Request::builder()
@@ -660,6 +857,12 @@ async fn codex_thread_rollback_route_falls_back_when_history_is_unavailable() {
         .iter()
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
+    assert!(!session.messages_loaded);
+    assert!(session.messages.is_empty());
+    let session = state
+        .get_session(&session_id)
+        .expect("rolled back fallback session should hydrate")
+        .session;
     assert!(matches!(
         session.messages.first(),
         Some(Message::Text { text, .. }) if text == "local history"

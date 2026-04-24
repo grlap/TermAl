@@ -508,6 +508,8 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
             },
         )
         .expect("pending Claude approval should be registered");
+    let mut state_rx = state.subscribe_events();
+    let mut delta_rx = state.subscribe_delta_events();
     let app = app_router(state.clone());
     let body = serde_json::to_vec(&json!({
         "decision": "acceptedForSession"
@@ -534,6 +536,12 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
         session.preview,
         approval_preview_text("Claude", ApprovalDecision::AcceptedForSession)
     );
+    assert!(!session.messages_loaded);
+    assert!(session.messages.is_empty());
+    let session = state
+        .get_session(&session_id)
+        .expect("updated Claude session should hydrate")
+        .session;
     assert!(session.messages.iter().any(|message| matches!(
         message,
         Message::Approval { id, decision, .. }
@@ -564,6 +572,513 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
         .find(|record| record.session.id == session_id)
         .expect("Claude session should exist");
     assert!(record.pending_claude_approvals.is_empty());
+    drop(inner);
+
+    assert!(
+        state_rx.try_recv().is_err(),
+        "approval submission should not publish a full state snapshot"
+    );
+    let delta: DeltaEvent = serde_json::from_str(
+        &delta_rx
+            .try_recv()
+            .expect("approval submission should publish a message update delta"),
+    )
+    .expect("approval delta should decode");
+    match delta {
+        DeltaEvent::MessageUpdated {
+            revision,
+            session_id: delta_session_id,
+            message_id: delta_message_id,
+            message_index,
+            message_count,
+            message,
+            preview,
+            status,
+            session_mutation_stamp,
+        } => {
+            assert_eq!(revision, response.revision);
+            assert_eq!(delta_session_id, session_id);
+            assert_eq!(delta_message_id, message_id);
+            assert_eq!(message_index, 0);
+            assert_eq!(message_count, 1);
+            assert_eq!(session_mutation_stamp, session.session_mutation_stamp);
+            assert_eq!(
+                preview,
+                approval_preview_text("Claude", ApprovalDecision::AcceptedForSession)
+            );
+            assert_eq!(status, SessionStatus::Active);
+            assert!(matches!(
+                message,
+                Message::Approval {
+                    decision: ApprovalDecision::AcceptedForSession,
+                    ..
+                }
+            ));
+        }
+        _ => panic!("expected approval submission to publish MessageUpdated"),
+    }
+    assert!(
+        delta_rx.try_recv().is_err(),
+        "approval submission should publish exactly one delta"
+    );
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+fn attach_test_codex_runtime(
+    state: &AppState,
+    session_id: &str,
+    runtime_id: &str,
+) -> mpsc::Receiver<CodexRuntimeCommand> {
+    let (runtime, input_rx) = test_codex_runtime_handle(runtime_id);
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(session_id)
+        .expect("Codex session should exist");
+    inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+    input_rx
+}
+
+fn assert_no_state_and_one_message_updated_delta(
+    state_rx: &mut broadcast::Receiver<String>,
+    delta_rx: &mut broadcast::Receiver<String>,
+    session_id: &str,
+    message_id: &str,
+    expected_revision: u64,
+    expected_message_index: usize,
+    expected_message_count: u32,
+    expected_preview: &str,
+    expected_status: SessionStatus,
+    expected_session_mutation_stamp: Option<u64>,
+) -> Message {
+    assert!(
+        state_rx.try_recv().is_err(),
+        "interaction submission should not publish a full state snapshot"
+    );
+    let delta: DeltaEvent = serde_json::from_str(
+        &delta_rx
+            .try_recv()
+            .expect("interaction submission should publish MessageUpdated"),
+    )
+    .expect("interaction delta should decode");
+    let message = match delta {
+        DeltaEvent::MessageUpdated {
+            revision,
+            session_id: delta_session_id,
+            message_id: delta_message_id,
+            message_index,
+            message_count,
+            message,
+            preview,
+            status,
+            session_mutation_stamp,
+        } => {
+            assert_eq!(revision, expected_revision);
+            assert_eq!(delta_session_id, session_id);
+            assert_eq!(delta_message_id, message_id);
+            assert_eq!(message_index, expected_message_index);
+            assert_eq!(message_count, expected_message_count);
+            assert_eq!(preview, expected_preview);
+            assert_eq!(status, expected_status);
+            assert_eq!(session_mutation_stamp, expected_session_mutation_stamp);
+            message
+        }
+        _ => panic!("expected interaction submission to publish MessageUpdated"),
+    };
+    assert!(
+        delta_rx.try_recv().is_err(),
+        "interaction submission should publish exactly one delta"
+    );
+    message
+}
+
+#[tokio::test]
+async fn submit_codex_user_input_route_updates_message_and_publishes_message_updated_delta() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let input_rx = attach_test_codex_runtime(&state, &session_id, "codex-user-input-route");
+    let message_id = "user-input-route-1".to_owned();
+    let questions = vec![UserInputQuestion {
+        header: "Choice".to_owned(),
+        id: "choice".to_owned(),
+        is_other: false,
+        is_secret: false,
+        options: Some(vec![UserInputQuestionOption {
+            description: "Use the recommended option".to_owned(),
+            label: "Yes".to_owned(),
+        }]),
+        question: "Continue?".to_owned(),
+    }];
+    state
+        .push_message(
+            &session_id,
+            Message::UserInputRequest {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Need input".to_owned(),
+                detail: "Choose one option.".to_owned(),
+                questions: questions.clone(),
+                state: InteractionRequestState::Pending,
+                submitted_answers: None,
+            },
+        )
+        .expect("user input request should be recorded");
+    state
+        .register_codex_pending_user_input(
+            &session_id,
+            message_id.clone(),
+            CodexPendingUserInput {
+                questions,
+                request_id: json!("user-input-request"),
+            },
+        )
+        .expect("pending user input should be registered");
+    let mut state_rx = state.subscribe_events();
+    let mut delta_rx = state.subscribe_delta_events();
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "answers": {
+            "choice": ["Yes"]
+        }
+    }))
+    .expect("user input body should serialize");
+
+    let (status, response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/sessions/{session_id}/user-input/{message_id}"
+            ))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let session = response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated Codex session should be present");
+    assert_eq!(session.status, SessionStatus::Active);
+    assert!(!session.messages_loaded);
+    assert!(session.messages.is_empty());
+    let session = state
+        .get_session(&session_id)
+        .expect("updated Codex user-input session should hydrate")
+        .session;
+    assert!(session.messages.iter().any(|message| matches!(
+        message,
+        Message::UserInputRequest {
+            id,
+            state: InteractionRequestState::Submitted,
+            submitted_answers: Some(answers),
+            ..
+        } if id == &message_id && answers.get("choice") == Some(&vec!["Yes".to_owned()])
+    )));
+
+    match input_rx.recv_timeout(Duration::from_millis(50)) {
+        Ok(CodexRuntimeCommand::JsonRpcResponse { response }) => {
+            assert_eq!(response.request_id, json!("user-input-request"));
+            assert_eq!(
+                response.payload,
+                CodexJsonRpcResponsePayload::Result(json!({
+                    "answers": {
+                        "choice": {
+                            "answers": ["Yes"]
+                        }
+                    }
+                }))
+            );
+        }
+        Ok(_) => panic!("expected Codex JSON-RPC user input response"),
+        Err(err) => panic!("Codex user input response should arrive: {err}"),
+    }
+    let expected_preview =
+        user_input_request_preview_text(session.agent.name(), InteractionRequestState::Submitted);
+    let message = assert_no_state_and_one_message_updated_delta(
+        &mut state_rx,
+        &mut delta_rx,
+        &session_id,
+        &message_id,
+        response.revision,
+        0,
+        1,
+        &expected_preview,
+        SessionStatus::Active,
+        session.session_mutation_stamp,
+    );
+    assert!(matches!(
+        message,
+        Message::UserInputRequest {
+            state: InteractionRequestState::Submitted,
+            ..
+        }
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert!(record.pending_codex_user_inputs.is_empty());
+    drop(inner);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[tokio::test]
+async fn submit_codex_mcp_elicitation_route_updates_message_and_publishes_message_updated_delta() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let input_rx = attach_test_codex_runtime(&state, &session_id, "codex-mcp-route");
+    let message_id = "mcp-route-1".to_owned();
+    let request = McpElicitationRequestPayload {
+        thread_id: "thread-1".to_owned(),
+        turn_id: Some("turn-1".to_owned()),
+        server_name: "docs-server".to_owned(),
+        mode: McpElicitationRequestMode::Url {
+            meta: None,
+            elicitation_id: "elicitation-1".to_owned(),
+            message: "Open documentation?".to_owned(),
+            url: "https://example.test/docs".to_owned(),
+        },
+    };
+    state
+        .push_message(
+            &session_id,
+            Message::McpElicitationRequest {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "MCP request".to_owned(),
+                detail: "Open documentation?".to_owned(),
+                request: request.clone(),
+                state: InteractionRequestState::Pending,
+                submitted_action: None,
+                submitted_content: None,
+            },
+        )
+        .expect("MCP elicitation request should be recorded");
+    state
+        .register_codex_pending_mcp_elicitation(
+            &session_id,
+            message_id.clone(),
+            CodexPendingMcpElicitation {
+                request: request.clone(),
+                request_id: json!("mcp-request"),
+            },
+        )
+        .expect("pending MCP elicitation should be registered");
+    let mut state_rx = state.subscribe_events();
+    let mut delta_rx = state.subscribe_delta_events();
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "action": "decline"
+    }))
+    .expect("MCP elicitation body should serialize");
+
+    let (status, response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/sessions/{session_id}/mcp-elicitation/{message_id}"
+            ))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let session = response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated Codex session should be present");
+    assert_eq!(session.status, SessionStatus::Active);
+    assert!(!session.messages_loaded);
+    assert!(session.messages.is_empty());
+    let session = state
+        .get_session(&session_id)
+        .expect("updated Codex MCP session should hydrate")
+        .session;
+    assert!(session.messages.iter().any(|message| matches!(
+        message,
+        Message::McpElicitationRequest {
+            id,
+            state: InteractionRequestState::Submitted,
+            submitted_action: Some(McpElicitationAction::Decline),
+            submitted_content: None,
+            ..
+        } if id == &message_id
+    )));
+
+    match input_rx.recv_timeout(Duration::from_millis(50)) {
+        Ok(CodexRuntimeCommand::JsonRpcResponse { response }) => {
+            assert_eq!(response.request_id, json!("mcp-request"));
+            assert_eq!(
+                response.payload,
+                CodexJsonRpcResponsePayload::Result(json!({
+                    "action": "decline",
+                    "content": null
+                }))
+            );
+        }
+        Ok(_) => panic!("expected Codex JSON-RPC MCP elicitation response"),
+        Err(err) => panic!("Codex MCP elicitation response should arrive: {err}"),
+    }
+    let expected_preview = mcp_elicitation_request_preview_text(
+        session.agent.name(),
+        InteractionRequestState::Submitted,
+        Some(McpElicitationAction::Decline),
+    );
+    let message = assert_no_state_and_one_message_updated_delta(
+        &mut state_rx,
+        &mut delta_rx,
+        &session_id,
+        &message_id,
+        response.revision,
+        0,
+        1,
+        &expected_preview,
+        SessionStatus::Active,
+        session.session_mutation_stamp,
+    );
+    assert!(matches!(
+        message,
+        Message::McpElicitationRequest {
+            state: InteractionRequestState::Submitted,
+            submitted_action: Some(McpElicitationAction::Decline),
+            ..
+        }
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert!(record.pending_codex_mcp_elicitations.is_empty());
+    drop(inner);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[tokio::test]
+async fn submit_codex_app_request_route_updates_message_and_publishes_message_updated_delta() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let input_rx = attach_test_codex_runtime(&state, &session_id, "codex-app-request-route");
+    let message_id = "app-request-route-1".to_owned();
+    let result = json!({ "ok": true, "value": 42 });
+    state
+        .push_message(
+            &session_id,
+            Message::CodexAppRequest {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "App request".to_owned(),
+                detail: "Generic app request".to_owned(),
+                method: "termal/test".to_owned(),
+                params: json!({ "question": true }),
+                state: InteractionRequestState::Pending,
+                submitted_result: None,
+            },
+        )
+        .expect("Codex app request should be recorded");
+    state
+        .register_codex_pending_app_request(
+            &session_id,
+            message_id.clone(),
+            CodexPendingAppRequest {
+                request_id: json!("app-request"),
+            },
+        )
+        .expect("pending app request should be registered");
+    let mut state_rx = state.subscribe_events();
+    let mut delta_rx = state.subscribe_delta_events();
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "result": result
+    }))
+    .expect("app request body should serialize");
+
+    let (status, response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/sessions/{session_id}/codex/requests/{message_id}"
+            ))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let session = response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated Codex session should be present");
+    assert_eq!(session.status, SessionStatus::Active);
+    assert!(!session.messages_loaded);
+    assert!(session.messages.is_empty());
+    let session = state
+        .get_session(&session_id)
+        .expect("updated Codex app request session should hydrate")
+        .session;
+    assert!(session.messages.iter().any(|message| matches!(
+        message,
+        Message::CodexAppRequest {
+            id,
+            state: InteractionRequestState::Submitted,
+            submitted_result: Some(submitted_result),
+            ..
+        } if id == &message_id && submitted_result == &json!({ "ok": true, "value": 42 })
+    )));
+
+    match input_rx.recv_timeout(Duration::from_millis(50)) {
+        Ok(CodexRuntimeCommand::JsonRpcResponse { response }) => {
+            assert_eq!(response.request_id, json!("app-request"));
+            assert_eq!(
+                response.payload,
+                CodexJsonRpcResponsePayload::Result(json!({ "ok": true, "value": 42 }))
+            );
+        }
+        Ok(_) => panic!("expected Codex JSON-RPC app request response"),
+        Err(err) => panic!("Codex app request response should arrive: {err}"),
+    }
+    let expected_preview =
+        codex_app_request_preview_text(session.agent.name(), InteractionRequestState::Submitted);
+    let message = assert_no_state_and_one_message_updated_delta(
+        &mut state_rx,
+        &mut delta_rx,
+        &session_id,
+        &message_id,
+        response.revision,
+        0,
+        1,
+        &expected_preview,
+        SessionStatus::Active,
+        session.session_mutation_stamp,
+    );
+    assert!(matches!(
+        message,
+        Message::CodexAppRequest {
+            state: InteractionRequestState::Submitted,
+            submitted_result: Some(_),
+            ..
+        }
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert!(record.pending_codex_app_requests.is_empty());
     drop(inner);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }

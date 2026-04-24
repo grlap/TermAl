@@ -80,7 +80,10 @@ import {
 import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
 import { useAppPreferencesState } from "./app-preferences-state";
 import { useAppWorkspaceLayout } from "./app-workspace-layout";
-import { useAppLiveState } from "./app-live-state";
+import {
+  useAppLiveState,
+  type SessionHydrationTarget,
+} from "./app-live-state";
 import { useAppSessionActions } from "./app-session-actions";
 import { useAppDragResize } from "./app-drag-resize";
 import { useAppDialogState } from "./app-dialog-state";
@@ -530,6 +533,31 @@ export default function App() {
   const activeSession = activePane?.activeSessionId
     ? (sessionLookup.get(activePane.activeSessionId) ?? null)
     : null;
+  const visibleSessionHydrationTargets = useMemo<
+    readonly SessionHydrationTarget[]
+  >(
+    () =>
+      workspace.panes.flatMap((pane) => {
+        const activeTab =
+          pane.tabs.find((tab) => tab.id === pane.activeTabId) ??
+          pane.tabs[0] ??
+          null;
+        if (activeTab?.kind !== "session") {
+          return [];
+        }
+
+        const session = sessionLookup.get(activeTab.sessionId);
+        return session
+          ? [
+              {
+                id: session.id,
+                messagesLoaded: session.messagesLoaded,
+              },
+            ]
+          : [];
+      }),
+    [sessionLookup, workspace.panes],
+  );
   const openSessionIds = useMemo(
     () =>
       new Set(
@@ -793,6 +821,7 @@ export default function App() {
     requestBackendReconnectRef,
     requestActionRecoveryResyncRef,
     activeSession,
+    visibleSessionHydrationTargets,
   });
 
   const selectedProject =

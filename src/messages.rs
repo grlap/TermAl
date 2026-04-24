@@ -19,6 +19,11 @@
 // Extracted from state.rs so state.rs can stay focused on `StateInner`
 // + commit_locked() + SSE broadcasting.
 
+/// Returns the transcript count carried by session-scoped SSE deltas.
+fn session_message_count(record: &SessionRecord) -> u32 {
+    u32::try_from(record.session.messages.len()).unwrap_or(u32::MAX)
+}
+
 /// Recovers interrupted session record.
 fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<String> {
     if !matches!(

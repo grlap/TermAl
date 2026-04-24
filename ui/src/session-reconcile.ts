@@ -78,7 +78,8 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.codexThreadState === next.codexThreadState &&
     previous.sessionMutationStamp === next.sessionMutationStamp &&
     previous.status === next.status &&
-    previous.preview === next.preview
+    previous.preview === next.preview &&
+    (previous.messageCount ?? null) === (next.messageCount ?? null)
   );
 }
 
@@ -87,6 +88,10 @@ function reconcileSession(
   next: Session,
   options?: ReconcileSessionsOptions,
 ): Session {
+  if (next.messagesLoaded === false) {
+    return reconcileSummarySession(previous, next, options);
+  }
+
   if (
     !options?.disableMutationStampFastPath &&
     previous.sessionMutationStamp !== null &&
@@ -115,6 +120,59 @@ function reconcileSession(
     ...rest,
     messages,
   };
+}
+
+function reconcileSummarySession(
+  previous: Session,
+  next: Session,
+  options?: ReconcileSessionsOptions,
+): Session {
+  if (
+    !options?.disableMutationStampFastPath &&
+    previous.sessionMutationStamp !== null &&
+    previous.sessionMutationStamp !== undefined &&
+    previous.sessionMutationStamp === next.sessionMutationStamp
+  ) {
+    return previous;
+  }
+
+  const pendingPrompts = reconcilePendingPrompts(previous.pendingPrompts, next.pendingPrompts);
+  const nextMessageCount =
+    typeof next.messageCount === "number" ? next.messageCount : null;
+  const hasCompleteMessages =
+    nextMessageCount === null || previous.messages.length >= nextMessageCount;
+  const previousMutationStamp = previous.sessionMutationStamp ?? null;
+  const nextMutationStamp = next.sessionMutationStamp ?? null;
+  const hasDifferentKnownSummaryMutation =
+    previousMutationStamp !== null &&
+    nextMutationStamp !== null &&
+    nextMutationStamp !== previousMutationStamp;
+  const messagesLoaded =
+    !hasDifferentKnownSummaryMutation &&
+    hasCompleteMessages &&
+    (previous.messagesLoaded === true || previous.messages.length > 0);
+  if (
+    sameSessionSummary(previous, next) &&
+    pendingPrompts === previous.pendingPrompts &&
+    previous.messagesLoaded === messagesLoaded
+  ) {
+    return previous;
+  }
+
+  const base = {
+    ...next,
+    messages: previous.messages,
+    messagesLoaded,
+  };
+  if (pendingPrompts) {
+    return {
+      ...base,
+      pendingPrompts,
+    };
+  }
+
+  const { pendingPrompts: _discard, ...rest } = base;
+  return rest;
 }
 
 function sameModelOptions(previous?: Session["modelOptions"], next?: Session["modelOptions"]) {

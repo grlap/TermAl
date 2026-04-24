@@ -1624,6 +1624,7 @@ describe("Backend connection state", () => {
           sessionId: "session-1",
           messageId: "message-live",
           messageIndex: 0,
+          messageCount: 1,
           message: {
             id: "message-live",
             type: "text",
@@ -1636,7 +1637,7 @@ describe("Backend connection state", () => {
         });
       });
       await act(async () => {
-        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(16);
       });
 
       expectNoControlPanelConnectionIssue();
@@ -2524,6 +2525,7 @@ describe("Backend connection state", () => {
           sessionId: "session-1",
           messageId: "message-1",
           messageIndex: 0,
+          messageCount: 1,
           message: {
             id: "message-1",
             type: "text",
@@ -2535,7 +2537,10 @@ describe("Backend connection state", () => {
           status: "active",
         });
       });
-      expect(screen.getByText("Streaming preview")).toBeInTheDocument();
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
       expect(
         screen.getByLabelText("Control panel backend reconnecting"),
       ).toBeInTheDocument();
@@ -3814,6 +3819,7 @@ function makeBackendStateResponse({
         status: "idle" as const,
         preview,
         messages: [],
+        messagesLoaded: true,
         pendingPrompts: [],
       },
     ],

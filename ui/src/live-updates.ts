@@ -88,6 +88,51 @@ function resolveSessionMutationStamp(
   return sessionMutationStamp ?? session.sessionMutationStamp ?? null;
 }
 
+function isValidMessageIndex(messageIndex: number) {
+  return Number.isSafeInteger(messageIndex) && messageIndex >= 0;
+}
+
+function applyMetadataOnlySessionDelta(
+  session: Session,
+  delta: Exclude<SessionDeltaEvent, { type: "sessionCreated" }>,
+): Session {
+  const pendingPrompts =
+    delta.type === "messageCreated"
+      ? removePendingPromptById(session.pendingPrompts, delta.messageId)
+      : session.pendingPrompts;
+  const base = {
+    ...session,
+    messageCount: delta.messageCount,
+    pendingPrompts,
+    sessionMutationStamp: resolveSessionMutationStamp(
+      session,
+      delta.sessionMutationStamp,
+    ),
+  };
+
+  switch (delta.type) {
+    case "messageCreated":
+    case "messageUpdated":
+      return {
+        ...base,
+        preview: delta.preview,
+        status: delta.status,
+      };
+    case "textDelta":
+    case "textReplace":
+      return {
+        ...base,
+        preview: delta.preview ?? session.preview,
+      };
+    case "commandUpdate":
+    case "parallelAgentsUpdate":
+      return {
+        ...base,
+        preview: delta.preview,
+      };
+  }
+}
+
 export function applyDeltaToSessions(
   sessions: Session[],
   delta: SessionDeltaEvent,
@@ -120,7 +165,20 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
-      if (delta.message.id !== delta.messageId || delta.messageIndex < 0) {
+      if (session.messagesLoaded === false) {
+        return {
+          kind: "applied",
+          sessions: replaceSession(
+            sessions,
+            sessionIndex,
+            applyMetadataOnlySessionDelta(session, delta),
+          ),
+        };
+      }
+      if (
+        delta.message.id !== delta.messageId ||
+        !isValidMessageIndex(delta.messageIndex)
+      ) {
         return { kind: "needsResync" };
       }
 
@@ -130,28 +188,77 @@ export function applyDeltaToSessions(
         delta.messageId,
         delta.messageIndex,
       );
-      if (existingMessageIndex === -1) {
-        if (delta.messageIndex > updatedMessages.length) {
-          return { kind: "needsResync" };
-        }
-
-        updatedMessages.splice(delta.messageIndex, 0, delta.message);
-      } else if (existingMessageIndex === delta.messageIndex) {
-        updatedMessages[existingMessageIndex] = delta.message;
-      } else {
+      if (existingMessageIndex !== -1) {
         updatedMessages.splice(existingMessageIndex, 1);
-        const nextMessageIndex =
-          existingMessageIndex < delta.messageIndex
-            ? delta.messageIndex - 1
-            : delta.messageIndex;
-        updatedMessages.splice(nextMessageIndex, 0, delta.message);
       }
+      if (delta.messageIndex > updatedMessages.length) {
+        return { kind: "needsResync" };
+      }
+
+      updatedMessages.splice(delta.messageIndex, 0, delta.message);
+      const pendingPrompts = removePendingPromptById(
+        session.pendingPrompts,
+        delta.messageId,
+      );
 
       return {
         kind: "applied",
         sessions: replaceSession(sessions, sessionIndex, {
           ...session,
           messages: updatedMessages,
+          messageCount: delta.messageCount,
+          pendingPrompts,
+          preview: delta.preview,
+          status: delta.status,
+          sessionMutationStamp: resolveSessionMutationStamp(
+            session,
+            delta.sessionMutationStamp,
+          ),
+        }),
+      };
+    }
+
+    case "messageUpdated": {
+      if (sessionIndex === -1) {
+        return { kind: "needsResync" };
+      }
+      const session = sessions[sessionIndex];
+      if (session.messagesLoaded === false) {
+        return {
+          kind: "applied",
+          sessions: replaceSession(
+            sessions,
+            sessionIndex,
+            applyMetadataOnlySessionDelta(session, delta),
+          ),
+        };
+      }
+      if (
+        delta.message.id !== delta.messageId ||
+        !isValidMessageIndex(delta.messageIndex)
+      ) {
+        return { kind: "needsResync" };
+      }
+
+      const messageIndex = findMessageIndex(
+        session.messages,
+        delta.messageId,
+        delta.messageIndex,
+      );
+      if (messageIndex === -1) {
+        return { kind: "needsResync" };
+      }
+
+      const updatedMessages = session.messages.slice();
+      // In-place replacement only; unlike messageCreated this must not reorder.
+      updatedMessages[messageIndex] = delta.message;
+
+      return {
+        kind: "applied",
+        sessions: replaceSession(sessions, sessionIndex, {
+          ...session,
+          messages: updatedMessages,
+          messageCount: delta.messageCount,
           preview: delta.preview,
           status: delta.status,
           sessionMutationStamp: resolveSessionMutationStamp(
@@ -167,6 +274,16 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
+      if (session.messagesLoaded === false) {
+        return {
+          kind: "applied",
+          sessions: replaceSession(
+            sessions,
+            sessionIndex,
+            applyMetadataOnlySessionDelta(session, delta),
+          ),
+        };
+      }
       const messageIndex = findMessageIndex(
         session.messages,
         delta.messageId,
@@ -196,6 +313,7 @@ export function applyDeltaToSessions(
         sessions: replaceSession(sessions, sessionIndex, {
           ...session,
           messages: updatedMessages,
+          messageCount: delta.messageCount,
           preview: delta.preview ?? session.preview,
           sessionMutationStamp: resolveSessionMutationStamp(
             session,
@@ -210,6 +328,16 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
+      if (session.messagesLoaded === false) {
+        return {
+          kind: "applied",
+          sessions: replaceSession(
+            sessions,
+            sessionIndex,
+            applyMetadataOnlySessionDelta(session, delta),
+          ),
+        };
+      }
       const messageIndex = findMessageIndex(
         session.messages,
         delta.messageId,
@@ -239,6 +367,7 @@ export function applyDeltaToSessions(
         sessions: replaceSession(sessions, sessionIndex, {
           ...session,
           messages: updatedMessages,
+          messageCount: delta.messageCount,
           preview: delta.preview ?? session.preview,
           sessionMutationStamp: resolveSessionMutationStamp(
             session,
@@ -253,6 +382,16 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
+      if (session.messagesLoaded === false) {
+        return {
+          kind: "applied",
+          sessions: replaceSession(
+            sessions,
+            sessionIndex,
+            applyMetadataOnlySessionDelta(session, delta),
+          ),
+        };
+      }
       const messageIndex = findMessageIndex(
         session.messages,
         delta.messageId,
@@ -286,6 +425,7 @@ export function applyDeltaToSessions(
         sessions: replaceSession(sessions, sessionIndex, {
           ...session,
           messages: updatedMessages,
+          messageCount: delta.messageCount,
           preview: delta.preview,
           sessionMutationStamp: resolveSessionMutationStamp(
             session,
@@ -300,6 +440,16 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
+      if (session.messagesLoaded === false) {
+        return {
+          kind: "applied",
+          sessions: replaceSession(
+            sessions,
+            sessionIndex,
+            applyMetadataOnlySessionDelta(session, delta),
+          ),
+        };
+      }
       const messageIndex = findMessageIndex(
         session.messages,
         delta.messageId,
@@ -329,6 +479,7 @@ export function applyDeltaToSessions(
         sessions: replaceSession(sessions, sessionIndex, {
           ...session,
           messages: updatedMessages,
+          messageCount: delta.messageCount,
           preview: delta.preview,
           sessionMutationStamp: resolveSessionMutationStamp(
             session,
@@ -349,6 +500,24 @@ function replaceSession(sessions: Session[], index: number, session: Session) {
   const updatedSessions = sessions.slice();
   updatedSessions[index] = session;
   return updatedSessions;
+}
+
+function removePendingPromptById(
+  pendingPrompts: Session["pendingPrompts"],
+  promptId: string,
+): Session["pendingPrompts"] {
+  if (!pendingPrompts?.length) {
+    return pendingPrompts;
+  }
+
+  const nextPendingPrompts = pendingPrompts.filter(
+    (prompt) => prompt.id !== promptId,
+  );
+  if (nextPendingPrompts.length === pendingPrompts.length) {
+    return pendingPrompts;
+  }
+
+  return nextPendingPrompts.length > 0 ? nextPendingPrompts : undefined;
 }
 
 function findMessageIndex(

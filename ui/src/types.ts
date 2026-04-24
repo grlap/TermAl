@@ -271,6 +271,7 @@ export type Session = {
   status: SessionStatus;
   preview: string;
   messages: Message[];
+  messageCount?: number | null;
   messagesLoaded?: boolean | null;
   pendingPrompts?: PendingPrompt[];
   sessionMutationStamp?: number | null;
@@ -551,6 +552,7 @@ export type TextDeltaEvent = {
   sessionId: string;
   messageId: string;
   messageIndex: number;
+  messageCount: number;
   delta: string;
   preview?: string | null;
   sessionMutationStamp?: number | null;
@@ -562,6 +564,7 @@ export type TextReplaceEvent = {
   sessionId: string;
   messageId: string;
   messageIndex: number;
+  messageCount: number;
   text: string;
   preview?: string | null;
   sessionMutationStamp?: number | null;
@@ -573,6 +576,20 @@ export type MessageCreatedEvent = {
   sessionId: string;
   messageId: string;
   messageIndex: number;
+  messageCount: number;
+  message: Message;
+  preview: string;
+  status: SessionStatus;
+  sessionMutationStamp?: number | null;
+};
+
+export type MessageUpdatedEvent = {
+  type: "messageUpdated";
+  revision: number;
+  sessionId: string;
+  messageId: string;
+  messageIndex: number;
+  messageCount: number;
   message: Message;
   preview: string;
   status: SessionStatus;
@@ -592,6 +609,7 @@ export type CommandUpdateEvent = {
   sessionId: string;
   messageId: string;
   messageIndex: number;
+  messageCount: number;
   command: string;
   commandLanguage?: string | null;
   output: string;
@@ -607,6 +625,7 @@ export type ParallelAgentsUpdateEvent = {
   sessionId: string;
   messageId: string;
   messageIndex: number;
+  messageCount: number;
   agents: ParallelAgentProgress[];
   preview: string;
   sessionMutationStamp?: number | null;
@@ -648,6 +667,7 @@ export type WorkspaceFilesChangedEvent = {
 export type DeltaEvent =
   | SessionCreatedEvent
   | MessageCreatedEvent
+  | MessageUpdatedEvent
   | TextDeltaEvent
   | TextReplaceEvent
   | CommandUpdateEvent

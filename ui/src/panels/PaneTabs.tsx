@@ -2,6 +2,7 @@ import {
   memo,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -47,7 +48,7 @@ import {
   formatCodexNoticeBadgeLabel,
   hasSessionTabStatusTooltip,
 } from "./session-tab-status-tooltip";
-import { useSessionSummariesById } from "../session-store";
+import { useSessionSummarySnapshots } from "../session-store";
 import { dataTransferHasSessionDragType } from "../session-drag";
 import {
   TAB_DRAG_MIME_TYPE,
@@ -126,7 +127,29 @@ export const PaneTabs = memo(function PaneTabs({
     trigger?: HTMLElement | null,
   ) => void;
 }) {
-  const sessionSummariesById = useSessionSummariesById();
+  const tabSessionSummaryIds = useMemo(() => {
+    const sessionIds: string[] = [];
+    const seenSessionIds = new Set<string>();
+    const addSessionId = (sessionId: string | null | undefined) => {
+      if (!sessionId || seenSessionIds.has(sessionId)) {
+        return;
+      }
+      seenSessionIds.add(sessionId);
+      sessionIds.push(sessionId);
+    };
+
+    tabs.forEach((tab) => {
+      if (tab.kind === "session") {
+        addSessionId(tab.sessionId);
+      }
+      if ("originSessionId" in tab) {
+        addSessionId(tab.originSessionId);
+      }
+    });
+
+    return sessionIds;
+  }, [tabs]);
+  const sessionSummariesById = useSessionSummarySnapshots(tabSessionSummaryIds);
   const paneTabsRef = useRef<HTMLDivElement | null>(null);
   const activeStatusTooltipAnchorRef = useRef<HTMLElement | null>(null);
   const fileTabContextMenuRef = useRef<HTMLDivElement | null>(null);

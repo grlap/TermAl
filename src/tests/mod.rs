@@ -859,6 +859,8 @@ fn sample_remote_orchestrator_state(
                 status: SessionStatus::Idle,
                 preview: format!("Remote {} ready.", template_session.name),
                 messages: Vec::new(),
+                messages_loaded: true,
+                message_count: 0,
                 pending_prompts: Vec::new(),
                 session_mutation_stamp: None,
             };

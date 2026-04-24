@@ -63,13 +63,13 @@ describe("MessageCard", () => {
     expect(screen.getByText("Preserved list formatting")).toBeInTheDocument();
   });
 
-  it("uses a plain-text shell for the active streaming assistant message", () => {
+  it("renders markdown for active streaming assistant text that contains markdown structure", async () => {
     const message: TextMessage = {
       id: "message-streaming",
       type: "text",
       author: "assistant",
       timestamp: "10:02",
-      text: "## Summary of Changes\n- Preserved literal markdown while streaming",
+      text: "## Summary of Changes\n- Render markdown while streaming\n\nUse `code` and **bold**.",
     };
 
     const { container } = render(
@@ -82,10 +82,36 @@ describe("MessageCard", () => {
     );
 
     expect(
-      screen.queryByRole("heading", { name: "Summary of Changes" }),
-    ).not.toBeInTheDocument();
+      await screen.findByRole("heading", { name: "Summary of Changes" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Render markdown while streaming"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("code").tagName).toBe("CODE");
+    expect(screen.getByText("bold").tagName).toBe("STRONG");
+    expect(container.querySelector(".plain-text-copy")).toBeNull();
+  });
+
+  it("uses a plain-text shell for active streaming assistant prose without markdown", () => {
+    const message: TextMessage = {
+      id: "message-streaming-plain",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: "Checking the workspace and waiting for the next chunk of output.",
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        preferStreamingPlainTextRender
+      />,
+    );
+
     expect(container.querySelector(".plain-text-copy")?.textContent).toBe(
-      "## Summary of Changes\n- Preserved literal markdown while streaming",
+      "Checking the workspace and waiting for the next chunk of output.",
     );
   });
 

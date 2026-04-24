@@ -11,7 +11,7 @@
 //
 // Two flavours of event leave the backend:
 //
-// - **State snapshots** — the full `StateResponse` shape, serialized
+// - **State snapshots** — the metadata-first `StateResponse` shape, serialized
 //   once per commit and pushed on the `state_events` channel. Used by
 //   new SSE clients and remote proxies that need a ground-truth
 //   snapshot after reconnect.
@@ -52,11 +52,11 @@
 
 impl AppState {
     /// Central commit path: bumps the revision, wakes the persist
-    /// thread, and broadcasts a full state snapshot over SSE.
+    /// thread, and broadcasts a metadata-first state snapshot over SSE.
     ///
     /// Call this after *any* mutation that should be visible to
-    /// clients. The full snapshot is suitable for mutations that
-    /// affect many fields at once (settings, workspace layouts,
+    /// clients. The metadata-first snapshot is suitable for mutations
+    /// that affect many fields at once (settings, workspace layouts,
     /// project CRUD) or that touch the sessions array shape (create,
     /// remove, reorder). For narrow per-field updates, prefer
     /// [`Self::commit_delta_locked`] to avoid re-serializing the
@@ -186,7 +186,7 @@ impl AppState {
     }
 
     /// Returns a receiver on the `state_events` broadcast channel
-    /// (JSON-serialized full `StateResponse` snapshots). Each new SSE
+    /// (JSON-serialized metadata-first `StateResponse` snapshots). Each new SSE
     /// subscriber in `api.rs` calls this to start receiving
     /// post-revision snapshots; the initial snapshot is sent
     /// separately from the connect handler.
@@ -372,7 +372,7 @@ impl AppState {
         }
     }
 
-    /// Fire-and-forget full-snapshot broadcast, paired with
+    /// Fire-and-forget metadata-first snapshot broadcast, paired with
     /// [`Self::publish_delta`] for deltas; serialization errors are
     /// logged but do not propagate.
     ///

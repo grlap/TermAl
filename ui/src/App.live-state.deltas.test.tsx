@@ -436,6 +436,387 @@ describe("App live state - delta-gap core", () => {
     });
   });
 
+  it("rehydrates an active transcript when a summary snapshot overtakes a delayed delta", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const initialSession = makeSession("session-1", {
+        name: "Codex Session",
+        status: "active",
+        preview: "Hello",
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 10,
+        messages: [
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Hello",
+          },
+        ],
+      });
+      const hydratedSession = makeSession("session-1", {
+        ...initialSession,
+        preview: "Hello world",
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 11,
+        messages: [
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Hello world",
+          },
+        ],
+      });
+      const sessionFetch = createDeferred<Response>();
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse(
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [initialSession],
+            }),
+          );
+        }
+        if (requestUrl.pathname === "/api/sessions/session-1") {
+          return sessionFetch.promise;
+        }
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/tmp",
+            upstream: "origin/main",
+            workdir: "/tmp",
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [initialSession],
+          }),
+        );
+        await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        const sessionRowButton =
+          within(sessionList).getByText("Codex Session").closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+        await clickAndSettle(sessionRowButton);
+        expect(screen.getAllByText("Hello").length).toBeGreaterThan(0);
+
+        await dispatchStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 3,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                ...initialSession,
+                preview: "Hello world",
+                messagesLoaded: false,
+                messageCount: 1,
+                sessionMutationStamp: 11,
+                messages: [],
+              }),
+            ],
+          }),
+        );
+        await settleAsyncUi();
+        expect(
+          fetchMock.mock.calls.some(
+            ([input]) =>
+              new URL(String(input), "http://localhost").pathname ===
+              "/api/sessions/session-1",
+          ),
+        ).toBe(true);
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "textDelta",
+            revision: 2,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 0,
+            messageCount: 1,
+            delta: " world",
+            preview: "Hello world",
+            sessionMutationStamp: 11,
+          });
+          await flushUiWork();
+        });
+
+        await act(async () => {
+          sessionFetch.resolve(
+            jsonResponse({
+              revision: 3,
+              serverInstanceId: "test-instance",
+              session: hydratedSession,
+            }),
+          );
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        expect(screen.getAllByText("Hello world").length).toBeGreaterThan(0);
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("hydrates all visible metadata-only session panes after startup", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const state = makeStateResponse({
+        revision: 1,
+        projects: [
+          {
+            id: "project-termal",
+            name: "TermAl",
+            rootPath: "/projects/termal",
+          },
+        ],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-left", {
+            name: "Left Session",
+            projectId: "project-termal",
+            workdir: "/projects/termal",
+            messagesLoaded: false,
+            messageCount: 1,
+            preview: "Left summary",
+            messages: [],
+          }),
+          makeSession("session-right", {
+            name: "Right Session",
+            projectId: "project-termal",
+            workdir: "/projects/termal",
+            messagesLoaded: false,
+            messageCount: 1,
+            preview: "Right summary",
+            messages: [],
+          }),
+        ],
+      });
+      const hydratedSessions = new Map([
+        [
+          "session-left",
+          makeSession("session-left", {
+            name: "Left Session",
+            projectId: "project-termal",
+            workdir: "/projects/termal",
+            messagesLoaded: true,
+            messageCount: 1,
+            preview: "Left transcript",
+            messages: [
+              {
+                id: "message-left",
+                type: "text",
+                timestamp: "10:01",
+                author: "assistant",
+                text: "Left transcript",
+              },
+            ],
+          }),
+        ],
+        [
+          "session-right",
+          makeSession("session-right", {
+            name: "Right Session",
+            projectId: "project-termal",
+            workdir: "/projects/termal",
+            messagesLoaded: true,
+            messageCount: 1,
+            preview: "Right transcript",
+            messages: [
+              {
+                id: "message-right",
+                type: "text",
+                timestamp: "10:02",
+                author: "assistant",
+                text: "Right transcript",
+              },
+            ],
+          }),
+        ],
+      ]);
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse(state);
+          }
+          if (requestUrl.pathname.startsWith("/api/sessions/")) {
+            const sessionId = decodeURIComponent(
+              requestUrl.pathname.split("/").pop() ?? "",
+            );
+            const session = hydratedSessions.get(sessionId);
+            if (!session) {
+              return new Response("", { status: 404 });
+            }
+            return jsonResponse({
+              revision: 2,
+              serverInstanceId: "test-instance",
+              session,
+            });
+          }
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
+
+            return new Response("", { status: 404 });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+      const workspace: WorkspaceState = {
+        root: {
+          id: "split-root",
+          type: "split",
+          direction: "row",
+          ratio: 0.5,
+          first: { type: "pane", paneId: "pane-left" },
+          second: { type: "pane", paneId: "pane-right" },
+        },
+        panes: [
+          {
+            id: "pane-left",
+            tabs: [
+              {
+                id: "tab-left",
+                kind: "session",
+                sessionId: "session-left",
+              },
+            ],
+            activeTabId: "tab-left",
+            activeSessionId: "session-left",
+            viewMode: "session",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+          {
+            id: "pane-right",
+            tabs: [
+              {
+                id: "tab-right",
+                kind: "session",
+                sessionId: "session-right",
+              },
+            ],
+            activeTabId: "tab-right",
+            activeSessionId: "session-right",
+            viewMode: "session",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+        ],
+        activePaneId: "pane-right",
+      };
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=visible-session-hydration",
+      );
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        "termal-workspace-layout:visible-session-hydration",
+        JSON.stringify({
+          controlPanelSide: "right",
+          workspace,
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        await dispatchOpenedStateEvent(latestEventSource(), state);
+
+        await waitFor(() => {
+          const fetchedSessionIds = fetchMock.mock.calls
+            .map(([input]) => new URL(String(input), "http://localhost"))
+            .filter((url) => url.pathname.startsWith("/api/sessions/"))
+            .map((url) => decodeURIComponent(url.pathname.split("/").pop() ?? ""));
+          expect(fetchedSessionIds).toEqual(
+            expect.arrayContaining(["session-left", "session-right"]),
+          );
+        });
+        expect(
+          (await screen.findAllByText("Left transcript")).length,
+        ).toBeGreaterThan(0);
+        expect(
+          (await screen.findAllByText("Right transcript")).length,
+        ).toBeGreaterThan(0);
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("coalesces Codex global-state delta renders through one animation frame", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;

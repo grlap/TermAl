@@ -106,7 +106,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 /// `Vec<u8>` body, which is a fixed-cost hand-off to hyper.
 async fn get_state(State(state): State<AppState>) -> Result<Response, ApiError> {
     let body = run_blocking_api(move || {
-        let snapshot = state.snapshot();
+        let snapshot = state.summary_snapshot();
         serde_json::to_vec(&snapshot)
             .map_err(|err| ApiError::internal(format!("failed to serialize state: {err}")))
     })
@@ -667,7 +667,8 @@ async fn send_message(
 
     let snapshot = run_blocking_api({
         let state = state.clone();
-        move || Ok(state.snapshot())
+        let session_id = session_id.clone();
+        move || Ok(state.summary_snapshot_with_full_session(&session_id))
     })
     .await?;
 

@@ -48,12 +48,12 @@ impl AppState {
     /// path (see `src/recorders.rs`) for whole-block events (text,
     /// thinking, diff, approval, subagent result, etc.).
     fn push_message(&self, session_id: &str, message: Message) -> Result<()> {
-        let (revision, message, message_index, preview, status, session_mutation_stamp) = {
+        let (revision, message, message_index, message_count, preview, status, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let (message_index, preview, status, session_mutation_stamp) = {
+            let (message_index, message_count, preview, status, session_mutation_stamp) = {
                 let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -72,6 +72,7 @@ impl AppState {
                 let message_index = push_message_on_record(record, message.clone());
                 (
                     message_index,
+                    session_message_count(record),
                     record.session.preview.clone(),
                     record.session.status,
                     record.mutation_stamp,
@@ -82,6 +83,7 @@ impl AppState {
                 revision,
                 message,
                 message_index,
+                message_count,
                 preview,
                 status,
                 session_mutation_stamp,
@@ -93,6 +95,7 @@ impl AppState {
             session_id: session_id.to_owned(),
             message_id: message.id().to_owned(),
             message_index,
+            message_count,
             message,
             preview,
             status,
@@ -125,12 +128,12 @@ impl AppState {
         anchor_message_id: &str,
         message: Message,
     ) -> Result<()> {
-        let (revision, message, message_index, preview, status, session_mutation_stamp) = {
+        let (revision, message, message_index, message_count, preview, status, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let (message_index, preview, status, session_mutation_stamp) = {
+            let (message_index, message_count, preview, status, session_mutation_stamp) = {
                 let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -146,6 +149,7 @@ impl AppState {
                 let message_index = insert_message_on_record(record, anchor_index, message.clone());
                 (
                     message_index,
+                    session_message_count(record),
                     record.session.preview.clone(),
                     record.session.status,
                     record.mutation_stamp,
@@ -156,6 +160,7 @@ impl AppState {
                 revision,
                 message,
                 message_index,
+                message_count,
                 preview,
                 status,
                 session_mutation_stamp,
@@ -167,6 +172,7 @@ impl AppState {
             session_id: session_id.to_owned(),
             message_id: message.id().to_owned(),
             message_index,
+            message_count,
             message,
             preview,
             status,
@@ -187,13 +193,13 @@ impl AppState {
     /// reasoning/assistant deltas in `src/codex_events.rs`, ACP
     /// `text_delta` in `src/acp.rs`).
     fn append_text_delta(&self, session_id: &str, message_id: &str, delta: &str) -> Result<()> {
-        let (preview, revision, message_index, session_mutation_stamp) = {
+        let (preview, revision, message_index, message_count, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let mut preview = None;
-            let (message_index, session_mutation_stamp) = {
+            let (message_index, message_count, session_mutation_stamp) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -225,10 +231,20 @@ impl AppState {
                 if let Some(next_preview) = preview.as_ref() {
                     session.preview = next_preview.clone();
                 }
-                (message_index, record.mutation_stamp)
+                (
+                    message_index,
+                    session_message_count(record),
+                    record.mutation_stamp,
+                )
             };
             let revision = self.commit_delta_locked(&mut inner)?;
-            (preview, revision, message_index, session_mutation_stamp)
+            (
+                preview,
+                revision,
+                message_index,
+                message_count,
+                session_mutation_stamp,
+            )
         };
 
         self.publish_delta(&DeltaEvent::TextDelta {
@@ -236,6 +252,7 @@ impl AppState {
             session_id: session_id.to_owned(),
             message_id: message_id.to_owned(),
             message_index,
+            message_count,
             delta: delta.to_owned(),
             preview,
             session_mutation_stamp: Some(session_mutation_stamp),
@@ -256,13 +273,20 @@ impl AppState {
     /// `append_text_delta` when their message-stop handler detects a
     /// mismatch.
     fn replace_text_message(&self, session_id: &str, message_id: &str, text: &str) -> Result<()> {
-        let (preview, revision, message_index, replacement_text, session_mutation_stamp) = {
+        let (
+            preview,
+            revision,
+            message_index,
+            message_count,
+            replacement_text,
+            session_mutation_stamp,
+        ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let mut preview = None;
-            let (message_index, session_mutation_stamp) = {
+            let (message_index, message_count, session_mutation_stamp) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -299,13 +323,18 @@ impl AppState {
                 if let Some(next_preview) = preview.as_ref() {
                     session.preview = next_preview.clone();
                 }
-                (message_index, record.mutation_stamp)
+                (
+                    message_index,
+                    session_message_count(record),
+                    record.mutation_stamp,
+                )
             };
             let revision = self.commit_delta_locked(&mut inner)?;
             (
                 preview,
                 revision,
                 message_index,
+                message_count,
                 text.to_owned(),
                 session_mutation_stamp,
             )
@@ -316,6 +345,7 @@ impl AppState {
             session_id: session_id.to_owned(),
             message_id: message_id.to_owned(),
             message_index,
+            message_count,
             text: replacement_text,
             preview,
             session_mutation_stamp: Some(session_mutation_stamp),
@@ -349,6 +379,7 @@ impl AppState {
             preview,
             revision,
             message_index,
+            message_count,
             created_message,
             session_status,
             session_mutation_stamp,
@@ -359,6 +390,7 @@ impl AppState {
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let (
                 message_index,
+                message_count,
                 created_message,
                 preview,
                 session_status,
@@ -433,6 +465,7 @@ impl AppState {
                 record.session.preview = preview.clone();
                 (
                     message_index,
+                    session_message_count(record),
                     created_message,
                     preview,
                     record.session.status,
@@ -448,6 +481,7 @@ impl AppState {
                 preview,
                 revision,
                 message_index,
+                message_count,
                 created_message,
                 session_status,
                 session_mutation_stamp,
@@ -460,6 +494,7 @@ impl AppState {
                 session_id: session_id.to_owned(),
                 message_id: message_id.to_owned(),
                 message_index,
+                message_count,
                 message,
                 preview,
                 status: session_status,
@@ -471,6 +506,7 @@ impl AppState {
                 session_id: session_id.to_owned(),
                 message_id: message_id.to_owned(),
                 message_index,
+                message_count,
                 command: command.to_owned(),
                 command_language,
                 output: output.to_owned(),
@@ -505,6 +541,7 @@ impl AppState {
             preview,
             revision,
             message_index,
+            message_count,
             created_message,
             session_status,
             session_mutation_stamp,
@@ -515,6 +552,7 @@ impl AppState {
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let (
                 message_index,
+                message_count,
                 created_message,
                 preview,
                 session_status,
@@ -562,6 +600,7 @@ impl AppState {
                 record.session.preview = preview.clone();
                 (
                     message_index,
+                    session_message_count(record),
                     created_message,
                     preview,
                     record.session.status,
@@ -577,6 +616,7 @@ impl AppState {
                 preview,
                 revision,
                 message_index,
+                message_count,
                 created_message,
                 session_status,
                 session_mutation_stamp,
@@ -589,6 +629,7 @@ impl AppState {
                 session_id: session_id.to_owned(),
                 message_id: message_id.to_owned(),
                 message_index,
+                message_count,
                 message,
                 preview,
                 status: session_status,
@@ -600,6 +641,7 @@ impl AppState {
                 session_id: session_id.to_owned(),
                 message_id: message_id.to_owned(),
                 message_index,
+                message_count,
                 agents,
                 preview,
                 session_mutation_stamp: Some(session_mutation_stamp),

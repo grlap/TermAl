@@ -603,8 +603,14 @@ fn codex_archive_and_unarchive_actions_update_thread_state_and_block_dispatch() 
         archived_session.codex_thread_state,
         Some(CodexThreadState::Archived)
     );
+    assert!(!archived_session.messages_loaded);
+    assert!(archived_session.messages.is_empty());
+    let archived_full_session = state
+        .get_session(&session_id)
+        .expect("archived Codex session should hydrate")
+        .session;
     assert!(matches!(
-        archived_session.messages.last(),
+        archived_full_session.messages.last(),
         Some(Message::Markdown { title, .. }) if title == "Archived Codex thread"
     ));
 
@@ -636,8 +642,14 @@ fn codex_archive_and_unarchive_actions_update_thread_state_and_block_dispatch() 
         restored_session.codex_thread_state,
         Some(CodexThreadState::Active)
     );
+    assert!(!restored_session.messages_loaded);
+    assert!(restored_session.messages.is_empty());
+    let restored_full_session = state
+        .get_session(&session_id)
+        .expect("restored Codex session should hydrate")
+        .session;
     assert!(matches!(
-        restored_session.messages.last(),
+        restored_full_session.messages.last(),
         Some(Message::Markdown { title, .. }) if title == "Restored Codex thread"
     ));
 }

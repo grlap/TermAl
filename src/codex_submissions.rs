@@ -38,7 +38,87 @@
 // `set_approval_decision_on_record` + the `set_*_request_state_on_record`
 // helpers; `src/tests/http_routes.rs` for end-to-end route coverage.
 
+fn interaction_message_update_parts(
+    record: &SessionRecord,
+    message_index: usize,
+    message_id: &str,
+) -> (Message, u32, String, SessionStatus, u64) {
+    let message = record
+        .session
+        .messages
+        .get(message_index)
+        .cloned()
+        .expect("commit_interaction_message_update closure returned an out-of-bounds index");
+    assert_eq!(
+        message.id(),
+        message_id,
+        "commit_interaction_message_update closure returned a stale message index"
+    );
+
+    (
+        message,
+        session_message_count(record),
+        record.session.preview.clone(),
+        record.session.status,
+        record.mutation_stamp,
+    )
+}
+
 impl AppState {
+    /// Commits an interaction-card edit and publishes its replacement delta.
+    /// The closure must return the in-bounds index of `message_id` after
+    /// mutation; violating that contract panics because it is an internal
+    /// state invariant, not a recoverable API error.
+    fn commit_interaction_message_update<F>(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        update_record: F,
+    ) -> std::result::Result<StateResponse, ApiError>
+    where
+        F: FnOnce(&mut SessionRecord) -> std::result::Result<usize, ApiError>,
+    {
+        let snapshot = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_visible_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let (message_index, message, message_count, preview, status, session_mutation_stamp) = {
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                let message_index = update_record(record)?;
+                let (message, message_count, preview, status, session_mutation_stamp) =
+                    interaction_message_update_parts(record, message_index, message_id);
+                (
+                    message_index,
+                    message,
+                    message_count,
+                    preview,
+                    status,
+                    session_mutation_stamp,
+                )
+            };
+            let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!("failed to persist session state: {err:#}"))
+            })?;
+            let event = DeltaEvent::MessageUpdated {
+                revision,
+                session_id: session_id.to_owned(),
+                message_id: message_id.to_owned(),
+                message_index,
+                message_count,
+                message,
+                preview,
+                status,
+                session_mutation_stamp: Some(session_mutation_stamp),
+            };
+            self.publish_delta(&event);
+            self.snapshot_from_inner(&inner)
+        };
+        Ok(snapshot)
+    }
+
     /// Routes an approval decision back to the originating agent.
     /// Looks up the pending entry across all three agent pending maps
     /// on the `SessionRecord`: `pending_claude_approvals` for Claude
@@ -264,35 +344,21 @@ impl AppState {
                 })?;
         }
 
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-        if record.session.status != SessionStatus::Approval && decision == ApprovalDecision::Pending
-        {
-            return Err(ApiError::conflict(
-                "session is not currently awaiting approval",
-            ));
-        }
-        set_approval_decision_on_record(record, message_id, decision)
-            .map_err(|_| ApiError::not_found("approval message not found"))?;
+        self.commit_interaction_message_update(session_id, message_id, |record| {
+            let message_index = set_approval_decision_on_record(record, message_id, decision)
+                .map_err(|_| ApiError::not_found("approval message not found"))?;
 
-        if decision != ApprovalDecision::Pending {
-            record.pending_claude_approvals.remove(message_id);
-            record.pending_codex_approvals.remove(message_id);
-            record.pending_acp_approvals.remove(message_id);
-        }
-        sync_session_interaction_state(
-            record,
-            approval_preview_text(record.session.agent.name(), decision),
-        );
-        self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!("failed to persist session state: {err:#}"))
-        })?;
-        Ok(self.snapshot_from_inner(&inner))
+            if decision != ApprovalDecision::Pending {
+                record.pending_claude_approvals.remove(message_id);
+                record.pending_codex_approvals.remove(message_id);
+                record.pending_acp_approvals.remove(message_id);
+            }
+            sync_session_interaction_state(
+                record,
+                approval_preview_text(record.session.agent.name(), decision),
+            );
+            Ok(message_index)
+        })
     }
 
     /// Submits user-input-request answers back to Codex. Looks up the
@@ -363,32 +429,24 @@ impl AppState {
                 ))
             })?;
 
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-        set_user_input_request_state_on_record(
-            record,
-            message_id,
-            InteractionRequestState::Submitted,
-            Some(display_answers),
-        )
-        .map_err(|_| ApiError::not_found("user input request not found"))?;
-        record.pending_codex_user_inputs.remove(message_id);
-        sync_session_interaction_state(
-            record,
-            user_input_request_preview_text(
-                record.session.agent.name(),
+        self.commit_interaction_message_update(session_id, message_id, |record| {
+            let message_index = set_user_input_request_state_on_record(
+                record,
+                message_id,
                 InteractionRequestState::Submitted,
-            ),
-        );
-        self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!("failed to persist session state: {err:#}"))
-        })?;
-        Ok(self.snapshot_from_inner(&inner))
+                Some(display_answers),
+            )
+            .map_err(|_| ApiError::not_found("user input request not found"))?;
+            record.pending_codex_user_inputs.remove(message_id);
+            sync_session_interaction_state(
+                record,
+                user_input_request_preview_text(
+                    record.session.agent.name(),
+                    InteractionRequestState::Submitted,
+                ),
+            );
+            Ok(message_index)
+        })
     }
 
     /// Submits an MCP elicitation response back to Codex. Looks up
@@ -466,34 +524,26 @@ impl AppState {
                 ))
             })?;
 
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-        set_mcp_elicitation_request_state_on_record(
-            record,
-            message_id,
-            InteractionRequestState::Submitted,
-            Some(action),
-            normalized_content.clone(),
-        )
-        .map_err(|_| ApiError::not_found("MCP elicitation request not found"))?;
-        record.pending_codex_mcp_elicitations.remove(message_id);
-        sync_session_interaction_state(
-            record,
-            mcp_elicitation_request_preview_text(
-                record.session.agent.name(),
+        self.commit_interaction_message_update(session_id, message_id, |record| {
+            let message_index = set_mcp_elicitation_request_state_on_record(
+                record,
+                message_id,
                 InteractionRequestState::Submitted,
                 Some(action),
-            ),
-        );
-        self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!("failed to persist session state: {err:#}"))
-        })?;
-        Ok(self.snapshot_from_inner(&inner))
+                normalized_content.clone(),
+            )
+            .map_err(|_| ApiError::not_found("MCP elicitation request not found"))?;
+            record.pending_codex_mcp_elicitations.remove(message_id);
+            sync_session_interaction_state(
+                record,
+                mcp_elicitation_request_preview_text(
+                    record.session.agent.name(),
+                    InteractionRequestState::Submitted,
+                    Some(action),
+                ),
+            );
+            Ok(message_index)
+        })
     }
 
     /// Submits a generic Codex app-request result back. Runs
@@ -561,32 +611,24 @@ impl AppState {
                 ))
             })?;
 
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-        set_codex_app_request_state_on_record(
-            record,
-            message_id,
-            InteractionRequestState::Submitted,
-            Some(result),
-        )
-        .map_err(|_| ApiError::not_found("Codex app request not found"))?;
-        record.pending_codex_app_requests.remove(message_id);
-        sync_session_interaction_state(
-            record,
-            codex_app_request_preview_text(
-                record.session.agent.name(),
+        self.commit_interaction_message_update(session_id, message_id, |record| {
+            let message_index = set_codex_app_request_state_on_record(
+                record,
+                message_id,
                 InteractionRequestState::Submitted,
-            ),
-        );
-        self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!("failed to persist session state: {err:#}"))
-        })?;
-        Ok(self.snapshot_from_inner(&inner))
+                Some(result),
+            )
+            .map_err(|_| ApiError::not_found("Codex app request not found"))?;
+            record.pending_codex_app_requests.remove(message_id);
+            sync_session_interaction_state(
+                record,
+                codex_app_request_preview_text(
+                    record.session.agent.name(),
+                    InteractionRequestState::Submitted,
+                ),
+            );
+            Ok(message_index)
+        })
     }
 
     /// Transitions the session to `SessionStatus::Error` with an

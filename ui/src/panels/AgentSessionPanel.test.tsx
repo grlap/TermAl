@@ -50,6 +50,18 @@ function makeTextMessages(count: number): Message[] {
   }));
 }
 
+function makeCommandMessages(count: number): Message[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `command-${index + 1}`,
+    type: "command",
+    timestamp: `10:${String(index).padStart(2, "0")}`,
+    author: "assistant",
+    command: "pwd",
+    output: ".",
+    status: "success",
+  }));
+}
+
 const EMPTY_AGENT_COMMANDS: {
   kind?: "promptTemplate" | "nativeSlash";
   name: string;
@@ -109,6 +121,60 @@ afterEach(() => {
 });
 
 describe("AgentSessionPanel conversation caching", () => {
+  it("refreshes the live turn tooltip from the latest session store record", () => {
+    const initialSession = makeSession("active-session", {
+      status: "active",
+      messages: [
+        {
+          author: "you",
+          id: "message-old",
+          text: "old prompt",
+          timestamp: "10:00",
+          type: "text",
+        },
+      ],
+    });
+    renderSessionPanelWithDefaults({
+      activeSession: initialSession,
+      showWaitingIndicator: true,
+      waitingIndicatorPrompt: "old prompt",
+    });
+
+    expect(screen.getByRole("tooltip")).toHaveTextContent("old prompt");
+
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [
+          makeSession("active-session", {
+            status: "active",
+            messages: [
+              ...initialSession.messages,
+              {
+                author: "assistant",
+                id: "message-assistant",
+                text: "working",
+                timestamp: "10:01",
+                type: "text",
+              },
+              {
+                author: "you",
+                id: "message-new",
+                text: "new prompt",
+                timestamp: "10:02",
+                type: "text",
+              },
+            ],
+          }),
+        ],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+
+    expect(screen.getByRole("tooltip")).toHaveTextContent("new prompt");
+    expect(screen.getByRole("tooltip")).not.toHaveTextContent("old prompt");
+  });
+
   it("renders only the active session transcript DOM", () => {
     const cachedSession = makeSession("cached-session", {
       messages: makeTextMessages(85).map((message, index) => ({
@@ -1557,6 +1623,236 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(scrollTop).toBe(middleScrollTop);
     } finally {
       vi.useRealTimers();
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
+  it("mounts more pages below when compact command pages shrink during scroll cooldown", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const performanceNowSpy = vi.spyOn(performance, "now").mockReturnValue(1000);
+    const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
+    const messages = makeCommandMessages(80);
+    const clientHeight = 500;
+    const tallMeasuredSlotHeight = 220;
+    const compactMeasuredSlotHeight = 40;
+    let useCompactMeasurements = false;
+    let exposeVirtualScrollHeight = false;
+    let scrollTop = 0;
+
+    class ResizeObserverMock {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        resizeCallbacks.set(target, this.callback);
+      }
+      disconnect() {}
+    }
+
+    const getMessageHeight = () =>
+      useCompactMeasurements ? compactMeasuredSlotHeight : tallMeasuredSlotHeight;
+
+    const getVirtualNodeHeight = (node: HTMLElement): number => {
+      if (node.classList.contains("virtualized-message-spacer")) {
+        return Number.parseFloat(node.style.height) || 0;
+      }
+      if (node.classList.contains("virtualized-message-page-gap")) {
+        return Number.parseFloat(node.style.height) || 0;
+      }
+      if (node.classList.contains("virtualized-message-slot")) {
+        return getMessageHeight();
+      }
+
+      const children = Array.from(node.children).filter(
+        (child): child is HTMLElement => child instanceof HTMLElement,
+      );
+      let total = 0;
+      children.forEach((child, index) => {
+        total += getVirtualNodeHeight(child);
+        if (
+          node.classList.contains("virtualized-message-range") &&
+          index < children.length - 1
+        ) {
+          total += VIRTUALIZED_MESSAGE_GAP_PX;
+        }
+      });
+      return total;
+    };
+
+    const getVirtualContentTop = (root: HTMLElement, target: HTMLElement): number => {
+      const walk = (node: HTMLElement): number | null => {
+        if (node === target) {
+          return 0;
+        }
+
+        const children = Array.from(node.children).filter(
+          (child): child is HTMLElement => child instanceof HTMLElement,
+        );
+        let offset = 0;
+        for (let index = 0; index < children.length; index += 1) {
+          const child = children[index]!;
+          const childOffset = walk(child);
+          if (childOffset !== null) {
+            return offset + childOffset;
+          }
+          offset += getVirtualNodeHeight(child);
+        }
+
+        return null;
+      };
+
+      const top = walk(root);
+      if (top === null) {
+        throw new Error("target node not found in virtualized message list");
+      }
+      return top;
+    };
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => clientHeight,
+    });
+    Object.defineProperty(scrollNode, "clientWidth", {
+      configurable: true,
+      get: () => 1000,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => {
+        if (!exposeVirtualScrollHeight) {
+          return clientHeight;
+        }
+        const list = document.querySelector(".virtualized-message-list");
+        return list instanceof HTMLElement
+          ? getVirtualNodeHeight(list)
+          : buildVirtualizedMessageLayout(messages.map(() => tallMeasuredSlotHeight)).totalHeight;
+      },
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    let nextFrameId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      queueMicrotask(() => callback(0));
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
+    Element.prototype.getBoundingClientRect = function getBoundingClientRectMock() {
+      const element = this as HTMLElement;
+      if (element === scrollNode) {
+        return {
+          bottom: clientHeight,
+          height: clientHeight,
+          left: 0,
+          right: 100,
+          top: 0,
+          width: 100,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+
+      const root = element.closest(".virtualized-message-list") as HTMLElement | null;
+      if (root) {
+        const top = getVirtualContentTop(root, element) - scrollTop;
+        const height = getVirtualNodeHeight(element);
+        return {
+          bottom: top + height,
+          height,
+          left: 0,
+          right: 100,
+          top,
+          width: 100,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+
+      return {
+        bottom: 0,
+        height: 0,
+        left: 0,
+        right: 100,
+        top: 0,
+        width: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+
+    try {
+      const { container } = render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={messages}
+          scrollContainerRef={{
+            current: scrollNode,
+          } as RefObject<HTMLElement | null>}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(container.querySelectorAll(".virtualized-message-slot").length).toBeGreaterThan(0);
+      });
+
+      exposeVirtualScrollHeight = true;
+      act(() => {
+        scrollTop = 3600;
+        fireEvent.wheel(scrollNode, { deltaY: 3600 });
+        fireEvent.scroll(scrollNode);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("command-48")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("command-80")).not.toBeInTheDocument();
+
+      useCompactMeasurements = true;
+      await act(async () => {
+        new Set(resizeCallbacks.values()).forEach((callback) => {
+          callback([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("command-80")).toBeInTheDocument();
+      });
+
+      const renderedPages = Array.from(
+        container.querySelectorAll<HTMLElement>(".virtualized-message-page"),
+      );
+      const lastPage = renderedPages[renderedPages.length - 1];
+      expect(lastPage?.getBoundingClientRect().bottom).toBeGreaterThanOrEqual(
+        clientHeight,
+      );
+    } finally {
+      performanceNowSpy.mockRestore();
       window.ResizeObserver = OriginalResizeObserver;
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
@@ -3130,6 +3426,225 @@ describe("AgentSessionPanelFooter", () => {
       expect(getComputedStyleSpy).not.toHaveBeenCalled();
     } finally {
       getComputedStyleSpy.mockRestore();
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
+  it("keeps multiline composer height after blur commits the draft", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "scrollHeight",
+    );
+    let nextFrameId = 0;
+    const queuedFrames = new Map<number, FrameRequestCallback>();
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      const id = ++nextFrameId;
+      queuedFrames.set(id, callback);
+      return id;
+    });
+    const cancelAnimationFrameMock = vi.fn((id: number) => {
+      queuedFrames.delete(id);
+    });
+    const drainAnimationFrames = () => {
+      while (queuedFrames.size > 0) {
+        const callbacks = [...queuedFrames.values()];
+        queuedFrames.clear();
+        act(() => {
+          callbacks.forEach((callback) => callback(0));
+        });
+      }
+    };
+    const session = makeSession("session-a");
+    let committedDraft = "";
+    let rerender: ReturnType<typeof render>["rerender"];
+    let unmount: ReturnType<typeof render>["unmount"] | null = null;
+    const onDraftCommit = vi.fn((sessionId: string, nextValue: string) => {
+      committedDraft = nextValue;
+      expect(sessionId).toBe(session.id);
+    });
+
+    window.requestAnimationFrame =
+      requestAnimationFrameMock as unknown as typeof requestAnimationFrame;
+    window.cancelAnimationFrame =
+      cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame;
+    Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        const textarea = this as HTMLTextAreaElement;
+        if (document.activeElement !== textarea) {
+          return 40;
+        }
+        return 40 + (textarea.value.split("\n").length - 1) * 28;
+      },
+    });
+
+    try {
+      ({ rerender, unmount } = render(
+        renderFooter({
+          committedDraft,
+          onDraftCommit,
+          session,
+        }),
+      ));
+      drainAnimationFrames();
+
+      const textarea = screen.getByLabelText("Message session-a");
+      if (!(textarea instanceof HTMLTextAreaElement)) {
+        throw new Error("Composer textarea not found");
+      }
+
+      act(() => {
+        textarea.focus();
+      });
+      act(() => {
+        fireEvent.change(textarea, {
+          target: { value: "line one\nline two\nline three" },
+        });
+      });
+      drainAnimationFrames();
+      expect(textarea.style.height).toBe("96px");
+
+      act(() => {
+        textarea.blur();
+        fireEvent.blur(textarea);
+      });
+      act(() => {
+        rerender(
+          renderFooter({
+            committedDraft,
+            onDraftCommit,
+            session,
+          }),
+        );
+      });
+      drainAnimationFrames();
+
+      expect(onDraftCommit).toHaveBeenCalledWith(
+        session.id,
+        "line one\nline two\nline three",
+      );
+      expect(textarea.style.height).toBe("96px");
+    } finally {
+      act(() => {
+        unmount?.();
+      });
+      if (originalScrollHeightDescriptor) {
+        Object.defineProperty(
+          HTMLTextAreaElement.prototype,
+          "scrollHeight",
+          originalScrollHeightDescriptor,
+        );
+      } else {
+        delete (
+          HTMLTextAreaElement.prototype as unknown as {
+            scrollHeight?: number;
+          }
+        ).scrollHeight;
+      }
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
+  it("keeps remaining multiline composer height when a line is deleted", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "scrollHeight",
+    );
+    let nextFrameId = 0;
+    const queuedFrames = new Map<number, FrameRequestCallback>();
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      const id = ++nextFrameId;
+      queuedFrames.set(id, callback);
+      return id;
+    });
+    const cancelAnimationFrameMock = vi.fn((id: number) => {
+      queuedFrames.delete(id);
+    });
+    let unmount: ReturnType<typeof render>["unmount"] | null = null;
+    const drainAnimationFrames = () => {
+      while (queuedFrames.size > 0) {
+        const callbacks = [...queuedFrames.values()];
+        queuedFrames.clear();
+        act(() => {
+          callbacks.forEach((callback) => callback(0));
+        });
+      }
+    };
+
+    window.requestAnimationFrame =
+      requestAnimationFrameMock as unknown as typeof requestAnimationFrame;
+    window.cancelAnimationFrame =
+      cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame;
+    Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        const textarea = this as HTMLTextAreaElement;
+        if (
+          textarea.style.height !== "0px" &&
+          !textarea.value.includes("line two") &&
+          textarea.value.length > 0
+        ) {
+          return 40;
+        }
+        return 40 + (textarea.value.split("\n").length - 1) * 28;
+      },
+    });
+
+    try {
+      ({ unmount } = render(
+        renderFooter({
+          session: makeSession("session-a"),
+        }),
+      ));
+      drainAnimationFrames();
+
+      const textarea = screen.getByLabelText("Message session-a");
+      if (!(textarea instanceof HTMLTextAreaElement)) {
+        throw new Error("Composer textarea not found");
+      }
+
+      act(() => {
+        textarea.focus();
+      });
+      act(() => {
+        fireEvent.change(textarea, {
+          target: { value: "line one\nline two\nline three\nline four" },
+        });
+      });
+      drainAnimationFrames();
+      expect(textarea.style.height).toBe("124px");
+
+      act(() => {
+        fireEvent.change(textarea, {
+          target: { value: "line one\nline three\nline four" },
+        });
+      });
+      drainAnimationFrames();
+
+      expect(textarea.style.height).toBe("96px");
+    } finally {
+      act(() => {
+        unmount?.();
+      });
+      if (originalScrollHeightDescriptor) {
+        Object.defineProperty(
+          HTMLTextAreaElement.prototype,
+          "scrollHeight",
+          originalScrollHeightDescriptor,
+        );
+      } else {
+        delete (
+          HTMLTextAreaElement.prototype as unknown as {
+            scrollHeight?: number;
+          }
+        ).scrollHeight;
+      }
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
     }
