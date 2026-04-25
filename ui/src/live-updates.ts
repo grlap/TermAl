@@ -6,6 +6,7 @@ import type {
   Session,
   TextMessage,
 } from "./types";
+import { reconcileSessions } from "./session-reconcile";
 
 export const LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS = 15000;
 export const LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS = 5000;
@@ -156,7 +157,13 @@ export function applyDeltaToSessions(
 
       return {
         kind: "applied",
-        sessions: replaceSession(sessions, sessionIndex, delta.session),
+        sessions: replaceSession(
+          sessions,
+          sessionIndex,
+          reconcileSessions([sessions[sessionIndex]], [delta.session], {
+            disableMutationStampFastPath: true,
+          })[0],
+        ),
       };
     }
 

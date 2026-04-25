@@ -31,17 +31,41 @@
 impl AppState {
     fn wire_session_from_record(record: &SessionRecord) -> Session {
         let mut session = record.session.clone();
-        session.messages_loaded = true;
+        session.messages_loaded = record.session.messages_loaded;
         session.message_count = session_message_count(record);
         session.session_mutation_stamp = Some(record.mutation_stamp);
         session
     }
 
     fn wire_session_summary_from_record(record: &SessionRecord) -> Session {
-        let mut session = Self::wire_session_from_record(record);
-        session.messages.clear();
-        session.messages_loaded = false;
-        session
+        let session = &record.session;
+        Session {
+            id: session.id.clone(),
+            name: session.name.clone(),
+            emoji: session.emoji.clone(),
+            agent: session.agent,
+            workdir: session.workdir.clone(),
+            project_id: session.project_id.clone(),
+            model: session.model.clone(),
+            model_options: session.model_options.clone(),
+            approval_policy: session.approval_policy,
+            reasoning_effort: session.reasoning_effort,
+            sandbox_mode: session.sandbox_mode,
+            cursor_mode: session.cursor_mode,
+            claude_effort: session.claude_effort,
+            claude_approval_mode: session.claude_approval_mode,
+            gemini_approval_mode: session.gemini_approval_mode,
+            external_session_id: session.external_session_id.clone(),
+            agent_commands_revision: session.agent_commands_revision,
+            codex_thread_state: session.codex_thread_state,
+            status: session.status,
+            preview: session.preview.clone(),
+            messages: Vec::new(),
+            messages_loaded: false,
+            message_count: session_message_count(record),
+            pending_prompts: session.pending_prompts.clone(),
+            session_mutation_stamp: Some(record.mutation_stamp),
+        }
     }
 
     /// Builds a metadata-first state snapshot with guaranteed-fresh agent readiness.
@@ -127,15 +151,40 @@ impl AppState {
 
     /// Returns one visible session with its state revision.
     fn get_session(&self, session_id: &str) -> Result<SessionResponse, ApiError> {
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_visible_session_index(session_id)
-            .ok_or_else(|| ApiError::not_found("session not found"))?;
-        Ok(SessionResponse {
-            revision: inner.revision,
-            session: Self::wire_session_from_record(&inner.sessions[index]),
-            server_instance_id: self.server_instance_id.clone(),
-        })
+        enum SessionLookup {
+            Ready(SessionResponse),
+            HydrateRemoteProxy,
+        }
+
+        let lookup = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_visible_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let record = &inner.sessions[index];
+            if record.remote_id.is_some()
+                && record.remote_session_id.is_some()
+                && !record.session.messages_loaded
+            {
+                SessionLookup::HydrateRemoteProxy
+            } else {
+                SessionLookup::Ready(SessionResponse {
+                    revision: inner.revision,
+                    session: Self::wire_session_from_record(record),
+                    server_instance_id: self.server_instance_id.clone(),
+                })
+            }
+        };
+
+        match lookup {
+            SessionLookup::Ready(response) => Ok(response),
+            SessionLookup::HydrateRemoteProxy => {
+                let Some(target) = self.remote_session_target(session_id)? else {
+                    return Err(ApiError::bad_request("session is not assigned to a remote"));
+                };
+                self.hydrate_remote_session_target(&target, None)
+            }
+        }
     }
 
     fn invalidate_agent_readiness_cache(&self) {

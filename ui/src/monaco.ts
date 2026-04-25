@@ -22,6 +22,7 @@ import "monaco-editor/esm/vs/basic-languages/sql/sql.contribution";
 import "monaco-editor/esm/vs/basic-languages/xml/xml.contribution";
 import "monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution";
 import "monaco-editor/min/vs/editor/editor.main.css";
+import { installMonacoCancellationRejectionFilter } from "./monaco-cancellation-filter";
 
 type MonacoEnvironment = {
   getWorker: (moduleId: string, label: string) => Worker;
@@ -39,6 +40,8 @@ type RGBA = {
 let monacoConfigured = false;
 
 export function ensureMonacoEnvironment() {
+  installMonacoCancellationRejectionFilter();
+
   if (!monacoConfigured) {
     configureMonaco(monaco);
     monacoConfigured = true;

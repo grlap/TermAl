@@ -305,12 +305,22 @@ fn apply_remote_session_to_record(
     remote_session: &Session,
 ) {
     let local_session_id = record.session.id.clone();
-    let previous_messages = (!remote_session.messages_loaded).then(|| record.session.messages.clone());
+    let previous_messages =
+        (!remote_session.messages_loaded).then(|| record.session.messages.clone());
     let previous_messages_loaded = record.session.messages_loaded;
+    let previous_remote_mutation_stamp = record.session.session_mutation_stamp;
     record.session = localize_remote_session(&local_session_id, local_project_id, remote_session);
     if let Some(messages) = previous_messages {
+        let count_matches =
+            record.session.message_count == u32::try_from(messages.len()).unwrap_or(u32::MAX);
+        let remote_mutation_stamp_matches = remote_session
+            .session_mutation_stamp
+            .zip(previous_remote_mutation_stamp)
+            .is_some_and(|(next_stamp, previous_stamp)| next_stamp == previous_stamp);
+        let has_complete_previous_transcript =
+            previous_messages_loaded && count_matches && remote_mutation_stamp_matches;
         record.session.messages = messages;
-        record.session.messages_loaded = previous_messages_loaded;
+        record.session.messages_loaded = has_complete_previous_transcript;
     }
     record.external_session_id = record.session.external_session_id.clone();
     sync_codex_thread_state(record);

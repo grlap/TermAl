@@ -90,6 +90,7 @@ import { resolveAdoptedStateSlices } from "./state-adoption";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
 import {
   decideDeltaRevisionAction,
+  isServerInstanceMismatch,
   shouldAdoptSnapshotRevision,
 } from "./state-revision";
 import { mergeOrchestratorDeltaSessions } from "./control-surface-state";
@@ -170,6 +171,7 @@ export type AdoptStateOptions = {
   /** Allow adopting a snapshot with a lower revision than the current one.
    *  Only used for backend restart rollbacks where the revision counter resets. */
   allowRevisionDowngrade?: boolean;
+  disableMutationStampFastPath?: boolean;
   openSessionId?: string;
   paneId?: string | null;
 };
@@ -195,6 +197,25 @@ export type SessionHydrationTarget = {
   messagesLoaded?: boolean | null;
 };
 
+type SessionHydrationRequestContext = {
+  messageCount: number | null;
+  revision: number | null;
+  serverInstanceId: string | null;
+  sessionMutationStamp: number | null;
+};
+
+export function resolveAdoptStateSessionOptions(
+  options: AdoptStateOptions | undefined,
+  serverInstanceChanged: boolean,
+): AdoptSessionsOptions {
+  return {
+    ...options,
+    disableMutationStampFastPath:
+      serverInstanceChanged || options?.disableMutationStampFastPath === true,
+  };
+}
+
+const SESSION_HYDRATION_RETRY_DELAYS_MS = [50, 250, 1000, 3000] as const;
 const SLOW_STATE_EVENT_WARNING_MS = 50;
 const STATE_EVENT_METADATA_PEEK_CHARS = 4096;
 
@@ -476,7 +497,10 @@ export function useAppLiveState(
 
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
   const hydratedSessionIdsRef = useRef<Set<string>>(new Set());
+  const hydrationRetryTimersRef = useRef<Map<string, number>>(new Map());
+  const hydrationRetryAttemptsRef = useRef<Map<string, number>>(new Map());
   const forceAdoptNextStateEventRef = useRef(false);
+  const [hydrationRetryTick, setHydrationRetryTick] = useState(0);
 
   const [workspaceFilesChangedEvent, setWorkspaceFilesChangedEvent] =
     useState<WorkspaceFilesChangedEvent | null>(null);
@@ -596,6 +620,55 @@ export function useAppLiveState(
       window.requestAnimationFrame(flushPendingCodexStateRender);
   }
 
+  function clearHydrationRetry(sessionId: string) {
+    const timerId = hydrationRetryTimersRef.current.get(sessionId);
+    if (timerId !== undefined) {
+      window.clearTimeout(timerId);
+      hydrationRetryTimersRef.current.delete(sessionId);
+    }
+    hydrationRetryAttemptsRef.current.delete(sessionId);
+  }
+
+  function cancelHydrationRetries() {
+    for (const timerId of hydrationRetryTimersRef.current.values()) {
+      window.clearTimeout(timerId);
+    }
+    hydrationRetryTimersRef.current.clear();
+    hydrationRetryAttemptsRef.current.clear();
+  }
+
+  function sessionStillNeedsHydration(sessionId: string) {
+    return sessionsRef.current.some(
+      (session) =>
+        session.id === sessionId && session.messagesLoaded === false,
+    );
+  }
+
+  function scheduleHydrationRetry(sessionId: string) {
+    if (
+      !isMountedRef.current ||
+      hydrationRetryTimersRef.current.has(sessionId) ||
+      !sessionStillNeedsHydration(sessionId)
+    ) {
+      return;
+    }
+
+    const attempt = hydrationRetryAttemptsRef.current.get(sessionId) ?? 0;
+    const delayMs =
+      SESSION_HYDRATION_RETRY_DELAYS_MS[
+        Math.min(attempt, SESSION_HYDRATION_RETRY_DELAYS_MS.length - 1)
+      ];
+    hydrationRetryAttemptsRef.current.set(sessionId, attempt + 1);
+    const timerId = window.setTimeout(() => {
+      hydrationRetryTimersRef.current.delete(sessionId);
+      if (!isMountedRef.current || !sessionStillNeedsHydration(sessionId)) {
+        return;
+      }
+      setHydrationRetryTick((tick) => tick + 1);
+    }, delayMs);
+    hydrationRetryTimersRef.current.set(sessionId, timerId);
+  }
+
   function flushAndCancelPendingSessionRender(
     sessionSnapshot = sessionsRef.current,
   ) {
@@ -642,6 +715,7 @@ export function useAppLiveState(
     return () => {
       cancelPendingSessionRender();
       cancelPendingCodexStateRender();
+      cancelHydrationRetries();
     };
   }, []);
 
@@ -822,6 +896,11 @@ export function useAppLiveState(
           availableSessionIds.has(sessionId),
         ),
       );
+      for (const sessionId of hydrationRetryTimersRef.current.keys()) {
+        if (!availableSessionIds.has(sessionId)) {
+          clearHydrationRetry(sessionId);
+        }
+      }
     }
     if (hasRemovedSessions || unhydratedSessionIds.size > 0) {
       hydratedSessionIdsRef.current = new Set(
@@ -926,6 +1005,84 @@ export function useAppLiveState(
     return "adopted";
   }
 
+  function getHydrationMessageCount(session: Session) {
+    if (typeof session.messageCount === "number") {
+      return session.messageCount;
+    }
+    return session.messagesLoaded === true ? session.messages.length : null;
+  }
+
+  function getHydrationMutationStamp(session: Session) {
+    return session.sessionMutationStamp ?? null;
+  }
+
+  function captureHydrationRequestContext(
+    sessionId: string,
+  ): SessionHydrationRequestContext | null {
+    const session = sessionsRef.current.find((entry) => entry.id === sessionId);
+    if (!session) {
+      return null;
+    }
+
+    return {
+      messageCount: getHydrationMessageCount(session),
+      revision: latestStateRevisionRef.current,
+      serverInstanceId: lastSeenServerInstanceIdRef.current,
+      sessionMutationStamp: getHydrationMutationStamp(session),
+    };
+  }
+
+  function hydrationRequestStillMatchesSession(
+    requestContext: SessionHydrationRequestContext,
+    currentSession: Session,
+  ) {
+    return (
+      requestContext.messageCount === getHydrationMessageCount(currentSession) &&
+      requestContext.sessionMutationStamp === getHydrationMutationStamp(currentSession)
+    );
+  }
+
+  function hydrationResponseMatchesSession(
+    responseSession: Session,
+    currentSession: Session,
+  ) {
+    const currentMessageCount = getHydrationMessageCount(currentSession);
+    const responseMessageCount = getHydrationMessageCount(responseSession);
+    if (
+      currentMessageCount !== null &&
+      responseMessageCount !== null &&
+      responseMessageCount !== currentMessageCount
+    ) {
+      return false;
+    }
+
+    const currentMutationStamp = getHydrationMutationStamp(currentSession);
+    const responseMutationStamp = getHydrationMutationStamp(responseSession);
+    if (
+      currentMutationStamp !== null &&
+      responseMutationStamp !== null &&
+      responseMutationStamp !== currentMutationStamp
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function isStaleHydrationFromSupersededInstance(
+    requestContext: SessionHydrationRequestContext,
+    responseServerInstanceId: string,
+  ) {
+    const currentServerInstanceId = lastSeenServerInstanceIdRef.current;
+    return (
+      Boolean(requestContext.serverInstanceId) &&
+      Boolean(currentServerInstanceId) &&
+      Boolean(responseServerInstanceId) &&
+      requestContext.serverInstanceId !== currentServerInstanceId &&
+      requestContext.serverInstanceId === responseServerInstanceId
+    );
+  }
+
   // Returns `boolean` rather than the sibling
   // `AdoptCreatedSessionOutcome` discriminated union because the
   // wire-contract-mismatch branch for this path is hoisted to
@@ -943,6 +1100,7 @@ export function useAppLiveState(
     session: Session,
     revision: number,
     serverInstanceId: string,
+    requestContext: SessionHydrationRequestContext,
   ) {
     const previousRevision = latestStateRevisionRef.current;
     const previousSessions = sessionsRef.current;
@@ -954,6 +1112,27 @@ export function useAppLiveState(
     }
 
     const currentSession = previousSessions[existingIndex];
+    if (
+      isStaleHydrationFromSupersededInstance(requestContext, serverInstanceId)
+    ) {
+      return false;
+    }
+
+    const isServerRestartResponse = isServerInstanceMismatch(
+      lastSeenServerInstanceIdRef.current,
+      serverInstanceId,
+    );
+    const responseIsNotOlderThanRequest =
+      requestContext.revision === null || revision >= requestContext.revision;
+    const canAdoptLowerRevisionHydration =
+      currentSession.messagesLoaded !== true &&
+      responseIsNotOlderThanRequest &&
+      hydrationRequestStillMatchesSession(requestContext, currentSession) &&
+      hydrationResponseMatchesSession(session, currentSession);
+    // The downgrade allowance below is intentionally narrower than
+    // "metadata-only": the request and response must still match the current
+    // summary, otherwise a delayed full-session response can clobber newer
+    // delta metadata and mark stale text as loaded.
     // Routing through `shouldAdoptSnapshotRevision` gives us the
     // `serverInstanceId` restart-detection branch while preserving the
     // pre-existing nuance: on a genuine first hydration (no local
@@ -969,7 +1148,8 @@ export function useAppLiveState(
         lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
         nextServerInstanceId: serverInstanceId,
         force: true,
-        allowRevisionDowngrade: currentSession.messagesLoaded !== true,
+        allowRevisionDowngrade:
+          isServerRestartResponse || canAdoptLowerRevisionHydration,
       })
     ) {
       return false;
@@ -1022,7 +1202,13 @@ export function useAppLiveState(
       }
 
       hydratingSessionIdsRef.current.add(sessionId);
+      const requestContext = captureHydrationRequestContext(sessionId);
+      if (!requestContext) {
+        hydratingSessionIdsRef.current.delete(sessionId);
+        continue;
+      }
       void (async () => {
+        let shouldRetryHydration = false;
         try {
           const response = await fetchSession(sessionId);
           if (!isMountedRef.current) {
@@ -1037,9 +1223,13 @@ export function useAppLiveState(
               response.session,
               response.revision,
               response.serverInstanceId,
+              requestContext,
             )
           ) {
+            clearHydrationRetry(sessionId);
             hydratedSessionIdsRef.current.add(sessionId);
+          } else {
+            shouldRetryHydration = true;
           }
         } catch (error) {
           if (!isMountedRef.current) {
@@ -1061,8 +1251,12 @@ export function useAppLiveState(
             return;
           }
           reportRequestError(error);
+          shouldRetryHydration = true;
         } finally {
           hydratingSessionIdsRef.current.delete(sessionId);
+          if (shouldRetryHydration) {
+            scheduleHydrationRetry(sessionId);
+          }
         }
       })();
     }
@@ -1074,6 +1268,7 @@ export function useAppLiveState(
   }, [
     activeSession?.id,
     activeSession?.messagesLoaded,
+    hydrationRetryTick,
     visibleSessionHydrationTargets,
   ]);
 
@@ -1158,10 +1353,10 @@ export function useAppLiveState(
     }
     const requestedOpenSessionId =
       options?.openSessionId ?? pendingRecoveryOpenSessionIdRef.current;
-    adoptSessions(nextState.sessions, {
-      ...options,
-      disableMutationStampFastPath: serverInstanceChanged,
-    });
+    adoptSessions(
+      nextState.sessions,
+      resolveAdoptStateSessionOptions(options, serverInstanceChanged),
+    );
     // Local state adoptions can resume or create active sessions before any SSE arrives.
     syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current(
       nextState.sessions,

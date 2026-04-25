@@ -1,10 +1,13 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { installMonacoCancellationRejectionFilter } from "./monaco-cancellation-filter";
 import { applyDensityPreference, applyFontSizePreference, applyStylePreference, applyThemePreference, getStoredDensityPreference, getStoredFontSizePreference, getStoredStylePreference, getStoredThemePreference } from "./themes";
 import { ensureWorkspaceViewId, getStoredWorkspaceLayout } from "./workspace-storage";
 import "./themes/index.css";
 import "./styles.css";
+
+installMonacoCancellationRejectionFilter();
 
 // Read UI settings from the per-workspace localStorage cache when available,
 // falling back to the global preference keys for workspaces that haven't saved yet.

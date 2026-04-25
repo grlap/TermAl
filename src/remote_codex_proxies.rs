@@ -59,7 +59,7 @@ impl AppState {
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             inner.sessions[index].session.project_id.clone()
         };
-        let (revision, local_session_id, local_session, changed) = {
+        let (revision, local_session_id, local_session, changed, delta_session) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             // Gate `update_existing` on the remote's applied-revision
             // tracking — see `create_remote_session_proxy` in
@@ -92,6 +92,7 @@ impl AppState {
                 .cloned()
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let local_session = AppState::wire_session_from_record(&local_record);
+            let delta_session = AppState::wire_session_summary_from_record(&local_record);
             let revision = if changed {
                 self.commit_session_created_locked(&mut inner, &local_record)
                     .map_err(|err| {
@@ -102,13 +103,18 @@ impl AppState {
             } else {
                 inner.revision
             };
-            (revision, local_session_id, local_session, changed)
+            (revision, local_session_id, local_session, changed, delta_session)
         };
         // Skip the SSE announcement on the no-change branch — see
         // the shared rationale on
         // [`AppState::announce_remote_session_created_if_changed`]
         // and its invocation from `remote_create_proxies.rs`.
-        self.announce_remote_session_created_if_changed(changed, revision, &local_session);
+        self.announce_remote_session_created_if_changed(
+            changed,
+            revision,
+            &local_session_id,
+            delta_session,
+        );
 
         Ok(CreateSessionResponse {
             session_id: local_session_id,

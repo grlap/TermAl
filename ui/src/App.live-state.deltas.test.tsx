@@ -607,6 +607,379 @@ describe("App live state - delta-gap core", () => {
     });
   });
 
+  it("rejects stale session hydration after a newer metadata delta", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const staleHydration = createDeferred<Response>();
+      let sessionFetchCount = 0;
+      const summarySession = makeSession("session-1", {
+        name: "Codex Session",
+        status: "active",
+        preview: "Old summary",
+        messagesLoaded: false,
+        messageCount: 1,
+        sessionMutationStamp: 10,
+        messages: [],
+      });
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse(
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [summarySession],
+            }),
+          );
+        }
+        if (requestUrl.pathname === "/api/sessions/session-1") {
+          sessionFetchCount += 1;
+          if (sessionFetchCount === 1) {
+            return staleHydration.promise;
+          }
+          return jsonResponse({
+            revision: 2,
+            serverInstanceId: "test-instance",
+            session: makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "Newer metadata-only message",
+              messagesLoaded: true,
+              messageCount: 2,
+              sessionMutationStamp: 11,
+              messages: [
+                {
+                  id: "message-existing",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Existing transcript",
+                },
+                {
+                  id: "message-new",
+                  type: "text",
+                  timestamp: "10:02",
+                  author: "assistant",
+                  text: "Newer metadata-only message",
+                },
+              ],
+            }),
+          });
+        }
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/tmp",
+            upstream: "origin/main",
+            workdir: "/tmp",
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [summarySession],
+          }),
+        );
+        await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        const sessionRowButton =
+          within(sessionList).getByText("Codex Session").closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+        await clickAndSettle(sessionRowButton);
+
+        await waitFor(() => {
+          expect(
+            fetchMock.mock.calls.some(
+              ([input]) =>
+                new URL(String(input), "http://localhost").pathname ===
+                "/api/sessions/session-1",
+            ),
+          ).toBe(true);
+        });
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "messageCreated",
+            revision: 2,
+            sessionId: "session-1",
+            messageId: "message-new",
+            messageIndex: 1,
+            messageCount: 2,
+            message: {
+              id: "message-new",
+              type: "text",
+              timestamp: "10:02",
+              author: "assistant",
+              text: "Newer metadata-only message",
+            },
+            preview: "Newer metadata-only message",
+            status: "active",
+            sessionMutationStamp: 11,
+          });
+          await flushUiWork();
+        });
+
+        await act(async () => {
+          staleHydration.resolve(
+            jsonResponse({
+              revision: 1,
+              serverInstanceId: "test-instance",
+              session: makeSession("session-1", {
+                name: "Codex Session",
+                status: "active",
+                preview: "Stale transcript",
+                messagesLoaded: true,
+                messageCount: 1,
+                sessionMutationStamp: 10,
+                messages: [
+                  {
+                    id: "message-old",
+                    type: "text",
+                    timestamp: "10:01",
+                    author: "assistant",
+                    text: "Stale transcript",
+                  },
+                ],
+              }),
+            }),
+          );
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          expect(sessionFetchCount).toBeGreaterThanOrEqual(2);
+        });
+        await waitFor(() => {
+          expect(
+            screen.getAllByText("Newer metadata-only message").length,
+          ).toBeGreaterThan(0);
+        });
+        expect(screen.queryByText("Stale transcript")).not.toBeInTheDocument();
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("rejects stale session hydration from a superseded server instance", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const staleHydration = createDeferred<Response>();
+      let sessionFetchCount = 0;
+      const oldInstanceSummary = makeSession("session-1", {
+        name: "Codex Session",
+        status: "active",
+        preview: "Old instance summary",
+        messagesLoaded: false,
+        messageCount: 1,
+        sessionMutationStamp: 10,
+        messages: [],
+      });
+      const newInstanceSummary = makeSession("session-1", {
+        ...oldInstanceSummary,
+        preview: "New instance summary",
+      });
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse(
+            makeStateResponse({
+              revision: 5,
+              serverInstanceId: "old-instance",
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [oldInstanceSummary],
+            }),
+          );
+        }
+        if (requestUrl.pathname === "/api/sessions/session-1") {
+          sessionFetchCount += 1;
+          if (sessionFetchCount === 1) {
+            return staleHydration.promise;
+          }
+          return jsonResponse({
+            revision: 1,
+            serverInstanceId: "new-instance",
+            session: makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "New instance transcript",
+              messagesLoaded: true,
+              messageCount: 1,
+              sessionMutationStamp: 10,
+              messages: [
+                {
+                  id: "message-new-instance",
+                  type: "text",
+                  timestamp: "10:03",
+                  author: "assistant",
+                  text: "New instance transcript",
+                },
+              ],
+            }),
+          });
+        }
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/tmp",
+            upstream: "origin/main",
+            workdir: "/tmp",
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 5,
+            serverInstanceId: "old-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [oldInstanceSummary],
+          }),
+        );
+        await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        const sessionRowButton =
+          within(sessionList).getByText("Codex Session").closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+        await clickAndSettle(sessionRowButton);
+
+        await waitFor(() => {
+          expect(
+            fetchMock.mock.calls.some(
+              ([input]) =>
+                new URL(String(input), "http://localhost").pathname ===
+                "/api/sessions/session-1",
+            ),
+          ).toBe(true);
+        });
+
+        await dispatchStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 1,
+            serverInstanceId: "new-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [newInstanceSummary],
+          }),
+        );
+
+        await act(async () => {
+          staleHydration.resolve(
+            jsonResponse({
+              revision: 5,
+              serverInstanceId: "old-instance",
+              session: makeSession("session-1", {
+                name: "Codex Session",
+                status: "active",
+                preview: "Old instance transcript",
+                messagesLoaded: true,
+                messageCount: 1,
+                sessionMutationStamp: 10,
+                messages: [
+                  {
+                    id: "message-old-instance",
+                    type: "text",
+                    timestamp: "10:01",
+                    author: "assistant",
+                    text: "Old instance transcript",
+                  },
+                ],
+              }),
+            }),
+          );
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          expect(sessionFetchCount).toBeGreaterThanOrEqual(2);
+        });
+        await waitFor(() => {
+          expect(
+            screen.getAllByText("New instance transcript").length,
+          ).toBeGreaterThan(0);
+        });
+        expect(
+          screen.queryByText("Old instance transcript"),
+        ).not.toBeInTheDocument();
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("hydrates all visible metadata-only session panes after startup", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;

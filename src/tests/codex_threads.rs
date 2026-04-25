@@ -316,6 +316,7 @@ fn fork_codex_thread_creates_a_new_local_session() {
         }
     });
 
+    let mut delta_events = state.subscribe_delta_events();
     let forked = state.fork_codex_thread(&created.session_id).unwrap();
     assert_ne!(forked.session_id, created.session_id);
 
@@ -393,6 +394,26 @@ fn fork_codex_thread_creates_a_new_local_session() {
     assert!(!forked_session.messages.iter().any(
         |message| matches!(message, Message::Markdown { title, .. } if title == "Forked Codex thread")
     ));
+
+    let payload = delta_events
+        .try_recv()
+        .expect("fork should publish a sessionCreated delta");
+    let delta: DeltaEvent = serde_json::from_str(&payload).expect("delta should decode");
+    match delta {
+        DeltaEvent::SessionCreated {
+            revision,
+            session_id,
+            session,
+        } => {
+            assert_eq!(revision, forked.revision);
+            assert_eq!(session_id, forked.session_id);
+            assert_eq!(session.id, forked.session_id);
+            assert!(!session.messages_loaded);
+            assert!(session.messages.is_empty());
+            assert_eq!(session.message_count, forked_session.messages.len() as u32);
+        }
+        _ => panic!("expected sessionCreated delta"),
+    }
 }
 
 // pins that when `thread/fork` omits turn history the forked session

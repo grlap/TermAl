@@ -237,10 +237,10 @@ impl AppState {
     ///
     /// Routing both sites through this helper keeps the
     /// "announce only when the record actually changed"
-    /// invariant in one place. Takes `local_session: &Session`
-    /// rather than by value so callers can still move the owned
-    /// `Session` into their `CreateSessionResponse` afterwards
-    /// without an extra clone outside the `if changed` branch.
+    /// invariant in one place. Takes an already-projected summary so
+    /// callers build `SessionCreated` metadata from `SessionRecord`
+    /// instead of cloning a full transcript-bearing `Session` and
+    /// clearing its messages.
     ///
     /// Deliberately NOT used by
     /// `remote_routes.rs::apply_remote_delta_event`. That path
@@ -258,15 +258,16 @@ impl AppState {
         &self,
         changed: bool,
         revision: u64,
-        local_session: &Session,
+        session_id: &str,
+        delta_session: Session,
     ) {
         if !changed {
             return;
         }
         self.publish_delta(&DeltaEvent::SessionCreated {
             revision,
-            session_id: local_session.id.clone(),
-            session: local_session.clone(),
+            session_id: session_id.to_owned(),
+            session: delta_session,
         });
     }
 

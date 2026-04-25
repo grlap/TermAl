@@ -5,6 +5,119 @@ and cleanup notes do not belong here.
 
 ## Active Repo Bugs
 
+Also fixed in the current tree: `SessionCreated` and
+`OrchestratorsUpdated.sessions` deltas now publish metadata-first session
+summaries instead of full transcript-bearing `Session` objects. The backend
+uses summary wire projections for local, forked, remote-proxy, and
+orchestrator-referenced session payloads, and the frontend preserves already
+hydrated messages when a summary `sessionCreated` delta updates an existing
+session.
+
+Also fixed in the current tree: inbound remote summary `SessionCreated` and
+`OrchestratorsUpdated.sessions` deltas now preserve nonzero remote
+`messageCount` values and keep proxy sessions unhydrated when the payload has
+`messagesLoaded: false` with an empty `messages` array. Rust regressions cover
+both remote summary delta shapes and their republished localized summaries.
+
+Also fixed in the current tree: remote proxy transcript recovery no longer
+treats metadata-only `/api/state` or summary deltas as a full transcript repair.
+Unloaded remote proxies keep the remote `messageCount`, cached transcripts are
+marked stale when summary counts diverge, `/api/sessions/{id}` performs a
+targeted remote full-session fetch before returning a proxy session, and
+session-scoped remote deltas hydrate unloaded proxies before local index checks.
+This also closes the old `wire_session_from_record`/`messagesLoaded` ambiguity
+for remote proxy GET hydration because the route hydrates unloaded remote
+proxies before returning `SessionResponse`. Rust regressions cover GET
+hydration, delta-before-gap hydration, and count-decrease summary handling.
+
+Also fixed in the current tree: targeted remote transcript repair now rejects
+full-session responses from revisions newer than the delta being repaired, so a
+single-session fetch cannot silently advance one proxy beyond the global remote
+watermark. Stale remote deltas also skip before attempting targeted hydration.
+Rust regressions cover newer targeted-session responses and stale unloaded
+delta skips.
+
+Also fixed in the current tree: metadata-only remote summaries no longer treat
+`messageCount` equality as proof that a cached loaded transcript is fresh. The
+merge now preserves cached messages only when both the count and known remote
+`sessionMutationStamp` match; same-count summaries with a newer stamp demote the
+proxy to `messagesLoaded: false` so targeted hydration can repair the transcript.
+Rust regressions cover both same-stamp preservation and new-stamp demotion.
+
+Also fixed in the current tree: remote hydration now keeps the single-session
+repair path aligned with the global remote revision cursor. Direct
+`/api/sessions/{id}` hydration performs a full remote `/api/state` resync before
+applying a newer per-session response, targeted delta repair re-checks the
+remote cursor under lock after the fetch returns, and session-scoped remote
+deltas retain the remote `sessionMutationStamp` on cached proxy sessions so
+later metadata-only summaries can make a real freshness decision.
+
+Also fixed in the current tree: `wire_session_summary_from_record` now builds
+metadata-first summaries directly from `SessionRecord` fields instead of
+cloning the full transcript-bearing `Session` and then clearing `messages`.
+This removes the hidden O(total transcript messages) allocation/drop cost from
+summary snapshot construction under the state mutex.
+
+Also fixed in the current tree: the remaining `wire_session_summary_from_session`
+clone-and-clear call sites have been removed. Codex fork, local create-session,
+remote `SessionCreated` republish, and remote proxy create/fork announcements
+now build `SessionCreated` delta summaries from `SessionRecord` metadata via
+`wire_session_summary_from_record`, and the transitional helper was deleted.
+The Codex fork regression now asserts the route response remains
+transcript-bearing while the published delta is metadata-only with the correct
+`messageCount`.
+
+Also fixed in the current tree: Monaco diff worker cancellations are now
+filtered before they reach the browser as uncaught promise rejections. The
+startup path installs a narrow `unhandledrejection` filter that only prevents
+Monaco `Canceled: Canceled` errors with both a Monaco worker/service frame and
+`computeDiff`, so normal app promise failures still surface in the console.
+`monaco-cancellation-filter` coverage pins the positive Monaco stack, unrelated
+canceled-error cases, and a negative `computeDiff`-without-Monaco stack.
+
+Also fixed in the current tree: single-session hydration now rejects stale
+full-session responses instead of marking old transcripts loaded over newer
+metadata. The hydration request captures the session's `messageCount`,
+`sessionMutationStamp`, revision, and server instance at dispatch; lower
+same-instance responses are accepted only when the current summary still
+matches that captured metadata and the response matches the current summary.
+In-flight old-server responses are also rejected after a server-instance change.
+`ui/src/App.live-state.deltas.test.tsx` covers both a newer metadata delta
+overtaking hydration and an old-instance hydration resolving after a restart.
+
+Also fixed in the current tree: visible metadata-only session hydration now
+schedules a bounded retry after a stale full-session response is rejected or a
+transient non-404 fetch failure is reported. The stale-hydration regressions
+now require the fresh retry response to hydrate the pane and assert the newer
+delta/restarted-server data remains visible, so the tests no longer pass on an
+empty pane that merely lacks stale text.
+
+Also fixed in the current tree: the Create Session dialog now initializes its
+assistant picker from the active session only when the active session id
+changes. User changes inside the open dialog no longer retrigger the sync effect
+and snap the picker back to the active session's agent. The session-lifecycle
+test suite covers changing the Assistant combobox away from the active Codex
+session and verifying the Claude selection sticks.
+
+Also fixed in the current tree: `AdoptStateOptions` now explicitly carries
+`disableMutationStampFastPath`, and `adoptState` preserves a caller-requested
+deep session reconcile by OR-ing that flag with the server-instance-change
+guard. A focused `app-live-state` unit test pins the explicit-true,
+server-restart, and default-false branches.
+
+Also fixed in the current tree: `sessionCreated` delta reconciliation now
+disables the mutation-stamp fast path when merging an authoritative summary
+into an existing session, so same-stamp re-emits can still update metadata while
+preserving hydrated messages. `live-updates.test.ts` covers matching-stamp
+metadata changes and now pins `messageCount` plus `sessionMutationStamp` on the
+summary-preservation path.
+
+Also fixed in the current tree: the stale search-band range mutation entry no
+longer applies to the current virtualized transcript implementation. The
+rendered mounted range is derived from either the pinned search range or the
+current mounted range, and the mutating `mergeRanges(...)` helper described by
+the bug is no longer present.
+
 Also fixed in the current tree: remote `MessageUpdated` deltas now behave as
 true in-place replacements. Existing local proxy messages are replaced and
 republished as localized `MessageUpdated` events, while missing targets are
@@ -954,62 +1067,393 @@ routes through the HTML-fallback detection. Two residual follow-ups (the
 buffers the body a second time on every successful response) are tracked
 as their own bug entries below.
 
-## Remote proxy recovery treats metadata-only `/api/state` as full transcript repair
+Also fixed in the current tree: targeted remote hydration no longer accepts
+strictly-newer per-session responses on the delta path. `hydrate_remote_session_target`
+now hard-rejects `remote_response.revision != min_revision` for the
+delta-fast-path and routes the GET-hydration path through a follow-up
+`/api/state` synchronization that advances the per-remote watermark. Same-stamp
+metadata-only summaries are also gated by `session_mutation_stamp` so cached
+transcripts only survive when both count and freshness marker agree. New
+`src/tests/remote.rs` regressions cover the strict-equality rejection and the
+stamp-aware preservation/demotion split.
 
-**Severity:** High - remote SSE gap recovery can advance the applied remote revision after only a summary snapshot, leaving proxy transcripts stale or empty.
+Also fixed in the current tree: GET-path remote session hydration no longer
+marks an older transcript loaded after a newer `/api/state` summary has advanced
+the remote watermark. If the synchronized state revision is newer than the
+single-session response and the current summary metadata does not match, the
+route rejects the stale transcript after committing the broad state mutation.
+The missing-target exit also commits the already-applied broad state before
+returning `404`. A focused Rust regression covers revision N session hydration
+racing revision N+1 state for the same session and asserts the newer summary
+remains metadata-only.
 
-The metadata-first state path changed `/api/state` and SSE `state` events to
-carry transcript-free session summaries. Remote sync still uses that same
-snapshot path as an authoritative recovery source after remote gaps or failed
-delta application. That means the local proxy can record a remote revision as
-applied even though it has not repaired the transcript messages for the affected
-remote session.
+Also fixed in the current tree: targeted remote hydration now treats a replayed
+same-revision session-scoped delta as already reflected when the loaded proxy
+transcript has the same `messageCount` and `sessionMutationStamp`. This keeps
+valid same-revision delta sequences possible while preventing duplicate
+non-idempotent replays after a targeted full-transcript repair. The remote delta
+handlers now also preserve an existing cached `sessionMutationStamp` when an
+incoming payload omits the optional stamp. A Rust regression covers a replayed
+`TextDelta` after targeted hydration and asserts the text is not appended twice.
+
+Also fixed in the current tree: `get_session()` no longer relies on
+`unreachable!()` in the request-handler path. The lock section now returns an
+explicit `Ready(SessionResponse)` or `HydrateRemoteProxy` plan and the outer
+code exhaustively matches it, so a future control-flow refactor returns an
+`ApiError` path instead of introducing a panic.
+
+## Strict-revision check on targeted hydration triggers a state resync per same-session delta on busy upstreams
+
+**Severity:** High - `src/remote_routes.rs:457-462` enforces `remote_response.revision == min_revision` on the delta-fast-path. `remote_response.revision` is the upstream's *global* revision at request time, not the targeted session's revision, so on any non-quiescent upstream `M > N` is the common case. Every targeted hydration on the delta path then fails with `bad_gateway`, propagates as `anyhow::Error` through `hydrate_unloaded_remote_session_for_delta`, and triggers `resync_remote_state_snapshot` in `dispatch_remote_event`. Net effect: every same-session inbound delta against an unloaded proxy on a busy chained-remote produces a full state resync.
+
+The `remote_delta_repair_rejects_newer_targeted_session_revision` test codifies the rejection as intended behavior, but the design trade-off (data safety vs. extra round-trip per delta) is not documented and may not be the intended end state. `docs/architecture.md:183` still describes `GET /api/sessions/{id}` as a cheap "Fetch one session" route.
 
 **Current behavior:**
-- `src/api.rs` returns summary-only state from `/api/state`.
-- `src/remote_sync.rs` still treats remote `/api/state` as recovery input for
-  proxy sessions and can preserve stale cached messages or mark recovery
-  progress from summary-only data.
-- `src/state_accessors.rs` projects local proxy records as loaded sessions based
-  on the local cached transcript, and `src/remote_routes.rs` still enforces
-  local transcript index contiguity for remote `MessageCreated` deltas.
+- Strict equality on `remote_response.revision` rejects the realistic common case where the upstream has advanced.
+- The fallback path (`anyhow::Error` → `resync_remote_state_snapshot`) is the documented recovery, so the cost is a full state fetch per same-session delta.
 
 **Proposal:**
-- Add a remote full-transcript recovery path for affected sessions, likely by
-  fetching remote `/api/sessions/{id}` before marking the remote revision as
-  applied.
-- Until a proxy transcript is repaired, preserve explicit unhydrated metadata
-  with the remote `messageCount` instead of presenting an empty local transcript
-  as loaded.
-- Relax or defer local index-contiguity checks for unhydrated proxy sessions so
-  a metadata-first summary cannot create a permanent resync loop.
+- Either accept `remote_response.revision >= min_revision` with per-session applied-revision tracking (so the per-session response can land safely without polluting the global watermark), OR document the latency cost in `docs/architecture.md` so future readers know targeted hydration is expected to fall back to resync per delta.
+- If the safe-but-expensive behavior is the intended end state, capture that decision in `docs/metadata-first-state-plan.md` so it isn't accidentally relaxed in a future round.
 
-## Single-session hydration can load stale transcripts after newer deltas
+## Same-revision replay suppression can drop valid sibling deltas
 
-**Severity:** High - an older `GET /api/sessions/{id}` response can mark a metadata-only session loaded after a newer delta or summary already advanced the session.
+**Severity:** High - session-level metadata is not a safe event identity for
+same-revision remote delta suppression.
 
-Lazy hydration fetches a single full session for metadata-only panes. The
-current adoption path allows same-server revision downgrades when the current
-session is not loaded, and single-session hydration participates in the same
-global revision flow as full state adoption. If a newer delta lands while the
-fetch is in flight, the older fetch can overwrite newer metadata and mark stale
-messages as fully loaded.
+`remote_session_delta_already_reflected()` currently treats
+`(remoteRevision, sessionId, messageCount, sessionMutationStamp)` as proof that
+a session-scoped delta was already applied. Same-revision deltas are valid in
+the current remote protocol, and different sibling events can share the same
+session-level count and mutation stamp. The second event can then be skipped
+with `Ok(())`, leaving the local proxy missing remote data while never
+triggering `/api/state` recovery.
 
 **Current behavior:**
-- `ui/src/app-live-state.ts` permits hydration adoption when the target session
-  is metadata-only, even if the response is older than newer session metadata.
-- A session hydration response can update global revision bookkeeping even
-  though it only contains one session.
-- The stale response can suppress the later need to hydrate, because the session
-  now appears loaded.
+- The replay guard uses session-level metadata rather than event identity.
+- A valid sibling same-revision delta with the same count/stamp can be treated
+  as already reflected.
+- The skip path returns success, so downstream recovery does not run.
 
 **Proposal:**
-- Capture request-start freshness using `sessionMutationStamp`, `messageCount`,
-  and/or the current revision, then reject stale hydration responses.
-- Do not advance global state revision from a single-session hydration response
-  unless the response is proven safe for the whole app revision stream.
-- On stale hydration, keep the session metadata-only and request a normal state
-  resync or retry hydration from the newer session metadata.
+- Deduplicate only exact targeted-hydration trigger events.
+- Track or compute an event key that includes at least variant, `sessionId`,
+  `messageId`, revision, and a payload hash or offset-equivalent for text
+  operations.
+- Add a same-revision sibling-delta regression that proves one replay is
+  skipped while a distinct sibling event still applies or triggers recovery.
+
+## Remote `SessionCreated` can publish a non-advancing delta
+
+**Severity:** Medium - an unchanged inbound remote `SessionCreated` redelivery
+can publish a local delta with the current revision instead of a newly committed
+revision.
+
+When `ensure_remote_proxy_session_record()` returns `changed == false`,
+`apply_remote_delta_event::SessionCreated` keeps `revision = inner.revision` but
+still publishes `DeltaEvent::SessionCreated`. Delta events are documented as
+carrying the exact next revision. Publishing a duplicate/current revision means
+clients can ignore the event as stale, and chained remote replay semantics
+become ambiguous.
+
+**Current behavior:**
+- The unchanged branch does not call `commit_session_created_locked()`.
+- The code still publishes `DeltaEvent::SessionCreated` with the current
+  revision.
+- Clients that enforce monotonic delta revisions may drop the event.
+
+**Proposal:**
+- Skip publishing when `changed == false`.
+- If chained remotes require a rebroadcast, route it through an explicit
+  non-delta protocol path or force a real committed revision bump with a clear
+  comment explaining why.
+- Add a regression for duplicate remote `SessionCreated` redelivery that asserts
+  no stale/non-advancing delta is published.
+
+## Stamp-preservation contract not honored for `SessionCreated` / `OrchestratorsUpdated.sessions[]` payloads
+
+**Severity:** Medium - the new `docs/architecture.md` note documents that "session-scoped deltas preserve cached `session_mutation_stamp` when the wire payload omits it." The fix landed for the six message-mutating delta arms (gated with `if remote_session_mutation_stamp.is_some()`), but `SessionCreated` and `OrchestratorsUpdated.sessions[]` payloads still flow through `apply_remote_session_to_record` → `localize_remote_session(&remote_session.clone())` (`src/remote_sync.rs:312` and `:368-411`), which clobbers a cached `Some(stamp)` to `None` if the inbound payload omits it.
+
+After such a delta lands, the next metadata-only summary's freshness gate (`remote_mutation_stamp_matches`) sees `previous == None && next == Some(_)` and demotes the proxy to `messages_loaded: false` — exactly the symptom the message-arm fix was meant to prevent. Per-delta hydration HTTP fan-out then re-issues `/api/sessions/{id}` until a stamp arrives.
+
+**Current behavior:**
+- `apply_remote_session_to_record` writes the inbound `session_mutation_stamp` directly without checking presence.
+- A `SessionCreated` (or `OrchestratorsUpdated.sessions[]`) payload omitting the stamp wipes a cached `Some(_)` value.
+- The `docs/architecture.md` doc note implies this path also preserves cached stamps; the implementation diverges.
+
+**Proposal:**
+- Gate the stamp assignment in `apply_remote_session_to_record` on `remote_session.session_mutation_stamp.is_some()` (with the existing `previous_remote_mutation_stamp` already captured at line 311).
+- Or tighten the doc note to say "narrow message-mutating deltas" and explicitly call out that `SessionCreated`/`OrchestratorsUpdated.sessions[]` payloads are authoritative session shapes whose absent stamps replace the cached value.
+- Add a regression where a `SessionCreated` summary with `session_mutation_stamp: None` lands against a cached `Some(_)`; assert the cached stamp survives.
+
+## `remote_session_delta_already_reflected` triples lock acquisitions per inbound delta
+
+**Severity:** Medium - `src/remote_routes.rs:432-461`. The helper opens a fresh `inner.lock()` independently of the subsequent `hydrate_unloaded_remote_session_for_delta` and the apply-step lock. The sequence per inbound delta is: lock (dedup check) → unlock → lock (hydration check) → unlock → fetch → lock (apply). Benign for safety because the apply step re-checks `should_skip_remote_applied_delta_revision` under its own lock, but each cycle re-acquires the global mutex. Under high delta throughput on busy upstreams, this is observable contention.
+
+**Current behavior:**
+- Each inbound delta acquires the state mutex up to three times (dedup + hydration + apply).
+- `remote_session_delta_already_reflected` and the hydration eligibility check inspect the same record back-to-back through separate locks.
+
+**Proposal:**
+- Fold the dedup check into the existing `hydrate_unloaded_remote_session_for_delta` lock acquisition (it already inspects the same record).
+- Or factor a single `inspect_inbound_delta_eligibility(...)` helper that returns an enum of `{AlreadyReflected, NeedsHydration(target), Apply}` from one lock cycle.
+
+## Repeated `commit_locked` boilerplate at four early-exit paths in `hydrate_remote_session_target`
+
+**Severity:** Low - `src/remote_routes.rs:561-606`. The new `remote_state_applied` flag must be checked and `commit_locked` called before each of four early-exit paths. The same `if remote_state_applied { commit_locked(...).map_err(...)?; } return Err(...)` boilerplate is duplicated. A future maintainer adding a fifth early-exit could easily forget the conditional commit, reintroducing the watermark-race bug under a new condition.
+
+**Current behavior:**
+- The conditional commit-before-error is replicated four times in close proximity.
+- No helper or invariant comment near the function body documents that every error-return must commit broad state when applied.
+
+**Proposal:**
+- Extract a small helper closure (`bail`) that takes an error and conditionally commits before returning.
+- Or invert the flow so the broad-state apply runs after the can-this-target-survive checks, eliminating the need to commit-before-error.
+
+## `remote_session_metadata_matches_record` is permissive on both-None stamps
+
+**Severity:** Low - `src/remote_routes.rs:428-431`. Returns `true` when both stamps are `None` — only `message_count` distinguishes a count-equal stale transcript from a current one. Consistent with sibling helpers but a remote that never emits stamps has no positive freshness evidence; a count-equal stale transcript can still be applied through the matching-metadata pass-through branch.
+
+**Current behavior:**
+- Both-None stamps yield a `true` match by virtue of `message_count` alone.
+- The function has no doc comment explaining the both-None acceptance.
+
+**Proposal:**
+- If positive-stamp evidence is required for the older-revision branch, change to `record.session.session_mutation_stamp.zip(session.session_mutation_stamp).is_some_and(|(a, b)| a == b) && session_message_count(record) == session.message_count`.
+- Or document the both-None acceptance in the helper's doc comment so the policy is explicit.
+
+## GET-path 502 error message after broad-state commit is misleading
+
+**Severity:** Low - `src/remote_routes.rs:557-572`. When `current < response.revision` triggers the rejection, the broad state has already been committed (line 561-565 `if remote_state_applied { commit_locked(...) }`) and `current_remote_revision` may now match or exceed the response revision. The error message reads "newer than synchronized remote state" — diagnostically confusing post-commit because the synchronized state was just advanced.
+
+**Current behavior:**
+- Error message refers to "synchronized remote state" without acknowledging that the commit-before-error path has already advanced it.
+
+**Proposal:**
+- Refine the message to "remote session response revision {} cannot be safely applied; broad state advanced to revision {} but transcript may have changed".
+- Or split the check so the broad-state apply happens only after rejection-eligibility is confirmed.
+
+## `remote_mutation_stamp_matches` demotes on either-side `None`
+
+**Severity:** Medium - `src/remote_sync.rs:316-319` uses `Option::zip(...).is_some_and(...)`, which evaluates to `false` whenever either side is `None`. Combined with the just-listed stamp-clobber behavior, any remote that does not emit `session_mutation_stamp` will demote loaded proxy transcripts to `messages_loaded: false` on every metadata-only summary. The per-delta hydration HTTP fan-out then re-issues `/api/sessions/{id}` for every subsequent delta on that proxy until a stamp arrives.
+
+The contract isn't documented at the call site — a future reader cannot tell whether `None` means "unknown freshness, be safe" or "no mutation observed."
+
+**Current behavior:**
+- `Option::zip(None, _) == None`, so any missing stamp on either side fails the match.
+- A Phase-1-compatible upstream (older builds without stamps) demotes loaded transcripts on every metadata refresh.
+
+**Proposal:**
+- Add a `///` doc comment near `apply_remote_session_to_record` describing the four `(prev, next)` stamp-presence cases and the chosen demotion policy.
+- If a Phase-1-compat mode is desired (preserve when both are `None`), make it explicit via `previous_stamp == next_stamp || (previous_stamp.is_none() && next_stamp.is_none())` and document the rationale.
+- Add a regression for the both-None case.
+
+## GET-path resync broadens the route's side-effect surface from "one session" to "all proxy records for the remote"
+
+**Severity:** Medium - `src/remote_routes.rs:470-525` calls `apply_remote_state_if_newer_locked(..., None)` with `focus_remote_session_id: None`. The broad sync runs `retain_sessions`/upsert across every proxy record for that remote, so a single `GET /api/sessions/{id}` for one proxy can mutate all proxy records on the remote. `docs/architecture.md:183` still describes the route as "Fetch one session (full transcript hydration)" with no mention of the global-resync side-effect or the additional `/api/state` outbound call.
+
+**Current behavior:**
+- The route's documented contract is "fetch one session"; the actual implementation also performs a per-remote state sync as a side-effect.
+- Frontend authors auditing latency expectations have no signal in the doc.
+
+**Proposal:**
+- Pass `focus_remote_session_id: Some(&target.remote_session_id)` to scope the sweep to the targeted session, OR explicitly document the broad sweep with a comment near line 506.
+- Update `docs/architecture.md` to reflect the new latency contract: targeted hydration may issue an additional `/api/state` fetch and a global SSE broadcast.
+
+## GET-path skipped-side-fetch branch does not advance the per-session watermark
+
+**Severity:** Medium - `src/remote_routes.rs:559-564` advances `note_remote_applied_revision` only when the side-fetch ran and `apply_remote_state_if_newer_locked` accepted it. If `latest_remote_revision >= remote_response.revision` at the pre-lock check, the side-fetch is skipped and the watermark is never explicitly bumped for `remote_response.revision`. This works today because the watermark already covers the response revision, but the implicit invariant ("if we skipped because we're caught up, we don't need to advance") is undocumented and a future refactor could break it.
+
+**Current behavior:**
+- Three branches diverge in whether the watermark is advanced: side-fetch ran and applied / side-fetch ran and was rejected / side-fetch skipped.
+- The skipped branch relies on `latest_remote_revision >= remote_response.revision` already holding.
+
+**Proposal:**
+- Unconditionally call `inner.note_remote_applied_revision(&target.remote.id, remote_response.revision)` after applying the targeted response. The op is idempotent (`max`-based) so it is safe under all three branches and removes the implicit invariant.
+- Move the `note_remote_applied_revision` call above the `commit_locked` invocation so the published SSE state event reflects an already-advanced watermark (consistent with `apply_remote_delta_event`'s ordering).
+
+## New stale-skip / equality-rejection tests use unrealistic fixtures
+
+**Severity:** Low - `src/tests/remote.rs:2475,2580` construct `MessageCreated` deltas with `session_mutation_stamp: None`. Real backend emitters always emit `Some(record.mutation_stamp)`. The unrealistic fixture masks the stamp-clobber issue (the delta arms unconditionally write `None` over cached `Some(_)`).
+
+**Current behavior:**
+- New tests use `session_mutation_stamp: None` instead of the production wire shape.
+- The stamp-clobber bug is not surfaced because the cache is also `None` in the fixture.
+
+**Proposal:**
+- Change the fixtures to `session_mutation_stamp: Some(...)` matching the production wire shape.
+- Add a separate dedicated regression for the `None`-clobber case once that bug is fixed.
+
+## `adoptFetchedSession` clobbers in-flight deltas read from a stale `sessionsRef` snapshot
+
+**Severity:** High - `ui/src/app-live-state.ts:1099-1172` reads `previousSessions = sessionsRef.current` at the top of the function, computes `existingIndex` and `currentSession = previousSessions[existingIndex]`, runs the hydration-still-matches predicates against that stale snapshot, then does `sessionsRef.current = nextSessions; setSessions(nextSessions)` where `nextSessions = previousSessions.map(...)`. Between the snapshot read and the eventual write, same-instance SSE delta paths (e.g., `messageCreated`, `textDelta`) may have already mutated `sessionsRef.current` in place. The captured `messageCount` / `sessionMutationStamp` guard catches *count*-changing deltas but not in-place text mutations on the latest assistant message.
+
+The Phase 2 hydration test scenarios pass because they add a delta that bumps `messageCount`. A same-`messageCount` shape mismatch — e.g., a `textDelta` that only changes content of the same message — is uncovered. The result on a live system would be a hydration response landing after a streaming chunk and silently rewinding the visible text to the snapshot.
+
+**Current behavior:**
+- `adoptFetchedSession` snapshots `sessionsRef.current` once at the top of an async-resolved path.
+- After the awaited `fetchSession()` resolves, the function writes back via `previousSessions.map(...)`, discarding any same-instance deltas that landed during the in-flight fetch.
+- The `hydrationRequestStillMatchesSession` predicate runs against the same stale snapshot, so the gate cannot detect in-place mutations.
+
+**Proposal:**
+- Re-read `sessionsRef.current` immediately before constructing `nextSessions` and re-derive `existingIndex` / `currentSession` against that fresh snapshot.
+- Re-run `hydrationResponseMatchesSession` on the fresh snapshot before writing.
+- Add a regression that lands a `textDelta` that does not change `messageCount` while a hydration is in flight, and asserts the streamed text survives.
+
+## `get_session()` for unloaded remote proxies silently changed its latency contract
+
+**Severity:** Medium - `src/state_accessors.rs:151-181` quietly turned `GET /api/sessions/{id}` from a constant-time local read into a synchronous outbound HTTP fetch + global SSE state broadcast (via `commit_locked`) when the proxy is unloaded. A slow or wedged remote stalls every visible-pane hydration request and every reconnect resync; a remote that returns `messages_loaded: false` returns `bad_gateway` to the local client instead of degrading to the unloaded summary. The new contract is not documented in `docs/architecture.md`, which still describes `GET /api/sessions/{id}` as the cheap full-hydration route.
+
+(See the sibling entry above, "GET-path resync broadens the route's side-effect surface", for the additional global-sweep side-effect.)
+
+**Current behavior:**
+- `get_session()` performs synchronous remote HTTP I/O in the unloaded-proxy branch.
+- The hydration call publishes a global SSE state event via `commit_locked`, fanning out to every connected client.
+- `bad_gateway` propagates to the caller when the remote returns metadata-only or refuses; no fallback to the local unloaded summary.
+
+**Proposal:**
+- Document the new latency dependency in `docs/architecture.md` next to the "GET /api/sessions/{id} stays as the full hydration route" note, including the remote round-trip and SSE broadcast.
+- Add a remote-fetch timeout that falls back to returning the local unloaded summary (`messagesLoaded: false`, `messageCount` from cache) instead of bubbling 502 to the browser.
+
+## `hydrate_remote_session_target` rejects upstream `messages_loaded: false`, breaking chained-remote topology
+
+**Severity:** Medium - `src/remote_routes.rs:444-462,558-561` returns `ApiError::bad_gateway("remote session response did not include a full transcript")` when an upstream remote responds with `messages_loaded: false`. On the delta path (`min_remote_revision.is_some()`), this propagates back through `hydrate_unloaded_remote_session_for_delta` as a fatal `anyhow::Error`, converting every same-session inbound delta into a hard error. In a chained-remote topology where the immediate upstream is itself proxying a third remote with an unloaded record, every session-scoped remote delta now becomes a hard error and triggers a fallback resync loop until the inner chain repairs itself.
+
+`hydrate_unloaded_remote_session_for_delta` also collapses the structured `ApiError` (with status code) into a flat `anyhow!("failed to hydrate remote session ...: {err.message}")`, discarding the `bad_gateway` vs `not_found` distinction that downstream recovery branches might need. This is a soft observability/extensibility cost on top of the chained-remote correctness issue.
+
+**Current behavior:**
+- `hydrate_remote_session_target` enforces strict `messages_loaded: true` regardless of caller context.
+- The wrapped `anyhow::Error` flows back through `apply_remote_delta_event` and triggers state resync.
+- `ApiError` status codes are lost before downstream consumers see them.
+
+**Proposal:**
+- Gate the strict `messages_loaded` rejection on `min_remote_revision.is_none()` so the GET path keeps strict-mode but the delta-fast-path tolerates the chained-summary case.
+- Return `Result<bool, ApiError>` from the helper (or wrap with `anyhow::Error::context(...)`) so the original error category is preserved.
+- Add a regression with a fake remote that returns `messages_loaded: false` to confirm the delta path falls through to normal apply rather than hard-erroring.
+
+## Per-delta hydration HTTP fan-out has no in-flight deduplication
+
+**Severity:** Medium - `src/remote_routes.rs:505-534` adds `hydrate_unloaded_remote_session_for_delta` calls at the top of eight delta handlers (`MessageCreated`, `MessageUpdated`, `TextDelta`, `ThinkingDelta`, `CommandUpdate`, `ParallelAgentsUpdate`, plus two more). For a burst of N inbound deltas on a still-unloaded proxy, each call drops the lock, performs a synchronous HTTP fetch, and reacquires the lock — without any in-flight tracking. The first fetch flips `messages_loaded: true` and subsequent fetches short-circuit, but the in-flight ones still serialize on the remote registry and on the local async runtime.
+
+A 100-delta burst on an unloaded proxy issues up to 100 HTTP fetches in sequence before the per-delta short-circuit kicks in. On chained-remote topologies where many proxies are unloaded after a summary `state` arrives, a small flurry of inbound activity can wedge the remote registry queue.
+
+**Current behavior:**
+- Eight delta handlers call `hydrate_unloaded_remote_session_for_delta` without coordination.
+- Each call independently sees `messages_loaded: false`, drops the lock, fetches, and reacquires.
+- The first fetch wins; subsequent fetches still serialize.
+
+**Proposal:**
+- Track in-flight hydrations per `(remote_id, remote_session_id)` (e.g., `HashMap<_, Arc<Notify>>` or a per-session `AtomicBool` + waiter pattern).
+- Have parallel callers `await` the same future, falling through to the existing skip path on the first success.
+- Add a regression with concurrent same-session `MessageCreated` deltas that asserts only one HTTP fetch is issued.
+
+## `adoptFetchedSession` allow-downgrade flag duplicates the server-restart guard at two layers
+
+**Severity:** Medium - `ui/src/app-live-state.ts:1146-1156` ORs `isServerRestartResponse` with `canAdoptLowerRevisionHydration` to compute `allowRevisionDowngrade`, but `shouldAdoptSnapshotRevision` already short-circuits restart cases via the `isServerInstanceMismatch` branch. The dead-flag interaction means restart vs. downgrade semantics are encoded across two layers of branching that must stay aligned — a regression that narrows `shouldAdoptSnapshotRevision`'s instance-mismatch branch would silently start using the downgrade path for restart cases, with subtle semantic differences.
+
+This gate is the only frontend defense against the prior High-severity stale-hydration data loss. Two near-redundant guards encoding the same intent are fragile.
+
+**Current behavior:**
+- Restart-vs-downgrade decisions are computed at two layers (`adoptFetchedSession` and `shouldAdoptSnapshotRevision`).
+- A regression in either layer can silently shift behavior without surfacing in tests.
+
+**Proposal:**
+- Split into three explicit branches: `if (isServerRestartResponse) { adopt unconditionally } else if (canAdoptLowerRevisionHydration) { adopt with downgrade } else { gate via shouldAdoptSnapshotRevision }`.
+- Same observable behavior, single layer of branching, easier to audit.
+
+## `scheduleHydrationRetry` re-runs the entire hydration effect on every tick
+
+**Severity:** Medium - `ui/src/app-live-state.ts:647-670` arms a `setTimeout` whose callback fires `setHydrationRetryTick(...)`, a `useState` counter included in the visible-session hydration effect's deps. Each tick re-runs the whole effect and walks every visible session in `sessionIdsToHydrate`, even if only one session was retrying. With multiple sessions in pending-retry state, the cascading effect re-runs multiply network requests and CPU work under load.
+
+The early-out at the top of the effect (`hydratingSessionIdsRef.current.has(sessionId)`) only guards against parallel in-flight requests, not against re-evaluation of unrelated sessions.
+
+**Current behavior:**
+- `setHydrationRetryTick` is a global counter dep.
+- A retry for session A bumps the tick and re-evaluates session B's hydration too.
+- The retry timer cleanup lives in a separate `useEffect(() => () => cancelHydrationRetries(), [])` rather than the same effect.
+
+**Proposal:**
+- Replace the tick counter with a per-session `Set<string>` ref of pending-retry ids; the timer adds the id and triggers a targeted re-fetch through a stable `useCallback` rather than re-running the effect.
+- Or have the retry timer call into the fetch loop directly, bypassing the effect entirely.
+- Skip work in the effect for sessions not in the retry set.
+
+## `apply_remote_delta_event::SessionCreated` clones the full transcript only to read `.id`
+
+**Severity:** Medium - `src/remote_routes.rs:681-690` builds `local_session = wire_session_from_record(local_record)` (a full transcript-bearing `Session`) just to consume `.id`. Both `delta_session.id` and the in-scope `local_session_id` already hold the same value. For a long-lived remote session whose proxy mirror already has a non-trivial transcript, every inbound `SessionCreated` redelivery rebuilds and drops the full message vec under the state mutex.
+
+This is the same clone-and-discard anti-pattern the rest of this changeset migrated away from for `wire_session_summary_from_session`. The publish path here only reads the id.
+
+**Current behavior:**
+- `wire_session_from_record(local_record)` runs once per `SessionCreated` redelivery, just to access `.id`.
+- The cloned `Session` is then dropped without further use.
+
+**Proposal:**
+- Drop the `local_session` binding entirely; publish using `delta_session.id.clone()` or the already-in-scope `local_session_id`.
+
+## `commit_session_created_locked` summary fallback diverges between branches
+
+**Severity:** Medium - `src/codex_thread_actions.rs:165-180` and `src/session_crud.rs:296-312` use `inner.find_session_index(...).map(|index| ...).unwrap_or_else(|| ...)` to build the published delta. The success arm reads from the index lookup; the fallback arm builds off the caller's `&record` parameter. The two paths can disagree on `messageCount` if the field cache (`record.session.message_count`) and the just-pushed `messages.len()` ever drift. The freshly pushed record cannot legitimately be missing from the index, but a silent divergence between the success and fallback arms is a contract wedge that can hide future regressions.
+
+**Current behavior:**
+- The fallback arm's existence implies the index lookup might fail.
+- The two arms compute summaries from different sources without explicit equivalence.
+
+**Proposal:**
+- Drop the `unwrap_or_else` fallback and replace with `.expect("just-created session must be present in the index")`.
+- Or route both arms through a single `wire_session_summary_from_record(record)` helper sourced from the actual `&SessionRecord` passed to `commit_session_created_locked`.
+
+## `installMonacoCancellationRejectionFilter()` default arg crashes in non-DOM contexts
+
+**Severity:** Low - `ui/src/monaco-cancellation-filter.ts:8` defaults `target: RejectionTarget = window`. In a non-DOM context (e.g., SSR rendering, a Node-side test harness, or a future Vitest entry that doesn't load `jsdom`), the default-arg evaluation `ReferenceError`s before any guard inside the function body runs.
+
+The internal `typeof target.addEventListener !== "function"` guard catches *passed-in* non-DOM-like targets, but cannot help when the *default* expression itself fails.
+
+**Current behavior:**
+- `target: RejectionTarget = window` is unguarded.
+- A future SSR or non-jsdom test entry calling `installMonacoCancellationRejectionFilter()` (no args) crashes at module-load time.
+
+**Proposal:**
+- `target: RejectionTarget = typeof window !== "undefined" ? window : ({} as RejectionTarget)`.
+- The internal guard then no-ops cleanly when no real `window` is available.
+
+## `captureHydrationRequestContext` null fallback defeats the gate
+
+**Severity:** Low - `ui/src/app-live-state.ts:1019-1033` falls back to `null` for both `messageCount` and `sessionMutationStamp` when the captured summary lacks them. The match predicates (`hydrationRequestStillMatchesSession`, `hydrationResponseMatchesSession`) accept any value when the captured field is `null`, so a captured-context with both fields `null` matches any response — exactly the mixed-instance restart window when the gate matters most.
+
+The wire contract per `Session.messageCount?: number | null` says the field is optional in payloads. After Phase 2 the backend should always emit it, but during the cross-version window the gate becomes a no-op.
+
+**Current behavior:**
+- `null` means "accept any response value" rather than "must match exactly null."
+- The capture-at-send / reject-at-receive gate is silently bypassed when the captured context lacks metadata.
+
+**Proposal:**
+- Treat `null` as a "must match exactly null" marker — a numeric response value should reject when the capture was null.
+- Or short-circuit to a recovery resync (`requestActionRecoveryResyncRef.current()`) when the captured context has `null` for both `messageCount` and `sessionMutationStamp`.
+
+## No-change branch builds an unused summary in remote codex/create proxies
+
+**Severity:** Low - `src/remote_codex_proxies.rs:94-95` and `src/remote_create_proxies.rs:183-184` build `wire_session_from_record(&local_record)` and `wire_session_summary_from_record(&local_record)` even when the surrounding `announce_remote_session_created_if_changed` short-circuits because nothing changed. The summary is then dropped on the no-change branch, wasting a metadata-shape clone under the state mutex.
+
+The cost is small (no transcript clone — the helper now sources fields from the record directly), but the no-change branch is hot for clients re-creating an already-mirrored remote session.
+
+**Current behavior:**
+- Both helpers run unconditionally.
+- The `delta_session` summary is dropped on the no-change path.
+
+**Proposal:**
+- Build the summary lazily inside the `if changed { ... }` arm, or pass an `Option<Session>` to the announce helper that defers construction until the announce path actually publishes.
+
+## `docs/architecture.md` missing `OrchestratorsUpdated.sessions[]` skip-when-empty contract
+
+**Severity:** Low - `docs/architecture.md:258-259` documents `OrchestratorsUpdated { revision, orchestrators[], sessions[] }` as a metadata-first delta but does not mention that `sessions[]` carries `#[serde(default, skip_serializing_if = "Vec::is_empty")]` (`src/wire.rs:1346-1347`). A reader auditing the wire contract cannot tell from the doc whether the field is required, optional, or omitted-when-empty.
+
+**Current behavior:**
+- The doc's `OrchestratorsUpdated` entry omits the empty-elision behavior.
+- Readers must consult `src/wire.rs` to confirm the contract.
+
+**Proposal:**
+- Append "`sessions[]` is omitted on the wire when empty (`#[serde(skip_serializing_if = "Vec::is_empty")]`)" to the doc note.
+- Confirm `ui/src/types.ts:638` (`sessions?: Session[]`) is consistent with the elision contract.
 
 ## Interaction request routes can hide same-revision `MessageUpdated` deltas
 
@@ -1105,31 +1549,6 @@ specific emitter path.
 - Assert the emitted `message_count` matches the transcript length or expected
   metadata count for that mutation.
 
-## Visible-session hydration failures have no retry path
-
-**Severity:** Medium - a transient full-session hydration failure can leave a visible metadata-only pane without a transcript until unrelated state changes.
-
-Metadata-first state makes `GET /api/sessions/{id}` the primary path for
-loading visible transcripts after `/api/state` has delivered summary shells. A
-non-404 hydration failure currently reports the request error and clears the
-in-flight marker, but it does not update any retry state or schedule another
-attempt. If the active and visible session identities stay stable, the
-hydration effect may not run again.
-
-**Current behavior:**
-- `ui/src/app-live-state.ts` catches non-404 `fetchSession` failures, reports
-  the error, and removes the session id from the in-flight hydration set.
-- The session can remain `messagesLoaded: false` with no timer, backoff state,
-  or dependency change to force another hydration attempt.
-
-**Proposal:**
-- Track hydration failures explicitly and retry with bounded backoff for
-  transient errors.
-- Keep the current 404 recovery-resync behavior for deleted or renamed
-  sessions.
-- Add a regression where hydration fails once, then succeeds without requiring
-  a tab switch, prompt send, or unrelated state event.
-
 ## Metadata-first summaries make transcript search incomplete
 
 **Severity:** Medium - search can silently miss transcript matches for sessions that have only metadata summaries loaded.
@@ -1196,6 +1615,59 @@ and miss metadata-first regressions.
   `messageCount` on all session-scoped deltas.
 - Update hand-written fixtures to match the current SSE contract.
 
+## Hydration retry loop can spam persistent failures
+
+**Severity:** Low - visible-session hydration retries clamp to the last retry delay and can continue indefinitely for persistent non-404 failures.
+
+The new retry loop correctly recovers from stale hydration rejection and transient `fetchSession` failures, but it has no ceiling. A visible metadata-only session whose targeted hydration keeps failing will retry every 3 seconds and repeatedly call the normal request-error reporting path.
+
+**Current behavior:**
+- `ui/src/app-live-state.ts` schedules retry delays of 50 ms, 250 ms, 1000 ms, then 3000 ms, and clamps all later retries to 3000 ms.
+- Non-404 `fetchSession` failures report the request error and schedule another retry.
+- The transient non-404 failure branch is not covered by a regression test.
+
+**Proposal:**
+- Cap repeated user-facing error reporting or retry attempts for the same visible session while keeping event-driven or manual recovery possible.
+- Add a test where the first `/api/sessions/{id}` request fails with a non-404 error, the retry succeeds, and the transcript appears without a tab switch or unrelated state event.
+
+## Remote test module size slows review and triage
+
+**Severity:** Note - `src/tests/remote.rs` is large enough that focused remote
+review now has to scan many unrelated scenarios.
+
+The file contains hydration, delta, orchestrator, proxy, and sync-gap coverage
+in one module. New hydration/replay tests are coherent, but keeping every remote
+scenario in the same file makes future review targeting and regression triage
+harder, especially as the metadata-first remote work continues adding focused
+cases.
+
+**Current behavior:**
+- Remote tests for several boundaries live in one oversized module.
+- New review findings repeatedly point into the same large file, making
+  ownership and intended fixture reuse harder to see.
+
+**Proposal:**
+- Split remote tests by boundary, for example `remote_hydration.rs`,
+  `remote_deltas.rs`, and `remote_orchestrators.rs`.
+- Move shared fake-server and remote-session helpers into a small support
+  module used by those test files.
+
+## New orchestrator summary-preservation test missing `.all()` shape assertion
+
+**Severity:** Medium - `src/tests/remote.rs:1505-1521` adds a test covering `OrchestratorsUpdated.sessions` summary preservation after a full `sessions` snapshot, but the assertion only `.find()`s one session by its `message_count == 2` and checks its individual fields. It does not assert that the `.all()` of the projected sessions match the summary-shape invariant (`messages == []`, `messages_loaded == false` when expected, all `message_count` values preserved from the incoming snapshot).
+
+A regression that silently left one session with a full transcript, or that swapped `messages_loaded` on an unrelated session in the batch, would pass the current `.find(|s| s.message_count == 2)` assertion. The test is meant to pin the "the whole republish is metadata-first" contract but only inspects one session.
+
+**Current behavior:**
+- Test finds one session by `message_count == 2` and asserts its shape.
+- No `.all()` assertion over the full snapshot's `sessions` vec.
+- No fixture coverage for multi-session snapshots with a mix of hydrated/unhydrated incoming records.
+
+**Proposal:**
+- Replace the `.find()` probe with `assert!(republished.iter().all(|s| s.messages.is_empty() && !s.messages_loaded))`, or add it alongside the existing assertion.
+- Expand the fixture to include at least two sessions with distinct `message_count` values so the `.all()` assertion covers more than one session shape.
+- Optional: parameterize over a hydrated-input + unhydrated-input mix to also pin the "republish projects metadata regardless of source hydration state" contract.
+
 ## Reconnect fallback test no longer proves applied delta is visible
 
 **Severity:** Low - reconnect coverage can pass even if the session delta in the scenario is ignored.
@@ -1234,34 +1706,6 @@ The extracted drag/resize hook now owns the `BroadcastChannel` that carries `dra
 - Add a regression test that forces a render between `drag-start` and `drop-commit` and asserts the source tab still closes cleanly.
 
 
-
-## Search-band range merging mutates mounted-page state during render
-
-**Severity:** High - `mergeRanges(...)` reuses and mutates the first input range object, so an overlapping search band can mutate `mountedPageRange` React state during render.
-
-`ui/src/panels/VirtualizedConversationMessageList.tsx` now merges the live
-viewport range with the pinned search-hit range, but `mergeRanges(...)`
-initializes `mergedRanges` with `sortedRanges[0]` and then updates
-`currentRange.endIndex` in place. When the first merged range is
-`mountedPageRange`, that mutation writes directly into the current React state
-object while the component is rendering. The same object also feeds mounted-band
-reconciliation and scroll-anchor bookkeeping, so the resulting corruption can
-be hard to reproduce and harder to reason about.
-
-**Current behavior:**
-- `mergeRanges(...)` copies the input array but not the `VirtualizedRange`
-  objects inside it.
-- Overlapping ranges update `currentRange.endIndex` in place.
-- When the first merged range is `mountedPageRange`, React state is mutated
-  during render instead of producing a fresh derived range.
-
-**Proposal:**
-- Make `mergeRanges(...)` fully immutable by cloning the first range before
-  storing it in `mergedRanges`.
-- Keep all later merged ranges cloned as well so the helper never mutates an
-  input object.
-- Add a focused regression that overlaps the viewport band with the pinned
-  search band and asserts the original `mountedPageRange` object is unchanged.
 
 ## Session store subscribers can dispatch stale action callbacks
 
@@ -1483,46 +1927,6 @@ through a broad module instead of a small boundary with a clear contract.
   short contract comment.
 - Consider extracting the heavy Markdown/code rendering path separately so
   virtualization policy and content rendering can evolve independently.
-
-## Create Session dialog reverts the user's agent pick while a session is active
-
-**Severity:** High - `ui/src/App.tsx:1343-1347` syncs `newSessionAgent` to `activeSession.agent` inside a `useEffect` whose deps include `newSessionAgent` itself. The effect therefore re-fires whenever the user changes the agent in the dialog and snaps the pick back to the active session's agent. With a session active in the pane, the user cannot actually change the agent in the Create Session dialog.
-
-Before the current-tree refactor, the deps were keyed on `[activeSession?.id]` so the initialization only ran on session switch. Adding `newSessionAgent` to the deps (likely to satisfy an exhaustive-deps lint) introduced a feedback loop: `setNewSessionAgent(...)` changes the state → effect runs again → guard `newSessionAgent !== activeSession.agent` is true → state is overwritten back to `activeSession.agent`. The guard was meant to avoid a no-op `setState`, but it does not prevent the user's valid override from being undone.
-
-**Current behavior:**
-- Opening the Create Session dialog while any session is active initializes `newSessionAgent` to that session's agent. Correct.
-- The user changes the agent selector. `onChangeNewSessionAgent={setNewSessionAgent}` fires. Correct.
-- The effect immediately re-runs, sees `newSessionAgent !== activeSession.agent`, and sets the agent back. Incorrect.
-- Net effect: the agent selector visibly flickers to the new pick and snaps back before the user sees their choice take.
-
-**Proposal:**
-- Track the last-seen `activeSession.id` in a ref and only sync when the id transitions. Sketch:
-  ```tsx
-  const lastSyncedSessionIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (activeSession && lastSyncedSessionIdRef.current !== activeSession.id) {
-      lastSyncedSessionIdRef.current = activeSession.id;
-      setNewSessionAgent(activeSession.agent);
-    }
-  }, [activeSession?.id, activeSession?.agent]);
-  ```
-- Alternatively, drop `newSessionAgent` from deps with an explicit `eslint-disable-next-line` comment explaining the init-on-session-switch intent.
-- Add a regression test: mount with an active session, open the Create Session dialog, change the agent to a different value, assert the pick sticks.
-
-## `adoptState` silently overwrites caller's `disableMutationStampFastPath`
-
-**Severity:** Medium - `ui/src/app-live-state.ts:906-909` computes `serverInstanceChanged` locally and builds adoption options as `{ ...options, disableMutationStampFastPath: serverInstanceChanged }`. The spread order means the caller's explicit `disableMutationStampFastPath: true` is silently overwritten when the local computation produces `false`.
-
-No external caller sets this option today, so the bug is latent. But `AdoptStateOptions` declares the flag, and a future caller that passes `disableMutationStampFastPath: true` (e.g. to force a deep reconcile after suspected transcript corruption, independently of server-instance change) will be confused when the flag has no effect.
-
-**Current behavior:**
-- `{ ...options, disableMutationStampFastPath: serverInstanceChanged }` — the local computation always wins.
-- A caller-passed `true` with `serverInstanceChanged === false` is dropped.
-
-**Proposal:**
-- OR the values: `disableMutationStampFastPath: serverInstanceChanged || options?.disableMutationStampFastPath ?? false`.
-- Once fixed, add a test that passes `disableMutationStampFastPath: true` through `AdoptStateOptions` and asserts the deep reconcile runs even when `serverInstanceChanged === false`.
 
 ## `useState` initializer in `SessionComposer` writes to a shared ref
 
@@ -1982,22 +2386,6 @@ Affected tests: `codex_thread_action_routes_update_session_state` (`:510`), `cod
 **Proposal:**
 - Add one sentence to the delta section: "Note: `DeltaEvent.*.messageCount` is required on the wire (no `#[serde(default)]`) — see `docs/metadata-first-state-plan.md` Contract Precisions → Field semantics for the intentional soft-rollout-on-Session + hard-break-on-Delta asymmetry."
 
-## `DeltaEvent::SessionCreated` and `OrchestratorsUpdated` still carry full transcripts
-
-**Severity:** High - Phase 2 made `/api/state` and SSE `state` metadata-first, but `DeltaEvent::SessionCreated { session: Session }` in `src/wire.rs` and `DeltaEvent::OrchestratorsUpdated.sessions: Vec<Session>` still ship full `Session` objects (with `messages_loaded: true` and populated `messages`) over SSE. Every new remote-session materialization (`src/sse_broadcast.rs::announce_remote_session_created_if_changed`), every `apply_remote_delta_event::SessionCreated` branch (`src/remote_routes.rs:524-574`), and every orchestrator burst that references existing sessions now ships unbounded transcripts through the delta channel — the exact transport the metadata-first plan aimed to remove.
-
-On a chained remote topology, or when a fresh proxy materializes for a long-lived remote session, one of these deltas can exceed the size of the full-state snapshot we just removed. The metadata-first invariant the frontend now depends on for SSE JSON.parse time is broken through these regressive channels.
-
-**Current behavior:**
-- `/api/state` and SSE `state` ship session summaries (no `messages`).
-- `DeltaEvent::SessionCreated` carries a full `Session` with populated `messages`.
-- `DeltaEvent::OrchestratorsUpdated.sessions` carries `Vec<Session>` with populated `messages`.
-- Every remote-session materialization through these channels ships the full transcript.
-
-**Proposal:**
-- Per `docs/metadata-first-state-plan.md`: introduce `StateSessionSummary` as a typed summary struct in `src/wire.rs` and change these two variants to carry summaries, OR ship ids only and have receivers targeted-hydrate via `GET /api/sessions/{id}`.
-- This must land before Phase 5's transitional-adapter removal deadline. Worth elevating in the plan's Implementation Status as the single remaining wire-shape gap.
-
 ## `#[cfg(test)] snapshot()` creates test-vs-production contract divergence
 
 **Severity:** High - `src/state_accessors.rs:54-87` defines `snapshot()` as `full_snapshot()` in test builds and `summary_snapshot()` in production. Tests read `state.snapshot()` and rely on the full-transcript form (~40 sites in `src/tests/remote.rs` read `session.messages` directly from the snapshot), while production emits the summary shape. This is a silent behavioral split: a regression that flips a production code path from summary → full transcript (e.g. a new snapshot builder that forgets `wire_session_summary_from_record`) does not surface in any unit test that uses `snapshot()`.
@@ -2014,38 +2402,6 @@ Two HTTP-route contract tests (`snapshot_bearing_routes_include_message_count`) 
 - Rename the cfg-split helpers so intent is audible at every call site: tests explicitly call `full_snapshot_for_test()`; production paths explicitly call `summary_snapshot()`. Same body, different names.
 - Or migrate the ~40 `state.snapshot().sessions[...].messages` call sites to read `state.inner.lock().sessions[...]` directly so tests assert against record state rather than wire state. Safer — transcript mutation checks don't route through the wire-projection helper at all.
 - Either fix closes the latent cliff. The cfg-split without renames is deprecated.
-
-## Stale hydration response can overwrite state after a server restart
-
-**Severity:** High - `ui/src/app-live-state.ts:942-993`'s hydration path dispatches `fetchSession(sessionId)` and on resolution calls `adoptFetchedSession(response.session, response.revision, response.serverInstanceId)`. The adoption check uses `shouldAdoptSnapshotRevision` against `lastSeenServerInstanceIdRef.current` at **resolve time**, not a value captured at **send time**. If a server restart completes during the in-flight fetch, `adoptState` clears `hydratingSessionIdsRef` / `hydratedSessionIdsRef` and updates `lastSeenServerInstanceIdRef` to the new instance id. The stale pre-restart response's `serverInstanceId` then differs from the current ref — but the mitigation at `ui/src/app-live-state.ts:1119-1121` just re-kicks a fresh hydration; the outstanding async IIFE still calls `adoptFetchedSession` and can adopt pre-restart session data.
-
-The review instructions for Phase 2 asked for "capture-at-send / reject-at-receive" and it is not implemented. The race window is narrow (needs restart during an in-flight fetch) but the consequence — rendering pre-restart transcript content against a new server — is user-visible.
-
-**Current behavior:**
-- Hydration fetch dispatches without capturing `lastSeenServerInstanceIdRef.current`.
-- `adoptFetchedSession` compares `response.serverInstanceId` against the current ref at resolve time.
-- `adoptState` clears hydrating/hydrated refs on server-instance change but does not abort in-flight promises.
-- A stale pre-restart response fails `isServerInstanceMismatch` and is adopted.
-
-**Proposal:**
-- At fetch dispatch: `const sentAgainstInstanceId = lastSeenServerInstanceIdRef.current;`.
-- After `await fetchSession(...)`: if `response.serverInstanceId !== sentAgainstInstanceId` OR `lastSeenServerInstanceIdRef.current !== sentAgainstInstanceId`, short-circuit to `requestActionRecoveryResyncRef.current()` without calling `adoptFetchedSession`.
-- A generation counter incremented on the `hydratingSessionIdsRef.current.clear()` path would make this bulletproof and also covers the case where `serverInstanceId` happens to match across restart instances.
-
-## Backend `wire_session_summary_from_record` clones full session under the state mutex
-
-**Severity:** Medium - `src/state_accessors.rs:40-45` implements `wire_session_summary_from_record` as "call `wire_session_from_record` (which clones the full session including `messages`), then clear `messages` and set `messages_loaded: false`." On a `/api/state` snapshot with N sessions × M messages, the helper allocates and drops O(N·M) `Message` clones that are immediately discarded. For the plan's baseline fixture (10 sessions × 500 messages), every snapshot clones and drops ~5,000 messages just to produce a summary payload.
-
-This runs on every `commit_locked` inside `sse_broadcast.rs:384-388`'s state-mutex critical section. The explicit goal of Phase 2 was to make snapshot cost scale with session count, not transcript size. The frontend `JSON.parse` cost is fixed (since `messages: []` on the wire), but the backend build path still scales `O(N·M)` under the mutex.
-
-**Current behavior:**
-- `wire_session_summary_from_record` clones the full session, then discards `messages`.
-- Under the state mutex.
-- On every `commit_locked` in production.
-
-**Proposal:**
-- Inline a summary builder that clones each metadata field individually and sets `messages: Vec::new()` + `messages_loaded: false` directly from `record`. No intermediate full clone.
-- Long-term: introduce the typed `StateSessionSummary` struct the plan calls for. A narrower struct that literally cannot have a `messages` field prevents both the allocation cost and the "forgot to clear" class of regression.
 
 ## `resolvedWaitingIndicatorPrompt` duplicates `findLastUserPrompt` derivation across `SessionBody` and `SessionPaneView`
 
@@ -2481,6 +2837,102 @@ Two distinct issues remain in and around the one-shot `fetchSession` hydration p
 
 ## Implementation Tasks
 
+- [ ] P2: Strengthen direct remote GET stale-response coverage:
+  in `get_session_rejects_stale_remote_transcript_after_newer_state_snapshot`,
+  capture the pre-call local revision and assert the revision advances after the
+  rejected hydration. Also assert either a state broadcast or a persisted reload
+  contains the newer metadata-only summary, so removing the commit-before-error
+  path fails the test.
+- [ ] P2: Add same-revision sibling-delta replay coverage:
+  cover the over-broad `remote_session_delta_already_reflected` guard with two
+  distinct same-revision session-scoped events that share the same
+  `messageCount` and `sessionMutationStamp`. Assert the exact replay is skipped
+  but the sibling event still applies or triggers remote recovery.
+- [ ] P2: Add non-text targeted-hydration replay coverage:
+  after the TextDelta replay regression, add a replay test for `CommandUpdate`
+  or `ParallelAgentsUpdate` because those handlers include create/update
+  branching and use the same replay-suppression guard.
+- [ ] P2: Add a hydration retry budget/fake-timer test:
+  use fake timers to drive repeated visible-session hydration failures through
+  the retry schedule, assert duplicate user-facing error reporting is capped,
+  and assert the retry budget resets only after the session revision, count, or
+  mutation stamp changes.
+- [ ] P2: Split `src/tests/remote.rs` by remote behavior boundary:
+  extract hydration, delta, and orchestrator/sync tests into separate modules
+  with shared fake-server helpers in a support module.
+- [ ] P2: Make stale-hydration retry tests prove transcript adoption:
+  use fresh retry transcript text that is distinct from the metadata-only
+  preview, or assert against the active transcript pane instead of summary text.
+  The test should fail if the retry fetch resolves but the full-session response
+  is not adopted.
+- [ ] P2: Add transient non-404 hydration retry coverage:
+  render a visible metadata-only session, have the first
+  `/api/sessions/{id}` request fail with a non-404 error, have the scheduled
+  retry return a full transcript, and assert the transcript appears without a
+  tab switch, prompt send, or unrelated state event. Include an assertion that
+  repeated failures do not spam user-facing errors if retry capping is added.
+- [ ] P2: Broaden unloaded remote-proxy delta hydration coverage:
+  `src/tests/remote.rs` covers `MessageCreated` hydrating an unloaded proxy
+  before local index checks. Add at least one non-`MessageCreated` branch such
+  as `CommandUpdate` or `ParallelAgentsUpdate` to prove the same targeted
+  hydration path protects other session-scoped remote deltas.
+- [ ] P2: Simplify `app-live-state.ts` restart-adoption control flow:
+  `ui/src/app-live-state.ts:1075-1085` sets `allowRevisionDowngrade: true`
+  when `isServerRestartResponse` is true and then calls
+  `shouldAdoptSnapshotRevision`, which already returns `true` unconditionally
+  via the `isServerInstanceMismatch` short-circuit. The flag is dead for that
+  path and the intertwined expression makes restart vs. downgrade semantics
+  hard to audit. Split into
+  `if (isServerRestartResponse) { /* adopt */ }` then the downgrade-capable
+  branch as an else-if. Same behaviour, clearer intent. The adoption gate is
+  the only defense against the prior High-severity stale-hydration data
+  loss, so readability is correctness-relevant here.
+- [ ] P2: Document Monaco cancellation filter install sites and design:
+  `ui/src/main.tsx:10` and `ui/src/monaco.ts:42` both call
+  `installMonacoCancellationRejectionFilter()`. Idempotent via
+  `INSTALL_MARKER`, but not documented — a future reader may remove one of
+  the two sites, breaking the non-obvious test-environment path where
+  `main.tsx` didn't run first. Add a one-line comment at the `monaco.ts`
+  site ("idempotent safety-net for test environments where `main.tsx`
+  didn't run first"). Also add a module-header block to
+  `ui/src/monaco-cancellation-filter.ts` covering (a) what it owns (global
+  `unhandledrejection` filter for Monaco diff-worker cancellations), (b)
+  what it deliberately does NOT own (all other `Canceled` error sources),
+  and (c) the Monaco-version-pinning risk of the four-frame-name heuristic
+  (if Monaco renames `EditorWorkerClient` → `DiffWorkerClient` or inlines
+  `computeDiff`, the filter silently stops matching and noisy rejections
+  return — failure-open is correct, but worth documenting).
+- [ ] P2: Document `SessionHydrationRequestContext` invariant:
+  `ui/src/app-live-state.ts:199-204` adds a new cross-function type used
+  by `captureHydrationRequestContext`, three matcher predicates, and
+  `adoptFetchedSession`. The "capture-at-send / reject-at-receive"
+  semantics are implicit across the four fields. Add a 4-line doc block
+  above the type naming the invariant: "Snapshot of session metadata at
+  fetch-dispatch time. Used by `adoptFetchedSession` to reject hydration
+  responses when (a) the captured server instance has since been
+  superseded, or (b) newer delta metadata has advanced the session beyond
+  what this response can cover." This anchors the intent so future readers
+  don't "optimize" away one of the two redundant guards.
+- [ ] P2: Cover Monaco cancellation filter default-target branch:
+  `ui/src/monaco-cancellation-filter.test.ts:43-48` exercises the
+  idempotency guard only via the injected `target` parameter. The default
+  `target = window` branch is one line of production code but uncovered.
+  Stub `globalThis.window` to a minimal `{ addEventListener }` object,
+  call `installMonacoCancellationRejectionFilter()` twice with no args,
+  assert `addEventListener` was called exactly once.
+- [ ] P2: Add defensive handling for contract-violating `sessionCreated`:
+  `ui/src/live-updates.ts:156-165` routes `sessionCreated` through
+  `reconcileSessions`, which correctly preserves hydrated transcripts when
+  `messagesLoaded === false`. A future server-side bug that publishes
+  `sessionCreated` with `messagesLoaded: true` + `messages: []` would hit
+  the hydrated-path in `reconcileSession` and silently clobber local
+  transcripts. Add either a comment documenting that `messagesLoaded: true
+  && messages.length === 0` is a wire-contract violation, or a
+  short-circuit to `{ kind: "needsResync" }` for that case.
+- [ ] P2: Pin local `orchestratorsUpdated` referenced-session summaries:
+  seed a referenced local orchestrator session with messages, publish an
+  orchestrator update, and assert every delta session has empty `messages`,
+  `messagesLoaded: false`, and preserved `messageCount`.
 - [ ] P2: Remove inline `expect(...)` inside `onDraftCommit` mock body:
   `ui/src/panels/AgentSessionPanel.test.tsx:3464-3467` asserts
   `expect(sessionId).toBe(session.id)` inside a jest mock function that
@@ -2572,14 +3024,6 @@ Two distinct issues remain in and around the one-shot `fetchSession` hydration p
   [...].messages` test call sites to read `state.inner.lock().sessions[...]`
   directly so transcript-mutation assertions bypass the wire projection
   entirely. Either fix closes the latent test-vs-prod divergence.
-- [ ] P2: Capture-at-send / reject-at-receive for hydration `fetchSession`:
-  `ui/src/app-live-state.ts:942-993` compares the incoming
-  `response.serverInstanceId` against `lastSeenServerInstanceIdRef.current`
-  at resolve time, not at send time. A server restart during an in-flight
-  hydration can let a stale pre-restart response slip past
-  `isServerInstanceMismatch`. Capture the ref value into
-  `sentAgainstInstanceId` at dispatch; short-circuit to
-  `requestActionRecoveryResyncRef.current()` on mismatch at resolve.
 - [ ] P2: Memoize `visibleSessionHydrationTargets` more aggressively:
   `ui/src/App.tsx:536-559`'s `useMemo([sessionLookup, workspace.panes])`
   loses reference equality because `sessionLookup` is rebuilt upstream each
@@ -2689,13 +3133,12 @@ Two distinct issues remain in and around the one-shot `fetchSession` hydration p
   refactor (drop the field from the in-memory `Session`, only set it on a
   dedicated wire DTO) is Phase 2 material.
 - [ ] P2: Extract `test_remote_config()` helper in `src/tests/remote.rs`
-  (actively regressing — **total now 46 duplicate literals**, +10 this
-  iteration at `src/tests/remote.rs:1670, 1773, 1830, 1892, 1960, 2052,
-  2172, 2234, 2292, 2353, 2421`). Each new `RemoteConfig` field
-  (e.g. a future transport flag) requires a 46-site sweep. Extract a
+  (actively regressing — **total now 52 duplicate literals**, +6 this
+  iteration). Each new `RemoteConfig` field (e.g. a future transport
+  flag) now requires a 52-site sweep. Extract a
   `fn test_remote_config() -> RemoteConfig` next to
-  `seed_remote_proxy_session_for_delta_test` and fold at least the 10 new
-  literals in one commit; older sites can follow.
+  `seed_remote_proxy_session_for_delta_test` and fold at least the new
+  iteration's literals in one commit; older sites can follow.
 - [ ] P2: Migrate `cancel_pending_interaction_messages` off `commit_locked`
   (Phase 1 outstanding gap):
   `src/turn_lifecycle.rs:581` still calls `commit_locked` for interaction
@@ -3769,6 +4212,187 @@ Two distinct issues remain in and around the one-shot `fetchSession` hydration p
   broadcaster thread too) would not need to duplicate the field list
   again. Low priority â€” the helper is small and only two call sites
   share the shape today.
+- [ ] P2: Rename or document `has_complete_previous_transcript`:
+  the boolean at `src/remote_sync.rs:311-318` gates whether an incoming remote
+  session payload may demote the local `messages_loaded` from `true` to `false`.
+  The name reads as a property of the local cache ("we had a complete
+  transcript before"), but it actually evaluates the incoming payload's
+  completeness against the cached `message_count`. Either rename to something
+  like `incoming_payload_is_complete_relative_to_cache` (verbose but unambiguous)
+  or add a 2-3 line doc comment above the binding spelling out exactly what
+  "complete previous transcript" means in terms of input vs. cached state.
+  Current callers would survive either change mechanically.
+- [ ] P2: Document `session_message_count` max-over-cached semantics:
+  `src/messages.rs::session_message_count(record)` now returns
+  `local_count.max(record.session.message_count)` when
+  `!record.messages_loaded`, so the reported count can exceed
+  `record.session.messages.len()`. This is load-bearing for metadata-first
+  summaries (the cached remote count must not be lost when the local
+  transcript is empty/partial), but no comment explains the intentional
+  divergence. Add a `///` doc comment stating: "For unhydrated records, returns
+  max(local message vec length, cached metadata message_count) so remote
+  count metadata survives partial local transcripts." A `debug_assert!` on the
+  hydrated branch that `local_count == record.session.message_count` would
+  also surface silent drift between the field cache and the vec length.
+- [ ] P2: Tighten the new orchestrator summary-preservation fixture
+  in `src/tests/remote.rs:1505-1521`:
+  the test currently probes `.find(|s| s.message_count == 2)` and asserts the
+  matched session's summary shape. Add an `.all()` assertion over the full
+  returned vec so the contract "every republished session is metadata-first"
+  is pinned, and expand the fixture to include at least two sessions with
+  distinct `message_count` values so the `.all()` assertion has more than one
+  summary to validate. Optionally parameterize over a hydrated vs. unhydrated
+  input mix to pin that republish always projects metadata regardless of
+  source hydration state.
+- [ ] P2: Pin record-state in the stale-hydration tests:
+  `ui/src/App.live-state.deltas.test.tsx:783-791,963-973` now check the newer
+  text renders, but a regression that briefly flashes the new content while
+  leaving the session record in `messagesLoaded: false` or with the wrong
+  `messageCount` would still pass. Query the session store after the
+  `await waitFor(...)` and assert `messageCount === <expected>` plus
+  `messagesLoaded === <expected>` so silent accept-then-overwrite regressions
+  are caught.
+- [ ] P2: Cover multi-field `options` in
+  `ui/src/app-live-state.test.ts` (NEW):
+  the new `resolveAdoptStateSessionOptions` test only passes
+  single-property option objects, so a regression that reorders the spread
+  (`{ disableMutationStampFastPath: ..., ...options }`) — inverting the OR
+  semantics — would not be caught. Add a case like
+  `expect(resolveAdoptStateSessionOptions({ openSessionId: "s1", paneId: "p1", disableMutationStampFastPath: true }, false)).toMatchObject({ openSessionId: "s1", paneId: "p1", disableMutationStampFastPath: true })`.
+- [ ] P2: Add the `monaco-cancellation-filter` default-target branch test:
+  `ui/src/monaco-cancellation-filter.test.ts:43-48` exercises only the
+  injected-`target` branch. The two production call sites (`main.tsx:10`,
+  `monaco.ts:42`) both rely on the default `target = window`. Stub
+  `globalThis.window` to a minimal `{ addEventListener: vi.fn() }`,
+  call `installMonacoCancellationRejectionFilter()` twice without args,
+  and assert `addEventListener` was called exactly once.
+- [ ] P2: Cover the bounded hydration retry backoff schedule directly:
+  the new `SESSION_HYDRATION_RETRY_DELAYS_MS = [50, 250, 1000, 3000]` is
+  exercised only indirectly via the existing stale-hydration tests using
+  real timers. A regression that doubled the first delay or always used
+  index 0 would still pass within the default `waitFor` timeout. Add a
+  `vi.useFakeTimers()` test that exercises retries 2, 3, and 4 and
+  asserts the delay sequence advances through the schedule.
+- [ ] P2: Cover the over-cache demotion branch of
+  `has_complete_previous_transcript`
+  (`src/remote_sync.rs:311-318`):
+  the unstaged tightening from `<=` to `==` made the gate strictly
+  stricter. The equal-count preservation path is now covered by
+  `remote_summary_same_count_with_same_stamp_preserves_cached_transcript`,
+  but the over-cache demotion case (cached length > remote `message_count`)
+  is still uncovered. Add
+  `apply_remote_session_demotes_when_cached_transcript_overshoots`:
+  cached length 3, remote `message_count: 2`, matching stamp; expect
+  demoted to `messages_loaded: false`.
+- [ ] P2: Cover the session-switch-induced loop variant in
+  `App.session-lifecycle.test.tsx:899-923`:
+  the new "keeps the Create Session assistant pick after changing away
+  from the active session agent" test only pins the immediate self-loop
+  case. Add a follow-up step where a new session is created and becomes
+  active while the dialog is open, and assert the user's "Claude" pick
+  still sticks. The original failure mode was
+  `setNewSessionAgent → effect re-runs → sets back`; the session-switch
+  case is the second half of that loop class.
+- [ ] P2: Pin `response.revision` in
+  `get_session_hydrates_unloaded_remote_proxy_from_remote_owner`
+  (`src/tests/remote.rs:2247-2371`):
+  the test pins request lines and `session.message_count == 1` but
+  not `response.revision`. Capture the pre-hydration revision via
+  `state.snapshot().revision`; after `state.get_session(...)`, assert
+  `response.revision > pre_revision` and that the value matches the
+  locally-advanced revision after `commit_locked`. Closes the
+  "verify the actual response revision is propagated" gap.
+- [ ] P2: Spawn a remote server in
+  `stale_remote_delta_skips_before_targeted_hydration_fetch`
+  (`src/tests/remote.rs:2580-2653`):
+  the test does NOT spawn a remote, so it cannot prove the production
+  code skipped the HTTP fetch — only that the consequence (no state
+  changes) holds. A regression that bypassed the skip and fell through
+  to a non-network path would still pass. Spawn
+  `spawn_remote_session_response_server`, bind `requests`, and after
+  the stale delta is applied assert `requests.lock().is_empty()` (no
+  `GET /api/sessions/...` line). Converts the test from "behavioral
+  consequence" to "no HTTP fetched."
+- [ ] P2: Subscribe to delta events in the new same-stamp tests
+  (`src/tests/remote.rs:2169-2245` and
+  `remote_summary_same_count_with_new_stamp_marks_cached_transcript_unloaded`):
+  the existing sibling
+  `remote_summary_count_decrease_marks_cached_transcript_unloaded`
+  already subscribes and inspects the published `SessionCreated`
+  delta's summary shape. The two new same-stamp tests omit this
+  inspection, leaving published-delta regressions undetected.
+  Subscribe via `state.subscribe_delta_events()` and assert the
+  summary's `messages_loaded`/`messages.is_empty()`/`message_count`
+  shape on each.
+- [ ] P2: Cover the both-`None` mutation-stamp case in
+  `apply_remote_session_to_record`
+  (`src/remote_sync.rs:316-321`):
+  `Option::zip` returns `None` whenever either side is `None`, which
+  evaluates the freshness gate to `false` and demotes. Add a
+  regression where both `previous_remote_mutation_stamp` and the
+  incoming `remote_session.session_mutation_stamp` are `None` and
+  assert the chosen demotion policy. Pair with a comment in
+  production explaining the four `(prev, next)` stamp-presence cases.
+- [ ] P2: Add a regression for the `session_mutation_stamp: None`
+  wire-payload clobber on `SessionCreated`/`OrchestratorsUpdated`
+  (`src/remote_sync.rs:312`):
+  the message-mutating arm fix landed, but `apply_remote_session_to_record`
+  still clobbers cached `Some(_)` to `None` for `SessionCreated` and
+  `OrchestratorsUpdated.sessions[]` payloads. Send a `SessionCreated`
+  summary with `session_mutation_stamp: None` against a cached `Some(_)`;
+  assert the cached stamp survives. Pair with the production fix that
+  gates the assignment on `is_some()` for the broad session-shape path.
+- [ ] P2: Cover replay-after-hydration for non-`TextDelta` arms
+  (`src/remote_routes.rs:867-1490`):
+  the new `remote_session_delta_already_reflected` dedup branch is wired
+  into all six message-mutating arms but the regression
+  (`remote_text_delta_replay_after_targeted_hydration_is_skipped_by_metadata`)
+  only covers `TextDelta`. Add at least a `MessageCreated` replay test
+  (highest-stakes — appends a new entry rather than mutating an existing
+  one) and ideally a parameterized regression covering all six variants.
+  A future change that breaks the dedup shape would only blow up `TextDelta`.
+- [ ] P2: Cover the new `remote_state_applied` commit-then-error branches
+  in `hydrate_remote_session_target` (`src/remote_routes.rs:577-589`,
+  `:597-610`):
+  two new branches lack regressions: (1) the missing-target exit where
+  the proxy disappears between state apply and lookup — assert `404`
+  is returned AND `inner.remote_applied_revisions` was advanced
+  (broad-state mutation preserved); (2) the stale-but-matching-metadata
+  pass-through where the older targeted response carries matching
+  `messageCount` + `sessionMutationStamp` — assert the call returns
+  `Ok` and the cached transcript is left intact.
+- [ ] P2: Bind `requests` and pin endpoint + state-event publish in
+  the three `_requests`-prefixed remote tests
+  (`src/tests/remote.rs:2445`, `:2538`, `:2638`) — third-round repeat:
+  `get_session_rejects_stale_remote_transcript_after_newer_state_snapshot`,
+  `remote_message_delta_hydrates_unloaded_proxy_before_gap_check`,
+  and the new
+  `remote_text_delta_replay_after_targeted_hydration_is_skipped_by_metadata`
+  all bind the captured request log as `_requests` and never inspect it.
+  Bind `requests` and assert the expected `GET /api/sessions/...` and
+  `GET /api/state` lines mirror the pattern from
+  `get_session_hydrates_unloaded_remote_proxy_from_remote_owner` (lines 2355-2367).
+- [ ] P2: Pin `messageCount` and `sessionMutationStamp` in
+  `live-updates.test.ts:472-515`:
+  the new "applies authoritative sessionCreated metadata even when the
+  mutation stamp matches" test asserts `name`, `preview`, `messages`,
+  and `messagesLoaded` but does not pin `messageCount` or
+  `sessionMutationStamp` (asymmetric with the sibling preservation test
+  at `:458-470` that pins both). Add
+  `expect(result.sessions[0].messageCount).toBe(1)` and
+  `expect(result.sessions[0].sessionMutationStamp).toBe(202)`.
+- [ ] P2: Add a `monaco-cancellation-filter` negative test for a Monaco
+  worker frame WITHOUT `computeDiff`
+  (`ui/src/monaco-cancellation-filter.test.ts`):
+  the matcher was tightened from "Monaco frame OR computeDiff" to
+  "Monaco frame AND computeDiff". The negative direction (`computeDiff`
+  alone) is now covered, the positive direction (Monaco frame +
+  `computeDiff`) is covered, but the remaining quadrant — a Monaco
+  worker frame (e.g., `EditorWorkerClient`) without `computeDiff` —
+  is uncovered. A regression that drops the `computeDiff` requirement
+  (reverting to OR) would not be caught. Add a third negative case
+  asserting `isBenignMonacoCancellationReason(createCanceledError("Canceled: Canceled\n    at EditorWorkerClient2.idleCheck"))`
+  returns `false`.
 
 ## Known Design Limitations
 

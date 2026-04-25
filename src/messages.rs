@@ -21,7 +21,12 @@
 
 /// Returns the transcript count carried by session-scoped SSE deltas.
 fn session_message_count(record: &SessionRecord) -> u32 {
-    u32::try_from(record.session.messages.len()).unwrap_or(u32::MAX)
+    let local_count = u32::try_from(record.session.messages.len()).unwrap_or(u32::MAX);
+    if record.session.messages_loaded {
+        local_count
+    } else {
+        record.session.message_count
+    }
 }
 
 /// Recovers interrupted session record.

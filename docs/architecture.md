@@ -240,11 +240,13 @@ Every `Session` or session summary serialized on the wire carries
 shells: they retain normal session metadata, set `messagesLoaded: false`, and
 keep `messages: []` only as a temporary adapter-compatible shape while the
 frontend migration is in progress. Full transcript-bearing sessions still come
-from `SessionResponse`, `CreateSessionResponse`, `SessionCreated`, and
-`OrchestratorsUpdated.sessions`. The backend computes `messageCount` from the
-session record's transcript at wire-projection time; the frontend keeps it on
-the session summary so reconnect/state adoption can preserve transcript height
-and gap-detection metadata without waiting for another session-scoped delta.
+from `SessionResponse` and `CreateSessionResponse`. `SessionCreated` and
+`OrchestratorsUpdated.sessions` are metadata-first delta summaries with
+`messagesLoaded: false` and `messages: []`. The backend computes
+`messageCount` from the session record's transcript at wire-projection time;
+the frontend keeps it on the session summary so reconnect/state adoption can
+preserve transcript height and gap-detection metadata without waiting for
+another session-scoped delta.
 
 ```
 DeltaEvent::TextDelta            { revision, session_id, message_id, message_index, message_count, delta, preview, session_mutation_stamp? }
@@ -253,9 +255,14 @@ DeltaEvent::CommandUpdate        { revision, session_id, message_id, message_ind
 DeltaEvent::ParallelAgentsUpdate { revision, session_id, message_id, message_index, message_count, agents, preview, session_mutation_stamp? }
 DeltaEvent::MessageCreated       { revision, session_id, message_id, message_index, message_count, message, preview, status, session_mutation_stamp? } // inserts a new message at message_index; if the id already exists, remove and reinsert it at that literal index
 DeltaEvent::MessageUpdated       { revision, session_id, message_id, message_index, message_count, message, preview, status, session_mutation_stamp? } // replaces an existing message in place; message_index is a fast-path hint and must not reorder the transcript
-DeltaEvent::SessionCreated       { revision, session_id, session } // local + remote-proxied session creation; forwarded by remote backends after id localization
-DeltaEvent::OrchestratorsUpdated { revision, orchestrators[] } // IDs inside each instance are scoped to the originating server; translate via sync_remote_state_inner before forwarding remotely.
+DeltaEvent::SessionCreated       { revision, session_id, session } // metadata-first session summary; local + remote-proxied session creation; forwarded by remote backends after id localization
+DeltaEvent::OrchestratorsUpdated { revision, orchestrators[], sessions[] } // sessions[] contains metadata-first summaries for referenced sessions; IDs inside each instance are scoped to the originating server; translate via sync_remote_state_inner before forwarding remotely.
 ```
+
+For inbound remote session-scoped deltas, `session_mutation_stamp?` is a
+freshness marker when present. A missing stamp means "unknown", not "clear the
+cached stamp", so receivers preserve any prior cached stamp and let later
+metadata-only summaries decide whether targeted hydration is needed.
 
 ```
 WorkspaceFilesChangedEvent {

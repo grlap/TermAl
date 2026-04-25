@@ -330,6 +330,9 @@ fn create_session_refreshes_agent_readiness_cache() {
             assert_eq!(revision, created.revision);
             assert_eq!(session_id, created.session_id);
             assert_eq!(session.id, created.session_id);
+            assert!(!session.messages_loaded);
+            assert!(session.messages.is_empty());
+            assert_eq!(session.message_count, 0);
         }
         _ => panic!("expected sessionCreated delta"),
     }

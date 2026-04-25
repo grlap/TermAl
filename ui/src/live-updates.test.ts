@@ -425,6 +425,95 @@ describe("session transport helpers", () => {
 });
 
 describe("applyDeltaToSessions", () => {
+  it("preserves hydrated messages when a sessionCreated delta carries a summary", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: true,
+        messageCount: 1,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Hydrated transcript",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "sessionCreated",
+      revision: 2,
+      sessionId: "session-a",
+      session: makeSession("session-a", {
+        name: "Renamed session",
+        preview: "Updated summary",
+        messagesLoaded: false,
+        messageCount: 1,
+        messages: [],
+        sessionMutationStamp: 202,
+      }),
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+    expect(result.sessions[0].name).toBe("Renamed session");
+    expect(result.sessions[0].preview).toBe("Updated summary");
+    expect(result.sessions[0].messagesLoaded).toBe(true);
+    expect(result.sessions[0].messageCount).toBe(1);
+    expect(result.sessions[0].sessionMutationStamp).toBe(202);
+    expect(result.sessions[0].messages).toEqual(sessions[0].messages);
+  });
+
+  it("applies authoritative sessionCreated metadata even when the mutation stamp matches", () => {
+    const sessions = [
+      makeSession("session-a", {
+        name: "Old session name",
+        preview: "Old summary",
+        messagesLoaded: true,
+        messageCount: 1,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Hydrated transcript",
+          },
+        ],
+        sessionMutationStamp: 202,
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "sessionCreated",
+      revision: 2,
+      sessionId: "session-a",
+      session: makeSession("session-a", {
+        name: "Authoritative session name",
+        preview: "Authoritative summary",
+        messagesLoaded: false,
+        messageCount: 1,
+        messages: [],
+        sessionMutationStamp: 202,
+      }),
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+    expect(result.sessions[0].name).toBe("Authoritative session name");
+    expect(result.sessions[0].preview).toBe("Authoritative summary");
+    expect(result.sessions[0].messagesLoaded).toBe(true);
+    expect(result.sessions[0].messages).toEqual(sessions[0].messages);
+  });
+
   it("appends a created message without needing a resync", () => {
     const sessions = [makeSession("session-a")];
     const delta: DeltaEvent = {

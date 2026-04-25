@@ -165,16 +165,26 @@ impl AppState {
         let revision = self.commit_session_created_locked(&mut inner, &record).map_err(|err| {
             ApiError::internal(format!("failed to persist forked Codex session: {err:#}"))
         })?;
-        let session = inner
+        let (session, delta_session) = inner
             .find_session_index(&record.session.id)
             .and_then(|index| inner.sessions.get(index))
-            .map(AppState::wire_session_from_record)
-            .unwrap_or_else(|| AppState::wire_session_from_record(&record));
+            .map(|record| {
+                (
+                    AppState::wire_session_from_record(record),
+                    AppState::wire_session_summary_from_record(record),
+                )
+            })
+            .unwrap_or_else(|| {
+                (
+                    AppState::wire_session_from_record(&record),
+                    AppState::wire_session_summary_from_record(&record),
+                )
+            });
         drop(inner);
         self.publish_delta(&DeltaEvent::SessionCreated {
             revision,
             session_id: session.id.clone(),
-            session: session.clone(),
+            session: delta_session,
         });
 
         Ok(CreateSessionResponse {

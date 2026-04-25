@@ -285,6 +285,7 @@ export default function App() {
   const [draftAttachmentsBySessionId, setDraftAttachmentsBySessionId] =
     useState<Record<string, DraftImageAttachment[]>>({});
   const [newSessionAgent, setNewSessionAgent] = useState<AgentType>("Codex");
+  const lastNewSessionAgentSyncedSessionIdRef = useRef<string | null>(null);
   const [newSessionModelByAgent, setNewSessionModelByAgent] = useState<
     Record<AgentType, string>
   >(() => ({
@@ -1377,10 +1378,20 @@ export default function App() {
   }, [collapsedSessionOrchestratorIdsBySurfaceId, workspace.panes]);
 
   useEffect(() => {
-    if (activeSession && newSessionAgent !== activeSession.agent) {
-      setNewSessionAgent(activeSession.agent);
+    if (!activeSession) {
+      lastNewSessionAgentSyncedSessionIdRef.current = null;
+      return;
     }
-  }, [activeSession?.agent, activeSession?.id, newSessionAgent]);
+
+    if (lastNewSessionAgentSyncedSessionIdRef.current === activeSession.id) {
+      return;
+    }
+
+    lastNewSessionAgentSyncedSessionIdRef.current = activeSession.id;
+    setNewSessionAgent((current) =>
+      current === activeSession.agent ? current : activeSession.agent,
+    );
+  }, [activeSession?.agent, activeSession?.id]);
 
   useEffect(() => {
     if (!isWorkspaceSwitcherOpen) {

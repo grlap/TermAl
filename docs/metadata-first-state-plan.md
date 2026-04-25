@@ -441,11 +441,12 @@ Work:
   `session_mutation_stamp` and `message_count`; variants that update summary
   text/status also carry `preview` / `status`. Frontend step 3 of "Delta
   arrival for un-hydrated sessions" (above) depends on preserving this.
-- Convert transcript-bearing delta payloads that are not truly message
-  deltas to summary payloads or id-only invalidation. In particular,
-  `DeltaEvent::OrchestratorsUpdated { sessions: Vec<Session> }` and
-  `DeltaEvent::SessionCreated { session: Session }` currently carry full
-  sessions and must become summary-only or id-only + targeted hydration.
+- Current tree: transcript-bearing delta payloads that are not truly message
+  deltas are now summary payloads. `DeltaEvent::SessionCreated.session` and
+  `DeltaEvent::OrchestratorsUpdated.sessions` use metadata-first session
+  summaries (`messages: []`, `messagesLoaded: false`, `messageCount` from the
+  real transcript); full transcripts remain limited to `SessionResponse` and
+  `CreateSessionResponse`.
 - Confirm non-message session metadata changes remain represented in
   summaries.
 - Confirm session creation still returns enough data for the new pane to
@@ -1006,7 +1007,7 @@ this; the ESLint rule added in Phase 5 codifies it.
 - `/api/state` and SSE `state` no longer include full transcripts. Schema
   test pins this at the type level.
 - `DeltaEvent::SessionCreated` and `DeltaEvent::OrchestratorsUpdated` no
-  longer carry full `Session` objects.
+  longer carry transcript-bearing session payloads.
 - Browser state-event parse time scales with number of sessions, not total
   conversation history. Measured against the Phase 0 baseline; delta
   recorded in `docs/prompt-responsiveness-refactor-plan.md`.

@@ -896,6 +896,32 @@ describe("App session lifecycle", () => {
     });
   });
 
+  it("keeps the Create Session assistant pick after changing away from the active session agent", async () => {
+    await withSuppressedActWarnings(async () => {
+      const setup = await renderAppWithProjectAndSession();
+      try {
+        await openCreateSessionDialog();
+
+        expect(
+          await screen.findByRole("combobox", { name: "Assistant" }),
+        ).toHaveTextContent("Codex");
+
+        await selectComboboxOption("Assistant", "Claude");
+        await waitFor(() => {
+          expect(
+            screen.getByRole("combobox", { name: "Assistant" }),
+          ).toHaveTextContent("Claude");
+        });
+        await settleAsyncUi();
+        expect(
+          screen.getByRole("combobox", { name: "Assistant" }),
+        ).toHaveTextContent("Claude");
+      } finally {
+        setup.cleanup();
+      }
+    });
+  });
+
   it("warns before sending a prompt with an unknown session model", () => {
     expect(
       describeUnknownSessionModelWarning(
