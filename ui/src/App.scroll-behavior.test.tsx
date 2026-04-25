@@ -526,6 +526,7 @@ describe("App scroll behaviour", () => {
         });
 
         await clickAndSettle(session2Tab);
+        expect(messageStack.scrollTop).toBe(800);
         messageStack.scrollTop = 400;
         act(() => {
           fireEvent.scroll(messageStack);
@@ -559,8 +560,21 @@ describe("App scroll behaviour", () => {
 
         expect(messageStack.scrollTop).toBe(490);
 
-        await clickAndSettle(session1Tab);
-        expect(messageStack.scrollTop).toBe(150);
+        const currentTablist = screen
+          .getAllByRole("tablist", { name: "Tile tabs" })
+          .find((candidate) =>
+            within(candidate).queryByRole("tab", {
+              name: "Session 2",
+              selected: true,
+            }),
+          );
+        if (!currentTablist) {
+          throw new Error("Session pane tablist not found after tab switch");
+        }
+        await clickAndSettle(
+          within(currentTablist).getByRole("tab", { name: "Session 1" }),
+        );
+        expect(messageStack.scrollTop).toBe(800);
       } finally {
         restoreScrollGeometry();
       }

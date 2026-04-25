@@ -5,6 +5,10 @@ import {
   DeferredHeavyContentActivationProvider,
   MessageCard,
 } from "./message-cards";
+import {
+  DEFERRED_RENDER_RESUME_EVENT,
+  DEFERRED_RENDER_SUSPENDED_ATTRIBUTE,
+} from "./deferred-render";
 import type {
   ApprovalMessage,
   CodexAppRequestMessage,
@@ -168,6 +172,89 @@ describe("MessageCard", () => {
     expect(
       container.querySelector(".deferred-markdown-placeholder"),
     ).toBeInTheDocument();
+  });
+
+  it("keeps heavy markdown deferred while the message stack suspends activation", async () => {
+    const message: TextMessage = {
+      id: "message-heavy-scroll-suspended",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: [
+        "# Deferred heading",
+        ...Array.from({ length: 28 }, (_, index) => `Line ${index + 1}`),
+      ].join("\n"),
+    };
+
+    const { container } = render(
+      <div
+        className="message-stack"
+        {...{ [DEFERRED_RENDER_SUSPENDED_ATTRIBUTE]: "true" }}
+      >
+        <MessageCard
+          message={message}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+        />
+      </div>,
+    );
+
+    expect(
+      screen.queryByRole("heading", { name: "Deferred heading" }),
+    ).not.toBeInTheDocument();
+    expect(
+      container.querySelector(".deferred-markdown-placeholder"),
+    ).toBeInTheDocument();
+
+    const root = container.querySelector(".message-stack");
+    expect(root).not.toBeNull();
+    root!.removeAttribute(DEFERRED_RENDER_SUSPENDED_ATTRIBUTE);
+    root!.dispatchEvent(new Event(DEFERRED_RENDER_RESUME_EVENT));
+
+    expect(
+      await screen.findByRole("heading", { name: "Deferred heading" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps immediate heavy assistant markdown mounted when scrolling disables immediate preference", async () => {
+    const message: TextMessage = {
+      id: "message-heavy-immediate",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: [
+        "# Stable heading",
+        ...Array.from({ length: 28 }, (_, index) => `Line ${index + 1}`),
+      ].join("\n"),
+    };
+
+    const { container, rerender } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        preferImmediateHeavyRender
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Stable heading" }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Stable heading" }),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector(".deferred-markdown-placeholder"),
+    ).not.toBeInTheDocument();
   });
 
   it("shows relative paths and diff counts for diff cards", () => {

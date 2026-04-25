@@ -100,11 +100,13 @@ import {
   type ConnectionRetryNotice,
 } from "./app-utils";
 import {
+  DEFERRED_RENDER_RESUME_EVENT,
   DEFERRED_RENDER_ROOT_MARGIN_PX,
   buildDeferredPreviewText,
   buildMarkdownPreviewText,
   estimateCodeBlockHeight,
   estimateMarkdownBlockHeight,
+  isDeferredRenderActivationSuspended,
   isElementNearRenderViewport,
   measureTextBlock,
   resolveDeferredRenderRoot,
@@ -264,7 +266,7 @@ export const MessageCard = memo(
             {message.author === "assistant" ? (
               shouldPreferStreamingPlainTextRender ? (
                 <StreamingAssistantTextShell text={message.text} />
-              ) : shouldRenderStreamingMarkdown || preferImmediateHeavyRender ? (
+              ) : shouldRenderStreamingMarkdown ? (
                 <MarkdownContent
                   appearance={appearance}
                   markdown={message.text}
@@ -278,6 +280,7 @@ export const MessageCard = memo(
                   appearance={appearance}
                   markdown={message.text}
                   onOpenSourceLink={onOpenSourceLink}
+                  preferImmediateRender={preferImmediateHeavyRender}
                   searchQuery={searchQuery}
                   searchHighlightTone={searchHighlightTone}
                   workspaceRoot={workspaceRoot}
@@ -634,10 +637,16 @@ function DeferredHeavyContent({
     }
 
     const root = resolveDeferredRenderRoot(node);
+    if (isDeferredRenderActivationSuspended(root)) {
+      return;
+    }
     if (
       isElementNearRenderViewport(node, root, DEFERRED_RENDER_ROOT_MARGIN_PX)
     ) {
       const frameId = window.requestAnimationFrame(() => {
+        if (isDeferredRenderActivationSuspended(root)) {
+          return;
+        }
         setIsActivated(true);
       });
       return () => {
@@ -656,25 +665,52 @@ function DeferredHeavyContent({
       return;
     }
 
-    if (
-      typeof window === "undefined" ||
-      typeof window.IntersectionObserver === "undefined"
-    ) {
-      setIsActivated(true);
-      return;
-    }
-
     const root = resolveDeferredRenderRoot(node);
     let activationFrameId: number | null = null;
     const activate = () => {
       if (activationFrameId !== null) {
         return;
       }
+      if (isDeferredRenderActivationSuspended(root)) {
+        return;
+      }
       activationFrameId = window.requestAnimationFrame(() => {
         activationFrameId = null;
+        if (isDeferredRenderActivationSuspended(root)) {
+          return;
+        }
         setIsActivated(true);
       });
     };
+    const activateIfNearViewport = () => {
+      if (
+        isElementNearRenderViewport(
+          node,
+          root,
+          DEFERRED_RENDER_ROOT_MARGIN_PX,
+        )
+      ) {
+        activate();
+      }
+    };
+    root?.addEventListener(DEFERRED_RENDER_RESUME_EVENT, activateIfNearViewport);
+
+    if (
+      typeof window === "undefined" ||
+      typeof window.IntersectionObserver === "undefined"
+    ) {
+      activate();
+      return () => {
+        if (activationFrameId !== null) {
+          window.cancelAnimationFrame(activationFrameId);
+        }
+        root?.removeEventListener(
+          DEFERRED_RENDER_RESUME_EVENT,
+          activateIfNearViewport,
+        );
+      };
+    }
+
     const observer = new window.IntersectionObserver(
       (entries) => {
         if (
@@ -697,6 +733,10 @@ function DeferredHeavyContent({
       if (activationFrameId !== null) {
         window.cancelAnimationFrame(activationFrameId);
       }
+      root?.removeEventListener(
+        DEFERRED_RENDER_RESUME_EVENT,
+        activateIfNearViewport,
+      );
       observer.disconnect();
     };
   }, [allowDeferredActivation, shouldRenderContent]);

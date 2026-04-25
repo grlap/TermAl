@@ -88,6 +88,9 @@ type UseAppWorkspaceActionsParams = {
   draftAttachmentsBySessionIdRef: MutableRefObject<
     Record<string, DraftImageAttachment[]>
   >;
+  forceSessionScrollToBottomRef: MutableRefObject<
+    Record<string, true | undefined>
+  >;
   setPendingScrollToBottomRequest: Dispatch<
     SetStateAction<PendingScrollToBottomRequest>
   >;
@@ -261,14 +264,15 @@ export function useAppWorkspaceActions({
   closePendingSessionRename,
   setKillRevealSessionId,
   setSelectedProjectId,
-    setWorkspace,
-    setStandaloneControlSurfaceViewStateByTabId,
-    setDraftsBySessionId,
-    draftsBySessionIdRef,
-    draftAttachmentsBySessionIdRef,
-    setPendingScrollToBottomRequest,
-    setRequestError,
-    setPendingOrchestratorActionById,
+  setWorkspace,
+  setStandaloneControlSurfaceViewStateByTabId,
+  setDraftsBySessionId,
+  draftsBySessionIdRef,
+  draftAttachmentsBySessionIdRef,
+  forceSessionScrollToBottomRef,
+  setPendingScrollToBottomRequest,
+  setRequestError,
+  setPendingOrchestratorActionById,
   setIsCreateSessionOpen,
   applyControlPanelLayout,
   markSessionTabsForBottomAfterWorkspaceRebuild,
@@ -558,6 +562,10 @@ export function useAppWorkspaceActions({
           setSelectedProjectId(projectId);
         }
       }
+    }
+
+    if (tab?.kind === "session") {
+      forceSessionScrollToBottomRef.current[tab.sessionId] = true;
     }
 
     setWorkspace((current) => activatePane(current, paneId, tabId));

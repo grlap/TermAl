@@ -17,6 +17,10 @@ import {
   type RefObject,
 } from "react";
 import { isExpandedPromptOpen } from "../ExpandedPromptPanel";
+import {
+  DEFERRED_RENDER_RESUME_EVENT,
+  DEFERRED_RENDER_SUSPENDED_ATTRIBUTE,
+} from "../deferred-render";
 import { DeferredHeavyContentActivationProvider } from "../message-cards";
 import {
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
@@ -90,6 +94,8 @@ const BOUNDARY_SEEK_MOUNTED_RESERVE_BELOW_VIEWPORTS = 0;
 const ACTIVE_MOUNTED_EXTRA_PAGES_BELOW = 2;
 const IDLE_MOUNTED_COMPACTION_PAGE_HYSTERESIS = 2;
 const ACTIVE_VIEWPORT_STARTUP_RESYNC_FRAMES = 12;
+const BOTTOM_BOUNDARY_REVEAL_SETTLE_FRAMES = 12;
+const BOTTOM_BOUNDARY_REVEAL_DELAY_MS = 220;
 const USER_SCROLL_ADJUSTMENT_COOLDOWN_MS = 200;
 
 const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
@@ -321,7 +327,10 @@ export function VirtualizedConversationMessageList({
   } | null>(null);
   const pendingDeferredLayoutTimerRef = useRef<number | null>(null);
   const pendingIdleCompactionTimerRef = useRef<number | null>(null);
-  const pendingBottomBoundaryMountTimerRef = useRef<number | null>(null);
+  const pendingBottomBoundaryRevealFrameRef = useRef<number | null>(null);
+  const pendingBottomBoundaryRevealNodeRef = useRef<HTMLElement | null>(null);
+  const pendingDeferredRenderResumeTimerRef = useRef<number | null>(null);
+  const pendingDeferredRenderSuspendedNodeRef = useRef<HTMLElement | null>(null);
   const pendingProgrammaticViewportSyncRef = useRef(false);
   const pendingBottomBoundarySeekRef = useRef(false);
   const renderedListRef = useRef<HTMLDivElement | null>(null);
@@ -338,6 +347,11 @@ export function VirtualizedConversationMessageList({
   const [isMeasuringPostActivation, setIsMeasuringPostActivation] = useState(
     () => isActive && messages.length > 0,
   );
+  const [
+    isBottomBoundaryRevealPending,
+    setIsBottomBoundaryRevealPending,
+  ] = useState(false);
+  const [bottomBoundaryRevealToken, setBottomBoundaryRevealToken] = useState(0);
   const previousIsActiveRef = useRef(isActive);
 
   const syncViewportFromScrollNode = useCallback((node: HTMLElement) => {
@@ -383,11 +397,60 @@ export function VirtualizedConversationMessageList({
       pendingIdleCompactionTimerRef.current = null;
     }
   }, []);
-  const clearPendingBottomBoundaryMountTimer = useCallback(() => {
-    if (pendingBottomBoundaryMountTimerRef.current !== null) {
-      window.clearTimeout(pendingBottomBoundaryMountTimerRef.current);
-      pendingBottomBoundaryMountTimerRef.current = null;
+  const clearPendingDeferredRenderResumeTimer = useCallback(() => {
+    if (pendingDeferredRenderResumeTimerRef.current !== null) {
+      window.clearTimeout(pendingDeferredRenderResumeTimerRef.current);
+      pendingDeferredRenderResumeTimerRef.current = null;
     }
+  }, []);
+  const resumeDeferredRenderActivation = useCallback(() => {
+    clearPendingDeferredRenderResumeTimer();
+    const node = pendingDeferredRenderSuspendedNodeRef.current;
+    if (!node) {
+      return;
+    }
+    pendingDeferredRenderSuspendedNodeRef.current = null;
+    node.removeAttribute(DEFERRED_RENDER_SUSPENDED_ATTRIBUTE);
+    node.dispatchEvent(new Event(DEFERRED_RENDER_RESUME_EVENT));
+  }, [clearPendingDeferredRenderResumeTimer]);
+  const suspendDeferredRenderActivation = useCallback(
+    (node: HTMLElement) => {
+      if (scrollContainerRef.current !== node) {
+        return;
+      }
+      clearPendingDeferredRenderResumeTimer();
+      pendingDeferredRenderSuspendedNodeRef.current = node;
+      node.setAttribute(DEFERRED_RENDER_SUSPENDED_ATTRIBUTE, "true");
+      pendingDeferredRenderResumeTimerRef.current = window.setTimeout(() => {
+        resumeDeferredRenderActivation();
+      }, USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
+    },
+    [
+      clearPendingDeferredRenderResumeTimer,
+      resumeDeferredRenderActivation,
+      scrollContainerRef,
+    ],
+  );
+  const clearPendingBottomBoundaryRevealFrame = useCallback(() => {
+    if (pendingBottomBoundaryRevealFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingBottomBoundaryRevealFrameRef.current);
+      pendingBottomBoundaryRevealFrameRef.current = null;
+    }
+    if (pendingBottomBoundaryRevealNodeRef.current) {
+      delete pendingBottomBoundaryRevealNodeRef.current.dataset
+        .virtualizedBottomBoundaryReveal;
+      pendingBottomBoundaryRevealNodeRef.current = null;
+    }
+  }, []);
+  const finishPostActivationMeasuring = useCallback(() => {
+    renderedListRef.current?.classList.remove("is-measuring-post-activation");
+    if (pendingBottomBoundaryRevealNodeRef.current) {
+      delete pendingBottomBoundaryRevealNodeRef.current.dataset
+        .virtualizedBottomBoundaryReveal;
+      pendingBottomBoundaryRevealNodeRef.current = null;
+    }
+    setIsMeasuringPostActivation(false);
+    setIsBottomBoundaryRevealPending(false);
   }, []);
   const scheduleIdleMountedRangeCompaction = useCallback(
     (delayMs: number) => {
@@ -430,9 +493,48 @@ export function VirtualizedConversationMessageList({
     [scrollContainerRef, syncViewportFromScrollNode],
   );
   const cancelPostActivationBottomRestore = useCallback(() => {
+    clearPendingBottomBoundaryRevealFrame();
     shouldKeepBottomAfterLayoutRef.current = false;
-    setIsMeasuringPostActivation(false);
-  }, []);
+    finishPostActivationMeasuring();
+  }, [
+    clearPendingBottomBoundaryRevealFrame,
+    finishPostActivationMeasuring,
+  ]);
+  const scheduleBottomBoundaryReveal = useCallback(
+    (node: HTMLElement) => {
+      clearPendingBottomBoundaryRevealFrame();
+      pendingBottomBoundaryRevealNodeRef.current = node;
+      node.dataset.virtualizedBottomBoundaryReveal = "true";
+      renderedListRef.current?.classList.add("is-measuring-post-activation");
+      setIsMeasuringPostActivation(true);
+      setIsBottomBoundaryRevealPending(true);
+      setBottomBoundaryRevealToken((current) => current + 1);
+
+      const step = (attempts: number) => {
+        pendingBottomBoundaryRevealFrameRef.current = window.requestAnimationFrame(() => {
+          pendingBottomBoundaryRevealFrameRef.current = null;
+          if (scrollContainerRef.current !== node) {
+            return;
+          }
+
+          shouldKeepBottomAfterLayoutRef.current = true;
+          const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+          writeScrollTopAndSyncViewport(node, maxScrollTop);
+
+          if (attempts + 1 < BOTTOM_BOUNDARY_REVEAL_SETTLE_FRAMES) {
+            step(attempts + 1);
+          }
+        });
+      };
+
+      step(0);
+    },
+    [
+      clearPendingBottomBoundaryRevealFrame,
+      scrollContainerRef,
+      writeScrollTopAndSyncViewport,
+    ],
+  );
 
   useEffect(() => {
     const previousIsActive = previousIsActiveRef.current;
@@ -441,6 +543,36 @@ export function VirtualizedConversationMessageList({
       setIsMeasuringPostActivation(true);
     }
   }, [isActive, messages.length]);
+  useEffect(
+    () => () => {
+      clearPendingBottomBoundaryRevealFrame();
+    },
+    [clearPendingBottomBoundaryRevealFrame],
+  );
+  useEffect(() => {
+    if (!isBottomBoundaryRevealPending) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      const node = scrollContainerRef.current;
+      if (node) {
+        const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+        writeScrollTopAndSyncViewport(node, maxScrollTop);
+      }
+      finishPostActivationMeasuring();
+    }, BOTTOM_BOUNDARY_REVEAL_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    bottomBoundaryRevealToken,
+    finishPostActivationMeasuring,
+    isBottomBoundaryRevealPending,
+    scrollContainerRef,
+    writeScrollTopAndSyncViewport,
+  ]);
   const isActivatingWithMessages =
     !previousIsActiveRef.current && isActive && messages.length > 0;
 
@@ -724,27 +856,19 @@ export function VirtualizedConversationMessageList({
     },
     [],
   );
-  const scheduleBottomBoundaryMount = useCallback(
+  const mountBottomBoundary = useCallback(
     (node: HTMLElement) => {
-      clearPendingBottomBoundaryMountTimer();
-      pendingBottomBoundaryMountTimerRef.current = window.setTimeout(() => {
-        pendingBottomBoundaryMountTimerRef.current = null;
-        if (
-          scrollContainerRef.current !== node ||
-          !pendingBottomBoundarySeekRef.current
-        ) {
-          return;
-        }
+      if (
+        scrollContainerRef.current !== node ||
+        !pendingBottomBoundarySeekRef.current
+      ) {
+        return;
+      }
 
-        setMountedPageRange(buildBottomMountedRange(node.clientHeight));
-        setBottomBoundarySeekVersion((version) => version + 1);
-      }, 0);
+      setMountedPageRange(buildBottomMountedRange(node.clientHeight));
+      setBottomBoundarySeekVersion((version) => version + 1);
     },
-    [
-      buildBottomMountedRange,
-      clearPendingBottomBoundaryMountTimer,
-      scrollContainerRef,
-    ],
+    [buildBottomMountedRange, scrollContainerRef],
   );
   const expandRangeToRenderedPageEdges = useCallback(
     (
@@ -862,14 +986,18 @@ export function VirtualizedConversationMessageList({
   );
   useEffect(() => {
     return () => {
-      clearPendingBottomBoundaryMountTimer();
       clearPendingDeferredLayoutTimer();
+      clearPendingDeferredRenderResumeTimer();
       clearPendingIdleCompactionTimer();
+      pendingDeferredRenderSuspendedNodeRef.current?.removeAttribute(
+        DEFERRED_RENDER_SUSPENDED_ATTRIBUTE,
+      );
+      pendingDeferredRenderSuspendedNodeRef.current = null;
       pendingProgrammaticViewportSyncRef.current = false;
     };
   }, [
-    clearPendingBottomBoundaryMountTimer,
     clearPendingDeferredLayoutTimer,
+    clearPendingDeferredRenderResumeTimer,
     clearPendingIdleCompactionTimer,
   ]);
 
@@ -1229,6 +1357,9 @@ export function VirtualizedConversationMessageList({
       const target = Math.max(node.scrollHeight - node.clientHeight, 0);
       writeScrollTopAndSyncViewport(node, target);
     }
+    if (pendingBottomBoundaryRevealFrameRef.current !== null) {
+      return;
+    }
     setIsMeasuringPostActivation(false);
   }, [
     isActive,
@@ -1259,6 +1390,9 @@ export function VirtualizedConversationMessageList({
       if (node) {
         const target = Math.max(node.scrollHeight - node.clientHeight, 0);
         writeScrollTopAndSyncViewport(node, target);
+      }
+      if (pendingBottomBoundaryRevealFrameRef.current !== null) {
+        return;
       }
       shouldKeepBottomAfterLayoutRef.current = true;
       setIsMeasuringPostActivation(false);
@@ -1327,13 +1461,16 @@ export function VirtualizedConversationMessageList({
     }
 
     const syncViewport = (options: { isNativeScrollEvent?: boolean } = {}) => {
+      const isBottomBoundaryRevealScroll =
+        pendingBottomBoundaryRevealNodeRef.current === node;
       if (options.isNativeScrollEvent) {
         const pendingProgrammaticScrollTop = pendingProgrammaticScrollTopRef.current;
         const isProgrammaticScrollEvent =
           pendingProgrammaticScrollTop !== null &&
           Math.abs(node.scrollTop - pendingProgrammaticScrollTop) < 1;
-        if (isProgrammaticScrollEvent) {
+        if (isProgrammaticScrollEvent || isBottomBoundaryRevealScroll) {
           pendingProgrammaticScrollTopRef.current = null;
+          lastNativeScrollTopRef.current = node.scrollTop;
         } else {
           if (isMeasuringPostActivation) {
             cancelPostActivationBottomRestore();
@@ -1368,7 +1505,11 @@ export function VirtualizedConversationMessageList({
 
       syncViewportFromScrollNode(node);
 
-      if (shouldKeepBottomAfterLayoutRef.current && !isScrollContainerNearBottom(node)) {
+      if (
+        shouldKeepBottomAfterLayoutRef.current &&
+        !isBottomBoundaryRevealScroll &&
+        !isScrollContainerNearBottom(node)
+      ) {
         shouldKeepBottomAfterLayoutRef.current = false;
       }
     };
@@ -1377,6 +1518,7 @@ export function VirtualizedConversationMessageList({
       if (isMeasuringPostActivation) {
         cancelPostActivationBottomRestore();
       }
+      suspendDeferredRenderActivation(node);
       clearPendingDeferredLayoutTimer();
       pendingDeferredLayoutAnchorRef.current = null;
       const isSeekKeyboardNavigation =
@@ -1426,17 +1568,17 @@ export function VirtualizedConversationMessageList({
         lastNativeScrollTopRef.current = node.scrollTop;
         shouldKeepBottomAfterLayoutRef.current = true;
         isDetachedFromBottomRef.current = false;
-        hasUserScrollInteractionRef.current = true;
+        hasUserScrollInteractionRef.current = false;
         lastUserScrollKindRef.current = null;
-        lastUserScrollInputTimeRef.current = performance.now();
+        lastUserScrollInputTimeRef.current = Number.NEGATIVE_INFINITY;
         pendingAggressiveIdleCompactionRef.current = true;
         pendingMountedPrependRestoreRef.current = null;
         skipNextMountedPrependRestoreRef.current = false;
         clearPendingDeferredLayoutTimer();
         clearPendingIdleCompactionTimer();
         pendingDeferredLayoutAnchorRef.current = null;
-        scheduleBottomBoundaryMount(node);
-        scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
+        mountBottomBoundary(node);
+        scheduleBottomBoundaryReveal(node);
         return;
       }
 
@@ -1444,31 +1586,47 @@ export function VirtualizedConversationMessageList({
       const scrollDelta = node.scrollTop - previousScrollTop;
       lastNativeScrollTopRef.current = node.scrollTop;
       pendingProgrammaticScrollTopRef.current = node.scrollTop;
-      if (shouldKeepBottomAfterLayoutRef.current && !isScrollContainerNearBottom(node)) {
+      const isNearBottomAfterWrite = isScrollContainerNearBottom(node);
+      if (!isNearBottomAfterWrite) {
+        suspendDeferredRenderActivation(node);
+      }
+      if (shouldKeepBottomAfterLayoutRef.current && !isNearBottomAfterWrite) {
         shouldKeepBottomAfterLayoutRef.current = false;
       }
-      if (isScrollContainerNearBottom(node)) {
+      if (isNearBottomAfterWrite) {
+        shouldKeepBottomAfterLayoutRef.current = true;
         isDetachedFromBottomRef.current = false;
+        hasUserScrollInteractionRef.current = false;
+        lastUserScrollKindRef.current = null;
+        lastUserScrollInputTimeRef.current = Number.NEGATIVE_INFINITY;
+        clearPendingIdleCompactionTimer();
       }
       clearPendingDeferredLayoutTimer();
       pendingDeferredLayoutAnchorRef.current = null;
       if (Math.abs(scrollDelta) >= 0.5) {
-        if (explicitScrollKind === "seek" && isScrollContainerNearBottom(node)) {
+        if (explicitScrollKind === "seek" && isNearBottomAfterWrite) {
           shouldKeepBottomAfterLayoutRef.current = true;
           isDetachedFromBottomRef.current = false;
         }
-        lastUserScrollKindRef.current =
+        const resolvedScrollKind =
           explicitScrollKind ??
-          classifyScrollKind(
-            scrollDelta,
-            node.clientHeight,
-          );
-        lastUserScrollInputTimeRef.current = performance.now();
-        scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
+          (isNearBottomAfterWrite
+            ? "seek"
+            : classifyScrollKind(
+                scrollDelta,
+                node.clientHeight,
+              ));
+        lastUserScrollKindRef.current = isNearBottomAfterWrite
+          ? null
+          : resolvedScrollKind;
+        if (!isNearBottomAfterWrite) {
+          lastUserScrollInputTimeRef.current = performance.now();
+          scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
+        }
         reconcileMountedRangeForNativeScroll(
           node,
           scrollDelta,
-          lastUserScrollKindRef.current,
+          resolvedScrollKind,
         );
       }
       scheduleProgrammaticViewportSync(node);
@@ -1499,16 +1657,16 @@ export function VirtualizedConversationMessageList({
     };
   }, [
     cancelPostActivationBottomRestore,
-    clearPendingBottomBoundaryMountTimer,
     clearPendingDeferredLayoutTimer,
     clearPendingIdleCompactionTimer,
-    buildBottomMountedRange,
     isActive,
     isMeasuringPostActivation,
+    mountBottomBoundary,
     reconcileMountedRangeForNativeScroll,
+    scheduleBottomBoundaryReveal,
     scheduleProgrammaticViewportSync,
-    scheduleBottomBoundaryMount,
     scheduleIdleMountedRangeCompaction,
+    suspendDeferredRenderActivation,
     scrollContainerRef,
     sessionId,
     syncViewportFromScrollNode,
@@ -1639,7 +1797,7 @@ export function VirtualizedConversationMessageList({
   return (
     <div
       ref={renderedListRef}
-      className={`virtualized-message-list${isMeasuringPostActivation ? " is-measuring-post-activation" : ""}`}
+      className={`virtualized-message-list${isMeasuringPostActivation ? " is-measuring-post-activation" : ""}${isBottomBoundaryRevealPending ? " is-bottom-boundary-revealing" : ""}`}
     >
       {topSpacerHeight > 0 ? (
         <div className="virtualized-message-spacer" style={{ height: topSpacerHeight }} />

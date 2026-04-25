@@ -453,6 +453,7 @@ const SessionBody = memo(function SessionBody({
     return (
       <>
         <SessionConversationPage
+          key={activeSession.id}
           renderMessageCard={stableRenderMessageCard}
           session={activeSession}
           scrollContainerRef={scrollContainerRef}

@@ -1082,6 +1082,7 @@ export default function App() {
     setDraftsBySessionId,
     draftsBySessionIdRef: draftsRef,
     draftAttachmentsBySessionIdRef: draftAttachmentsRef,
+    forceSessionScrollToBottomRef,
     setPendingScrollToBottomRequest,
     setRequestError,
     setPendingOrchestratorActionById,

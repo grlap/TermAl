@@ -1194,10 +1194,7 @@ export function SessionPaneView({
         if (node.querySelector(".virtualized-message-list")) {
           const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
           if (Math.abs(node.scrollTop - nextScrollTop) > 0.5) {
-            node.scrollTo({
-              top: nextScrollTop,
-              behavior: "auto",
-            });
+            node.scrollTop = nextScrollTop;
           }
           notifyMessageStackScrollWrite(node, {
             scrollKind: "bottom_boundary",
@@ -1659,9 +1656,13 @@ export function SessionPaneView({
         top: Number.MAX_SAFE_INTEGER,
         shouldStick: true,
       };
-      restoreCleanup = scheduleSettledScrollToBottom("auto", {
-        maxAttempts: 60,
-      });
+      node.scrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+      scrollMessageStackToBoundary("bottom");
+      if (!node.querySelector(".virtualized-message-list")) {
+        restoreCleanup = scheduleSettledScrollToBottom("auto", {
+          maxAttempts: 60,
+        });
+      }
     } else if (paneScrollPositions[scrollStateKey]) {
       const saved = paneScrollPositions[scrollStateKey];
       setShouldStickToBottom(saved.shouldStick);
@@ -1870,6 +1871,13 @@ export function SessionPaneView({
     }
 
     const requestToken = pendingScrollToBottomRequest.token;
+    const node = messageStackRef.current;
+    if (node?.querySelector(".virtualized-message-list")) {
+      scrollMessageStackToBoundary("bottom");
+      onScrollToBottomRequestHandled(requestToken);
+      return undefined;
+    }
+
     return scheduleSettledScrollToBottom("auto", {
       onComplete: () => {
         onScrollToBottomRequestHandled(requestToken);

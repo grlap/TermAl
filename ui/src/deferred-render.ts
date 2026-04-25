@@ -62,10 +62,20 @@ import {
 } from "./app-utils";
 
 export const DEFERRED_RENDER_ROOT_MARGIN_PX = 960;
+export const DEFERRED_RENDER_RESUME_EVENT = "termal:deferred-render-resume";
+export const DEFERRED_RENDER_SUSPENDED_ATTRIBUTE =
+  "data-deferred-render-suspended";
 
 export function resolveDeferredRenderRoot(node: Element) {
   const root = node.closest(".message-stack");
   return root instanceof Element ? root : null;
+}
+
+export function isDeferredRenderActivationSuspended(root: Element | null) {
+  return (
+    root instanceof Element &&
+    root.getAttribute(DEFERRED_RENDER_SUSPENDED_ATTRIBUTE) === "true"
+  );
 }
 
 export function isElementNearRenderViewport(
