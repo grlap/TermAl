@@ -3,11 +3,9 @@
 //
 //   - `isSafePastedMarkdownHref` decides whether an `<a href="...">`
 //     from a pasted fragment keeps its link. The allowlist is
-//     http / https / mailto plus Windows drive-letter paths
-//     (the drive-letter exception is a known minor inconsistency
-//     with `transformMarkdownLinkUri`'s tighter allowlist — see
-//     `docs/bugs.md` → "isSafePastedMarkdownHref Windows drive-letter
-//     exception inconsistent with protocol allowlist").
+//     http / https / mailto plus no-colon hrefs (relative paths
+//     and anchors); Windows drive-letter paths are intentionally
+//     stripped on paste.
 //   - `sanitizePastedMarkdownFragment` walks a `<template>` content
 //     fragment and applies three gates: HTML-namespace only,
 //     drop the 24-element block set, unwrap anything not in the
@@ -29,6 +27,7 @@ import {
   isSafePastedMarkdownHref,
   normalizePastedMarkdownCodeClass,
   sanitizePastedMarkdownFragment,
+  serializeEditableMarkdownSection,
 } from "./markdown-diff-edit-pipeline";
 
 function buildPasteFragment(html: string): DocumentFragment {
@@ -721,5 +720,31 @@ describe("insertSanitizedMarkdownPaste", () => {
     } finally {
       section.remove();
     }
+  });
+});
+
+describe("serializeEditableMarkdownSection", () => {
+  function buildEditableSection(html: string) {
+    const section = document.createElement("section");
+    section.innerHTML = `<div class="markdown-copy">${html}</div>`;
+    return section;
+  }
+
+  it("does not serialize unsafe href attributes into Markdown links", () => {
+    const section = buildEditableSection(
+      '<p><a href="javascript:alert(1)">Unsafe link</a></p>',
+    );
+
+    expect(serializeEditableMarkdownSection(section)).toBe("Unsafe link");
+  });
+
+  it("keeps safe href attributes when serializing Markdown links", () => {
+    const section = buildEditableSection(
+      '<p><a href=" https://example.com/docs ">Safe link</a></p>',
+    );
+
+    expect(serializeEditableMarkdownSection(section)).toBe(
+      "[Safe link](https://example.com/docs)",
+    );
   });
 });

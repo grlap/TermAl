@@ -778,6 +778,17 @@ and preserves a visible-row anchor when prepending pages or applying deferred
 page-height corrections. The design intentionally avoids per-message estimated
 height corrections in the live scroll path.
 
+Deferred heavy message content participates in the same scroll contract. During
+active transcript scrolling or page-jump cooldowns, the virtualized stack marks
+the `.message-stack` with `data-deferred-render-suspended="true"`. Deferred
+heavy content must not activate while that marker is present. When the cooldown
+ends, the stack removes the marker and dispatches `termal:deferred-render-resume`
+so near-viewport heavy blocks can activate after scroll geometry has settled.
+Assistant markdown should keep the same deferred-render component mounted when
+scroll state changes; toggling between eager markdown and the deferred wrapper
+can swap measured content for a placeholder and shift the virtualized scroll
+height during the first `PageUp` from the bottom.
+
 ### Monaco Integration
 
 Two Monaco components:

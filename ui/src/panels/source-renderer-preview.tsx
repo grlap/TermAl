@@ -5,16 +5,16 @@
 // pane composes those regions into a synthetic Markdown fragment
 // that `MarkdownContent` already knows how to render safely, so the
 // sandboxed-Mermaid and KaTeX paths from Phase 1 are reused without
-// a second renderer implementation. Markdown source files delegate
-// straight to `MarkdownDocumentView` so the existing Markdown
-// chrome (headings / ToC / link handling) stays intact.
+// a second renderer implementation. Markdown source files normally
+// use SourcePanel's editable rendered-Markdown wrapper; this pane
+// still supports a read-only `MarkdownDocumentView` fallback.
 //
 // What this file owns:
 //   - `RendererPreviewPane` — the React component rendered in the
-//     preview column of the source panel's split view. Picks
-//     `<MarkdownDocumentView>` for Markdown source files, else
-//     composes a synthetic-Markdown fragment and hands it to
-//     `<MarkdownContent>`.
+//     preview column of the source panel's split view for read-only
+//     previews. Picks `<MarkdownDocumentView>` for Markdown source
+//     files, else composes a synthetic-Markdown fragment and hands it
+//     to `<MarkdownContent>`.
 //   - `composeInlineRegionFence` — wraps a single renderable region
 //     in the minimal Markdown code-fence / math-block that
 //     `MarkdownContent` needs: ```` ```mermaid ```` for mermaid,
@@ -65,10 +65,11 @@ export function composeInlineRegionFence(region: SourceRenderableRegion): string
 
 // Preview pane for source files that have at least one renderable
 // region (Phase 3 of `docs/features/source-renderers.md`). For
-// Markdown files, delegates to `MarkdownDocumentView` so all the
-// existing Markdown chrome (headings, table-of-contents, link
-// handling) stays intact. For non-Markdown files the detected
-// regions are composed into a synthetic Markdown fragment that
+// Markdown files, delegates to read-only `MarkdownDocumentView`. The
+// editable SourcePanel Markdown Preview/Split path bypasses this
+// helper and reuses `EditableRenderedMarkdownSection`. For
+// non-Markdown files the detected regions are composed into a
+// synthetic Markdown fragment that
 // `MarkdownContent` already knows how to render — reuses the
 // Mermaid / KaTeX paths already wired in Phase 1 without a second
 // renderer implementation.

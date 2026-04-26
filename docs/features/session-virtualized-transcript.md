@@ -83,7 +83,7 @@ Current reserves:
 
 - `ACTIVE_MOUNTED_RESERVE_ABOVE_VIEWPORTS = 3`
 - `ACTIVE_MOUNTED_RESERVE_BELOW_VIEWPORTS = 3`
-- `ACTIVE_MOUNTED_EXTRA_PAGES_BELOW = 1`
+- `ACTIVE_MOUNTED_EXTRA_PAGES_BELOW = 2`
 
 So active reading keeps several viewports of real DOM around the visible area
 instead of waiting until the user is already on a band edge.
@@ -97,6 +97,13 @@ During active user scroll, mounted-range updates are grow-oriented:
 - the opposite side is not trimmed during the gesture
 
 This avoids exposing spacer space during normal reading.
+
+Large upward wheel deltas are prewarmed before the native scroll event paints:
+the virtualizer projects the wheel target and grows the mounted band above when
+that target would otherwise land in the top spacer. A layout guard also checks
+actual mounted DOM bounds during scroll cooldown and prepends pages if the first
+mounted page has fallen below the viewport top. This mirrors the existing
+bottom-edge guard for compact pages that shrink below their estimates.
 
 ### Idle compaction
 
@@ -197,14 +204,14 @@ There are two bottom-follow policies in the current system:
    - owned by `SessionPaneView.tsx`
    - used for explicit jump-to-bottom and some prompt-send cases
 
-For prompt send specifically:
+For prompt send and pinned assistant updates:
 
 - if the pane is already near bottom, `SessionPaneView` keeps the lightweight
-  smooth follow
+  smooth follow with the `bottom_follow` scroll-write kind
 - otherwise it uses the stronger settled jump-to-bottom path
 
-That split keeps prompt send visually pleasant when already pinned, but still
-reliable when the pane is away from bottom.
+That split keeps active bottom-follow visually pleasant when already pinned,
+but still reliable when the pane is away from bottom.
 
 ## Important Refs And State
 

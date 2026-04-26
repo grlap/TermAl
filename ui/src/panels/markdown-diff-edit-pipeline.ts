@@ -10,7 +10,7 @@
 //     attributes on anchors and code blocks),
 //     `normalizePastedMarkdownCodeClass` (keep only
 //     `language-<name>` classes on `<code>`), and
-//     `isSafePastedMarkdownHref` (allowlist drive-letter paths,
+//     `isSafePastedMarkdownHref` (allowlist no-colon hrefs,
 //     `http(s)`, and `mailto`; everything else rejected).
 //   - The allow/deny sets
 //     `PASTED_MARKDOWN_ALLOWED_ELEMENTS`,
@@ -363,7 +363,9 @@ export function serializeMarkdownInlineNode(node: Node): string {
     }
 
     const href = node.getAttribute("href");
-    return href ? `[${content}](${href})` : content;
+    return href && isSafePastedMarkdownHref(href)
+      ? `[${content}](${href.trim()})`
+      : content;
   }
 
   return content;

@@ -5,7 +5,8 @@ export type MessageStackScrollWriteKind =
   | "incremental"
   | "page_jump"
   | "seek"
-  | "bottom_boundary";
+  | "bottom_boundary"
+  | "bottom_follow";
 
 export type MessageStackScrollWriteDetail = {
   scrollKind?: MessageStackScrollWriteKind;

@@ -2005,6 +2005,217 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
+  it("prewarms pages above on a large upward wheel before native scroll paints", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const messages = makeCommandMessages(80);
+    const clientHeight = 500;
+    const compactMeasuredSlotHeight = 40;
+    let scrollTop = 0;
+
+    class ResizeObserverMock {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        this.callback([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+      }
+      disconnect() {}
+    }
+
+    const getVirtualNodeHeight = (node: HTMLElement): number => {
+      if (node.classList.contains("virtualized-message-spacer")) {
+        return Number.parseFloat(node.style.height) || 0;
+      }
+      if (node.classList.contains("virtualized-message-page-gap")) {
+        return Number.parseFloat(node.style.height) || 0;
+      }
+      if (node.classList.contains("virtualized-message-slot")) {
+        return compactMeasuredSlotHeight;
+      }
+
+      const children = Array.from(node.children).filter(
+        (child): child is HTMLElement => child instanceof HTMLElement,
+      );
+      let total = 0;
+      children.forEach((child, index) => {
+        total += getVirtualNodeHeight(child);
+        if (
+          node.classList.contains("virtualized-message-range") &&
+          index < children.length - 1
+        ) {
+          total += VIRTUALIZED_MESSAGE_GAP_PX;
+        }
+      });
+      return total;
+    };
+
+    const getVirtualContentTop = (root: HTMLElement, target: HTMLElement): number => {
+      const walk = (node: HTMLElement): number | null => {
+        if (node === target) {
+          return 0;
+        }
+
+        const children = Array.from(node.children).filter(
+          (child): child is HTMLElement => child instanceof HTMLElement,
+        );
+        let offset = 0;
+        for (let index = 0; index < children.length; index += 1) {
+          const child = children[index]!;
+          const childOffset = walk(child);
+          if (childOffset !== null) {
+            return offset + childOffset;
+          }
+          offset += getVirtualNodeHeight(child);
+        }
+
+        return null;
+      };
+
+      const top = walk(root);
+      if (top === null) {
+        throw new Error("target node not found in virtualized message list");
+      }
+      return top;
+    };
+
+    const getFirstMountedMessageIndex = (container: HTMLElement) => {
+      const firstSlot = container.querySelector<HTMLElement>(".virtualized-message-slot");
+      const messageId = firstSlot?.dataset.messageId ?? "";
+      const index = Number.parseInt(messageId.replace("command-", ""), 10);
+      return Number.isFinite(index) ? index : 0;
+    };
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => clientHeight,
+    });
+    Object.defineProperty(scrollNode, "clientWidth", {
+      configurable: true,
+      get: () => 1000,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => {
+        const list = document.querySelector(".virtualized-message-list");
+        return list instanceof HTMLElement
+          ? getVirtualNodeHeight(list)
+          : buildVirtualizedMessageLayout(messages.map(() => 180)).totalHeight;
+      },
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    let nextFrameId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      queueMicrotask(() => callback(0));
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
+    Element.prototype.getBoundingClientRect = function getBoundingClientRectMock() {
+      const element = this as HTMLElement;
+      if (element === scrollNode) {
+        return {
+          bottom: clientHeight,
+          height: clientHeight,
+          left: 0,
+          right: 100,
+          top: 0,
+          width: 100,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+
+      const root = element.closest(".virtualized-message-list") as HTMLElement | null;
+      if (root) {
+        const top = getVirtualContentTop(root, element) - scrollTop;
+        const height = getVirtualNodeHeight(element);
+        return {
+          bottom: top + height,
+          height,
+          left: 0,
+          right: 100,
+          top,
+          width: 100,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+
+      return {
+        bottom: 0,
+        height: 0,
+        left: 0,
+        right: 100,
+        top: 0,
+        width: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+
+    try {
+      const { container } = render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={messages}
+          scrollContainerRef={{
+            current: scrollNode,
+          } as RefObject<HTMLElement | null>}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(container.querySelectorAll(".virtualized-message-slot").length).toBeGreaterThan(0);
+      });
+
+      await act(async () => {
+        scrollTop = 3600;
+        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(getFirstMountedMessageIndex(container)).toBeGreaterThan(1);
+      });
+      const firstMountedBeforeWheel = getFirstMountedMessageIndex(container);
+
+      act(() => {
+        fireEvent.wheel(scrollNode, { deltaY: -1800 });
+      });
+
+      await waitFor(() => {
+        expect(getFirstMountedMessageIndex(container)).toBeLessThan(firstMountedBeforeWheel);
+      });
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
   it("does not hit nested update depth when a scrollbar drag jumps to a distant region", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;

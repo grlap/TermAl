@@ -80,6 +80,7 @@ import {
   useRef,
   useState,
   type ClipboardEvent,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
@@ -112,6 +113,7 @@ type MarkdownDiffSaveHandler = () => Promise<void> | void;
 
 export function RenderedMarkdownChangeSection({
   allowReadOnlyCaret,
+  allowCurrentSegmentFallback = true,
   appearance,
   canEdit,
   documentPath,
@@ -128,11 +130,12 @@ export function RenderedMarkdownChangeSection({
   workspaceRoot,
 }: {
   allowReadOnlyCaret: boolean;
+  allowCurrentSegmentFallback?: boolean;
   appearance: MonacoAppearance;
   canEdit: boolean;
   documentPath: string | null;
-  onCommitDrafts: () => void;
-  onCommitSectionDraft: (commit: RenderedMarkdownSectionCommit) => void;
+  onCommitDrafts: () => boolean;
+  onCommitSectionDraft: (commit: RenderedMarkdownSectionCommit) => boolean;
   onDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
   onReadOnlyMutation: () => void;
@@ -149,6 +152,7 @@ export function RenderedMarkdownChangeSection({
     >
       <EditableRenderedMarkdownSection
         allowReadOnlyCaret={allowReadOnlyCaret}
+        allowCurrentSegmentFallback={allowCurrentSegmentFallback}
         appearance={appearance}
         canEdit={canEdit}
         className="markdown-diff-rendered-section-body"
@@ -170,6 +174,7 @@ export function RenderedMarkdownChangeSection({
 
 export function EditableRenderedMarkdownSection({
   allowReadOnlyCaret,
+  allowCurrentSegmentFallback = true,
   appearance,
   canEdit,
   className,
@@ -186,12 +191,13 @@ export function EditableRenderedMarkdownSection({
   workspaceRoot,
 }: {
   allowReadOnlyCaret: boolean;
+  allowCurrentSegmentFallback?: boolean;
   appearance: MonacoAppearance;
   canEdit: boolean;
   className: string;
   documentPath: string | null;
-  onCommitDrafts: () => void;
-  onCommitSectionDraft: (commit: RenderedMarkdownSectionCommit) => void;
+  onCommitDrafts: () => boolean;
+  onCommitSectionDraft: (commit: RenderedMarkdownSectionCommit) => boolean;
   onDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
   onReadOnlyMutation: () => void;
@@ -270,6 +276,14 @@ export function EditableRenderedMarkdownSection({
     onDraftChange(baseSegment, normalizedDraft);
   }
 
+  function clearCommittedDraft(baseSegment: MarkdownDiffDocumentSegment) {
+    hasUncommittedUserEditRef.current = false;
+    draftSegmentRef.current = null;
+    draftSourceContentRef.current = null;
+    onDraftChange(baseSegment, baseSegment.markdown);
+    setRenderResetVersion((current) => current + 1);
+  }
+
   function handleInput(event: FormEvent<HTMLElement>) {
     if (!canEdit) {
       if (allowReadOnlyCaret) {
@@ -315,27 +329,15 @@ export function EditableRenderedMarkdownSection({
     const nextMarkdown = readEditedMarkdown(section, commitSegment.markdown);
     const sourceAtDraftStart = draftSourceContentRef.current ?? sourceContent;
     if (nextMarkdown !== commitSegment.markdown) {
-      // Hand-off — clear the draft state + bump `renderResetVersion`
-      // so the content-wrapper div remounts and the contentEditable
-      // DOM snaps back to the current `segment.markdown`. The parent
-      // will re-parse the committed text into new segments (the
-      // typed portion usually pops out as a fresh added segment);
-      // this component's own `segment.markdown` prop often won't
-      // change (the neutral prefix is unchanged — only the boundary
-      // shifts), so the reset useEffect below wouldn't fire. Bumping
-      // here is what prevents the "typed text lingers in the neutral
-      // section after save until I reopen the tab" symptom. If the
-      // parent ultimately rejects the commit (conflict / resolution
-      // failure) the user sees the pre-edit state + a save error —
-      // which matches the state they'd end up in if they re-opened
-      // the tab anyway, so it's an acceptable degenerate path.
-      hasUncommittedUserEditRef.current = false;
-      draftSegmentRef.current = null;
-      draftSourceContentRef.current = null;
-      setRenderResetVersion((current) => current + 1);
+      // Updated contract: the parent clears this draft through `onApplied`
+      // only after resolving and accepting the commit.
+      // Rejected commits leave the draft refs intact so the user can recover
+      // or retry instead of losing the in-progress rendered edit.
       return {
+        allowCurrentSegmentFallback,
         currentSegment: segment,
         nextMarkdown,
+        onApplied: () => clearCommittedDraft(commitSegment),
         segment: commitSegment,
         sourceContent: sourceAtDraftStart,
       };
@@ -346,18 +348,19 @@ export function EditableRenderedMarkdownSection({
     draftSourceContentRef.current = null;
     onDraftChange(commitSegment, commitSegment.markdown);
     return null;
-  }, [canEdit, onDraftChange, segment, sourceContent]);
+  }, [allowCurrentSegmentFallback, canEdit, onDraftChange, segment, sourceContent]);
 
   function commitOwnDraft() {
     const section = sectionRef.current;
     if (!section) {
-      return;
+      return true;
     }
 
     const commit = collectSectionEdit(section);
     if (commit) {
-      onCommitSectionDraft(commit);
+      return onCommitSectionDraft(commit);
     }
+    return true;
   }
 
   function handleBeforeInput(event: FormEvent<HTMLElement>) {
@@ -385,6 +388,37 @@ export function EditableRenderedMarkdownSection({
     }
 
     event.preventDefault();
+    insertSanitizedMarkdownPaste(
+      event.currentTarget,
+      html,
+      fallbackText,
+    );
+    const baseSegment = draftSegmentRef.current ?? segment;
+    const nextMarkdown = readEditedMarkdown(event.currentTarget, baseSegment.markdown);
+    updateLocalDraftState(nextMarkdown);
+  }
+
+  function handleDrop(event: DragEvent<HTMLElement>) {
+    if (!canEdit) {
+      if (allowReadOnlyCaret) {
+        event.preventDefault();
+      }
+      return;
+    }
+
+    event.preventDefault();
+    const html = event.dataTransfer.getData("text/html");
+    const plainText = event.dataTransfer.getData("text/plain");
+    const uriList = event.dataTransfer.getData("text/uri-list");
+    const firstUri = uriList
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0 && !line.startsWith("#"));
+    const fallbackText = plainText || firstUri || "";
+    if (!html && !fallbackText) {
+      return;
+    }
+
     insertSanitizedMarkdownPaste(
       event.currentTarget,
       html,
@@ -436,7 +470,10 @@ export function EditableRenderedMarkdownSection({
     if (canEdit && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
       const focusSnapshot = captureEditableMarkdownFocusSnapshot(event.currentTarget);
-      onCommitDrafts();
+      if (!onCommitDrafts()) {
+        scheduleEditableMarkdownFocusRestore(focusSnapshot);
+        return;
+      }
       scheduleEditableMarkdownFocusRestore(focusSnapshot);
       const saveResult = onSave();
       if (saveResult && typeof saveResult.then === "function") {
@@ -664,7 +701,7 @@ export function EditableRenderedMarkdownSection({
         }
       }}
       onCut={handleReadOnlyMutationEvent}
-      onDrop={handleReadOnlyMutationEvent}
+      onDrop={handleDrop}
       onInput={handleInput}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}

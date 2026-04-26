@@ -53,10 +53,12 @@ import {
 } from "./markdown-diff-segments";
 
 export type RenderedMarkdownSectionCommit = {
+  allowCurrentSegmentFallback?: boolean;
   currentSegment: MarkdownDiffDocumentSegment;
   segment: MarkdownDiffDocumentSegment;
   nextMarkdown: string;
   sourceContent: string;
+  onApplied?: () => void;
 };
 
 export type MarkdownDocumentRange = {
@@ -97,12 +99,14 @@ export function resolveRenderedMarkdownCommitRange(
     return searchedRange;
   }
 
-  const currentRange = {
-    start: commit.currentSegment.afterStartOffset,
-    end: commit.currentSegment.afterEndOffset,
-  };
-  if (markdownRangeMatches(currentContent, currentRange, commit.currentSegment.markdown)) {
-    return currentRange;
+  if (commit.allowCurrentSegmentFallback !== false) {
+    const currentRange = {
+      start: commit.currentSegment.afterStartOffset,
+      end: commit.currentSegment.afterEndOffset,
+    };
+    if (markdownRangeMatches(currentContent, currentRange, commit.currentSegment.markdown)) {
+      return currentRange;
+    }
   }
 
   return null;

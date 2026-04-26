@@ -363,6 +363,13 @@ the visible viewport would otherwise fall into the bottom spacer. A focused
 under cooldown and asserts the list mounts enough pages below to keep content
 visible.
 
+Also fixed in the current tree: session-switch transcript scroll state no
+longer leaks between sessions in the same pane. `SessionConversationPage` is
+keyed by active session id, so the virtualized list remounts on session switch
+and resets its scroll-intent refs, deferred-layout timers, idle-compaction
+timers, and page-height caches. The scroll regression coverage now includes
+programmatic bottom-boundary writes that immediately mount the bottom window.
+
 Also fixed in the current tree: dangerous-Markdown-link neutralization is
 now directly covered. A new `ui/src/markdown-links.test.ts` pins the
 `transformMarkdownLinkUri` contract with table-driven cases for `javascript:`
@@ -1102,6 +1109,511 @@ explicit `Ready(SessionResponse)` or `HydrateRemoteProxy` plan and the outer
 code exhaustively matches it, so a future control-flow refactor returns an
 `ApiError` path instead of introducing a panic.
 
+Also fixed in the current tree: SourcePanel rendered-Markdown commits now keep
+the source snapshot they were based on, propagate commit failures through the
+shared `onCommitDrafts` / `onCommitSectionDraft` boolean contract, and clear
+child draft refs only after the parent accepts the commit. Split-mode rendered
+drafts can no longer overwrite concurrent code-pane edits, Ctrl-S no longer
+saves after a failed rendered-draft commit, and blur-time failures keep the
+user's draft visible with an action error. SourcePanel instances are now keyed
+by active source tab and clear rendered-Markdown committers on document-path
+change, so stale preview drafts cannot leak across source-file switches.
+Focused SourcePanel regressions cover stale split drafts and failed Ctrl-S.
+
+Also fixed in the current tree: editable rendered-Markdown drops now prevent
+the browser default in edit mode and route `text/html`, `text/plain`, and
+`text/uri-list` payloads through the same sanitizer used for paste. The
+Markdown serializer also re-checks anchor hrefs with
+`isSafePastedMarkdownHref` before emitting `[text](href)`, so an unsafe anchor
+that reaches the DOM serializes as plain text instead of
+`javascript:`-bearing Markdown. Pipeline tests cover serializer
+defense-in-depth, and SourcePanel coverage drops active markup plus an image
+payload and asserts the saved source contains only safe Markdown.
+
+## Markdown href serialization can break out of link syntax
+
+**Severity:** High - safe-scheme hrefs can still persist dangerous Markdown if
+the destination is not escaped before serialization.
+
+`serializeMarkdownInlineNode` now gates anchor hrefs through
+`isSafePastedMarkdownHref`, but it still emits `[text](href)` with the raw
+destination. A DOM anchor whose href starts with an allowed scheme can contain
+Markdown syntax such as `)` followed by a second link, for example
+`https://example.com/) [x](javascript:alert(1)`. The scheme allowlist accepts
+the destination because it starts with `https:`, then serialization writes a
+second dangerous Markdown link to disk.
+
+**Current behavior:**
+- The serializer accepts `http`, `https`, `mailto`, and no-colon hrefs.
+- Accepted hrefs are interpolated into Markdown link syntax without escaping
+  link-destination metacharacters.
+- A safe-scheme href can break out of the destination and introduce a second
+  Markdown link.
+
+**Proposal:**
+- Escape Markdown link labels and destinations before emitting `[text](href)`,
+  or conservatively reject destinations containing whitespace/control chars,
+  brackets, parentheses, or angle brackets.
+- Add a regression that builds a DOM anchor with a safe-scheme breakout href
+  and asserts serialization emits safe text or a single safe link only.
+
+## DiffPanel save ignores failed rendered-Markdown draft commits
+
+**Severity:** Medium - toolbar or parent saves can proceed after a rendered
+Markdown draft failed to apply.
+
+`DiffPanel.tsx:959` calls `commitRenderedMarkdownDrafts()` from `handleSave`
+but ignores the boolean return. The SourcePanel save path now aborts on a
+failed rendered-draft commit; DiffPanel still continues into the file save
+flow. If range resolution fails, the user can see an unresolved rendered draft
+and an error while the underlying buffer save still proceeds.
+
+**Current behavior:**
+- `commitRenderedMarkdownDrafts()` returns `false` when a rendered draft cannot
+  be applied.
+- `DiffPanel.handleSave()` ignores that return value.
+- Save can continue with the current text buffer while a rendered draft remains
+  unresolved.
+
+**Proposal:**
+- Gate `handleSave` with `if (!commitRenderedMarkdownDrafts()) return;`,
+  matching SourcePanel and the Ctrl-S rendered editor contract.
+- Add a DiffPanel regression where rendered-draft range resolution fails and
+  assert `onSaveFile` is not called.
+
+## Rendered Markdown commit lifecycle fields lack contract documentation
+
+**Severity:** Low - exported commit fields carry ordering-sensitive behavior
+without a nearby contract comment.
+
+`RenderedMarkdownSectionCommit` now includes `allowCurrentSegmentFallback` and
+`onApplied`. `allowCurrentSegmentFallback=false` disables a range-resolution
+fallback that is unsafe for SourcePanel full-document preview drafts, while
+`onApplied` must run only after the parent has accepted the commit. The names
+are not enough to make that lifecycle obvious to future callers.
+
+**Current behavior:**
+- `allowCurrentSegmentFallback` silently changes commit range-resolution
+  semantics.
+- `onApplied` performs child draft cleanup and must not run on rejected
+  commits.
+- The exported type has no field-level contract comment.
+
+**Proposal:**
+- Add a short comment on `RenderedMarkdownSectionCommit` documenting when the
+  fallback may be disabled and that `onApplied` is a post-acceptance callback.
+- Consider splitting the pure range payload from UI lifecycle callbacks if the
+  type grows further.
+
+## `SourcePanel` has two parallel dirty-state notification paths that can double-fire
+
+**Severity:** Medium - `ui/src/panels/SourcePanel.tsx:155-156` and `:273-275`. The component derives `isDirty` from `isEditorDirty || hasRenderedMarkdownDraftActive` and propagates it via `useEffect(() => onDirtyChange?.(isDirty), [isDirty, onDirtyChange])`. The same `onDirtyChange?.()` is also called manually from `commitRenderedMarkdownDrafts`, `handleRenderedMarkdownSectionDraftChange`, `handleEditorChange`, and `handleRenderedMarkdownSectionCommits`. Manual calls inside a setState batch can produce flicker between dirty/clean states or hand the parent a stale value before the post-commit effect resolves.
+
+**Current behavior:**
+- Two notification mechanisms own the same contract: a `useEffect` keyed on `isDirty`, and ad-hoc imperative calls scattered through ~four handlers.
+- Both fire on a typical edit/commit/save cycle.
+- The `isDirty` derivation reads React state but the imperative calls compute dirtiness from `editorValueRef.current`/`fileStateRef.current`; the two sources of truth can drift inside the same component.
+
+**Proposal:**
+- Pick one mechanism: rely on the `[isDirty]` effect (drop the manual calls) OR drop the effect and call `onDirtyChange` only at known mutation sites with computed-from-refs values.
+- Add a regression that asserts `onDirtyChange` is called exactly once per dirty/clean flip, not twice.
+
+## `isProgrammaticBottomFollowScroll` discriminator may misclassify real user scrolls
+
+**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:1470-1473`. The new branch in `syncViewport` distinguishes programmatic-bottom-follow scroll ticks from real user scrolls purely on (a) the cooldown window being live and (b) `node.scrollTop >= lastNativeScrollTopRef.current - 1`. There is no marker on the event itself. `markUserScroll` defends against this by clearing the cooldown on `wheel`, `touchmove`, and `keydown`, but trackpad inertial momentum events without a wheel event, or programmatic scrolls inside a ResizeObserver tick, can slip past — the user's downward inertial scroll would then be silently classified as a continuation of the programmatic follow and the user-scroll bookkeeping cleared.
+
+**Current behavior:**
+- The discriminator is purely positional + temporal; it cannot distinguish a real user scroll that happens to arrive without a wheel/touch/keydown predecessor from a continuation of the programmatic smooth-scroll.
+- `markUserScroll` is wired to `wheel`, `touchmove`, and `keydown` only.
+
+**Proposal:**
+- Tighten the discriminator to also require `lastUserScrollInputTimeRef.current === Number.NEGATIVE_INFINITY` (the value `bottom_follow` event handler sets). A real user scroll between dispatch and completion sets `lastUserScrollInputTimeRef`, which then disqualifies subsequent ticks from the programmatic branch.
+- Add coverage for the inertial-scroll-without-wheel-event case (e.g., synthetic `scroll` events without preceding `wheel`).
+
+## Wheel `deltaMode` conversion lacks line/page branch coverage
+
+**Severity:** Low - upward-wheel prewarm behavior depends on browser-specific
+wheel delta units, but only pixel deltas are currently pinned.
+
+`ui/src/panels/VirtualizedConversationMessageList.tsx` adds
+`resolveWheelDeltaYPx` so upward-wheel prewarm can normalize pixel, line, and
+page wheel deltas before projecting the next scroll position. The new coverage
+exercises the pixel-delta path, but the `DOM_DELTA_LINE` and `DOM_DELTA_PAGE`
+branches are untested even though those modes vary by browser and input device.
+
+**Current behavior:**
+- Pixel-delta upward-wheel prewarm is covered.
+- Line-mode and page-mode wheel delta conversion can regress without a focused
+  test failure.
+
+**Proposal:**
+- Extend the upward-wheel prewarm regression with `DOM_DELTA_LINE` and
+  `DOM_DELTA_PAGE` cases.
+- Assert the converted projected scroll position mounts earlier pages without
+  stealing the user's scroll progress.
+
+## Per-keystroke remount of editable Markdown preview's contentEditable subtree in Split mode
+
+**Severity:** High - in Split mode, every Code-pane keystroke unmounts and remounts the rendered preview's contentEditable subtree. `ui/src/panels/SourcePanel.tsx:183-199` recomputes `renderedMarkdownSegment` on every `editorValue` change, producing a new `segment.markdown` string. The downstream `useEffect([segment.markdown])` at `markdown-diff-change-section.tsx:213-246` (when `hasUncommittedUserEditRef.current === false`) bumps `setRenderResetVersion(c => c + 1)`. The `<div key={renderResetVersion}>` at line 675 re-keys, fully unmounting and remounting `MarkdownContent` — including Mermaid sandbox iframes and KaTeX nodes — on every Code-pane keystroke.
+
+The visible effects are: any text-selection in the rendered pane is destroyed on every keystroke, Mermaid iframes are re-initialised (the file's earlier comments call out inline-zone stability for diff-side editing but not for the Split-mode preview path), and KaTeX is regenerated. This also amplifies the cost of the documented callback-identity churn — every keystroke triggers the unstable-prop unregister/register cycle for committers.
+
+**Current behavior:**
+- `renderedMarkdownSegment` is keyed on `[editorValue, ...]`, so it recomputes per keystroke.
+- The reset effect bumps `renderResetVersion` whenever `segment.markdown` differs from the previously-stored baseline, even when the only change is in Monaco.
+- `<div key={renderResetVersion}>` causes a full subtree remount on every bump.
+
+**Proposal:**
+- Derive `renderedMarkdownSegment` from `fileState.content` (the on-disk baseline) and only update `segment.markdown` when the user crosses a save/blur/mode-switch boundary. Monaco edits still apply to the source buffer; the rendered preview shows the last "settled" Markdown until the next commit.
+- Or compare incoming `segment.markdown` to the rendered DOM (or against a value-derived guard) before bumping `renderResetVersion`.
+- Or make `MarkdownContent`'s rendering tolerant of in-place markdown updates without a key bump.
+- Add a Split-mode regression that types into the Code pane and asserts the rendered preview's Mermaid iframe `src` (or a representative DOM-identity probe) is unchanged across keystrokes.
+
+## `handleDrop` ignores drop coordinates and inserts at stale selection
+
+**Severity:** Low - `ui/src/panels/markdown-diff-change-section.tsx:401-430`. The new `handleDrop` correctly prevents the browser default and routes payloads through `insertSanitizedMarkdownPaste`, but it ignores the drop coordinates (`event.clientX`/`clientY`). After `event.preventDefault()`, the browser does not move the caret to the drop point, and `insertSanitizedMarkdownPaste` operates on the current `window.getSelection()` (or appends to the end of the section when no selection lives inside it). The user perceives "I dropped here, content inserted somewhere else." Functionally safe — the sanitizer still runs — but UX-asymmetric.
+
+The new SourcePanel drop test pre-calls `selectRenderedMarkdownSectionContents()` to seed a selection inside the section, so the test path always inserts where expected. Production drops without a prior selection in the section silently fall back to the end-of-section path.
+
+**Current behavior:**
+- `handleDrop` calls `insertSanitizedMarkdownPaste` without setting the selection to the drop coordinates.
+- Insertion lands at the user's previous selection or appends to the end of the section.
+
+**Proposal:**
+- Use `document.caretPositionFromPoint(event.clientX, event.clientY)` (Firefox) or `document.caretRangeFromPoint(event.clientX, event.clientY)` (Chromium) to derive the drop point, set the selection to that range before calling `insertSanitizedMarkdownPaste`.
+- Add a regression that drops without a pre-existing selection inside the section and asserts the content lands at the drop point, not at the end.
+
+## `onApplied` clears uncommitted-but-equivalent drafts, causing contentEditable remount on round-trip
+
+**Severity:** Low - `ui/src/panels/SourcePanel.tsx:386-391`. When `nextDocumentContentLf === sourceContent` (the user typed something that round-trips to the original after normalization), `onApplied` runs and calls `clearCommittedDraft`, which bumps `renderResetVersion`. The user's typed-but-equivalent text is replaced by the normalized base segment — DOM identity churns and any text selection is destroyed. Subtle UX echo of the previously-tracked "Per-keystroke remount in Split mode" finding, but on a narrower trigger.
+
+**Current behavior:**
+- A round-trip-equivalent edit triggers `onApplied`, which bumps `renderResetVersion` and remounts the contentEditable subtree.
+- Visible text is unchanged, but DOM identity churns and selection state is lost.
+
+**Proposal:**
+- When `nextDocumentContentLf === sourceContent`, skip the `onApplied` calls (don't bump `renderResetVersion`) — just clear `hasRenderedMarkdownDraftActive`. The draft refs were already in a clean state in this branch; nothing else needs to reset.
+- Add a regression that types `foo` then types backspaces back to the original, asserts the contentEditable's first child node identity is preserved across the round-trip.
+
+## `renderedMarkdownDocumentPathRef` clear runs in `useEffect` rather than `useLayoutEffect`
+
+**Severity:** Low - `ui/src/panels/SourcePanel.tsx:250-256`. The path-change clear runs post-paint via `useEffect`. With `<SourcePanel/>` now keyed by `tab.id ?? path` (the structural fix that landed alongside this), full remount is the primary defense and this clear-on-path-change effect is mostly redundant. But for the path-change-within-same-tab case (file rename keeping a stable tab id), the committers `Set` survives one paint after `fileState.path` changes. A `commitRenderedMarkdownDrafts()` triggered between path-change and the post-paint clear (e.g., via `flushSync(() => onCommitDrafts())` from a future `flushDraftsBeforeNavigation` handler) would still see the old committers, re-resolved against the new file's `editorValueRef.current`. Today the keying makes the window almost-always zero, so this is defense-in-depth.
+
+**Current behavior:**
+- The clear runs in `useEffect`, not `useLayoutEffect`.
+- Same-tab path-change opens a single-paint window where stale committers can fire against the new file.
+
+**Proposal:**
+- Promote the clear to `useLayoutEffect` so it runs synchronously after the path change settles in render but before paint.
+- Or rely entirely on the `key={...}` remount and drop the effect, since same-tab path renames are not a common code path today.
+
+## `onCut` is a no-op when `canEdit=true`, symmetric to the `onDrop` finding
+
+**Severity:** Medium - `markdown-diff-change-section.tsx:666` wires `onCut={handleReadOnlyMutationEvent}`, which only `event.preventDefault()`s when `allowReadOnlyCaret && !canEdit`. In editable mode the browser default cut path runs. Less severe than drop (no untrusted content enters the document), but the resulting clipboard payload is rich HTML — including any sandboxed iframe markup or rendered SVG nodes — and a subsequent paste in another app or another editable surface within TermAl runs through `insertSanitizedMarkdownPaste` only on paste, not on the source. Cut/copy of a rendered Mermaid diagram carries rendered HTML rather than the source `mermaid`-fenced Markdown the user likely expects.
+
+**Current behavior:**
+- `onCut` and `onCopy` (the latter not bound) follow the browser default in editable mode.
+- The clipboard payload is rich HTML, not source Markdown.
+
+**Proposal:**
+- Implement explicit `onCopy`/`onCut` handlers that write the segment's source Markdown (or a serialized substring for partial selections) instead of relying on the browser default. Set `text/plain`, `preventDefault()`, and handle the DOM removal manually.
+- Group with the `onDrop` fix so cut/copy/drop are all handled symmetrically.
+
+## Pane-level smooth-scroll intermediate ticks cancel `settledScrollToBottom` RAF
+
+**Severity:** Medium - the same root as "Pane-level bottom-follow state can detach during smooth scroll" with an additional symptom: `SessionPaneView.tsx:2518-2531` cancels `settledScrollToBottom` whenever `shouldStick` flips false. While the scrollbar smooth-animates toward the bottom, an intermediate tick at, say, `scrollTop = bottom − 200` trips `shouldStick = false`, which calls `cancelSettledScrollToBottom()` and clears `settledScrollToBottomCancelRef.current`. Any settled-scroll attempts queued for layout settling (e.g., when a streaming chunk's height was still measuring) are aborted mid-flight even though the user did nothing.
+
+**Current behavior:**
+- Pane-level `onScroll` cancels the settled-scroll RAF on every `shouldStick` flip.
+- Smooth-scroll intermediate ticks satisfy the flip without the user scrolling.
+- Settled-scroll attempts queued during layout settling are aborted.
+
+**Proposal:**
+- Gate `cancelSettledScrollToBottom()` on a real user-driven scroll signal (e.g., a recent wheel/keyboard/touch interaction within the last N ms), or on the same `pendingProgrammaticBottomFollowUntilRef` window the virtualizer uses.
+- Cover the symptom in the regression for the parent "Pane-level bottom-follow" entry.
+
+## `bottom_follow` cooldown can be implicitly cancelled by a concurrent `bottom_boundary` reveal
+
+**Severity:** Low - `ui/src/panels/VirtualizedConversationMessageList.tsx:1470-1473`. If a user clicks "scroll to bottom" while a `bottom_follow` smooth-scroll is mid-animation, both cooldowns are pending. The bottom-boundary reveal mounts new pages, which can momentarily decrease `scrollTop` (because the bottom spacer changes when pages mount). Subsequent native scroll ticks then fail the `node.scrollTop >= lastNativeScrollTopRef.current - 1` test, the bottom_follow path defers, and the user-scroll bookkeeping path runs — flipping `hasUserScrollInteractionRef.current = true` and clearing `shouldKeepBottomAfterLayoutRef`. The `bottom_follow` cooldown is implicitly cancelled despite the user not scrolling.
+
+The two cooldowns (`pendingBottomBoundaryRevealNodeRef` and `pendingProgrammaticBottomFollowUntilRef`) are independent ref clusters with no documented precedence rule. The `isBottomBoundaryRevealScroll` check at line 1468 takes priority over `isProgrammaticBottomFollowScroll` at line 1470 (the order in `if/else if`), but the bottom_follow handler at line 1610 doesn't reset the boundary's `pendingBottomBoundarySeekRef`/`pendingMountedPrependRestoreRef`, and the boundary handler at line 1590 doesn't reset `pendingProgrammaticBottomFollowUntilRef`. New scroll-kind variants will need explicit interleaving rules to avoid this drift.
+
+**Current behavior:**
+- Two independent cooldown ref clusters with no documented precedence.
+- A `bottom_boundary` reveal can implicitly cancel an in-flight `bottom_follow` cooldown via spacer-driven `scrollTop` decrease.
+
+**Proposal:**
+- Document the precedence between `bottom_follow` and `bottom_boundary` cooldowns in the `message-stack-scroll-sync.ts` comment.
+- When entering `bottom_boundary`, also reset `pendingProgrammaticBottomFollowUntilRef = NEGATIVE_INFINITY` so the priority is unambiguous.
+- Add a regression that fires `bottom_follow` followed quickly by `bottom_boundary` and asserts neither cooldown's invariants are violated.
+
+## `bottom_follow` programmatic-write doesn't own a mount strategy (smooth-scroll into spacer)
+
+**Severity:** High - `ui/src/panels/VirtualizedConversationMessageList.tsx:1731-1746`. The `bottom_follow` branch arms the cooldown and resets bottom-stick state but never grows the mounted range. By contrast, `bottom_boundary` (lines 1711-1729) explicitly calls `mountBottomBoundary(node)` + `scheduleBottomBoundaryReveal(node)`, and the unspecified-scroll-kind branch calls `reconcileMountedRangeForNativeScroll`. `bottom_follow` only calls `scheduleProgrammaticViewportSync(node)`, which reads viewport state but does not grow the mounted band.
+
+If the smooth scroll's target (`scrollHeight - clientHeight`) lies below the currently mounted bottom page, the smooth animation scrolls into the bottom spacer for the first ~1200ms until the cooldown ends and a non-`bottom_follow` reconcile path mounts the rest. `followLatestMessageForPromptSend` only takes the smooth path when `isMessageStackNearBottom()` is already true (so bottom is usually mounted), but `SessionPaneView.tsx:1847`'s `requestAnimationFrame` jump-to-bottom path takes `bottom_follow` unconditionally — the contract gap is silent. As more scroll kinds get added, the contract drifts further from "every kind owns its mount strategy."
+
+**Current behavior:**
+- The `bottom_follow` branch does not call any mount-growth helper.
+- Smooth scrolls whose target lies in the bottom spacer animate into empty space until the cooldown ends.
+- The contract that "every scroll kind owns its mount strategy" is undocumented.
+
+**Proposal:**
+- Either (a) document explicitly that callers must only dispatch `bottom_follow` when the bottom messages are already mounted, AND add a callsite-level guard in `followLatestMessageForPromptSend` / the bottom-follow effect; or (b) call `reconcileMountedRangeForNativeScroll(node, scrollDelta, "seek")` after setting the cooldown so the bottom band is mounted when the smooth animation lands.
+- Add a regression where the bottom band is unmounted, `bottom_follow` is dispatched, and either the producer rejects the dispatch (variant a) or the bottom band is mounted before the animation completes (variant b).
+
+## Wheel-prewarm bypasses `skipNextMountedPrependRestoreRef` first-upward-escape semantics
+
+**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:1001-1039` (prewarm) × `:984-991` (incremental reconcile). `prewarmMountedRangeForUpwardWheel` unconditionally writes `pendingMountedPrependRestoreRef.current` and ignores `skipNextMountedPrependRestoreRef.current`. The native-scroll reconcile path runs after the prewarm (the wheel handler is synchronous; the `scroll` event fires next), sees the upward `nextRange`, consults `skipNextMountedPrependRestoreRef`, and consumes the flag — leaving the prewarm's prepend-restore intact. The "skip restore on first upward escape" intent (added precisely to avoid the layout-tick snap-back) is silently re-introduced for any wheel-driven upward gesture from the bottom.
+
+**Current behavior:**
+- Prewarm writes `pendingMountedPrependRestoreRef.current` regardless of the skip flag.
+- Native reconcile then consumes `skipNextMountedPrependRestoreRef` without affecting the prewarm's already-set restore.
+- First-escape upward wheel still queues a scrollHeight-delta restore.
+
+**Proposal:**
+- Have `prewarmMountedRangeForUpwardWheel` consult and consume `skipNextMountedPrependRestoreRef.current` symmetrically: if the flag is set, do not write `pendingMountedPrependRestoreRef`, and clear the skip flag.
+- Add a regression that establishes "at bottom, then first upward wheel" and asserts no scrollHeight-delta restore is queued.
+
+## `bottom_follow` programmatic-write branch doesn't clear `pendingMountedPrependRestoreRef`
+
+**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:1731-1746`. Unlike the `bottom_boundary` branch directly above it (lines 1721-1722), the `bottom_follow` branch leaves `pendingMountedPrependRestoreRef.current` and `skipNextMountedPrependRestoreRef.current` intact. If an upward wheel just queued a prepend-scroll-restore (via `prewarmMountedRangeForUpwardWheel:1031-1034`) and the user immediately triggers a prompt-send that emits `bottom_follow`, the queued restore-ref fires later and snaps `scrollTop` backward to the pre-wheel position mid-smooth-scroll. The smooth-scroll-to-bottom then visually stutters or partially reverses.
+
+**Current behavior:**
+- `bottom_follow` write entry sets up the cooldown but does not reset prepend-restore refs.
+- A queued upward-wheel restore can fire mid-bottom_follow and contradict the smooth-scroll target.
+
+**Proposal:**
+- In the `bottom_follow` branch, also set `pendingMountedPrependRestoreRef.current = null` and `skipNextMountedPrependRestoreRef.current = false`, mirroring `bottom_boundary`.
+- Add a regression: queue an upward-wheel prepend-restore, dispatch `bottom_follow` immediately, and assert `scrollTop` does not regress backward.
+
+## New top-spacer guard layout effect doesn't respect `pendingProgrammaticBottomFollowUntilRef`
+
+**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:1171-1238`. The new "wheel-prewarm DOM-bounds coverage" `useLayoutEffect` checks `hasUserScrollInteractionRef.current` for cooldown gating but does not check `pendingProgrammaticBottomFollowUntilRef`. If a layout shift fires during an in-flight `bottom_follow` cooldown and `hasUserScrollInteractionRef.current` is set from a prior gesture, the top-spacer guard could prepend pages and call `setMountedPageRange` against a programmatic smooth-scroll, with `pendingMountedPrependRestoreRef` set to `node.scrollTop`. The next layout phase would then attempt a scroll-restore that contradicts the smooth-scroll target — cross-cooldown interference between two new this-round subsystems.
+
+**Current behavior:**
+- Top-spacer guard only consults `hasUserScrollInteractionRef`.
+- Programmatic `bottom_follow` cooldown is invisible to the layout effect.
+
+**Proposal:**
+- Gate the layout effect's user-scroll cooldown check additionally on `pendingProgrammaticBottomFollowUntilRef.current < performance.now()`.
+- Add a regression that runs a layout shift during an in-flight `bottom_follow` and asserts no prepend-restore is queued.
+
+## Near-bottom early termination of `bottom_follow` cooldown can mid-animation hand control to user-scroll branch
+
+**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:1611-1613`. The "near bottom shortcut" inside the `isProgrammaticBottomFollowScroll` branch unconditionally cancels the cooldown when any single intermediate native scroll tick lands near the bottom. But the smooth-scroll animation typically spans many ticks — an intermediate tick at, say, `scrollTop = scrollHeight - clientHeight - 60` (within the 72px near-bottom threshold) would terminate the cooldown midway. A subsequent tick at `bottom - 100` (still mid-animation) would then fall through to the "user scroll" branch (because the cooldown is now expired) and flip `hasUserScrollInteractionRef.current = true`. This re-introduces the same class of bug the cooldown was added to prevent.
+
+**Current behavior:**
+- A single near-bottom intermediate tick cancels the cooldown.
+- Subsequent ticks (still mid-animation) are reclassified as user scrolls.
+
+**Proposal:**
+- Replace the early termination with a check that the node is BOTH near-bottom AND the scroll has stopped (delta < 1 vs `lastNativeScrollTopRef.current`).
+- Or remove the branch entirely and let the cooldown's natural 1.2 s timeout drain.
+- Add a regression that fires intermediate ticks crossing the near-bottom boundary and asserts the cooldown survives until either timeout or stopped-scroll.
+
+## `resolveWheelDeltaYPx` constants undocumented; touch input is silently not pre-warmed
+
+**Severity:** Low - `ui/src/panels/VirtualizedConversationMessageList.tsx:173-181` (`resolveWheelDeltaYPx`) hardcodes `40` for `DOM_DELTA_LINE` and `DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT` (720) for `DOM_DELTA_PAGE` fallback with no inline comment explaining the values. Real browser/OS line-mode multipliers vary considerably (Chromium ~40, Firefox 16-20 on Linux). The constant is load-bearing for the prewarm projection — too low and trackpad inertial scrolls in LINE mode will under-grow the band; too high and a small line-mode scroll over-grows the mounted range and forces unnecessary work.
+
+Separately, the wheel handler at `:1700-1702` is the only input modality that drives `prewarmMountedRangeForUpwardWheel`. `markUserScroll` is bound to `wheel`, `touchmove`, and `keydown`, but only the wheel handler does prewarm. Touch users (mobile/iPad) get the spacer-blank that wheel users no longer see, and touch typically produces LARGER per-gesture deltas than wheel — so the spacer-exposure window is potentially worse on touch.
+
+**Current behavior:**
+- `resolveWheelDeltaYPx` constants are bare with no doc comment.
+- Only wheel events trigger prewarm; touch and keyboard do not.
+- The layout-effect DOM-bounds guard at lines 1171-1230 is the implicit fallback for non-wheel inputs but its asymmetric role is undocumented.
+
+**Proposal:**
+- Add a `///`-style comment documenting `resolveWheelDeltaYPx`'s constants as deliberate over-estimates that match Chromium's typical wheel-line scroll amount; over-projection only widens the prewarmed band.
+- Either (a) extend the prewarm to read `touchmove` deltas (track previous touchY, compute deltaY) and pre-warm symmetrically, or (b) document explicitly that the layout-effect DOM-bounds guard at lines 1171-1230 handles touch as a fallback.
+
+## New `AgentSessionPanel.test.tsx` test scaffolding has hardening gaps
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx` (NEW this round, +211 lines). Two small hardening gaps:
+
+1. `:2018-2024` — `ResizeObserverMock.observe` synchronously invokes the callback during `observe(target)`. Other tests in this file use a deferred-callback shape via `resizeCallbacks` map (see line 2224 onward). A synchronous mock that schedules a `setState` mid-effect can produce a "Cannot update a component while rendering a different component" warning under certain React 18 reconciliation orderings, especially if tests are later parallelized.
+2. `:2214-2215` — The `finally` block restores `Element.prototype.getBoundingClientRect = originalGetBoundingClientRect` directly. If `originalGetBoundingClientRect` is `undefined` (the type signature allows it), this would set the prototype property to `undefined`, breaking subsequent tests' `getBoundingClientRect` calls. The staged `App.scroll-behavior.test.tsx` uses `Object.defineProperty(...)` with original-descriptor checks; the same pattern would harden this test.
+
+**Current behavior:**
+- `ResizeObserverMock` invokes its callback synchronously inside `observe()`.
+- `finally` restores `getBoundingClientRect` via plain assignment without descriptor check.
+
+**Proposal:**
+- Use the existing `resizeCallbacks` deferred-callback shape from the sibling tests instead of synchronously invoking the callback.
+- Capture the descriptor with `Object.getOwnPropertyDescriptor` and conditionally restore (or use `Object.defineProperty` when the original was missing).
+
+## `registerRenderedMarkdownCommitter` lacks idempotency guard
+
+**Severity:** Low - `SourcePanel.tsx:300-305`. Adds to the live ref Set with no idempotency guard. A section that re-runs its register effect (which it does on every parent render — see "Inconsistent `useCallback` discipline" entry) will momentarily have two committer closures registered in the brief window between adding the new closure and the cleanup running. `collectRenderedMarkdownCommits` invokes BOTH; each closure inside the section calls `collectSectionEdit(section)` against the same DOM section. The first one mutates `hasUncommittedUserEditRef.current = false` and clears `draftSegmentRef.current`; the second sees the cleared state and returns `null`. Today benign, but order-sensitive — a regression here could re-introduce the previously-flagged "double-fire" parent dirty notification.
+
+**Current behavior:**
+- Set-based registration with no dedup.
+- Transient duplicate registrations during effect cycles.
+
+**Proposal:**
+- Key by a stable id (e.g., the section's `useId()` value) so duplicate registrations dedupe.
+- Or track a registration count and warn in dev when more than one committer is alive for the same section.
+
+## `SourcePanel.tsx` is growing along a separable axis
+
+**Severity:** Low - `ui/src/panels/SourcePanel.tsx` grew from ~803 to 1119 lines in this round (+316). It is approaching but has not crossed the ~2,000-line scrutiny threshold. The new responsibility (rendered-Markdown commit pipeline orchestration: collect → resolve ranges → check overlap → reduce edits → re-emit with EOL style) is meaningfully separable from the existing source-buffer/save/rebase/compare orchestration. It has its own state (`hasRenderedMarkdownDraftActive`, `renderedMarkdownCommittersRef`), pure helpers already split into `markdown-commit-ranges`/`markdown-diff-segments`, and a clean parent-callback interface.
+
+**Current behavior:**
+- SourcePanel owns two distinct orchestration responsibilities in one component.
+
+**Proposal:**
+- No action this commit. Consider extracting a `useRenderedMarkdownDrafts(fileStateRef, editorValueRef, setEditorValueState, ...)` hook in a follow-up, owning `renderedMarkdownCommittersRef`, `hasRenderedMarkdownDraftActive`, `commitRenderedMarkdownDrafts`, `handleRenderedMarkdownSectionCommits`, and `handleRenderedMarkdownSectionDraftChange`.
+- The hook would expose a small surface for SourcePanel to consume and keep the file under the scrutiny threshold.
+
+## Inconsistent `useCallback` discipline on `SourcePanel` handlers crossing the prop boundary
+
+**Severity:** Low - `ui/src/panels/SourcePanel.tsx`. `commitRenderedMarkdownDrafts`, `commitRenderedMarkdownSectionDraft`, `handleRenderedMarkdownSectionCommits`, `handleRenderedMarkdownSectionDraftChange`, `handleRenderedMarkdownReadOnlyMutation`, `handleSelectDocumentMode`, and `handleEditorChange` are plain function declarations recreated on every render. The sibling `registerRenderedMarkdownCommitter` is correctly wrapped in `useCallback` (line 305). All cross the prop boundary into `EditableMarkdownPreviewPane` / `EditableRenderedMarkdownSection`. Combined with `normalizeMarkdownDocumentLineEndings(editorValue)` being recomputed twice per render in JSX (lines 843-870, 891-906), the editable contentEditable subtree receives shifting prop identities on every parent render.
+
+This is the exact regression the React review checklist warns about — complex component trees with inline `components` props don't survive re-renders. `EditableRenderedMarkdownSection` does have its own internal `previousSegmentMarkdownRef`/`renderResetVersion` machinery to absorb this, but stable inputs help.
+
+**Current behavior:**
+- Inconsistent stabilization: one handler `useCallback`-wrapped, six others not.
+- `normalizedEditorValue` recomputed twice per render at JSX call sites.
+- Editable preview pane sees fresh prop identities on every parent render.
+
+**Proposal:**
+- Wrap the prop-crossing handlers in `useCallback` with the right deps.
+- Compute `normalizedEditorValue` once at the top via `useMemo([editorValue])` and reuse in both call sites.
+- Or document why identity stability is unnecessary if `EditableRenderedMarkdownSection` is robust to inline-handler thrash.
+
+## Editable rendered Markdown surface lacks textbox semantics
+
+**Severity:** Low - keyboard and screen-reader users can focus an editable
+rendered Markdown region without an accessible control role or name.
+
+`ui/src/panels/SourcePanel.tsx:988` labels the preview wrapper as
+`aria-label="Rendered preview"`, but the actual focusable
+`contentEditable` section created by `EditableRenderedMarkdownSection` does not
+receive a textbox role or accessible name. Once the rendered preview becomes an
+editing surface, the focus target should announce itself as editable content
+rather than as an unnamed generic element.
+
+**Current behavior:**
+- The wrapper has an accessible label.
+- The contentEditable child is the focusable/editable element.
+- The child lacks `role="textbox"`, `aria-multiline`, and a specific label.
+
+**Proposal:**
+- Extend `EditableRenderedMarkdownSection` with an editable-only
+  `aria-label` prop.
+- When `canEdit` is true, set `role="textbox"` and
+  `aria-multiline="true"` on the contentEditable target.
+- Add a focused React Testing Library assertion for the editable rendered
+  preview role/name.
+
+## Rendered Markdown editing reuses diff-owned modules without updating ownership docs
+
+**Severity:** Low - SourcePanel now treats `markdown-diff-*` modules as a
+general rendered-Markdown editing layer, but their ownership still reads as
+diff-only.
+
+`ui/src/panels/SourcePanel.tsx` imports `EditableRenderedMarkdownSection`,
+`markdown-commit-ranges`, and `markdown-diff-segments` for full-document source
+editing. That reuse is practical, but the module names and comments still
+present the code as diff-pane infrastructure. Future maintainers can therefore
+change a "diff-only" helper without realizing SourcePanel's editable preview
+depends on the same commit/range contract.
+
+**Current behavior:**
+- Diff-named modules are now consumed by SourcePanel's normal source-editing
+  path.
+- Ownership comments do not name SourcePanel as a supported consumer.
+- The shared commit contract spans both rendered diffs and full-document
+  rendered source preview.
+
+**Proposal:**
+- Either extract the shared rendered-Markdown edit contract into neutral
+  modules, or update the existing module headers to document SourcePanel as a
+  supported consumer.
+- Add a brief SourcePanel comment near the imports naming the shared contract
+  so future refactors do not accidentally break the full-document editor path.
+
+## `bottom_follow` "enter state" reset block duplicated across two branches
+
+**Severity:** Low - `ui/src/panels/VirtualizedConversationMessageList.tsx:1482-1495` and `:1610-1625`. Two branches duplicate the same ~six-line ref-reset (`pendingProgrammaticScrollTopRef`, `lastNativeScrollTopRef`, `shouldKeepBottomAfterLayoutRef`, `isDetachedFromBottomRef`, `hasUserScrollInteractionRef`, `lastUserScrollKindRef`, `lastUserScrollInputTimeRef`). Future ref additions risk getting added to one but not the other.
+
+**Current behavior:**
+- The `syncViewport` re-arm path and the `syncProgrammaticScrollWrite` event handler each duplicate the ref-reset cluster.
+
+**Proposal:**
+- Extract a small helper inside the effect (`function enterBottomFollowMode(node) { ... }`) and call it from both sites.
+
+## New scroll-intent refs and scroll-write kinds lack contract documentation
+
+**Severity:** Low - `ui/src/panels/VirtualizedConversationMessageList.tsx:336-338` adds `pendingProgrammaticBottomFollowUntilRef` to the already-large cluster of ~30 scroll-intent / mounted-range / cooldown refs without a doc comment. `ui/src/message-stack-scroll-sync.ts:5-19` adds the `bottom_follow` variant to the scroll-write enum but the file's existing comment block describes only the `bottom_boundary` exception — the `bottom_follow` variant has its own subtle contract (extends a 1.2 s cooldown that re-classifies subsequent native scroll ticks) and deserves a peer-level mention.
+
+The session-virtualized-transcript subsystem is already cited in `bugs.md` history as a maintenance hazard. Each new ref or scroll-kind expands the surface that future refactors must reset / clear correctly.
+
+**Current behavior:**
+- New ref has no inline comment explaining its role or reset semantics.
+- The shared scroll-sync seam describes only one variant in its prose despite three existing.
+
+**Proposal:**
+- Add a one-line comment near `pendingProgrammaticBottomFollowUntilRef` explaining "Latest deadline at which a programmatic `bottom_follow` smooth-scroll can still claim native scroll ticks. Reset to `Number.NEGATIVE_INFINITY` from `markUserScroll` so user gestures cancel the cooldown."
+- Extend the `message-stack-scroll-sync.ts` comment block to describe `bottom_follow`'s 1.2 s cooldown contract symmetrically with `bottom_boundary`.
+
+## `bottom_follow` virtualizer state machine has no synthetic-native-scroll test coverage
+
+**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:1610-1624` (production), no test. The new `bottom_follow` scroll-kind sets a 1.2s programmatic-bottom-follow window and re-classifies subsequent native scroll ticks as programmatic at lines 1467-1495. The new `App.scroll-behavior.test.tsx` asserts only that `scrollTo` is called with `top: 900, behavior: "smooth"` (the SessionPaneView side). The actual regression-prevention contract — that intermediate native scroll ticks during the smooth-scroll do NOT flip `hasUserScrollInteractionRef`, that `shouldKeepBottomAfterLayoutRef` survives, and that the cooldown re-arms each forward-progress tick — has zero direct coverage.
+
+**Current behavior:**
+- Production has the cooldown + re-classification logic in two cooperating branches (event handler + syncViewport).
+- Tests only check the dispatcher side.
+- A regression dropping the `pendingProgrammaticBottomFollowUntilRef` re-arm would still pass the new test.
+
+**Proposal:**
+- Add a test that fires synthetic native `scroll` events with `scrollTop` advancing toward the bottom after a `bottom_follow` write and asserts:
+  - `hasUserScrollInteractionRef` is not set (e.g., no "New response" indicator emerges on the next assistant delta).
+  - `shouldKeepBottomAfterLayoutRef` survives across the smooth-scroll ticks.
+  - A user-initiated wheel/keyboard event during the window cancels the programmatic-bottom-follow marker.
+  - The early-exit `if (isScrollContainerNearBottom(node))` branch at 1492-1495 is exercised separately.
+
+## Pane-level bottom-follow state can detach during smooth scroll
+
+**Severity:** Medium - `SessionPaneView` can treat programmatic smooth-scroll
+intermediate positions as user detachment.
+
+`ui/src/SessionPaneView.tsx` now marks smooth bottom-follow writes for the
+virtualizer, but the pane-level `onScroll` bookkeeping still sees the native
+smooth-scroll ticks. While the browser animates toward bottom, intermediate
+positions can be more than the near-bottom threshold from the final target.
+That can flip pane-level sticky-bottom state off even though the user did not
+scroll away.
+
+**Current behavior:**
+- `bottom_follow` intent is consumed by the virtualized list.
+- Pane-level scroll state does not know that the smooth-scroll is
+  programmatic.
+- Intermediate smooth-scroll ticks can clear bottom-stick and make later
+  streaming chunks show "New response" or stop following.
+
+**Proposal:**
+- Add pane-level programmatic bottom-follow tracking in `SessionPaneView`.
+- Clear it on real user scroll intent and when the final bottom target is
+  reached.
+- Add a regression where a smooth bottom-follow emits intermediate scroll
+  events far from bottom and the pane remains sticky until the target is
+  reached.
+
+## `App.scroll-behavior.test.tsx` "scroll away from bottom" geometry never moves away from bottom
+
+**Severity:** Medium - `ui/src/App.scroll-behavior.test.tsx:944-948`. The test writes `scrollTop = 800` with `scrollHeight = 1000` and `clientHeight = 200` — i.e., `scrollHeight - scrollTop - clientHeight = 0`. That's exactly the bottom. The "still smooth-follow even when not yet pinned" intent of the test name is undermined: the panel was already pinned, so the assertions about smooth-follow and the absence of the "New response" indicator are trivially satisfied even if `bottom_follow` did nothing.
+
+The geometry helper duplication at `:879-899` (re-implementing `stubElementScrollGeometry` inline) compounds the issue — future definition-shape changes would need to be updated in two places.
+
+**Current behavior:**
+- Test passes regardless of whether `bottom_follow` is wired through to the virtualizer.
+- Test name doesn't match the geometry it sets up.
+
+**Proposal:**
+- Change `scrollTop` to a non-bottom value (e.g., 200) and dispatch a `wheel` event with `deltaY: -300` to actually establish the "scrolled up" state, OR rename the test to match what it does.
+- Extract a `stubMutableElementScrollGeometry` helper returning `{ setScrollHeight, restore }` and use it instead of the inline `Object.defineProperty` block.
+
 ## Strict-revision check on targeted hydration triggers a state resync per same-session delta on busy upstreams
 
 **Severity:** High - `src/remote_routes.rs:457-462` enforces `remote_response.revision == min_revision` on the delta-fast-path. `remote_response.revision` is the upstream's *global* revision at request time, not the targeted session's revision, so on any non-quiescent upstream `M > N` is the common case. Every targeted hydration on the delta path then fails with `bad_gateway`, propagates as `anyhow::Error` through `hydrate_unloaded_remote_session_for_delta`, and triggers `resync_remote_state_snapshot` in `dispatch_remote_event`. Net effect: every same-session inbound delta against an unloaded proxy on a busy chained-remote produces a full state resync.
@@ -1834,54 +2346,6 @@ still coming from the previous React `sessions` commit.
 - Add an integration test that forces a store-backed session update plus a
   lagging React-state-derived sibling prop and asserts the active pane never
   renders a torn combination.
-
-## Transcript scroll state can leak across session switches
-
-**Severity:** High - the virtualized transcript is instantiated once and reused across every session in the pane, so ten-plus stateful scroll/intent refs persist from one session into the next. A new session inherits the previous session's "user has scrolled", "detached from bottom", "last scroll kind", "last native scrollTop", and search-pin bookkeeping, which breaks bottom-pinning on first activation, misclassifies the first native scroll, and can suppress idle compaction and auto-pinning until the user scrolls again.
-
-`ui/src/panels/AgentSessionPanel.tsx:695` renders `<VirtualizedConversationMessageList …/>` without a `key={sessionId}` prop, and the parent `SessionConversationPage` is similarly unkeyed. `sessionId` is threaded as a plain prop, so React keeps the same component instance mounted across every session change in that pane — and every `useRef` inside `ui/src/panels/VirtualizedConversationMessageList.tsx` persists with it. The main scroll-listener / ResizeObserver effect at line 1310 has `sessionId` in its deps, so it tears down and resubscribes on switch, but the cleanup only removes listeners — it never resets the scroll-intent refs.
-
-**Current behavior:**
-- `VirtualizedConversationMessageList` is not remounted per session; `sessionId` is a prop, not a key.
-- The following refs have no reset path keyed on `sessionId` or on the `isActive` false → true transition:
-  - `hasUserScrollInteractionRef` (line 323) — only flips `false → true` (lines 1186, 1248). Gates post-activation bottom-pin (1075), the setTimeout fallback (1108), `scrollToBottom` (1145), and `handlePageHeightChange` re-pin (1375, 1397, 1403).
-  - `shouldKeepBottomAfterLayoutRef` (302), `isDetachedFromBottomRef` (303), `skipNextMountedPrependRestoreRef` (304), `lastPinnedConversationSearchIdRef` (305), `lastUserScrollInputTimeRef` (306), `lastUserScrollKindRef` (307), `pendingAggressiveIdleCompactionRef` (308), `lastNativeScrollTopRef` (309), `pendingProgrammaticScrollTopRef` (310).
-  - `pendingDeferredLayoutAnchorRef` (315-318) is nullable with explicit reset paths (1019, 1177, 1216, 1264), but none of those fires on session change — a stale anchor (`messageId`, `viewportOffsetPx`) carried across a switch is applied against the new session's DOM, usually a no-op but wasteful.
-- The consequence: session B starts with the bottom-pin disabled if the user was scrolled up in A; the first scroll in B computes `scrollDelta` against A's `scrollTop` and misclassifies as seek/incremental; cooldowns stay armed and suppress idle compaction in B.
-
-**Proposal:**
-- Simplest fix: add `key={sessionId}` to `<VirtualizedConversationMessageList …/>` at `ui/src/panels/AgentSessionPanel.tsx:695`. React then unmounts the virtualizer on session switch and every `useRef` resets on the new mount — no targeted reset effect needed.
-- Alternative: add a single `useLayoutEffect` keyed on `[sessionId]` inside `VirtualizedConversationMessageList` that resets the full ref cluster listed above (plus nulls `pendingDeferredLayoutAnchorRef` and `pendingMountedPrependRestoreRef`). More surgical but wider surface to keep in sync on every future ref addition.
-- Regression coverage: scroll away from bottom in session A, switch to B, assert (a) the new session renders at bottom, (b) the "New response" indicator behaves correctly on the next delta, (c) the first native scroll in B is classified against a `scrollTop=0` baseline.
-
-## Virtualized transcript timers can fire against a newly-switched session
-
-**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx` keeps `pendingDeferredLayoutTimerRef` (line 319) and `pendingIdleCompactionTimerRef` (line 320) alive in component scope with a cleanup effect at lines 800-805 whose deps are the stable `clearPendingDeferredLayoutTimer` / `clearPendingIdleCompactionTimer` callbacks. Those callbacks never change identity, so the cleanup runs on component mount/unmount only — not on `sessionId` change. A timer armed in session A can fire after the user switches to session B and call `setMountedPageRange` or bump the layout version against B's state.
-
-The timer callbacks do read `scrollContainerRef.current` and gate on `isActive`, which neutralizes the common case (deactivation plus unmount). But on a session switch the pane stays active and the scroll container stays the same, so a late-firing deferred-layout or idle-compaction tick can legitimately reach `setMountedPageRange(nextRange)` or `bumpLayoutVersion(...)` against the new session's `pageKeys`, using a `nextRange` computed from A's mounted-range bookkeeping. Under the "key the virtualizer by sessionId" fix to the preceding bug this disappears automatically because the timers are cleared on unmount; under the surgical fix it has to be handled explicitly.
-
-**Current behavior:**
-- Deferred-layout and idle-compaction timers are cleared only when the component unmounts.
-- On `sessionId` change, both timers can fire later with state derived from the previous session.
-- The callbacks are defensive enough that no observable bug has been reported, but the contract is fragile.
-
-**Proposal:**
-- If the primary fix is `key={sessionId}`, this bug is covered as a side-effect and no extra work is needed.
-- If the primary fix is a surgical reset effect, also cancel both timers inside that effect: `clearPendingDeferredLayoutTimer(); clearPendingIdleCompactionTimer();` alongside the ref resets.
-- Either way, add a regression that primes a pending deferred-layout tick, switches sessions, and asserts no `setMountedPageRange` or `bumpLayoutVersion` call lands with the previous session's range data.
-
-## Page-height cache cleanup assumes UUID message IDs without documenting the contract
-
-**Severity:** Low - `pageHeightsRef` / `estimatedPageHeightsRef` in `ui/src/panels/VirtualizedConversationMessageList.tsx` (lines 298-301) are keyed on `${startIndex}:${endIndex}:${firstMessageId}:${lastMessageId}` (line 132). The cleanup at lines 807-816 is a plain `useEffect`, so it runs after the first render of a new session — meaning the first render of session B could consume a cached height from session A if their page keys happened to match. Today that collision is impossible because message IDs are UUIDs, but the key-construction comment does not call that out, and a future perf-motivated refactor that drops the UUID suffix from the key (e.g. switching to index-only keys for "simplicity") would regress to wrong initial heights on the first frame of every new session.
-
-**Current behavior:**
-- Page keys embed both message IDs; UUIDs make cross-session collisions practically impossible.
-- Cleanup runs as `useEffect`, after the first render of the new `pageKeys`.
-- Nothing in the file or nearby helpers notes that the UUID component of the key is load-bearing for cross-session safety.
-
-**Proposal:**
-- Add a short comment at the key construction site (line 132) documenting that the message-id component prevents stale heights from leaking across sessions.
-- Optionally promote the cleanup to `useLayoutEffect` so the invariant holds even if the message-id safety net ever shrinks.
 
 ## `codexUpdated` SSE delta is missing contract documentation
 
@@ -4393,6 +4857,149 @@ Two distinct issues remain in and around the one-shot `fetchSession` hydration p
   (reverting to OR) would not be caught. Add a third negative case
   asserting `isBenignMonacoCancellationReason(createCanceledError("Canceled: Canceled\n    at EditorWorkerClient2.idleCheck"))`
   returns `false`.
+- [ ] P2: Cover prompt-send-while-pinned `bottom_follow` change
+  (`ui/src/SessionPaneView.tsx:1148-1152`):
+  the `followLatestMessageForPromptSend` path silently changed scroll
+  behavior from `"auto"` to `"smooth"` and added a new scroll-kind, but
+  no test confirms the new behavior. The pre-existing prompt-send test
+  uses `auto` and pre-dates this change. Add a test that sends a prompt
+  while already at the bottom and asserts the scroll-to call is
+  `"smooth"` with `bottom_follow` — symmetric to the existing
+  "follows the latest user prompt immediately while a send is in flight"
+  test that pins the away-from-bottom `auto` path.
+- [ ] P2: Cover the `bottom_follow` virtualizer state machine directly
+  (`ui/src/panels/VirtualizedConversationMessageList.tsx:1467-1495,1610-1624`):
+  fire a synthetic native `scroll` event with `scrollTop` advancing
+  toward the bottom after a `bottom_follow` write and assert
+  `hasUserScrollInteractionRef` is not set (no "New response" indicator
+  on the next assistant delta), `shouldKeepBottomAfterLayoutRef`
+  survives, and a user wheel/keyboard event during the window cancels
+  the cooldown. Cover the early-exit `if (isScrollContainerNearBottom(node))`
+  branch at 1492-1495 separately.
+- [ ] P2: Cover pane-level `bottom_follow` sticky-state preservation:
+  simulate smooth bottom-follow scroll events that pass through intermediate
+  offsets outside the near-bottom threshold, then assert `SessionPaneView`
+  does not clear sticky-bottom or show the "New response" affordance until a
+  real user scroll cancels the programmatic follow.
+- [ ] P2: Fix the `App.scroll-behavior.test.tsx` "scroll away from
+  bottom" test geometry (`ui/src/App.scroll-behavior.test.tsx:944-948`):
+  the test writes `scrollTop = 800` with `scrollHeight = 1000` and
+  `clientHeight = 200` — that's exactly the bottom. The "still
+  smooth-follow even when not yet pinned" intent is undermined; the
+  panel was already pinned. Change `scrollTop` to a non-bottom value
+  (e.g., 200) and dispatch a `wheel` event with `deltaY: -300` to
+  actually establish the "scrolled up" state, OR rename the test to
+  match what it does. While there, extract a
+  `stubMutableElementScrollGeometry` helper to replace the inline
+  `Object.defineProperty` block at `:879-899`.
+- [ ] P2: Cover SourcePanel rendered-Markdown conflict / mode-switch
+  blocked paths (`ui/src/panels/SourcePanel.tsx:357-362,424` —
+  no test in `SourcePanel.test.tsx`):
+  the `unresolvedCommitCount > 0` / `hasOverlappingMarkdownCommitRanges`
+  branch fires `setActionError(...)` and returns `false`; the
+  `handleSelectDocumentMode` blocks mode-switch when
+  `commitRenderedMarkdownDrafts()` returns `false`. Both are
+  user-visible error paths added by the round and have no coverage.
+  Add a test that mutates the source content under an active draft
+  (rerender with new `content` while the rendered editor still has
+  uncommitted text) and assert the action-error banner appears AND
+  `onSaveFile` is not called. Pair with a mode-switch-blocked test.
+- [ ] P2: Cover SourcePanel rendered-preview drafts across source-file switches:
+  start a rendered Markdown draft in file A, rerender SourcePanel with a
+  different Markdown file B, and assert the draft/committer from A is gone and
+  cannot affect B's save payload.
+- [ ] P2: Cover successful SourcePanel rendered-Markdown commits during
+  document-mode changes:
+  edit rendered Markdown in Preview or Split, click another mode (`Code`,
+  `Preview`, or `Split`), and assert the shared editor buffer, dirty state,
+  and later save payload include the rendered edit. This pins the
+  `handleSelectDocumentMode` success path instead of only the save/blur paths.
+- [ ] P2: Cover Markdown href serialization breakout:
+  construct an editable Markdown DOM anchor with an allowed scheme plus
+  Markdown metacharacters in the destination, such as
+  `https://example.com/) [x](javascript:alert(1)`, then assert
+  `serializeEditableMarkdownSection` does not persist a second Markdown link.
+- [ ] P2: Cover DiffPanel save abort on failed rendered draft commit:
+  create a rendered Markdown draft whose commit range no longer resolves, run
+  the toolbar/parent save path, and assert the save callback is not invoked and
+  the draft remains recoverable.
+- [ ] P2: Add a `userEvent.type` end-to-end test for the rendered
+  preview contentEditable in `SourcePanel.test.tsx`
+  (the existing `editRenderedMarkdownSection` helper at `:68-79`
+  bypasses the contentEditable user surface by directly mutating
+  `innerHTML`):
+  add at least one test using `userEvent.type` against the
+  contentEditable to exercise the typing → input → onDraftChange flow
+  end-to-end. Real editing-path bugs (caret position, paste handlers,
+  typed text not firing the right input event) cannot surface today.
+- [ ] P2: Cover URI-list-only and file-only rendered-Markdown drops:
+  the SourcePanel drop regression now covers hostile `text/html` plus image
+  markup and serializer defense-in-depth. Add follow-up cases for a
+  `text/uri-list`-only `javascript:` drop and file-only/image drops, asserting
+  default insertion is prevented and the live DOM does not host remote-loading
+  elements.
+- [ ] P2: Cover pane-level smooth-scroll intermediate-tick detachment in
+  `App.scroll-behavior.test.tsx` or `AgentSessionPanel.test.tsx`:
+  fire intermediate `fireEvent.scroll(messageStack)` events with
+  `scrollTop` mid-animation (e.g., 600, 700, 850) during a `bottom_follow`
+  write and assert (a) `shouldStickToBottom` (proxy: "New response"
+  indicator absence) survives, (b) any settled-scroll RAF queued for
+  layout settling is NOT cancelled, and (c) a real
+  `fireEvent.wheel(messageStack, { deltaY: -300 })` cancels the cooldown.
+- [ ] P2: Cover cross-source-file rendered-draft contamination in
+  `SourcePanel.test.tsx`:
+  start a rendered draft on file A (`editRenderedMarkdownSection(...)`),
+  rerender with file B's `fileState`, assert the dirty banner is gone
+  and Ctrl+S on file B's editable section does not include file A's
+  draft text. This should pin the current `key={tab.id ?? path}` remount
+  contract instead of documenting an active leak.
+- [ ] P2: Cover `handleSelectDocumentMode` mode-switch blocking on commit
+  failure in `SourcePanel.test.tsx`:
+  mutate parent `content` while a rendered draft is active, click another
+  mode button, and assert the action-error banner appears AND
+  `documentMode` did not change (active mode button still selected).
+  Today only the happy path through the mode-switch is covered.
+- [ ] P2: Add negative-path cases for `resolveRenderedMarkdownCommitRange`
+  in `markdown-commit-ranges.test.ts`:
+  the existing test only covers the success path. Add table-driven
+  negative cases where the source content is mutated before, after, and
+  inside the draft segment, asserting `null` for each. This pins the
+  foundation predicate that the SourcePanel `unresolvedCommitCount > 0`
+  branch depends on.
+- [ ] P2: Assert `scrollTop` preservation in the new upward-wheel
+  prewarm test (`ui/src/panels/AgentSessionPanel.test.tsx:2008-2217`):
+  the new test asserts `getFirstMountedMessageIndex < firstMountedBeforeWheel`
+  but does NOT assert that `scrollNode.scrollTop` is preserved across the
+  prepend. The `docs/bugs_flicker.md` preamble specifically claims
+  "prepends still use the existing scroll-height restore so replacing
+  estimated spacer space with real page DOM does not steal the user's
+  wheel progress." That contract has no test today. Add an assertion that
+  reads `scrollNode.scrollTop` before and after the wheel + prepend, and
+  asserts the user's wheel progress is preserved (not regressed to a
+  lower value than expected).
+- [ ] P2: Cover `resolveWheelDeltaYPx` line/page delta conversion:
+  extend the upward-wheel prewarm coverage with `DOM_DELTA_LINE` and
+  `DOM_DELTA_PAGE` cases, then assert the converted projection mounts earlier
+  pages while preserving the user's scroll progress.
+- [ ] P2: Add a "not yet pinned" / "scrolled away from bottom" test for
+  the second `bottom_follow` write site at `SessionPaneView.tsx:1846`:
+  the path that changed `auto`→`smooth`+`bottom_follow` in the
+  `requestAnimationFrame` jump-to-bottom branch has no test. Add a test
+  where the user is genuinely scrolled away from bottom (e.g.,
+  `scrollTop=200` with `scrollHeight=1000`/`clientHeight=200`) before the
+  assistant delta arrives, and assert the dispatcher chooses the settled
+  jump-to-bottom rather than `bottom_follow`.
+- [ ] P2: Pin the `scrollKind === "bottom_follow"` dispatch contract in
+  `App.scroll-behavior.test.tsx:877-1009`:
+  the existing "smoothly follows new assistant messages while pinned"
+  test asserts only that `scrollTo` was called with `top: 900,
+  behavior: "smooth"`. A regression that ships the smooth scroll
+  without the new scroll-kind (and therefore without the cooldown
+  re-classification at `VirtualizedConversationMessageList.tsx:1467-1495,1610-1624`)
+  would still pass. Spy on `notifyMessageStackScrollWrite` (or the
+  `dispatchEvent` call) and assert the dispatched `scrollKind` is
+  `"bottom_follow"`. Pair with a sibling assertion at the not-yet-pinned
+  write site (`SessionPaneView.tsx:1846`).
 
 ## Known Design Limitations
 

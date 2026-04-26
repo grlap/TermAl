@@ -65,6 +65,31 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
+function editRenderedMarkdownSection(section: HTMLElement, html: string) {
+  act(() => {
+    section.focus();
+    const markdownRoot = section.querySelector<HTMLElement>(".markdown-copy");
+    if (markdownRoot) {
+      markdownRoot.innerHTML = html;
+    } else {
+      section.innerHTML = `<div class="markdown-copy">${html}</div>`;
+    }
+    fireEvent.input(section);
+  });
+}
+
+function selectRenderedMarkdownSectionContents(section: HTMLElement) {
+  act(() => {
+    section.focus();
+    const markdownRoot = section.querySelector<HTMLElement>(".markdown-copy") ?? section;
+    const range = document.createRange();
+    range.selectNodeContents(markdownRoot);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+}
+
 const readyFileState: SourceFileState = {
   status: "ready",
   path: "src/main.rs",
@@ -209,6 +234,233 @@ describe("SourcePanel", () => {
 
     expect(await screen.findByRole("heading", { name: "Changed Title" })).toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
+  });
+
+  it("edits Markdown source from rendered Preview and saves the shared buffer", async () => {
+    const onSaveFile = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Original paragraph.\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={onSaveFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+
+    editRenderedMarkdownSection(renderedSection, "<p>Updated paragraph.</p>");
+
+    expect(await screen.findByText("Unsaved changes")).toBeInTheDocument();
+
+    fireEvent.keyDown(renderedSection, {
+      key: "s",
+      code: "KeyS",
+      ctrlKey: true,
+    });
+
+    await waitFor(() => {
+      expect(onSaveFile).toHaveBeenCalledWith(
+        "/repo/docs/readme.md",
+        "Updated paragraph.\n",
+        undefined,
+      );
+    });
+  });
+
+  it("sanitizes dropped rendered Markdown HTML before saving", async () => {
+    const onSaveFile = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Original paragraph.\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={onSaveFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+
+    selectRenderedMarkdownSectionContents(renderedSection);
+    fireEvent.drop(renderedSection, {
+      dataTransfer: {
+        getData: vi.fn((type: string) => {
+          if (type === "text/html") {
+            return [
+              '<a href="javascript:alert(1)" onclick="alert(2)">Dropped link</a>',
+              '<img src="https://example.com/tracker.png" alt="tracker">',
+              "<p>Safe paragraph</p>",
+            ].join("");
+          }
+          if (type === "text/plain") {
+            return "Dropped link\nSafe paragraph";
+          }
+          return "";
+        }),
+      },
+    });
+
+    fireEvent.keyDown(renderedSection, {
+      key: "s",
+      code: "KeyS",
+      ctrlKey: true,
+    });
+
+    await waitFor(() => {
+      expect(onSaveFile).toHaveBeenCalledWith(
+        "/repo/docs/readme.md",
+        "Dropped link\n\nSafe paragraph\n",
+        undefined,
+      );
+    });
+    const savedContent = onSaveFile.mock.calls[0]?.[1] as string;
+    expect(savedContent).not.toContain("javascript:");
+    expect(savedContent).not.toContain("tracker.png");
+  });
+
+  it("commits rendered Markdown split edits back into the code editor buffer", async () => {
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Original paragraph.\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    const editor = await screen.findByLabelText("Source editor for /repo/docs/readme.md");
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+
+    editRenderedMarkdownSection(renderedSection, "<p>Split paragraph.</p>");
+    fireEvent.blur(renderedSection);
+
+    await waitFor(() => {
+      expect(editor).toHaveValue("Split paragraph.\n");
+    });
+  });
+
+  it("rejects stale rendered split drafts instead of overwriting code-pane edits", async () => {
+    const onSaveFile = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Original paragraph.\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={onSaveFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    const editor = await screen.findByLabelText("Source editor for /repo/docs/readme.md");
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+
+    editRenderedMarkdownSection(renderedSection, "<p>Rendered paragraph.</p>");
+    fireEvent.change(editor, {
+      target: { value: "Code pane edit.\n" },
+    });
+    fireEvent.blur(renderedSection);
+
+    expect(
+      await screen.findByText(/Rendered Markdown edit could not be applied/),
+    ).toBeInTheDocument();
+    expect(editor).toHaveValue("Code pane edit.\n");
+    expect(renderedSection).toHaveTextContent("Rendered paragraph.");
+    expect(onSaveFile).not.toHaveBeenCalled();
+  });
+
+  it("does not save when Ctrl+S cannot apply a rendered Markdown draft", async () => {
+    const onSaveFile = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Original paragraph.\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={onSaveFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    const editor = await screen.findByLabelText("Source editor for /repo/docs/readme.md");
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+
+    editRenderedMarkdownSection(renderedSection, "<p>Rendered paragraph.</p>");
+    fireEvent.change(editor, {
+      target: { value: "Code pane edit.\n" },
+    });
+    fireEvent.keyDown(renderedSection, {
+      key: "s",
+      code: "KeyS",
+      ctrlKey: true,
+    });
+
+    expect(
+      await screen.findByText(/Rendered Markdown edit could not be applied/),
+    ).toBeInTheDocument();
+    expect(editor).toHaveValue("Code pane edit.\n");
+    expect(renderedSection).toHaveTextContent("Rendered paragraph.");
+    expect(onSaveFile).not.toHaveBeenCalled();
   });
 
   it("renders split Markdown preview from the unsaved buffer and opens document links", async () => {

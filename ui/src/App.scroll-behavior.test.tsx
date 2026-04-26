@@ -874,6 +874,149 @@ describe("App scroll behaviour", () => {
     });
   });
 
+  it("smoothly follows new assistant messages while pinned to the bottom", async () => {
+    await withSuppressedActWarnings(async () => {
+      let scrollHeight = 1000;
+      const originalScrollHeight = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        "scrollHeight",
+      );
+      const originalClientHeight = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        "clientHeight",
+      );
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get() {
+          return scrollHeight;
+        },
+      });
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+        configurable: true,
+        get() {
+          return 200;
+        },
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+
+      try {
+        const messageStack = Array.from(
+          document.querySelectorAll(".message-stack"),
+        ).find(
+          (candidate): candidate is HTMLElement =>
+            candidate instanceof HTMLElement &&
+            !candidate.classList.contains("control-panel-stack"),
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 2,
+          projects: [
+            {
+              id: "project-termal",
+              name: "TermAl",
+              rootPath: "/projects/termal",
+            },
+          ],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              preview: "First assistant response.",
+              messages: [
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "First assistant response.",
+                },
+              ],
+            }),
+          ],
+        });
+        await settleAsyncUi();
+
+        messageStack.scrollTop = 800;
+        await act(async () => {
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+        scrollToMock.mockClear();
+
+        scrollHeight = 1100;
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 3,
+          projects: [
+            {
+              id: "project-termal",
+              name: "TermAl",
+              rootPath: "/projects/termal",
+            },
+          ],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              preview: "Second assistant response.",
+              messages: [
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "First assistant response.",
+                },
+                {
+                  id: "message-assistant-2",
+                  type: "text",
+                  timestamp: "10:02",
+                  author: "assistant",
+                  text: "Second assistant response.",
+                },
+              ],
+            }),
+          ],
+        });
+        await settleAsyncUi();
+
+        expect(
+          filterScrollToCallsAt(scrollToMock, 900, "smooth").length,
+        ).toBeGreaterThan(0);
+        expect(
+          screen.queryByRole("button", { name: "New response" }),
+        ).not.toBeInTheDocument();
+      } finally {
+        context.cleanup();
+        if (originalScrollHeight) {
+          Object.defineProperty(
+            HTMLElement.prototype,
+            "scrollHeight",
+            originalScrollHeight,
+          );
+        } else {
+          delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+            .scrollHeight;
+        }
+        if (originalClientHeight) {
+          Object.defineProperty(
+            HTMLElement.prototype,
+            "clientHeight",
+            originalClientHeight,
+          );
+        } else {
+          delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+            .clientHeight;
+        }
+      }
+    });
+  });
+
   it("resolves settled-scroll minimum attempts from the fallback threshold and explicit clamp", () => {
     expect(resolveSettledScrollMinimumAttempts(60)).toBe(8);
     expect(resolveSettledScrollMinimumAttempts(13)).toBe(8);

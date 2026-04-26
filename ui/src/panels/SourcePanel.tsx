@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { copyTextToClipboard } from "../clipboard";
 import { MarkdownContent, type MarkdownFileLinkTarget } from "../message-cards";
 import type { MonacoCodeEditorStatus, MonacoInlineZone } from "../MonacoCodeEditor";
@@ -11,6 +11,21 @@ import {
 } from "../source-renderers";
 import type { WorkspaceFileChangeKind } from "../types";
 import { rebaseContentOntoDisk } from "./content-rebase";
+import { EditableRenderedMarkdownSection } from "./markdown-diff-change-section";
+import {
+  hasOverlappingMarkdownCommitRanges,
+  resolveRenderedMarkdownCommitRange,
+  type MarkdownDocumentRange,
+  type RenderedMarkdownSectionCommit,
+} from "./markdown-commit-ranges";
+import {
+  applyMarkdownDocumentEolStyle,
+  detectMarkdownDocumentEolStyle,
+  normalizeEditedMarkdownSection,
+  normalizeMarkdownDocumentLineEndings,
+  replaceMarkdownDocumentRange,
+  type MarkdownDiffDocumentSegment,
+} from "./markdown-diff-segments";
 import {
   RendererPreviewPane,
   composeInlineRegionFence,
@@ -126,13 +141,21 @@ export function SourcePanel({
   const [documentMode, setDocumentMode] = useState<SourceDocumentMode>("code");
   const [editorStatus, setEditorStatus] = useState<MonacoCodeEditorStatus>(DEFAULT_EDITOR_STATUS);
   const [copiedPath, setCopiedPath] = useState(false);
+  const [hasRenderedMarkdownDraftActive, setHasRenderedMarkdownDraftActive] = useState(false);
   const pendingEditorValueRef = useRef<string | null>(null);
   const lastAutoRebaseKeyRef = useRef<string | null>(null);
   const mountedRef = useRef(false);
   const rebaseRequestTokenRef = useRef(0);
   const fileStateRef = useRef(fileState);
   const editorValueRef = useRef(editorValue);
-  const isDirty = fileState.status === "ready" && editorValue !== fileState.content;
+  const renderedMarkdownDocumentPathRef = useRef(
+    fileState.status === "ready" ? fileState.path : null,
+  );
+  const renderedMarkdownCommittersRef = useRef(
+    new Set<() => RenderedMarkdownSectionCommit | null>(),
+  );
+  const isEditorDirty = fileState.status === "ready" && editorValue !== fileState.content;
+  const isDirty = isEditorDirty || hasRenderedMarkdownDraftActive;
   const isMarkdownSource =
     fileState.status === "ready" && isMarkdownDocument(fileState.language, fileState.path);
   // Phase 3 of `docs/features/source-renderers.md`: expose
@@ -160,6 +183,23 @@ export function SourcePanel({
   // (`.mmd`) surface a whole-file region, so they get the switcher.
   const canShowRendererPreview =
     fileState.status === "ready" && (isMarkdownSource || renderableRegions.length > 0);
+  const renderedMarkdownSegment = useMemo<MarkdownDiffDocumentSegment | null>(() => {
+    if (!isMarkdownSource || fileState.status !== "ready") {
+      return null;
+    }
+
+    const markdown = normalizeMarkdownDocumentLineEndings(editorValue);
+    return {
+      afterEndOffset: markdown.length,
+      afterStartOffset: 0,
+      id: `source-preview:${fileState.path}`,
+      isInAfterDocument: true,
+      kind: "normal",
+      markdown,
+      newStart: 1,
+      oldStart: 1,
+    };
+  }, [editorValue, fileState.path, fileState.status, isMarkdownSource]);
   // Inline Monaco view zones: each detected renderable region gets a
   // zone pinned AFTER its last source line, hosting a portal that
   // renders the region's display text via MarkdownContent. Keyed by
@@ -208,6 +248,13 @@ export function SourcePanel({
   }, []);
 
   useEffect(() => {
+    const nextRenderedMarkdownDocumentPath =
+      fileState.status === "ready" ? fileState.path : null;
+    if (renderedMarkdownDocumentPathRef.current !== nextRenderedMarkdownDocumentPath) {
+      renderedMarkdownDocumentPathRef.current = nextRenderedMarkdownDocumentPath;
+      renderedMarkdownCommittersRef.current.clear();
+    }
+
     if (fileState.status === "ready") {
       const pendingEditorValue = pendingEditorValueRef.current;
       pendingEditorValueRef.current = null;
@@ -216,12 +263,14 @@ export function SourcePanel({
       setActionError(null);
       setSaveConflictOnDisk(false);
       setCompareDiskContent(null);
+      setHasRenderedMarkdownDraftActive(false);
       setEditorStatus(createEditorStatusSnapshot(nextEditorValue));
       return;
     }
 
     if (fileState.status !== "loading") {
       setEditorValueState("");
+      setHasRenderedMarkdownDraftActive(false);
       setEditorStatus(DEFAULT_EDITOR_STATUS);
     }
   }, [
@@ -258,7 +307,143 @@ export function SourcePanel({
     };
   }, [copiedPath]);
 
+  const registerRenderedMarkdownCommitter = useCallback((committer: () => RenderedMarkdownSectionCommit | null) => {
+    renderedMarkdownCommittersRef.current.add(committer);
+    return () => {
+      renderedMarkdownCommittersRef.current.delete(committer);
+    };
+  }, []);
+
+  function collectRenderedMarkdownCommits() {
+    return Array.from(renderedMarkdownCommittersRef.current)
+      .map((committer) => committer())
+      .filter((commit): commit is RenderedMarkdownSectionCommit => commit != null);
+  }
+
+  function commitRenderedMarkdownDrafts(): boolean {
+    const commits = collectRenderedMarkdownCommits();
+    if (commits.length === 0) {
+      setHasRenderedMarkdownDraftActive(false);
+      const currentFileState = fileStateRef.current;
+      onDirtyChange?.(
+        currentFileState.status === "ready" &&
+          editorValueRef.current !== currentFileState.content,
+      );
+      return true;
+    }
+
+    return handleRenderedMarkdownSectionCommits(commits);
+  }
+
+  function commitRenderedMarkdownSectionDraft(commit: RenderedMarkdownSectionCommit) {
+    return handleRenderedMarkdownSectionCommits([commit]);
+  }
+
+  function handleRenderedMarkdownSectionCommits(
+    commits: RenderedMarkdownSectionCommit[],
+  ) {
+    const currentFileState = fileStateRef.current;
+    if (!isMarkdownSource || currentFileState.status !== "ready") {
+      return false;
+    }
+
+    const rawSourceContent = editorValueRef.current;
+    const originalEolStyle = detectMarkdownDocumentEolStyle(rawSourceContent);
+    const sourceContent = normalizeMarkdownDocumentLineEndings(rawSourceContent);
+    const resolvedCommits = commits.map((commit) => ({
+      commit,
+      range: resolveRenderedMarkdownCommitRange(sourceContent, commit),
+    }));
+    const unresolvedCommitCount = resolvedCommits.filter(
+      (entry) => entry.range === null,
+    ).length;
+    const validResolvedCommits = resolvedCommits.filter(
+      (entry): entry is {
+        commit: RenderedMarkdownSectionCommit;
+        range: MarkdownDocumentRange;
+      } => entry.range !== null,
+    );
+    const hasOverlappingRange = hasOverlappingMarkdownCommitRanges(validResolvedCommits);
+    if (unresolvedCommitCount > 0 || hasOverlappingRange) {
+      setActionError(
+        "Rendered Markdown edit could not be applied because the document changed under that section. Review the latest file and edit again.",
+      );
+      return false;
+    }
+
+    const nextDocumentContentLf = validResolvedCommits
+      .sort((left, right) => right.range.start - left.range.start)
+      .reduce(
+        (currentContent, { commit, range }) =>
+          replaceMarkdownDocumentRange(
+            currentContent,
+            range.start,
+            range.end,
+            normalizeEditedMarkdownSection(commit.nextMarkdown, commit.segment.markdown),
+          ),
+        sourceContent,
+      );
+    if (nextDocumentContentLf === sourceContent) {
+      commits.forEach((commit) => commit.onApplied?.());
+      setHasRenderedMarkdownDraftActive(false);
+      onDirtyChange?.(currentFileState.status === "ready" && rawSourceContent !== currentFileState.content);
+      return true;
+    }
+
+    const nextDocumentContent = applyMarkdownDocumentEolStyle(
+      nextDocumentContentLf,
+      originalEolStyle,
+    );
+    setHasRenderedMarkdownDraftActive(false);
+    setEditorValueState(nextDocumentContent);
+    setEditorStatus(createEditorStatusSnapshot(nextDocumentContent));
+    setActionError(null);
+    setSaveConflictOnDisk(false);
+    commits.forEach((commit) => commit.onApplied?.());
+    onDirtyChange?.(nextDocumentContent !== currentFileState.content);
+    return true;
+  }
+
+  function handleRenderedMarkdownSectionDraftChange(
+    segment: MarkdownDiffDocumentSegment,
+    nextMarkdown: string,
+  ) {
+    if (!isMarkdownSource || fileStateRef.current.status !== "ready") {
+      return;
+    }
+
+    const normalizedDraft = normalizeEditedMarkdownSection(nextMarkdown, segment.markdown);
+    const nextHasDraft = normalizedDraft !== segment.markdown;
+    const currentFileState = fileStateRef.current;
+    setHasRenderedMarkdownDraftActive(nextHasDraft);
+    setActionError(null);
+    setSaveConflictOnDisk(false);
+    onDirtyChange?.(
+      currentFileState.status === "ready" &&
+        (editorValueRef.current !== currentFileState.content || nextHasDraft),
+    );
+  }
+
+  function handleRenderedMarkdownReadOnlyMutation() {
+    // SourcePanel Markdown preview is editable; this is only required by
+    // the shared rendered-Markdown section API.
+  }
+
+  function handleSelectDocumentMode(nextMode: SourceDocumentMode) {
+    if (documentMode === nextMode) {
+      return;
+    }
+    if (!commitRenderedMarkdownDrafts()) {
+      return;
+    }
+    setDocumentMode(nextMode);
+  }
+
   async function handleSave(options?: SourceSaveOptions) {
+    if (!commitRenderedMarkdownDrafts()) {
+      return;
+    }
+
     const currentFileState = fileStateRef.current;
     const currentEditorValue = editorValueRef.current;
     const canRestoreDeletedFile =
@@ -293,7 +478,8 @@ export function SourcePanel({
   function handleEditorChange(nextValue: string) {
     setEditorValueState(nextValue);
     onDirtyChange?.(
-      fileState.status === "ready" && nextValue !== fileState.content,
+      fileState.status === "ready" &&
+        (nextValue !== fileState.content || hasRenderedMarkdownDraftActive),
     );
   }
 
@@ -314,6 +500,10 @@ export function SourcePanel({
   }
 
   async function handleApplyLocalEditsToDiskVersion() {
+    if (!commitRenderedMarkdownDrafts()) {
+      return;
+    }
+
     const currentFileState = fileStateRef.current;
     const currentEditorValue = editorValueRef.current;
     if (
@@ -376,6 +566,10 @@ export function SourcePanel({
   }
 
   async function handleShowCompare() {
+    if (!commitRenderedMarkdownDrafts()) {
+      return;
+    }
+
     if (
       fileState.status !== "ready" ||
       !onFetchLatestFile ||
@@ -526,17 +720,17 @@ export function SourcePanel({
               <SourceDocumentModeButton
                 label="Code"
                 selected={documentMode === "code"}
-                onClick={() => setDocumentMode("code")}
+                onClick={() => handleSelectDocumentMode("code")}
               />
               <SourceDocumentModeButton
                 label="Preview"
                 selected={documentMode === "preview"}
-                onClick={() => setDocumentMode("preview")}
+                onClick={() => handleSelectDocumentMode("preview")}
               />
               <SourceDocumentModeButton
                 label="Split"
                 selected={documentMode === "split"}
-                onClick={() => setDocumentMode("split")}
+                onClick={() => handleSelectDocumentMode("split")}
               />
             </div>
           </div>
@@ -660,15 +854,32 @@ export function SourcePanel({
                 </Suspense>
               </>
             ) : canShowRendererPreview && documentMode === "preview" ? (
-              <RendererPreviewPane
-                appearance={editorAppearance}
-                content={editorValue}
-                documentPath={fileState.path}
-                isMarkdownSource={isMarkdownSource}
-                onOpenSourceLink={onOpenSourceLink}
-                renderableRegions={renderableRegions}
-                workspaceRoot={workspaceRoot}
-              />
+              isMarkdownSource && renderedMarkdownSegment ? (
+                <EditableMarkdownPreviewPane
+                  appearance={editorAppearance}
+                  documentPath={fileState.path}
+                  onCommitDrafts={commitRenderedMarkdownDrafts}
+                  onCommitSectionDraft={commitRenderedMarkdownSectionDraft}
+                  onDraftChange={handleRenderedMarkdownSectionDraftChange}
+                  onOpenSourceLink={onOpenSourceLink}
+                  onReadOnlyMutation={handleRenderedMarkdownReadOnlyMutation}
+                  onRegisterCommitter={registerRenderedMarkdownCommitter}
+                  onSave={() => handleSave()}
+                  segment={renderedMarkdownSegment}
+                  sourceContent={normalizeMarkdownDocumentLineEndings(editorValue)}
+                  workspaceRoot={workspaceRoot}
+                />
+              ) : (
+                <RendererPreviewPane
+                  appearance={editorAppearance}
+                  content={editorValue}
+                  documentPath={fileState.path}
+                  isMarkdownSource={isMarkdownSource}
+                  onOpenSourceLink={onOpenSourceLink}
+                  renderableRegions={renderableRegions}
+                  workspaceRoot={workspaceRoot}
+                />
+              )
             ) : canShowRendererPreview && documentMode === "split" ? (
               <div className="source-markdown-split">
                 <div className="source-markdown-split-pane source-markdown-editor-pane">
@@ -690,15 +901,32 @@ export function SourcePanel({
                   </Suspense>
                 </div>
                 <div className="source-markdown-split-pane">
-                  <RendererPreviewPane
-                    appearance={editorAppearance}
-                    content={editorValue}
-                    documentPath={fileState.path}
-                    isMarkdownSource={isMarkdownSource}
-                    onOpenSourceLink={onOpenSourceLink}
-                    renderableRegions={renderableRegions}
-                    workspaceRoot={workspaceRoot}
-                  />
+                  {isMarkdownSource && renderedMarkdownSegment ? (
+                    <EditableMarkdownPreviewPane
+                      appearance={editorAppearance}
+                      documentPath={fileState.path}
+                      onCommitDrafts={commitRenderedMarkdownDrafts}
+                      onCommitSectionDraft={commitRenderedMarkdownSectionDraft}
+                      onDraftChange={handleRenderedMarkdownSectionDraftChange}
+                      onOpenSourceLink={onOpenSourceLink}
+                      onReadOnlyMutation={handleRenderedMarkdownReadOnlyMutation}
+                      onRegisterCommitter={registerRenderedMarkdownCommitter}
+                      onSave={() => handleSave()}
+                      segment={renderedMarkdownSegment}
+                      sourceContent={normalizeMarkdownDocumentLineEndings(editorValue)}
+                      workspaceRoot={workspaceRoot}
+                    />
+                  ) : (
+                    <RendererPreviewPane
+                      appearance={editorAppearance}
+                      content={editorValue}
+                      documentPath={fileState.path}
+                      isMarkdownSource={isMarkdownSource}
+                      onOpenSourceLink={onOpenSourceLink}
+                      renderableRegions={renderableRegions}
+                      workspaceRoot={workspaceRoot}
+                    />
+                  )}
                 </div>
               </div>
             ) : (
@@ -735,6 +963,59 @@ export function SourcePanel({
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+const noopOpenSourceLink = (_target: MarkdownFileLinkTarget) => {};
+
+function EditableMarkdownPreviewPane({
+  appearance,
+  documentPath,
+  onCommitDrafts,
+  onCommitSectionDraft,
+  onDraftChange,
+  onOpenSourceLink,
+  onReadOnlyMutation,
+  onRegisterCommitter,
+  onSave,
+  segment,
+  sourceContent,
+  workspaceRoot,
+}: {
+  appearance: MonacoAppearance;
+  documentPath: string | null;
+  onCommitDrafts: () => boolean;
+  onCommitSectionDraft: (commit: RenderedMarkdownSectionCommit) => boolean;
+  onDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
+  onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
+  onReadOnlyMutation: () => void;
+  onRegisterCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
+  onSave: () => Promise<void> | void;
+  segment: MarkdownDiffDocumentSegment;
+  sourceContent: string;
+  workspaceRoot: string | null;
+}) {
+  return (
+    <div className="source-renderer-preview source-renderer-preview-editable" aria-label="Rendered preview">
+      <EditableRenderedMarkdownSection
+        allowReadOnlyCaret={false}
+        allowCurrentSegmentFallback={false}
+        appearance={appearance}
+        canEdit
+        className="source-rendered-markdown-section markdown-diff-normal-section"
+        documentPath={documentPath}
+        onCommitDrafts={onCommitDrafts}
+        onCommitSectionDraft={onCommitSectionDraft}
+        onDraftChange={onDraftChange}
+        onOpenSourceLink={onOpenSourceLink ?? noopOpenSourceLink}
+        onReadOnlyMutation={onReadOnlyMutation}
+        onRegisterCommitter={onRegisterCommitter}
+        onSave={onSave}
+        segment={segment}
+        sourceContent={sourceContent}
+        workspaceRoot={workspaceRoot}
+      />
     </div>
   );
 }

@@ -7,9 +7,9 @@
 //     zeroes body descenders / scroll-root overflow so the iframe
 //     can be sized off the SVG viewBox.
 //   - `getMermaidDiagramFrameStyle` — reads the SVG's viewBox and
-//     returns `{ height, width, maxWidth }` css for the iframe,
-//     clamped against upper/lower bounds that protect the layout
-//     from pathologically large diagrams.
+//     returns `{ aspectRatio, height, width, maxWidth }` css for the
+//     iframe, clamped against upper/lower bounds that protect the
+//     layout from pathologically large diagrams.
 //   - `clampMermaidDiagramExtent`, `readMermaidSvgDimensions` —
 //     the clamp math and the viewBox parser that back the frame-
 //     style helper.
@@ -122,36 +122,29 @@ export function getMermaidDiagramFrameStyle(svg: string): CSSProperties {
     return {};
   }
 
+  const frameHeight = clampMermaidDiagramExtent(
+    Math.ceil(dimensions.height) + 24,
+    60,
+    MERMAID_DIAGRAM_FRAME_MAX_HEIGHT,
+  );
+  const frameWidth = clampMermaidDiagramExtent(
+    Math.ceil(dimensions.width) + 2,
+    180,
+    MERMAID_DIAGRAM_FRAME_MAX_WIDTH,
+  );
+
   return {
-    // Minimum iframe dimensions kept just above the Mermaid
-    // "something rendered here" threshold so short diagrams aren't
-    // padded up. Earlier minimums (320 × 120) were tuned for the
-    // fatter pre-12px-font layout; with the smaller theme variables
-    // in `TERMAL_MERMAID_THEME_VARIABLES` a 3-node linear flowchart
-    // now naturally renders well under those sizes.
+    // `max-width: 100%` can shrink a wide iframe below `frameWidth`.
+    // If height stays fixed, the SVG scales down horizontally while
+    // the iframe keeps the old unscaled height, leaving a large blank
+    // area below wide ER diagrams. Use CSS aspect-ratio so the used
+    // height scales with the constrained width.
     //
-    // Buffer detail: Mermaid's SVG viewBox is measured in a temp-DOM
-    // that doesn't necessarily use the same font metrics as the
-    // iframe, so the html-labels foreignObject text can render a
-    // couple of pixels taller. The srcDoc CSS sets
-    // `html { overflow-x: auto; overflow-y: hidden }` so wide
-    // diagrams can scroll horizontally inside the iframe — but that
-    // horizontal scrollbar eats ~16 px of vertical space at the
-    // bottom of the frame, so we reserve that room in the iframe
-    // height even when no scrollbar is showing. Cheaper than
-    // detecting overflow: a narrow diagram loses 16 px of empty
-    // space; a wide one doesn't clip its bottom row behind the
-    // scrollbar chrome.
-    height: `${clampMermaidDiagramExtent(
-      Math.ceil(dimensions.height) + 24,
-      60,
-      MERMAID_DIAGRAM_FRAME_MAX_HEIGHT,
-    )}px`,
-    width: `${clampMermaidDiagramExtent(
-      Math.ceil(dimensions.width) + 2,
-      180,
-      MERMAID_DIAGRAM_FRAME_MAX_WIDTH,
-    )}px`,
+    // `frameHeight` still includes the historical 24px vertical slack
+    // for scrollbar chrome / Mermaid temp-DOM text-measurement drift.
+    aspectRatio: `${frameWidth} / ${frameHeight}`,
+    height: "auto",
+    width: `${frameWidth}px`,
     maxWidth: "100%",
   };
 }

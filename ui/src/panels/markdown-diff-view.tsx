@@ -113,9 +113,9 @@ export function MarkdownDiffView({
     segment: MarkdownDiffDocumentSegment,
     nextMarkdown: string,
   ) => void;
-  onCommitRenderedMarkdownSectionDraft: (commit: RenderedMarkdownSectionCommit) => void;
+  onCommitRenderedMarkdownSectionDraft: (commit: RenderedMarkdownSectionCommit) => boolean;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
-  onCommitRenderedMarkdownDrafts: () => void;
+  onCommitRenderedMarkdownDrafts: () => boolean;
   onRegisterRenderedMarkdownCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
   onSave: MarkdownDiffSaveHandler;
   preview: ReturnType<typeof buildDiffPreviewModel>;
@@ -254,10 +254,10 @@ function MarkdownDiffDocument({
   completeness: MarkdownDocumentCompleteness;
   documentPath: string | null;
   note: string | null;
-  onCommitRenderedMarkdownSectionDraft: (commit: RenderedMarkdownSectionCommit) => void;
+  onCommitRenderedMarkdownSectionDraft: (commit: RenderedMarkdownSectionCommit) => boolean;
   onRenderedMarkdownSectionDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
-  onCommitRenderedMarkdownDrafts: () => void;
+  onCommitRenderedMarkdownDrafts: () => boolean;
   onRegisterRenderedMarkdownCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
   onReadOnlyRenderedMarkdownMutation: () => void;
   onSave: MarkdownDiffSaveHandler;
@@ -342,8 +342,8 @@ function renderMarkdownDiffSegments({
   appearance: MonacoAppearance;
   canEdit: boolean;
   documentPath: string | null;
-  onCommitRenderedMarkdownDrafts: () => void;
-  onCommitRenderedMarkdownSectionDraft: (commit: RenderedMarkdownSectionCommit) => void;
+  onCommitRenderedMarkdownDrafts: () => boolean;
+  onCommitRenderedMarkdownSectionDraft: (commit: RenderedMarkdownSectionCommit) => boolean;
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
   onRegisterRenderedMarkdownCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
   onReadOnlyRenderedMarkdownMutation: () => void;

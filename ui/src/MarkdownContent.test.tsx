@@ -473,18 +473,17 @@ describe("MarkdownContent Mermaid diagrams", () => {
 
     const frame = await screen.findByTestId("mermaid-frame");
     const widthPx = Number.parseInt(frame.style.width, 10);
-    const heightPx = Number.parseInt(frame.style.height, 10);
     expect(widthPx).toBeGreaterThan(0);
-    expect(heightPx).toBeGreaterThan(0);
     expect(widthPx).toBeLessThanOrEqual(4096);
-    expect(heightPx).toBeLessThanOrEqual(4096);
+    expect(frame.style.height).toBe("auto");
+    expect(frame.style.aspectRatio).toBe("4096 / 4096");
     expect(frame.style.maxWidth).toBe("100%");
-    // The inline width/height cap is the primary guard; also confirm the
+    // The inline width/aspect-ratio cap is the primary guard; also confirm the
     // container did not propagate the runaway SVG dimensions.
     expect(container.querySelector(".mermaid-diagram-frame")).toBe(frame);
   });
 
-  it("reserves a 24-px vertical slack for the horizontal scrollbar on normal-size Mermaid diagrams", async () => {
+  it("encodes 24-px vertical slack in the Mermaid iframe aspect ratio", async () => {
     // The iframe srcDoc CSS uses `overflow-x: auto; overflow-y: hidden`
     // so wide diagrams can scroll horizontally inside the iframe, but
     // the horizontal scrollbar eats ~16 px at the bottom of the frame.
@@ -507,12 +506,39 @@ describe("MarkdownContent Mermaid diagrams", () => {
     );
 
     const frame = await screen.findByTestId("mermaid-frame");
-    const heightPx = Number.parseInt(frame.style.height, 10);
     const widthPx = Number.parseInt(frame.style.width, 10);
-    // viewBox height 80 + 24 slack = 104; within [60, 4096] so not clamped.
-    expect(heightPx).toBe(104);
     // viewBox width 300 + 2 = 302; within [180, 4096] so not clamped.
     expect(widthPx).toBe(302);
+    // viewBox height 80 + 24 slack = 104; encoded into aspect ratio so
+    // CSS scales the used height when `max-width: 100%` constrains the frame.
+    expect(frame.style.height).toBe("auto");
+    expect(frame.style.aspectRatio).toBe("302 / 104");
+  });
+
+  it("scales wide Mermaid iframe height with max-width instead of leaving blank space", async () => {
+    mermaidRenderMock.mockResolvedValueOnce({
+      diagramType: "er",
+      svg: '<svg data-testid="mermaid-svg" viewBox="0 0 2340.4453125 926.6875"><text>wide er</text></svg>',
+    });
+
+    render(
+      <MarkdownContent
+        markdown={[
+          "```mermaid",
+          "erDiagram",
+          "  USERS {",
+          "    uuid id",
+          "  }",
+          "```",
+        ].join("\n")}
+      />,
+    );
+
+    const frame = await screen.findByTestId("mermaid-frame");
+    expect(frame.style.width).toBe("2343px");
+    expect(frame.style.maxWidth).toBe("100%");
+    expect(frame.style.height).toBe("auto");
+    expect(frame.style.aspectRatio).toBe("2343 / 951");
   });
 
   it("clamps Mermaid iframe dimensions up to the lower bound when the viewBox is negative", async () => {
@@ -535,9 +561,9 @@ describe("MarkdownContent Mermaid diagrams", () => {
 
     const frame = await screen.findByTestId("mermaid-frame");
     const widthPx = Number.parseInt(frame.style.width, 10);
-    const heightPx = Number.parseInt(frame.style.height, 10);
     expect(widthPx).toBe(180);
-    expect(heightPx).toBe(60);
+    expect(frame.style.height).toBe("auto");
+    expect(frame.style.aspectRatio).toBe("180 / 60");
   });
 
   it("clamps Mermaid iframe dimensions up to the lower bound when the viewBox is zero", async () => {
@@ -559,9 +585,9 @@ describe("MarkdownContent Mermaid diagrams", () => {
 
     const frame = await screen.findByTestId("mermaid-frame");
     const widthPx = Number.parseInt(frame.style.width, 10);
-    const heightPx = Number.parseInt(frame.style.height, 10);
     expect(widthPx).toBe(180);
-    expect(heightPx).toBe(60);
+    expect(frame.style.height).toBe("auto");
+    expect(frame.style.aspectRatio).toBe("180 / 60");
   });
 });
 

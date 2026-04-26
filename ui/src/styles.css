@@ -5195,6 +5195,25 @@ textarea {
   border-left: 0;
 }
 
+.source-renderer-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 1rem;
+  background: var(--surface-white);
+}
+
+.source-renderer-preview .source-rendered-markdown-section,
+.source-renderer-preview .markdown-copy-shell,
+.source-renderer-preview .markdown-copy {
+  max-width: min(58rem, 100%);
+}
+
+.source-renderer-preview .markdown-copy-shell .markdown-copy {
+  max-width: none;
+}
+
 .source-markdown-editor-pane .monaco-code-editor {
   min-height: 0;
 }

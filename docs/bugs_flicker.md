@@ -8,6 +8,39 @@ dedicated working record for reproduction notes, root-cause findings, and
 fix-specific acceptance criteria. Do not close the issue based on partial
 improvements or narrower test coverage.
 
+## Latest fixed finding: first `PageUp` from the bottom
+
+The reproducible first-`PageUp` flicker from the bottom was caused by a heavy
+assistant markdown card changing component shape at scroll start. While idle at
+the bottom, assistant text could render as eager `MarkdownContent`; the first
+manual scroll then disabled the immediate-heavy preference and remounted the
+same message through `DeferredHeavyContent`, temporarily replacing measured
+content with a placeholder. That changed the mounted page height during the
+native page scroll.
+
+The current fix keeps non-streaming assistant markdown mounted through the
+deferred wrapper and passes the immediate-render preference into that wrapper
+instead of switching component types. The virtualized stack also suspends
+deferred heavy activation during direct user-scroll / page-jump cooldowns with
+`data-deferred-render-suspended="true"`, then dispatches
+`termal:deferred-render-resume` after the cooldown so near-viewport heavy blocks
+activate only after scroll geometry has settled.
+
+## Latest fixed finding: upward wheel can expose the top spacer
+
+Mouse-wheel scroll upward could briefly reveal a large blank spacer when a
+large delta moved the viewport into virtual space before the native `scroll`
+event gave React a chance to prepend the next page band. The downward path
+already had an actual-DOM coverage guard for compact pages that exposed the
+bottom spacer; the upward path now has the symmetric protection:
+
+- wheel input projects the upward target and prewarms pages above the mounted
+  band before the native scroll event paints
+- during active-scroll cooldown, the virtualizer checks the first mounted page's
+  real DOM top and prepends pages if it has fallen below the viewport top
+- prepends still use the existing scroll-height restore so replacing estimated
+  spacer space with real page DOM does not steal the user's wheel progress
+
 ## Current user-visible symptoms
 
 ### 1. `PageUp` scroll can degrade from page-sized movement into tiny steps
@@ -132,12 +165,15 @@ The current bad `PageUp` behavior does not require loading older messages at the
 top. That path may still have issues, but it is not needed to explain the main
 reported failure.
 
-### 2. Deferred placeholder activation inside the virtualized list is not the
-primary culprit
+### 2. Intersection-driven deferred placeholder activation inside the
+virtualized list is not the primary culprit
 
 The virtualized transcript already short-circuits deferred-heavy activation for
-cards inside `.virtualized-message-list`, so the main repro is not simply
-"placeholder swapped to real content later."
+cards inside `.virtualized-message-list`, so the older main repro was not simply
+"placeholder swapped to real content later" by IntersectionObserver activation.
+The fixed first-`PageUp` repro was a different placeholder path: assistant
+markdown switched from eager render to the deferred wrapper when scroll state
+changed.
 
 The more plausible source is:
 

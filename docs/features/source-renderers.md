@@ -6,8 +6,10 @@ Phases 1-5 shipped plus an Inline-zones enhancement that merges the
 read-only "Inline" preview into the editable Code mode: when a file
 has renderable regions, `MonacoCodeEditor` hosts view zones that
 render each diagram inline after its last source line, alongside the
-editable source. No separate mode toggle. Phase 6 (additional
-renderers beyond Mermaid/math) planned.
+editable source. Markdown source Preview/Split also reuse the rendered
+Markdown editing surface from Git diff, so rendered preview edits write
+back to the same source buffer. Phase 6 (additional renderers beyond
+Mermaid/math) planned.
 
 This document defines a shared renderer model for source-backed previews. It
 extends the Markdown document work into a more general capability: render
@@ -304,8 +306,10 @@ For files with renderable content, the source panel can expose:
 Rules:
 
 - `Code` keeps the current Monaco editor.
-- `Preview` renders from the current source buffer.
-- `Split` shows Monaco and rendered preview side by side.
+- `Preview` renders from the current source buffer. For Markdown files,
+  the rendered document is editable and commits back to that same buffer.
+- `Split` shows Monaco and rendered preview side by side; Markdown
+  rendered edits update the Monaco buffer on blur/save/mode changes.
 - Preview updates from unsaved `editorValue`, not stale loaded file content.
 - Save, reload, compare, rebase, and stale-write behavior remain source-buffer
   operations.
@@ -400,6 +404,11 @@ Rules:
 
 - Render only tagged Mermaid blocks.
 - Keep the current sandboxed iframe behavior.
+- Size the iframe from the rendered SVG `viewBox` using a clamped width and
+  CSS `aspect-ratio` with `height: auto`. The frame must preserve the diagram's
+  aspect ratio when pane width constrains `max-width: 100%`; do not return to a
+  fixed-height iframe, because wide ER diagrams otherwise scale down
+  horizontally while retaining a tall blank frame.
 - Keep source visible or recoverable in editable contexts.
 - Keep existing source length and diagram count budgets.
 
@@ -436,6 +445,8 @@ Rules:
 Automated tests:
 
 - Markdown source preview renders Mermaid from unsaved editor content.
+- Markdown source Preview/Split rendered edits save through the same
+  `editorValue` buffer as Code mode.
 - Markdown source preview renders inline and block math.
 - Markdown diff view renders Mermaid/math with correct staged and unstaged side
   semantics.
@@ -476,6 +487,7 @@ Manual checks:
 - Show `Preview` and `Split` for Markdown and detected renderable non-Markdown
   files.
 - Render from unsaved `editorValue`.
+- Reuse the rendered Markdown editor for Markdown source Preview/Split.
 - Preserve current save/reload/rebase behavior.
 
 ### Phase 4: Diff Panel Integration

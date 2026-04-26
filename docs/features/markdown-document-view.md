@@ -495,6 +495,9 @@ Rules:
 
 - Only show the mode switcher for Markdown files.
 - Preview uses `editorValue`, not stale file state.
+- Preview and Split use the same rendered Markdown editing surface as
+  Git diff; rendered edits commit into `editorValue` on blur, save, and
+  mode changes.
 - Save, reload, compare, rebase, and stale-write actions remain source-buffer actions.
 - Source preview scroll position should be preserved across editor updates when practical.
 
@@ -536,6 +539,7 @@ Automated tests:
 - Unsafe links are blocked.
 - Relative file links resolve against `documentPath`.
 - Source Markdown preview updates from unsaved `editorValue`.
+- Source Markdown preview rendered edits save through the shared source buffer.
 - Non-Markdown source files do not show Markdown modes.
 - Diff Markdown mode appears only for Markdown targets.
 - Git unstaged Markdown preview renders index -> working tree.

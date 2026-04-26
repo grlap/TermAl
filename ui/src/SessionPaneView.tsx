@@ -1147,7 +1147,7 @@ export function SessionPaneView({
 
   function followLatestMessageForPromptSend() {
     if (isMessageStackNearBottom()) {
-      scrollToLatestMessage("smooth");
+      scrollToLatestMessage("smooth", false, "bottom_follow");
       return undefined;
     }
 
@@ -1844,7 +1844,7 @@ export function SessionPaneView({
 
     setNewResponseIndicator(scrollStateKey, false);
     const frameId = window.requestAnimationFrame(() => {
-      scrollToLatestMessage("auto");
+      scrollToLatestMessage("smooth", false, "bottom_follow");
     });
 
     return () => {
@@ -2574,6 +2574,7 @@ export function SessionPaneView({
             editorAppearance={editorAppearance}
             editorFontSizePx={editorFontSizePx}
             fileState={fileState}
+            key={activeSourceTab.id ?? activeSourceTab.path}
             sourceFocus={
               activeSourceTab?.focusLineNumber
                 ? {

@@ -340,12 +340,11 @@ export function DiffPanel({
       }
       const commits = Array.from(commitsBySegmentId.values());
       if (commits.length > 0) {
-        handleRenderedMarkdownSectionCommits(commits);
-        return;
+        return handleRenderedMarkdownSectionCommits(commits);
       }
     }
 
-    handleRenderedMarkdownSectionCommits([commit]);
+    return handleRenderedMarkdownSectionCommits([commit]);
   }
 
   const stableCommitRenderedMarkdownDrafts = useStableEvent(commitRenderedMarkdownDrafts);
@@ -1089,6 +1088,7 @@ export function DiffPanel({
       );
     if (nextDocumentContentLf === sourceContent) {
       for (const commit of commits) {
+        commit.onApplied?.();
         setRenderedMarkdownDraftSegmentActive(commit.segment.id, false);
       }
       return true;
@@ -1105,6 +1105,7 @@ export function DiffPanel({
     );
 
     for (const commit of commits) {
+      commit.onApplied?.();
       setRenderedMarkdownDraftSegmentActive(commit.segment.id, false);
     }
     setMarkdownEditContentState(nextDocumentContent);
