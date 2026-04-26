@@ -182,7 +182,7 @@ impl AppState {
                 let Some(target) = self.remote_session_target(session_id)? else {
                     return Err(ApiError::bad_request("session is not assigned to a remote"));
                 };
-                self.hydrate_remote_session_target(&target, None)
+                self.hydrate_remote_session_target(&target, None, None)
             }
         }
     }
@@ -234,6 +234,10 @@ impl AppState {
             .expect("state mutex poisoned")
             .remote_applied_revisions
             .remove(remote_id);
+        self.remote_hydrated_delta_replay_cache
+            .lock()
+            .expect("remote delta replay cache mutex poisoned")
+            .remove_remote(remote_id);
     }
 
     /// Clears remote fallback resync tracking when event-stream continuity is

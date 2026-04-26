@@ -264,6 +264,20 @@ freshness marker when present. A missing stamp means "unknown", not "clear the
 cached stamp", so receivers preserve any prior cached stamp and let later
 metadata-only summaries decide whether targeted hydration is needed.
 
+When a delta targets an unloaded remote-proxy session, TermAl repairs that
+single transcript with remote `GET /api/sessions/{id}`. The returned
+`SessionResponse.revision` is a remote-global revision, not a per-session
+freshness marker: it may be greater than the triggering delta revision because
+unrelated sessions changed upstream. The targeted repair accepts that newer
+global revision only when the returned session's `(sessionMutationStamp,
+messageCount)` exactly matches the triggering delta's post-state metadata. If
+the stamp is missing or mismatched, the repair is rejected and the remote event
+bridge falls back to `/api/state` resync so a future same-session transcript is
+not localized early and then replayed again by later deltas. Successful
+targeted repairs record a bounded in-memory replay key for the exact triggering
+delta payload; exact replays are skipped, but same-revision sibling deltas with
+different payloads still apply.
+
 ```
 WorkspaceFilesChangedEvent {
   revision,

@@ -303,16 +303,12 @@ export function DiffPanel({
   // (or when there was nothing to flush), and `false` when
   // `handleRenderedMarkdownSectionCommits` rejected the batch for
   // unresolvable or overlapping commits. Callers that gate their
-  // next side effect on a clean commit (notably
+  // next side effect on a clean commit (`handleSave` and
   // `handleApplyDiffEditsToDiskVersion`) capture this return so
-  // they don't proceed to `fetchFile` / rebase against a buffer
-  // whose drafts are still dirty — without the boolean gate, a
-  // rejected commit only surfaced via a `saveError` banner while
-  // the apply-to-disk action silently no-op'd (or worse, rebased
-  // against the pre-flush edit buffer). Callers that ignore the
-  // return (Save / reload / navigation) continue to treat the
-  // function as a best-effort flush; the existing `saveError`
-  // banner still surfaces the commit error for them.
+  // they don't proceed against a buffer whose drafts are still
+  // dirty. Without the boolean gate, a rejected commit only
+  // surfaced via a `saveError` banner while the next side effect
+  // still ran against the pre-flush edit buffer.
   function commitRenderedMarkdownDrafts(): boolean {
     const commits = collectRenderedMarkdownCommits();
     if (commits.length === 0) {
@@ -588,7 +584,9 @@ export function DiffPanel({
 
   useEffect(() => {
     if (renderedMarkdownDraftSegmentIdsRef.current.size > 0) {
-      commitRenderedMarkdownDrafts();
+      if (!commitRenderedMarkdownDrafts()) {
+        return;
+      }
     }
 
     const currentFile = latestFileRef.current;
@@ -830,7 +828,9 @@ export function DiffPanel({
     }
 
     if (renderedMarkdownDraftSegmentIdsRef.current.size > 0) {
-      commitRenderedMarkdownDrafts();
+      if (!commitRenderedMarkdownDrafts()) {
+        return;
+      }
     }
 
     const currentFile = latestFileRef.current;
@@ -870,7 +870,9 @@ export function DiffPanel({
         }
 
         if (renderedMarkdownDraftSegmentIdsRef.current.size > 0) {
-          commitRenderedMarkdownDrafts();
+          if (!commitRenderedMarkdownDrafts()) {
+            return;
+          }
         }
 
         const latestSnapshot = latestFileRef.current;
@@ -956,7 +958,9 @@ export function DiffPanel({
   }, [copiedReviewPath]);
 
   async function handleSave(options?: SourceSaveOptions) {
-    commitRenderedMarkdownDrafts();
+    if (!commitRenderedMarkdownDrafts()) {
+      return;
+    }
 
     const currentFile = latestFileRef.current;
     const currentEditValue = editValueRef.current;
@@ -973,7 +977,9 @@ export function DiffPanel({
         baseHash: currentFile.contentHash ?? null,
         overwrite: options?.overwrite,
       });
-      commitRenderedMarkdownDrafts();
+      if (!commitRenderedMarkdownDrafts()) {
+        return;
+      }
       const savedContent = response?.content ?? currentEditValue;
       const latestEditValue = editValueRef.current;
       const hasLocalEditsAfterSaveStarted = latestEditValue !== currentEditValue;

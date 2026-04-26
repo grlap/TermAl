@@ -991,6 +991,64 @@ describe("App scroll behaviour", () => {
         expect(
           screen.queryByRole("button", { name: "New response" }),
         ).not.toBeInTheDocument();
+
+        messageStack.scrollTop = 760;
+        await act(async () => {
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+        scrollToMock.mockClear();
+
+        scrollHeight = 1200;
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 4,
+          projects: [
+            {
+              id: "project-termal",
+              name: "TermAl",
+              rootPath: "/projects/termal",
+            },
+          ],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              preview: "Third assistant response.",
+              messages: [
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "First assistant response.",
+                },
+                {
+                  id: "message-assistant-2",
+                  type: "text",
+                  timestamp: "10:02",
+                  author: "assistant",
+                  text: "Second assistant response.",
+                },
+                {
+                  id: "message-assistant-3",
+                  type: "text",
+                  timestamp: "10:03",
+                  author: "assistant",
+                  text: "Third assistant response.",
+                },
+              ],
+            }),
+          ],
+        });
+        await settleAsyncUi();
+
+        expect(
+          filterScrollToCallsAt(scrollToMock, 1000, "smooth").length,
+        ).toBeGreaterThan(0);
+        expect(
+          screen.queryByRole("button", { name: "New response" }),
+        ).not.toBeInTheDocument();
       } finally {
         context.cleanup();
         if (originalScrollHeight) {

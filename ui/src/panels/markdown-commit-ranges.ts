@@ -53,11 +53,17 @@ import {
 } from "./markdown-diff-segments";
 
 export type RenderedMarkdownSectionCommit = {
+  // Set to false when the caller is resolving against a full-document preview
+  // whose current visible segment may already have drifted from the persisted
+  // source. Diff-side section commits can keep the fallback enabled because
+  // their current segment is derived from the same rendered diff model.
   allowCurrentSegmentFallback?: boolean;
   currentSegment: MarkdownDiffDocumentSegment;
   segment: MarkdownDiffDocumentSegment;
   nextMarkdown: string;
   sourceContent: string;
+  // Called only after the parent accepts and applies the commit. Rejected
+  // commits must keep their child draft state intact so the user can retry.
   onApplied?: () => void;
 };
 

@@ -43,6 +43,111 @@ enum PersistRequest {
     Delta,
 }
 
+const REMOTE_HYDRATED_DELTA_REPLAY_CACHE_LIMIT: usize = 2048;
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct RemoteDeltaReplayKey {
+    remote_id: String,
+    revision: u64,
+    payload: RemoteDeltaReplayPayload,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum RemoteDeltaReplayPayload {
+    SessionCreated {
+        session_id: String,
+        message_count: u32,
+        session_mutation_stamp: Option<u64>,
+    },
+    MessageCreated {
+        session_id: String,
+        message_id: String,
+        message_index: usize,
+        message_count: u32,
+        session_mutation_stamp: Option<u64>,
+    },
+    MessageUpdated {
+        session_id: String,
+        message_id: String,
+        message_index: usize,
+        message_count: u32,
+        session_mutation_stamp: Option<u64>,
+    },
+    TextDelta {
+        session_id: String,
+        message_id: String,
+        message_index: usize,
+        message_count: u32,
+        delta: String,
+        session_mutation_stamp: Option<u64>,
+    },
+    TextReplace {
+        session_id: String,
+        message_id: String,
+        message_index: usize,
+        message_count: u32,
+        session_mutation_stamp: Option<u64>,
+    },
+    CommandUpdate {
+        session_id: String,
+        message_id: String,
+        message_index: usize,
+        message_count: u32,
+        status: u8,
+        session_mutation_stamp: Option<u64>,
+    },
+    ParallelAgentsUpdate {
+        session_id: String,
+        message_id: String,
+        message_index: usize,
+        message_count: u32,
+        agent_states: Vec<(String, u8)>,
+        session_mutation_stamp: Option<u64>,
+    },
+    CodexUpdated,
+    OrchestratorsUpdated {
+        orchestrator_ids: Vec<String>,
+        session_ids: Vec<String>,
+    },
+}
+
+/// Bounded exact remote-delta replay suppression.
+///
+/// Entries are keyed by remote id, remote revision, and structural delta
+/// identity. The cap is intentionally small because the cache only covers the
+/// short same-revision replay window around remote event delivery; older
+/// revisions still fall back to the monotonic remote-applied watermark. Per
+/// remote entries are cleared when event-stream continuity is lost.
+#[derive(Default)]
+struct RemoteDeltaReplayCache {
+    keys: HashSet<RemoteDeltaReplayKey>,
+    order: VecDeque<RemoteDeltaReplayKey>,
+}
+
+impl RemoteDeltaReplayCache {
+    fn contains(&self, key: &RemoteDeltaReplayKey) -> bool {
+        self.keys.contains(key)
+    }
+
+    fn insert(&mut self, key: RemoteDeltaReplayKey) {
+        if self.keys.contains(&key) {
+            return;
+        }
+        self.order.push_back(key.clone());
+        self.keys.insert(key);
+        while self.order.len() > REMOTE_HYDRATED_DELTA_REPLAY_CACHE_LIMIT {
+            if let Some(expired) = self.order.pop_front() {
+                self.keys.remove(&expired);
+            }
+        }
+    }
+
+    fn remove_remote(&mut self, remote_id: &str) {
+        self.keys.retain(|key| key.remote_id != remote_id);
+        self.order.retain(|key| key.remote_id != remote_id);
+    }
+}
+
 /// The diff the persist thread writes on each tick.
 ///
 /// Built inside `AppState::inner` by
@@ -116,6 +221,11 @@ struct AppState {
     /// so duplicate or older fallback events do not trigger redundant
     /// blocking `/api/state` fetches.
     remote_sse_fallback_resynced_revision: Arc<Mutex<HashMap<String, u64>>>,
+    /// Exact inbound remote delta payloads already consumed by targeted
+    /// full-session hydration. This is intentionally narrower than
+    /// session-level metadata dedupe: sibling same-revision deltas must still
+    /// apply unless their whole payload is an exact replay.
+    remote_hydrated_delta_replay_cache: Arc<Mutex<RemoteDeltaReplayCache>>,
     terminal_local_command_semaphore: Arc<tokio::sync::Semaphore>,
     terminal_remote_command_semaphore: Arc<tokio::sync::Semaphore>,
     stopping_orchestrator_ids: Arc<Mutex<HashSet<String>>>,

@@ -78,6 +78,7 @@ import {
   syncMessageStackScrollPosition,
 } from "./scroll-position";
 import {
+  MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
   notifyMessageStackScrollWrite,
   type MessageStackScrollWriteKind,
 } from "./message-stack-scroll-sync";
@@ -645,6 +646,7 @@ export function SessionPaneView({
   const messageStackRef = useRef<HTMLElement | null>(null);
   const paneRootRef = useRef<HTMLElement | null>(null);
   const settledScrollToBottomCancelRef = useRef<(() => void) | null>(null);
+  const paneProgrammaticBottomFollowUntilRef = useRef(Number.NEGATIVE_INFINITY);
   const paneTopRef = useRef<HTMLDivElement | null>(null);
   const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<
     TabDropPlacement,
@@ -880,6 +882,19 @@ export function SessionPaneView({
     paneShouldStickToBottomRef.current[pane.id] = nextValue;
   }
 
+  function beginPaneProgrammaticBottomFollow() {
+    paneProgrammaticBottomFollowUntilRef.current =
+      performance.now() + MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS;
+  }
+
+  function cancelPaneProgrammaticBottomFollow() {
+    paneProgrammaticBottomFollowUntilRef.current = Number.NEGATIVE_INFINITY;
+  }
+
+  function isPaneProgrammaticBottomFollowActive() {
+    return paneProgrammaticBottomFollowUntilRef.current >= performance.now();
+  }
+
   function handleComposerPaste(
     event: ReactClipboardEvent<HTMLTextAreaElement>,
   ) {
@@ -1087,6 +1102,11 @@ export function SessionPaneView({
         top: nextScrollTop,
         behavior,
       });
+      if (scrollKind === "bottom_follow") {
+        beginPaneProgrammaticBottomFollow();
+      } else if (scrollKind) {
+        cancelPaneProgrammaticBottomFollow();
+      }
       notifyMessageStackScrollWrite(node, {
         scrollKind,
       });
@@ -1120,6 +1140,7 @@ export function SessionPaneView({
       return;
     }
 
+    cancelPaneProgrammaticBottomFollow();
     node.scrollTop = nextScrollTop;
     notifyMessageStackScrollWrite(node, {
       scrollKind: options.scrollKind,
@@ -1189,6 +1210,7 @@ export function SessionPaneView({
   function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
     if (boundary === "bottom") {
       cancelSettledScrollToBottom();
+      cancelPaneProgrammaticBottomFollow();
       const node = messageStackRef.current;
       if (node) {
         if (node.querySelector(".virtualized-message-list")) {
@@ -1218,6 +1240,7 @@ export function SessionPaneView({
     }
 
     cancelSettledScrollToBottom();
+    cancelPaneProgrammaticBottomFollow();
     node.scrollTo({
       top: 0,
       behavior: "auto",
@@ -1346,7 +1369,9 @@ export function SessionPaneView({
     }
 
     event.preventDefault();
-    scrollMessageStackByDelta(deltaY);
+    scrollMessageStackByDelta(deltaY, {
+      scrollKind: "incremental",
+    });
   };
 
   useEffect(() => {
@@ -1615,6 +1640,10 @@ export function SessionPaneView({
     const cancel = settledScrollToBottomCancelRef.current;
     settledScrollToBottomCancelRef.current = null;
     cancel?.();
+  }
+
+  function handleMessageStackUserScrollIntent() {
+    cancelPaneProgrammaticBottomFollow();
   }
 
   function restoreMessageStackScrollTop(targetTop: number) {
@@ -2522,6 +2551,19 @@ export function SessionPaneView({
             scrollStateKey,
             paneScrollPositions,
           );
+          if (isPaneProgrammaticBottomFollowActive()) {
+            const targetTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+            setShouldStickToBottom(true);
+            paneScrollPositions[scrollStateKey] = {
+              top: targetTop,
+              shouldStick: true,
+            };
+            setNewResponseIndicator(scrollStateKey, false);
+            if (targetTop - node.scrollTop <= 4) {
+              cancelPaneProgrammaticBottomFollow();
+            }
+            return;
+          }
           setShouldStickToBottom(shouldStick);
           if (shouldStick) {
             setNewResponseIndicator(scrollStateKey, false);
@@ -2529,6 +2571,9 @@ export function SessionPaneView({
             cancelSettledScrollToBottom();
           }
         }}
+        onWheel={handleMessageStackUserScrollIntent}
+        onTouchMove={handleMessageStackUserScrollIntent}
+        onKeyDown={handleMessageStackUserScrollIntent}
       >
         {activeControlPanelTab ? (
           renderControlPanel(pane.id)

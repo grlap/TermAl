@@ -186,6 +186,7 @@ export function EditableRenderedMarkdownSection({
   onReadOnlyMutation,
   onRegisterCommitter,
   onSave,
+  resetOnSegmentMarkdownChange = true,
   segment,
   sourceContent,
   workspaceRoot,
@@ -203,6 +204,7 @@ export function EditableRenderedMarkdownSection({
   onReadOnlyMutation: () => void;
   onRegisterCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
   onSave: MarkdownDiffSaveHandler;
+  resetOnSegmentMarkdownChange?: boolean;
   segment: MarkdownDiffDocumentSegment;
   sourceContent: string;
   workspaceRoot: string | null;
@@ -212,12 +214,14 @@ export function EditableRenderedMarkdownSection({
   const hasUncommittedUserEditRef = useRef(false);
   const draftSegmentRef = useRef<MarkdownDiffDocumentSegment | null>(null);
   const draftSourceContentRef = useRef<string | null>(null);
+  const previousSegmentIdRef = useRef(segment.id);
   const previousSegmentMarkdownRef = useRef(segment.markdown);
   const sectionRef = useRef<HTMLElement | null>(null);
   const [renderResetVersion, setRenderResetVersion] = useState(0);
 
   useEffect(() => {
-    if (previousSegmentMarkdownRef.current === segment.markdown) {
+    const segmentIdentityChanged = previousSegmentIdRef.current !== segment.id;
+    if (!segmentIdentityChanged && previousSegmentMarkdownRef.current === segment.markdown) {
       return;
     }
 
@@ -244,12 +248,15 @@ export function EditableRenderedMarkdownSection({
       }
     }
 
+    previousSegmentIdRef.current = segment.id;
     previousSegmentMarkdownRef.current = segment.markdown;
     hasUncommittedUserEditRef.current = false;
     draftSegmentRef.current = null;
     draftSourceContentRef.current = null;
-    setRenderResetVersion((current) => current + 1);
-  }, [segment.markdown]);
+    if (segmentIdentityChanged || resetOnSegmentMarkdownChange) {
+      setRenderResetVersion((current) => current + 1);
+    }
+  }, [resetOnSegmentMarkdownChange, segment.id, segment.markdown]);
 
   function readEditedMarkdown(section: HTMLElement, baselineMarkdown = segment.markdown) {
     return normalizeEditedMarkdownSection(

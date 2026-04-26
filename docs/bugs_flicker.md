@@ -35,7 +35,13 @@ already had an actual-DOM coverage guard for compact pages that exposed the
 bottom spacer; the upward path now has the symmetric protection:
 
 - wheel input projects the upward target and prewarms pages above the mounted
-  band before the native scroll event paints
+  band before the parent-owned scroll write paints
+- `SessionPaneView` marks parent-owned wheel scroll writes as `incremental`, so
+  large wheel deltas do not get reclassified as seek jumps and trim the
+  prewarmed band during the same gesture
+- coverage calculations cap stale estimated page heights with the smallest
+  currently rendered page height, allowing compact pages to prepend enough DOM
+  before the viewport reaches the spacer
 - during active-scroll cooldown, the virtualizer checks the first mounted page's
   real DOM top and prepends pages if it has fallen below the viewport top
 - prepends still use the existing scroll-height restore so replacing estimated

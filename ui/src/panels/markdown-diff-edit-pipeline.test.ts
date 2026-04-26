@@ -747,4 +747,22 @@ describe("serializeEditableMarkdownSection", () => {
       "[Safe link](https://example.com/docs)",
     );
   });
+
+  it("does not serialize safe-scheme hrefs that can break out of Markdown link syntax", () => {
+    const section = buildEditableSection(
+      '<p><a href="https://example.com/) [x](javascript:alert(1)">Safe-looking link</a></p>',
+    );
+
+    expect(serializeEditableMarkdownSection(section)).toBe("Safe-looking link");
+  });
+
+  it("escapes Markdown link label brackets while preserving safe destinations", () => {
+    const section = buildEditableSection(
+      '<p><a href="https://example.com/docs">Read [draft] \\ notes</a></p>',
+    );
+
+    expect(serializeEditableMarkdownSection(section)).toBe(
+      "[Read \\[draft\\] \\\\ notes](https://example.com/docs)",
+    );
+  });
 });

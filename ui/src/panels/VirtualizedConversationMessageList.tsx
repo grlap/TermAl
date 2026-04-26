@@ -16,6 +16,7 @@ import {
   useState,
   type RefObject,
 } from "react";
+import { flushSync } from "react-dom";
 import { isExpandedPromptOpen } from "../ExpandedPromptPanel";
 import {
   DEFERRED_RENDER_RESUME_EVENT,
@@ -23,6 +24,7 @@ import {
 } from "../deferred-render";
 import { DeferredHeavyContentActivationProvider } from "../message-cards";
 import {
+  MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   type MessageStackScrollWriteDetail,
 } from "../message-stack-scroll-sync";
@@ -97,7 +99,7 @@ const ACTIVE_VIEWPORT_STARTUP_RESYNC_FRAMES = 12;
 const BOTTOM_BOUNDARY_REVEAL_SETTLE_FRAMES = 12;
 const BOTTOM_BOUNDARY_REVEAL_DELAY_MS = 220;
 const USER_SCROLL_ADJUSTMENT_COOLDOWN_MS = 200;
-const PROGRAMMATIC_BOTTOM_FOLLOW_SCROLL_MS = 1200;
+const MIN_PAGE_COVERAGE_HEIGHT_PX = 64;
 
 const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
 
@@ -178,6 +180,37 @@ function resolveWheelDeltaYPx(event: WheelEvent, viewportHeight: number) {
     return event.deltaY * Math.max(viewportHeight, DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT);
   }
   return event.deltaY;
+}
+
+function resolveRenderedPageCoverageHeight(pageNodes: HTMLElement[]) {
+  let minHeight = Number.POSITIVE_INFINITY;
+  for (const pageNode of pageNodes) {
+    const height = pageNode.getBoundingClientRect().height;
+    if (Number.isFinite(height) && height > 0) {
+      minHeight = Math.min(minHeight, height);
+    }
+  }
+
+  return Number.isFinite(minHeight)
+    ? Math.max(minHeight, MIN_PAGE_COVERAGE_HEIGHT_PX)
+    : null;
+}
+
+function resolvePageCoverageHeight(
+  pageHeights: number[],
+  pageIndex: number,
+  renderedCoverageHeight: number | null,
+) {
+  const measuredOrEstimatedHeight = pageHeights[pageIndex];
+  const fallbackHeight =
+    Number.isFinite(measuredOrEstimatedHeight) && measuredOrEstimatedHeight > 0
+      ? measuredOrEstimatedHeight
+      : DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT;
+  const coverageHeight =
+    renderedCoverageHeight !== null
+      ? Math.min(fallbackHeight, renderedCoverageHeight)
+      : fallbackHeight;
+  return Math.max(coverageHeight, MIN_PAGE_COVERAGE_HEIGHT_PX);
 }
 
 function rangeContainsRange(container: VirtualizedRange, target: VirtualizedRange) {
@@ -756,6 +789,19 @@ export function VirtualizedConversationMessageList({
   );
   const mountedPageRangeRef = useRef(mountedPageRange);
   mountedPageRangeRef.current = mountedPageRange;
+  const applyMountedPageRange = useCallback(
+    (nextRange: VirtualizedRange, options: { flush?: boolean } = {}) => {
+      mountedPageRangeRef.current = nextRange;
+      if (options.flush) {
+        flushSync(() => {
+          setMountedPageRange(nextRange);
+        });
+        return;
+      }
+      setMountedPageRange(nextRange);
+    },
+    [],
+  );
   const pageLayoutTopsRef = useRef(pageLayout.tops);
   pageLayoutTopsRef.current = pageLayout.tops;
   const pageHeightsRefForScroll = useRef(pageHeights);
@@ -879,10 +925,10 @@ export function VirtualizedConversationMessageList({
         return;
       }
 
-      setMountedPageRange(buildBottomMountedRange(node.clientHeight));
+      applyMountedPageRange(buildBottomMountedRange(node.clientHeight));
       setBottomBoundarySeekVersion((version) => version + 1);
     },
-    [buildBottomMountedRange, scrollContainerRef],
+    [applyMountedPageRange, buildBottomMountedRange, scrollContainerRef],
   );
   const expandRangeToRenderedPageEdges = useCallback(
     (
@@ -901,6 +947,7 @@ export function VirtualizedConversationMessageList({
         return nextRange;
       }
 
+      const renderedCoverageHeight = resolveRenderedPageCoverageHeight(pageNodes);
       const containerRect = node.getBoundingClientRect();
       let nextStartIndex = nextRange.startIndex;
       let nextEndIndex = nextRange.endIndex;
@@ -916,7 +963,11 @@ export function VirtualizedConversationMessageList({
         let missingAbovePx = renderedMountedTop - desiredMountedTop;
         while (missingAbovePx > 0 && nextStartIndex > 0) {
           nextStartIndex -= 1;
-          missingAbovePx -= pageHeightsRefForScroll.current[nextStartIndex] ?? 0;
+          missingAbovePx -= resolvePageCoverageHeight(
+            pageHeightsRefForScroll.current,
+            nextStartIndex,
+            renderedCoverageHeight,
+          );
         }
       } else if (scrollDelta > 0) {
         const lastPageRect = pageNodes[pageNodes.length - 1]!.getBoundingClientRect();
@@ -926,7 +977,11 @@ export function VirtualizedConversationMessageList({
           node.scrollTop + node.clientHeight + activeMountedBufferBelowPxRef.current;
         let missingBelowPx = desiredMountedBottom - renderedMountedBottom;
         while (missingBelowPx > 0 && nextEndIndex < pagesLengthRef.current) {
-          missingBelowPx -= pageHeightsRefForScroll.current[nextEndIndex] ?? 0;
+          missingBelowPx -= resolvePageCoverageHeight(
+            pageHeightsRefForScroll.current,
+            nextEndIndex,
+            renderedCoverageHeight,
+          );
           nextEndIndex += 1;
         }
       }
@@ -940,7 +995,12 @@ export function VirtualizedConversationMessageList({
   );
 
   const reconcileMountedRangeForNativeScroll = useCallback(
-    (node: HTMLElement, scrollDelta: number, scrollKind: UserScrollKind) => {
+    (
+      node: HTMLElement,
+      scrollDelta: number,
+      scrollKind: UserScrollKind,
+      options: { flush?: boolean } = {},
+    ) => {
       const nextWorkingRange = buildWorkingMountedRangeForScrollTop(
         node.scrollTop,
         node.clientHeight,
@@ -956,7 +1016,7 @@ export function VirtualizedConversationMessageList({
           startIndex: Math.min(currentRange.startIndex, nextWorkingRange.startIndex),
           endIndex: Math.max(currentRange.endIndex, nextWorkingRange.endIndex),
         }, scrollDelta);
-      } else if (scrollDelta > 0) {
+      } else if (scrollDelta !== 0) {
         nextRange = expandRangeToRenderedPageEdges(node, {
           startIndex: Math.min(currentRange.startIndex, nextWorkingRange.startIndex),
           endIndex: Math.max(currentRange.endIndex, nextWorkingRange.endIndex),
@@ -994,9 +1054,13 @@ export function VirtualizedConversationMessageList({
         skipNextMountedPrependRestoreRef.current = false;
       }
 
-      setMountedPageRange(nextRange);
+      applyMountedPageRange(nextRange, options);
     },
-    [buildWorkingMountedRangeForScrollTop, expandRangeToRenderedPageEdges],
+    [
+      applyMountedPageRange,
+      buildWorkingMountedRangeForScrollTop,
+      expandRangeToRenderedPageEdges,
+    ],
   );
   const prewarmMountedRangeForUpwardWheel = useCallback(
     (node: HTMLElement, event: WheelEvent) => {
@@ -1028,14 +1092,22 @@ export function VirtualizedConversationMessageList({
       }
 
       if (nextRange.startIndex < currentRange.startIndex && !isScrollContainerNearBottom(node)) {
-        pendingMountedPrependRestoreRef.current = {
-          scrollHeight: node.scrollHeight,
-          scrollTop: node.scrollTop,
-        };
+        if (skipNextMountedPrependRestoreRef.current) {
+          skipNextMountedPrependRestoreRef.current = false;
+        } else {
+          pendingMountedPrependRestoreRef.current = {
+            scrollHeight: node.scrollHeight,
+            scrollTop: node.scrollTop,
+          };
+        }
       }
-      setMountedPageRange(nextRange);
+      applyMountedPageRange(nextRange, { flush: true });
     },
-    [buildWorkingMountedRangeForScrollTop, expandRangeToRenderedPageEdges],
+    [
+      applyMountedPageRange,
+      buildWorkingMountedRangeForScrollTop,
+      expandRangeToRenderedPageEdges,
+    ],
   );
   useEffect(() => {
     return () => {
@@ -1105,9 +1177,10 @@ export function VirtualizedConversationMessageList({
           scrollTop: node.scrollTop,
         };
       }
-      setMountedPageRange(nextRange);
+      applyMountedPageRange(nextRange);
     }
   }, [
+    applyMountedPageRange,
     isActive,
     mountedPageRange,
     pages.length,
@@ -1132,7 +1205,7 @@ export function VirtualizedConversationMessageList({
       // the gesture settles; trimming during motion is what exposed spacer
       // blanks on the way down and snap-backs on the way up.
       if (lastUserScrollKindRef.current === "seek" && viewportEscapedMountedBand) {
-        setMountedPageRange(workingMountedPageRange);
+        applyMountedPageRange(workingMountedPageRange);
       }
       return;
     }
@@ -1160,8 +1233,9 @@ export function VirtualizedConversationMessageList({
     }
 
     pendingAggressiveIdleCompactionRef.current = false;
-    setMountedPageRange(workingMountedPageRange);
+    applyMountedPageRange(workingMountedPageRange);
   }, [
+    applyMountedPageRange,
     mountedPageRange,
     scrollIdleVersion,
     visiblePageRange,
@@ -1181,7 +1255,9 @@ export function VirtualizedConversationMessageList({
       hasUserScrollInteractionRef.current &&
       performance.now() - lastUserScrollInputTimeRef.current <
         USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
-    if (!isUserScrollCooldown) {
+    const isProgrammaticBottomFollowCooldown =
+      pendingProgrammaticBottomFollowUntilRef.current >= performance.now();
+    if (!isUserScrollCooldown || isProgrammaticBottomFollowCooldown) {
       return;
     }
 
@@ -1195,6 +1271,7 @@ export function VirtualizedConversationMessageList({
         ".virtualized-message-page[data-page-key]",
       ),
     );
+    const renderedCoverageHeight = resolveRenderedPageCoverageHeight(pageNodes);
     const firstPage = pageNodes[0];
     if (!firstPage) {
       return;
@@ -1213,7 +1290,11 @@ export function VirtualizedConversationMessageList({
     let nextStartIndex = mountedPageRange.startIndex;
     while (missingAbovePx > 0 && nextStartIndex > 0) {
       nextStartIndex -= 1;
-      missingAbovePx -= pageHeights[nextStartIndex] ?? 0;
+      missingAbovePx -= resolvePageCoverageHeight(
+        pageHeights,
+        nextStartIndex,
+        renderedCoverageHeight,
+      );
     }
     if (nextStartIndex >= mountedPageRange.startIndex) {
       return;
@@ -1223,11 +1304,12 @@ export function VirtualizedConversationMessageList({
       scrollHeight: node.scrollHeight,
       scrollTop: node.scrollTop,
     };
-    setMountedPageRange({
+    applyMountedPageRange({
       startIndex: nextStartIndex,
       endIndex: mountedPageRange.endIndex,
     });
   }, [
+    applyMountedPageRange,
     isActive,
     layoutVersion,
     mountedPageRange,
@@ -1264,6 +1346,7 @@ export function VirtualizedConversationMessageList({
         ".virtualized-message-page[data-page-key]",
       ),
     );
+    const renderedCoverageHeight = resolveRenderedPageCoverageHeight(pageNodes);
     const lastPage = pageNodes[pageNodes.length - 1];
     if (!lastPage) {
       return;
@@ -1287,18 +1370,23 @@ export function VirtualizedConversationMessageList({
 
     let nextEndIndex = mountedPageRange.endIndex;
     while (missingBelowPx > 0 && nextEndIndex < pages.length) {
-      missingBelowPx -= pageHeights[nextEndIndex] ?? 0;
+      missingBelowPx -= resolvePageCoverageHeight(
+        pageHeights,
+        nextEndIndex,
+        renderedCoverageHeight,
+      );
       nextEndIndex += 1;
     }
     if (nextEndIndex <= mountedPageRange.endIndex) {
       return;
     }
 
-    setMountedPageRange({
+    applyMountedPageRange({
       startIndex: mountedPageRange.startIndex,
       endIndex: nextEndIndex,
     });
   }, [
+    applyMountedPageRange,
     isActive,
     layoutVersion,
     mountedPageRange,
@@ -1340,7 +1428,7 @@ export function VirtualizedConversationMessageList({
       );
       if (!rangesEqual(mountedPageRangeRef.current, nextMountedRange)) {
         pendingMountedPrependRestoreRef.current = null;
-        setMountedPageRange(nextMountedRange);
+        applyMountedPageRange(nextMountedRange);
       }
       if (Math.abs(node.scrollTop - activeConversationSearchScrollTop) >= 1) {
         shouldKeepBottomAfterLayoutRef.current = false;
@@ -1362,7 +1450,7 @@ export function VirtualizedConversationMessageList({
     const nextMountedRange = buildWorkingMountedRangeForScrollTop(nextScrollTop, node.clientHeight);
     if (!rangesEqual(mountedPageRangeRef.current, nextMountedRange)) {
       pendingMountedPrependRestoreRef.current = null;
-      setMountedPageRange(nextMountedRange);
+      applyMountedPageRange(nextMountedRange);
     }
     if (Math.abs(node.scrollTop - nextScrollTop) >= 1) {
       shouldKeepBottomAfterLayoutRef.current = false;
@@ -1372,6 +1460,7 @@ export function VirtualizedConversationMessageList({
   }, [
     activeConversationSearchMessageId,
     activeConversationSearchScrollTop,
+    applyMountedPageRange,
     buildWorkingMountedRangeForScrollTop,
     hasConversationSearch,
     isActive,
@@ -1587,6 +1676,7 @@ export function VirtualizedConversationMessageList({
         pendingBottomBoundaryRevealNodeRef.current === node;
       const isProgrammaticBottomFollowScroll =
         options.isNativeScrollEvent === true &&
+        lastUserScrollInputTimeRef.current === Number.NEGATIVE_INFINITY &&
         pendingProgrammaticBottomFollowUntilRef.current >= performance.now() &&
         node.scrollTop >= lastNativeScrollTopRef.current - 1;
       if (options.isNativeScrollEvent) {
@@ -1601,16 +1691,12 @@ export function VirtualizedConversationMessageList({
           pendingProgrammaticScrollTopRef.current = null;
           lastNativeScrollTopRef.current = node.scrollTop;
           pendingProgrammaticBottomFollowUntilRef.current =
-            performance.now() + PROGRAMMATIC_BOTTOM_FOLLOW_SCROLL_MS;
+            performance.now() + MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS;
           shouldKeepBottomAfterLayoutRef.current = true;
           isDetachedFromBottomRef.current = false;
           hasUserScrollInteractionRef.current = false;
           lastUserScrollKindRef.current = null;
           lastUserScrollInputTimeRef.current = Number.NEGATIVE_INFINITY;
-          if (isScrollContainerNearBottom(node)) {
-            pendingProgrammaticBottomFollowUntilRef.current =
-              Number.NEGATIVE_INFINITY;
-          }
         } else {
           if (isMeasuringPostActivation) {
             cancelPostActivationBottomRestore();
@@ -1709,6 +1795,8 @@ export function VirtualizedConversationMessageList({
           : null;
 
       if (explicitScrollKind === "bottom_boundary") {
+        pendingProgrammaticBottomFollowUntilRef.current =
+          Number.NEGATIVE_INFINITY;
         pendingBottomBoundarySeekRef.current = true;
         pendingProgrammaticScrollTopRef.current = node.scrollTop;
         lastNativeScrollTopRef.current = node.scrollTop;
@@ -1730,7 +1818,7 @@ export function VirtualizedConversationMessageList({
 
       if (explicitScrollKind === "bottom_follow") {
         pendingProgrammaticBottomFollowUntilRef.current =
-          performance.now() + PROGRAMMATIC_BOTTOM_FOLLOW_SCROLL_MS;
+          performance.now() + MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS;
         pendingProgrammaticScrollTopRef.current = null;
         lastNativeScrollTopRef.current = node.scrollTop;
         shouldKeepBottomAfterLayoutRef.current = true;
@@ -1738,9 +1826,13 @@ export function VirtualizedConversationMessageList({
         hasUserScrollInteractionRef.current = false;
         lastUserScrollKindRef.current = null;
         lastUserScrollInputTimeRef.current = Number.NEGATIVE_INFINITY;
+        pendingAggressiveIdleCompactionRef.current = true;
+        pendingMountedPrependRestoreRef.current = null;
+        skipNextMountedPrependRestoreRef.current = false;
         clearPendingDeferredLayoutTimer();
         clearPendingIdleCompactionTimer();
         pendingDeferredLayoutAnchorRef.current = null;
+        applyMountedPageRange(buildBottomMountedRange(node.clientHeight));
         scheduleProgrammaticViewportSync(node);
         return;
       }
@@ -1779,17 +1871,23 @@ export function VirtualizedConversationMessageList({
                 scrollDelta,
                 node.clientHeight,
               ));
+        const scrollWriteTime = performance.now();
         lastUserScrollKindRef.current = isNearBottomAfterWrite
           ? null
           : resolvedScrollKind;
         if (!isNearBottomAfterWrite) {
-          lastUserScrollInputTimeRef.current = performance.now();
+          lastUserScrollInputTimeRef.current = scrollWriteTime;
           scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
         }
+        const isActiveUpwardUserScrollWrite =
+          scrollDelta < 0 &&
+          resolvedScrollKind === "incremental" &&
+          !isNearBottomAfterWrite;
         reconcileMountedRangeForNativeScroll(
           node,
           scrollDelta,
           resolvedScrollKind,
+          { flush: isActiveUpwardUserScrollWrite },
         );
       }
       scheduleProgrammaticViewportSync(node);
@@ -1819,6 +1917,8 @@ export function VirtualizedConversationMessageList({
       resizeObserver.disconnect();
     };
   }, [
+    applyMountedPageRange,
+    buildBottomMountedRange,
     cancelPostActivationBottomRestore,
     clearPendingDeferredLayoutTimer,
     clearPendingIdleCompactionTimer,

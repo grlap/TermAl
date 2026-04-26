@@ -22,6 +22,18 @@ vi.mock("../clipboard", () => ({
   copyTextToClipboard: vi.fn(() => Promise.resolve()),
 }));
 
+vi.mock("./markdown-commit-ranges", async () => {
+  const actual = await vi.importActual<typeof import("./markdown-commit-ranges")>(
+    "./markdown-commit-ranges",
+  );
+  return {
+    ...actual,
+    hasOverlappingMarkdownCommitRanges: vi.fn(
+      actual.hasOverlappingMarkdownCommitRanges,
+    ),
+  };
+});
+
 vi.mock("mermaid", () => ({
   default: {
     initialize: vi.fn(),
@@ -160,6 +172,9 @@ const fetchFileMock = vi.mocked(fetchFile);
 const fetchReviewDocumentMock = vi.mocked(fetchReviewDocument);
 const saveReviewDocumentMock = vi.mocked(saveReviewDocument);
 const copyTextToClipboardMock = vi.mocked(copyTextToClipboard);
+const hasOverlappingMarkdownCommitRangesMock = vi.mocked(
+  hasOverlappingMarkdownCommitRanges,
+);
 
 async function clickAndSettle(target: HTMLElement, eventInit?: MouseEventInit) {
   await act(async () => {
@@ -247,6 +262,7 @@ describe("DiffPanel", () => {
     saveReviewDocumentMock.mockReset();
     copyTextToClipboardMock.mockReset();
     copyTextToClipboardMock.mockResolvedValue(undefined);
+    hasOverlappingMarkdownCommitRangesMock.mockClear();
     mermaidInitializeMock.mockClear();
     mermaidRenderMock.mockClear();
     mermaidRenderMock.mockResolvedValue({
@@ -1001,6 +1017,81 @@ describe("DiffPanel", () => {
       baseHash: null,
       overwrite: undefined,
     });
+  });
+
+  it("does not save when a rendered Markdown draft cannot be committed", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+    const onSaveFile = vi.fn().mockResolvedValue({
+      content: "Shared intro.\n# Draft document\nShared middle.\nReady to ship.\nShared outro.\n",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " Shared intro.",
+            "-# Base document",
+            "+# Draft document",
+            " Shared middle.",
+            "-Committed text.",
+            "+Ready to commit.",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "Shared intro.\n# Base document\nShared middle.\nCommitted text.\nShared outro.\n",
+              source: "index",
+            },
+            after: {
+              content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-save-rejected-draft"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={onSaveFile}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    const addedSections = await waitFor(() => {
+      const sections = document.querySelectorAll<HTMLElement>(
+        ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+      );
+      expect(sections.length).toBeGreaterThanOrEqual(2);
+      return sections;
+    });
+
+    editRenderedMarkdownSection(addedSections[1], "<p>Ready to ship.</p>");
+    hasOverlappingMarkdownCommitRangesMock.mockReturnValueOnce(true);
+
+    await clickAndSettle(screen.getByRole("button", { name: "Save Markdown" }));
+
+    expect(hasOverlappingMarkdownCommitRangesMock).toHaveBeenCalled();
+    expect(onSaveFile).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "Save failed: Rendered Markdown edit could not be applied because the document changed under that section. Review the latest diff and edit again.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("keeps the save action dirty when another rendered Markdown section reports no-op input", async () => {
@@ -3738,6 +3829,89 @@ describe("DiffPanel", () => {
     );
   });
 
+  it("keeps rendered Markdown drafts active when documentContent refresh cannot commit them", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "# Title\n\nSection one original.\n",
+      language: "markdown",
+      path: "/repo/notes.md",
+    });
+    const onSaveFile = vi.fn();
+
+    const baseProps = {
+      appearance: "dark" as const,
+      fontSizePx: 13,
+      changeType: "edit" as const,
+      diff: [
+        "@@ -1,3 +1,3 @@",
+        " # Title",
+        " ",
+        "-Section one base.",
+        "+Section one original.",
+      ].join("\n"),
+      documentContent: {
+        before: {
+          content: "# Title\n\nSection one base.\n",
+          source: "index" as const,
+        },
+        after: {
+          content: "# Title\n\nSection one original.\n",
+          source: "worktree" as const,
+        },
+        canEdit: true,
+        isCompleteDocument: true,
+      },
+      diffMessageId: "diff-markdown-document-content-rejected-draft",
+      filePath: "/repo/notes.md",
+      gitSectionId: "unstaged" as const,
+      language: "markdown",
+      sessionId: "session-1",
+      workspaceRoot: "/repo",
+      onOpenPath: () => {},
+      onSaveFile,
+      summary: "Updated notes",
+    };
+
+    const { rerender } = render(
+      <DiffPanel {...baseProps} workspaceFilesChangedEvent={null} />,
+    );
+
+    const section = await waitFor(() => {
+      const candidate = document.querySelector<HTMLElement>(
+        ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+      );
+      expect(candidate).toBeTruthy();
+      return candidate!;
+    });
+    editRenderedMarkdownSection(section, "<p>Section one local draft.</p>");
+    hasOverlappingMarkdownCommitRangesMock.mockReturnValueOnce(true);
+
+    rerender(
+      <DiffPanel
+        {...baseProps}
+        documentContent={{
+          ...baseProps.documentContent,
+          before: {
+            content: "# Title\n\nExternal intro.\n\nSection one base.\n",
+            source: "index" as const,
+          },
+          after: {
+            content: "# Title\n\nExternal intro.\n\nSection one original.\n",
+            source: "worktree" as const,
+          },
+        }}
+        workspaceFilesChangedEvent={null}
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        "Save failed: Rendered Markdown edit could not be applied because the document changed under that section. Review the latest diff and edit again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Markdown" })).toBeEnabled();
+    expect(onSaveFile).not.toHaveBeenCalled();
+  });
+
   it("preserves downstream repeated rendered Markdown drafts when an upstream duplicate is inserted", async () => {
     const initialBefore = [
       "# Title",
@@ -3959,6 +4133,83 @@ describe("DiffPanel", () => {
       await screen.findByText("The file was deleted on disk. Your diff edit buffer is preserved."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save anyway" })).toBeEnabled();
+  });
+
+  it("does not refresh from a watcher event when rendered Markdown drafts cannot commit", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "# Title\n\nSection one original.\n",
+      language: "markdown",
+      path: "/repo/notes.md",
+    });
+
+    const baseProps = {
+      appearance: "dark" as const,
+      fontSizePx: 13,
+      changeType: "edit" as const,
+      diff: [
+        "@@ -1,3 +1,3 @@",
+        " # Title",
+        " ",
+        "-Section one base.",
+        "+Section one original.",
+      ].join("\n"),
+      documentContent: {
+        before: {
+          content: "# Title\n\nSection one base.\n",
+          source: "index" as const,
+        },
+        after: {
+          content: "# Title\n\nSection one original.\n",
+          source: "worktree" as const,
+        },
+        canEdit: true,
+        isCompleteDocument: true,
+      },
+      diffMessageId: "diff-markdown-watch-rejected-draft",
+      filePath: "/repo/notes.md",
+      gitSectionId: "unstaged" as const,
+      language: "markdown",
+      sessionId: "session-1",
+      workspaceRoot: "/repo",
+      onOpenPath: () => {},
+      onSaveFile: async () => {},
+      summary: "Updated notes",
+    };
+
+    const { rerender } = render(
+      <DiffPanel {...baseProps} workspaceFilesChangedEvent={null} />,
+    );
+
+    await waitFor(() => {
+      expect(fetchFileMock).toHaveBeenCalledTimes(1);
+    });
+    const section = await waitFor(() => {
+      const candidate = document.querySelector<HTMLElement>(
+        ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+      );
+      expect(candidate).toBeTruthy();
+      return candidate!;
+    });
+    editRenderedMarkdownSection(section, "<p>Section one local draft.</p>");
+    hasOverlappingMarkdownCommitRangesMock.mockReturnValueOnce(true);
+
+    rerender(
+      <DiffPanel
+        {...baseProps}
+        workspaceFilesChangedEvent={{
+          revision: 9,
+          changes: [{ path: "/repo/notes.md", kind: "modified" }],
+        }}
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        "Save failed: Rendered Markdown edit could not be applied because the document changed under that section. Review the latest diff and edit again.",
+      ),
+    ).toBeInTheDocument();
+    expect(fetchFileMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Save Markdown" })).toBeEnabled();
   });
 
   // Regression: rendered-mode edit handlers used `markdownPreview.after.content`

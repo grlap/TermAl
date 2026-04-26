@@ -267,6 +267,9 @@ impl AppState {
                     .expect("remote registry init thread panicked")?,
             ),
             remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
+            remote_hydrated_delta_replay_cache: Arc::new(Mutex::new(
+                RemoteDeltaReplayCache::default(),
+            )),
             terminal_local_command_semaphore: Arc::new(tokio::sync::Semaphore::new(
                 TERMINAL_LOCAL_COMMAND_CONCURRENCY_LIMIT,
             )),

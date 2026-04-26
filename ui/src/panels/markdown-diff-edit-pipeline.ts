@@ -31,10 +31,12 @@
 // Serializer contract: blocks are joined by blank lines, inline
 // content preserves whitespace, `<code>` is fenced with `` ` ``
 // (or `` `` `` when the content itself contains a backtick),
-// links round-trip via `[text](href)`, and images / iframes /
-// other disallowed inputs are already removed by the sanitizer
-// (if they sneak through, the serializer emits the empty
-// string).
+// links round-trip via `[text](href)` after escaping label
+// brackets/backslashes and rejecting destinations that cannot be
+// safely represented inside Markdown's parenthesized link syntax;
+// images / iframes / other disallowed inputs are already removed
+// by the sanitizer (if they sneak through, the serializer emits
+// the empty string).
 //
 // What this file does NOT own:
 //   - The `MarkdownDiffDocument` component that runs the paste /
@@ -363,12 +365,31 @@ export function serializeMarkdownInlineNode(node: Node): string {
     }
 
     const href = node.getAttribute("href");
-    return href && isSafePastedMarkdownHref(href)
-      ? `[${content}](${href.trim()})`
+    const destination =
+      href && isSafePastedMarkdownHref(href)
+        ? formatSafeMarkdownLinkDestination(href)
+        : null;
+    return destination
+      ? `[${escapeMarkdownLinkLabel(content)}](${destination})`
       : content;
   }
 
   return content;
+}
+
+function escapeMarkdownLinkLabel(label: string) {
+  return label.replace(/[\\[\]]/g, "\\$&");
+}
+
+function formatSafeMarkdownLinkDestination(href: string) {
+  const destination = href.trim();
+  if (
+    destination.length === 0 ||
+    /[\u0000-\u001F\u007F\s()[\]<>]/.test(destination)
+  ) {
+    return null;
+  }
+  return destination;
 }
 
 export function serializeMarkdownList(list: HTMLElement, ordered: boolean) {

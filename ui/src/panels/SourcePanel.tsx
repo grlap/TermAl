@@ -324,11 +324,6 @@ export function SourcePanel({
     const commits = collectRenderedMarkdownCommits();
     if (commits.length === 0) {
       setHasRenderedMarkdownDraftActive(false);
-      const currentFileState = fileStateRef.current;
-      onDirtyChange?.(
-        currentFileState.status === "ready" &&
-          editorValueRef.current !== currentFileState.content,
-      );
       return true;
     }
 
@@ -386,7 +381,6 @@ export function SourcePanel({
     if (nextDocumentContentLf === sourceContent) {
       commits.forEach((commit) => commit.onApplied?.());
       setHasRenderedMarkdownDraftActive(false);
-      onDirtyChange?.(currentFileState.status === "ready" && rawSourceContent !== currentFileState.content);
       return true;
     }
 
@@ -400,7 +394,6 @@ export function SourcePanel({
     setActionError(null);
     setSaveConflictOnDisk(false);
     commits.forEach((commit) => commit.onApplied?.());
-    onDirtyChange?.(nextDocumentContent !== currentFileState.content);
     return true;
   }
 
@@ -414,14 +407,9 @@ export function SourcePanel({
 
     const normalizedDraft = normalizeEditedMarkdownSection(nextMarkdown, segment.markdown);
     const nextHasDraft = normalizedDraft !== segment.markdown;
-    const currentFileState = fileStateRef.current;
     setHasRenderedMarkdownDraftActive(nextHasDraft);
     setActionError(null);
     setSaveConflictOnDisk(false);
-    onDirtyChange?.(
-      currentFileState.status === "ready" &&
-        (editorValueRef.current !== currentFileState.content || nextHasDraft),
-    );
   }
 
   function handleRenderedMarkdownReadOnlyMutation() {
@@ -477,10 +465,6 @@ export function SourcePanel({
 
   function handleEditorChange(nextValue: string) {
     setEditorValueState(nextValue);
-    onDirtyChange?.(
-      fileState.status === "ready" &&
-        (nextValue !== fileState.content || hasRenderedMarkdownDraftActive),
-    );
   }
 
   async function handleReloadFromDisk() {
@@ -536,7 +520,6 @@ export function SourcePanel({
 
       if (latestEditorSnapshot === latestFileSnapshot.content) {
         onAdoptFileState(latestFileState);
-        onDirtyChange?.(false);
         return;
       }
 
@@ -553,7 +536,6 @@ export function SourcePanel({
       pendingEditorValueRef.current = rebaseResult.content;
       onAdoptFileState(latestFileState);
       setEditorValueState(rebaseResult.content);
-      onDirtyChange?.(rebaseResult.content !== latestFileState.content);
     } catch (error) {
       if (mountedRef.current && rebaseRequestTokenRef.current === requestToken) {
         setActionError(getErrorMessage(error));
@@ -1012,6 +994,7 @@ function EditableMarkdownPreviewPane({
         onReadOnlyMutation={onReadOnlyMutation}
         onRegisterCommitter={onRegisterCommitter}
         onSave={onSave}
+        resetOnSegmentMarkdownChange={false}
         segment={segment}
         sourceContent={sourceContent}
         workspaceRoot={workspaceRoot}

@@ -195,6 +195,11 @@ describe("SourcePanel", () => {
       />,
     );
 
+    await waitFor(() => {
+      expect(onDirtyChange).toHaveBeenCalledWith(false);
+    });
+    onDirtyChange.mockClear();
+
     fireEvent.change(
       await screen.findByLabelText("Source editor for src/main.rs"),
       {
@@ -205,6 +210,7 @@ describe("SourcePanel", () => {
     await waitFor(() => {
       expect(onDirtyChange).toHaveBeenLastCalledWith(true);
     });
+    expect(onDirtyChange).toHaveBeenCalledTimes(1);
   });
 
   it("renders Markdown preview from the unsaved editor buffer", async () => {
@@ -375,6 +381,47 @@ describe("SourcePanel", () => {
     await waitFor(() => {
       expect(editor).toHaveValue("Split paragraph.\n");
     });
+  });
+
+  it("keeps rendered Markdown mounted while typing in the split code pane", async () => {
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Original paragraph.\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    const editor = await screen.findByLabelText("Source editor for /repo/docs/readme.md");
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+    const renderedContent = renderedSection.querySelector<HTMLElement>(
+      ".markdown-diff-rendered-section-content",
+    );
+    expect(renderedContent).not.toBeNull();
+
+    fireEvent.change(editor, {
+      target: { value: "Original paragraph.\n\nSecond paragraph.\n" },
+    });
+
+    await waitFor(() => {
+      expect(renderedSection).toHaveTextContent("Second paragraph.");
+    });
+    expect(
+      renderedSection.querySelector(".markdown-diff-rendered-section-content"),
+    ).toBe(renderedContent);
   });
 
   it("rejects stale rendered split drafts instead of overwriting code-pane edits", async () => {

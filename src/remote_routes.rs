@@ -50,6 +50,12 @@
 // src/remote_terminal.rs (terminal stream forwarding); src/tests/remote.rs
 // (pin tests).
 
+#[derive(Clone, Copy)]
+struct RemoteDeltaHydrationExpectation {
+    message_count: u32,
+    session_mutation_stamp: Option<u64>,
+}
+
 impl AppState {
     // -- event bridge lifecycle --
 
@@ -430,40 +436,169 @@ impl AppState {
             && record.session.session_mutation_stamp == session.session_mutation_stamp
     }
 
-    fn remote_session_delta_already_reflected(
-        &self,
-        remote_id: &str,
-        remote_session_id: &str,
-        remote_revision: u64,
-        message_count: u32,
-        session_mutation_stamp: Option<u64>,
-    ) -> bool {
-        let Some(session_mutation_stamp) = session_mutation_stamp else {
-            return false;
-        };
-
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        if !inner
-            .remote_applied_revisions
-            .get(remote_id)
-            .is_some_and(|latest_revision| *latest_revision >= remote_revision)
-        {
-            return false;
+    fn command_status_replay_code(status: CommandStatus) -> u8 {
+        match status {
+            CommandStatus::Running => 0,
+            CommandStatus::Success => 1,
+            CommandStatus::Error => 2,
         }
+    }
 
-        let Some(index) = inner.find_remote_session_index(remote_id, remote_session_id) else {
-            return false;
+    fn parallel_agent_status_replay_code(status: ParallelAgentStatus) -> u8 {
+        match status {
+            ParallelAgentStatus::Initializing => 0,
+            ParallelAgentStatus::Running => 1,
+            ParallelAgentStatus::Completed => 2,
+            ParallelAgentStatus::Error => 3,
+        }
+    }
+
+    fn remote_delta_replay_key(remote_id: &str, event: &DeltaEvent) -> RemoteDeltaReplayKey {
+        let payload = match event {
+            DeltaEvent::SessionCreated { session_id, session, .. } => {
+                RemoteDeltaReplayPayload::SessionCreated {
+                    session_id: session_id.clone(),
+                    message_count: session.message_count,
+                    session_mutation_stamp: session.session_mutation_stamp,
+                }
+            }
+            DeltaEvent::MessageCreated {
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                session_mutation_stamp,
+                ..
+            } => RemoteDeltaReplayPayload::MessageCreated {
+                session_id: session_id.clone(),
+                message_id: message_id.clone(),
+                message_index: *message_index,
+                message_count: *message_count,
+                session_mutation_stamp: *session_mutation_stamp,
+            },
+            DeltaEvent::MessageUpdated {
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                session_mutation_stamp,
+                ..
+            } => RemoteDeltaReplayPayload::MessageUpdated {
+                session_id: session_id.clone(),
+                message_id: message_id.clone(),
+                message_index: *message_index,
+                message_count: *message_count,
+                session_mutation_stamp: *session_mutation_stamp,
+            },
+            DeltaEvent::TextDelta {
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                delta,
+                session_mutation_stamp,
+                ..
+            } => RemoteDeltaReplayPayload::TextDelta {
+                session_id: session_id.clone(),
+                message_id: message_id.clone(),
+                message_index: *message_index,
+                message_count: *message_count,
+                delta: delta.clone(),
+                session_mutation_stamp: *session_mutation_stamp,
+            },
+            DeltaEvent::TextReplace {
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                session_mutation_stamp,
+                ..
+            } => RemoteDeltaReplayPayload::TextReplace {
+                session_id: session_id.clone(),
+                message_id: message_id.clone(),
+                message_index: *message_index,
+                message_count: *message_count,
+                session_mutation_stamp: *session_mutation_stamp,
+            },
+            DeltaEvent::CommandUpdate {
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                status,
+                session_mutation_stamp,
+                ..
+            } => RemoteDeltaReplayPayload::CommandUpdate {
+                session_id: session_id.clone(),
+                message_id: message_id.clone(),
+                message_index: *message_index,
+                message_count: *message_count,
+                status: Self::command_status_replay_code(*status),
+                session_mutation_stamp: *session_mutation_stamp,
+            },
+            DeltaEvent::ParallelAgentsUpdate {
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                agents,
+                session_mutation_stamp,
+                ..
+            } => RemoteDeltaReplayPayload::ParallelAgentsUpdate {
+                session_id: session_id.clone(),
+                message_id: message_id.clone(),
+                message_index: *message_index,
+                message_count: *message_count,
+                agent_states: agents
+                    .iter()
+                    .map(|agent| {
+                        (
+                            agent.id.clone(),
+                            Self::parallel_agent_status_replay_code(agent.status),
+                        )
+                    })
+                    .collect(),
+                session_mutation_stamp: *session_mutation_stamp,
+            },
+            DeltaEvent::CodexUpdated { .. } => RemoteDeltaReplayPayload::CodexUpdated,
+            DeltaEvent::OrchestratorsUpdated {
+                orchestrators,
+                sessions,
+                ..
+            } => RemoteDeltaReplayPayload::OrchestratorsUpdated {
+                orchestrator_ids: orchestrators
+                    .iter()
+                    .map(|orchestrator| orchestrator.id.clone())
+                    .collect(),
+                session_ids: sessions.iter().map(|session| session.id.clone()).collect(),
+            },
         };
-        let record = &inner.sessions[index];
-        record.session.messages_loaded
-            && session_message_count(record) == message_count
-            && record.session.session_mutation_stamp == Some(session_mutation_stamp)
+        RemoteDeltaReplayKey {
+            remote_id: remote_id.to_owned(),
+            revision: delta_event_revision(event),
+            payload,
+        }
+    }
+
+    fn should_skip_remote_hydrated_delta_replay(&self, key: &RemoteDeltaReplayKey) -> bool {
+        self.remote_hydrated_delta_replay_cache
+            .lock()
+            .expect("remote delta replay cache mutex poisoned")
+            .contains(key)
+    }
+
+    fn note_remote_hydrated_delta_replay(&self, key: &RemoteDeltaReplayKey) {
+        self.remote_hydrated_delta_replay_cache
+            .lock()
+            .expect("remote delta replay cache mutex poisoned")
+            .insert(key.clone());
     }
 
     fn hydrate_remote_session_target(
         &self,
         target: &RemoteSessionTarget,
         min_remote_revision: Option<u64>,
+        delta_expectation: Option<RemoteDeltaHydrationExpectation>,
     ) -> Result<SessionResponse, ApiError> {
         let remote_response: SessionResponse = self.remote_registry.request_json(
             &target.remote,
@@ -482,6 +617,19 @@ impl AppState {
                 remote_response.session.id, target.remote_session_id
             )));
         }
+        if !remote_response.session.messages_loaded {
+            return Err(ApiError::bad_gateway(
+                "remote session response did not include a full transcript",
+            ));
+        }
+        let loaded_message_count =
+            u32::try_from(remote_response.session.messages.len()).unwrap_or(u32::MAX);
+        if loaded_message_count != remote_response.session.message_count {
+            return Err(ApiError::bad_gateway(format!(
+                "remote session response messageCount {} did not match loaded transcript length {}",
+                remote_response.session.message_count, loaded_message_count
+            )));
+        }
         if let Some(min_revision) = min_remote_revision {
             if remote_response.revision < min_revision {
                 return Err(ApiError::bad_gateway(format!(
@@ -490,16 +638,20 @@ impl AppState {
                 )));
             }
             if remote_response.revision > min_revision {
-                return Err(ApiError::bad_gateway(format!(
-                    "remote session response revision {} is newer than targeted repair revision {min_revision}",
-                    remote_response.revision
-                )));
+                let metadata_matches_triggering_delta = delta_expectation
+                    .is_some_and(|expectation| {
+                        expectation.session_mutation_stamp.is_some()
+                            && remote_response.session.message_count == expectation.message_count
+                            && remote_response.session.session_mutation_stamp
+                                == expectation.session_mutation_stamp
+                    });
+                if !metadata_matches_triggering_delta {
+                    return Err(ApiError::bad_gateway(format!(
+                        "remote session response revision {} is newer than targeted repair revision {min_revision} without matching session mutation metadata",
+                        remote_response.revision
+                    )));
+                }
             }
-        }
-        if !remote_response.session.messages_loaded {
-            return Err(ApiError::bad_gateway(
-                "remote session response did not include a full transcript",
-            ));
         }
 
         let remote_state_for_full_hydration = if min_remote_revision.is_none() {
@@ -662,6 +814,8 @@ impl AppState {
         remote_id: &str,
         remote_session_id: &str,
         remote_revision: u64,
+        remote_message_count: u32,
+        remote_session_mutation_stamp: Option<u64>,
     ) -> Result<bool, anyhow::Error> {
         let target = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -686,7 +840,14 @@ impl AppState {
             }
         };
 
-        self.hydrate_remote_session_target(&target, Some(remote_revision))
+        self.hydrate_remote_session_target(
+            &target,
+            Some(remote_revision),
+            Some(RemoteDeltaHydrationExpectation {
+                message_count: remote_message_count,
+                session_mutation_stamp: remote_session_mutation_stamp,
+            }),
+        )
             .map_err(|err| anyhow!("failed to hydrate remote session `{remote_session_id}`: {}", err.message))?;
         Ok(true)
     }
@@ -789,6 +950,10 @@ impl AppState {
         remote_id: &str,
         event: DeltaEvent,
     ) -> Result<(), anyhow::Error> {
+        let remote_delta_replay_key = Self::remote_delta_replay_key(remote_id, &event);
+        if self.should_skip_remote_hydrated_delta_replay(&remote_delta_replay_key) {
+            return Ok(());
+        }
         let remote_revision = delta_event_revision(&event);
         match event {
             DeltaEvent::SessionCreated {
@@ -802,7 +967,7 @@ impl AppState {
                         session.id
                     ));
                 }
-                let (local_session, delta_session, revision) = {
+                let Some((local_session, delta_session, revision)) = ({
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
                     if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
                         return Ok(());
@@ -825,27 +990,33 @@ impl AppState {
                         .ok_or_else(|| {
                             anyhow!("local proxy session `{local_session_id}` not found")
                         })?;
-                    let revision = if changed {
+                    if !changed {
+                        inner.note_remote_applied_revision(remote_id, remote_revision);
+                        None
+                    } else {
                         let local_record = inner.sessions.get(local_index).cloned().ok_or_else(|| {
                             anyhow!("local proxy session `{local_session_id}` not found")
                         })?;
-                        self.commit_session_created_locked(&mut inner, &local_record)?
-                    } else {
-                        inner.revision
-                    };
+                        let revision =
+                            self.commit_session_created_locked(&mut inner, &local_record)?;
                     let local_record = inner.sessions.get(local_index).ok_or_else(|| {
                         anyhow!("local proxy session `{local_session_id}` not found")
                     })?;
                     let local_session = AppState::wire_session_from_record(local_record);
                     let delta_session = AppState::wire_session_summary_from_record(local_record);
                     inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (local_session, delta_session, revision)
+                        Some((local_session, delta_session, revision))
+                    }
+                }) else {
+                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                    return Ok(());
                 };
                 self.publish_delta(&DeltaEvent::SessionCreated {
                     revision,
                     session_id: local_session.id.clone(),
                     session: delta_session,
                 });
+                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::MessageCreated {
                 message,
@@ -864,20 +1035,14 @@ impl AppState {
                         message.id()
                     ));
                 }
-                if self.remote_session_delta_already_reflected(
+                if self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
                     remote_revision,
                     remote_message_count,
                     remote_session_mutation_stamp,
-                ) {
-                    return Ok(());
-                }
-                if self.hydrate_unloaded_remote_session_for_delta(
-                    remote_id,
-                    &session_id,
-                    remote_revision,
                 )? {
+                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 }
                 let (
@@ -959,6 +1124,7 @@ impl AppState {
                     status,
                     session_mutation_stamp: Some(session_mutation_stamp),
                 });
+                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::MessageUpdated {
                 message,
@@ -983,20 +1149,14 @@ impl AppState {
                         message.id()
                     ));
                 }
-                if self.remote_session_delta_already_reflected(
+                if self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
                     remote_revision,
                     remote_message_count,
                     remote_session_mutation_stamp,
-                ) {
-                    return Ok(());
-                }
-                if self.hydrate_unloaded_remote_session_for_delta(
-                    remote_id,
-                    &session_id,
-                    remote_revision,
                 )? {
+                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 }
                 {
@@ -1055,6 +1215,7 @@ impl AppState {
                         session_mutation_stamp: Some(session_mutation_stamp),
                     });
                 }
+                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::TextDelta {
                 delta,
@@ -1065,20 +1226,14 @@ impl AppState {
                 session_mutation_stamp: remote_session_mutation_stamp,
                 ..
             } => {
-                if self.remote_session_delta_already_reflected(
+                if self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
                     remote_revision,
                     remote_message_count,
                     remote_session_mutation_stamp,
-                ) {
-                    return Ok(());
-                }
-                if self.hydrate_unloaded_remote_session_for_delta(
-                    remote_id,
-                    &session_id,
-                    remote_revision,
                 )? {
+                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 }
                 let (local_session_id, message_index, message_count, revision, session_mutation_stamp) = {
@@ -1141,6 +1296,7 @@ impl AppState {
                     preview,
                     session_mutation_stamp: Some(session_mutation_stamp),
                 });
+                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::TextReplace {
                 message_count: remote_message_count,
@@ -1151,20 +1307,14 @@ impl AppState {
                 text,
                 ..
             } => {
-                if self.remote_session_delta_already_reflected(
+                if self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
                     remote_revision,
                     remote_message_count,
                     remote_session_mutation_stamp,
-                ) {
-                    return Ok(());
-                }
-                if self.hydrate_unloaded_remote_session_for_delta(
-                    remote_id,
-                    &session_id,
-                    remote_revision,
                 )? {
+                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 }
                 let (local_session_id, message_index, message_count, revision, session_mutation_stamp) = {
@@ -1232,6 +1382,7 @@ impl AppState {
                     preview,
                     session_mutation_stamp: Some(session_mutation_stamp),
                 });
+                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::CommandUpdate {
                 command,
@@ -1247,20 +1398,14 @@ impl AppState {
                 status,
                 ..
             } => {
-                if self.remote_session_delta_already_reflected(
+                if self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
                     remote_revision,
                     remote_message_count,
                     remote_session_mutation_stamp,
-                ) {
-                    return Ok(());
-                }
-                if self.hydrate_unloaded_remote_session_for_delta(
-                    remote_id,
-                    &session_id,
-                    remote_revision,
                 )? {
+                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 }
                 let (
@@ -1397,6 +1542,7 @@ impl AppState {
                         session_mutation_stamp: Some(session_mutation_stamp),
                     });
                 }
+                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::ParallelAgentsUpdate {
                 agents,
@@ -1408,20 +1554,14 @@ impl AppState {
                 session_mutation_stamp: remote_session_mutation_stamp,
                 ..
             } => {
-                if self.remote_session_delta_already_reflected(
+                if self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
                     remote_revision,
                     remote_message_count,
                     remote_session_mutation_stamp,
-                ) {
-                    return Ok(());
-                }
-                if self.hydrate_unloaded_remote_session_for_delta(
-                    remote_id,
-                    &session_id,
-                    remote_revision,
                 )? {
+                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 }
                 let (
@@ -1542,6 +1682,7 @@ impl AppState {
                         session_mutation_stamp: Some(session_mutation_stamp),
                     });
                 }
+                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::OrchestratorsUpdated {
                 orchestrators,
@@ -1583,6 +1724,7 @@ impl AppState {
                     (revision, inner.orchestrator_instances.clone())
                 };
                 self.publish_orchestrators_updated(revision, localized_orchestrators);
+                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::CodexUpdated { .. } => {
                 // CodexState is process-global runtime metadata, not localized
@@ -1593,6 +1735,8 @@ impl AppState {
                     return Ok(());
                 }
                 inner.note_remote_applied_revision(remote_id, remote_revision);
+                drop(inner);
+                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
             }
         }
         Ok(())

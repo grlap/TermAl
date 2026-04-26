@@ -98,12 +98,18 @@ During active user scroll, mounted-range updates are grow-oriented:
 
 This avoids exposing spacer space during normal reading.
 
-Large upward wheel deltas are prewarmed before the native scroll event paints:
-the virtualizer projects the wheel target and grows the mounted band above when
-that target would otherwise land in the top spacer. A layout guard also checks
-actual mounted DOM bounds during scroll cooldown and prepends pages if the first
-mounted page has fallen below the viewport top. This mirrors the existing
-bottom-edge guard for compact pages that shrink below their estimates.
+Large upward wheel deltas are prewarmed before the scroll write paints: the
+virtualizer projects the wheel target and grows the mounted band above when that
+target would otherwise land in the top spacer. `SessionPaneView` tags its
+parent-owned wheel scroll writes as `incremental`, so a large wheel delta is not
+misclassified as a seek and trimmed back while the gesture is still active.
+
+The edge-growth math uses actual rendered page coverage as a cap on stale page
+height estimates. That lets compact command-heavy pages prepend multiple bands
+in one frame when their stored estimates are still too tall. A layout guard also
+checks actual mounted DOM bounds during scroll cooldown and prepends pages if
+the first mounted page has fallen below the viewport top. This mirrors the
+existing bottom-edge guard for compact pages that shrink below their estimates.
 
 ### Idle compaction
 

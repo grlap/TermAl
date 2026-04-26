@@ -1397,6 +1397,124 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
+  it("does not let bottom-follow recapture later inertial native scroll ticks", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
+    let measuredSlotHeight = 180;
+    let scrollTop = 400;
+    const scrollWrites: number[] = [];
+
+    class ResizeObserverMock {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        resizeCallbacks.set(target, this.callback);
+      }
+      disconnect() {}
+    }
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 100,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 500 + (measuredSlotHeight - 180),
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+        scrollWrites.push(nextValue);
+      },
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    let nextFrameId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      queueMicrotask(() => callback(0));
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
+    Element.prototype.getBoundingClientRect = function getBoundingClientRectMock() {
+      const element = this as HTMLElement;
+      const height = element.classList.contains("virtualized-message-slot")
+        ? measuredSlotHeight
+        : 100;
+      return {
+        bottom: height,
+        height,
+        left: 0,
+        right: 100,
+        top: 0,
+        width: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+
+    try {
+      const { container } = render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">{message.id}</article>
+          )}
+          sessionId="session-a"
+          messages={makeTextMessages(3)}
+          scrollContainerRef={{
+            current: scrollNode,
+          } as RefObject<HTMLElement | null>}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+      );
+
+      const slot = await waitFor(() => {
+        const candidate = container.querySelector(".virtualized-message-slot");
+        expect(candidate).not.toBeNull();
+        return candidate!;
+      });
+
+      act(() => {
+        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "bottom_follow" });
+      });
+
+      act(() => {
+        scrollTop = 350;
+        fireEvent.scroll(scrollNode);
+      });
+      act(() => {
+        scrollTop = 360;
+        fireEvent.scroll(scrollNode);
+      });
+
+      scrollWrites.length = 0;
+      measuredSlotHeight = 340;
+      await act(async () => {
+        resizeCallbacks.get(slot)?.([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+        await Promise.resolve();
+      });
+
+      expect(scrollWrites).toEqual([]);
+      expect(scrollTop).toBe(360);
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
   it("does not give back upward wheel progress when a row above the viewport grows", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
@@ -2190,6 +2308,58 @@ describe("AgentSessionPanel conversation caching", () => {
         expect(container.querySelectorAll(".virtualized-message-slot").length).toBeGreaterThan(0);
       });
 
+      const wheelInputs: WheelEventInit[] = [
+        { deltaY: -1800 },
+        { deltaMode: WheelEvent.DOM_DELTA_LINE, deltaY: -45 },
+        { deltaMode: WheelEvent.DOM_DELTA_PAGE, deltaY: -3 },
+      ];
+      const resolveWheelDelta = (wheelInput: WheelEventInit) => {
+        if (wheelInput.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+          return (wheelInput.deltaY ?? 0) * 40;
+        }
+        if (wheelInput.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+          return (wheelInput.deltaY ?? 0) * clientHeight;
+        }
+        return wheelInput.deltaY ?? 0;
+      };
+
+      for (const wheelInput of wheelInputs) {
+        await act(async () => {
+          scrollTop = 0;
+          notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
+          await Promise.resolve();
+        });
+        await act(async () => {
+          scrollTop = 3600;
+          notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
+          await Promise.resolve();
+        });
+
+        await waitFor(() => {
+          expect(getFirstMountedMessageIndex(container)).toBeGreaterThan(1);
+        });
+        const firstMountedBeforeWheel = getFirstMountedMessageIndex(container);
+
+        act(() => {
+          fireEvent.wheel(scrollNode, wheelInput);
+          scrollTop = Math.max(3600 + resolveWheelDelta(wheelInput), 0);
+          notifyMessageStackScrollWrite(scrollNode);
+        });
+
+        await waitFor(() => {
+          expect(getFirstMountedMessageIndex(container)).toBeLessThan(firstMountedBeforeWheel);
+          const firstMountedPage = container.querySelector<HTMLElement>(
+            ".virtualized-message-page",
+          );
+          expect(firstMountedPage?.getBoundingClientRect().top).toBeLessThanOrEqual(0);
+        });
+      }
+
+      await act(async () => {
+        scrollTop = 0;
+        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
+        await Promise.resolve();
+      });
       await act(async () => {
         scrollTop = 3600;
         notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
@@ -2199,14 +2369,20 @@ describe("AgentSessionPanel conversation caching", () => {
       await waitFor(() => {
         expect(getFirstMountedMessageIndex(container)).toBeGreaterThan(1);
       });
-      const firstMountedBeforeWheel = getFirstMountedMessageIndex(container);
+      const firstMountedBeforeLargeWrite = getFirstMountedMessageIndex(container);
 
       act(() => {
-        fireEvent.wheel(scrollNode, { deltaY: -1800 });
-      });
+        fireEvent.wheel(scrollNode, { deltaY: -1 });
+        scrollTop = 1800;
+        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "incremental" });
 
-      await waitFor(() => {
-        expect(getFirstMountedMessageIndex(container)).toBeLessThan(firstMountedBeforeWheel);
+        expect(getFirstMountedMessageIndex(container)).toBeLessThan(
+          firstMountedBeforeLargeWrite,
+        );
+        const firstMountedPage = container.querySelector<HTMLElement>(
+          ".virtualized-message-page",
+        );
+        expect(firstMountedPage?.getBoundingClientRect().top).toBeLessThanOrEqual(0);
       });
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
