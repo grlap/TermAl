@@ -2392,6 +2392,115 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
+  it("ignores upward wheel prewarm when a nested scrollable consumes the wheel", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const messages = makeTextMessages(80);
+    let scrollTop = 0;
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    const getFirstMountedMessageIndex = (container: HTMLElement) => {
+      const firstSlot = container.querySelector<HTMLElement>(".virtualized-message-slot");
+      const messageId = firstSlot?.dataset.messageId ?? "";
+      const index = Number.parseInt(messageId.replace("message-", ""), 10);
+      return Number.isFinite(index) ? index : 0;
+    };
+
+    const scrollNode = document.createElement("div");
+    document.body.appendChild(scrollNode);
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(scrollNode, "clientWidth", {
+      configurable: true,
+      get: () => 1000,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 20000,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+
+    try {
+      const { container } = render(
+        <VirtualizedConversationMessageList
+          isActive
+          renderMessageCard={(message) => (
+            <article className="message-card">
+              <div className="nested-scrollable" style={{ overflowY: "auto" }}>
+                {message.id}
+              </div>
+            </article>
+          )}
+          sessionId="session-a"
+          messages={messages}
+          scrollContainerRef={{
+            current: scrollNode,
+          } as RefObject<HTMLElement | null>}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />,
+        { container: scrollNode },
+      );
+
+      await waitFor(() => {
+        expect(container.querySelectorAll(".virtualized-message-slot").length).toBeGreaterThan(0);
+      });
+
+      await act(async () => {
+        scrollTop = 3600;
+        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(getFirstMountedMessageIndex(container)).toBeGreaterThan(1);
+      });
+      const firstMountedBeforeWheel = getFirstMountedMessageIndex(container);
+      const nestedScrollable = container.querySelector<HTMLElement>(".nested-scrollable");
+      expect(nestedScrollable).not.toBeNull();
+      let nestedScrollTop = 40;
+      Object.defineProperty(nestedScrollable!, "clientHeight", {
+        configurable: true,
+        get: () => 100,
+      });
+      Object.defineProperty(nestedScrollable!, "scrollHeight", {
+        configurable: true,
+        get: () => 400,
+      });
+      Object.defineProperty(nestedScrollable!, "scrollTop", {
+        configurable: true,
+        get: () => nestedScrollTop,
+        set: (nextValue: number) => {
+          nestedScrollTop = nextValue;
+        },
+      });
+
+      act(() => {
+        fireEvent.wheel(nestedScrollable!, { deltaY: -1800 });
+      });
+
+      expect(getFirstMountedMessageIndex(container)).toBe(firstMountedBeforeWheel);
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      scrollNode.remove();
+    }
+  });
+
   it("does not hit nested update depth when a scrollbar drag jumps to a distant region", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;

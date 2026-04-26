@@ -115,7 +115,42 @@ import type { MonacoAppearance } from "./monaco";
 
 const HEAVY_CODE_CHARACTER_THRESHOLD = 1400;
 const HEAVY_CODE_LINE_THRESHOLD = 28;
-const HEAVY_MARKDOWN_CHARACTER_THRESHOLD = 1800;
+// Markdown qualifies as "heavy" — and therefore goes through
+// `DeferredMarkdownContent`'s IntersectionObserver-gated render path —
+// when EITHER the line count OR the character count crosses these
+// thresholds. Both gates are OR'd, so a long single-line table or a
+// short-but-very-wide block still qualifies.
+//
+// Tuning history:
+//   - 1800 chars / 24 lines: original conservative gate, sized so that
+//     even mid-size assistant explanations (a few paragraphs of prose,
+//     no code) deferred. This made fast scrolling feel laggy because
+//     ordinary message bodies blanked out and re-painted on dwell.
+//   - 9000 chars / 24 lines (current): only genuinely heavy content
+//     (long-form docs, large markdown tables, dumped logs in a fenced
+//     block, big mermaid sources) goes through the deferred path;
+//     typical assistant prose paints synchronously like plain text and
+//     never flickers during fast scroll.
+//
+// Mermaid note: any ```mermaid``` fence inside the body triggers a
+// real mermaid render in a sandboxed iframe (`MermaidDiagram` →
+// `renderTermalMermaidDiagram`), capped at
+// `MAX_MERMAID_DIAGRAMS_PER_DOCUMENT` (20). The first render of a
+// non-trivial flowchart can take hundreds of ms, so messages with
+// embedded mermaid are exactly the case the deferred wrapper exists
+// to protect — even if the surrounding prose is short, the character
+// count of the source fence usually pushes the body past this gate.
+//
+// If you raise these further, weigh the cost: every non-deferred
+// markdown body re-runs the full remark/rehype/KaTeX/highlight pipeline
+// on each mount/unmount the virtualizer performs. The deferred wrapper
+// exists specifically to keep those pipelines off the hot path while
+// the user is still scrolling. The cooldown that gates the deferred
+// path between scroll inputs lives in
+// `panels/VirtualizedConversationMessageList.tsx` as
+// `DEFERRED_HEAVY_ACTIVATION_COOLDOWN_MS` — keep these two tunings in
+// mind as a pair.
+const HEAVY_MARKDOWN_CHARACTER_THRESHOLD = 9000;
 const HEAVY_MARKDOWN_LINE_THRESHOLD = 24;
 const FILE_CHANGES_COLLAPSE_THRESHOLD = 6;
 let mermaidDiagramIdCounter = 0;

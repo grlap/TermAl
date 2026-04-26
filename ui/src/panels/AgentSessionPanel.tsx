@@ -714,6 +714,15 @@ function ConversationMessageList({
 
   return (
     <VirtualizedConversationMessageList
+      // Keying by sessionId remounts the virtualizer on every session switch
+      // so all per-session scroll-intent refs and pending timers/RAFs reset
+      // cleanly via the existing unmount cleanup. Without the key, refs like
+      // `pendingMountedPrependRestoreRef`, `pendingDeferredLayoutAnchorRef`,
+      // `pendingProgrammaticBottomFollowUntilRef`, the idle-compaction timer,
+      // and the bottom-stick state survive across sessions in the same pane —
+      // letting session A's queued restore corrupt session B's scroll, or an
+      // A-armed timer mutate B's mounted range with stale flags.
+      key={sessionId}
       isActive={isActive}
       renderMessageCard={renderMessageCard}
       sessionId={sessionId}

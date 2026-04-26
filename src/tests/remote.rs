@@ -2884,6 +2884,275 @@ fn remote_text_delta_exact_replay_is_skipped_for_loaded_proxy_session() {
 }
 
 #[test]
+fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
+    let remote_id = "ssh-lab";
+    let remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    );
+    let mut session_a = remote_state.sessions[0].clone();
+    let mut session_b = session_a.clone();
+    session_a.session_mutation_stamp = Some(10);
+    session_b.session_mutation_stamp = Some(10);
+    session_b.preview = "different session preview".to_owned();
+    assert_ne!(
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::SessionCreated {
+                revision: 3,
+                session_id: session_a.id.clone(),
+                session: session_a,
+            },
+        ),
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::SessionCreated {
+                revision: 3,
+                session_id: session_b.id.clone(),
+                session: session_b,
+            },
+        ),
+        "SessionCreated replay identity must include the session payload"
+    );
+
+    assert_ne!(
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::MessageCreated {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                message: remote_text_message("remote-message-1", "first text"),
+                preview: "first text".to_owned(),
+                status: SessionStatus::Idle,
+                session_mutation_stamp: Some(11),
+            },
+        ),
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::MessageCreated {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                message: remote_text_message("remote-message-1", "second text"),
+                preview: "second text".to_owned(),
+                status: SessionStatus::Idle,
+                session_mutation_stamp: Some(11),
+            },
+        ),
+        "MessageCreated replay identity must include the message payload"
+    );
+
+    assert_ne!(
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::MessageUpdated {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                message: remote_text_message("remote-message-1", "first text"),
+                preview: "first text".to_owned(),
+                status: SessionStatus::Idle,
+                session_mutation_stamp: Some(11),
+            },
+        ),
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::MessageUpdated {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                message: remote_text_message("remote-message-1", "second text"),
+                preview: "second text".to_owned(),
+                status: SessionStatus::Idle,
+                session_mutation_stamp: Some(11),
+            },
+        ),
+        "MessageUpdated replay identity must include the message payload"
+    );
+
+    assert_ne!(
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::TextReplace {
+                revision: 5,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                text: "first replacement".to_owned(),
+                preview: Some("first replacement".to_owned()),
+                session_mutation_stamp: Some(12),
+            },
+        ),
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::TextReplace {
+                revision: 5,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                text: "second replacement".to_owned(),
+                preview: Some("second replacement".to_owned()),
+                session_mutation_stamp: Some(12),
+            },
+        ),
+        "TextReplace replay identity must include replacement text"
+    );
+
+    assert_ne!(
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::CommandUpdate {
+                revision: 6,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-command-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                command: "cargo test".to_owned(),
+                command_language: Some("shell".to_owned()),
+                output: "first output".to_owned(),
+                output_language: Some("text".to_owned()),
+                status: CommandStatus::Running,
+                preview: "first output".to_owned(),
+                session_mutation_stamp: Some(13),
+            },
+        ),
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::CommandUpdate {
+                revision: 6,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-command-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                command: "cargo test".to_owned(),
+                command_language: Some("shell".to_owned()),
+                output: "second output".to_owned(),
+                output_language: Some("text".to_owned()),
+                status: CommandStatus::Running,
+                preview: "second output".to_owned(),
+                session_mutation_stamp: Some(13),
+            },
+        ),
+        "CommandUpdate replay identity must include command output"
+    );
+
+    assert_ne!(
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::ParallelAgentsUpdate {
+                revision: 7,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-parallel-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                agents: vec![ParallelAgentProgress {
+                    detail: Some("first detail".to_owned()),
+                    id: "agent-1".to_owned(),
+                    status: ParallelAgentStatus::Running,
+                    title: "Agent one".to_owned(),
+                }],
+                preview: "first detail".to_owned(),
+                session_mutation_stamp: Some(14),
+            },
+        ),
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::ParallelAgentsUpdate {
+                revision: 7,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-parallel-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                agents: vec![ParallelAgentProgress {
+                    detail: Some("second detail".to_owned()),
+                    id: "agent-1".to_owned(),
+                    status: ParallelAgentStatus::Running,
+                    title: "Agent one".to_owned(),
+                }],
+                preview: "second detail".to_owned(),
+                session_mutation_stamp: Some(14),
+            },
+        ),
+        "ParallelAgentsUpdate replay identity must include agent detail and preview"
+    );
+
+    let mut orchestrator_a = remote_state.orchestrators[0].clone();
+    let mut orchestrator_b = orchestrator_a.clone();
+    orchestrator_a.status = OrchestratorInstanceStatus::Running;
+    orchestrator_b.status = OrchestratorInstanceStatus::Paused;
+    assert_ne!(
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::OrchestratorsUpdated {
+                revision: 8,
+                orchestrators: vec![orchestrator_a],
+                sessions: Vec::new(),
+            },
+        ),
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::OrchestratorsUpdated {
+                revision: 8,
+                orchestrators: vec![orchestrator_b],
+                sessions: Vec::new(),
+            },
+        ),
+        "OrchestratorsUpdated replay identity must include orchestrator payloads"
+    );
+
+    assert_ne!(
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::CodexUpdated {
+                revision: 9,
+                codex: CodexState {
+                    rate_limits: None,
+                    notices: vec![CodexNotice {
+                        kind: CodexNoticeKind::RuntimeNotice,
+                        level: CodexNoticeLevel::Info,
+                        title: "first notice".to_owned(),
+                        detail: "detail".to_owned(),
+                        timestamp: "2026-04-05 10:00:00".to_owned(),
+                        code: None,
+                    }],
+                },
+            },
+        ),
+        AppState::remote_delta_replay_key(
+            remote_id,
+            &DeltaEvent::CodexUpdated {
+                revision: 9,
+                codex: CodexState {
+                    rate_limits: None,
+                    notices: vec![CodexNotice {
+                        kind: CodexNoticeKind::RuntimeNotice,
+                        level: CodexNoticeLevel::Info,
+                        title: "second notice".to_owned(),
+                        detail: "detail".to_owned(),
+                        timestamp: "2026-04-05 10:00:00".to_owned(),
+                        code: None,
+                    }],
+                },
+            },
+        ),
+        "CodexUpdated replay identity must include the codex payload"
+    );
+}
+
+#[test]
 fn remote_delta_replay_cache_clears_with_remote_revision_watermark() {
     let state = test_app_state();
     let remote = RemoteConfig {

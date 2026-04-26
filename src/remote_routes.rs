@@ -444,6 +444,15 @@ impl AppState {
         }
     }
 
+    fn session_status_replay_code(status: SessionStatus) -> u8 {
+        match status {
+            SessionStatus::Active => 0,
+            SessionStatus::Idle => 1,
+            SessionStatus::Approval => 2,
+            SessionStatus::Error => 3,
+        }
+    }
+
     fn parallel_agent_status_replay_code(status: ParallelAgentStatus) -> u8 {
         match status {
             ParallelAgentStatus::Initializing => 0,
@@ -453,12 +462,19 @@ impl AppState {
         }
     }
 
+    fn remote_delta_payload_fingerprint<T: Serialize>(payload: &T) -> String {
+        let encoded = serde_json::to_vec(payload)
+            .expect("remote delta replay payload should serialize through the wire contract");
+        format!("{:x}", Sha256::digest(encoded))
+    }
+
     fn remote_delta_replay_key(remote_id: &str, event: &DeltaEvent) -> RemoteDeltaReplayKey {
         let payload = match event {
             DeltaEvent::SessionCreated { session_id, session, .. } => {
                 RemoteDeltaReplayPayload::SessionCreated {
                     session_id: session_id.clone(),
                     message_count: session.message_count,
+                    session_fingerprint: Self::remote_delta_payload_fingerprint(session),
                     session_mutation_stamp: session.session_mutation_stamp,
                 }
             }
@@ -467,6 +483,9 @@ impl AppState {
                 message_id,
                 message_index,
                 message_count,
+                message,
+                preview,
+                status,
                 session_mutation_stamp,
                 ..
             } => RemoteDeltaReplayPayload::MessageCreated {
@@ -474,6 +493,9 @@ impl AppState {
                 message_id: message_id.clone(),
                 message_index: *message_index,
                 message_count: *message_count,
+                message_fingerprint: Self::remote_delta_payload_fingerprint(message),
+                preview: preview.clone(),
+                status: Self::session_status_replay_code(*status),
                 session_mutation_stamp: *session_mutation_stamp,
             },
             DeltaEvent::MessageUpdated {
@@ -481,6 +503,9 @@ impl AppState {
                 message_id,
                 message_index,
                 message_count,
+                message,
+                preview,
+                status,
                 session_mutation_stamp,
                 ..
             } => RemoteDeltaReplayPayload::MessageUpdated {
@@ -488,6 +513,9 @@ impl AppState {
                 message_id: message_id.clone(),
                 message_index: *message_index,
                 message_count: *message_count,
+                message_fingerprint: Self::remote_delta_payload_fingerprint(message),
+                preview: preview.clone(),
+                status: Self::session_status_replay_code(*status),
                 session_mutation_stamp: *session_mutation_stamp,
             },
             DeltaEvent::TextDelta {
@@ -511,6 +539,8 @@ impl AppState {
                 message_id,
                 message_index,
                 message_count,
+                text,
+                preview,
                 session_mutation_stamp,
                 ..
             } => RemoteDeltaReplayPayload::TextReplace {
@@ -518,6 +548,8 @@ impl AppState {
                 message_id: message_id.clone(),
                 message_index: *message_index,
                 message_count: *message_count,
+                text: text.clone(),
+                preview: preview.clone(),
                 session_mutation_stamp: *session_mutation_stamp,
             },
             DeltaEvent::CommandUpdate {
@@ -525,7 +557,12 @@ impl AppState {
                 message_id,
                 message_index,
                 message_count,
+                command,
+                command_language,
+                output,
+                output_language,
                 status,
+                preview,
                 session_mutation_stamp,
                 ..
             } => RemoteDeltaReplayPayload::CommandUpdate {
@@ -533,7 +570,12 @@ impl AppState {
                 message_id: message_id.clone(),
                 message_index: *message_index,
                 message_count: *message_count,
+                command: command.clone(),
+                command_language: command_language.clone(),
+                output: output.clone(),
+                output_language: output_language.clone(),
                 status: Self::command_status_replay_code(*status),
+                preview: preview.clone(),
                 session_mutation_stamp: *session_mutation_stamp,
             },
             DeltaEvent::ParallelAgentsUpdate {
@@ -542,6 +584,7 @@ impl AppState {
                 message_index,
                 message_count,
                 agents,
+                preview,
                 session_mutation_stamp,
                 ..
             } => RemoteDeltaReplayPayload::ParallelAgentsUpdate {
@@ -549,28 +592,36 @@ impl AppState {
                 message_id: message_id.clone(),
                 message_index: *message_index,
                 message_count: *message_count,
-                agent_states: agents
+                agents: agents
                     .iter()
                     .map(|agent| {
                         (
+                            agent.detail.clone(),
                             agent.id.clone(),
                             Self::parallel_agent_status_replay_code(agent.status),
+                            agent.title.clone(),
                         )
                     })
                     .collect(),
+                preview: preview.clone(),
                 session_mutation_stamp: *session_mutation_stamp,
             },
-            DeltaEvent::CodexUpdated { .. } => RemoteDeltaReplayPayload::CodexUpdated,
+            DeltaEvent::CodexUpdated { codex, .. } => RemoteDeltaReplayPayload::CodexUpdated {
+                codex_fingerprint: Self::remote_delta_payload_fingerprint(codex),
+            },
             DeltaEvent::OrchestratorsUpdated {
                 orchestrators,
                 sessions,
                 ..
             } => RemoteDeltaReplayPayload::OrchestratorsUpdated {
-                orchestrator_ids: orchestrators
+                orchestrator_fingerprints: orchestrators
                     .iter()
-                    .map(|orchestrator| orchestrator.id.clone())
+                    .map(Self::remote_delta_payload_fingerprint)
                     .collect(),
-                session_ids: sessions.iter().map(|session| session.id.clone()).collect(),
+                session_fingerprints: sessions
+                    .iter()
+                    .map(Self::remote_delta_payload_fingerprint)
+                    .collect(),
             },
         };
         RemoteDeltaReplayKey {
@@ -950,11 +1001,17 @@ impl AppState {
         remote_id: &str,
         event: DeltaEvent,
     ) -> Result<(), anyhow::Error> {
+        let remote_revision = delta_event_revision(&event);
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                return Ok(());
+            }
+        }
         let remote_delta_replay_key = Self::remote_delta_replay_key(remote_id, &event);
         if self.should_skip_remote_hydrated_delta_replay(&remote_delta_replay_key) {
             return Ok(());
         }
-        let remote_revision = delta_event_revision(&event);
         match event {
             DeltaEvent::SessionCreated {
                 session,
@@ -999,12 +1056,12 @@ impl AppState {
                         })?;
                         let revision =
                             self.commit_session_created_locked(&mut inner, &local_record)?;
-                    let local_record = inner.sessions.get(local_index).ok_or_else(|| {
-                        anyhow!("local proxy session `{local_session_id}` not found")
-                    })?;
-                    let local_session = AppState::wire_session_from_record(local_record);
-                    let delta_session = AppState::wire_session_summary_from_record(local_record);
-                    inner.note_remote_applied_revision(remote_id, remote_revision);
+                        let local_record = inner.sessions.get(local_index).ok_or_else(|| {
+                            anyhow!("local proxy session `{local_session_id}` not found")
+                        })?;
+                        let local_session = AppState::wire_session_from_record(local_record);
+                        let delta_session = AppState::wire_session_summary_from_record(local_record);
+                        inner.note_remote_applied_revision(remote_id, remote_revision);
                         Some((local_session, delta_session, revision))
                     }
                 }) else {

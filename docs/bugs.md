@@ -5,80 +5,172 @@ cleanup notes, implementation task ledgers, and external limitations do not belo
 
 ## Active Repo Bugs
 
-## Same-revision remote `TextDelta` replays can duplicate text in already-loaded proxy sessions
+## `TextDelta` replay identity omits preview changes
 
-**Severity:** High - `src/remote_routes.rs:1083-1090`. Exact replay suppression is currently recorded only after targeted hydration succeeds. If the proxy session is already loaded, `hydrate_unloaded_remote_session_for_delta()` returns `false`; the stale-revision guard then rejects only revisions older than the remote watermark, so an exact duplicate `TextDelta` at the same remote revision can append the same text a second time.
+**Severity:** Medium - `src/state.rs:83` and `src/remote_routes.rs:521`. `TextDelta` replay keys include the appended `delta` text but omit the optional `preview` field, even though applying the delta updates `record.session.preview` when a preview is present.
 
-This is a correctness issue for remote SSE duplicate delivery and reconnect replay. Same-revision sibling deltas with different payloads still need to apply, so the fix cannot collapse all same-revision events.
-
-**Current behavior:**
-- Targeted-hydration success records an exact replay key.
-- Normally applied same-revision `TextDelta` events are not recorded in the replay cache.
-- An exact duplicate same-revision `TextDelta` can append duplicate assistant output.
-
-**Proposal:**
-- Record exact replay keys after every successful non-idempotent session delta application, not only after targeted hydration.
-- Keep the key specific enough to allow different same-revision sibling deltas.
-- Add an already-loaded proxy regression that applies the same `TextDelta` twice at the same remote revision and asserts text is appended once.
-
-## Remote hydrated-delta replay cache survives remote continuity resets
-
-**Severity:** Medium - `src/remote_routes.rs:815-818` and `src/state.rs:55-77`. Remote applied-revision watermarks are cleared on reconnect, disconnect, or repoint paths, but `RemoteDeltaReplayCache` entries are not. A later stream epoch using the same `remote_id`, revision, and payload can be skipped by the old cache entry before the normal revision gate has a chance to rebuild continuity.
-
-The cache is meant to suppress replays inside one remote event-stream lifetime. Keeping it across continuity resets gives old-process knowledge authority over a new stream.
+Two same-revision `TextDelta` events with the same session/message ids, message count, appended text, and mutation stamp but different preview values can be treated as an exact replay. The second event is skipped before apply, leaving the local session preview stale.
 
 **Current behavior:**
-- `clear_remote_applied_revision(remote_id)` resets the remote revision watermark.
-- The replay cache retains entries for the same `remote_id`.
-- A same revision/payload in a new stream epoch can be dropped as an old hydrated replay.
+- `RemoteDeltaReplayPayload::TextDelta` does not include `preview`.
+- `apply_remote_delta_event` applies `preview` from `TextDelta` to the session record.
+- Same-revision preview-only changes can be suppressed by the replay cache.
 
 **Proposal:**
-- Clear replay-cache entries for the remote anywhere the remote applied-revision watermark is cleared.
-- Or include a remote connection/server epoch in the replay key.
-- Add a reconnect/repoint regression that clears the watermark, replays the same revision/payload, and asserts the event is evaluated under the new epoch.
+- Add `preview: Option<String>` to `RemoteDeltaReplayPayload::TextDelta`.
+- Populate it in `remote_delta_replay_key`.
+- Add a regression where two same-revision `TextDelta` events differ only by preview and the second is not skipped.
 
-## Targeted remote hydration trusts `messageCount` without validating loaded transcript length
+## Code-block serialization can break out of fixed triple-backtick fences
 
-**Severity:** Medium - `src/remote_routes.rs:497-512`. The targeted hydration freshness gate compares the triggering delta expectation against `SessionResponse.session.message_count`, but it does not first validate that the loaded `messages` array length matches that advertised count. A malformed or inconsistent remote response can match `messageCount` and `sessionMutationStamp` while carrying a different transcript length.
+**Severity:** Medium - `ui/src/panels/markdown-diff-edit-pipeline.ts:297`. Rendered Markdown serialization emits fenced code blocks using a fixed three-backtick fence.
 
-This weakens the repair gate that is supposed to prove the full response reflects the delta that triggered hydration.
+If pasted or edited code content itself contains three backticks, serialization can close the generated fence early and persist active Markdown outside the code block. That bypasses the sanitizer's intent because unsafe-looking content can become Markdown structure after the DOM-to-Markdown round trip.
 
 **Current behavior:**
-- Targeted hydration accepts a newer full response when advertised metadata matches the triggering delta.
-- Loaded `session.messages.len()` is not checked against `session.message_count`.
-- A count/stamp-consistent but transcript-length-inconsistent response can be adopted.
+- `<pre><code>` serialization always emits a three-backtick opening and closing fence.
+- Code content is inserted inside that fence without choosing a longer delimiter.
+- Content containing three backticks can escape the generated code block.
 
 **Proposal:**
-- When `messages_loaded` is true, reject `SessionResponse` values where `messages.len()` does not equal `message_count`.
-- Compare delta expectations only against the validated count.
-- Add a remote hydration regression with mismatched advertised count and loaded transcript length.
+- Choose a fence length longer than the longest backtick run in the code content.
+- Apply the same dynamic-fence idea to inline code when needed.
+- Add a serializer test with code content containing three backticks and assert it remains inside the code block after round-trip.
 
-## Pane-level `bottom_follow` cooldown is not scoped to the scroll state key
+## Programmatic virtualizer scroll writes can still flush during layout effects
 
-**Severity:** Medium - `ui/src/SessionPaneView.tsx:649` and `ui/src/SessionPaneView.tsx:2552-2563`. The pane-level programmatic `bottom_follow` deadline can survive a fast session/tab switch. A scroll event in the next active session can then be treated as part of the previous session's smooth bottom-follow, force the new session to bottom, and overwrite its saved non-bottom scroll state.
+**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:1890` and `ui/src/SessionPaneView.tsx`. Programmatic scroll writes can still route through the `{ flush: true }` path while `SessionPaneView` dispatches scroll writes from `useLayoutEffect`.
 
-This is separate from the virtualizer-side cooldown behavior: the pane-level state also needs to be keyed to the session/tab whose scroll it is managing.
+React warns when `flushSync` runs from inside a lifecycle method. The current scroll-restore and session-switch paths can still reach that shape if a programmatic write is treated like the wheel-prewarm path.
 
 **Current behavior:**
-- `paneProgrammaticBottomFollowUntilRef` stores a deadline but not the owning `scrollStateKey`.
-- Session/tab switches restore saved scroll while the previous bottom-follow deadline can still be active.
-- A native scroll in the new session can be misclassified as programmatic.
+- The virtualizer supports a flushing scroll-write mode.
+- Some programmatic restore/follow writes can enter the same path as user wheel prewarm.
+- Layout-effect dispatched scroll writes can therefore trigger React's `flushSync` lifecycle warning.
 
 **Proposal:**
-- Store the active `scrollStateKey` with the pane bottom-follow deadline, or cancel the deadline whenever `scrollStateKey` changes.
-- Add a regression that starts bottom-follow in one session, switches sessions before the cooldown expires, and asserts the second session's saved non-bottom position is preserved.
+- Reserve `{ flush: true }` for real user wheel prewarm only.
+- Pass an explicit non-flushing scroll kind for layout-effect restores and programmatic bottom-follow writes.
+- Add a regression that switches/restores a session and asserts no lifecycle `flushSync` warning is emitted.
 
-## Remote hydrated replay tests cover only `TextDelta`
+## Remote hydrated replay tests cover only 3 of 9 delta variants
 
-**Severity:** Medium - `src/tests/remote.rs:2588`. The replay suppression coverage currently exercises the `TextDelta` path, but several `apply_remote_delta_event` arms manually participate in the hydrate/apply/note contract. A missing replay-note call in `MessageCreated`, `TextReplace`, `CommandUpdate`, or another representative delta arm could pass tests.
+**Severity:** Medium - `src/tests/remote.rs`. The replay-key identity test now proves that state-mutating payloads affect the replay key, but end-to-end replay suppression still exercises only `TextDelta`, `MessageUpdated`, and `SessionCreated`. A missing or wrong-shape replay-note call in `MessageCreated`, `TextReplace`, `CommandUpdate`, `ParallelAgentsUpdate`, `OrchestratorsUpdated`, or `CodexUpdated` would pass tests today. `MessageCreated` is the most reorder-sensitive variant - non-idempotent - and remains uncovered.
 
 **Current behavior:**
-- Tests pin exact hydrated replay behavior for `TextDelta`.
-- Other session-mutating delta variants rely on manual cache calls without equivalent coverage.
+- 3 of 9 variants have replay-suppression tests.
+- Other session-mutating delta variants rely on manual cache calls without coverage.
 
 **Proposal:**
-- Add table-driven replay tests across representative delta variants.
+- Add table-driven replay tests across the remaining six variants (especially `MessageCreated`).
 - Or refactor the hydrate/apply/note sequence into one shared helper and test that helper's contract.
+
+## No FIFO eviction test for `RemoteDeltaReplayCache`
+
+**Severity:** Medium - `src/state.rs:138-142` enforces `REMOTE_HYDRATED_DELTA_REPLAY_CACHE_LIMIT = 2048` via FIFO eviction in `RemoteDeltaReplayCache::insert`, but no test inserts >2048 entries and verifies the oldest is evicted. The contract "older revisions still fall back to the monotonic remote-applied watermark" (per the new doc comment) is therefore unverified.
+
+**Current behavior:**
+- The cap is enforced in production.
+- No regression covers it.
+
+**Proposal:**
+- Add a test that inserts 2049 entries and asserts the oldest is no longer present.
+- Verify subsequent inserts continue to evict the oldest.
+
+## No two-remote isolation test for `RemoteDeltaReplayCache::remove_remote`
+
+**Severity:** Medium - `src/tests/remote.rs:2887` (`remote_delta_replay_cache_clears_with_remote_revision_watermark`) confirms `clear_remote_applied_revision(remote_id)` clears that remote's cache entries, but does not assert another remote's entries survive the clear. `RemoteDeltaReplayCache::remove_remote` filters by `remote_id` (`state.rs:145-148`), so the per-remote scoping is the load-bearing detail; without a two-remote test, a regression that accidentally cleared the whole cache would go undetected.
+
+**Current behavior:**
+- The clear-cache test exercises only one remote.
+- Per-remote scoping invariant has no regression.
+
+**Proposal:**
+- Seed entries for two distinct `remote_id`s, clear one, assert the other survives.
+
+## `note_remote_hydrated_delta_replay` name misaligned with new "every-applied-delta" contract
+
+**Severity:** Low - the cache name (`remote_hydrated_delta_replay_cache`) and the method name (`note_remote_hydrated_delta_replay`) reference "hydrated" semantics, but insertion now happens on every successful delta application across every applying arm — not just hydration repairs. A reader looking for "hydrated" semantics sees the cache populated everywhere and second-guesses the invariant.
+
+**Current behavior:**
+- The cache stores every applied delta key, not just hydrated ones.
+- The names still imply the narrower hydrated-only semantics.
+
+**Proposal:**
+- Rename `note_remote_hydrated_delta_replay` → `note_remote_applied_delta_replay`.
+- Rename the cache field similarly.
+- Update the doc comment to match the new "every-applied-delta" semantics.
+
+## `remote_delta_payload_fingerprint` panics on `serde_json::to_vec` failure
+
+**Severity:** Medium - `src/remote_routes.rs:465-469`. The fingerprint helper calls `serde_json::to_vec(payload).expect("...should serialize through the wire contract")`. Today serialization is infallible for the wire types it serves (`Session`, `Message`, `CodexState`, `OrchestratorInstance`), but coupling replay-cache correctness to a runtime invariant via `expect` is an architectural inversion: the replay cache is a best-effort optimization (the watermark is the authoritative protection), yet a `panic!` here would crash the SSE bridge thread on every inbound delta on a misbehaving remote — taking down the bridge.
+
+A future enum variant or custom `Serialize` impl that returns an error would silently break this contract. The replay cache is allowed to under-suppress; it must not crash a critical primitive.
+
+**Current behavior:**
+- The `expect` panics the worker thread on any serialization failure.
+- The replay cache (best-effort optimization) is coupled to a runtime panic.
+
+**Proposal:**
+- Fall back to a sentinel string (e.g., `"<unfingerprintable>"`) on serialization error and log via existing remote-error channels.
+- Or change the function to return `Option<String>` and degrade the cache to "skip suppression for this delta" on failure. The watermark remains as the primary defense.
+
+## Replay key memory asymmetry: `TextDelta`/`TextReplace`/`CommandUpdate` retain raw `String` fields
+
+**Severity:** Medium - `src/state.rs:83-99` × `src/remote_routes.rs:521-554`. The recent structural-key refactor introduced 64-byte hex fingerprints for `MessageCreated`, `MessageUpdated`, `SessionCreated`, `OrchestratorsUpdated`, and `CodexUpdated`, but `TextDelta` retains `delta: String`, `TextReplace` retains `text: String` and `preview: Option<String>`, and `CommandUpdate` retains `command`, `output`, and `preview` strings. For a long-running Codex token stream emitting `TextDelta` events, each cached entry can hold KB-scale payload copies — potentially several MB of replay-cache footprint per remote at the 2048-entry cap.
+
+The design goal of switching to "semantic payload identity" was to avoid full-event hashing per delta. For the four asymmetric variants, every insert still allocates a fresh `String` clone and the cache holds the full payloads.
+
+**Current behavior:**
+- Five variants use constant-size hex fingerprints.
+- Three+ variants hold raw `String` fields per cache entry.
+- Memory footprint per remote is bounded but markedly larger than the fingerprint variants.
+
+**Proposal:**
+- Hash the content fields the same way (`text_fingerprint`, `delta_fingerprint`, `command_output_fingerprint`) so every cache entry is constant-size.
+- The fingerprint computation cost is the same either way; the savings are on memory and the per-insert clone path.
+
+## `RemoteDeltaReplayPayload` lacks a contract doc comment
+
+**Severity:** Medium - `src/state.rs:55-128`. The enum mirrors `wire::DeltaEvent` shape-by-shape but selectively copies fields per variant. A future maintainer adding fields to a wire variant has no signal that they must also be added to the replay payload variant — the contract lives only in the new `remote_delta_replay_key_includes_state_mutating_payload_fields` test, and the test was already missed for `MessageCreated`/`TextReplace`/etc. one round ago.
+
+**Current behavior:**
+- Replay-payload variants are defined without a cross-link to the wire enum.
+- The "every state-mutating field must be reflected here (directly or via fingerprint)" invariant is implicit.
+
+**Proposal:**
+- Add a `///` doc comment on `RemoteDeltaReplayPayload` documenting: every state-mutating field on the wire variant must be reflected here (directly or via fingerprint), because the replay key is the only line of defense against same-revision sibling replays from a misbehaving remote/SSE retry.
+- Cross-link to `apply_remote_delta_event` and the identity test in the comment.
+
+## `CodexUpdated` watermark-advance asymmetry undocumented
+
+**Severity:** Medium - `src/remote_routes.rs:1786-1797`. The `CodexUpdated` arm calls `note_remote_applied_revision(remote_id, remote_revision)` even though the local state does NOT actually fold the remote codex into anything (the comment says "CodexState is process-global runtime metadata, not localized remote proxy state"). The semantics of "applied revision" diverge between message-mutating arms (truly applied) and `CodexUpdated` (acknowledged but discarded). A future contributor reading the watermark may assume value `N` means "all remote effects through revision `N` are reflected locally" — false for `CodexUpdated` content.
+
+**Current behavior:**
+- Watermark is advanced for `CodexUpdated` to satisfy monotonicity.
+- The asymmetry is undocumented at the call site.
+
+**Proposal:**
+- Add a doc comment at the `note_remote_applied_revision` call inside `CodexUpdated` explaining: "we advance the watermark to satisfy monotonicity; the codex payload itself is intentionally not localized."
+- Or split out two watermarks: `applied` vs `consumed`.
+
+## Replay-key identity test gaps
+
+**Severity:** Low - `src/tests/remote.rs:2887` (`remote_delta_replay_key_includes_state_mutating_payload_fields`) covers `assert_ne!` for 8 of 9 variants with payload-mutated copies, but has three coverage gaps:
+
+1. **No symmetric `assert_eq!` case.** A future regression that salted the key with a per-call counter or wall-clock would still pass these assertions while breaking actual replay suppression — only the two existing e2e replay tests (`TextDelta`, `SessionCreated`) would catch it.
+2. **`remote_id` is not varied.** The key carries `remote_id`, so a pair of `assert_ne!` calls with identical payloads but different `remote_id`s would lock per-remote scoping at the key level. Cheap to add.
+3. **`TextDelta` is missing from the inequality cases.** The other 8 variants are covered; `TextDelta` differentiation by `delta` content has no direct assertion.
+
+**Current behavior:**
+- `assert_ne!` covers 8 of 9 variants.
+- No `assert_eq!` symmetric pinning.
+- Single `remote_id` used throughout.
+
+**Proposal:**
+- Add at least one `assert_eq!(remote_delta_replay_key(remote, &event_clone), remote_delta_replay_key(remote, &event_clone_again))` per variant.
+- Add a pair of `assert_ne!` calls with identical payloads but different `remote_id`s.
+- Add a `TextDelta` `assert_ne!` block that varies only the `delta` string.
 
 ## SourcePanel rendered-Markdown mode switching lacks commit-failure coverage
 
@@ -120,6 +212,22 @@ If this path regresses, a user can switch editor modes with an uncommitted or re
 **Proposal:**
 - Assert the rejected draft is still visible after failure.
 - Clear the mocked overlap, retry the save, and assert the saved payload includes the retained draft.
+
+## DiffPanel can keep stale base state after successful save plus post-save draft commit failure
+
+**Severity:** Medium - `ui/src/panels/DiffPanel.tsx:980`. After `onSaveFile` succeeds, a second `commitRenderedMarkdownDrafts()` can fail and return before the panel adopts the successful save response.
+
+The disk write may have completed, but the UI can keep the old base content/hash and dirty state. The next save then runs from stale local state even though the filesystem already contains the previous successful write.
+
+**Current behavior:**
+- `onSaveFile` can succeed.
+- A later rendered-draft commit failure can abort before the save response is reconciled into panel state.
+- The panel can remain falsely dirty or retain stale base metadata.
+
+**Proposal:**
+- Reconcile the successful save response immediately after `onSaveFile` resolves.
+- Preserve and report any post-save rendered-draft commit failure separately.
+- Add a test where save succeeds, the follow-up draft commit fails, and the panel still adopts the saved base state.
 
 ## Paste/drop href validation allows UNC-style no-colon paths
 
@@ -497,35 +605,6 @@ The geometry helper duplication at `:879-899` (re-implementing `stubElementScrol
 - Change `scrollTop` to a non-bottom value (e.g., 200) and dispatch a `wheel` event with `deltaY: -300` to actually establish the "scrolled up" state, OR rename the test to match what it does.
 - Extract a `stubMutableElementScrollGeometry` helper returning `{ setScrollHeight, restore }` and use it instead of the inline `Object.defineProperty` block.
 
-## `remote_delta_replay_key` re-serializes the full `DeltaEvent` and SHA-256 hashes it on every inbound delta
-
-**Severity:** High - `src/remote_routes.rs:443-444` × `:815-818`. The new `RemoteDeltaReplayCache` correctly suppresses exact-payload replays after a successful targeted hydration, but the cache pre-check sits at the very top of `apply_remote_delta_event` and runs for every inbound delta on every remote, even when the cache is empty. The key construction calls `serde_json::to_vec(event)` (potentially MB-sized for `MessageCreated` payloads) and then runs SHA-256 over the result — BEFORE the cheap `should_skip_remote_applied_delta_revision` check and BEFORE the variant match.
-
-For a busy session emitting `TextDelta` chunks per token, the cost of re-serializing the message + payload + computing a 256-bit digest dwarfs the actual delta application work. Worst case a chained-remote topology multiplies this by every hop. The cache has 2048 entries; the *miss* path is paying full cost on every single delta.
-
-**Current behavior:**
-- Cache pre-check runs at the top of `apply_remote_delta_event` for every variant.
-- `remote_delta_replay_key` serializes the full event payload to JSON and hashes the bytes.
-- The expensive key construction runs on the common case (cache miss) for every inbound delta.
-
-**Proposal:**
-- Hash only the variant discriminant + the small set of identifying fields per variant (`session_id`, `message_id`, `message_index`, `message_count`, `session_mutation_stamp`) — these uniquely identify a delta replay just as well as the full payload.
-- Or do a cheap revision-only check first and only construct the full key on revision match.
-- Or only run the cache pre-check inside the per-variant arms that actually populate the cache (the six message-mutating arms in `hydrate_unloaded_remote_session_for_delta`'s success path).
-
-## Replay-cache check fires before per-variant guards, broadening "do nothing" across all `DeltaEvent` variants
-
-**Severity:** Medium - `src/remote_routes.rs:815-818`. The cache is fed only by `hydrate_unloaded_remote_session_for_delta` success in six message-mutating arms. But the *check* runs unconditionally at the top of `apply_remote_delta_event`, so a `SessionCreated` / `OrchestratorsUpdated` / `CodexUpdated` delta whose key happens to collide with a hydrated message delta key (astronomically unlikely under SHA-256, but possible) would be silently dropped without folding the orchestrator state. The semantic boundary of the cache is fuzzy — its name says "hydrated delta replay" but it applies to all variants.
-
-**Current behavior:**
-- Cache check is variant-agnostic.
-- Six variants populate the cache; five do not.
-- Cross-variant collision drops the non-hydrating variant's effects.
-
-**Proposal:**
-- Move the cache check into the per-variant arms that can hydrate (the same six arms that call `note_remote_hydrated_delta_replay`), OR scope the key to include the `match` discriminant so non-hydrating variants can never share keys with hydrating ones.
-- The latter is essentially free if you adopt the High's structural-key suggestion above.
-
 ## Newer-revision targeted-repair acceptance leaves local watermark behind actual response revision
 
 **Severity:** Medium - `src/remote_routes.rs:497-512` × `:655-657`. When the remote returns `revision=5` for a delta-driven repair targeting `min_revision=3` and metadata matches, the apply path stamps `note_remote_applied_revision(min_remote_revision)` (i.e., 3, the *triggering delta's* revision) — not `remote_response.revision=5`. The local remote applied-revision stays at 3 even though the response demonstrably reflects state at revision 5. Future deltas at revisions 4 and 5 then re-apply (hitting the replay cache as the only protection), which is fragile because the cache only protects against exact-payload replays.
@@ -554,77 +633,6 @@ The virtualizer-side `markUserScroll` has the same gap (binds wheel/touchmove/ke
 - Add `onMouseDown` to the message-stack wrapper that calls `handleMessageStackUserScrollIntent`, AND add `mousedown` to `markUserScroll`'s event bindings in the virtualizer.
 - Add a regression that fires `mousedown` on the scroll container during a `bottom_follow` cooldown and asserts the cooldown clears.
 
-## `RemoteDeltaReplayCache::insert` clones the key twice on insert
-
-**Severity:** Low - `src/state.rs:62-77`. The current shape is `if !self.keys.insert(key.clone()) { return; } ... self.order.push_back(key.clone());` (paraphrased) — even on a duplicate insert path the function clones once before the membership check, and on a real insert it clones twice. The `String` `remote_id` inside the key is heap-allocated, so this churns the allocator on every per-delta insert.
-
-**Current behavior:**
-- Two heap allocations per real insert; one wasted clone on every duplicate insert.
-
-**Proposal:**
-- Restructure as `if self.keys.contains(&key) { return; } self.order.push_back(key.clone()); self.keys.insert(key);` — single clone per real insert, zero clones on duplicate.
-- Or take the key by value and clone once at the boundary so callers can choose.
-
-## `RemoteDeltaReplayCache` lacks a doc comment on its eviction contract and lifetime
-
-**Severity:** Low - `src/state.rs:55-77`. The constant `REMOTE_HYDRATED_DELTA_REPLAY_CACHE_LIMIT = 2048` carries no rationale. The cache's process-lifetime scope (no per-remote clear on bridge shutdown / remote removal) is implicit. A future contributor reading the cache may assume eviction is correlated with remote lifecycle, or that the 2048 limit is tuned for some specific load.
-
-**Current behavior:**
-- Bounded FIFO-by-insertion eviction, capped at 2048.
-- No `///` comment on the type explaining the policy or scope.
-- Removed-then-re-registered remote could in theory see stale entries (it doesn't, because new revisions allocate new keys, but the invariant is implicit).
-
-**Proposal:**
-- Add a `///` doc comment on `RemoteDeltaReplayCache` explaining: bounded LRU-by-insertion replay-suppression cache; cap chosen because a hydration burst per remote rarely exceeds the band of unique inbound delta payloads observable during one connection lifetime; eviction is safe because evicted entries fall back to `should_skip_remote_applied_delta_revision`'s watermark check.
-
-## SHA-256 over `serde_json::to_vec(event)` depends on stable byte-exact serialization
-
-**Severity:** Low - `src/remote_routes.rs:443-451`. `serde_json` does not guarantee canonical key ordering across releases. Today, `serde_derive` emits fields in struct-declaration order deterministically — but a future field reorder in `wire.rs::DeltaEvent` would silently break replay-suppression without breaking any test. Fragile invariant.
-
-**Current behavior:**
-- The cache key depends on serde_json's byte-exact output for the event struct.
-- A field reorder or `Option::is_none` skip-toggling in `wire.rs::DeltaEvent` would invalidate existing keys silently.
-
-**Proposal:**
-- Either document the dependency on `serde_derive`'s stable field ordering as a build-time invariant near `wire.rs::DeltaEvent`, OR move to a structural cache key (per the High finding above) that doesn't depend on serialization order.
-
-## `SessionCreated` delta runs cache pre-check unnecessarily
-
-**Severity:** Low - `src/remote_routes.rs:815-818`. The cache is never populated for `SessionCreated`, so the variant-agnostic pre-check is wasted work. Also: a future maintainer reading "this short-circuits replays" might assume `SessionCreated` is in the cache (it isn't).
-
-**Current behavior:**
-- Pre-check runs for every variant including non-hydrating ones.
-- Wasted hash + lock acquisition for `SessionCreated`/`OrchestratorsUpdated`/`CodexUpdated` deltas.
-
-**Proposal:**
-- Same fix as the Medium "Replay-cache check fires before per-variant guards": move the pre-check into the hydrating variants only.
-
-## Remote `SessionCreated` can publish a non-advancing delta
-
-**Severity:** Medium - an unchanged inbound remote `SessionCreated` redelivery
-can publish a local delta with the current revision instead of a newly committed
-revision.
-
-When `ensure_remote_proxy_session_record()` returns `changed == false`,
-`apply_remote_delta_event::SessionCreated` keeps `revision = inner.revision` but
-still publishes `DeltaEvent::SessionCreated`. Delta events are documented as
-carrying the exact next revision. Publishing a duplicate/current revision means
-clients can ignore the event as stale, and chained remote replay semantics
-become ambiguous.
-
-**Current behavior:**
-- The unchanged branch does not call `commit_session_created_locked()`.
-- The code still publishes `DeltaEvent::SessionCreated` with the current
-  revision.
-- Clients that enforce monotonic delta revisions may drop the event.
-
-**Proposal:**
-- Skip publishing when `changed == false`.
-- If chained remotes require a rebroadcast, route it through an explicit
-  non-delta protocol path or force a real committed revision bump with a clear
-  comment explaining why.
-- Add a regression for duplicate remote `SessionCreated` redelivery that asserts
-  no stale/non-advancing delta is published.
 
 ## Stamp-preservation contract not honored for `SessionCreated` / `OrchestratorsUpdated.sessions[]` payloads
 

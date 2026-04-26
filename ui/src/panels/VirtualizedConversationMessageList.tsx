@@ -19,6 +19,10 @@ import {
 import { flushSync } from "react-dom";
 import { isExpandedPromptOpen } from "../ExpandedPromptPanel";
 import {
+  canNestedScrollableConsumeWheel,
+  normalizeWheelDelta,
+} from "../app-utils";
+import {
   DEFERRED_RENDER_RESUME_EVENT,
   DEFERRED_RENDER_SUSPENDED_ATTRIBUTE,
 } from "../deferred-render";
@@ -99,6 +103,11 @@ const ACTIVE_VIEWPORT_STARTUP_RESYNC_FRAMES = 12;
 const BOTTOM_BOUNDARY_REVEAL_SETTLE_FRAMES = 12;
 const BOTTOM_BOUNDARY_REVEAL_DELAY_MS = 220;
 const USER_SCROLL_ADJUSTMENT_COOLDOWN_MS = 200;
+// Separate, much shorter cooldown for the deferred-heavy-content (Markdown,
+// tool blocks) activation gate. Heavy content paint should resume almost
+// immediately after the user stops scrolling, while the broader scroll-state
+// machine keeps its 200ms quiet window for range / mount adjustments.
+const DEFERRED_HEAVY_ACTIVATION_COOLDOWN_MS = 10;
 const MIN_PAGE_COVERAGE_HEIGHT_PX = 64;
 
 const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
@@ -170,16 +179,6 @@ function classifyScrollKind(
     Math.max(clientHeight * 1.5, DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT)
     ? "seek"
     : "incremental";
-}
-
-function resolveWheelDeltaYPx(event: WheelEvent, viewportHeight: number) {
-  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
-    return event.deltaY * 40;
-  }
-  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
-    return event.deltaY * Math.max(viewportHeight, DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT);
-  }
-  return event.deltaY;
 }
 
 function resolveRenderedPageCoverageHeight(pageNodes: HTMLElement[]) {
@@ -470,7 +469,7 @@ export function VirtualizedConversationMessageList({
       node.setAttribute(DEFERRED_RENDER_SUSPENDED_ATTRIBUTE, "true");
       pendingDeferredRenderResumeTimerRef.current = window.setTimeout(() => {
         resumeDeferredRenderActivation();
-      }, USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
+      }, DEFERRED_HEAVY_ACTIVATION_COOLDOWN_MS);
     },
     [
       clearPendingDeferredRenderResumeTimer,
@@ -864,13 +863,19 @@ export function VirtualizedConversationMessageList({
       : (pageLayout.tops[renderedMountedPageRange.endIndex - 1] ?? topSpacerHeight) +
         (pageHeights[renderedMountedPageRange.endIndex - 1] ?? 0);
   const bottomSpacerHeight = Math.max(pageLayout.totalHeight - mountedPageEndOffset, 0);
-  const isUserScrollAdjustmentCooldownActive =
-    performance.now() - lastUserScrollInputTimeRef.current < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
   const preferImmediateHeavyRender =
     !isMeasuringPostActivation &&
     !isActivatingWithMessages &&
     !hasUserScrollInteractionRef.current;
-  const allowDeferredHeavyActivation = !isUserScrollAdjustmentCooldownActive;
+  // Always allow deferred-heavy activation in the React context. The actual
+  // suspension during fast scroll is driven by the DOM-attribute mechanism
+  // (`data-deferred-render-suspended` + DEFERRED_RENDER_RESUME_EVENT) inside
+  // `DeferredHeavyContent`, which resumes after
+  // DEFERRED_HEAVY_ACTIVATION_COOLDOWN_MS (10ms). Gating here on a ref-derived
+  // boolean would not actually re-render at the 10ms mark — the next re-render
+  // is typically the 200ms idle compaction pass, which is far too late for
+  // heavy markdown to come back after the user stops scrolling.
+  const allowDeferredHeavyActivation = true;
 
   const buildWorkingMountedRangeForScrollTop = useCallback(
     (scrollTop: number, clientHeight: number) => {
@@ -1063,8 +1068,7 @@ export function VirtualizedConversationMessageList({
     ],
   );
   const prewarmMountedRangeForUpwardWheel = useCallback(
-    (node: HTMLElement, event: WheelEvent) => {
-      const wheelDeltaY = resolveWheelDeltaYPx(event, node.clientHeight);
+    (node: HTMLElement, wheelDeltaY: number) => {
       if (wheelDeltaY >= 0) {
         return;
       }
@@ -1618,6 +1622,14 @@ export function VirtualizedConversationMessageList({
     if (!isActive || !shouldKeepBottomAfterLayoutRef.current || isDetachedFromBottomRef.current) {
       return;
     }
+    // A programmatic `bottom_follow` smooth-scroll is in flight; the browser is
+    // animating toward the previous bottom. Hard-writing scrollTop here would
+    // cancel that animation mid-flight (visible jank — scrollbar snaps instead
+    // of glides). The cooldown ends naturally when the animation lands or when
+    // a real user gesture fires `markUserScroll`.
+    if (pendingProgrammaticBottomFollowUntilRef.current >= performance.now()) {
+      return;
+    }
 
     const timeSinceUserScroll = performance.now() - lastUserScrollInputTimeRef.current;
     if (timeSinceUserScroll < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS) {
@@ -1714,10 +1726,24 @@ export function VirtualizedConversationMessageList({
           hasUserScrollInteractionRef.current = true;
           lastUserScrollInputTimeRef.current = performance.now();
           scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
+          // Scrollbar-thumb drag and touch-inertia scrolls have no preceding
+          // wheel/touch/key event, so `prewarmMountedRangeForUpwardWheel`
+          // never runs for them. Without flush, `setMountedPageRange` batches
+          // until the next React commit — and the browser paints the new
+          // scroll position first, exposing the top spacer as a visible void.
+          // Flush on upward scrolls (when not already near the bottom) so the
+          // mount + the prepend-restore in the consumer layout-effect run
+          // synchronously inside the scroll handler, before the next paint.
+          // The matching pane-write path already uses the same condition; we
+          // keep the conditions symmetric so neither code path can outrun the
+          // other.
+          const isActiveUpwardNativeScroll =
+            scrollDelta < 0 && !isScrollContainerNearBottom(node);
           reconcileMountedRangeForNativeScroll(
             node,
             scrollDelta,
             lastUserScrollKindRef.current,
+            { flush: isActiveUpwardNativeScroll },
           );
           if (
             isDetachedFromBottomRef.current &&
@@ -1742,6 +1768,17 @@ export function VirtualizedConversationMessageList({
     };
 
     const markUserScroll = (event?: WheelEvent | TouchEvent | KeyboardEvent) => {
+      let wheelDeltaY: number | null = null;
+      if (event instanceof WheelEvent) {
+        wheelDeltaY = normalizeWheelDelta(event, node);
+        if (
+          event.ctrlKey ||
+          Math.abs(wheelDeltaY) < 0.5 ||
+          canNestedScrollableConsumeWheel(event.target, node, wheelDeltaY)
+        ) {
+          return;
+        }
+      }
       pendingProgrammaticBottomFollowUntilRef.current =
         Number.NEGATIVE_INFINITY;
       if (isMeasuringPostActivation) {
@@ -1757,7 +1794,7 @@ export function VirtualizedConversationMessageList({
         event instanceof KeyboardEvent &&
         (event.key === "PageUp" || event.key === "PageDown");
       const isExplicitUpwardScrollIntent =
-        (event instanceof WheelEvent && event.deltaY < 0) ||
+        (wheelDeltaY !== null && wheelDeltaY < 0) ||
         (event instanceof KeyboardEvent &&
           (event.key === "PageUp" ||
             event.key === "ArrowUp" ||
@@ -1784,8 +1821,8 @@ export function VirtualizedConversationMessageList({
       hasUserScrollInteractionRef.current = true;
       lastUserScrollInputTimeRef.current = performance.now();
       scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
-      if (event instanceof WheelEvent && event.deltaY < 0) {
-        prewarmMountedRangeForUpwardWheel(node, event);
+      if (wheelDeltaY !== null && wheelDeltaY < 0) {
+        prewarmMountedRangeForUpwardWheel(node, wheelDeltaY);
       }
     };
     const syncProgrammaticScrollWrite = (event: Event) => {
@@ -1879,10 +1916,14 @@ export function VirtualizedConversationMessageList({
           lastUserScrollInputTimeRef.current = scrollWriteTime;
           scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
         }
+        // Flush on any upward scroll write that lands far from the bottom,
+        // not just `incremental`. Boundary jumps (`Ctrl+Shift+PgUp` ->
+        // `seek`) and page jumps (`page_jump`) can both leave the viewport
+        // in the top spacer, exposing void until the next React commit.
+        // Mirrors the native-scroll handler's flush condition above and the
+        // pane-write rationale in the new mousedown handler comment.
         const isActiveUpwardUserScrollWrite =
-          scrollDelta < 0 &&
-          resolvedScrollKind === "incremental" &&
-          !isNearBottomAfterWrite;
+          scrollDelta < 0 && !isNearBottomAfterWrite;
         reconcileMountedRangeForNativeScroll(
           node,
           scrollDelta,
@@ -1891,6 +1932,19 @@ export function VirtualizedConversationMessageList({
         );
       }
       scheduleProgrammaticViewportSync(node);
+    };
+
+    // Scrollbar-thumb mousedown does not produce wheel/touch/keydown events,
+    // so a downward scrollbar drag during a `bottom_follow` cooldown otherwise
+    // satisfies the `isProgrammaticBottomFollowScroll` discriminator (forward
+    // progress + cooldown alive + `lastUserScrollInputTimeRef ===
+    // NEGATIVE_INFINITY`) and gets re-classified as continuation of the smooth
+    // animation — re-extending the cooldown and fighting the user. Cancelling
+    // the cooldown unconditionally on mousedown is correct: a click on message
+    // content costs nothing (no native scroll fires), and a click on the
+    // scrollbar correctly hands control back to the user.
+    const cancelBottomFollowOnMouseDown = () => {
+      pendingProgrammaticBottomFollowUntilRef.current = Number.NEGATIVE_INFINITY;
     };
 
     syncViewport();
@@ -1903,6 +1957,7 @@ export function VirtualizedConversationMessageList({
     node.addEventListener("wheel", markUserScroll, { passive: true });
     node.addEventListener("touchmove", markUserScroll, { passive: true });
     node.addEventListener("keydown", markUserScroll);
+    node.addEventListener("mousedown", cancelBottomFollowOnMouseDown);
     const resizeObserver = new ResizeObserver(() => {
       syncViewport();
     });
@@ -1914,6 +1969,7 @@ export function VirtualizedConversationMessageList({
       node.removeEventListener("wheel", markUserScroll);
       node.removeEventListener("touchmove", markUserScroll);
       node.removeEventListener("keydown", markUserScroll);
+      node.removeEventListener("mousedown", cancelBottomFollowOnMouseDown);
       resizeObserver.disconnect();
     };
   }, [

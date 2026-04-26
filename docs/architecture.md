@@ -273,10 +273,14 @@ global revision only when the returned session's `(sessionMutationStamp,
 messageCount)` exactly matches the triggering delta's post-state metadata. If
 the stamp is missing or mismatched, the repair is rejected and the remote event
 bridge falls back to `/api/state` resync so a future same-session transcript is
-not localized early and then replayed again by later deltas. Successful
-targeted repairs record a bounded in-memory replay key for the exact triggering
-delta payload; exact replays are skipped, but same-revision sibling deltas with
-different payloads still apply.
+not localized early and then replayed again by later deltas. Successful remote
+delta applications record a bounded in-memory replay key from the remote
+revision plus the delta's semantic payload identity. Cheap variants use
+structural fields such as session/message ids, message index, message count, and
+mutation stamp; content-bearing or complex variants also include the exact
+mutating payload, or a stable fingerprint of that payload, so distinct
+same-revision sibling deltas still apply. Replay keys are cleared with the
+remote applied-revision watermark when event-stream continuity is lost.
 
 ```
 WorkspaceFilesChangedEvent {

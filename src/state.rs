@@ -57,6 +57,7 @@ enum RemoteDeltaReplayPayload {
     SessionCreated {
         session_id: String,
         message_count: u32,
+        session_fingerprint: String,
         session_mutation_stamp: Option<u64>,
     },
     MessageCreated {
@@ -64,6 +65,9 @@ enum RemoteDeltaReplayPayload {
         message_id: String,
         message_index: usize,
         message_count: u32,
+        message_fingerprint: String,
+        preview: String,
+        status: u8,
         session_mutation_stamp: Option<u64>,
     },
     MessageUpdated {
@@ -71,6 +75,9 @@ enum RemoteDeltaReplayPayload {
         message_id: String,
         message_index: usize,
         message_count: u32,
+        message_fingerprint: String,
+        preview: String,
+        status: u8,
         session_mutation_stamp: Option<u64>,
     },
     TextDelta {
@@ -86,6 +93,8 @@ enum RemoteDeltaReplayPayload {
         message_id: String,
         message_index: usize,
         message_count: u32,
+        text: String,
+        preview: Option<String>,
         session_mutation_stamp: Option<u64>,
     },
     CommandUpdate {
@@ -93,7 +102,12 @@ enum RemoteDeltaReplayPayload {
         message_id: String,
         message_index: usize,
         message_count: u32,
+        command: String,
+        command_language: Option<String>,
+        output: String,
+        output_language: Option<String>,
         status: u8,
+        preview: String,
         session_mutation_stamp: Option<u64>,
     },
     ParallelAgentsUpdate {
@@ -101,19 +115,22 @@ enum RemoteDeltaReplayPayload {
         message_id: String,
         message_index: usize,
         message_count: u32,
-        agent_states: Vec<(String, u8)>,
+        agents: Vec<(Option<String>, String, u8, String)>,
+        preview: String,
         session_mutation_stamp: Option<u64>,
     },
-    CodexUpdated,
+    CodexUpdated {
+        codex_fingerprint: String,
+    },
     OrchestratorsUpdated {
-        orchestrator_ids: Vec<String>,
-        session_ids: Vec<String>,
+        orchestrator_fingerprints: Vec<String>,
+        session_fingerprints: Vec<String>,
     },
 }
 
 /// Bounded exact remote-delta replay suppression.
 ///
-/// Entries are keyed by remote id, remote revision, and structural delta
+/// Entries are keyed by remote id, remote revision, and semantic delta payload
 /// identity. The cap is intentionally small because the cache only covers the
 /// short same-revision replay window around remote event delivery; older
 /// revisions still fall back to the monotonic remote-applied watermark. Per

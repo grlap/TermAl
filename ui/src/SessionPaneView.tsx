@@ -646,7 +646,10 @@ export function SessionPaneView({
   const messageStackRef = useRef<HTMLElement | null>(null);
   const paneRootRef = useRef<HTMLElement | null>(null);
   const settledScrollToBottomCancelRef = useRef<(() => void) | null>(null);
-  const paneProgrammaticBottomFollowUntilRef = useRef(Number.NEGATIVE_INFINITY);
+  const paneProgrammaticBottomFollowRef = useRef<{
+    key: string | null;
+    until: number;
+  }>({ key: null, until: Number.NEGATIVE_INFINITY });
   const paneTopRef = useRef<HTMLDivElement | null>(null);
   const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<
     TabDropPlacement,
@@ -883,17 +886,34 @@ export function SessionPaneView({
   }
 
   function beginPaneProgrammaticBottomFollow() {
-    paneProgrammaticBottomFollowUntilRef.current =
-      performance.now() + MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS;
+    paneProgrammaticBottomFollowRef.current = {
+      key: scrollStateKey,
+      until: performance.now() + MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
+    };
   }
 
   function cancelPaneProgrammaticBottomFollow() {
-    paneProgrammaticBottomFollowUntilRef.current = Number.NEGATIVE_INFINITY;
+    paneProgrammaticBottomFollowRef.current = {
+      key: null,
+      until: Number.NEGATIVE_INFINITY,
+    };
   }
 
   function isPaneProgrammaticBottomFollowActive() {
-    return paneProgrammaticBottomFollowUntilRef.current >= performance.now();
+    const bottomFollow = paneProgrammaticBottomFollowRef.current;
+    return (
+      bottomFollow.key === scrollStateKey && bottomFollow.until >= performance.now()
+    );
   }
+
+  useEffect(() => {
+    if (paneProgrammaticBottomFollowRef.current.key !== scrollStateKey) {
+      paneProgrammaticBottomFollowRef.current = {
+        key: null,
+        until: Number.NEGATIVE_INFINITY,
+      };
+    }
+  }, [scrollStateKey]);
 
   function handleComposerPaste(
     event: ReactClipboardEvent<HTMLTextAreaElement>,
@@ -2574,6 +2594,12 @@ export function SessionPaneView({
         onWheel={handleMessageStackUserScrollIntent}
         onTouchMove={handleMessageStackUserScrollIntent}
         onKeyDown={handleMessageStackUserScrollIntent}
+        // Scrollbar-thumb mousedown is the only path that bypasses
+        // wheel/touch/key bindings; without it a scrollbar drag during the
+        // pane's `bottom_follow` cooldown would still re-pin the user to the
+        // bottom (the onScroll handler treats forward-progress ticks during
+        // the cooldown as continuation of the smooth animation).
+        onMouseDown={handleMessageStackUserScrollIntent}
       >
         {activeControlPanelTab ? (
           renderControlPanel(pane.id)
