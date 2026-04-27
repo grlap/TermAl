@@ -204,7 +204,11 @@ type SessionHydrationRequestContext = {
   sessionMutationStamp: number | null;
 };
 
-type AdoptFetchedSessionOutcome = "adopted" | "stale" | "restartResync";
+type AdoptFetchedSessionOutcome =
+  | "adopted"
+  | "stale"
+  | "stateResync"
+  | "restartResync";
 
 export function resolveAdoptStateSessionOptions(
   options: AdoptStateOptions | undefined,
@@ -268,6 +272,35 @@ export function hydrationSessionMetadataMatches(
       getHydrationMessageCount(currentSession) &&
     getHydrationMutationStamp(responseSession) ===
       getHydrationMutationStamp(currentSession)
+  );
+}
+
+function hydrationSessionMetadataIsAhead(
+  responseSession: Pick<
+    Session,
+    "messageCount" | "messagesLoaded" | "messages" | "sessionMutationStamp"
+  >,
+  currentSession: Pick<
+    Session,
+    "messageCount" | "messagesLoaded" | "messages" | "sessionMutationStamp"
+  >,
+) {
+  const responseMessageCount = getHydrationMessageCount(responseSession);
+  const currentMessageCount = getHydrationMessageCount(currentSession);
+  if (
+    responseMessageCount !== null &&
+    currentMessageCount !== null &&
+    responseMessageCount > currentMessageCount
+  ) {
+    return true;
+  }
+
+  const responseMutationStamp = getHydrationMutationStamp(responseSession);
+  const currentMutationStamp = getHydrationMutationStamp(currentSession);
+  return (
+    responseMutationStamp !== null &&
+    currentMutationStamp !== null &&
+    responseMutationStamp > currentMutationStamp
   );
 }
 
@@ -1136,19 +1169,10 @@ export function useAppLiveState(
     );
   }
 
-  // Returns `boolean` rather than the sibling
-  // `AdoptCreatedSessionOutcome` discriminated union because the
-  // wire-contract-mismatch branch for this path is hoisted to
-  // the call site in the hydration effect below (see
-  // `fetchSession` catch branch: it checks
-  // `response.session.id !== sessionId` and triggers recovery
-  // BEFORE reaching this function). The two `false` outcomes
-  // here — unknown session id (deleted during fetch) and
-  // revision gate rejection — both collapse to the same caller
-  // behaviour: don't mark as hydrated, let the next SSE delta
-  // or action-recovery resync reconcile. A three-way
-  // discrimination would be useful only if those two cases
-  // ever needed divergent callback treatment.
+  // Returns a discriminated outcome because metadata mismatch needs different
+  // recovery depending on direction: stale responses retry hydration, while a
+  // full-session response ahead of the current summary must first force
+  // `/api/state` so the global revision/session metadata catches up.
   function adoptFetchedSession(
     session: Session,
     revision: number,
@@ -1180,12 +1204,23 @@ export function useAppLiveState(
     if (isCrossInstanceHydrationResponse) {
       return "restartResync";
     }
+    const currentRequestStillMatches = hydrationRequestStillMatchesSession(
+      requestContext,
+      currentSession,
+    );
+    if (
+      currentRequestStillMatches &&
+      !hydrationResponseMatchesSession(session, currentSession) &&
+      hydrationSessionMetadataIsAhead(session, currentSession)
+    ) {
+      return "stateResync";
+    }
     const responseIsNotOlderThanRequest =
       requestContext.revision === null || revision >= requestContext.revision;
     const canAdoptLowerRevisionHydration =
       currentSession.messagesLoaded !== true &&
       responseIsNotOlderThanRequest &&
-      hydrationRequestStillMatchesSession(requestContext, currentSession) &&
+      currentRequestStillMatches &&
       hydrationResponseMatchesSession(session, currentSession);
     // The downgrade allowance below is intentionally narrower than
     // "metadata-only": the request and response must still match the current
@@ -1218,14 +1253,24 @@ export function useAppLiveState(
       return "stale";
     }
     const latestCurrentSession = latestSessions[latestExistingIndex];
+    const latestRequestStillMatches = hydrationRequestStillMatchesSession(
+      requestContext,
+      latestCurrentSession,
+    );
+    const latestResponseMatches = hydrationResponseMatchesSession(
+      session,
+      latestCurrentSession,
+    );
     if (
-      !isCrossInstanceHydrationResponse &&
-      (!hydrationRequestStillMatchesSession(
-        requestContext,
-        latestCurrentSession,
-      ) ||
-        !hydrationResponseMatchesSession(session, latestCurrentSession))
+      !latestRequestStillMatches ||
+      !latestResponseMatches
     ) {
+      if (
+        latestRequestStillMatches &&
+        hydrationSessionMetadataIsAhead(session, latestCurrentSession)
+      ) {
+        return "stateResync";
+      }
       return "stale";
     }
 
@@ -1235,8 +1280,7 @@ export function useAppLiveState(
     );
     if (
       previousRevision === null ||
-      revision > previousRevision ||
-      isCrossInstanceHydrationResponse
+      revision > previousRevision
     ) {
       // A fresh server instance starts a new revision counter, so adopting its
       // targeted hydration response may legitimately step this ref backward.
@@ -1306,14 +1350,29 @@ export function useAppLiveState(
             response.serverInstanceId,
             requestContext,
           );
-          if (adoptOutcome === "adopted") {
-            clearHydrationRetry(sessionId);
-            hydratedSessionIdsRef.current.add(sessionId);
-          } else if (adoptOutcome === "restartResync") {
-            hydrationRestartResyncPendingRef.current = true;
-            requestActionRecoveryResyncRef.current();
-          } else {
-            shouldRetryHydration = true;
+          switch (adoptOutcome) {
+            case "adopted":
+              clearHydrationRetry(sessionId);
+              hydratedSessionIdsRef.current.add(sessionId);
+              break;
+            case "restartResync":
+              hydrationRestartResyncPendingRef.current = true;
+              requestActionRecoveryResyncRef.current();
+              shouldRetryHydration = true;
+              break;
+            case "stateResync":
+              requestActionRecoveryResyncRef.current();
+              shouldRetryHydration = true;
+              break;
+            case "stale":
+              shouldRetryHydration = true;
+              break;
+            default: {
+              const _exhaustive: never = adoptOutcome;
+              void _exhaustive;
+              shouldRetryHydration = true;
+              break;
+            }
           }
         } catch (error) {
           if (!isMountedRef.current) {
@@ -1942,10 +2001,10 @@ export function useAppLiveState(
       });
     };
     requestActionRecoveryResyncRef.current = (options) => {
-      hydrationRestartResyncPendingRef.current = false;
       if (cancelled || !readNavigatorOnline()) {
         return;
       }
+      hydrationRestartResyncPendingRef.current = false;
 
       // Action-error recovery is a plain one-shot `/api/state` probe. Unlike
       // the manual retry path it must NOT reset `sawReconnectOpenSinceLastError`

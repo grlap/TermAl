@@ -637,6 +637,177 @@ describe("applyDeltaToSessions", () => {
     expect(result.sessions[0].sessionMutationStamp).toBe(101);
   });
 
+  it("retains a new prompt delta when an unhydrated summary still has a contiguous transcript", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 1,
+        sessionMutationStamp: 100,
+        messages: [
+          {
+            id: "message-previous",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Previous answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: "message-new-prompt",
+      messageIndex: 1,
+      messageCount: 2,
+      message: {
+        id: "message-new-prompt",
+        type: "text",
+        timestamp: "10:01",
+        author: "you",
+        text: "Latest prompt",
+      },
+      preview: "Latest prompt",
+      status: "active",
+      sessionMutationStamp: 101,
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected prompt delta to apply");
+    }
+
+    expect(result.sessions[0].messagesLoaded).toBe(true);
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
+      "message-previous",
+      "message-new-prompt",
+    ]);
+    expect(result.sessions[0].messages[1]).toMatchObject({
+      author: "you",
+      text: "Latest prompt",
+    });
+    expect(result.sessions[0].messageCount).toBe(2);
+    expect(result.sessions[0].sessionMutationStamp).toBe(101);
+  });
+
+  it("does not insert a retained prompt delta across an unhydrated transcript gap", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 1,
+        sessionMutationStamp: 100,
+        messages: [
+          {
+            id: "message-previous",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Previous answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: "message-late-prompt",
+      messageIndex: 3,
+      messageCount: 4,
+      message: {
+        id: "message-late-prompt",
+        type: "text",
+        timestamp: "10:03",
+        author: "you",
+        text: "Prompt after missing messages",
+      },
+      preview: "Prompt after missing messages",
+      status: "active",
+      sessionMutationStamp: 101,
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected metadata-only delta to apply");
+    }
+
+    expect(result.sessions[0].messagesLoaded).toBe(false);
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
+      "message-previous",
+    ]);
+    expect(result.sessions[0].messageCount).toBe(4);
+    expect(result.sessions[0].preview).toBe("Prompt after missing messages");
+    expect(result.sessions[0].sessionMutationStamp).toBe(101);
+  });
+
+  it("does not duplicate a replayed prompt delta while retaining an unhydrated transcript", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 2,
+        sessionMutationStamp: 100,
+        messages: [
+          {
+            id: "message-previous",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Previous answer",
+          },
+          {
+            id: "message-new-prompt",
+            type: "text",
+            timestamp: "10:01",
+            author: "you",
+            text: "Latest prompt",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "message-new-prompt",
+      messageIndex: 1,
+      messageCount: 2,
+      message: {
+        id: "message-new-prompt",
+        type: "text",
+        timestamp: "10:01",
+        author: "you",
+        text: "Latest prompt",
+      },
+      preview: "Latest prompt",
+      status: "active",
+      sessionMutationStamp: 101,
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected replayed prompt delta to apply");
+    }
+
+    expect(result.sessions[0].messagesLoaded).toBe(true);
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
+      "message-previous",
+      "message-new-prompt",
+    ]);
+    expect(
+      result.sessions[0].messages.filter(
+        (message) => message.id === "message-new-prompt",
+      ),
+    ).toHaveLength(1);
+    expect(result.sessions[0].sessionMutationStamp).toBe(101);
+  });
+
   it("inserts created messages at the provided index", () => {
     const sessions = [
       makeSession("session-a", {

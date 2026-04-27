@@ -67,63 +67,186 @@ A future regression that accidentally double-reads the body (consuming the strea
 - Add a test that returns `Content-Type: application/json` with a body like `'{"foo":'` (truncated, non-HTML) and asserts the resulting error shape.
 - Decide whether the contract is (a) `SyntaxError` propagates as-is (current behavior), or (b) wrap `JSON.parse(raw)` in try/catch and throw `new ApiRequestError("request-failed", "The TermAl backend returned an unparseable JSON response.", ...)` for consistent error-shape with the rest of `api.ts`.
 
-## Dead branches on `isCrossInstanceHydrationResponse` after the new early return
+## "Keeps a newly created prompt visible while active session hydration is pending" test does not pin its load-bearing regression
 
-**Severity:** Low - `ui/src/app-live-state.ts:1222, 1239`. The function now returns `"restartResync"` at line 1181 whenever `isCrossInstanceHydrationResponse` is true. Lines 1222 (`!isCrossInstanceHydrationResponse`) and 1239 (`|| isCrossInstanceHydrationResponse`) preserve flag references that are now always evaluated against `false` and `true` respectively.
+**Severity:** High - `ui/src/App.live-state.deltas.test.tsx:1131-1140`. The new integration test resolves the deferred hydration via `sessionFetch.resolve(...)` and `flushUiWork()` but never re-asserts that the prompt bubble survives the late hydration response. The deferred `hydratedSession` fixture already contains `promptMessage` in its `messages` array, so even if `adoptFetchedSession` wrongly clobbered the in-flight delta state, the prompt would still render after hydration and the test would still pass.
 
-The conditions are correct but encode an invariant that the early return now guarantees, making future maintainers reason about a path that no longer exists. If the early return is later relaxed (e.g., to allow some same-session cross-instance hydration to adopt directly), these now-dead branches could spring back to life with a different meaning.
-
-**Current behavior:**
-- Early return at line 1181 makes the downstream `isCrossInstanceHydrationResponse` checks unreachable in their `true` branch.
-- The flag references read as if cross-instance adoption were still possible inside this function.
-- Future maintainers will be misled or trip on the contradiction.
-
-**Proposal:**
-- Drop both downstream guards on `isCrossInstanceHydrationResponse`.
-- Or replace with a `// invariant: same-instance only past this point` comment near the early return.
-
-## Restart hydration recovery can drop the transcript retry after server-instance mismatch
-
-**Severity:** Medium - `ui/src/app-live-state.ts` sets `hydrationRestartResyncPendingRef` when targeted hydration rejects a cross-instance session response, but the recovery path can clear that intent before recovery is confirmed and does not guarantee a transcript hydration retry.
-
-The recovery flow relies on a follow-up `/api/state` request. That request is metadata-first and may return the same current revision, so `adoptState()` can reject it as a no-op. If the recovery probe is offline, cancelled, fails, or resolves to a same-revision snapshot, the visible session can remain `messagesLoaded: false` with no durable retry until an unrelated state event or user action happens.
+This is precisely the regression class the test purports to cover (round-13 callout: "late hydration overwriting the in-flight delta"). The sister test at line 610 ("does not let stale hydration clobber an in-flight text delta") gets this right by re-asserting `Hello world` survives the deferred hydration.
 
 **Current behavior:**
-- Targeted hydration rejects unknown cross-instance session responses with `"restartResync"`.
-- The recovery marker can be cleared before the resync actually runs or succeeds.
-- A same-revision `/api/state` recovery response does not materialize transcripts and may not schedule another hydration pass.
+- The deferred `hydratedSession` already contains `promptMessage`.
+- The trailing `act(...) { sessionFetch.resolve(...); await flushUiWork(); }` block has no follow-up assertion.
+- Both "in-flight delta survives" and "in-flight delta clobbered" code paths produce identical visible state.
 
 **Proposal:**
-- Keep the restart-hydration recovery intent pending until a recovery snapshot is successfully requested/adopted or a session hydration retry is explicitly scheduled.
-- Re-arm the intent on offline/cancelled/failed recovery probes.
-- After a restart resync, schedule a hydration retry for the affected visible session even if `/api/state` is a revision no-op.
+- Change the deferred `hydratedSession` so its `messages` array does NOT contain `promptMessage` (only `message-previous`). Re-assert the prompt bubble is still rendered after `sessionFetch.resolve(...)` and `flushUiWork()`. Only the in-flight retention path can keep it visible; an erroneous adoption would visibly remove it.
+- Or assert `sessionsRef`/store-snapshot identity to prove the prompt was retained across the hydration adoption.
 
-## `AdoptFetchedSessionOutcome` enum has no exhaustive switch with `assertNever`
+## Switch refactor in hydration effect silently changes `restartResync` retry semantics
 
-**Severity:** Low - `ui/src/app-live-state.ts:1303-1317`. The new string-union outcome `"adopted" | "stale" | "restartResync"` has a single call site that handles it via if/else-if/else without an exhaustiveness assertion. A future fourth outcome (e.g., `"deferred"`) would silently hit the `else` branch and trigger `shouldRetryHydration = true`.
+**Severity:** Medium - `ui/src/app-live-state.ts:1358-1362`. The `if/else → switch` refactor moved `shouldRetryHydration = true` into the `restartResync` arm. Previously this case returned without setting the retry flag — the action-recovery `/api/state` probe was the single recovery path. The retry timer now fires after `SESSION_HYDRATION_RETRY_DELAYS_MS[0] = 50ms` while the action-recovery probe is still in flight, doubling request volume and weakening the previous "after `restartResync`, wait for state-event-driven re-hydration" invariant.
+
+The change is a behavior delta buried in what otherwise looks like a refactor. Three reviewers flagged it independently. There is no inline comment explaining the rationale and no test pinning the new behavior.
 
 **Current behavior:**
-- TypeScript enforces only that current callers cover the three documented outcomes.
-- A new variant added to the union would compile cleanly while silently routing through the catch-all branch.
+- `restartResync` triggers BOTH `requestActionRecoveryResyncRef.current()` AND a hydration retry timer.
+- The retry timer fires at `SESSION_HYDRATION_RETRY_DELAYS_MS[0] = 50ms`, frequently before the resync probe completes.
+- Risk of duplicate `/api/sessions/{id}` fetches per cross-instance hydration mismatch.
+- No comment or test pins the new dual-path recovery.
 
 **Proposal:**
-- Convert to `switch (adoptOutcome) { case "adopted": …; case "stale": …; case "restartResync": …; default: assertNever(adoptOutcome); }`.
-- Use the project's existing `assertNever` helper or add one to a shared util module if not present.
+- Either (a) drop `shouldRetryHydration = true` from the `restartResync` arm so action-recovery resync remains the single recovery path, restoring the previous semantics; or (b) keep the new behavior but add an inline comment explaining why retry-on-top-of-resync is desirable AND extend an existing `restartResync` integration test to assert the additional retry fires.
 
-## `adoptFetchedSession` contract comment still documents a boolean return
+## Switch outcomes (`restartResync`/`stateResync`/offline-preserve) lack focused unit coverage
 
-**Severity:** Low - `ui/src/app-live-state.ts` now returns `AdoptFetchedSessionOutcome` from `adoptFetchedSession`, but the nearby contract comment still describes a boolean return with two false outcomes.
+**Severity:** Medium - `ui/src/app-live-state.ts:1306-1376`. The new exhaustive switch over `AdoptFetchedSessionOutcome` has four outcomes (`adopted`, `restartResync`, `stateResync`, `stale`) with distinct downstream effects, plus the offline-preserve reorder around line 2003-2007. Two behaviors changed in this round — `restartResync` now also sets `shouldRetryHydration = true`, and the new `stateResync` path — but neither is unit-tested at the function boundary. Only the `stateResync` outcome is exercised end-to-end; `restartResync`'s additional retry and offline-preserve are not.
 
-This function is on the hydration/restart recovery boundary. A stale contract comment here is more than cosmetic: it can mislead future changes into treating `"restartResync"` as a normal stale/no-op branch instead of a distinct recovery path that must trigger a resync and transcript retry.
+A future refactor could swap the order of `requestActionRecoveryResyncRef.current()` and `shouldRetryHydration` in either branch and still pass.
 
 **Current behavior:**
-- Implementation returns `"adopted"`, `"stale"`, or `"restartResync"`.
-- Comment still describes the previous boolean contract.
-- The new cross-instance restart behavior is not documented at the function boundary.
+- `adoptFetchedSession` is a 124-line nested-conditional function with side-effects baked into the caller.
+- No unit test asserts each outcome's downstream effects in isolation.
+- `restartResync`'s new retry behavior, the offline-preserve reorder, and the ahead-by-mutation-stamp `stateResync` branch are all uncovered.
 
 **Proposal:**
-- Rewrite the contract comment to describe all three outcomes.
-- Explicitly document that `"restartResync"` rejects cross-instance hydration and requires recovery instead of direct adoption.
+- Extract the outcome decision into a pure helper (e.g. `classifyFetchedSessionAdoption(...): AdoptFetchedSessionOutcome`) so the caller becomes purely the side-effects branch and the classification is unit-testable without the surrounding hook closure.
+- Add a focused test that asserts each outcome's downstream effects, particularly that `restartResync` triggers BOTH the resync request AND the retry, and that offline-cancelled resync preserves `hydrationRestartResyncPendingRef.current = true`.
+
+## Asymmetric malformed-delta handling between unhydrated and hydrated branches
+
+**Severity:** Low - `ui/src/live-updates.ts:225-247`. In the `messagesLoaded === false` branch, when `applyMessageCreatedDeltaToRetainedTranscript` returns `null` due to a protocol-shape violation (`delta.message.id !== delta.messageId` or invalid `messageIndex`), the code silently falls through to `applyMetadataOnlySessionDelta`. The `messagesLoaded === true` branch returns `needsResync` for the same shape violations.
+
+This means the same malformed payload yields different recovery depending on hydration state. The hydrated branch escalates correctly; the unhydrated branch tolerates it.
+
+**Current behavior:**
+- Same shape violation produces `applied` (metadata-only) on `messagesLoaded === false` but `needsResync` on `messagesLoaded === true`.
+- Helper signals all three null reasons (id-mismatch, invalid-index, gap) with the same return value.
+- Caller has no way to distinguish "legitimate gap, fall through to metadata-only" from "malformed payload, escalate to resync".
+
+**Proposal:**
+- Validate `delta.message.id === delta.messageId && isValidMessageIndex(delta.messageIndex)` upfront in the `messageCreated` case (before the `messagesLoaded === false` branch) and short-circuit to `needsResync` for both branches.
+- The retain helper would then only return `null` for the gap case, which is the legitimate metadata-only fallback.
+
+## `adoptFetchedSession` 4-outcome state machine warrants extraction into a pure classifier
+
+**Severity:** Low - `ui/src/app-live-state.ts:1187-1217, 1264-1275`. `adoptFetchedSession` now returns four distinct outcomes from two decision sites (the early-return cluster around 1187-1217 and the later cluster around 1264-1275). The function relies on five distinct cross-checks (server-instance match, request-still-matches, response-matches, revision gate, ahead-direction) without an inline truth-table comment. This is the second consecutive round both clusters have grown.
+
+State-machine correctness is the load-bearing contract here. Embedding it in a 124-line nested-conditional function increases the chance of subtle regressions during the next lifecycle change.
+
+**Current behavior:**
+- Four-outcome state machine with side effects mixed into the caller.
+- No unit-testable classification helper.
+- Two decision sites that must stay in agreement on the truth table.
+
+**Proposal:**
+- Extract `classifyFetchedSessionAdoption(...): AdoptFetchedSessionOutcome` as a pure helper. The call site becomes purely the side-effects switch.
+- Add unit tests covering each outcome's classification independently of the hook closure.
+- This dovetails with the "switch outcomes lack focused unit coverage" entry above.
+
+## `App.live-state.deltas.test.tsx` past 2,000-line review threshold
+
+**Severity:** Low - `ui/src/App.live-state.deltas.test.tsx`. File is now 3,237 lines and 17 `it` blocks after this round's +316 line addition, well past the architecture rubric §9 ~2,000-line threshold for TSX files. The header already lists three sibling files split out (`reconnect`, `visibility`, `watchdog`), establishing the per-cluster split pattern.
+
+Both new tests cluster around hydration races (deferred fetch + late-arriving delta + ahead-of-summary metadata), which is a coherent split boundary. Pure code move per CLAUDE.md.
+
+**Current behavior:**
+- Single test file mixes hydration races, watchdog resync, ignored deltas, orchestrator-only deltas, scroll/render coalescing, and resync-after-mismatch flows.
+- 17 `it` blocks; the last two added 316 lines together.
+- Per-cluster grep tax growing.
+
+**Proposal:**
+- Pure code move: extract the 4–5 hydration-focused tests into `ui/src/App.live-state.hydration.test.tsx`, mirroring the sibling-split pattern.
+- Defer to a dedicated split commit; do not couple with feature changes.
+
+## Hydration test mock conflates state-generation with session-fetch-count
+
+**Severity:** Low - `ui/src/App.live-state.deltas.test.tsx:1193-1216`. The `/api/state` mock returns `oldSummary` when `sessionFetchCount === 0` and `newSummary` otherwise, implicitly assuming the implementation order: a session fetch happens before the resync `/api/state` fetch. If the implementation legitimately reorders these (e.g. probe state before retrying hydration on `stateResync`), the test would silently change semantics — the second `/api/state` would return `oldSummary` again, defeating the test's purpose.
+
+The test is correct for the current implementation but tightly coupled to its fetch-ordering.
+
+**Current behavior:**
+- State-snapshot freshness is a function of session-fetch count.
+- Test assumes session fetch precedes resync fetch.
+- A legitimate reorder would break the test in a non-obvious way.
+
+**Proposal:**
+- Replace the count-coupled mock with a step counter / explicit phase variable that the test increments when the server-side summary should advance.
+- Decouple "what stage is the test at" from "which endpoint was called".
+
+## `default` switch arm with `void _exhaustive` is too forgiving
+
+**Severity:** Low - `ui/src/app-live-state.ts:1370-1375`. The `const _exhaustive: never = adoptOutcome` build-time exhaustiveness assert is the right tool, but the runtime fallback `void _exhaustive; shouldRetryHydration = true;` weakens the diagnostic value if some unexpected non-string sneaks in via JSON parsing, and a contributor who silenced the type error with a cast would silently get retry-on-everything semantics.
+
+**Current behavior:**
+- Type error caught at build time (good).
+- Runtime fallback silently retries on any unknown outcome.
+- A bypass via `as`-cast or runtime-only type drift would produce confusing behavior with no log.
+
+**Proposal:**
+- Replace with `assertNever(adoptOutcome)` (use the project's existing helper or add one to a shared util module).
+- Or `console.warn`-then-retry so unknown outcomes are diagnosable in dev tools.
+
+## `applyMessageCreatedDeltaToRetainedTranscript` tolerates a regressing `delta.messageCount`
+
+**Severity:** Low - `ui/src/live-updates.ts:158-180`. The helper computes `messagesLoaded: updatedMessages.length >= delta.messageCount ? true : session.messagesLoaded` and unconditionally writes `messageCount: delta.messageCount`. If a buggy upstream sends `delta.messageCount < session.messageCount` (a regressing count), the unhydrated summary's longer retained transcript would satisfy `length >= delta.messageCount` and flip `messagesLoaded` to `true` based on the regressed count. The helper would also overwrite `messageCount` with the smaller value.
+
+The current wire contract requires `messageCount` to be monotonically non-decreasing for `messageCreated`, so this is latent. But the helper now sits on the only delta-driven `messagesLoaded` flip path, and a future bug elsewhere — or a chained-remote topology — could exploit this asymmetry.
+
+**Current behavior:**
+- The hydration flip ignores whether the response actually argues a longer transcript than the current summary.
+- The unconditional `messageCount: delta.messageCount` write accepts regressing counts.
+- A regressing `messageCount` is not validated upstream by this helper.
+
+**Proposal:**
+- Guard the flip with `delta.messageCount >= session.messageCount` so a regression returns `null` and falls through to the metadata-only path.
+- Or validate `delta.messageCount` shape at the wire boundary so this helper does not need to defend against it.
+
+## `applyMessageCreatedDeltaToRetainedTranscript` and `hydrationSessionMetadataIsAhead` lack direct unit-test coverage
+
+**Severity:** Low - `ui/src/live-updates.ts:141-186` and `ui/src/app-live-state.ts:278-306`. Both helpers are unexported. Round 14 added unit tests covering the gap branch and the replay/dedup case via `applyDeltaToSessions`, but several branches remain unobserved in isolation: id-mismatch (`delta.message.id !== delta.messageId`) and invalid `messageIndex` (`!isValidMessageIndex`) returning `null`, and `hydrationSessionMetadataIsAhead`'s ahead-by-mutation-stamp branch (which only fires when counts are equal/null and stamps differ).
+
+The id-mismatch and invalid-`messageIndex` branches are particularly worth pinning under a `messagesLoaded: false` session WITH retained messages — those branches must return `null` so the call site falls through to `applyMetadataOnlySessionDelta`. The existing "updates metadata for unhydrated summaries without forcing a state resync" test covers id-mismatch when `messages: []` (no retained transcript), but not the retained-transcript variant introduced by the new helper. The sibling `hydrationSessionMetadataMatches` is exported and has direct unit-test coverage (`ui/src/app-live-state.test.ts`); the ahead-detection sibling does not.
+
+**Current behavior:**
+- Helpers are unexported; tests reach them only through `applyDeltaToSessions` and the `useAppLiveState` hook.
+- Round 14 closed the gap and dedup branches; id-mismatch and invalid-index branches remain unobserved.
+- The ahead-by-mutation-stamp branch in `hydrationSessionMetadataIsAhead` is not directly tested.
+
+**Proposal:**
+- Export both helpers and add focused unit tests covering: (a) id-mismatch returns `null`, (b) invalid `messageIndex` returns `null`, (c) ahead-by-mutation-stamp without count change returns `true`, (d) equal counts + equal stamps returns `false`.
+- Add two retained-transcript variant tests at the `applyDeltaToSessions` level: (a) `messagesLoaded: false` + retained 1-message transcript + delta with `delta.messageId !== delta.message.id`, assert metadata-only update and existing message untouched; (b) same setup with `messageIndex: -1`, same assertion.
+- Mirror the test shape used for `hydrationSessionMetadataMatches`.
+
+## Hydration ahead-of-summary integration test does not pin "first hydration not applied"
+
+**Severity:** Low - `ui/src/App.live-state.deltas.test.tsx:1027-1106`. The new test asserts that a `/api/state` resync fires after the first hydration AND that a second hydration completes, then asserts "Ahead transcript" appears. A buggy implementation that erroneously adopted the first hydration response (then later re-hydrated harmlessly) would still pass — the visible final state is identical to the correct path.
+
+The test's stated contract is "requests state resync when session hydration is ahead of the announced summary", but the assertion sequence proves only that resync was eventually requested and that the final transcript is visible, not that the first hydration response was deferred.
+
+**Current behavior:**
+- Test asserts `sessionFetchCount >= 1`, then `stateFetchCountAfterHydration >= 1`, then `sessionFetchCount >= 2`, then "Ahead transcript" visible.
+- No assertion proves the first hydration response was NOT applied.
+- The pinned regression contract is therefore looser than the test name suggests.
+
+**Proposal:**
+- Between the first and second `waitFor` blocks, add an assertion that "Ahead transcript" is NOT yet visible (the first hydration must be deferred until state catches up).
+- Or query the session-store snapshot directly and assert `messages.length === 0` after the first hydration response, before resync completes.
+- Update the test name and any inline comment to match the strengthened contract.
+
+## `requestActionRecoveryResyncRef` offline-preserve reorder lacks inline note or test
+
+**Severity:** Low - `ui/src/app-live-state.ts:2002-2008`. The pre-change implementation cleared `hydrationRestartResyncPendingRef.current = false` unconditionally at the top of the closure. The post-change implementation moves that write past the `cancelled || !readNavigatorOnline()` early return, which is a deliberate semantic improvement: an offline observation no longer silently clears restart-resync intent. But the change is buried inside a comment-refactor block with no inline note explaining the order, and there is no test that drives `requestActionRecoveryResyncRef` while offline and asserts the flag survives.
+
+A future contributor cleaning up the closure, or moving the body around, can easily re-hoist the write to the top without realizing the order is load-bearing.
+
+**Current behavior:**
+- The flag-write order is the only thing preserving restart-resync intent across an offline observation.
+- No inline comment names the invariant.
+- No test asserts the flag survives an offline-cancelled resync.
+
+**Proposal:**
+- Add a one-line comment at the moved write naming the invariant ("preserve resync intent across offline observations so a temporary `navigator.onLine === false` does not silently clear `hydrationRestartResyncPendingRef`").
+- Or add a regression test that drives `requestActionRecoveryResyncRef` while `navigator.onLine === false`, then re-drives it once online, and asserts the resync runs both times.
 
 ## `renderSessionMessageCard` deps cause SessionBody to re-render per streaming chunk
 

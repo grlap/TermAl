@@ -77,6 +77,10 @@ type SessionDeltaEvent = Exclude<
   DeltaEvent,
   { type: "codexUpdated" } | { type: "orchestratorsUpdated" }
 >;
+type MessageCreatedDelta = Extract<
+  SessionDeltaEvent,
+  { type: "messageCreated" }
+>;
 
 export type DeltaApplyResult =
   | { kind: "applied"; sessions: Session[] }
@@ -134,6 +138,52 @@ function applyMetadataOnlySessionDelta(
   }
 }
 
+function applyMessageCreatedDeltaToRetainedTranscript(
+  session: Session,
+  delta: MessageCreatedDelta,
+): Session | null {
+  if (
+    delta.message.id !== delta.messageId ||
+    !isValidMessageIndex(delta.messageIndex)
+  ) {
+    return null;
+  }
+
+  const updatedMessages = session.messages.slice();
+  const existingMessageIndex = findMessageIndex(
+    updatedMessages,
+    delta.messageId,
+    delta.messageIndex,
+  );
+  if (existingMessageIndex !== -1) {
+    updatedMessages.splice(existingMessageIndex, 1);
+  }
+  if (delta.messageIndex > updatedMessages.length) {
+    return null;
+  }
+
+  updatedMessages.splice(delta.messageIndex, 0, delta.message);
+  const pendingPrompts = removePendingPromptById(
+    session.pendingPrompts,
+    delta.messageId,
+  );
+
+  return {
+    ...session,
+    messages: updatedMessages,
+    messagesLoaded:
+      updatedMessages.length >= delta.messageCount ? true : session.messagesLoaded,
+    messageCount: delta.messageCount,
+    pendingPrompts,
+    preview: delta.preview,
+    status: delta.status,
+    sessionMutationStamp: resolveSessionMutationStamp(
+      session,
+      delta.sessionMutationStamp,
+    ),
+  };
+}
+
 export function applyDeltaToSessions(
   sessions: Session[],
   delta: SessionDeltaEvent,
@@ -173,6 +223,19 @@ export function applyDeltaToSessions(
       }
       const session = sessions[sessionIndex];
       if (session.messagesLoaded === false) {
+        const retainedTranscriptUpdate =
+          applyMessageCreatedDeltaToRetainedTranscript(session, delta);
+        if (retainedTranscriptUpdate) {
+          return {
+            kind: "applied",
+            sessions: replaceSession(
+              sessions,
+              sessionIndex,
+              retainedTranscriptUpdate,
+            ),
+          };
+        }
+
         return {
           kind: "applied",
           sessions: replaceSession(
@@ -189,39 +252,19 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
 
-      const updatedMessages = session.messages.slice();
-      const existingMessageIndex = findMessageIndex(
-        updatedMessages,
-        delta.messageId,
-        delta.messageIndex,
-      );
-      if (existingMessageIndex !== -1) {
-        updatedMessages.splice(existingMessageIndex, 1);
-      }
-      if (delta.messageIndex > updatedMessages.length) {
+      const retainedTranscriptUpdate =
+        applyMessageCreatedDeltaToRetainedTranscript(session, delta);
+      if (!retainedTranscriptUpdate) {
         return { kind: "needsResync" };
       }
 
-      updatedMessages.splice(delta.messageIndex, 0, delta.message);
-      const pendingPrompts = removePendingPromptById(
-        session.pendingPrompts,
-        delta.messageId,
-      );
-
       return {
         kind: "applied",
-        sessions: replaceSession(sessions, sessionIndex, {
-          ...session,
-          messages: updatedMessages,
-          messageCount: delta.messageCount,
-          pendingPrompts,
-          preview: delta.preview,
-          status: delta.status,
-          sessionMutationStamp: resolveSessionMutationStamp(
-            session,
-            delta.sessionMutationStamp,
-          ),
-        }),
+        sessions: replaceSession(
+          sessions,
+          sessionIndex,
+          retainedTranscriptUpdate,
+        ),
       };
     }
 
