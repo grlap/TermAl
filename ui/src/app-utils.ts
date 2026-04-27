@@ -511,12 +511,17 @@ export function normalizeWheelDelta(
   container: HTMLElement,
 ) {
   if (event.deltaMode === 1) {
+    // Browser line-mode wheel deltas are unitless. Use the container's
+    // computed line-height instead of a fixed multiplier so virtualized
+    // prewarm projection follows the active transcript typography.
     const computedLineHeight = Number.parseFloat(window.getComputedStyle(container).lineHeight);
     const lineHeight = Number.isFinite(computedLineHeight) ? computedLineHeight : 16;
     return event.deltaY * lineHeight;
   }
 
   if (event.deltaMode === 2) {
+    // Page-mode wheel deltas represent viewport pages; the scroll container's
+    // live clientHeight is the closest projection for mounted-range prewarm.
     return event.deltaY * Math.max(container.clientHeight, 1);
   }
 

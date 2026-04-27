@@ -10,8 +10,10 @@
 //     attributes on anchors and code blocks),
 //     `normalizePastedMarkdownCodeClass` (keep only
 //     `language-<name>` classes on `<code>`), and
-//     `isSafePastedMarkdownHref` (allowlist no-colon hrefs,
-//     `http(s)`, and `mailto`; everything else rejected).
+//     `isSafePastedMarkdownHref` (allowlist anchors,
+//     document-relative hrefs, `http(s)`, and `mailto`; local
+//     absolute / network-looking hrefs and everything else are
+//     rejected).
 //   - The allow/deny sets
 //     `PASTED_MARKDOWN_ALLOWED_ELEMENTS`,
 //     `PASTED_MARKDOWN_DROPPED_ELEMENTS`, and the
@@ -32,11 +34,11 @@
 // content preserves whitespace, `<code>` is fenced with `` ` ``
 // (or `` `` `` when the content itself contains a backtick),
 // links round-trip via `[text](href)` after escaping label
-// brackets/backslashes and rejecting destinations that cannot be
-// safely represented inside Markdown's parenthesized link syntax;
-// images / iframes / other disallowed inputs are already removed
-// by the sanitizer (if they sneak through, the serializer emits
-// the empty string).
+// brackets/backslashes and destination parens/backslashes while
+// rejecting destinations that cannot be safely represented inside
+// Markdown's parenthesized link syntax; images / iframes / other
+// disallowed inputs are already removed by the sanitizer (if they
+// sneak through, the serializer emits the empty string).
 //
 // What this file does NOT own:
 //   - The `MarkdownDiffDocument` component that runs the paste /
@@ -219,9 +221,11 @@ export function isSafePastedMarkdownHref(href: string) {
   // Paste-time allowlist for `<a href="...">` in the rendered-
   // Markdown diff editor. Dangerous protocols are rejected; safe
   // external protocols (http/https/mailto) round-trip; no-colon
-  // hrefs (relative paths, anchors) are accepted because they
-  // cannot be interpreted as a scheme by the browser's URL
-  // parser.
+  // hrefs are accepted only when they are anchors or document-
+  // relative paths. Network-looking paths (`//host/path`,
+  // `\\host\share`) and rooted local paths (`/etc/passwd`,
+  // `\Windows`) are stripped because this paste boundary has no
+  // workspace context to prove they are project-scoped.
   //
   // Previously this function also short-circuited on
   // `/^[a-zA-Z]:[\\/]/` and returned true for Windows drive-
@@ -248,7 +252,7 @@ export function isSafePastedMarkdownHref(href: string) {
   const normalized = trimmed.replace(/[\u0000-\u001F\u007F\s]+/g, "");
   const colonIndex = normalized.indexOf(":");
   if (colonIndex === -1) {
-    return true;
+    return !normalized.startsWith("/") && !normalized.startsWith("\\");
   }
 
   const protocol = normalized.slice(0, colonIndex).toLowerCase();
@@ -294,7 +298,8 @@ export function serializeMarkdownBlockNode(node: Node): string {
     const codeElement = node.querySelector("code");
     const language = codeElement?.className.match(/language-([\w-]+)/)?.[1] ?? "";
     const code = codeElement?.textContent ?? node.textContent ?? "";
-    return `\`\`\`${language}\n${code.replace(/\n$/, "")}\n\`\`\``;
+    const fence = buildMarkdownBacktickFence(code, 3);
+    return `${fence}${language}\n${code.replace(/\n$/, "")}\n${fence}`;
   }
   if (tagName === "table") {
     return serializeMarkdownTable(node);
@@ -385,11 +390,11 @@ function formatSafeMarkdownLinkDestination(href: string) {
   const destination = href.trim();
   if (
     destination.length === 0 ||
-    /[\u0000-\u001F\u007F\s()[\]<>]/.test(destination)
+    /[\u0000-\u001F\u007F\s[\]<>]/.test(destination)
   ) {
     return null;
   }
-  return destination;
+  return destination.replace(/[\\()]/g, "\\$&");
 }
 
 export function serializeMarkdownList(list: HTMLElement, ordered: boolean) {
@@ -426,6 +431,21 @@ export function serializeMarkdownTable(table: HTMLElement) {
 }
 
 export function wrapInlineMarkdownCode(content: string) {
-  const fence = content.includes("`") ? "``" : "`";
+  const fence = buildMarkdownBacktickFence(content, 1);
+  if (content.startsWith("`") || content.endsWith("`")) {
+    // CommonMark code spans need a single inner space when content touches a
+    // fence backtick; otherwise the parser treats one fence backtick as content.
+    return `${fence} ${content} ${fence}`;
+  }
   return `${fence}${content}${fence}`;
+}
+
+// CommonMark fenced code and code spans need a delimiter longer than any
+// backtick run inside the content, so the serializer uses longest run + 1.
+function buildMarkdownBacktickFence(content: string, minimumLength: number) {
+  let longestRun = 0;
+  for (const match of content.matchAll(/`+/g)) {
+    longestRun = Math.max(longestRun, match[0].length);
+  }
+  return "`".repeat(Math.max(minimumLength, longestRun + 1));
 }

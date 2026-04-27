@@ -1092,6 +1092,18 @@ describe("DiffPanel", () => {
         "Save failed: Rendered Markdown edit could not be applied because the document changed under that section. Review the latest diff and edit again.",
       ),
     ).toBeInTheDocument();
+    expect(addedSections[1]).toHaveTextContent("Ready to ship.");
+
+    await clickAndSettle(screen.getByRole("button", { name: "Save Markdown" }));
+
+    expect(onSaveFile).toHaveBeenCalledWith(
+      "/repo/README.md",
+      "Shared intro.\n# Draft document\nShared middle.\nReady to ship.\nShared outro.\n",
+      {
+        baseHash: null,
+        overwrite: undefined,
+      },
+    );
   });
 
   it("keeps the save action dirty when another rendered Markdown section reports no-op input", async () => {
@@ -1379,6 +1391,151 @@ describe("DiffPanel", () => {
 
     expect(savedCapture[savedCapture.length - 1]).toEqual({
       content: secondContent,
+      path: "/repo/README.md",
+    });
+  });
+
+  it("adopts a successful save before reporting post-save rendered draft failure", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+      contentHash: "sha256:base",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+    const firstSave = createDeferred<{
+      content: string;
+      contentHash: string;
+      language: string;
+      path: string;
+    }>();
+    const savedCapture: Array<{
+      content: string;
+      options?: { baseHash?: string | null; overwrite?: boolean };
+      path: string;
+    }> = [];
+    const onSaveFile = vi
+      .fn()
+      .mockImplementationOnce(
+        async (
+          path: string,
+          content: string,
+          options?: { baseHash?: string | null; overwrite?: boolean },
+        ) => {
+          savedCapture.push({ content, options, path });
+          return firstSave.promise;
+        },
+      )
+      .mockImplementation(
+        async (
+          path: string,
+          content: string,
+          options?: { baseHash?: string | null; overwrite?: boolean },
+        ) => {
+          savedCapture.push({ content, options, path });
+          return { content, contentHash: "sha256:second", language: "markdown", path };
+        },
+      );
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " Shared intro.",
+            "-# Base document",
+            "+# Draft document",
+            " Shared middle.",
+            "-Committed text.",
+            "+Ready to commit.",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "Shared intro.\n# Base document\nShared middle.\nCommitted text.\nShared outro.\n",
+              source: "index",
+            },
+            after: {
+              content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-save-post-success-reject"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={onSaveFile}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    const addedSections = await waitFor(() => {
+      const sections = document.querySelectorAll<HTMLElement>(
+        ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+      );
+      expect(sections.length).toBeGreaterThanOrEqual(2);
+      return sections;
+    });
+    const firstContent = "Shared intro.\n# Draft document\nShared middle.\nReady to ship.\nShared outro.\n";
+    const secondContent = "Shared intro.\n# Draft document\nShared middle.\nReady to launch.\nShared outro.\n";
+
+    hasOverlappingMarkdownCommitRangesMock
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    editRenderedMarkdownSection(addedSections[1], "<p>Ready to ship.</p>");
+    await clickAndSettle(screen.getByRole("button", { name: "Save Markdown" }));
+    expect(savedCapture[0]).toEqual({
+      content: firstContent,
+      options: { baseHash: "sha256:base", overwrite: undefined },
+      path: "/repo/README.md",
+    });
+
+    const pendingSection = await waitFor(() => {
+      const section = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+        ),
+      ).find((candidate) => candidate.textContent?.includes("Ready to ship."));
+      expect(section).toBeTruthy();
+      return section!;
+    });
+    editRenderedMarkdownSection(pendingSection, "<p>Ready to launch.</p>");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      firstSave.resolve({
+        content: firstContent,
+        contentHash: "sha256:first",
+        language: "markdown",
+        path: "/repo/README.md",
+      });
+      await Promise.resolve();
+    });
+
+    expect(
+      await screen.findByText(
+        "Save failed: Rendered Markdown edit could not be applied because the document changed under that section. Review the latest diff and edit again.",
+      ),
+    ).toBeInTheDocument();
+
+    await clickAndSettle(screen.getByRole("button", { name: "Save Markdown" }));
+
+    await waitFor(() => {
+      expect(savedCapture).toHaveLength(2);
+    });
+    expect(savedCapture[1]).toEqual({
+      content: secondContent,
+      options: { baseHash: "sha256:first", overwrite: undefined },
       path: "/repo/README.md",
     });
   });

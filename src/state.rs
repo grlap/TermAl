@@ -43,7 +43,7 @@ enum PersistRequest {
     Delta,
 }
 
-const REMOTE_HYDRATED_DELTA_REPLAY_CACHE_LIMIT: usize = 2048;
+const REMOTE_DELTA_REPLAY_CACHE_LIMIT: usize = 2048;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct RemoteDeltaReplayKey {
@@ -52,6 +52,15 @@ struct RemoteDeltaReplayKey {
     payload: RemoteDeltaReplayPayload,
 }
 
+/// Semantic identity for one remote delta replay key.
+///
+/// Every state-mutating field from the corresponding `DeltaEvent` variant must
+/// be represented here directly or through a stable fingerprint. The replay
+/// cache uses this value to distinguish exact same-revision redeliveries from
+/// valid same-revision sibling deltas. See `wire::DeltaEvent` for the source
+/// variants and `AppState::apply_remote_delta_event` for the consumer; new wire
+/// fields must be added here and pinned by the `remote_delta_replay_key_*`
+/// tests.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum RemoteDeltaReplayPayload {
     SessionCreated {
@@ -66,7 +75,7 @@ enum RemoteDeltaReplayPayload {
         message_index: usize,
         message_count: u32,
         message_fingerprint: String,
-        preview: String,
+        preview_fingerprint: String,
         status: u8,
         session_mutation_stamp: Option<u64>,
     },
@@ -76,7 +85,7 @@ enum RemoteDeltaReplayPayload {
         message_index: usize,
         message_count: u32,
         message_fingerprint: String,
-        preview: String,
+        preview_fingerprint: String,
         status: u8,
         session_mutation_stamp: Option<u64>,
     },
@@ -85,7 +94,8 @@ enum RemoteDeltaReplayPayload {
         message_id: String,
         message_index: usize,
         message_count: u32,
-        delta: String,
+        delta_fingerprint: String,
+        preview_fingerprint: Option<String>,
         session_mutation_stamp: Option<u64>,
     },
     TextReplace {
@@ -93,8 +103,8 @@ enum RemoteDeltaReplayPayload {
         message_id: String,
         message_index: usize,
         message_count: u32,
-        text: String,
-        preview: Option<String>,
+        text_fingerprint: String,
+        preview_fingerprint: Option<String>,
         session_mutation_stamp: Option<u64>,
     },
     CommandUpdate {
@@ -102,12 +112,12 @@ enum RemoteDeltaReplayPayload {
         message_id: String,
         message_index: usize,
         message_count: u32,
-        command: String,
+        command_fingerprint: String,
         command_language: Option<String>,
-        output: String,
+        output_fingerprint: String,
         output_language: Option<String>,
         status: u8,
-        preview: String,
+        preview_fingerprint: String,
         session_mutation_stamp: Option<u64>,
     },
     ParallelAgentsUpdate {
@@ -115,8 +125,8 @@ enum RemoteDeltaReplayPayload {
         message_id: String,
         message_index: usize,
         message_count: u32,
-        agents: Vec<(Option<String>, String, u8, String)>,
-        preview: String,
+        agents_fingerprint: String,
+        preview_fingerprint: String,
         session_mutation_stamp: Option<u64>,
     },
     CodexUpdated {
@@ -152,7 +162,7 @@ impl RemoteDeltaReplayCache {
         }
         self.order.push_back(key.clone());
         self.keys.insert(key);
-        while self.order.len() > REMOTE_HYDRATED_DELTA_REPLAY_CACHE_LIMIT {
+        while self.order.len() > REMOTE_DELTA_REPLAY_CACHE_LIMIT {
             if let Some(expired) = self.order.pop_front() {
                 self.keys.remove(&expired);
             }
@@ -238,11 +248,12 @@ struct AppState {
     /// so duplicate or older fallback events do not trigger redundant
     /// blocking `/api/state` fetches.
     remote_sse_fallback_resynced_revision: Arc<Mutex<HashMap<String, u64>>>,
-    /// Exact inbound remote delta payloads already consumed by targeted
-    /// full-session hydration. This is intentionally narrower than
-    /// session-level metadata dedupe: sibling same-revision deltas must still
-    /// apply unless their whole payload is an exact replay.
-    remote_hydrated_delta_replay_cache: Arc<Mutex<RemoteDeltaReplayCache>>,
+    /// Exact remote-delta payload identities for every successfully applied
+    /// inbound delta. Suppresses same-revision payload-identical replays from a
+    /// misbehaving remote/SSE retry; sibling same-revision deltas with different
+    /// payloads still apply. Per-remote entries are cleared on event-stream
+    /// continuity loss.
+    remote_delta_replay_cache: Arc<Mutex<RemoteDeltaReplayCache>>,
     terminal_local_command_semaphore: Arc<tokio::sync::Semaphore>,
     terminal_remote_command_semaphore: Arc<tokio::sync::Semaphore>,
     stopping_orchestrator_ids: Arc<Mutex<HashSet<String>>>,

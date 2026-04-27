@@ -10,8 +10,11 @@ export type MessageStackScrollWriteKind =
   | "bottom_boundary"
   | "bottom_follow";
 
+export type MessageStackScrollWriteSource = "programmatic" | "user";
+
 export type MessageStackScrollWriteDetail = {
   scrollKind?: MessageStackScrollWriteKind;
+  scrollSource?: MessageStackScrollWriteSource;
 };
 
 // Shared seam between pane-owned transcript scroll intent and the virtualizer's
@@ -20,7 +23,10 @@ export type MessageStackScrollWriteDetail = {
 // the virtualizer to mount the bottom range first, then perform the scroll
 // after the target pages exist. `bottom_follow` marks a smooth programmatic
 // follow; the pane and virtualizer keep bottom-stick state while native smooth
-// scroll ticks pass through intermediate positions.
+// scroll ticks pass through intermediate positions. `scrollSource: "user"` is
+// reserved for direct pane writes that are synchronously caused by an input
+// event; layout-effect restores and other programmatic writes should omit it so
+// the virtualizer never calls `flushSync` from a React lifecycle.
 export function notifyMessageStackScrollWrite(
   node: HTMLElement,
   detail?: MessageStackScrollWriteDetail,

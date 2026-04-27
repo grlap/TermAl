@@ -167,7 +167,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
         remote_registry: test_remote_registry(),
         remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
-        remote_hydrated_delta_replay_cache: Arc::new(Mutex::new(RemoteDeltaReplayCache::default())),
+        remote_delta_replay_cache: Arc::new(Mutex::new(RemoteDeltaReplayCache::default())),
         terminal_local_command_semaphore: Arc::new(tokio::sync::Semaphore::new(
             TERMINAL_LOCAL_COMMAND_CONCURRENCY_LIMIT,
         )),

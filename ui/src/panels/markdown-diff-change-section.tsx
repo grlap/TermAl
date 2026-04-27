@@ -111,6 +111,59 @@ import {
 
 type MarkdownDiffSaveHandler = () => Promise<void> | void;
 
+type DocumentWithCaretRangeFromPoint = Document & {
+  caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  caretRangeFromPoint?: (x: number, y: number) => Range | null;
+};
+
+function setDropCaretFromPoint(section: HTMLElement, clientX: number, clientY: number) {
+  const ownerDocument = section.ownerDocument as DocumentWithCaretRangeFromPoint;
+  let range: Range | null = null;
+  const caretPosition = ownerDocument.caretPositionFromPoint?.(clientX, clientY);
+  if (caretPosition) {
+    range = ownerDocument.createRange();
+    range.setStart(caretPosition.offsetNode, caretPosition.offset);
+    range.collapse(true);
+  } else {
+    range = ownerDocument.caretRangeFromPoint?.(clientX, clientY) ?? null;
+  }
+  if (!range) {
+    return;
+  }
+
+  const startContainer = range.startContainer;
+  if (startContainer !== section && !section.contains(startContainer)) {
+    return;
+  }
+
+  const selection = ownerDocument.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function getSelectionRangeInsideSection(section: HTMLElement) {
+  const selection = section.ownerDocument.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    return null;
+  }
+
+  const range = selection.getRangeAt(0);
+  const containsNode = (node: Node) => node === section || section.contains(node);
+  if (!containsNode(range.startContainer) || !containsNode(range.endContainer)) {
+    return null;
+  }
+
+  return range;
+}
+
+function serializeSelectedMarkdown(range: Range, fallbackMarkdown: string) {
+  const ownerDocument = range.commonAncestorContainer.ownerDocument ?? document;
+  const container = ownerDocument.createElement("div");
+  container.append(range.cloneContents());
+  const markdown = serializeEditableMarkdownSection(container);
+  return markdown.trim().length > 0 ? markdown : fallbackMarkdown;
+}
+
 export function RenderedMarkdownChangeSection({
   allowReadOnlyCaret,
   allowCurrentSegmentFallback = true,
@@ -283,12 +336,17 @@ export function EditableRenderedMarkdownSection({
     onDraftChange(baseSegment, normalizedDraft);
   }
 
-  function clearCommittedDraft(baseSegment: MarkdownDiffDocumentSegment) {
+  function clearCommittedDraft(
+    baseSegment: MarkdownDiffDocumentSegment,
+    options?: { resetRenderedContent?: boolean },
+  ) {
     hasUncommittedUserEditRef.current = false;
     draftSegmentRef.current = null;
     draftSourceContentRef.current = null;
     onDraftChange(baseSegment, baseSegment.markdown);
-    setRenderResetVersion((current) => current + 1);
+    if (options?.resetRenderedContent !== false) {
+      setRenderResetVersion((current) => current + 1);
+    }
   }
 
   function handleInput(event: FormEvent<HTMLElement>) {
@@ -344,7 +402,7 @@ export function EditableRenderedMarkdownSection({
         allowCurrentSegmentFallback,
         currentSegment: segment,
         nextMarkdown,
-        onApplied: () => clearCommittedDraft(commitSegment),
+        onApplied: (options) => clearCommittedDraft(commitSegment, options),
         segment: commitSegment,
         sourceContent: sourceAtDraftStart,
       };
@@ -380,6 +438,50 @@ export function EditableRenderedMarkdownSection({
     if (allowReadOnlyCaret && !canEdit) {
       event.preventDefault();
     }
+  }
+
+  function handleCopy(event: ClipboardEvent<HTMLElement>) {
+    if (!canEdit) {
+      return;
+    }
+
+    const range = getSelectionRangeInsideSection(event.currentTarget);
+    if (!range) {
+      return;
+    }
+
+    const baseSegment = draftSegmentRef.current ?? segment;
+    event.clipboardData.setData(
+      "text/plain",
+      serializeSelectedMarkdown(range, baseSegment.markdown),
+    );
+    event.preventDefault();
+  }
+
+  function handleCut(event: ClipboardEvent<HTMLElement>) {
+    if (!canEdit) {
+      handleReadOnlyMutationEvent(event);
+      return;
+    }
+
+    const range = getSelectionRangeInsideSection(event.currentTarget);
+    if (!range) {
+      return;
+    }
+
+    const baseSegment = draftSegmentRef.current ?? segment;
+    event.clipboardData.setData(
+      "text/plain",
+      serializeSelectedMarkdown(range, baseSegment.markdown),
+    );
+    event.preventDefault();
+    range.deleteContents();
+    range.collapse(true);
+
+    const selection = event.currentTarget.ownerDocument.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    updateLocalDraftState(readEditedMarkdown(event.currentTarget, baseSegment.markdown));
   }
 
   function handlePaste(event: ClipboardEvent<HTMLElement>) {
@@ -426,6 +528,7 @@ export function EditableRenderedMarkdownSection({
       return;
     }
 
+    setDropCaretFromPoint(event.currentTarget, event.clientX, event.clientY);
     insertSanitizedMarkdownPaste(
       event.currentTarget,
       html,
@@ -707,7 +810,8 @@ export function EditableRenderedMarkdownSection({
           commitOwnDraft();
         }
       }}
-      onCut={handleReadOnlyMutationEvent}
+      onCopy={handleCopy}
+      onCut={handleCut}
       onDrop={handleDrop}
       onInput={handleInput}
       onKeyDown={handleKeyDown}

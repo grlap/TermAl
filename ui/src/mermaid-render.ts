@@ -140,6 +140,11 @@ export function getMermaidDiagramFrameStyle(svg: string): CSSProperties {
     // area below wide ER diagrams. Use CSS aspect-ratio so the used
     // height scales with the constrained width.
     //
+    // Trade-off: very tall, narrow diagrams in narrow columns can be
+    // clipped at the bottom because the srcdoc intentionally keeps
+    // vertical overflow hidden. That keeps wide diagrams tight instead
+    // of restoring the old fixed-height blank-frame behavior.
+    //
     // `frameHeight` still includes the historical 24px vertical slack
     // for scrollbar chrome / Mermaid temp-DOM text-measurement drift.
     aspectRatio: `${frameWidth} / ${frameHeight}`,

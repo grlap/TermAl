@@ -357,6 +357,7 @@ export function VirtualizedConversationMessageList({
   const lastPinnedConversationSearchIdRef = useRef<string | null>(null);
   const lastUserScrollInputTimeRef = useRef(Number.NEGATIVE_INFINITY);
   const lastUserScrollKindRef = useRef<UserScrollKind>(null);
+  const lastTouchClientYRef = useRef<number | null>(null);
   const pendingAggressiveIdleCompactionRef = useRef(false);
   const lastNativeScrollTopRef = useRef(0);
   const pendingProgrammaticScrollTopRef = useRef<number | null>(null);
@@ -1769,6 +1770,7 @@ export function VirtualizedConversationMessageList({
 
     const markUserScroll = (event?: WheelEvent | TouchEvent | KeyboardEvent) => {
       let wheelDeltaY: number | null = null;
+      let touchDeltaY: number | null = null;
       if (event instanceof WheelEvent) {
         wheelDeltaY = normalizeWheelDelta(event, node);
         if (
@@ -1777,6 +1779,18 @@ export function VirtualizedConversationMessageList({
           canNestedScrollableConsumeWheel(event.target, node, wheelDeltaY)
         ) {
           return;
+        }
+      } else if (event instanceof TouchEvent) {
+        const touch = event.touches[0] ?? event.changedTouches[0] ?? null;
+        if (touch) {
+          const previousTouchClientY = lastTouchClientYRef.current;
+          lastTouchClientYRef.current = touch.clientY;
+          if (previousTouchClientY !== null) {
+            // Finger moves down => scrollTop moves up, matching a negative
+            // wheel delta. Feed the same prewarm path before native scroll
+            // exposes the top spacer.
+            touchDeltaY = previousTouchClientY - touch.clientY;
+          }
         }
       }
       pendingProgrammaticBottomFollowUntilRef.current =
@@ -1795,6 +1809,7 @@ export function VirtualizedConversationMessageList({
         (event.key === "PageUp" || event.key === "PageDown");
       const isExplicitUpwardScrollIntent =
         (wheelDeltaY !== null && wheelDeltaY < 0) ||
+        (touchDeltaY !== null && touchDeltaY < 0) ||
         (event instanceof KeyboardEvent &&
           (event.key === "PageUp" ||
             event.key === "ArrowUp" ||
@@ -1821,8 +1836,9 @@ export function VirtualizedConversationMessageList({
       hasUserScrollInteractionRef.current = true;
       lastUserScrollInputTimeRef.current = performance.now();
       scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
-      if (wheelDeltaY !== null && wheelDeltaY < 0) {
-        prewarmMountedRangeForUpwardWheel(node, wheelDeltaY);
+      const prewarmDeltaY = wheelDeltaY ?? touchDeltaY;
+      if (prewarmDeltaY !== null && prewarmDeltaY < 0) {
+        prewarmMountedRangeForUpwardWheel(node, prewarmDeltaY);
       }
     };
     const syncProgrammaticScrollWrite = (event: Event) => {
@@ -1830,6 +1846,11 @@ export function VirtualizedConversationMessageList({
         event instanceof CustomEvent
           ? ((event.detail as MessageStackScrollWriteDetail | undefined)?.scrollKind ?? null)
           : null;
+      const explicitScrollSource =
+        event instanceof CustomEvent
+          ? ((event.detail as MessageStackScrollWriteDetail | undefined)
+              ?.scrollSource ?? "programmatic")
+          : "programmatic";
 
       if (explicitScrollKind === "bottom_boundary") {
         pendingProgrammaticBottomFollowUntilRef.current =
@@ -1916,14 +1937,10 @@ export function VirtualizedConversationMessageList({
           lastUserScrollInputTimeRef.current = scrollWriteTime;
           scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
         }
-        // Flush on any upward scroll write that lands far from the bottom,
-        // not just `incremental`. Boundary jumps (`Ctrl+Shift+PgUp` ->
-        // `seek`) and page jumps (`page_jump`) can both leave the viewport
-        // in the top spacer, exposing void until the next React commit.
-        // Mirrors the native-scroll handler's flush condition above and the
-        // pane-write rationale in the new mousedown handler comment.
         const isActiveUpwardUserScrollWrite =
-          scrollDelta < 0 && !isNearBottomAfterWrite;
+          explicitScrollSource === "user" &&
+          scrollDelta < 0 &&
+          !isNearBottomAfterWrite;
         reconcileMountedRangeForNativeScroll(
           node,
           scrollDelta,
@@ -1946,6 +1963,12 @@ export function VirtualizedConversationMessageList({
     const cancelBottomFollowOnMouseDown = () => {
       pendingProgrammaticBottomFollowUntilRef.current = Number.NEGATIVE_INFINITY;
     };
+    const recordTouchStart = (event: TouchEvent) => {
+      lastTouchClientYRef.current = event.touches[0]?.clientY ?? null;
+    };
+    const clearTouchPosition = () => {
+      lastTouchClientYRef.current = null;
+    };
 
     syncViewport();
     lastNativeScrollTopRef.current = node.scrollTop;
@@ -1955,7 +1978,10 @@ export function VirtualizedConversationMessageList({
     node.addEventListener("scroll", onNativeScroll, { passive: true });
     node.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, syncProgrammaticScrollWrite);
     node.addEventListener("wheel", markUserScroll, { passive: true });
+    node.addEventListener("touchstart", recordTouchStart, { passive: true });
     node.addEventListener("touchmove", markUserScroll, { passive: true });
+    node.addEventListener("touchend", clearTouchPosition, { passive: true });
+    node.addEventListener("touchcancel", clearTouchPosition, { passive: true });
     node.addEventListener("keydown", markUserScroll);
     node.addEventListener("mousedown", cancelBottomFollowOnMouseDown);
     const resizeObserver = new ResizeObserver(() => {
@@ -1967,7 +1993,10 @@ export function VirtualizedConversationMessageList({
       node.removeEventListener("scroll", onNativeScroll);
       node.removeEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, syncProgrammaticScrollWrite);
       node.removeEventListener("wheel", markUserScroll);
+      node.removeEventListener("touchstart", recordTouchStart);
       node.removeEventListener("touchmove", markUserScroll);
+      node.removeEventListener("touchend", clearTouchPosition);
+      node.removeEventListener("touchcancel", clearTouchPosition);
       node.removeEventListener("keydown", markUserScroll);
       node.removeEventListener("mousedown", cancelBottomFollowOnMouseDown);
       resizeObserver.disconnect();

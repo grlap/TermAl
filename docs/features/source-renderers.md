@@ -408,7 +408,10 @@ Rules:
   CSS `aspect-ratio` with `height: auto`. The frame must preserve the diagram's
   aspect ratio when pane width constrains `max-width: 100%`; do not return to a
   fixed-height iframe, because wide ER diagrams otherwise scale down
-  horizontally while retaining a tall blank frame.
+  horizontally while retaining a tall blank frame. This intentionally favors
+  tight wide-diagram layout over very tall/narrow diagrams in constrained
+  columns: the iframe srcdoc keeps `overflow-y: hidden`, so a tall diagram can
+  clip at the bottom instead of expanding past its aspect-ratio height.
 - Keep source visible or recoverable in editable contexts.
 - Keep existing source length and diagram count budgets.
 

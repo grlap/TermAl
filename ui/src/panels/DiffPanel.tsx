@@ -235,6 +235,7 @@ export function DiffPanel({
   const renderedMarkdownCommittersRef = useRef(
     new Set<() => RenderedMarkdownSectionCommit | null>(),
   );
+  const preserveSaveErrorOnLatestFileAdoptionRef = useRef(false);
   const pendingEditValueRef = useRef<string | null>(null);
   const latestFileRef = useRef(latestFile);
   const editValueRef = useRef(editValue);
@@ -737,9 +738,13 @@ export function DiffPanel({
   useEffect(() => {
     if (latestFile.status === "ready") {
       const pendingEditValue = pendingEditValueRef.current;
+      const shouldPreserveSaveError = preserveSaveErrorOnLatestFileAdoptionRef.current;
+      preserveSaveErrorOnLatestFileAdoptionRef.current = false;
       pendingEditValueRef.current = null;
       setEditValueState(pendingEditValue ?? latestFile.content);
-      setSaveError(null);
+      if (!shouldPreserveSaveError) {
+        setSaveError(null);
+      }
       setEditEditorStatus(createEditorStatusSnapshot(pendingEditValue ?? latestFile.content));
       return;
     }
@@ -977,12 +982,11 @@ export function DiffPanel({
         baseHash: currentFile.contentHash ?? null,
         overwrite: options?.overwrite,
       });
-      if (!commitRenderedMarkdownDrafts()) {
-        return;
-      }
+      const draftsApplied = commitRenderedMarkdownDrafts();
       const savedContent = response?.content ?? currentEditValue;
       const latestEditValue = editValueRef.current;
-      const hasLocalEditsAfterSaveStarted = latestEditValue !== currentEditValue;
+      const hasLocalEditsAfterSaveStarted =
+        draftsApplied && latestEditValue !== currentEditValue;
       if (hasLocalEditsAfterSaveStarted) {
         pendingEditValueRef.current = latestEditValue;
       }
@@ -1002,11 +1006,15 @@ export function DiffPanel({
           };
         });
       }
+      setExternalFileNotice(null);
+      setDiffEditConflictOnDisk(false);
+      if (!draftsApplied) {
+        preserveSaveErrorOnLatestFileAdoptionRef.current = true;
+        return;
+      }
       if (markdownEditContent !== null || viewMode === "markdown") {
         setMarkdownEditContentState(hasLocalEditsAfterSaveStarted ? latestEditValue : savedContent);
       }
-      setExternalFileNotice(null);
-      setDiffEditConflictOnDisk(false);
     } catch (error) {
       const message = getErrorMessage(error);
       setSaveError(message);

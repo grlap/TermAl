@@ -453,28 +453,35 @@ impl AppState {
         }
     }
 
-    fn parallel_agent_status_replay_code(status: ParallelAgentStatus) -> u8 {
-        match status {
-            ParallelAgentStatus::Initializing => 0,
-            ParallelAgentStatus::Running => 1,
-            ParallelAgentStatus::Completed => 2,
-            ParallelAgentStatus::Error => 3,
+    fn remote_delta_payload_fingerprint<T: Serialize>(payload: &T) -> Option<String> {
+        match serde_json::to_vec(payload) {
+            Ok(encoded) => Some(format!("{:x}", Sha256::digest(encoded))),
+            Err(err) => {
+                eprintln!(
+                    "remote delta replay> failed to fingerprint {} payload: {err}",
+                    std::any::type_name::<T>()
+                );
+                None
+            }
         }
     }
 
-    fn remote_delta_payload_fingerprint<T: Serialize>(payload: &T) -> String {
-        let encoded = serde_json::to_vec(payload)
-            .expect("remote delta replay payload should serialize through the wire contract");
-        format!("{:x}", Sha256::digest(encoded))
+    fn remote_delta_text_fingerprint(payload: &str) -> String {
+        format!("{:x}", Sha256::digest(payload.as_bytes()))
     }
 
-    fn remote_delta_replay_key(remote_id: &str, event: &DeltaEvent) -> RemoteDeltaReplayKey {
+    /// Builds the exact replay-suppression key for one remote delta.
+    ///
+    /// Returns `None` when any payload field cannot be JSON-serialized. The
+    /// monotonic `remote_applied_revisions` watermark remains the authoritative
+    /// ordering defense, so the replay cache is safe to skip per delta.
+    fn remote_delta_replay_key(remote_id: &str, event: &DeltaEvent) -> Option<RemoteDeltaReplayKey> {
         let payload = match event {
             DeltaEvent::SessionCreated { session_id, session, .. } => {
                 RemoteDeltaReplayPayload::SessionCreated {
                     session_id: session_id.clone(),
                     message_count: session.message_count,
-                    session_fingerprint: Self::remote_delta_payload_fingerprint(session),
+                    session_fingerprint: Self::remote_delta_payload_fingerprint(session)?,
                     session_mutation_stamp: session.session_mutation_stamp,
                 }
             }
@@ -493,8 +500,8 @@ impl AppState {
                 message_id: message_id.clone(),
                 message_index: *message_index,
                 message_count: *message_count,
-                message_fingerprint: Self::remote_delta_payload_fingerprint(message),
-                preview: preview.clone(),
+                message_fingerprint: Self::remote_delta_payload_fingerprint(message)?,
+                preview_fingerprint: Self::remote_delta_text_fingerprint(preview),
                 status: Self::session_status_replay_code(*status),
                 session_mutation_stamp: *session_mutation_stamp,
             },
@@ -513,8 +520,8 @@ impl AppState {
                 message_id: message_id.clone(),
                 message_index: *message_index,
                 message_count: *message_count,
-                message_fingerprint: Self::remote_delta_payload_fingerprint(message),
-                preview: preview.clone(),
+                message_fingerprint: Self::remote_delta_payload_fingerprint(message)?,
+                preview_fingerprint: Self::remote_delta_text_fingerprint(preview),
                 status: Self::session_status_replay_code(*status),
                 session_mutation_stamp: *session_mutation_stamp,
             },
@@ -524,6 +531,7 @@ impl AppState {
                 message_index,
                 message_count,
                 delta,
+                preview,
                 session_mutation_stamp,
                 ..
             } => RemoteDeltaReplayPayload::TextDelta {
@@ -531,7 +539,10 @@ impl AppState {
                 message_id: message_id.clone(),
                 message_index: *message_index,
                 message_count: *message_count,
-                delta: delta.clone(),
+                delta_fingerprint: Self::remote_delta_text_fingerprint(delta),
+                preview_fingerprint: preview
+                    .as_deref()
+                    .map(Self::remote_delta_text_fingerprint),
                 session_mutation_stamp: *session_mutation_stamp,
             },
             DeltaEvent::TextReplace {
@@ -548,8 +559,10 @@ impl AppState {
                 message_id: message_id.clone(),
                 message_index: *message_index,
                 message_count: *message_count,
-                text: text.clone(),
-                preview: preview.clone(),
+                text_fingerprint: Self::remote_delta_text_fingerprint(text),
+                preview_fingerprint: preview
+                    .as_deref()
+                    .map(Self::remote_delta_text_fingerprint),
                 session_mutation_stamp: *session_mutation_stamp,
             },
             DeltaEvent::CommandUpdate {
@@ -570,12 +583,12 @@ impl AppState {
                 message_id: message_id.clone(),
                 message_index: *message_index,
                 message_count: *message_count,
-                command: command.clone(),
+                command_fingerprint: Self::remote_delta_text_fingerprint(command),
                 command_language: command_language.clone(),
-                output: output.clone(),
+                output_fingerprint: Self::remote_delta_text_fingerprint(output),
                 output_language: output_language.clone(),
                 status: Self::command_status_replay_code(*status),
-                preview: preview.clone(),
+                preview_fingerprint: Self::remote_delta_text_fingerprint(preview),
                 session_mutation_stamp: *session_mutation_stamp,
             },
             DeltaEvent::ParallelAgentsUpdate {
@@ -592,22 +605,15 @@ impl AppState {
                 message_id: message_id.clone(),
                 message_index: *message_index,
                 message_count: *message_count,
-                agents: agents
-                    .iter()
-                    .map(|agent| {
-                        (
-                            agent.detail.clone(),
-                            agent.id.clone(),
-                            Self::parallel_agent_status_replay_code(agent.status),
-                            agent.title.clone(),
-                        )
-                    })
-                    .collect(),
-                preview: preview.clone(),
+                // Parallel-agent deltas replace the displayed agent list as a
+                // unit, so one list-level fingerprint captures order, add,
+                // remove, and per-agent field changes without retaining text.
+                agents_fingerprint: Self::remote_delta_payload_fingerprint(agents)?,
+                preview_fingerprint: Self::remote_delta_text_fingerprint(preview),
                 session_mutation_stamp: *session_mutation_stamp,
             },
             DeltaEvent::CodexUpdated { codex, .. } => RemoteDeltaReplayPayload::CodexUpdated {
-                codex_fingerprint: Self::remote_delta_payload_fingerprint(codex),
+                codex_fingerprint: Self::remote_delta_payload_fingerprint(codex)?,
             },
             DeltaEvent::OrchestratorsUpdated {
                 orchestrators,
@@ -617,32 +623,40 @@ impl AppState {
                 orchestrator_fingerprints: orchestrators
                     .iter()
                     .map(Self::remote_delta_payload_fingerprint)
-                    .collect(),
+                    .collect::<Option<Vec<_>>>()?,
                 session_fingerprints: sessions
                     .iter()
                     .map(Self::remote_delta_payload_fingerprint)
-                    .collect(),
+                    .collect::<Option<Vec<_>>>()?,
             },
         };
-        RemoteDeltaReplayKey {
+        Some(RemoteDeltaReplayKey {
             remote_id: remote_id.to_owned(),
             revision: delta_event_revision(event),
             payload,
+        })
+    }
+
+    /// Explicit no-op for `None` keys so callers can plumb optional replay
+    /// keys without branching.
+    fn should_skip_remote_applied_delta_replay(&self, key: &Option<RemoteDeltaReplayKey>) -> bool {
+        key.as_ref().is_some_and(|key| {
+            self.remote_delta_replay_cache
+                .lock()
+                .expect("remote delta replay cache mutex poisoned")
+                .contains(key)
+        })
+    }
+
+    /// Explicit no-op for `None` keys; an unserializable delta still advances
+    /// through the monotonic revision watermark after it applies.
+    fn note_remote_applied_delta_replay(&self, key: &Option<RemoteDeltaReplayKey>) {
+        if let Some(key) = key {
+            self.remote_delta_replay_cache
+                .lock()
+                .expect("remote delta replay cache mutex poisoned")
+                .insert(key.clone());
         }
-    }
-
-    fn should_skip_remote_hydrated_delta_replay(&self, key: &RemoteDeltaReplayKey) -> bool {
-        self.remote_hydrated_delta_replay_cache
-            .lock()
-            .expect("remote delta replay cache mutex poisoned")
-            .contains(key)
-    }
-
-    fn note_remote_hydrated_delta_replay(&self, key: &RemoteDeltaReplayKey) {
-        self.remote_hydrated_delta_replay_cache
-            .lock()
-            .expect("remote delta replay cache mutex poisoned")
-            .insert(key.clone());
     }
 
     fn hydrate_remote_session_target(
@@ -1009,7 +1023,7 @@ impl AppState {
             }
         }
         let remote_delta_replay_key = Self::remote_delta_replay_key(remote_id, &event);
-        if self.should_skip_remote_hydrated_delta_replay(&remote_delta_replay_key) {
+        if self.should_skip_remote_applied_delta_replay(&remote_delta_replay_key) {
             return Ok(());
         }
         match event {
@@ -1065,7 +1079,7 @@ impl AppState {
                         Some((local_session, delta_session, revision))
                     }
                 }) else {
-                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 };
                 self.publish_delta(&DeltaEvent::SessionCreated {
@@ -1073,7 +1087,7 @@ impl AppState {
                     session_id: local_session.id.clone(),
                     session: delta_session,
                 });
-                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::MessageCreated {
                 message,
@@ -1099,7 +1113,7 @@ impl AppState {
                     remote_message_count,
                     remote_session_mutation_stamp,
                 )? {
-                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 }
                 let (
@@ -1181,7 +1195,7 @@ impl AppState {
                     status,
                     session_mutation_stamp: Some(session_mutation_stamp),
                 });
-                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::MessageUpdated {
                 message,
@@ -1213,7 +1227,7 @@ impl AppState {
                     remote_message_count,
                     remote_session_mutation_stamp,
                 )? {
-                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 }
                 {
@@ -1272,7 +1286,7 @@ impl AppState {
                         session_mutation_stamp: Some(session_mutation_stamp),
                     });
                 }
-                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::TextDelta {
                 delta,
@@ -1290,7 +1304,7 @@ impl AppState {
                     remote_message_count,
                     remote_session_mutation_stamp,
                 )? {
-                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 }
                 let (local_session_id, message_index, message_count, revision, session_mutation_stamp) = {
@@ -1353,7 +1367,7 @@ impl AppState {
                     preview,
                     session_mutation_stamp: Some(session_mutation_stamp),
                 });
-                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::TextReplace {
                 message_count: remote_message_count,
@@ -1371,7 +1385,7 @@ impl AppState {
                     remote_message_count,
                     remote_session_mutation_stamp,
                 )? {
-                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 }
                 let (local_session_id, message_index, message_count, revision, session_mutation_stamp) = {
@@ -1439,7 +1453,7 @@ impl AppState {
                     preview,
                     session_mutation_stamp: Some(session_mutation_stamp),
                 });
-                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::CommandUpdate {
                 command,
@@ -1462,7 +1476,7 @@ impl AppState {
                     remote_message_count,
                     remote_session_mutation_stamp,
                 )? {
-                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 }
                 let (
@@ -1599,7 +1613,7 @@ impl AppState {
                         session_mutation_stamp: Some(session_mutation_stamp),
                     });
                 }
-                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::ParallelAgentsUpdate {
                 agents,
@@ -1618,7 +1632,7 @@ impl AppState {
                     remote_message_count,
                     remote_session_mutation_stamp,
                 )? {
-                    self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
                     return Ok(());
                 }
                 let (
@@ -1739,7 +1753,7 @@ impl AppState {
                         session_mutation_stamp: Some(session_mutation_stamp),
                     });
                 }
-                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::OrchestratorsUpdated {
                 orchestrators,
@@ -1781,19 +1795,21 @@ impl AppState {
                     (revision, inner.orchestrator_instances.clone())
                 };
                 self.publish_orchestrators_updated(revision, localized_orchestrators);
-                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::CodexUpdated { .. } => {
                 // CodexState is process-global runtime metadata, not localized
-                // remote proxy state. Mark the remote revision consumed so this
-                // informational delta does not force a snapshot resync.
+                // remote proxy state. Mark the remote revision consumed for
+                // monotonicity, but intentionally do not fold the Codex payload
+                // into local state; this watermark means "consumed" for this
+                // informational variant, not "reflected in the proxy model".
                 let mut inner = self.inner.lock().expect("state mutex poisoned");
                 if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
                     return Ok(());
                 }
                 inner.note_remote_applied_revision(remote_id, remote_revision);
                 drop(inner);
-                self.note_remote_hydrated_delta_replay(&remote_delta_replay_key);
+                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
         }
         Ok(())

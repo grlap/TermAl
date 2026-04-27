@@ -32,6 +32,7 @@
 
 import {
   startTransition,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -1033,10 +1034,10 @@ export function SessionPaneView({
     setFileState(nextFileState);
   }
 
-  function handleSourceEditorDirtyChange(isDirty: boolean) {
+  const handleSourceEditorDirtyChange = useCallback((isDirty: boolean) => {
     sourceEditorDirtyRef.current = isDirty;
     setSourceEditorDirty(isDirty);
-  }
+  }, []);
 
   function setNewResponseIndicator(key: string, visible: boolean) {
     startTransition(() => {
@@ -1164,6 +1165,7 @@ export function SessionPaneView({
     node.scrollTop = nextScrollTop;
     notifyMessageStackScrollWrite(node, {
       scrollKind: options.scrollKind,
+      scrollSource: "user",
     });
     const { shouldStick } = syncMessageStackScrollPosition(
       node,
@@ -1209,7 +1211,9 @@ export function SessionPaneView({
       top: distance * direction,
       behavior: "smooth",
     });
-    notifyMessageStackScrollWrite(node);
+    notifyMessageStackScrollWrite(node, {
+      scrollSource: "user",
+    });
   }
 
   function scrollSessionMessageStackByPageJump(direction: -1 | 1) {
@@ -1240,6 +1244,7 @@ export function SessionPaneView({
           }
           notifyMessageStackScrollWrite(node, {
             scrollKind: "bottom_boundary",
+            scrollSource: "user",
           });
         } else {
           scrollToLatestMessage("auto", true, "seek");
@@ -1267,6 +1272,7 @@ export function SessionPaneView({
     });
     notifyMessageStackScrollWrite(node, {
       scrollKind: "seek",
+      scrollSource: "user",
     });
     setShouldStickToBottom(false);
     paneScrollPositions[scrollStateKey] = {

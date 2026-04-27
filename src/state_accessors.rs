@@ -234,7 +234,7 @@ impl AppState {
             .expect("state mutex poisoned")
             .remote_applied_revisions
             .remove(remote_id);
-        self.remote_hydrated_delta_replay_cache
+        self.remote_delta_replay_cache
             .lock()
             .expect("remote delta replay cache mutex poisoned")
             .remove_remote(remote_id);

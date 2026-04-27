@@ -53,18 +53,20 @@ import {
 } from "./markdown-diff-segments";
 
 export type RenderedMarkdownSectionCommit = {
-  // Set to false when the caller is resolving against a full-document preview
-  // whose current visible segment may already have drifted from the persisted
-  // source. Diff-side section commits can keep the fallback enabled because
-  // their current segment is derived from the same rendered diff model.
-  allowCurrentSegmentFallback?: boolean;
+  // Diff-side section commits can use the current segment as a last-resort
+  // locator because the current segment is derived from the same rendered diff
+  // model. Full-document preview callers must pass false: their current visible
+  // segment may already have drifted from the persisted source.
+  allowCurrentSegmentFallback: boolean;
   currentSegment: MarkdownDiffDocumentSegment;
   segment: MarkdownDiffDocumentSegment;
   nextMarkdown: string;
   sourceContent: string;
   // Called only after the parent accepts and applies the commit. Rejected
   // commits must keep their child draft state intact so the user can retry.
-  onApplied?: () => void;
+  // `resetRenderedContent: false` clears the child draft refs while preserving
+  // the current contentEditable DOM for no-op/equivalent commits.
+  onApplied?: (options?: { resetRenderedContent?: boolean }) => void;
 };
 
 export type MarkdownDocumentRange = {
@@ -105,7 +107,7 @@ export function resolveRenderedMarkdownCommitRange(
     return searchedRange;
   }
 
-  if (commit.allowCurrentSegmentFallback !== false) {
+  if (commit.allowCurrentSegmentFallback) {
     const currentRange = {
       start: commit.currentSegment.afterStartOffset,
       end: commit.currentSegment.afterEndOffset,

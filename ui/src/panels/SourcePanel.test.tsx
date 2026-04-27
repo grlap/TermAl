@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { copyTextToClipboard } from "../clipboard";
@@ -7,6 +7,8 @@ import {
   type SourceFileState,
 } from "./SourcePanel";
 import { rebaseContentOntoDisk } from "./content-rebase";
+import { EditableRenderedMarkdownSection } from "./markdown-diff-change-section";
+import type { MarkdownDiffDocumentSegment } from "./markdown-diff-segments";
 
 vi.mock("../clipboard", () => ({
   copyTextToClipboard: vi.fn(),
@@ -332,6 +334,20 @@ describe("SourcePanel", () => {
       },
     });
 
+    expect(renderedSection.querySelector("img")).toBeNull();
+    expect(
+      Array.from(renderedSection.querySelectorAll<HTMLElement>("*")).some((element) =>
+        Array.from(element.attributes).some((attribute) =>
+          attribute.name.toLowerCase().startsWith("on"),
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      Array.from(renderedSection.querySelectorAll<HTMLAnchorElement>("a[href]")).some((link) =>
+        (link.getAttribute("href") ?? "").trim().toLowerCase().startsWith("javascript:"),
+      ),
+    ).toBe(false);
+
     fireEvent.keyDown(renderedSection, {
       key: "s",
       code: "KeyS",
@@ -348,6 +364,275 @@ describe("SourcePanel", () => {
     const savedContent = onSaveFile.mock.calls[0]?.[1] as string;
     expect(savedContent).not.toContain("javascript:");
     expect(savedContent).not.toContain("tracker.png");
+  });
+
+  it("prevents the browser default for empty rendered Markdown drops", async () => {
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Original paragraph.\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+    const dropEvent = createEvent.drop(renderedSection, {
+      dataTransfer: {
+        getData: vi.fn(() => ""),
+      },
+    });
+
+    fireEvent(renderedSection, dropEvent);
+
+    expect(dropEvent.defaultPrevented).toBe(true);
+    expect(renderedSection).toHaveTextContent("Original paragraph.");
+  });
+
+  it("uses text/uri-list as the rendered Markdown drop fallback", async () => {
+    const onSaveFile = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Original paragraph.\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={onSaveFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+
+    selectRenderedMarkdownSectionContents(renderedSection);
+    fireEvent.drop(renderedSection, {
+      dataTransfer: {
+        getData: vi.fn((type: string) => {
+          if (type === "text/uri-list") {
+            return "# dragged link\nhttps://example.com/docs/readme\n";
+          }
+          return "";
+        }),
+      },
+    });
+    expect(renderedSection).toHaveTextContent("https://example.com/docs/readme");
+
+    fireEvent.keyDown(renderedSection, {
+      key: "s",
+      code: "KeyS",
+      ctrlKey: true,
+    });
+
+    await waitFor(() => {
+      expect(onSaveFile).toHaveBeenCalledWith(
+        "/repo/docs/readme.md",
+        "https://example.com/docs/readme\n",
+        undefined,
+      );
+    });
+  });
+
+  it("inserts rendered Markdown drops at the pointer caret instead of the stale selection", async () => {
+    const onSaveFile = vi.fn().mockResolvedValue(undefined);
+    const documentWithCaretRange = document as Document & {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    };
+    const originalCaretRangeFromPoint = Object.getOwnPropertyDescriptor(
+      document,
+      "caretRangeFromPoint",
+    );
+
+    try {
+      render(
+        <SourcePanel
+          editorAppearance={editorAppearance}
+          editorFontSizePx={14}
+          fileState={{
+            ...readyFileState,
+            path: "/repo/docs/readme.md",
+            content: "Original paragraph.\n",
+            language: "markdown",
+          }}
+          sourcePath="/repo/docs/readme.md"
+          workspaceRoot="/repo"
+          onSaveFile={onSaveFile}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+      const renderedSection = await waitFor(() => {
+        const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+        expect(section).not.toBeNull();
+        return section!;
+      });
+      const markdownRoot = renderedSection.querySelector<HTMLElement>(".markdown-copy");
+      const paragraphText = markdownRoot?.querySelector("p")?.firstChild;
+      expect(paragraphText?.nodeType).toBe(Node.TEXT_NODE);
+
+      const staleRange = document.createRange();
+      staleRange.selectNodeContents(markdownRoot!);
+      staleRange.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(staleRange);
+
+      const dropRange = document.createRange();
+      dropRange.setStart(paragraphText!, "Original ".length);
+      dropRange.collapse(true);
+      Object.defineProperty(documentWithCaretRange, "caretRangeFromPoint", {
+        configurable: true,
+        value: vi.fn(() => dropRange),
+      });
+
+      fireEvent.drop(renderedSection, {
+        clientX: 12,
+        clientY: 34,
+        dataTransfer: {
+          getData: vi.fn((type: string) => (type === "text/plain" ? "dropped " : "")),
+        },
+      });
+
+      expect(renderedSection).toHaveTextContent("Original dropped paragraph.");
+
+      fireEvent.keyDown(renderedSection, {
+        key: "s",
+        code: "KeyS",
+        ctrlKey: true,
+      });
+
+      await waitFor(() => {
+        expect(onSaveFile).toHaveBeenCalledWith(
+          "/repo/docs/readme.md",
+          "Original dropped paragraph.\n",
+          undefined,
+        );
+      });
+    } finally {
+      if (originalCaretRangeFromPoint) {
+        Object.defineProperty(document, "caretRangeFromPoint", originalCaretRangeFromPoint);
+      } else {
+        Reflect.deleteProperty(documentWithCaretRange, "caretRangeFromPoint");
+      }
+    }
+  });
+
+  it("copies editable rendered Markdown as text/plain Markdown", async () => {
+    const setClipboardData = vi.fn();
+
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Original paragraph.\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+
+    selectRenderedMarkdownSectionContents(renderedSection);
+    const copyEvent = createEvent.copy(renderedSection, {
+      clipboardData: {
+        setData: setClipboardData,
+      },
+    });
+    fireEvent(renderedSection, copyEvent);
+
+    expect(copyEvent.defaultPrevented).toBe(true);
+    expect(setClipboardData).toHaveBeenCalledWith(
+      "text/plain",
+      "Original paragraph.",
+    );
+  });
+
+  it("cuts editable rendered Markdown as text/plain Markdown and commits the deletion", async () => {
+    const onSaveFile = vi.fn().mockResolvedValue(undefined);
+    const setClipboardData = vi.fn();
+
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Original paragraph.\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={onSaveFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+
+    selectRenderedMarkdownSectionContents(renderedSection);
+    const cutEvent = createEvent.cut(renderedSection, {
+      clipboardData: {
+        setData: setClipboardData,
+      },
+    });
+    fireEvent(renderedSection, cutEvent);
+
+    expect(cutEvent.defaultPrevented).toBe(true);
+    expect(setClipboardData).toHaveBeenCalledWith(
+      "text/plain",
+      "Original paragraph.",
+    );
+
+    fireEvent.keyDown(renderedSection, {
+      key: "s",
+      ctrlKey: true,
+    });
+
+    await waitFor(() => {
+      expect(onSaveFile).toHaveBeenCalledWith(
+        "/repo/docs/readme.md",
+        "\n",
+        undefined,
+      );
+    });
   });
 
   it("commits rendered Markdown split edits back into the code editor buffer", async () => {
@@ -381,6 +666,135 @@ describe("SourcePanel", () => {
     await waitFor(() => {
       expect(editor).toHaveValue("Split paragraph.\n");
     });
+  });
+
+  it("can clear an accepted rendered draft without remounting the editable DOM", async () => {
+    const markdown = "Original paragraph.\n";
+    const segment: MarkdownDiffDocumentSegment = {
+      afterEndOffset: markdown.length,
+      afterStartOffset: 0,
+      id: "segment-1",
+      isInAfterDocument: true,
+      kind: "normal",
+      markdown,
+      newStart: 1,
+      oldStart: 1,
+    };
+    const onCommitSectionDraft = vi.fn((commit) => {
+      commit.onApplied?.({ resetRenderedContent: false });
+      return true;
+    });
+    const onDraftChange = vi.fn();
+
+    render(
+      <EditableRenderedMarkdownSection
+        allowReadOnlyCaret={false}
+        allowCurrentSegmentFallback={false}
+        appearance={editorAppearance}
+        canEdit
+        className="markdown-diff-rendered-section-body"
+        documentPath="/repo/docs/readme.md"
+        onCommitDrafts={() => true}
+        onCommitSectionDraft={onCommitSectionDraft}
+        onDraftChange={onDraftChange}
+        onOpenSourceLink={vi.fn()}
+        onReadOnlyMutation={vi.fn()}
+        onRegisterCommitter={() => vi.fn()}
+        onSave={vi.fn()}
+        segment={segment}
+        sourceContent={markdown}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+    const renderedContent = renderedSection.querySelector<HTMLElement>(
+      ".markdown-diff-rendered-section-content",
+    );
+    expect(renderedContent).not.toBeNull();
+
+    editRenderedMarkdownSection(renderedSection, "<p>Edited paragraph.</p>");
+    fireEvent.blur(renderedSection);
+
+    expect(onCommitSectionDraft).toHaveBeenCalledTimes(1);
+    expect(onDraftChange).toHaveBeenLastCalledWith(segment, segment.markdown);
+    expect(
+      renderedSection.querySelector(".markdown-diff-rendered-section-content"),
+    ).toBe(renderedContent);
+  });
+
+  it("commits rendered Markdown edits before switching document modes", async () => {
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Original paragraph.\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+
+    editRenderedMarkdownSection(renderedSection, "<p>Mode-switched paragraph.</p>");
+    fireEvent.click(screen.getByRole("button", { name: "Code" }));
+
+    const editor = await screen.findByLabelText("Source editor for /repo/docs/readme.md");
+    expect(editor).toHaveValue("Mode-switched paragraph.\n");
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+  });
+
+  it("keeps the current Markdown mode when switching cannot apply a rendered draft", async () => {
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Original paragraph.\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    const editor = await screen.findByLabelText("Source editor for /repo/docs/readme.md");
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+
+    editRenderedMarkdownSection(renderedSection, "<p>Rendered paragraph.</p>");
+    fireEvent.change(editor, {
+      target: { value: "Code pane edit.\n" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(
+      await screen.findByText(/Rendered Markdown edit could not be applied/),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Source editor for /repo/docs/readme.md")).toBeInTheDocument();
+    expect(renderedSection).toHaveTextContent("Rendered paragraph.");
   });
 
   it("keeps rendered Markdown mounted while typing in the split code pane", async () => {
@@ -1285,6 +1699,64 @@ describe("SourcePanel", () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId("diff-original")).toHaveTextContent("disk");
     expect(screen.getByTestId("diff-modified")).toHaveTextContent("mine");
+  });
+
+  it("ignores stale compare results after the source tab changes", async () => {
+    const latestFile = createDeferred<SourceFileState>();
+    const onFetchLatestFile = vi.fn().mockReturnValue(latestFile.promise);
+
+    const { rerender } = render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "src/first.rs",
+          staleOnDisk: true,
+          externalContentHash: "sha256:first-disk",
+        }}
+        sourcePath="src/first.rs"
+        onFetchLatestFile={onFetchLatestFile}
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(
+      await screen.findByLabelText("Source editor for src/first.rs"),
+      {
+        target: { value: "fn first() { println!(\"mine\"); }\n" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+
+    rerender(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "src/second.rs",
+          content: "fn second() {}\n",
+          contentHash: "sha256:second",
+        }}
+        sourcePath="src/second.rs"
+        onFetchLatestFile={onFetchLatestFile}
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    latestFile.resolve({
+      ...readyFileState,
+      path: "src/first.rs",
+      content: "fn first() { println!(\"disk\"); }\n",
+      contentHash: "sha256:first-disk",
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Source editor for src/second.rs")).toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText("Source compare for src/second.rs")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("diff-original")).not.toBeInTheDocument();
   });
 
   it("automatically rebases dirty buffers when disk changes do not overlap", async () => {

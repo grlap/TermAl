@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { RefObject } from "react";
+import { useLayoutEffect, type RefObject } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as slashPalette from "./session-slash-palette";
@@ -441,6 +441,133 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.queryByText("message-120")).toBeInTheDocument();
       expect(screen.queryByText("message-1")).not.toBeInTheDocument();
     } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
+  it("does not flush virtualizer range updates from layout-effect scroll writes", () => {
+    // Regression guard for React's "flushSync was called from inside a
+    // lifecycle method" warning. SessionPaneView restores saved positions from
+    // a layout effect and immediately dispatches the message-stack scroll-write
+    // event; the virtualizer must reconcile that programmatic write without
+    // routing through its user-scroll flush path.
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalGetBoundingClientRect =
+      Element.prototype.getBoundingClientRect;
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    const messages = makeTextMessages(120);
+    const estimatedLayout = buildVirtualizedMessageLayout(
+      messages.map((message) => estimateConversationMessageHeight(message)),
+    );
+    const clientHeight = 500;
+    let scrollTop = 0;
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => clientHeight,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => estimatedLayout.totalHeight,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
+    function LayoutEffectScrollWriter({ enabled }: { enabled: boolean }) {
+      useLayoutEffect(() => {
+        if (!enabled) {
+          return;
+        }
+
+        scrollTop = 0;
+        notifyMessageStackScrollWrite(scrollNode, {
+          scrollKind: "seek",
+        });
+      }, [enabled]);
+
+      return null;
+    }
+
+    function Harness({ restoreToTop }: { restoreToTop: boolean }) {
+      return (
+        <>
+          <VirtualizedConversationMessageList
+            isActive
+            renderMessageCard={(message) => (
+              <article className="message-card">{message.id}</article>
+            )}
+            sessionId="session-a"
+            messages={messages}
+            scrollContainerRef={{
+              current: scrollNode,
+            } as RefObject<HTMLElement | null>}
+            onApprovalDecision={() => {}}
+            onUserInputSubmit={() => {}}
+            onMcpElicitationSubmit={() => {}}
+            onCodexAppRequestSubmit={() => {}}
+          />
+          <LayoutEffectScrollWriter enabled={restoreToTop} />
+        </>
+      );
+    }
+
+    window.ResizeObserver =
+      ResizeObserverMock as unknown as typeof ResizeObserver;
+    Element.prototype.getBoundingClientRect =
+      function getBoundingClientRectMock() {
+        const element = this as HTMLElement;
+        const height = element.classList.contains("virtualized-message-slot")
+          ? 0
+          : clientHeight;
+        return {
+          bottom: height,
+          height,
+          left: 0,
+          right: 100,
+          top: 0,
+          width: 100,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      };
+
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    try {
+      const { rerender } = render(<Harness restoreToTop={false} />);
+      expect(scrollTop).toBe(estimatedLayout.totalHeight - clientHeight);
+      expect(screen.queryByText("message-120")).toBeInTheDocument();
+
+      act(() => {
+        rerender(<Harness restoreToTop />);
+      });
+
+      expect(screen.queryByText("message-1")).toBeInTheDocument();
+      expect(
+        consoleErrorSpy.mock.calls.some((call) =>
+          call
+            .map((part) => String(part))
+            .join(" ")
+            .includes("flushSync was called from inside a lifecycle method"),
+        ),
+      ).toBe(false);
+    } finally {
+      consoleErrorSpy.mockRestore();
       window.ResizeObserver = OriginalResizeObserver;
       Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     }
@@ -1401,7 +1528,10 @@ describe("AgentSessionPanel conversation caching", () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
-    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const originalGetBoundingClientRectDescriptor = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "getBoundingClientRect",
+    );
     const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
     let measuredSlotHeight = 180;
     let scrollTop = 400;
@@ -1511,7 +1641,15 @@ describe("AgentSessionPanel conversation caching", () => {
       window.ResizeObserver = OriginalResizeObserver;
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
-      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      if (originalGetBoundingClientRectDescriptor) {
+        Object.defineProperty(
+          Element.prototype,
+          "getBoundingClientRect",
+          originalGetBoundingClientRectDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(Element.prototype, "getBoundingClientRect");
+      }
     }
   });
 
@@ -1897,7 +2035,10 @@ describe("AgentSessionPanel conversation caching", () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
-    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const originalGetBoundingClientRectDescriptor = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "getBoundingClientRect",
+    );
     const performanceNowSpy = vi.spyOn(performance, "now").mockReturnValue(1000);
     const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
     const messages = makeCommandMessages(80);
@@ -2119,7 +2260,15 @@ describe("AgentSessionPanel conversation caching", () => {
       window.ResizeObserver = OriginalResizeObserver;
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
-      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      if (originalGetBoundingClientRectDescriptor) {
+        Object.defineProperty(
+          Element.prototype,
+          "getBoundingClientRect",
+          originalGetBoundingClientRectDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(Element.prototype, "getBoundingClientRect");
+      }
     }
   });
 
@@ -2127,16 +2276,20 @@ describe("AgentSessionPanel conversation caching", () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
-    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const originalGetBoundingClientRectDescriptor = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "getBoundingClientRect",
+    );
     const messages = makeCommandMessages(80);
     const clientHeight = 500;
     const compactMeasuredSlotHeight = 40;
+    const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
     let scrollTop = 0;
 
     class ResizeObserverMock {
       constructor(private readonly callback: ResizeObserverCallback) {}
       observe(target: Element) {
-        this.callback([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+        resizeCallbacks.set(target, this.callback);
       }
       disconnect() {}
     }
@@ -2205,6 +2358,7 @@ describe("AgentSessionPanel conversation caching", () => {
     };
 
     const scrollNode = document.createElement("div");
+    scrollNode.style.lineHeight = "40px";
     Object.defineProperty(scrollNode, "clientHeight", {
       configurable: true,
       get: () => clientHeight,
@@ -2304,6 +2458,13 @@ describe("AgentSessionPanel conversation caching", () => {
         />,
       );
 
+      await act(async () => {
+        new Set(resizeCallbacks.values()).forEach((callback) => {
+          callback([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+        });
+        await Promise.resolve();
+      });
+
       await waitFor(() => {
         expect(container.querySelectorAll(".virtualized-message-slot").length).toBeGreaterThan(0);
       });
@@ -2315,7 +2476,11 @@ describe("AgentSessionPanel conversation caching", () => {
       ];
       const resolveWheelDelta = (wheelInput: WheelEventInit) => {
         if (wheelInput.deltaMode === WheelEvent.DOM_DELTA_LINE) {
-          return (wheelInput.deltaY ?? 0) * 40;
+          const computedLineHeight = Number.parseFloat(
+            window.getComputedStyle(scrollNode).lineHeight,
+          );
+          const lineHeight = Number.isFinite(computedLineHeight) ? computedLineHeight : 16;
+          return (wheelInput.deltaY ?? 0) * lineHeight;
         }
         if (wheelInput.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
           return (wheelInput.deltaY ?? 0) * clientHeight;
@@ -2374,7 +2539,10 @@ describe("AgentSessionPanel conversation caching", () => {
       act(() => {
         fireEvent.wheel(scrollNode, { deltaY: -1 });
         scrollTop = 1800;
-        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "incremental" });
+        notifyMessageStackScrollWrite(scrollNode, {
+          scrollKind: "incremental",
+          scrollSource: "user",
+        });
 
         expect(getFirstMountedMessageIndex(container)).toBeLessThan(
           firstMountedBeforeLargeWrite,
@@ -2388,7 +2556,15 @@ describe("AgentSessionPanel conversation caching", () => {
       window.ResizeObserver = OriginalResizeObserver;
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
-      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      if (originalGetBoundingClientRectDescriptor) {
+        Object.defineProperty(
+          Element.prototype,
+          "getBoundingClientRect",
+          originalGetBoundingClientRectDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(Element.prototype, "getBoundingClientRect");
+      }
     }
   });
 

@@ -3,9 +3,9 @@
 //
 //   - `isSafePastedMarkdownHref` decides whether an `<a href="...">`
 //     from a pasted fragment keeps its link. The allowlist is
-//     http / https / mailto plus no-colon hrefs (relative paths
-//     and anchors); Windows drive-letter paths are intentionally
-//     stripped on paste.
+//     http / https / mailto plus anchors and document-relative
+//     no-colon hrefs; Windows drive-letter, rooted-local, and
+//     network-looking paths are intentionally stripped on paste.
 //   - `sanitizePastedMarkdownFragment` walks a `<template>` content
 //     fragment and applies three gates: HTML-namespace only,
 //     drop the 24-element block set, unwrap anything not in the
@@ -20,8 +20,11 @@
 // tighten the drive-letter exception (which is a documented
 // follow-up, not a fix landing here).
 
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render } from "@testing-library/react";
+import { createElement } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { MarkdownContent } from "../message-cards";
 import {
   insertSanitizedMarkdownPaste,
   isSafePastedMarkdownHref,
@@ -29,6 +32,18 @@ import {
   sanitizePastedMarkdownFragment,
   serializeEditableMarkdownSection,
 } from "./markdown-diff-edit-pipeline";
+
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn((id: string) =>
+      Promise.resolve({
+        diagramType: "flowchart",
+        svg: `<svg data-testid="mermaid-svg" id="${id}"><text>diagram</text></svg>`,
+      }),
+    ),
+  },
+}));
 
 function buildPasteFragment(html: string): DocumentFragment {
   // Mirrors `insertSanitizedMarkdownPaste`'s use of a `<template>`:
@@ -103,11 +118,11 @@ describe("isSafePastedMarkdownHref", () => {
     });
   });
 
-  describe("allows no-protocol hrefs", () => {
-    // The guard treats any href with no colon (after normalization)
-    // as a relative path or anchor and returns true. This keeps
-    // pasted `[text](./file.md)` and `[text](#anchor)` fragments
-    // working through the rendered-Markdown edit path.
+  describe("allows safe no-protocol hrefs", () => {
+    // The guard treats anchors and document-relative hrefs with no colon
+    // (after normalization) as safe. This keeps pasted `[text](./file.md)`
+    // and `[text](#anchor)` fragments working through the rendered-
+    // Markdown edit path.
     it.each([
       ["./relative/file.md"],
       ["../sibling.md"],
@@ -116,9 +131,41 @@ describe("isSafePastedMarkdownHref", () => {
       ["foo.txt"],
       ["#anchor"],
       ["#section-2"],
-      ["/absolute/path"],
     ])("returns true for %s", (href) => {
       expect(isSafePastedMarkdownHref(href)).toBe(true);
+    });
+  });
+
+  describe("rejects no-colon local or network-looking paths", () => {
+    it.each([
+      ["/absolute/path"],
+      ["/etc/passwd"],
+      ["//example.com/path"],
+      ["\\\\server\\share\\file.md"],
+      ["\\Windows\\System32\\cmd.exe"],
+      ["\t//example.com/path"],
+      [" /\u0000/etc/passwd"],
+    ])("returns false for %s", (href) => {
+      expect(isSafePastedMarkdownHref(href)).toBe(false);
+    });
+
+    it("strips href from pasted UNC and protocol-relative anchors", () => {
+      const fragment = buildPasteFragment(
+        [
+          '<a href="\\\\server\\share\\file.md">UNC path</a>',
+          '<a href="//example.com/path">Protocol-relative path</a>',
+          '<a href="/etc/passwd">Rooted path</a>',
+        ].join(""),
+      );
+
+      sanitizePastedMarkdownFragment(fragment);
+
+      expect(Array.from(fragment.querySelectorAll("a")).map((anchor) => anchor.hasAttribute("href"))).toEqual([
+        false,
+        false,
+        false,
+      ]);
+      expect(fragment.textContent).toBe("UNC pathProtocol-relative pathRooted path");
     });
   });
 
@@ -724,6 +771,10 @@ describe("insertSanitizedMarkdownPaste", () => {
 });
 
 describe("serializeEditableMarkdownSection", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   function buildEditableSection(html: string) {
     const section = document.createElement("section");
     section.innerHTML = `<div class="markdown-copy">${html}</div>`;
@@ -748,12 +799,46 @@ describe("serializeEditableMarkdownSection", () => {
     );
   });
 
+  it("escapes parens in safe Markdown link destinations", () => {
+    const section = buildEditableSection(
+      '<p><a href="https://en.wikipedia.org/wiki/Foo_(bar)">Paren link</a></p>',
+    );
+
+    expect(serializeEditableMarkdownSection(section)).toBe(
+      "[Paren link](https://en.wikipedia.org/wiki/Foo_\\(bar\\))",
+    );
+  });
+
+  it("escapes backslashes in safe Markdown link destinations", () => {
+    const section = buildEditableSection(
+      '<p><a href="https://example.com/foo\\bar">Backslash link</a></p>',
+    );
+
+    expect(serializeEditableMarkdownSection(section)).toBe(
+      "[Backslash link](https://example.com/foo\\\\bar)",
+    );
+  });
+
   it("does not serialize safe-scheme hrefs that can break out of Markdown link syntax", () => {
     const section = buildEditableSection(
       '<p><a href="https://example.com/) [x](javascript:alert(1)">Safe-looking link</a></p>',
     );
 
     expect(serializeEditableMarkdownSection(section)).toBe("Safe-looking link");
+  });
+
+  it("does not serialize no-colon local or network-looking hrefs into Markdown links", () => {
+    const section = buildEditableSection(
+      [
+        '<p><a href="\\\\server\\share\\file.md">UNC path</a></p>',
+        '<p><a href="//example.com/path">Protocol-relative path</a></p>',
+        '<p><a href="/etc/passwd">Rooted path</a></p>',
+      ].join(""),
+    );
+
+    expect(serializeEditableMarkdownSection(section)).toBe(
+      ["UNC path", "Protocol-relative path", "Rooted path"].join("\n\n"),
+    );
   });
 
   it("escapes Markdown link label brackets while preserving safe destinations", () => {
@@ -764,5 +849,93 @@ describe("serializeEditableMarkdownSection", () => {
     expect(serializeEditableMarkdownSection(section)).toBe(
       "[Read \\[draft\\] \\\\ notes](https://example.com/docs)",
     );
+  });
+
+  it("uses a longer code fence when block content contains backticks", () => {
+    const section = buildEditableSection(
+      '<pre><code class="language-markdown">before\n```mermaid\nflowchart TD\n```\nafter</code></pre>',
+    );
+
+    const markdown = serializeEditableMarkdownSection(section);
+
+    expect(markdown).toBe(
+      [
+        "````markdown",
+        "before",
+        "```mermaid",
+        "flowchart TD",
+        "```",
+        "after",
+        "````",
+      ].join("\n"),
+    );
+    const { container } = render(createElement(MarkdownContent, { markdown }));
+    expect(container.querySelectorAll("pre code")).toHaveLength(1);
+    expect(container.querySelector("pre code")?.textContent).toContain(
+      "```mermaid\nflowchart TD\n```",
+    );
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("uses a longer inline-code fence when inline content contains backticks", () => {
+    const section = buildEditableSection("<p><code>run `cargo test`</code></p>");
+
+    const markdown = serializeEditableMarkdownSection(section);
+
+    expect(markdown).toBe("`` run `cargo test` ``");
+    const { container } = render(createElement(MarkdownContent, { markdown }));
+    expect(container.querySelector("code")?.textContent).toBe(
+      "run `cargo test`",
+    );
+  });
+
+  it("uses a single inline-code fence when inline content has no backticks", () => {
+    const section = buildEditableSection("<p><code>plain code</code></p>");
+
+    const markdown = serializeEditableMarkdownSection(section);
+
+    expect(markdown).toBe("`plain code`");
+  });
+
+  it("uses an inline-code fence longer than the longest backtick run", () => {
+    const section = buildEditableSection("<p><code>alpha ``` beta</code></p>");
+
+    const markdown = serializeEditableMarkdownSection(section);
+
+    expect(markdown).toBe("````alpha ``` beta````");
+    const { container } = render(createElement(MarkdownContent, { markdown }));
+    expect(container.querySelector("code")?.textContent).toBe(
+      "alpha ``` beta",
+    );
+  });
+
+  it("keeps boundary-backtick inline code inert after reparsing", () => {
+    const section = buildEditableSection(
+      "<p><code>![x](https://attacker/pixel)`</code></p>",
+    );
+
+    const markdown = serializeEditableMarkdownSection(section);
+
+    expect(markdown).toBe("`` ![x](https://attacker/pixel)` ``");
+    const { container } = render(createElement(MarkdownContent, { markdown }));
+    expect(container.querySelector("code")?.textContent).toBe(
+      "![x](https://attacker/pixel)`",
+    );
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("keeps boundary-backtick raw HTML inline code inert after reparsing", () => {
+    const section = buildEditableSection(
+      "<p><code>&lt;script&gt;alert(1)&lt;/script&gt;`</code></p>",
+    );
+
+    const markdown = serializeEditableMarkdownSection(section);
+
+    expect(markdown).toBe("`` <script>alert(1)</script>` ``");
+    const { container } = render(createElement(MarkdownContent, { markdown }));
+    expect(container.querySelector("code")?.textContent).toBe(
+      "<script>alert(1)</script>`",
+    );
+    expect(container.querySelector("script")).toBeNull();
   });
 });

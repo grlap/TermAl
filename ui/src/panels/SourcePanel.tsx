@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { copyTextToClipboard } from "../clipboard";
 import { MarkdownContent, type MarkdownFileLinkTarget } from "../message-cards";
 import type { MonacoCodeEditorStatus, MonacoInlineZone } from "../MonacoCodeEditor";
@@ -146,6 +146,10 @@ export function SourcePanel({
   const lastAutoRebaseKeyRef = useRef<string | null>(null);
   const mountedRef = useRef(false);
   const rebaseRequestTokenRef = useRef(0);
+  const saveRequestTokenRef = useRef(0);
+  const reloadRequestTokenRef = useRef(0);
+  const compareRequestTokenRef = useRef(0);
+  const copyPathRequestTokenRef = useRef(0);
   const fileStateRef = useRef(fileState);
   const editorValueRef = useRef(editorValue);
   const renderedMarkdownDocumentPathRef = useRef(
@@ -231,6 +235,28 @@ export function SourcePanel({
     setEditorValue(nextValue);
   };
 
+  function beginSourceRequest(requestTokenRef: { current: number }) {
+    const requestToken = requestTokenRef.current + 1;
+    requestTokenRef.current = requestToken;
+    return requestToken;
+  }
+
+  function isActiveSourceRequest(
+    requestTokenRef: { current: number },
+    requestToken: number,
+    requestPath?: string,
+  ) {
+    if (!mountedRef.current || requestTokenRef.current !== requestToken) {
+      return false;
+    }
+    if (requestPath === undefined) {
+      return true;
+    }
+
+    const currentFileState = fileStateRef.current;
+    return currentFileState.status === "ready" && currentFileState.path === requestPath;
+  }
+
   useEffect(() => {
     fileStateRef.current = fileState;
   }, [fileState]);
@@ -244,17 +270,23 @@ export function SourcePanel({
     return () => {
       mountedRef.current = false;
       rebaseRequestTokenRef.current += 1;
+      saveRequestTokenRef.current += 1;
+      reloadRequestTokenRef.current += 1;
+      compareRequestTokenRef.current += 1;
+      copyPathRequestTokenRef.current += 1;
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const nextRenderedMarkdownDocumentPath =
       fileState.status === "ready" ? fileState.path : null;
     if (renderedMarkdownDocumentPathRef.current !== nextRenderedMarkdownDocumentPath) {
       renderedMarkdownDocumentPathRef.current = nextRenderedMarkdownDocumentPath;
       renderedMarkdownCommittersRef.current.clear();
     }
+  }, [fileState.path, fileState.status]);
 
+  useEffect(() => {
     if (fileState.status === "ready") {
       const pendingEditorValue = pendingEditorValueRef.current;
       pendingEditorValueRef.current = null;
@@ -379,7 +411,9 @@ export function SourcePanel({
         sourceContent,
       );
     if (nextDocumentContentLf === sourceContent) {
-      commits.forEach((commit) => commit.onApplied?.());
+      commits.forEach((commit) =>
+        commit.onApplied?.({ resetRenderedContent: false }),
+      );
       setHasRenderedMarkdownDraftActive(false);
       return true;
     }
@@ -450,16 +484,23 @@ export function SourcePanel({
     setIsSaving(true);
     setActionError(null);
     setSaveConflictOnDisk(false);
+    const savePath = currentFileState.path;
+    const requestToken = beginSourceRequest(saveRequestTokenRef);
     try {
-      await onSaveFile(currentFileState.path, currentEditorValue, options);
+      await onSaveFile(savePath, currentEditorValue, options);
     } catch (error) {
+      if (!isActiveSourceRequest(saveRequestTokenRef, requestToken, savePath)) {
+        return;
+      }
       const message = getErrorMessage(error);
       setActionError(message);
       if (isStaleFileSaveError(message)) {
         setSaveConflictOnDisk(true);
       }
     } finally {
-      setIsSaving(false);
+      if (isActiveSourceRequest(saveRequestTokenRef, requestToken)) {
+        setIsSaving(false);
+      }
     }
   }
 
@@ -474,12 +515,18 @@ export function SourcePanel({
 
     setIsReloading(true);
     setActionError(null);
+    const reloadPath = fileState.path;
+    const requestToken = beginSourceRequest(reloadRequestTokenRef);
     try {
-      await onReloadFile(fileState.path);
+      await onReloadFile(reloadPath);
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      if (isActiveSourceRequest(reloadRequestTokenRef, requestToken, reloadPath)) {
+        setActionError(getErrorMessage(error));
+      }
     } finally {
-      setIsReloading(false);
+      if (isActiveSourceRequest(reloadRequestTokenRef, requestToken)) {
+        setIsReloading(false);
+      }
     }
   }
 
@@ -562,13 +609,21 @@ export function SourcePanel({
 
     setIsLoadingCompare(true);
     setActionError(null);
+    const comparePath = fileState.path;
+    const requestToken = beginSourceRequest(compareRequestTokenRef);
     try {
-      const latestFileState = await onFetchLatestFile(fileState.path);
-      setCompareDiskContent(latestFileState.content);
+      const latestFileState = await onFetchLatestFile(comparePath);
+      if (isActiveSourceRequest(compareRequestTokenRef, requestToken, comparePath)) {
+        setCompareDiskContent(latestFileState.content);
+      }
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      if (isActiveSourceRequest(compareRequestTokenRef, requestToken, comparePath)) {
+        setActionError(getErrorMessage(error));
+      }
     } finally {
-      setIsLoadingCompare(false);
+      if (isActiveSourceRequest(compareRequestTokenRef, requestToken)) {
+        setIsLoadingCompare(false);
+      }
     }
   }
 
@@ -577,11 +632,25 @@ export function SourcePanel({
       return;
     }
 
+    const copiedDisplayPath = displayPath;
+    const requestToken = beginSourceRequest(copyPathRequestTokenRef);
     try {
-      await copyTextToClipboard(displayPath);
-      setCopiedPath(true);
+      await copyTextToClipboard(copiedDisplayPath);
+      const currentDisplayPath = fileStateRef.current.path.trim() || sourcePath?.trim() || "";
+      if (
+        isActiveSourceRequest(copyPathRequestTokenRef, requestToken) &&
+        currentDisplayPath === copiedDisplayPath
+      ) {
+        setCopiedPath(true);
+      }
     } catch {
-      setCopiedPath(false);
+      const currentDisplayPath = fileStateRef.current.path.trim() || sourcePath?.trim() || "";
+      if (
+        isActiveSourceRequest(copyPathRequestTokenRef, requestToken) &&
+        currentDisplayPath === copiedDisplayPath
+      ) {
+        setCopiedPath(false);
+      }
     }
   }
 
