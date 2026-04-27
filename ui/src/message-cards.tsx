@@ -55,7 +55,9 @@ import { highlightCode } from "./highlight";
 import {
   buildMarkdownHrefDisplayLabel,
   isExternalMarkdownHref,
+  MARKDOWN_INTERNAL_LINK_HREF_ATTRIBUTE,
   resolveMarkdownFileLinkTarget,
+  shouldScrubMarkdownDomHref,
   transformMarkdownLinkUri,
   type MarkdownFileLinkTarget,
 } from "./markdown-links";
@@ -3481,6 +3483,14 @@ export function MarkdownContent({
               workspaceRoot,
               documentPath,
             );
+            const scrubDomHref = Boolean(
+              fileLinkTarget || shouldScrubMarkdownDomHref(href),
+            );
+            const domHref = scrubDomHref ? "#" : href;
+            const internalLinkHref =
+              scrubDomHref && href
+                ? { [MARKDOWN_INTERNAL_LINK_HREF_ATTRIBUTE]: href }
+                : undefined;
             // `transformMarkdownLinkUri` returns "" for URIs that
             // `react-markdown` would otherwise neutralize to
             // `javascript:void(0)` (the placeholder React now warns
@@ -3499,15 +3509,21 @@ export function MarkdownContent({
             }
             const handleClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
               props.onClick?.(event);
-              if (
-                event.defaultPrevented ||
-                !fileLinkTarget ||
-                !onOpenSourceLinkRef.current
-              ) {
+              if (event.defaultPrevented) {
+                return;
+              }
+
+              if (!fileLinkTarget) {
+                if (scrubDomHref) {
+                  event.preventDefault();
+                }
                 return;
               }
 
               event.preventDefault();
+              if (!onOpenSourceLinkRef.current) {
+                return;
+              }
               onOpenSourceLinkRef.current({
                 ...fileLinkTarget,
                 openInNewTab: event.ctrlKey || event.metaKey,
@@ -3517,7 +3533,8 @@ export function MarkdownContent({
             return (
               <a
                 {...props}
-                href={href}
+                {...internalLinkHref}
+                href={domHref}
                 draggable={false}
                 target={isExternalLink ? "_blank" : undefined}
                 rel={isExternalLink ? "noreferrer" : undefined}
@@ -3559,7 +3576,7 @@ export function MarkdownContent({
                 return (
                   <a
                     className="inline-code-link"
-                    href={code}
+                    href="#"
                     draggable={false}
                     onClick={handleInlineCodeClick}
                   >

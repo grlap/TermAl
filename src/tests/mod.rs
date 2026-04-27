@@ -1607,7 +1607,7 @@ fn shared_codex_global_notices_update_codex_state() {
     )
     .unwrap();
 
-    let codex = state.snapshot().codex;
+    let codex = state.full_snapshot().codex;
     assert_eq!(codex.notices.len(), 2);
     assert!(matches!(
         codex.notices.first(),
@@ -1655,7 +1655,7 @@ fn codex_notice_cap_retains_most_recent_notices() {
             .expect("notice should be recorded");
     }
 
-    let notices = state.snapshot().codex.notices;
+    let notices = state.full_snapshot().codex.notices;
     assert_eq!(CODEX_NOTICE_CAP, 5);
     assert_eq!(notices.len(), CODEX_NOTICE_CAP);
     assert_eq!(
@@ -1671,6 +1671,34 @@ fn codex_notice_cap_retains_most_recent_notices() {
             "Runtime notice 2",
         ]
     );
+
+    state
+        .note_codex_notice(CodexNotice {
+            kind: CodexNoticeKind::RuntimeNotice,
+            level: CodexNoticeLevel::Info,
+            title: "Runtime notice 4".to_string(),
+            detail: "Runtime detail 4".to_string(),
+            timestamp: "2026-04-26T00:00:09Z".to_string(),
+            code: Some("runtime-notice-4".to_string()),
+        })
+        .expect("duplicate notice should be promoted");
+
+    let notices = state.full_snapshot().codex.notices;
+    assert_eq!(notices.len(), CODEX_NOTICE_CAP);
+    assert_eq!(
+        notices
+            .iter()
+            .map(|notice| notice.title.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Runtime notice 4",
+            "Runtime notice 6",
+            "Runtime notice 5",
+            "Runtime notice 3",
+            "Runtime notice 2",
+        ]
+    );
+    assert_eq!(notices[0].timestamp, "2026-04-26T00:00:09Z");
 }
 
 // Tests that shared Codex rate-limit updates use a narrow delta rather
@@ -1718,7 +1746,7 @@ fn shared_codex_rate_limits_publish_codex_delta_without_full_state_snapshot() {
     let delta: DeltaEvent = serde_json::from_str(&payload).expect("delta should decode");
     match delta {
         DeltaEvent::CodexUpdated { revision, codex } => {
-            assert_eq!(revision, state.snapshot().revision);
+            assert_eq!(revision, state.full_snapshot().revision);
             assert_eq!(
                 codex
                     .rate_limits
@@ -1765,7 +1793,7 @@ fn shared_codex_threadless_runtime_notice_is_recorded() {
     )
     .unwrap();
 
-    let codex = state.snapshot().codex;
+    let codex = state.full_snapshot().codex;
     assert!(matches!(
         codex.notices.first(),
         Some(CodexNotice {
@@ -1866,7 +1894,7 @@ fn shared_codex_agent_message_event_uses_conversation_id_for_session_routing() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -1913,7 +1941,7 @@ fn subagent_results_append_after_existing_assistant_text() {
         )
         .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -1945,7 +1973,7 @@ fn clear_runtime_commits_revision_when_it_resets_state() {
         state.commit_locked(&mut inner).unwrap();
     }
 
-    let baseline = state.snapshot().revision;
+    let baseline = state.full_snapshot().revision;
     state.clear_runtime(&session_id).unwrap();
 
     {
@@ -1955,11 +1983,11 @@ fn clear_runtime_commits_revision_when_it_resets_state() {
         assert!(matches!(record.runtime, SessionRuntime::None));
         assert!(!record.runtime_reset_required);
     }
-    assert_eq!(state.snapshot().revision, baseline + 1);
+    assert_eq!(state.full_snapshot().revision, baseline + 1);
 
-    let stable_revision = state.snapshot().revision;
+    let stable_revision = state.full_snapshot().revision;
     state.clear_runtime(&session_id).unwrap();
-    assert_eq!(state.snapshot().revision, stable_revision);
+    assert_eq!(state.full_snapshot().revision, stable_revision);
 }
 
 // Tests that canonicalizes session model updates from live model labels.

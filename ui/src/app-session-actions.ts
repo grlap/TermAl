@@ -751,9 +751,12 @@ export function useAppSessionActions(
         const adopted = adoptState(state);
         releaseDraftAttachments(attachments);
         setRequestError(null);
-        if (!adopted) {
+        const responseKeepsSessionActive = state.sessions?.some(
+          (candidate) =>
+            candidate.id === sessionId && candidate.status === "active",
+        );
+        if (!adopted || responseKeepsSessionActive) {
           startStaleSendResponseRecoveryPoll(sessionId);
-          return;
         }
       } catch (error) {
         if (!isMountedRef.current) {

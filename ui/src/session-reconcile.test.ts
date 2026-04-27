@@ -216,6 +216,50 @@ describe("reconcileSessions", () => {
     });
   });
 
+  it("reuses an explicitly loaded session when the mutation stamp still matches", () => {
+    const previous = [
+      makeSession("session-a", {
+        preview: "ready",
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 42,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Loaded transcript",
+          },
+        ],
+      }),
+    ];
+
+    const next = [
+      makeSession("session-a", {
+        preview: "ready",
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 42,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Loaded transcript",
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).toBe(previous);
+    expect(merged[0]).toBe(previous[0]);
+    expect(merged[0].messages).toBe(previous[0].messages);
+  });
+
   it("can disable the mutation-stamp fast path after a server restart", () => {
     const previous = [
       makeSession("session-a", {

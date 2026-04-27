@@ -600,6 +600,61 @@ describe("SourcePanel", () => {
     );
   });
 
+  it("copies partial rendered Markdown text selections as text/plain Markdown", async () => {
+    const setClipboardData = vi.fn();
+
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Hello world!\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+    const textNode = await waitFor(() => {
+      const node = renderedSection.querySelector("p")?.firstChild;
+      expect(node?.nodeType).toBe(Node.TEXT_NODE);
+      return node!;
+    });
+
+    act(() => {
+      renderedSection.focus();
+      const range = document.createRange();
+      range.setStart(textNode, 6);
+      range.setEnd(textNode, 11);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    const copyEvent = createEvent.copy(renderedSection, {
+      clipboardData: {
+        setData: setClipboardData,
+      },
+    });
+    fireEvent(renderedSection, copyEvent);
+
+    expect(copyEvent.defaultPrevented).toBe(true);
+    expect(setClipboardData).toHaveBeenCalledWith("text/plain", "world");
+    expect(setClipboardData).not.toHaveBeenCalledWith(
+      "text/plain",
+      "Hello world!",
+    );
+  });
+
   it("does not copy a whole rendered Markdown segment for an unserialized partial selection", async () => {
     const setClipboardData = vi.fn();
 
@@ -1128,10 +1183,13 @@ describe("SourcePanel", () => {
         "Code pane edit.\n",
       );
     });
-    expect(
-      screen.getByText(/Rendered Markdown edit could not be applied/),
-    ).toBeInTheDocument();
-    expect(screen.getAllByText("Action failed").length).toBeGreaterThan(0);
+    const actionFailureNotice = screen
+      .getByText("Action failed", { selector: ".card-label" })
+      .closest("article");
+    expect(actionFailureNotice).not.toBeNull();
+    expect(actionFailureNotice!).toHaveTextContent(
+      "Rendered Markdown edit could not be applied because the document changed under that section. Review the latest file and edit again.",
+    );
   });
 
   it("does not save when Ctrl+S cannot apply a rendered Markdown draft", async () => {

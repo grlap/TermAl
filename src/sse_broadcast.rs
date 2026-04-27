@@ -259,11 +259,13 @@ impl AppState {
         changed: bool,
         revision: u64,
         session_id: &str,
-        delta_session: Session,
+        delta_session: Option<Session>,
     ) {
         if !changed {
             return;
         }
+        let delta_session =
+            delta_session.expect("changed remote session creation must include a delta summary");
         self.publish_delta(&DeltaEvent::SessionCreated {
             revision,
             session_id: session_id.to_owned(),

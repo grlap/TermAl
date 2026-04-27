@@ -431,6 +431,10 @@ impl AppState {
     /// localizes it into the proxy record, and returns the local full-session
     /// response shape. This keeps `/api/sessions/{id}` full-transcript-only
     /// even after metadata-first remote summaries create unloaded proxy records.
+    /// Accepts metadata-light remotes that do not emit mutation stamps yet:
+    /// when both stamps are `None`, `messageCount` is the only freshness
+    /// evidence available and the caller has already confirmed broad remote
+    /// state is newer than the candidate session response.
     fn remote_session_metadata_matches_record(record: &SessionRecord, session: &Session) -> bool {
         session_message_count(record) == session.message_count
             && record.session.session_mutation_stamp == session.session_mutation_stamp
@@ -612,9 +616,11 @@ impl AppState {
                 preview_fingerprint: Self::remote_delta_text_fingerprint(preview),
                 session_mutation_stamp: *session_mutation_stamp,
             },
-            DeltaEvent::CodexUpdated { codex, .. } => RemoteDeltaReplayPayload::CodexUpdated {
-                codex_fingerprint: Self::remote_delta_payload_fingerprint(codex)?,
-            },
+            DeltaEvent::CodexUpdated { revision: _, codex } => {
+                RemoteDeltaReplayPayload::CodexUpdated {
+                    codex_fingerprint: Self::remote_delta_payload_fingerprint(codex)?,
+                }
+            }
             DeltaEvent::OrchestratorsUpdated {
                 orchestrators,
                 sessions,
@@ -786,9 +792,12 @@ impl AppState {
                             ))
                         })?;
                     }
+                    let synchronized_revision = current_remote_revision
+                        .map(|revision| revision.to_string())
+                        .unwrap_or_else(|| "none".to_owned());
                     return Err(ApiError::bad_gateway(format!(
-                        "remote session response revision {} is newer than synchronized remote state",
-                        remote_response.revision
+                        "remote session response revision {} cannot be safely applied; latest synchronized remote state revision is {synchronized_revision} and the transcript may have changed",
+                        remote_response.revision,
                     )));
                 }
             }
@@ -870,6 +879,17 @@ impl AppState {
                 );
                 inner.note_remote_applied_revision(&target.remote.id, remote_response.revision);
             } else if let Some(remote_revision) = min_remote_revision {
+                // A targeted full-session repair materializes only this
+                // transcript. Advance the session-specific transcript
+                // watermark to the response revision so later deltas for this
+                // session are skipped, but keep the broad remote watermark at
+                // the triggering delta revision so unrelated sessions at
+                // intermediate revisions can still apply.
+                inner.note_remote_session_transcript_applied_revision(
+                    &target.remote.id,
+                    &target.remote_session_id,
+                    remote_response.revision,
+                );
                 inner.note_remote_applied_revision(&target.remote.id, remote_revision);
             }
             let revision = self.commit_locked(&mut inner).map_err(|err| {
@@ -1851,7 +1871,10 @@ impl AppState {
                 self.publish_orchestrators_updated(revision, localized_orchestrators);
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
-            DeltaEvent::CodexUpdated { .. } => {
+            DeltaEvent::CodexUpdated {
+                revision: _,
+                codex: _,
+            } => {
                 // CodexState is process-global runtime metadata, not localized
                 // remote proxy state. Mark the remote revision consumed for
                 // monotonicity, but intentionally do not fold the Codex payload

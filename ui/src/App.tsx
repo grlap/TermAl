@@ -480,15 +480,14 @@ export default function App() {
   const projectsRef = useRef(projects);
   const orchestratorsRef = useRef(orchestrators);
   const latestStateRevisionRef = useRef<number | null>(null);
-  // The `serverInstanceId` the client last adopted. Paired with
-  // `latestStateRevisionRef` as the server-restart detector: when an
-  // incoming snapshot carries a non-empty `serverInstanceId` that
-  // differs from this ref, the server has just restarted and its
-  // revision counter rewound to whatever SQLite had, so the client
-  // accepts the snapshot regardless of the monotonic revision guard.
+  // The `serverInstanceId` the client last adopted, plus every
+  // non-empty instance id this tab has already accepted. A different
+  // unseen id is a server restart; a different already-seen id is a
+  // late response from an old process and must not roll the UI back.
   // Updated in lockstep with `latestStateRevisionRef` inside
   // `adoptState` / `adoptCreatedSessionResponse` / `adoptFetchedSession`.
   const lastSeenServerInstanceIdRef = useRef<string | null>(null);
+  const seenServerInstanceIdsRef = useRef<Set<string>>(new Set());
   // Populated by the live-state hook's transport useEffect on
   // mount and reset to a no-op on cleanup. App.tsx owns the ref
   // identity because `reportRequestError` and
@@ -771,6 +770,7 @@ export default function App() {
       isMountedRef,
       latestStateRevisionRef,
       lastSeenServerInstanceIdRef,
+      seenServerInstanceIdsRef,
       sessionsRef,
       draftsBySessionIdRef: draftsRef,
       draftAttachmentsBySessionIdRef: draftAttachmentsRef,

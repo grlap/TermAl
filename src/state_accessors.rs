@@ -10,17 +10,20 @@
 // `turn_dispatch.rs`, settings sync in `session_sync.rs`, and the
 // commit/broadcast pipeline in `sse_broadcast.rs`.
 //
-// Snapshot semantics. `snapshot()` and `snapshot_from_inner()` are
-// two different entry points with different freshness guarantees:
-// `snapshot()` refreshes the agent-readiness cache via filesystem
-// I/O *before* locking `inner`, then reads the freshly-populated
-// cache under the lock, so the returned `StateResponse` reflects
-// current CLI availability. `snapshot_from_inner()` is the hot-path
-// builder used inside `commit_locked` / `publish_state_locked` where
-// the lock is already held and filesystem I/O is not safe — it
-// reuses whatever value `cached_agent_readiness()` happens to have.
-// This is the cache-staleness tradeoff documented in
-// `sse_broadcast.rs`.
+// Snapshot semantics. `snapshot()` and `snapshot_from_inner()` both
+// build metadata-first production-shaped state snapshots. `snapshot()`
+// refreshes the agent-readiness cache via filesystem I/O *before*
+// locking `inner`, then reads the freshly-populated cache under the
+// lock, so the returned `StateResponse` reflects current CLI
+// availability. `snapshot_from_inner()` is the hot-path builder used
+// inside `commit_locked` / `publish_state_locked` where the lock is
+// already held and filesystem I/O is not safe — it reuses whatever
+// value `cached_agent_readiness()` happens to have. This is the
+// cache-staleness tradeoff documented in `sse_broadcast.rs`.
+//
+// Tests that need to inspect internal transcript state must call the
+// explicit `full_snapshot()` helper instead of relying on a cfg(test)
+// behavior split in `snapshot()`.
 //
 // Remote SSE fallback dedup. When a remote-proxy SSE stream drops,
 // this host falls back to polling the remote's `/state` endpoint.
@@ -75,20 +78,8 @@ impl AppState {
     /// the same path used by `commit_locked` / `publish_state_locked`.  This
     /// ensures that a `snapshot()` call at revision N uses the same cached
     /// readiness value that was published in the SSE event for revision N.
-    #[cfg(not(test))]
     fn snapshot(&self) -> StateResponse {
         self.summary_snapshot()
-    }
-
-    /// Test-only full snapshot inspection helper.
-    ///
-    /// Production `/api/state` and SSE state events are metadata-first. The
-    /// Rust unit suite historically uses `state.snapshot()` to assert internal
-    /// transcript mutations directly, so test builds keep that inspection shape
-    /// while route/SSE tests call `summary_snapshot()` through the real handlers.
-    #[cfg(test)]
-    fn snapshot(&self) -> StateResponse {
-        self.full_snapshot()
     }
 
     fn summary_snapshot(&self) -> StateResponse {
@@ -103,6 +94,11 @@ impl AppState {
         self.snapshot_from_inner_with_full_session(&inner, agent_readiness, session_id)
     }
 
+    /// Test-only full snapshot inspection helper.
+    ///
+    /// Production `/api/state`, action responses, and SSE state events are
+    /// metadata-first. Tests that need full transcripts use this helper so
+    /// `snapshot()` keeps the same shape in test and production builds.
     #[cfg(test)]
     fn full_snapshot(&self) -> StateResponse {
         let _ = self.agent_readiness_snapshot();

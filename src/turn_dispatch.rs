@@ -448,17 +448,18 @@ impl AppState {
                 queued.pending_prompt.expanded_text.clone(),
             )
             .map_err(|err| anyhow!("failed to dispatch queued prompt: {}", err.message))?;
-        inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid")
-            .queued_prompts
-            .pop_front();
-        sync_pending_prompts(inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"));
+        let mut message_delta = started.message_delta;
+        {
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            record.queued_prompts.pop_front();
+            sync_pending_prompts(record);
+            message_delta.session_mutation_stamp = record.mutation_stamp;
+        }
         let revision = self.commit_persisted_delta_locked(&mut inner)?;
         drop(inner);
-        self.publish_started_turn_message_delta(revision, started.message_delta);
+        self.publish_started_turn_message_delta(revision, message_delta);
         Ok(Some(started.dispatch))
     }
 

@@ -21,6 +21,10 @@
 
 /// Returns the transcript count carried by session-scoped SSE deltas.
 fn session_message_count(record: &SessionRecord) -> u32 {
+    debug_assert!(
+        record.session.messages.len() <= u32::MAX as usize,
+        "session transcript length exceeded the wire messageCount range"
+    );
     let local_count = u32::try_from(record.session.messages.len()).unwrap_or(u32::MAX);
     if record.session.messages_loaded {
         local_count

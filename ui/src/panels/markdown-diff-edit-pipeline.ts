@@ -56,6 +56,7 @@
 // bodies, same allowlists / denylists, same attribute names;
 // consumers import from here directly.
 
+import { MARKDOWN_INTERNAL_LINK_HREF_ATTRIBUTE } from "../markdown-links";
 import { shouldSkipMarkdownEditableNode } from "./editable-markdown-focus";
 
 const MARKDOWN_HREF_POLICY_IGNORED_CHARACTERS =
@@ -379,7 +380,9 @@ export function serializeMarkdownInlineNode(node: Node): string {
       return wrapInlineMarkdownCode(code);
     }
 
-    const href = node.getAttribute("href");
+    const href =
+      node.getAttribute(MARKDOWN_INTERNAL_LINK_HREF_ATTRIBUTE) ??
+      node.getAttribute("href");
     const destination =
       href && isSerializableMarkdownHref(href)
         ? formatSafeMarkdownLinkDestination(href)
@@ -407,17 +410,16 @@ function isSerializableMarkdownHref(href: string) {
     return false;
   }
 
-  const normalized = normalizeMarkdownHrefForPolicy(trimmed);
-  const colonIndex = normalized.indexOf(":");
+  const colonIndex = trimmed.indexOf(":");
   if (colonIndex === -1) {
     return true;
   }
 
-  if (/^[a-zA-Z]:[\\/]/.test(normalized)) {
+  if (/^[a-zA-Z]:[\\/]/.test(trimmed)) {
     return true;
   }
 
-  const protocol = normalized.slice(0, colonIndex).toLowerCase();
+  const protocol = trimmed.slice(0, colonIndex).toLowerCase();
   return protocol === "http" || protocol === "https" || protocol === "mailto";
 }
 

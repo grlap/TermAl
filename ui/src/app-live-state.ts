@@ -215,6 +215,60 @@ export function resolveAdoptStateSessionOptions(
   };
 }
 
+export function hydrationRetainedMessagesMatch(
+  responseSession: Pick<Session, "messages">,
+  currentSession: Pick<Session, "messages">,
+) {
+  if (
+    responseSession.messages.length === 0 ||
+    currentSession.messages.length === 0
+  ) {
+    return true;
+  }
+
+  // This comparison intentionally covers the persisted message shape exactly.
+  // UI-only message fields must either stay out of `Message` or be excluded
+  // here explicitly, otherwise hydration can treat equivalent transcripts as
+  // divergent and drop retained messages.
+  return (
+    JSON.stringify(responseSession.messages) ===
+    JSON.stringify(currentSession.messages)
+  );
+}
+
+export function getHydrationMessageCount(
+  session: Pick<Session, "messageCount" | "messagesLoaded" | "messages">,
+) {
+  if (typeof session.messageCount === "number") {
+    return session.messageCount;
+  }
+  return session.messagesLoaded === true ? session.messages.length : null;
+}
+
+export function getHydrationMutationStamp(
+  session: Pick<Session, "sessionMutationStamp">,
+) {
+  return session.sessionMutationStamp ?? null;
+}
+
+export function hydrationSessionMetadataMatches(
+  responseSession: Pick<
+    Session,
+    "messageCount" | "messagesLoaded" | "messages" | "sessionMutationStamp"
+  >,
+  currentSession: Pick<
+    Session,
+    "messageCount" | "messagesLoaded" | "messages" | "sessionMutationStamp"
+  >,
+) {
+  return (
+    getHydrationMessageCount(responseSession) ===
+      getHydrationMessageCount(currentSession) &&
+    getHydrationMutationStamp(responseSession) ===
+      getHydrationMutationStamp(currentSession)
+  );
+}
+
 const SESSION_HYDRATION_RETRY_DELAYS_MS = [50, 250, 1000, 3000] as const;
 const SLOW_STATE_EVENT_WARNING_MS = 50;
 const STATE_EVENT_METADATA_PEEK_CHARS = 4096;
@@ -298,10 +352,20 @@ function payloadHasTopLevelTrueBoolean(payload: string, key: string) {
   );
 }
 
+function rememberServerInstanceId(
+  seenServerInstanceIdsRef: MutableRefObject<Set<string>>,
+  serverInstanceId: string | null | undefined,
+) {
+  if (serverInstanceId) {
+    seenServerInstanceIdsRef.current.add(serverInstanceId);
+  }
+}
+
 export type UseAppLiveStateAdoptionRefs = {
   isMountedRef: MutableRefObject<boolean>;
   latestStateRevisionRef: MutableRefObject<number | null>;
   lastSeenServerInstanceIdRef: MutableRefObject<string | null>;
+  seenServerInstanceIdsRef: MutableRefObject<Set<string>>;
   sessionsRef: MutableRefObject<Session[]>;
   draftsBySessionIdRef: MutableRefObject<Record<string, string>>;
   draftAttachmentsBySessionIdRef: MutableRefObject<
@@ -449,6 +513,7 @@ export function useAppLiveState(
     isMountedRef,
     latestStateRevisionRef,
     lastSeenServerInstanceIdRef,
+    seenServerInstanceIdsRef,
     sessionsRef,
     draftsBySessionIdRef,
     draftAttachmentsBySessionIdRef,
@@ -972,6 +1037,7 @@ export function useAppLiveState(
         {
           lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
           nextServerInstanceId: created.serverInstanceId,
+          seenServerInstanceIds: seenServerInstanceIdsRef.current,
         },
       )
     ) {
@@ -990,6 +1056,10 @@ export function useAppLiveState(
           );
     latestStateRevisionRef.current = created.revision;
     if (created.serverInstanceId) {
+      rememberServerInstanceId(
+        seenServerInstanceIdsRef,
+        created.serverInstanceId,
+      );
       lastSeenServerInstanceIdRef.current = created.serverInstanceId;
     }
     sessionsRef.current = nextSessions;
@@ -1006,34 +1076,6 @@ export function useAppLiveState(
       ),
     );
     return "adopted";
-  }
-
-  function getHydrationMessageCount(session: Session) {
-    if (typeof session.messageCount === "number") {
-      return session.messageCount;
-    }
-    return session.messagesLoaded === true ? session.messages.length : null;
-  }
-
-  function getHydrationMutationStamp(session: Session) {
-    return session.sessionMutationStamp ?? null;
-  }
-
-  function hydrationRetainedMessagesMatch(
-    responseSession: Session,
-    currentSession: Session,
-  ) {
-    if (
-      responseSession.messages.length === 0 ||
-      currentSession.messages.length === 0
-    ) {
-      return true;
-    }
-
-    return (
-      JSON.stringify(responseSession.messages) ===
-      JSON.stringify(currentSession.messages)
-    );
   }
 
   function captureHydrationRequestContext(
@@ -1066,23 +1108,7 @@ export function useAppLiveState(
     responseSession: Session,
     currentSession: Session,
   ) {
-    const currentMessageCount = getHydrationMessageCount(currentSession);
-    const responseMessageCount = getHydrationMessageCount(responseSession);
-    if (
-      currentMessageCount !== null &&
-      responseMessageCount !== null &&
-      responseMessageCount !== currentMessageCount
-    ) {
-      return false;
-    }
-
-    const currentMutationStamp = getHydrationMutationStamp(currentSession);
-    const responseMutationStamp = getHydrationMutationStamp(responseSession);
-    if (
-      currentMutationStamp !== null &&
-      responseMutationStamp !== null &&
-      responseMutationStamp !== currentMutationStamp
-    ) {
+    if (!hydrationSessionMetadataMatches(responseSession, currentSession)) {
       return false;
     }
 
@@ -1171,6 +1197,7 @@ export function useAppLiveState(
       !shouldAdoptSnapshotRevision(previousRevision, revision, {
         lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
         nextServerInstanceId: serverInstanceId,
+        seenServerInstanceIds: seenServerInstanceIdsRef.current,
         force: true,
         allowRevisionDowngrade: canAdoptLowerRevisionHydration,
       })
@@ -1205,6 +1232,7 @@ export function useAppLiveState(
       latestStateRevisionRef.current = revision;
     }
     if (serverInstanceId) {
+      rememberServerInstanceId(seenServerInstanceIdsRef, serverInstanceId);
       lastSeenServerInstanceIdRef.current = serverInstanceId;
     }
     sessionsRef.current = nextSessions;
@@ -1346,6 +1374,7 @@ export function useAppLiveState(
             fullStateServerInstanceChanged,
           lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
           nextServerInstanceId: nextState.serverInstanceId,
+          seenServerInstanceIds: seenServerInstanceIdsRef.current,
         },
       )
     ) {
@@ -1354,6 +1383,10 @@ export function useAppLiveState(
 
     latestStateRevisionRef.current = nextState.revision;
     if (nextState.serverInstanceId) {
+      rememberServerInstanceId(
+        seenServerInstanceIdsRef,
+        nextState.serverInstanceId,
+      );
       lastSeenServerInstanceIdRef.current = nextState.serverInstanceId;
       lastFullStateServerInstanceIdRef.current = nextState.serverInstanceId;
     }
@@ -2060,6 +2093,7 @@ export function useAppLiveState(
                 rawFullStateServerInstanceChanged,
               lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
               nextServerInstanceId: rawServerInstanceId,
+              seenServerInstanceIds: seenServerInstanceIdsRef.current,
             },
           )
         ) {

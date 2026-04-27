@@ -198,6 +198,16 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/mcp-elicitation/{message_id}` | Submit an MCP elicitation response |
 | POST | `/api/sessions/{id}/codex/requests/{message_id}` | Reply to a generic Codex app-server request |
 
+For local sessions, `GET /api/sessions/{id}` is a local full-transcript read. For
+unloaded remote-proxy sessions, the same route synchronously calls the owning
+remote's `GET /api/sessions/{remote_id}` and may also call remote `/api/state`
+when the remote session response is ahead of the locally applied remote
+revision. That `/api/state` fetch is a freshness check and global remote resync:
+it can update other proxy records for the same remote and publish local state
+before returning the requested `SessionResponse`. If the upstream session route
+returns `messagesLoaded: false`, TermAl rejects it as a bad gateway because this
+route's local contract is full transcript hydration.
+
 `GET /api/health` currently returns `{ ok: true, supportsInlineOrchestratorTemplates: true }`. Remote launchers use `supportsInlineOrchestratorTemplates` during health probes to decide whether a remote can accept inline local orchestrator templates or must be upgraded first.
 
 ### Terminal Command Execution
@@ -228,12 +238,12 @@ Design constraints:
 `GET /api/events` returns a Server-Sent Events stream with three event types:
 
 - **`state`** — metadata-first `StateResponse` JSON. Sent on initial connect, after `commit_locked()`, and as a recovery when the client falls behind. Session entries carry shell metadata, `messageCount`, and `messagesLoaded: false`; full transcripts are loaded through `GET /api/sessions/{id}`.
-- **`delta`** ? incremental `DeltaEvent` JSON. Sent during streaming (text deltas, text replacements, command output updates). Cheaper than full state.
+- **`delta`** - incremental `DeltaEvent` JSON. Sent during streaming (text deltas, text replacements, command output updates) and small process-global updates such as `CodexUpdated`. Cheaper than full state.
 - **`workspaceFilesChanged`** - coalesced local workspace file watcher hints. Sent outside the main state revision stream with its own monotonically increasing file-event revision so source, diff, file tree, and git-preview panels can refresh only when touched paths match their scope.
 
 All three carry a `revision: u64` field. `state` and `delta` share the main state revision counter, which the frontend uses to reject stale snapshots and detect gaps in the delta sequence. `workspaceFilesChanged` uses a separate file-event revision counter; the frontend batches same-tick file events and ignores file-event revisions strictly older than the last seen revision (same-revision events are merged while buffered).
 
-`state` events and every snapshot-bearing response (`StateResponse`, `HealthResponse`, `CreateSessionResponse`, `SessionResponse`) additionally carry a `serverInstanceId: string` — a per-process UUID generated once via `Uuid::new_v4()` at `AppState::new_with_paths`. The id is not a secret and not a protocol boundary; it exists so the frontend can detect a server restart deterministically. After a restart, the revision counter rewinds to whatever SQLite held (usually lower than the browser's last-seen revision), which would otherwise cause every monotonic check in `shouldAdoptStateRevision` to reject the fresh state. `isServerInstanceMismatch` in `ui/src/state-revision.ts` returns `true` only when both the last-seen and incoming ids are non-empty AND differ; `shouldAdoptSnapshotRevision` routes that branch unconditionally, overriding both the monotonic check and any `allowRevisionDowngrade` gate. The empty-string sentinel (`#[serde(default)]` on Rust, `""` fallback on older servers or fallback SSE payloads) means "unknown instance" and cannot trigger a restart branch — this is what lets `empty_state_events_response()` send a fallback payload without masquerading as a restart. New endpoints that return state-shaped responses must emit a non-empty `serverInstanceId` sourced from `AppState::server_instance_id`; otherwise a session hydration in flight across a restart gets silently rejected by the revision guard until the safety-net pollers re-fetch.
+`state` events and every snapshot-bearing response (`StateResponse`, `HealthResponse`, `CreateSessionResponse`, `SessionResponse`) additionally carry a `serverInstanceId: string` — a per-process UUID generated once via `Uuid::new_v4()` at `AppState::new_with_paths`. The id is not a secret and not a protocol boundary; it exists so the frontend can detect a server restart deterministically. After a restart, the revision counter rewinds to whatever SQLite held (usually lower than the browser's last-seen revision), which would otherwise cause every monotonic check in `shouldAdoptStateRevision` to reject the fresh state. `isServerInstanceMismatch` in `ui/src/state-revision.ts` returns `true` only when both the last-seen and incoming ids are non-empty AND differ; `shouldAdoptSnapshotRevision` accepts only unseen mismatched ids as restarts; mismatched ids already seen by the tab are rejected as late responses from older server processes. The unseen-restart branch overrides both the monotonic check and any `allowRevisionDowngrade` gate. The empty-string sentinel (`#[serde(default)]` on Rust, `""` fallback on older servers or fallback SSE payloads) means "unknown instance" and cannot trigger a restart branch — this is what lets `empty_state_events_response()` send a fallback payload without masquerading as a restart. New endpoints that return state-shaped responses must emit a non-empty `serverInstanceId` sourced from `AppState::server_instance_id`; otherwise a session hydration in flight across a restart gets silently rejected by the revision guard until the safety-net pollers re-fetch.
 
 Every `Session` or session summary serialized on the wire carries
 `messageCount: u32`. `StateResponse.sessions` are metadata-first summary
@@ -248,6 +258,11 @@ the frontend keeps it on the session summary so reconnect/state adoption can
 preserve transcript height and gap-detection metadata without waiting for
 another session-scoped delta.
 
+`Session.messageCount` is soft-rollout compatible via `#[serde(default)]`, but
+`DeltaEvent.*.messageCount` is intentionally required on the wire. Mixed-version
+remote SSE bridges that omit delta counts are treated as a hard protocol break;
+see `docs/metadata-first-state-plan.md` Contract Precisions -> Field semantics.
+
 ```
 DeltaEvent::TextDelta            { revision, session_id, message_id, message_index, message_count, delta, preview, session_mutation_stamp? }
 DeltaEvent::TextReplace          { revision, session_id, message_id, message_index, message_count, text, preview, session_mutation_stamp? }
@@ -256,7 +271,8 @@ DeltaEvent::ParallelAgentsUpdate { revision, session_id, message_id, message_ind
 DeltaEvent::MessageCreated       { revision, session_id, message_id, message_index, message_count, message, preview, status, session_mutation_stamp? } // inserts a new message at message_index; if the id already exists, remove and reinsert it at that literal index
 DeltaEvent::MessageUpdated       { revision, session_id, message_id, message_index, message_count, message, preview, status, session_mutation_stamp? } // replaces an existing message in place; message_index is a fast-path hint and must not reorder the transcript
 DeltaEvent::SessionCreated       { revision, session_id, session } // metadata-first session summary; local + remote-proxied session creation; forwarded by remote backends after id localization
-DeltaEvent::OrchestratorsUpdated { revision, orchestrators[], sessions[] } // sessions[] contains metadata-first summaries for referenced sessions; IDs inside each instance are scoped to the originating server; translate via sync_remote_state_inner before forwarding remotely.
+DeltaEvent::CodexUpdated         { revision, codex } // latest process-global CodexState snapshot; remotes consume the revision for ordering but do not localize Codex state into proxy sessions
+DeltaEvent::OrchestratorsUpdated { revision, orchestrators[], sessions[] } // sessions[] contains metadata-first summaries for referenced sessions and is omitted on the wire when empty; IDs inside each instance are scoped to the originating server; translate via sync_remote_state_inner before forwarding remotely.
 ```
 
 For inbound remote session-scoped deltas, `session_mutation_stamp?` is a
@@ -281,6 +297,10 @@ mutation stamp; content-bearing or complex variants also include the exact
 mutating payload, or a stable fingerprint of that payload, so distinct
 same-revision sibling deltas still apply. Replay keys are cleared with the
 remote applied-revision watermark when event-stream continuity is lost.
+Targeted repairs record a session-specific transcript watermark at the returned
+remote response revision, but keep the broad remote watermark at the triggering
+delta revision so same-session stale deltas are skipped without suppressing
+unrelated intermediate deltas from other sessions.
 
 ```
 WorkspaceFilesChangedEvent {

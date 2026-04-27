@@ -116,6 +116,106 @@ describe("session-store composer snapshots", () => {
     expect(secondSnapshot?.promptHistory).toEqual(["First prompt", "Second prompt"]);
   });
 
+  it("rebuilds prompt history when the transcript shrinks", () => {
+    const initialSession = createSession({
+      messages: [
+        createTextMessage("user-1", "you", "First prompt"),
+        createTextMessage("assistant-1", "assistant", "Done"),
+        createTextMessage("user-2", "you", "Second prompt"),
+      ],
+    });
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [initialSession],
+    });
+    const firstSnapshot = getComposerSessionSnapshotForTesting(initialSession.id);
+
+    const shrunkSession = createSession({
+      messages: [createTextMessage("user-1", "you", "First prompt")],
+    });
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [shrunkSession],
+    });
+    const secondSnapshot = getComposerSessionSnapshotForTesting(initialSession.id);
+
+    expect(firstSnapshot?.promptHistory).toEqual(["First prompt", "Second prompt"]);
+    expect(secondSnapshot).not.toBe(firstSnapshot);
+    expect(secondSnapshot?.promptHistory).not.toBe(firstSnapshot?.promptHistory);
+    expect(secondSnapshot?.promptHistory).toEqual(["First prompt"]);
+  });
+
+  it("rebuilds prompt history when the previous boundary message changes", () => {
+    const initialSession = createSession({
+      messages: [
+        createTextMessage("user-1", "you", "First prompt"),
+        createTextMessage("assistant-1", "assistant", "Done"),
+      ],
+    });
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [initialSession],
+    });
+    const firstSnapshot = getComposerSessionSnapshotForTesting(initialSession.id);
+
+    const rewrittenBoundarySession = createSession({
+      messages: [
+        createTextMessage("user-1", "you", "First prompt"),
+        createTextMessage("user-2", "you", "Second prompt"),
+      ],
+    });
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [rewrittenBoundarySession],
+    });
+    const secondSnapshot = getComposerSessionSnapshotForTesting(initialSession.id);
+
+    expect(firstSnapshot?.promptHistory).toEqual(["First prompt"]);
+    expect(secondSnapshot).not.toBe(firstSnapshot);
+    expect(secondSnapshot?.promptHistory).not.toBe(firstSnapshot?.promptHistory);
+    expect(secondSnapshot?.promptHistory).toEqual(["First prompt", "Second prompt"]);
+  });
+
+  it("rebuilds prompt history when a same-length update turns the last message into a user prompt", () => {
+    const initialSession = createSession({
+      messages: [
+        createTextMessage("user-1", "you", "First prompt"),
+        createTextMessage("message-2", "assistant", "Done"),
+      ],
+    });
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [initialSession],
+    });
+    const firstSnapshot = getComposerSessionSnapshotForTesting(initialSession.id);
+
+    const userBoundarySession = createSession({
+      messages: [
+        createTextMessage("user-1", "you", "First prompt"),
+        createTextMessage("message-2", "you", "Second prompt"),
+      ],
+    });
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [userBoundarySession],
+    });
+    const secondSnapshot = getComposerSessionSnapshotForTesting(initialSession.id);
+
+    expect(firstSnapshot?.promptHistory).toEqual(["First prompt"]);
+    expect(secondSnapshot).not.toBe(firstSnapshot);
+    expect(secondSnapshot?.promptHistory).not.toBe(firstSnapshot?.promptHistory);
+    expect(secondSnapshot?.promptHistory).toEqual(["First prompt", "Second prompt"]);
+  });
+
   it("tracks draft and attachment changes without replacing unchanged prompt history", () => {
     const initialSession = createSession();
     const attachment = createDraftAttachment();

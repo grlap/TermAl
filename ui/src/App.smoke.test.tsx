@@ -540,8 +540,31 @@ describe("App smoke", () => {
       expect(session1Tab).toHaveAttribute("aria-selected", "true");
       expect(composer).toBeInTheDocument();
 
+      const consumeAltPageKey = (event: KeyboardEvent) => {
+        if (event.altKey && (event.key === "PageUp" || event.key === "PageDown")) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      };
+      composer.addEventListener("keydown", consumeAltPageKey);
+      try {
+        await act(async () => {
+          fireEvent.keyDown(composer, {
+            key: "PageDown",
+            code: "PageDown",
+            altKey: true,
+          });
+        });
+        await settleAsyncUi();
+
+        expect(session1Tab).toHaveAttribute("aria-selected", "true");
+        expect(session2Tab).toHaveAttribute("aria-selected", "false");
+      } finally {
+        composer.removeEventListener("keydown", consumeAltPageKey);
+      }
+
       await act(async () => {
-        fireEvent.keyDown(window, {
+        fireEvent.keyDown(composer, {
           key: "PageDown",
           code: "PageDown",
           altKey: true,
@@ -551,10 +574,11 @@ describe("App smoke", () => {
 
       expect(session1Tab).toHaveAttribute("aria-selected", "false");
       expect(session2Tab).toHaveAttribute("aria-selected", "true");
-      expect(await screen.findByLabelText("Message Session 2")).toBeInTheDocument();
+      const session2Composer = await screen.findByLabelText("Message Session 2");
+      expect(session2Composer).toBeInTheDocument();
 
       await act(async () => {
-        fireEvent.keyDown(window, {
+        fireEvent.keyDown(session2Composer, {
           key: "PageUp",
           code: "PageUp",
           altKey: true,

@@ -181,7 +181,6 @@ impl AppState {
                 .cloned()
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let local_session = AppState::wire_session_from_record(&local_record);
-            let delta_session = AppState::wire_session_summary_from_record(&local_record);
             let revision = if changed {
                 self.commit_session_created_locked(&mut inner, &local_record)
                     .map_err(|err| {
@@ -192,6 +191,8 @@ impl AppState {
             } else {
                 inner.revision
             };
+            let delta_session =
+                changed.then(|| AppState::wire_session_summary_from_record(&local_record));
             (revision, local_session_id, local_session, changed, delta_session)
         };
         // Skip the SSE announcement on the no-change branch. The client

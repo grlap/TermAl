@@ -345,7 +345,7 @@ async fn orchestrator_stop_route_preserves_running_state_when_a_child_stop_fails
     );
     drop(failure_guard);
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let instance = snapshot
         .orchestrators
         .iter()
@@ -1394,6 +1394,7 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
         );
     }
 
+    let mut delta_rx = state.subscribe_delta_events();
     let dispatch_result = state
         .dispatch_turn(
             &session_id,
@@ -1416,6 +1417,19 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
             panic!("plain blocked FIFO recovery should dispatch immediately")
         }
     }
+    let queued_delta_stamp = match serde_json::from_str(
+        &delta_rx
+            .try_recv()
+            .expect("queued dispatch should publish a started-turn delta"),
+    )
+    .expect("started-turn delta should decode")
+    {
+        DeltaEvent::MessageCreated {
+            session_mutation_stamp,
+            ..
+        } => session_mutation_stamp,
+        _ => panic!("expected queued dispatch to publish MessageCreated"),
+    };
 
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -1433,6 +1447,11 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
             "new recovery prompt should stay behind old queued user work"
         );
         assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::User);
+        assert_eq!(
+            queued_delta_stamp,
+            Some(record.mutation_stamp),
+            "queued turn delta should carry the final session mutation stamp"
+        );
     }
 
     let _ = fs::remove_file(original_persistence_path.as_path());

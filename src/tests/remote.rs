@@ -479,7 +479,7 @@ fn remote_snapshot_sync_localizes_orchestrators_and_creates_missing_proxy_sessio
         )
         .expect("remote snapshot should apply");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let orchestrator = snapshot
         .orchestrators
         .iter()
@@ -1243,7 +1243,7 @@ fn remote_orchestrators_updated_delta_localizes_ids_and_preserves_proxy_identity
         )
         .expect("initial remote snapshot should apply");
 
-    let initial_snapshot = state.snapshot();
+    let initial_snapshot = state.full_snapshot();
     let local_orchestrator_id = initial_snapshot
         .orchestrators
         .iter()
@@ -1283,7 +1283,7 @@ fn remote_orchestrators_updated_delta_localizes_ids_and_preserves_proxy_identity
         )
         .expect("remote orchestrator delta should apply");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let orchestrator = snapshot
         .orchestrators
         .iter()
@@ -1418,7 +1418,7 @@ fn remote_orchestrators_updated_delta_creates_missing_proxy_sessions_from_payloa
         _ => panic!("unexpected delta variant"),
     }
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let orchestrator = snapshot
         .orchestrators
         .iter()
@@ -1578,7 +1578,7 @@ fn stale_remote_snapshot_does_not_overwrite_newer_orchestrator_delta_state() {
             },
         )
         .expect("remote orchestrator delta should apply");
-    let revision_after_delta = state.snapshot().revision;
+    let revision_after_delta = state.full_snapshot().revision;
 
     state
         .apply_remote_state_snapshot(
@@ -1592,7 +1592,7 @@ fn stale_remote_snapshot_does_not_overwrite_newer_orchestrator_delta_state() {
         )
         .expect("stale remote snapshot should be ignored");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert_eq!(snapshot.revision, revision_after_delta);
     let orchestrator = snapshot
         .orchestrators
@@ -1670,7 +1670,7 @@ fn remote_orchestrators_updated_delta_rolls_back_proxy_sessions_when_localizatio
         "failed remote delta should not publish a localized update"
     );
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert!(
         !snapshot
             .orchestrators
@@ -1932,7 +1932,7 @@ fn remote_session_created_delta_republishes_metadata_only_session_summary() {
             session_id,
             session,
         } => {
-            assert_eq!(revision, state.snapshot().revision);
+            assert_eq!(revision, state.full_snapshot().revision);
             assert_eq!(session_id, local_session_id);
             assert_eq!(session.id, local_session_id);
             assert!(!session.messages_loaded);
@@ -3210,18 +3210,11 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
                 session_mutation_stamp: Some(10),
             },
         )
-        .expect("same-revision sibling delta should not be suppressed by hydration replay cache");
-    let sibling_payload = delta_receiver
-        .try_recv()
-        .expect("same-revision sibling delta should publish");
-    let sibling_delta: DeltaEvent =
-        serde_json::from_str(&sibling_payload).expect("sibling delta should decode");
-    match sibling_delta {
-        DeltaEvent::MessageUpdated { message_id, .. } => {
-            assert_eq!(message_id, "remote-message-1");
-        }
-        _ => panic!("unexpected sibling delta variant"),
-    }
+        .expect("same-session sibling delta should be skipped by transcript hydration");
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "same-session sibling delta at the hydrated revision should not publish"
+    );
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     let index = inner
@@ -3235,9 +3228,28 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
         &record.session.messages[0],
         Message::Text { text, .. } if text == "Hello world"
     ));
-    assert_eq!(record.session.preview, "Reviewed remote message.");
+    assert_eq!(record.session.preview, "Hello world");
     assert_eq!(record.session.status, SessionStatus::Idle);
     assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&3));
+    assert_eq!(
+        inner
+            .remote_session_transcript_applied_revisions
+            .get(&remote.id)
+            .and_then(|sessions| sessions.get("remote-session-1")),
+        Some(&5)
+    );
+    assert!(
+        !inner.should_skip_remote_applied_delta_revision(&remote.id, 4),
+        "targeted hydration must not broadly skip unrelated intermediate deltas"
+    );
+    assert!(
+        inner.should_skip_remote_session_applied_delta_revision(
+            &remote.id,
+            "remote-session-1",
+            4,
+        ),
+        "targeted hydration should skip later stale deltas for the repaired session"
+    );
     drop(inner);
 
     join_test_server(server);
@@ -5436,7 +5448,7 @@ fn remote_summary_state_snapshot_preserves_existing_proxy_transcript() {
         )
         .expect("remote message create delta should apply");
 
-    let mut remote_state = state.snapshot();
+    let mut remote_state = state.full_snapshot();
     remote_state.revision = 3;
     let mut remote_session = remote_state
         .sessions
@@ -5503,7 +5515,7 @@ fn remote_message_created_delta_replaces_and_reorders_existing_message() {
         )
         .expect("remote message create replay should replace and reorder by id");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -5585,7 +5597,7 @@ fn remote_message_created_delta_rejects_gap_without_advancing_revision() {
         user: None,
     };
     let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
-    let initial_revision = state.snapshot().revision;
+    let initial_revision = state.full_snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
     let error = state
@@ -5613,7 +5625,7 @@ fn remote_message_created_delta_rejects_gap_without_advancing_revision() {
         "gap MessageCreated should not publish a local delta"
     );
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert_eq!(snapshot.revision, initial_revision);
     let session = snapshot
         .sessions
@@ -5642,7 +5654,7 @@ fn remote_message_created_delta_rejects_payload_id_mismatch_without_advancing_re
         user: None,
     };
     let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
-    let initial_revision = state.snapshot().revision;
+    let initial_revision = state.full_snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
     let error = state
@@ -5670,7 +5682,7 @@ fn remote_message_created_delta_rejects_payload_id_mismatch_without_advancing_re
         "id-mismatched MessageCreated should not publish a local delta"
     );
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert_eq!(snapshot.revision, initial_revision);
     let session = snapshot
         .sessions
@@ -5710,7 +5722,7 @@ fn remote_message_created_delta_rejects_existing_message_out_of_bounds_without_a
         2,
         "Second message.",
     );
-    let initial_revision = state.snapshot().revision;
+    let initial_revision = state.full_snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
     let error = state
@@ -5740,7 +5752,7 @@ fn remote_message_created_delta_rejects_existing_message_out_of_bounds_without_a
         "out-of-bounds existing MessageCreated should not publish a local delta"
     );
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert_eq!(snapshot.revision, initial_revision);
     let session = snapshot
         .sessions
@@ -5779,7 +5791,7 @@ fn remote_command_update_missing_target_rejects_gap_without_advancing_revision()
         user: None,
     };
     let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
-    let initial_revision = state.snapshot().revision;
+    let initial_revision = state.full_snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
     let error = state
@@ -5812,7 +5824,7 @@ fn remote_command_update_missing_target_rejects_gap_without_advancing_revision()
         "gap CommandUpdate should not publish a local delta"
     );
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert_eq!(snapshot.revision, initial_revision);
     let session = snapshot
         .sessions
@@ -5841,7 +5853,7 @@ fn remote_parallel_agents_update_missing_target_rejects_gap_without_advancing_re
         user: None,
     };
     let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
-    let initial_revision = state.snapshot().revision;
+    let initial_revision = state.full_snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
     let error = state
@@ -5875,7 +5887,7 @@ fn remote_parallel_agents_update_missing_target_rejects_gap_without_advancing_re
         "gap ParallelAgentsUpdate should not publish a local delta"
     );
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert_eq!(snapshot.revision, initial_revision);
     let session = snapshot
         .sessions
@@ -5929,7 +5941,7 @@ fn remote_message_updated_delta_replaces_existing_message_and_publishes_local_de
         )
         .expect("remote message update delta should apply");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -6037,7 +6049,7 @@ fn remote_message_updated_delta_uses_message_id_when_remote_index_is_stale() {
         )
         .expect("remote message update with stale index should apply by id");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -6121,7 +6133,7 @@ fn remote_message_updated_delta_missing_target_errors_without_creating_or_advanc
         user: None,
     };
     let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
-    let initial_revision = state.snapshot().revision;
+    let initial_revision = state.full_snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
     let error = state
@@ -6151,7 +6163,7 @@ fn remote_message_updated_delta_missing_target_errors_without_creating_or_advanc
         "missing-target MessageUpdated should not publish a local delta"
     );
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert_eq!(snapshot.revision, initial_revision);
     let session = snapshot
         .sessions
@@ -6184,7 +6196,7 @@ fn stale_remote_message_updated_delta_is_ignored() {
     };
     let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     apply_remote_created_text_message(&state, &remote.id, 4, "message-1", "Current text.");
-    let revision_after_create = state.snapshot().revision;
+    let revision_after_create = state.full_snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
     state
@@ -6208,7 +6220,7 @@ fn stale_remote_message_updated_delta_is_ignored() {
         "stale MessageUpdated should not publish a local delta"
     );
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert_eq!(snapshot.revision, revision_after_create);
     let session = snapshot
         .sessions
@@ -6242,7 +6254,7 @@ fn stale_remote_message_updated_delta_with_mismatched_payload_id_is_ignored() {
     };
     let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     apply_remote_created_text_message(&state, &remote.id, 4, "message-1", "Current text.");
-    let revision_after_create = state.snapshot().revision;
+    let revision_after_create = state.full_snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
     state
@@ -6266,7 +6278,7 @@ fn stale_remote_message_updated_delta_with_mismatched_payload_id_is_ignored() {
         "stale id-mismatched MessageUpdated should not publish a local delta"
     );
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert_eq!(snapshot.revision, revision_after_create);
     let session = snapshot
         .sessions
@@ -6303,7 +6315,7 @@ fn remote_message_updated_delta_rejects_payload_id_mismatch() {
     };
     let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     apply_remote_created_text_message(&state, &remote.id, 2, "message-1", "Current text.");
-    let revision_after_create = state.snapshot().revision;
+    let revision_after_create = state.full_snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
     let error = state
@@ -6333,7 +6345,7 @@ fn remote_message_updated_delta_rejects_payload_id_mismatch() {
         "id-mismatched MessageUpdated should not publish a local delta"
     );
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert_eq!(snapshot.revision, revision_after_create);
     let session = snapshot
         .sessions
@@ -6469,7 +6481,7 @@ fn remote_same_revision_deltas_apply_in_sequence() {
         _ => panic!("unexpected second delta variant"),
     }
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -7600,7 +7612,7 @@ fn remote_snapshot_sync_skips_orchestrators_without_a_local_project_mapping() {
         )
         .expect("snapshot should still apply even when orchestration localization fails");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert!(snapshot.orchestrators.is_empty());
     assert!(snapshot.sessions.is_empty());
 
@@ -7973,7 +7985,7 @@ fn remote_snapshot_sync_preserves_sessions_referenced_by_existing_orchestrators_
         .apply_remote_state_snapshot(&remote.id, invalid_state)
         .expect("remote snapshot should still apply when orchestrator localization fails");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert_eq!(
         snapshot
             .sessions
@@ -8083,7 +8095,7 @@ fn focused_remote_state_sync_rolls_back_proxy_sessions_when_orchestrator_localiz
         .sync_remote_state_for_target(&target, invalid_state)
         .expect("focused remote sync should preserve the target session update");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert_eq!(
         snapshot
             .sessions
@@ -8213,7 +8225,7 @@ fn focused_remote_state_sync_skips_stale_revision() {
         .sync_remote_state_for_target(&target, stale_state)
         .expect("stale focused sync should be ignored");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert_eq!(
         snapshot
             .sessions
@@ -8260,7 +8272,7 @@ fn remote_snapshot_sync_removes_missing_proxy_sessions() {
         (kept.session.id, removed.session.id, local.session.id)
     };
 
-    let mut remote_state = state.snapshot();
+    let mut remote_state = state.full_snapshot();
     let mut remote_session = remote_state
         .sessions
         .iter()
@@ -8275,7 +8287,7 @@ fn remote_snapshot_sync_removes_missing_proxy_sessions() {
         .apply_remote_state_snapshot("ssh-lab", remote_state)
         .expect("remote snapshot should apply");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert!(
         snapshot
             .sessions
@@ -8341,7 +8353,7 @@ fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
         (remote_record.session.id, local_record.session.id)
     };
 
-    let mut first_full_state_response = state.snapshot();
+    let mut first_full_state_response = state.full_snapshot();
     let mut first_remote_session = first_full_state_response
         .sessions
         .iter()
@@ -8354,7 +8366,7 @@ fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
     let first_full_state_response =
         serde_json::to_string(&first_full_state_response).expect("state response should encode");
 
-    let mut second_full_state_response = state.snapshot();
+    let mut second_full_state_response = state.full_snapshot();
     let mut second_remote_session = second_full_state_response
         .sessions
         .iter()
@@ -8469,7 +8481,7 @@ fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
     dispatch_remote_event(&state, "ssh-lab", "state", &second_data_lines)
         .expect("newer fallback revision should trigger another resync");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert!(
         snapshot
             .sessions
@@ -8580,6 +8592,24 @@ fn state_inner_remote_applied_revision_methods_cover_monotonic_cases() {
     assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 9));
     assert!(!inner.should_skip_remote_applied_revision("ssh-lab-2", 1));
     assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab-2", 1));
+}
+
+// Pins the snapshot-specific predicate because it intentionally differs
+// from both generic state snapshots and transcript deltas.
+#[test]
+fn state_inner_remote_applied_snapshot_revision_predicate_covers_boundary_cases() {
+    let mut inner = StateInner::new();
+
+    inner.note_remote_applied_revision("applied-only", 10);
+    assert!(!inner.should_skip_remote_applied_snapshot_revision("applied-only", 10));
+    assert!(inner.should_skip_remote_applied_snapshot_revision("applied-only", 9));
+    assert!(!inner.should_skip_remote_applied_snapshot_revision("applied-only", 11));
+
+    inner.note_remote_applied_snapshot_revision("snapshot-only", 10);
+    assert!(inner.should_skip_remote_applied_snapshot_revision("snapshot-only", 10));
+    assert!(inner.should_skip_remote_applied_snapshot_revision("snapshot-only", 9));
+    assert!(!inner.should_skip_remote_applied_snapshot_revision("snapshot-only", 11));
+    assert!(!inner.should_skip_remote_applied_snapshot_revision("other-remote", 10));
 }
 
 // Pins that decode_remote_json strips control characters, replaces
@@ -8834,7 +8864,7 @@ fn remote_state_event_applies_non_fallback_empty_snapshot_payload() {
     dispatch_remote_event(&state, "ssh-lab", "state", &data_lines)
         .expect("ordinary empty state payload should apply");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     assert!(
         !snapshot
             .sessions
@@ -8847,6 +8877,19 @@ fn remote_state_event_applies_non_fallback_empty_snapshot_payload() {
             .iter()
             .any(|session| session.id == local_session_id)
     );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(
+        inner.remote_snapshot_applied_revisions.get("ssh-lab"),
+        Some(&1)
+    );
+    assert_eq!(
+        inner
+            .remote_transcript_snapshot_applied_revisions
+            .get("ssh-lab"),
+        None
+    );
+    drop(inner);
+
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 

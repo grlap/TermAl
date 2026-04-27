@@ -12,6 +12,17 @@ function createCanceledError(stack: string) {
 }
 
 describe("monaco cancellation rejection filter", () => {
+  it("no-ops without a DOM window when no target is provided", () => {
+    const originalWindow = globalThis.window;
+
+    vi.stubGlobal("window", undefined);
+    try {
+      expect(() => installMonacoCancellationRejectionFilter()).not.toThrow();
+    } finally {
+      vi.stubGlobal("window", originalWindow);
+    }
+  });
+
   it("recognizes Monaco diff worker cancellations", () => {
     expect(
       isBenignMonacoCancellationReason(

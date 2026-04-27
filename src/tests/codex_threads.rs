@@ -577,7 +577,7 @@ fn codex_archive_and_unarchive_actions_update_thread_state_and_block_dispatch() 
         .unwrap();
 
     let initial_session = state
-        .snapshot()
+        .full_snapshot()
         .sessions
         .into_iter()
         .find(|session| session.id == session_id)
@@ -748,7 +748,7 @@ fn shared_codex_archive_notifications_update_thread_state() {
     .unwrap();
 
     let archived_session = state
-        .snapshot()
+        .full_snapshot()
         .sessions
         .into_iter()
         .find(|session| session.id == session_id)
@@ -770,7 +770,7 @@ fn shared_codex_archive_notifications_update_thread_state() {
     .unwrap();
 
     let restored_session = state
-        .snapshot()
+        .full_snapshot()
         .sessions
         .into_iter()
         .find(|session| session.id == session_id)
@@ -853,7 +853,7 @@ fn shared_codex_model_rerouted_notification_records_notice() {
     .unwrap();
 
     let session = state
-        .snapshot()
+        .full_snapshot()
         .sessions
         .into_iter()
         .find(|session| session.id == session_id)
@@ -954,7 +954,7 @@ fn shared_codex_compaction_notice_inserts_before_visible_assistant_output() {
     .unwrap();
 
     let session = state
-        .snapshot()
+        .full_snapshot()
         .sessions
         .into_iter()
         .find(|session| session.id == session_id)

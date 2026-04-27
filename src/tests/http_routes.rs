@@ -18,6 +18,27 @@
 
 use super::*;
 
+struct HttpRouteTestFiles {
+    persistence_path: std::path::PathBuf,
+    orchestrator_templates_path: std::path::PathBuf,
+}
+
+impl HttpRouteTestFiles {
+    fn capture(state: &AppState) -> Self {
+        Self {
+            persistence_path: state.persistence_path.as_ref().clone(),
+            orchestrator_templates_path: state.orchestrator_templates_path.as_ref().clone(),
+        }
+    }
+}
+
+impl Drop for HttpRouteTestFiles {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.persistence_path);
+        let _ = fs::remove_file(&self.orchestrator_templates_path);
+    }
+}
+
 // Pins `POST /api/sessions` — asserts 201 Created with a
 // `CreateSessionResponse` whose `session` field carries the normalized
 // workdir and default `Agent::Codex`. Guards against handler regressions
@@ -25,6 +46,7 @@ use super::*;
 #[tokio::test]
 async fn create_session_route_returns_created_response() {
     let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
     let initial_session_count = state.snapshot().sessions.len();
     let app = app_router(state.clone());
     let body = serde_json::to_vec(&json!({
@@ -64,6 +86,7 @@ async fn create_session_route_returns_created_response() {
 #[tokio::test]
 async fn get_session_route_returns_full_session() {
     let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
     let app = app_router(state.clone());
     let created = state
         .create_session(CreateSessionRequest {
@@ -113,6 +136,7 @@ async fn get_session_route_returns_full_session() {
 #[tokio::test]
 async fn snapshot_bearing_routes_include_message_count() {
     let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
     let created = state
         .create_session(CreateSessionRequest {
             name: Some("Counted Session".to_owned()),
@@ -204,6 +228,7 @@ async fn snapshot_bearing_routes_include_message_count() {
 #[tokio::test]
 async fn send_message_route_returns_full_session_and_publishes_prompt_delta() {
     let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
     let session_id = test_session_id(&state, Agent::Claude);
     let (runtime, _input_rx) = test_claude_runtime_handle("send-message-route-full-session");
     {
@@ -288,6 +313,111 @@ async fn send_message_route_returns_full_session_and_publishes_prompt_delta() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+fn next_delta_event(delta_events: &mut broadcast::Receiver<String>) -> DeltaEvent {
+    let payload = delta_events
+        .try_recv()
+        .expect("delta event should be published");
+    serde_json::from_str(&payload).expect("delta event should decode")
+}
+
+// Pins `message_count` on representative local streaming delta emitters. The
+// frontend uses this metadata to reconcile metadata-first snapshots with
+// transcript deltas, so Rust-side wire regressions must fail here instead of
+// only in frontend fixture tests.
+#[test]
+fn local_streaming_delta_events_include_message_count() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Claude);
+    let mut delta_events = state.subscribe_delta_events();
+
+    state
+        .push_message(
+            &session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: "text-1".to_owned(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: String::new(),
+                expanded_text: None,
+            },
+        )
+        .expect("streaming text placeholder should be recorded");
+    let _ = next_delta_event(&mut delta_events);
+
+    state
+        .append_text_delta(&session_id, "text-1", "hello")
+        .expect("text delta should append");
+    match next_delta_event(&mut delta_events) {
+        DeltaEvent::TextDelta { message_count, .. } => assert_eq!(message_count, 1),
+        _ => panic!("expected TextDelta"),
+    }
+
+    state
+        .replace_text_message(&session_id, "text-1", "hello final")
+        .expect("text replacement should publish");
+    match next_delta_event(&mut delta_events) {
+        DeltaEvent::TextReplace { message_count, .. } => assert_eq!(message_count, 1),
+        _ => panic!("expected TextReplace"),
+    }
+
+    state
+        .upsert_command_message(
+            &session_id,
+            "command-1",
+            "pwd",
+            "",
+            CommandStatus::Running,
+        )
+        .expect("command message should be created");
+    let _ = next_delta_event(&mut delta_events);
+    state
+        .upsert_command_message(
+            &session_id,
+            "command-1",
+            "pwd",
+            "/tmp",
+            CommandStatus::Success,
+        )
+        .expect("command update should publish");
+    match next_delta_event(&mut delta_events) {
+        DeltaEvent::CommandUpdate { message_count, .. } => assert_eq!(message_count, 2),
+        _ => panic!("expected CommandUpdate"),
+    }
+
+    let running_agent = ParallelAgentProgress {
+        detail: Some("Checking files".to_owned()),
+        id: "agent-1".to_owned(),
+        status: ParallelAgentStatus::Running,
+        title: "Reviewer".to_owned(),
+    };
+    state
+        .upsert_parallel_agents_message(&session_id, "agents-1", vec![running_agent])
+        .expect("parallel agents message should be created");
+    let _ = next_delta_event(&mut delta_events);
+    state
+        .upsert_parallel_agents_message(
+            &session_id,
+            "agents-1",
+            vec![ParallelAgentProgress {
+                detail: Some("Done".to_owned()),
+                id: "agent-1".to_owned(),
+                status: ParallelAgentStatus::Completed,
+                title: "Reviewer".to_owned(),
+            }],
+        )
+        .expect("parallel agents update should publish");
+    match next_delta_event(&mut delta_events) {
+        DeltaEvent::ParallelAgentsUpdate { message_count, .. } => {
+            assert_eq!(message_count, 3)
+        }
+        _ => panic!("expected ParallelAgentsUpdate"),
+    }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Tests that the empty SSE fallback payload carries an explicit fallback marker.
 #[test]
 fn empty_state_events_payload_carries_explicit_fallback_marker() {
@@ -323,6 +453,7 @@ fn fallback_state_events_payload_uses_supplied_revision() {
 #[tokio::test]
 async fn state_events_route_streams_initial_state_and_live_deltas() {
     let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
     let session_id = test_session_id(&state, Agent::Codex);
     let app = app_router(state.clone());
     let response = request_response(
@@ -381,6 +512,7 @@ async fn state_events_route_streams_initial_state_and_live_deltas() {
     assert_eq!(delta["type"], "messageCreated");
     assert_eq!(delta["sessionId"], session_id);
     assert_eq!(delta["messageId"], message_id);
+    assert_eq!(delta["messageCount"], 1);
     assert_eq!(delta["message"]["type"], "text");
     assert_eq!(delta["message"]["text"], "Live delta");
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -394,6 +526,7 @@ async fn state_events_route_streams_initial_state_and_live_deltas() {
 #[tokio::test]
 async fn state_events_route_streams_workspace_layout_summary_updates() {
     let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
     let app = app_router(state.clone());
     let response = request_response(
         &app,
@@ -510,6 +643,7 @@ async fn state_events_route_streams_workspace_layout_summary_updates() {
 #[tokio::test]
 async fn state_events_route_streams_orchestrator_creation_state_and_live_orchestrator_deltas() {
     let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
     let project_root = std::env::temp_dir().join(format!(
         "termal-orchestrator-events-route-{}",
         Uuid::new_v4()
@@ -625,6 +759,7 @@ async fn state_events_route_streams_orchestrator_creation_state_and_live_orchest
 #[tokio::test]
 async fn codex_thread_action_routes_update_session_state() {
     let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
     let session_id = test_session_id(&state, Agent::Codex);
     state
         .set_external_session_id(&session_id, "thread-live".to_owned())
@@ -791,6 +926,7 @@ async fn codex_thread_action_routes_update_session_state() {
 #[tokio::test]
 async fn codex_thread_rollback_route_falls_back_when_history_is_unavailable() {
     let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
     let session_id = test_session_id(&state, Agent::Codex);
     state
         .set_external_session_id(&session_id, "thread-live".to_owned())
@@ -884,6 +1020,7 @@ async fn codex_thread_rollback_route_falls_back_when_history_is_unavailable() {
 #[tokio::test]
 async fn codex_thread_fork_route_returns_created_response() {
     let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
     let created = state
         .create_session(CreateSessionRequest {
             agent: Some(Agent::Codex),

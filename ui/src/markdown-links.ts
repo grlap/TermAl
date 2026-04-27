@@ -68,6 +68,8 @@ export type MarkdownFileLinkTarget = {
   openInNewTab?: boolean;
 };
 
+export const MARKDOWN_INTERNAL_LINK_HREF_ATTRIBUTE = "data-markdown-link-href";
+
 export function resolveMarkdownFileLinkTarget(
   href: string | undefined,
   workspaceRoot: string | null,
@@ -188,6 +190,22 @@ export function transformMarkdownLinkUri(href: string) {
   // renders an empty href as a plain `<span>` so there's no inert
   // same-page-navigate behaviour either.
   return transformed === "javascript:void(0)" ? "" : transformed;
+}
+
+export function shouldScrubMarkdownDomHref(href: string | undefined) {
+  const normalizedHref = normalizeMarkdownLocalFileHref(href);
+  if (!normalizedHref) {
+    return false;
+  }
+
+  const decodedHref = safeDecodeMarkdownHref(normalizedHref);
+  return (
+    /^file:\/\//i.test(normalizedHref) ||
+    /^\/[A-Za-z]:[\\/]/.test(normalizedHref) ||
+    /^[A-Za-z]:[\\/]/.test(normalizedHref) ||
+    /^\/[A-Za-z]:[\\/]/.test(decodedHref) ||
+    /^[A-Za-z]:[\\/]/.test(decodedHref)
+  );
 }
 
 export function safeDecodeMarkdownHref(href: string) {

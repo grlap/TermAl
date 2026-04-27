@@ -256,7 +256,7 @@ fn late_turn_file_changes_are_summarized_during_grace_window() {
         size_bytes: None,
     }]);
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -426,7 +426,7 @@ fn late_turn_file_change_grace_window_emits_only_once() {
         size_bytes: None,
     }]);
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()

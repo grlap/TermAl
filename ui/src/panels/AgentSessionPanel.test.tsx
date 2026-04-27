@@ -117,7 +117,9 @@ function renderSessionPanelWithDefaults(
 }
 
 afterEach(() => {
-  resetSessionStoreForTesting();
+  act(() => {
+    resetSessionStoreForTesting();
+  });
 });
 
 describe("AgentSessionPanel conversation caching", () => {
@@ -135,10 +137,12 @@ describe("AgentSessionPanel conversation caching", () => {
         },
       ],
     });
-    syncComposerSessionsStore({
-      sessions: [activeSession],
-      draftsBySessionId: {},
-      draftAttachmentsBySessionId: {},
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [activeSession],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
     });
 
     const renderPanel = (
@@ -198,6 +202,310 @@ describe("AgentSessionPanel conversation caching", () => {
       "session-a",
       "approval-message",
       "accepted",
+    );
+  });
+
+  it("dispatches prompt settings through the latest parent callback after handler-only rerenders", async () => {
+    const initialSessionSettingsChange = vi.fn();
+    const latestSessionSettingsChange = vi.fn();
+    const activeSession = makeSession("session-a", {
+      agent: "Codex",
+      model: "gpt-5.4",
+    });
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [activeSession],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+
+    const renderPanel = (
+      onSessionSettingsChange: Parameters<typeof AgentSessionPanel>[0]["onSessionSettingsChange"],
+    ) => (
+      <AgentSessionPanel
+        paneId="pane-1"
+        viewMode="prompt"
+        activeSessionId={activeSession.id}
+        isLoading={false}
+        isUpdating={false}
+        showWaitingIndicator={false}
+        waitingIndicatorPrompt={null}
+        commandMessages={[]}
+        diffMessages={[]}
+        scrollContainerRef={{ current: document.createElement("section") }}
+        onApprovalDecision={() => {}}
+        onUserInputSubmit={() => {}}
+        onMcpElicitationSubmit={() => {}}
+        onCodexAppRequestSubmit={() => {}}
+        onCancelQueuedPrompt={() => {}}
+        onSessionSettingsChange={onSessionSettingsChange}
+        conversationSearchQuery=""
+        conversationSearchMatchedItemKeys={new Set()}
+        conversationSearchActiveItemKey={null}
+        onConversationSearchItemMount={() => {}}
+        renderCommandCard={() => null}
+        renderDiffCard={() => null}
+        renderMessageCard={(message) => (
+          <article className="message-card">{message.id}</article>
+        )}
+        renderPromptSettings={(_paneId, session, _isUpdating, onChange) => (
+          <button
+            type="button"
+            onClick={() => onChange(session.id, "model", "gpt-5.3-codex")}
+          >
+            Apply latest settings
+          </button>
+        )}
+      />
+    );
+
+    const { rerender } = render(renderPanel(initialSessionSettingsChange));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      rerender(renderPanel(latestSessionSettingsChange));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Apply latest settings" }));
+      await Promise.resolve();
+    });
+
+    expect(initialSessionSettingsChange).not.toHaveBeenCalled();
+    expect(latestSessionSettingsChange).toHaveBeenCalledWith(
+      "session-a",
+      "model",
+      "gpt-5.3-codex",
+    );
+  });
+
+  it("refreshes prompt settings when only the prompt renderer changes", async () => {
+    const activeSession = makeSession("session-a", {
+      agent: "Codex",
+      model: "gpt-5.4",
+    });
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [activeSession],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+
+    const scrollContainerRef = { current: document.createElement("section") };
+    const matchedItemKeys = new Set<string>();
+    const noopApproval = () => {};
+    const noopUserInput = () => {};
+    const noopElicitation = () => {};
+    const noopAppRequest = () => {};
+    const noopCancel = () => {};
+    const noopSettingsChange = () => {};
+    const noopSearchMount = () => {};
+    const renderCommandCard = () => null;
+    const renderDiffCard = () => null;
+    const renderMessageCard = (message: Message) => (
+      <article className="message-card">{message.id}</article>
+    );
+
+    const renderPanel = (
+      promptLabel: string,
+    ) => (
+      <AgentSessionPanel
+        paneId="pane-1"
+        viewMode="prompt"
+        activeSessionId={activeSession.id}
+        isLoading={false}
+        isUpdating={false}
+        showWaitingIndicator={false}
+        waitingIndicatorPrompt={null}
+        commandMessages={[]}
+        diffMessages={[]}
+        scrollContainerRef={scrollContainerRef}
+        onApprovalDecision={noopApproval}
+        onUserInputSubmit={noopUserInput}
+        onMcpElicitationSubmit={noopElicitation}
+        onCodexAppRequestSubmit={noopAppRequest}
+        onCancelQueuedPrompt={noopCancel}
+        onSessionSettingsChange={noopSettingsChange}
+        conversationSearchQuery=""
+        conversationSearchMatchedItemKeys={matchedItemKeys}
+        conversationSearchActiveItemKey={null}
+        onConversationSearchItemMount={noopSearchMount}
+        renderCommandCard={renderCommandCard}
+        renderDiffCard={renderDiffCard}
+        renderMessageCard={renderMessageCard}
+        renderPromptSettings={() => <p>{promptLabel}</p>}
+      />
+    );
+
+    const { rerender } = render(renderPanel("Initial prompt renderer"));
+    expect(screen.getByText("Initial prompt renderer")).toBeInTheDocument();
+
+    await act(async () => {
+      rerender(renderPanel("Latest prompt renderer"));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("Initial prompt renderer")).not.toBeInTheDocument();
+    expect(screen.getByText("Latest prompt renderer")).toBeInTheDocument();
+  });
+
+  it("dispatches Codex app requests through the latest parent callback after handler-only rerenders", async () => {
+    const initialCodexAppRequestSubmit = vi.fn();
+    const latestCodexAppRequestSubmit = vi.fn();
+    const activeSession = makeSession("session-a", {
+      messages: [
+        {
+          author: "assistant",
+          id: "app-request-message",
+          text: "App request",
+          timestamp: "10:00",
+          type: "text",
+        },
+      ],
+    });
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [activeSession],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+
+    const renderPanel = (
+      onCodexAppRequestSubmit: Parameters<typeof AgentSessionPanel>[0]["onCodexAppRequestSubmit"],
+    ) => (
+      <AgentSessionPanel
+        paneId="pane-1"
+        viewMode="session"
+        activeSessionId={activeSession.id}
+        isLoading={false}
+        isUpdating={false}
+        showWaitingIndicator={false}
+        waitingIndicatorPrompt={null}
+        commandMessages={[]}
+        diffMessages={[]}
+        scrollContainerRef={{ current: document.createElement("section") }}
+        onApprovalDecision={() => {}}
+        onUserInputSubmit={() => {}}
+        onMcpElicitationSubmit={() => {}}
+        onCodexAppRequestSubmit={onCodexAppRequestSubmit}
+        onCancelQueuedPrompt={() => {}}
+        onSessionSettingsChange={() => {}}
+        conversationSearchQuery=""
+        conversationSearchMatchedItemKeys={new Set()}
+        conversationSearchActiveItemKey={null}
+        onConversationSearchItemMount={() => {}}
+        renderCommandCard={() => null}
+        renderDiffCard={() => null}
+        renderMessageCard={(message, _isLive, _approve, _input, _elicitation, submitAppRequest) => (
+          <button
+            type="button"
+            onClick={() => submitAppRequest(message.id, { decision: "accepted" })}
+          >
+            Submit app request
+          </button>
+        )}
+        renderPromptSettings={() => null}
+      />
+    );
+
+    const { rerender } = render(renderPanel(initialCodexAppRequestSubmit));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      rerender(renderPanel(latestCodexAppRequestSubmit));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Submit app request" }));
+      await Promise.resolve();
+    });
+
+    expect(initialCodexAppRequestSubmit).not.toHaveBeenCalled();
+    expect(latestCodexAppRequestSubmit).toHaveBeenCalledWith(
+      "session-a",
+      "app-request-message",
+      { decision: "accepted" },
+    );
+  });
+
+  it("cancels queued prompts through the latest parent callback after handler-only rerenders", async () => {
+    const initialCancelQueuedPrompt = vi.fn();
+    const latestCancelQueuedPrompt = vi.fn();
+    const activeSession = makeSession("session-a", {
+      pendingPrompts: [
+        {
+          id: "queued-prompt",
+          text: "queued prompt",
+          timestamp: "10:00",
+        },
+      ],
+    });
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [activeSession],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+
+    const renderPanel = (
+      onCancelQueuedPrompt: Parameters<typeof AgentSessionPanel>[0]["onCancelQueuedPrompt"],
+    ) => (
+      <AgentSessionPanel
+        paneId="pane-1"
+        viewMode="session"
+        activeSessionId={activeSession.id}
+        isLoading={false}
+        isUpdating={false}
+        showWaitingIndicator={false}
+        waitingIndicatorPrompt={null}
+        commandMessages={[]}
+        diffMessages={[]}
+        scrollContainerRef={{ current: document.createElement("section") }}
+        onApprovalDecision={() => {}}
+        onUserInputSubmit={() => {}}
+        onMcpElicitationSubmit={() => {}}
+        onCodexAppRequestSubmit={() => {}}
+        onCancelQueuedPrompt={onCancelQueuedPrompt}
+        onSessionSettingsChange={() => {}}
+        conversationSearchQuery=""
+        conversationSearchMatchedItemKeys={new Set()}
+        conversationSearchActiveItemKey={null}
+        onConversationSearchItemMount={() => {}}
+        renderCommandCard={() => null}
+        renderDiffCard={() => null}
+        renderMessageCard={(message) => (
+          <article className="message-card">{message.id}</article>
+        )}
+        renderPromptSettings={() => null}
+      />
+    );
+
+    const { rerender } = render(renderPanel(initialCancelQueuedPrompt));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      rerender(renderPanel(latestCancelQueuedPrompt));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel queued prompt" }));
+      await Promise.resolve();
+    });
+
+    expect(initialCancelQueuedPrompt).not.toHaveBeenCalled();
+    expect(latestCancelQueuedPrompt).toHaveBeenCalledWith(
+      "session-a",
+      "queued-prompt",
     );
   });
 

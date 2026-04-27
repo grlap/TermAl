@@ -680,7 +680,7 @@ describe("App session lifecycle", () => {
     });
   });
 
-  it("does not arm the active-prompt poll when a successful send response is adopted", async () => {
+  it("arms the active-prompt poll when an adopted send response is still active", async () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -719,9 +719,44 @@ describe("App session lifecycle", () => {
           }),
         ],
       });
+      const pollState = makeStateResponse({
+        revision: 3,
+        projects: [project],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Session 1",
+            projectId: project.id,
+            workdir: project.rootPath,
+            status: "idle",
+            preview: "Recovered after adopted response",
+            messages: [
+              {
+                id: "message-1",
+                timestamp: "2026-04-19T10:00:00Z",
+                author: "you",
+                type: "text",
+                text: "Keep working",
+              },
+              {
+                id: "message-2",
+                timestamp: "2026-04-19T10:00:01Z",
+                author: "assistant",
+                type: "text",
+                text: "Recovered after adopted response",
+              },
+            ],
+          }),
+        ],
+      });
       const fetchMock = vi.fn(
         async (input: RequestInfo | URL, init?: RequestInit) => {
           const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse(pollState);
+          }
+
           if (
             requestUrl.pathname === "/api/sessions/session-1/messages" &&
             (init?.method ?? "GET").toUpperCase() === "POST"
@@ -789,8 +824,11 @@ describe("App session lifecycle", () => {
         await advanceTimers(ACTIVE_PROMPT_POLL_INTERVAL_MS);
         await settleAsyncUi();
 
-        expect(fetchMock).not.toHaveBeenCalled();
-        expect(screen.getAllByText("Keep working").length).toBeGreaterThan(0);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/state");
+        expect(
+          screen.getAllByText("Recovered after adopted response").length,
+        ).toBeGreaterThan(0);
       } finally {
         scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);

@@ -123,8 +123,9 @@ fn stops_shared_codex_sessions_via_turn_interrupt() {
         }
     });
 
-    let snapshot = state.stop_session(&session_id).unwrap();
-    let session = snapshot
+    state.stop_session(&session_id).unwrap();
+    let full_snapshot = state.full_snapshot();
+    let session = full_snapshot
         .sessions
         .iter()
         .find(|session| session.id == session_id)
@@ -224,8 +225,9 @@ fn stop_session_detaches_shared_codex_session_when_interrupt_fails() {
         );
     }
 
-    let snapshot = state.stop_session(&session_id).unwrap();
-    let session = snapshot
+    state.stop_session(&session_id).unwrap();
+    let full_snapshot = state.full_snapshot();
+    let session = full_snapshot
         .sessions
         .iter()
         .find(|session| session.id == session_id)
@@ -400,12 +402,13 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
         }
     });
 
-    let snapshot = state.stop_session(&session_id).unwrap();
+    state.stop_session(&session_id).unwrap();
     command_thread
         .join()
         .expect("shared Codex command thread should join cleanly");
 
-    let session = snapshot
+    let full_snapshot = state.full_snapshot();
+    let session = full_snapshot
         .sessions
         .iter()
         .find(|session| session.id == session_id)
@@ -508,7 +511,7 @@ fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
         sync_pending_prompts(&mut inner.sessions[index]);
     }
 
-    let baseline_revision = state.snapshot().revision;
+    let baseline_revision = state.full_snapshot().revision;
     let mut state_events = state.subscribe_events();
     let _failure_guard = force_test_kill_child_process_failure(&process, "Claude");
     let error = match state.stop_session(&session_id) {
@@ -517,7 +520,7 @@ fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
     };
     assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
     assert!(error.message.contains("failed to stop session `"));
-    assert_eq!(state.snapshot().revision, baseline_revision);
+    assert_eq!(state.full_snapshot().revision, baseline_revision);
     assert!(matches!(
         state_events.try_recv(),
         Err(broadcast::error::TryRecvError::Empty)
@@ -598,7 +601,7 @@ fn stop_session_keeps_the_previous_state_visible_until_shutdown_completes() {
         std::thread::sleep(Duration::from_millis(5));
     }
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -751,7 +754,7 @@ fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
         inner.sessions[index].runtime_stop_in_progress = true;
     }
 
-    let baseline_revision = state.snapshot().revision;
+    let baseline_revision = state.full_snapshot().revision;
     let mut state_events = state.subscribe_events();
 
     state
@@ -767,7 +770,7 @@ fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
         .finish_turn_ok_if_runtime_matches(&session_id, &runtime_token)
         .expect("finish_turn_ok_if_runtime_matches should succeed");
 
-    assert_eq!(state.snapshot().revision, baseline_revision);
+    assert_eq!(state.full_snapshot().revision, baseline_revision);
     assert!(matches!(
         state_events.try_recv(),
         Err(broadcast::error::TryRecvError::Empty)
@@ -833,14 +836,14 @@ fn fail_turn_if_runtime_matches_publishes_error_state_when_persist_fails() {
     state.persistence_path = Arc::new(failing_persistence_path.clone());
     state.persist_tx = mpsc::channel().0;
 
-    let baseline_revision = state.snapshot().revision;
+    let baseline_revision = state.full_snapshot().revision;
     let mut state_events = state.subscribe_events();
 
     state
         .fail_turn_if_runtime_matches(&session_id, &runtime_token, "persist fallback failure")
         .expect("fail_turn_if_runtime_matches should publish even when persistence fails");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -902,7 +905,7 @@ fn codex_thread_state_updates_are_suppressed_while_stop_is_in_progress() {
         inner.sessions[index].runtime_stop_in_progress = true;
     }
 
-    let baseline_revision = state.snapshot().revision;
+    let baseline_revision = state.full_snapshot().revision;
     let mut state_events = state.subscribe_events();
 
     state
@@ -913,7 +916,7 @@ fn codex_thread_state_updates_are_suppressed_while_stop_is_in_progress() {
         )
         .expect("set_codex_thread_state_if_runtime_matches should succeed");
 
-    assert_eq!(state.snapshot().revision, baseline_revision);
+    assert_eq!(state.full_snapshot().revision, baseline_revision);
     assert!(matches!(
         state_events.try_recv(),
         Err(broadcast::error::TryRecvError::Empty)
@@ -993,7 +996,7 @@ fn shared_codex_runtime_exit_clears_state_and_kills_process() {
         )
         .expect("shared Codex runtime exit should succeed");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()

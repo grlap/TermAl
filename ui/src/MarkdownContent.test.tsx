@@ -68,6 +68,7 @@ describe("MarkdownContent inline file links", () => {
 
     const link = screen.getByRole("link", { name: "experience.tex.#L63" });
     expect(link).toHaveClass("inline-code-link");
+    expect(link).toHaveAttribute("href", "#");
     expect(link).toHaveAttribute("draggable", "false");
 
     fireEvent.click(link);
@@ -1361,6 +1362,82 @@ describe("MarkdownContent", () => {
       line: 469,
       openInNewTab: false,
     });
+  });
+
+  it("keeps encoded Windows file links inert while routing through the source callback", () => {
+    const onOpenSourceLink = vi.fn();
+
+    render(
+      <MarkdownContent
+        markdown="[README](C:%5Crepo%5Cdocs%5CREADME.md#L9)"
+        onOpenSourceLink={onOpenSourceLink}
+        workspaceRoot="C:/repo"
+      />,
+    );
+
+    const link = screen.getByText("README").closest("a");
+    expect(link).not.toBeNull();
+    expect(link).toHaveAttribute("href", "#");
+    expect(link).toHaveAttribute(
+      "data-markdown-link-href",
+      "C:%5Crepo%5Cdocs%5CREADME.md#L9",
+    );
+    expect(link).not.toHaveAttribute("target");
+
+    fireEvent.click(link!);
+
+    expect(onOpenSourceLink).toHaveBeenCalledWith({
+      path: String.raw`C:\repo\docs\README.md`,
+      line: 9,
+      openInNewTab: false,
+    });
+  });
+
+  it("does not expose encoded Windows file links as DOM c-scheme hrefs without a source callback", () => {
+    render(
+      <MarkdownContent
+        markdown="[README](C:%5Crepo%5Cdocs%5CREADME.md)"
+        workspaceRoot="C:/repo"
+      />,
+    );
+
+    const link = screen.getByText("README").closest("a");
+    expect(link).not.toBeNull();
+    expect(link).toHaveAttribute("href", "#");
+    expect(document.querySelector('a[href^="c:"]')).toBeNull();
+
+    const clickEvent = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+    });
+    link!.dispatchEvent(clickEvent);
+
+    expect(clickEvent.defaultPrevented).toBe(true);
+  });
+
+  it("scrubs encoded Windows file-link hrefs even when source resolution fails", () => {
+    render(
+      <MarkdownContent
+        markdown="[README](C:%5Coutside%5CREADME.md)"
+        workspaceRoot="D:/repo"
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: "README" });
+    expect(link).toHaveAttribute("href", "#");
+    expect(link).toHaveAttribute(
+      "data-markdown-link-href",
+      "C:%5Coutside%5CREADME.md",
+    );
+    expect(document.querySelector('a[href^="c:"]')).toBeNull();
+
+    const clickEvent = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+    });
+    link.dispatchEvent(clickEvent);
+
+    expect(clickEvent.defaultPrevented).toBe(true);
   });
 
   it("opens absolute Linux file links through the source callback", () => {

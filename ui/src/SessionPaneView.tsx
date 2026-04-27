@@ -1292,6 +1292,25 @@ export function SessionPaneView({
     onSelectTab(pane.id, nextTab.id);
   }
 
+  function resolvePaneTabCycleDirection(event: {
+    altKey: boolean;
+    ctrlKey: boolean;
+    key: string;
+    metaKey: boolean;
+    shiftKey: boolean;
+  }): -1 | 1 | null {
+    if (
+      !event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      (event.key !== "PageUp" && event.key !== "PageDown")
+    ) {
+      return null;
+    }
+    return event.key === "PageUp" ? -1 : 1;
+  }
+
   function isNestedEditablePageKeyTarget(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) {
       return false;
@@ -1315,6 +1334,21 @@ export function SessionPaneView({
 
   function handlePaneKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
     if (event.defaultPrevented) {
+      return;
+    }
+
+    const tabCycleDirection = isActive
+      ? resolvePaneTabCycleDirection({
+          altKey: event.altKey,
+          ctrlKey: event.ctrlKey,
+          key: event.key,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+        })
+      : null;
+    if (tabCycleDirection != null) {
+      event.preventDefault();
+      selectAdjacentPaneTab(tabCycleDirection);
       return;
     }
 
@@ -1474,33 +1508,6 @@ export function SessionPaneView({
       window.removeEventListener("keydown", handleWindowKeyDown, true);
     };
   }, [canFindInSession, isActive]);
-
-  useEffect(() => {
-    if (!isActive) {
-      return;
-    }
-
-    function handleWindowPaneTabCycle(event: KeyboardEvent) {
-      if (
-        event.defaultPrevented ||
-        !event.altKey ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.shiftKey ||
-        (event.key !== "PageUp" && event.key !== "PageDown")
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-      selectAdjacentPaneTab(event.key === "PageUp" ? -1 : 1);
-    }
-
-    window.addEventListener("keydown", handleWindowPaneTabCycle, true);
-    return () => {
-      window.removeEventListener("keydown", handleWindowPaneTabCycle, true);
-    };
-  }, [activeTab?.id, isActive, onSelectTab, pane.id, pane.tabs]);
 
   const handleNestedTargetPageKeyRef = useRef<((event: KeyboardEvent) => void) | null>(null);
   handleNestedTargetPageKeyRef.current = function handleNestedTargetPageKey(

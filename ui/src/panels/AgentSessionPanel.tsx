@@ -122,6 +122,14 @@ function isSpaceKey(event: {
   );
 }
 
+function useRenderCallback<TArgs extends unknown[], TResult>(
+  callback: (...args: TArgs) => TResult,
+) {
+  const callbackRef = useRef(callback);
+  callbackRef.current = callback;
+  return useCallback((...args: TArgs) => callbackRef.current(...args), []);
+}
+
 
 export function AgentSessionPanel({
   paneId,
@@ -195,6 +203,9 @@ export function AgentSessionPanel({
   );
   const stableOnCancelQueuedPrompt = useStableEvent(onCancelQueuedPrompt);
   const stableOnSessionSettingsChange = useStableEvent(onSessionSettingsChange);
+  const stableRenderCommandCard = useRenderCallback(renderCommandCard);
+  const stableRenderDiffCard = useRenderCallback(renderDiffCard);
+  const stableRenderMessageCard = useRenderCallback(renderMessageCard);
 
   return (
     <SessionBody
@@ -218,9 +229,9 @@ export function AgentSessionPanel({
       conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
       conversationSearchActiveItemKey={conversationSearchActiveItemKey}
       onConversationSearchItemMount={onConversationSearchItemMount}
-      renderCommandCard={renderCommandCard}
-      renderDiffCard={renderDiffCard}
-      renderMessageCard={renderMessageCard}
+      renderCommandCard={stableRenderCommandCard}
+      renderDiffCard={stableRenderDiffCard}
+      renderMessageCard={stableRenderMessageCard}
       renderPromptSettings={renderPromptSettings}
     />
   );
@@ -390,8 +401,11 @@ const SessionBody = memo(function SessionBody({
   ) => JSX.Element | null;
 }): JSX.Element | null {
   // Stabilize render callbacks so children receive a constant function identity.
-  // The latest version is always called through the ref, so closures stay fresh
-  // even though the wrapper identity never changes.
+  // These are render-time callbacks, not event callbacks: children invoke them
+  // while rendering, and the prompt-settings callback is invoked below during
+  // this component's render. Do not replace this with `useStableEvent`, whose
+  // layout-effect publish point is intentionally too late for same-render calls.
+  // The render-phase ref update keeps in-progress render closures available.
   const activeSession = useSessionRecordSnapshot(activeSessionId);
   const resolvedWaitingIndicatorPrompt =
     showWaitingIndicator &&
@@ -523,16 +537,26 @@ const SessionBody = memo(function SessionBody({
   previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
   previous.commandMessages === next.commandMessages &&
   previous.diffMessages === next.diffMessages &&
+  previous.onApprovalDecision === next.onApprovalDecision &&
   previous.onUserInputSubmit === next.onUserInputSubmit &&
   previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
+  previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
+  previous.onCancelQueuedPrompt === next.onCancelQueuedPrompt &&
+  previous.onSessionSettingsChange === next.onSessionSettingsChange &&
   previous.conversationSearchQuery === next.conversationSearchQuery &&
   previous.conversationSearchMatchedItemKeys === next.conversationSearchMatchedItemKeys &&
   previous.conversationSearchActiveItemKey === next.conversationSearchActiveItemKey &&
-  previous.onConversationSearchItemMount === next.onConversationSearchItemMount
-  // Render callbacks (renderMessageCard, renderDiffCard, renderCommandCard,
-  // renderPromptSettings) are intentionally excluded — they are inline closures
-  // whose identity changes every render. SessionBody wraps them in stable refs
-  // so children always call the latest version without triggering re-renders.
+  previous.onConversationSearchItemMount === next.onConversationSearchItemMount &&
+  (previous.viewMode !== "prompt" ||
+    previous.renderPromptSettings === next.renderPromptSettings)
+  // Child render callbacks (renderMessageCard, renderDiffCard, renderCommandCard)
+  // are intentionally excluded — they are inline closures whose identity changes
+  // every render. AgentSessionPanel bridges them through render-phase refs so
+  // child rerenders can still call the latest version without retriggering this
+  // subtree. Prompt settings are different: SessionBody invokes that renderer
+  // directly, so prompt mode compares it to refresh the rendered prompt pane.
+  // Future callbacks: render-time invocations use refs; child event handlers
+  // belong in this comparator so handler-only rerenders publish latest callbacks.
 );
 
 const SessionConversationPage = memo(function SessionConversationPage({

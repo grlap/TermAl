@@ -300,6 +300,12 @@ fn apply_remote_state_if_newer_locked(
 }
 
 fn remote_state_materializes_all_session_transcripts(remote_state: &StateResponse) -> bool {
+    // Empty snapshots provide no transcript evidence; keep same-revision
+    // transcript deltas eligible to fill sessions that appear later.
+    if remote_state.sessions.is_empty() {
+        return false;
+    }
+
     remote_state.sessions.iter().all(|session| {
         session.messages_loaded
             && session.message_count == u32::try_from(session.messages.len()).unwrap_or(u32::MAX)

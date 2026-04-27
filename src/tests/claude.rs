@@ -468,7 +468,7 @@ fn claude_streamed_text_appends_missing_final_suffix_after_message_stop() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -551,7 +551,7 @@ fn claude_streamed_text_skips_duplicate_final_text_after_message_stop() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -624,7 +624,7 @@ fn claude_streamed_text_replaces_divergent_final_text() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -726,7 +726,7 @@ fn claude_tool_use_after_streamed_text_starts_followup_in_new_message() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -890,7 +890,7 @@ fn claude_result_resets_recorder_command_keys_between_turns() {
         .unwrap();
     }
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()

@@ -101,6 +101,31 @@ describe("state revision helpers", () => {
       ).toBe(true);
     });
 
+    it("rejects a late response from a previously seen old server instance", () => {
+      expect(
+        shouldAdoptSnapshotRevision(237, 213, {
+          lastSeenServerInstanceId: "uuid-after-restart",
+          nextServerInstanceId: "uuid-before-restart",
+          seenServerInstanceIds: new Set([
+            "uuid-before-restart",
+            "uuid-after-restart",
+          ]),
+          force: true,
+          allowRevisionDowngrade: true,
+        }),
+      ).toBe(false);
+    });
+
+    it("accepts a revision downgrade for an unseen replacement instance", () => {
+      expect(
+        shouldAdoptSnapshotRevision(237, 213, {
+          lastSeenServerInstanceId: "uuid-before-restart",
+          nextServerInstanceId: "uuid-after-restart",
+          seenServerInstanceIds: new Set(["uuid-before-restart"]),
+        }),
+      ).toBe(true);
+    });
+
     it("still rejects a stale revision on the same server instance", () => {
       // No restart — just an out-of-order stale response. Keep the
       // monotonic guard.

@@ -127,7 +127,7 @@ fn shared_codex_task_complete_event_buffers_subagent_result_until_final_agent_me
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -146,7 +146,7 @@ fn shared_codex_task_complete_event_buffers_subagent_result_until_final_agent_me
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -262,7 +262,7 @@ fn shared_codex_agent_message_event_without_turn_id_uses_active_turn() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -397,7 +397,7 @@ fn shared_codex_agent_message_event_ignores_stale_turn_id_from_params_id() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -416,7 +416,7 @@ fn shared_codex_agent_message_event_ignores_stale_turn_id_from_params_id() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -544,7 +544,7 @@ fn shared_codex_task_complete_event_stays_in_current_turn_after_prior_assistant_
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -566,7 +566,7 @@ fn shared_codex_task_complete_event_stays_in_current_turn_after_prior_assistant_
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -665,7 +665,7 @@ fn shared_codex_task_complete_event_without_active_turn_is_ignored() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -807,7 +807,7 @@ fn shared_codex_task_complete_event_after_streaming_output_inserts_before_answer
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -955,7 +955,7 @@ fn shared_codex_task_complete_event_ignores_stale_summary_from_previous_turn() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -974,7 +974,7 @@ fn shared_codex_task_complete_event_ignores_stale_summary_from_previous_turn() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -1099,7 +1099,7 @@ fn shared_codex_task_complete_event_drops_buffered_summary_on_failed_turn() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -1193,7 +1193,7 @@ fn shared_codex_turn_completed_flushes_buffered_subagent_results_after_output_st
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -1315,7 +1315,7 @@ fn shared_codex_item_completed_event_records_agent_message() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -1468,7 +1468,7 @@ fn shared_codex_item_completed_event_ignores_stale_turn_id_from_params_id() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -1487,7 +1487,7 @@ fn shared_codex_item_completed_event_ignores_stale_turn_id_from_params_id() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -1613,7 +1613,7 @@ fn shared_codex_item_completed_event_concatenates_multipart_agent_message() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -1749,7 +1749,7 @@ fn shared_codex_agent_message_content_delta_event_ignores_stale_turn_id_from_par
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -1768,7 +1768,7 @@ fn shared_codex_agent_message_content_delta_event_ignores_stale_turn_id_from_par
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -1897,7 +1897,7 @@ fn shared_codex_agent_message_final_event_appends_missing_suffix_after_streamed_
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -2010,7 +2010,7 @@ fn shared_codex_agent_message_final_event_replaces_divergent_streamed_text() {
         &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -2030,7 +2030,7 @@ fn shared_codex_agent_message_final_event_replaces_divergent_streamed_text() {
         &mpsc::channel::<CodexRuntimeCommand>().0,
     )
     .unwrap();
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -2174,7 +2174,7 @@ fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_mess
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -2297,7 +2297,7 @@ fn shared_codex_agent_message_event_after_turn_completed_is_recorded() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -2429,7 +2429,7 @@ fn shared_codex_previous_turn_message_is_ignored_after_next_turn_starts() {
         assert!(session_state.completed_turn_id.is_none());
     }
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -2530,7 +2530,7 @@ fn shared_codex_app_server_agent_message_completed_after_turn_completed_is_recor
         .unwrap();
     }
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -2654,7 +2654,7 @@ fn shared_codex_app_server_item_completed_after_turn_completed_is_ignored() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -2830,7 +2830,7 @@ fn shared_codex_completed_turn_cleanup_expires_late_event_window() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -2992,7 +2992,7 @@ fn shared_codex_turn_started_clears_command_recorder_keys_for_new_prompt() {
         .unwrap();
     }
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -3135,7 +3135,7 @@ fn shared_codex_turn_completed_error_clears_recorder_state() {
     assert!(!session_state.turn_state.assistant_output_started);
     drop(sessions);
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -3246,7 +3246,7 @@ fn shared_codex_error_notification_clears_recorder_state() {
     assert!(!session_state.turn_state.assistant_output_started);
     drop(sessions);
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -3446,7 +3446,7 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -3842,7 +3842,7 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
             SessionRuntime::Codex(handle) if handle.runtime_id == runtime.runtime_id
         ));
     }
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -4090,7 +4090,7 @@ fn shared_codex_start_turn_persist_failure_does_not_tear_down_runtime() {
     ));
     drop(inner);
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -4488,7 +4488,7 @@ fn shared_codex_prompt_json_rpc_errors_fail_the_turn_without_tearing_down_runtim
     )
     .expect("JSON-RPC prompt errors should be recorded as turn failures");
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -4589,7 +4589,7 @@ fn shared_codex_app_server_agent_message_delta_waits_for_turn_started() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -4618,7 +4618,7 @@ fn shared_codex_app_server_agent_message_delta_waits_for_turn_started() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -4715,7 +4715,7 @@ fn shared_codex_app_server_request_waits_for_turn_started() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()
@@ -4744,7 +4744,7 @@ fn shared_codex_app_server_request_waits_for_turn_started() {
     )
     .unwrap();
 
-    let snapshot = state.snapshot();
+    let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
         .iter()

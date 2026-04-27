@@ -822,6 +822,16 @@ describe("serializeEditableMarkdownSection", () => {
     );
   });
 
+  it("uses the preserved internal Markdown href when DOM href is scrubbed", () => {
+    const section = buildEditableSection(
+      '<p><a href="#" data-markdown-link-href="C:\\repo\\docs\\README.md">README</a></p>',
+    );
+
+    expect(serializeEditableMarkdownSection(section)).toBe(
+      String.raw`[README](C:\\repo\\docs\\README.md)`,
+    );
+  });
+
   it.each([
     ["https://example.com/\u00ADdocs"],
     ["https://example.com/\u200Bdocs"],
@@ -895,19 +905,24 @@ describe("serializeEditableMarkdownSection", () => {
     );
 
     const { container } = render(createElement(MarkdownContent, { markdown }));
-    const renderedHrefs = Array.from(container.querySelectorAll("a")).map(
+    const renderedLinks = Array.from(container.querySelectorAll("a"));
+    const renderedHrefs = renderedLinks.map(
       (anchor) => anchor.getAttribute("href"),
     );
     expect(renderedHrefs).toEqual([
-      "%5C%5Cserver%5Cshare%5Cfile.md",
+      "#",
       "//example.com/path",
       "/etc/passwd",
-      "C:%5Crepo%5Cdocs%5CREADME.md",
+      "#",
     ]);
-    expect(renderedHrefs.map((href) => (href ? safeDecodeMarkdownHref(href) : href))).toEqual([
+    expect(
+      renderedLinks
+        .map((anchor) => anchor.getAttribute("data-markdown-link-href"))
+        .map((href) => (href ? safeDecodeMarkdownHref(href) : href)),
+    ).toEqual([
       "\\\\server\\share\\file.md",
-      "//example.com/path",
-      "/etc/passwd",
+      null,
+      null,
       "C:\\repo\\docs\\README.md",
     ]);
   });

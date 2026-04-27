@@ -1523,8 +1523,11 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
           preview: "Recovered from live delta.",
         });
       });
-      await advanceTimers(16);
+      await advanceTimers(1000);
       await settleAsyncUi();
+      expect(
+        screen.getAllByText("Recovered from live delta.").length,
+      ).toBeGreaterThan(0);
 
       await act(async () => {
         firstStateFetch.resolve(
@@ -1565,6 +1568,9 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(1);
+      expect(
+        screen.getAllByText("Recovered from live delta.").length,
+      ).toBeGreaterThan(0);
       expect(
         screen.getByText("Waiting for the next chunk of output..."),
       ).toBeInTheDocument();

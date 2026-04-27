@@ -536,12 +536,7 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
         session.preview,
         approval_preview_text("Claude", ApprovalDecision::AcceptedForSession)
     );
-    assert!(!session.messages_loaded);
-    assert!(session.messages.is_empty());
-    let session = state
-        .get_session(&session_id)
-        .expect("updated Claude session should hydrate")
-        .session;
+    assert!(session.messages_loaded);
     assert!(session.messages.iter().any(|message| matches!(
         message,
         Message::Approval { id, decision, .. }
@@ -762,12 +757,7 @@ async fn submit_codex_user_input_route_updates_message_and_publishes_message_upd
         .find(|session| session.id == session_id)
         .expect("updated Codex session should be present");
     assert_eq!(session.status, SessionStatus::Active);
-    assert!(!session.messages_loaded);
-    assert!(session.messages.is_empty());
-    let session = state
-        .get_session(&session_id)
-        .expect("updated Codex user-input session should hydrate")
-        .session;
+    assert!(session.messages_loaded);
     assert!(session.messages.iter().any(|message| matches!(
         message,
         Message::UserInputRequest {
@@ -897,12 +887,7 @@ async fn submit_codex_mcp_elicitation_route_updates_message_and_publishes_messag
         .find(|session| session.id == session_id)
         .expect("updated Codex session should be present");
     assert_eq!(session.status, SessionStatus::Active);
-    assert!(!session.messages_loaded);
-    assert!(session.messages.is_empty());
-    let session = state
-        .get_session(&session_id)
-        .expect("updated Codex MCP session should hydrate")
-        .session;
+    assert!(session.messages_loaded);
     assert!(session.messages.iter().any(|message| matches!(
         message,
         Message::McpElicitationRequest {
@@ -1023,12 +1008,7 @@ async fn submit_codex_app_request_route_updates_message_and_publishes_message_up
         .find(|session| session.id == session_id)
         .expect("updated Codex session should be present");
     assert_eq!(session.status, SessionStatus::Active);
-    assert!(!session.messages_loaded);
-    assert!(session.messages.is_empty());
-    let session = state
-        .get_session(&session_id)
-        .expect("updated Codex app request session should hydrate")
-        .session;
+    assert!(session.messages_loaded);
     assert!(session.messages.iter().any(|message| matches!(
         message,
         Message::CodexAppRequest {

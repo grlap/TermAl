@@ -6,7 +6,7 @@ type RejectionTarget = {
 };
 
 export function installMonacoCancellationRejectionFilter(
-  target: RejectionTarget = window,
+  target: RejectionTarget = defaultRejectionTarget(),
 ) {
   if (target[INSTALL_MARKER] || typeof target.addEventListener !== "function") {
     return;
@@ -18,6 +18,10 @@ export function installMonacoCancellationRejectionFilter(
       event.preventDefault();
     }
   });
+}
+
+function defaultRejectionTarget(): RejectionTarget {
+  return typeof window === "undefined" ? {} : window;
 }
 
 export function isBenignMonacoCancellationReason(reason: unknown) {

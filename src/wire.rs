@@ -79,7 +79,7 @@
 //
 // SSE delta events: `DeltaEvent` (TextDelta / TextReplace /
 // CommandUpdate / ParallelAgentsUpdate / SessionCreated /
-// MessageCreated / OrchestratorsUpdated).
+// MessageCreated / CodexUpdated / OrchestratorsUpdated).
 //
 // Extracted from api.rs as the single largest extraction of the refactor.
 // api.rs can now stay focused on axum HTTP route handlers + the
@@ -1342,6 +1342,9 @@ enum DeltaEvent {
         session_mutation_stamp: Option<u64>,
     },
     CodexUpdated {
+        // Process-global Codex runtime metadata. The payload is the latest
+        // CodexState snapshot for this small subsystem, not localized remote
+        // proxy state.
         revision: u64,
         codex: CodexState,
     },

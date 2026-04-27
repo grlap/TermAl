@@ -20,30 +20,37 @@ export function shouldAdoptSnapshotRevision(
     lastSeenServerInstanceId?: string | null;
     /**
      * The `serverInstanceId` carried by the incoming snapshot. When
-     * both ids are non-empty and differ, the server has restarted and
-     * its revision counter has rewound to whatever value SQLite held
-     * — accept the snapshot unconditionally regardless of
-     * `force` / `allowRevisionDowngrade` and regardless of whether
-     * `nextRevision < currentRevision`. Empty ids (from older servers
-     * or fallback payloads) are treated as "unknown" and cannot
-     * trigger the restart branch.
+     * both ids are non-empty and differ, the server has restarted only
+     * if the incoming id is new to this browser tab. Empty ids (from
+     * older servers or fallback payloads) are treated as "unknown" and
+     * cannot trigger the restart branch.
      */
     nextServerInstanceId?: string | null;
+    /**
+     * All non-empty server instance ids this browser tab has already
+     * adopted. Used to reject late responses from older server
+     * instances after a newer restart was already adopted.
+     */
+    seenServerInstanceIds?: ReadonlySet<string>;
   },
 ): boolean {
-  // Server restart detection is authoritative: if the server id just
-  // changed, every monotonic assumption about the revision counter is
-  // invalid (the counter just rewound to a stored value on the fresh
-  // instance). Accept the snapshot so the client resyncs to the
-  // restarted server. This path closes both the "prompt invisible
-  // after server restart" bug and the "safety-net poll forces
-  // downgrade every tick" bug.
+  // Server restart detection is authoritative only for unseen ids. If
+  // the id changed to a new instance, every monotonic assumption about
+  // the revision counter is invalid. If the changed id was already
+  // seen, it is a late response from an older instance and must not
+  // bypass the monotonic guard.
   if (
     isServerInstanceMismatch(
       options?.lastSeenServerInstanceId,
       options?.nextServerInstanceId,
     )
   ) {
+    if (
+      options?.nextServerInstanceId &&
+      options.seenServerInstanceIds?.has(options.nextServerInstanceId)
+    ) {
+      return false;
+    }
     return true;
   }
 

@@ -114,7 +114,11 @@ impl AppState {
                 session_mutation_stamp: Some(session_mutation_stamp),
             };
             self.publish_delta(&event);
-            self.snapshot_from_inner(&inner)
+            self.snapshot_from_inner_with_full_session(
+                &inner,
+                self.cached_agent_readiness(),
+                session_id,
+            )
         };
         Ok(snapshot)
     }
