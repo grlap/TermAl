@@ -353,6 +353,100 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(screen.getByText("Latest prompt renderer")).toBeInTheDocument();
   });
 
+  it("uses the latest message renderer after a renderer-only parent rerender", async () => {
+    const firstMessage: Message = {
+      id: "message-1",
+      type: "text",
+      timestamp: "10:00",
+      author: "assistant",
+      text: "First",
+    };
+    const secondMessage: Message = {
+      id: "message-2",
+      type: "text",
+      timestamp: "10:01",
+      author: "assistant",
+      text: "Second",
+    };
+    const activeSession = makeSession("session-a", {
+      messages: [firstMessage],
+    });
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [activeSession],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+
+    const scrollContainerRef = { current: document.createElement("section") };
+    const matchedItemKeys = new Set<string>();
+    const noopApproval = () => {};
+    const noopUserInput = () => {};
+    const noopElicitation = () => {};
+    const noopAppRequest = () => {};
+    const noopCancel = () => {};
+    const noopSettingsChange = () => {};
+    const noopSearchMount = () => {};
+
+    const renderPanel = (label: string) => (
+      <AgentSessionPanel
+        paneId="pane-1"
+        viewMode="session"
+        activeSessionId={activeSession.id}
+        isLoading={false}
+        isUpdating={false}
+        showWaitingIndicator={false}
+        waitingIndicatorPrompt={null}
+        commandMessages={[]}
+        diffMessages={[]}
+        scrollContainerRef={scrollContainerRef}
+        onApprovalDecision={noopApproval}
+        onUserInputSubmit={noopUserInput}
+        onMcpElicitationSubmit={noopElicitation}
+        onCodexAppRequestSubmit={noopAppRequest}
+        onCancelQueuedPrompt={noopCancel}
+        onSessionSettingsChange={noopSettingsChange}
+        conversationSearchQuery=""
+        conversationSearchMatchedItemKeys={matchedItemKeys}
+        conversationSearchActiveItemKey={null}
+        onConversationSearchItemMount={noopSearchMount}
+        renderCommandCard={() => null}
+        renderDiffCard={() => null}
+        renderMessageCard={(message) => (
+          <article className="message-card">{`${label}: ${message.id}`}</article>
+        )}
+        renderPromptSettings={() => null}
+      />
+    );
+
+    const { rerender } = render(renderPanel("Initial renderer"));
+    expect(screen.getByText("Initial renderer: message-1")).toBeInTheDocument();
+
+    await act(async () => {
+      rerender(renderPanel("Latest renderer"));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      syncComposerSessionsStore({
+        sessions: [
+          {
+            ...activeSession,
+            messages: [firstMessage, secondMessage],
+          },
+        ],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Latest renderer: message-2")).toBeInTheDocument();
+    expect(screen.queryByText("Initial renderer: message-1")).not.toBeInTheDocument();
+    expect(screen.getByText("Latest renderer: message-1")).toBeInTheDocument();
+  });
+
   it("dispatches Codex app requests through the latest parent callback after handler-only rerenders", async () => {
     const initialCodexAppRequestSubmit = vi.fn();
     const latestCodexAppRequestSubmit = vi.fn();
@@ -5086,6 +5180,121 @@ describe("AgentSessionPanelFooter", () => {
       }
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
+  it("shrinks multiline composer height after a width-only pane resize", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalResizeObserver = window.ResizeObserver;
+    const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "scrollHeight",
+    );
+    let nextFrameId = 0;
+    const queuedFrames = new Map<number, FrameRequestCallback>();
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      const id = ++nextFrameId;
+      queuedFrames.set(id, callback);
+      return id;
+    });
+    const cancelAnimationFrameMock = vi.fn((id: number) => {
+      queuedFrames.delete(id);
+    });
+    const drainAnimationFrames = () => {
+      while (queuedFrames.size > 0) {
+        const callbacks = [...queuedFrames.values()];
+        queuedFrames.clear();
+        act(() => {
+          callbacks.forEach((callback) => callback(0));
+        });
+      }
+    };
+    let resizeCallback: ResizeObserverCallback | null = null;
+    let isWide = false;
+    let unmount: ReturnType<typeof render>["unmount"] | null = null;
+
+    class ResizeObserverMock {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
+      observe() {}
+      disconnect() {}
+    }
+
+    window.requestAnimationFrame =
+      requestAnimationFrameMock as unknown as typeof requestAnimationFrame;
+    window.cancelAnimationFrame =
+      cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame;
+    window.ResizeObserver =
+      ResizeObserverMock as unknown as typeof ResizeObserver;
+    Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        const textarea = this as HTMLTextAreaElement;
+        if (isWide && textarea.style.height === "0px") {
+          return 40;
+        }
+        return 96;
+      },
+    });
+
+    try {
+      ({ unmount } = render(
+        renderFooter({
+          session: makeSession("session-a"),
+        }),
+      ));
+      drainAnimationFrames();
+
+      const textarea = screen.getByLabelText("Message session-a");
+      if (!(textarea instanceof HTMLTextAreaElement)) {
+        throw new Error("Composer textarea not found");
+      }
+
+      act(() => {
+        fireEvent.change(textarea, {
+          target: { value: "line one\nline two\nline three" },
+        });
+      });
+      drainAnimationFrames();
+      expect(textarea.style.height).toBe("96px");
+
+      isWide = true;
+      act(() => {
+        resizeCallback?.(
+          [
+            {
+              target: textarea,
+              contentRect: { width: 600 },
+            } as unknown as ResizeObserverEntry,
+          ],
+          {} as ResizeObserver,
+        );
+      });
+      drainAnimationFrames();
+
+      expect(textarea.style.height).toBe("40px");
+    } finally {
+      act(() => {
+        unmount?.();
+      });
+      if (originalScrollHeightDescriptor) {
+        Object.defineProperty(
+          HTMLTextAreaElement.prototype,
+          "scrollHeight",
+          originalScrollHeightDescriptor,
+        );
+      } else {
+        delete (
+          HTMLTextAreaElement.prototype as unknown as {
+            scrollHeight?: number;
+          }
+        ).scrollHeight;
+      }
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      window.ResizeObserver = originalResizeObserver;
     }
   });
 

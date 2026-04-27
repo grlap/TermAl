@@ -83,6 +83,9 @@ describe("isSafePastedMarkdownHref", () => {
       ["vbscript:msgbox('x')"],
       ["data:text/html,<script>alert(1)</script>"],
       ["data:application/javascript,alert(1)"],
+      ["%6A%61%76%61%73%63%72%69%70%74%3Aalert(1)"],
+      ["%76%62%73%63%72%69%70%74%3Amsgbox('x')"],
+      ["%64%61%74%61%3Atext/html,<script>alert(1)</script>"],
       ["data:image/png;base64,iVBORw0KGgo="],
       ["file:///etc/passwd"],
       ["ftp://ftp.example.com/"],
@@ -830,6 +833,46 @@ describe("serializeEditableMarkdownSection", () => {
     expect(serializeEditableMarkdownSection(section)).toBe(
       String.raw`[README](C:\\repo\\docs\\README.md)`,
     );
+  });
+
+  it("keeps encoded Windows hrefs from the preserved internal Markdown href", () => {
+    const section = buildEditableSection(
+      '<p><a href="#" data-markdown-link-href="C:%5Crepo%5Cdocs%5CREADME.md">README</a></p>',
+    );
+
+    expect(serializeEditableMarkdownSection(section)).toBe(
+      "[README](C:%5Crepo%5Cdocs%5CREADME.md)",
+    );
+  });
+
+  it("keeps slash-prefixed encoded Windows hrefs from the preserved internal Markdown href", () => {
+    const section = buildEditableSection(
+      '<p><a href="#" data-markdown-link-href="/C:%5Crepo%5Cdocs%5CREADME.md">README</a></p>',
+    );
+
+    expect(serializeEditableMarkdownSection(section)).toBe(
+      "[README](/C:%5Crepo%5Cdocs%5CREADME.md)",
+    );
+  });
+
+  it("does not serialize unsafe preserved internal Markdown hrefs into links", () => {
+    const section = buildEditableSection(
+      '<p><a href="#" data-markdown-link-href="javascript:alert(1)">Unsafe link</a></p>',
+    );
+
+    expect(serializeEditableMarkdownSection(section)).toBe("Unsafe link");
+  });
+
+  it.each([
+    ["%6A%61%76%61%73%63%72%69%70%74%3Aalert(1)"],
+    ["%76%62%73%63%72%69%70%74%3Amsgbox('x')"],
+    ["%64%61%74%61%3Atext/html,<script>alert(1)</script>"],
+  ])("does not serialize percent-encoded unsafe href %s into Markdown links", (href) => {
+    const section = buildEditableSection(
+      `<p><a href="${href}" data-markdown-link-href="${href}">Unsafe link</a></p>`,
+    );
+
+    expect(serializeEditableMarkdownSection(section)).toBe("Unsafe link");
   });
 
   it.each([

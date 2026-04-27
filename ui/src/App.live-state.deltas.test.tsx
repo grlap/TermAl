@@ -1151,13 +1151,197 @@ describe("App live state - delta-gap core", () => {
     });
   });
 
-  it("deep-reconciles the first full snapshot after a partial restart response", async () => {
+  it("resyncs instead of adopting an unknown mismatched session hydration response", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const currentSummary = makeSession("session-1", {
+        name: "Codex Session",
+        projectId: "project-termal",
+        workdir: "/projects/termal",
+        status: "active",
+        preview: "Current instance summary",
+        messagesLoaded: false,
+        messageCount: 1,
+        sessionMutationStamp: 20,
+        messages: [],
+      });
+      const currentFullSession = makeSession("session-1", {
+        ...currentSummary,
+        preview: "Current authoritative transcript",
+        messagesLoaded: true,
+        messages: [
+          {
+            id: "message-current-instance",
+            type: "text",
+            timestamp: "10:04",
+            author: "assistant",
+            text: "Current authoritative transcript",
+          },
+        ],
+      });
+      let sessionHydrationFetchSeen = false;
+      let stateFetchCountAfterSessionHydration = 0;
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            const isHydrationResync = sessionHydrationFetchSeen;
+            if (isHydrationResync) {
+              stateFetchCountAfterSessionHydration += 1;
+            }
+            return jsonResponse(
+              makeStateResponse({
+                revision: isHydrationResync ? 6 : 5,
+                serverInstanceId: "current-instance",
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: isHydrationResync
+                  ? [currentFullSession]
+                  : [currentSummary],
+              }),
+            );
+          }
+          if (requestUrl.pathname === "/api/sessions/session-1") {
+            sessionHydrationFetchSeen = true;
+            return jsonResponse({
+              revision: 4,
+              serverInstanceId: "unknown-old-instance",
+              session: makeSession("session-1", {
+                name: "Codex Session",
+                status: "active",
+                preview: "Unknown old transcript",
+                messagesLoaded: true,
+                messageCount: 1,
+                sessionMutationStamp: 20,
+                messages: [
+                  {
+                    id: "message-unknown-old",
+                    type: "text",
+                    timestamp: "10:01",
+                    author: "assistant",
+                    text: "Unknown old transcript",
+                  },
+                ],
+              }),
+            });
+          }
+          if (requestUrl.pathname === "/api/git/status") {
+            return jsonResponse({
+              ahead: 0,
+              behind: 0,
+              branch: "main",
+              files: [],
+              isClean: true,
+              repoRoot: "/tmp",
+              upstream: "origin/main",
+              workdir: "/tmp",
+            });
+          }
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
+
+            return new Response("", { status: 404 });
+          }
+
+          throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+        },
+      );
+      const workspace: WorkspaceState = {
+        root: { type: "pane", paneId: "pane-main" },
+        panes: [
+          {
+            id: "pane-main",
+            tabs: [
+              {
+                id: "tab-main",
+                kind: "session",
+                sessionId: "session-1",
+              },
+            ],
+            activeTabId: "tab-main",
+            activeSessionId: "session-1",
+            viewMode: "session",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+        ],
+        activePaneId: "pane-main",
+      };
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=unknown-mismatched-session-hydration",
+      );
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        "termal-workspace-layout:unknown-mismatched-session-hydration",
+        JSON.stringify({
+          controlPanelSide: "right",
+          workspace,
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 5,
+            serverInstanceId: "current-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [currentSummary],
+          }),
+        );
+
+        await waitFor(() => {
+          expect(sessionHydrationFetchSeen).toBe(true);
+          expect(stateFetchCountAfterSessionHydration).toBeGreaterThanOrEqual(1);
+        });
+        await waitFor(() => {
+          expect(
+            screen.getAllByText("Current authoritative transcript").length,
+          ).toBeGreaterThan(0);
+        });
+        expect(screen.queryByText("Unknown old transcript")).not.toBeInTheDocument();
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("deep-reconciles the first full snapshot after a mismatched session hydration response", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       const sessionOneOldSummary = makeSession("session-1", {
         name: "Session One",
+        projectId: "project-termal",
+        workdir: "/projects/termal",
         status: "active",
         preview: "Old instance first summary",
         messagesLoaded: false,
@@ -1181,6 +1365,8 @@ describe("App live state - delta-gap core", () => {
       });
       const sessionTwoOld = makeSession("session-2", {
         name: "Session Two",
+        projectId: "project-termal",
+        workdir: "/projects/termal",
         status: "idle",
         preview: "Old instance second transcript",
         messagesLoaded: true,
@@ -1209,42 +1395,101 @@ describe("App live state - delta-gap core", () => {
           },
         ],
       });
-      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-        const requestUrl = new URL(String(input), "http://localhost");
-        if (requestUrl.pathname === "/api/state") {
-          return jsonResponse(
-            makeStateResponse({
-              revision: 5,
-              serverInstanceId: "old-instance",
-              projects: [],
-              orchestrators: [],
-              workspaces: [],
-              sessions: [sessionOneOldSummary, sessionTwoOld],
-            }),
-          );
-        }
-        if (requestUrl.pathname === "/api/sessions/session-1") {
-          return jsonResponse({
-            revision: 1,
-            serverInstanceId: "new-instance",
-            session: sessionOneNew,
-          });
-        }
-        if (requestUrl.pathname === "/api/git/status") {
-          return jsonResponse({
-            ahead: 0,
-            behind: 0,
-            branch: "main",
-            files: [],
-            isClean: true,
-            repoRoot: "/tmp",
-            upstream: "origin/main",
-            workdir: "/tmp",
-          });
-        }
+      let sessionHydrationFetchSeen = false;
+      let stateFetchCountAfterSessionHydration = 0;
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            const isHydrationResync = sessionHydrationFetchSeen;
+            if (isHydrationResync) {
+              stateFetchCountAfterSessionHydration += 1;
+            }
+            return jsonResponse(
+              !isHydrationResync
+                ? makeStateResponse({
+                    revision: 5,
+                    serverInstanceId: "old-instance",
+                    projects: [],
+                    orchestrators: [],
+                    workspaces: [],
+                    sessions: [sessionOneOldSummary, sessionTwoOld],
+                  })
+                : makeStateResponse({
+                    revision: 2,
+                    serverInstanceId: "new-instance",
+                    projects: [],
+                    orchestrators: [],
+                    workspaces: [],
+                    sessions: [sessionOneNew, sessionTwoNew],
+                  }),
+            );
+          }
+          if (requestUrl.pathname === "/api/sessions/session-1") {
+            sessionHydrationFetchSeen = true;
+            return jsonResponse({
+              revision: 1,
+              serverInstanceId: "new-instance",
+              session: sessionOneNew,
+            });
+          }
+          if (requestUrl.pathname === "/api/git/status") {
+            return jsonResponse({
+              ahead: 0,
+              behind: 0,
+              branch: "main",
+              files: [],
+              isClean: true,
+              repoRoot: "/tmp",
+              upstream: "origin/main",
+              workdir: "/tmp",
+            });
+          }
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
 
-        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
-      });
+            return new Response("", { status: 404 });
+          }
+
+          throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+        },
+      );
+      const workspace: WorkspaceState = {
+        root: { type: "pane", paneId: "pane-main" },
+        panes: [
+          {
+            id: "pane-main",
+            tabs: [
+              {
+                id: "tab-main",
+                kind: "session",
+                sessionId: "session-1",
+              },
+            ],
+            activeTabId: "tab-main",
+            activeSessionId: "session-1",
+            viewMode: "session",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+        ],
+        activePaneId: "pane-main",
+      };
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=mismatched-session-hydration-resync",
+      );
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        "termal-workspace-layout:mismatched-session-hydration-resync",
+        JSON.stringify({
+          controlPanelSide: "right",
+          workspace,
+        }),
+      );
       vi.stubGlobal("fetch", fetchMock);
       vi.stubGlobal(
         "EventSource",
@@ -1269,19 +1514,10 @@ describe("App live state - delta-gap core", () => {
             sessions: [sessionOneOldSummary, sessionTwoOld],
           }),
         );
-        await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
-        const sessionList = document.querySelector(".session-list");
-        if (!(sessionList instanceof HTMLDivElement)) {
-          throw new Error("Session list not found");
-        }
-        const sessionOneButton =
-          within(sessionList).getByText("Session One").closest("button");
-        if (!sessionOneButton) {
-          throw new Error("Session one row button not found");
-        }
-        await clickAndSettle(sessionOneButton);
 
         await waitFor(() => {
+          expect(sessionHydrationFetchSeen).toBe(true);
+          expect(stateFetchCountAfterSessionHydration).toBeGreaterThanOrEqual(1);
           expect(
             screen.getAllByText("New instance first transcript").length,
           ).toBeGreaterThan(0);
@@ -1318,6 +1554,8 @@ describe("App live state - delta-gap core", () => {
         });
       } finally {
         scrollIntoViewSpy.mockRestore();
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
         restoreGlobal("fetch", originalFetch);
         restoreGlobal("EventSource", originalEventSource);
         restoreGlobal("ResizeObserver", originalResizeObserver);

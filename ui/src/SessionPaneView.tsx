@@ -99,6 +99,7 @@ import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
 } from "./panels/AgentSessionPanel";
+import type { RenderMessageCard } from "./panels/VirtualizedConversationMessageList";
 import {
   type ControlPanelSectionId,
 } from "./panels/ControlPanelSurface";
@@ -2268,6 +2269,194 @@ export function SessionPaneView({
     return decoration ? { [activeSourceTab.id]: decoration } : {};
   }, [activeSourceTab, fileState, sourceEditorDirty]);
 
+  const renderSessionCommandCard = useCallback(
+    (message: CommandMessage) => <CommandCard message={message} />,
+    [],
+  );
+  const renderSessionDiffCard = useCallback(
+    (message: DiffMessage) => (
+      <DiffCard
+        message={message}
+        onOpenPreview={() =>
+          onOpenDiffPreviewTab(
+            pane.id,
+            message,
+            activeSession?.id ?? null,
+            activeSession?.projectId ?? null,
+          )
+        }
+        workspaceRoot={activeSession?.workdir ?? null}
+      />
+    ),
+    [
+      activeSession?.id,
+      activeSession?.projectId,
+      activeSession?.workdir,
+      onOpenDiffPreviewTab,
+      pane.id,
+    ],
+  );
+  const renderSessionMessageCard = useCallback<RenderMessageCard>(
+    (
+      message,
+      preferImmediateHeavyRender,
+      handleDecision,
+      handleUserInput,
+      handleMcpElicitation,
+      handleCodexAppRequest,
+    ) => (
+      <MessageCard
+        appearance={editorAppearance}
+        message={message}
+        onOpenDiffPreview={(diffMessage) =>
+          onOpenDiffPreviewTab(
+            pane.id,
+            diffMessage,
+            activeSession?.id ?? null,
+            activeSession?.projectId ?? null,
+          )
+        }
+        onOpenSourceLink={(target) =>
+          onOpenSourceTab(
+            pane.id,
+            target.path,
+            activeSession?.id ?? null,
+            activeSession?.projectId ?? null,
+            {
+              line: target.line,
+              column: target.column,
+              openInNewTab: target.openInNewTab,
+            },
+          )
+        }
+        preferImmediateHeavyRender={preferImmediateHeavyRender}
+        onApprovalDecision={handleDecision}
+        onUserInputSubmit={handleUserInput}
+        onMcpElicitationSubmit={handleMcpElicitation}
+        onCodexAppRequestSubmit={handleCodexAppRequest}
+        searchQuery={
+          activeSessionSearchMatch?.itemKey === `message:${message.id}`
+            ? sessionFindQuery
+            : ""
+        }
+        searchHighlightTone={
+          activeSessionSearchMatch?.itemKey === `message:${message.id}`
+            ? "active"
+            : "match"
+        }
+        preferStreamingPlainTextRender={
+          activeSession?.status === "active" &&
+          message.id === latestAssistantMessageId
+        }
+        isLatestAssistantMessage={message.id === latestAssistantMessageId}
+        workspaceRoot={activeSession?.workdir ?? null}
+      />
+    ),
+    [
+      activeSession?.id,
+      activeSession?.projectId,
+      activeSession?.status,
+      activeSession?.workdir,
+      activeSessionSearchMatch?.itemKey,
+      editorAppearance,
+      latestAssistantMessageId,
+      onOpenDiffPreviewTab,
+      onOpenSourceTab,
+      pane.id,
+      sessionFindQuery,
+    ],
+  );
+  const renderSessionPromptSettings = useCallback(
+    (
+      panelPaneId: string,
+      session: Session,
+      panelIsUpdating: boolean,
+      handleSettingsChange: (
+        sessionId: string,
+        field: SessionSettingsField,
+        value: SessionSettingsValue,
+      ) => void,
+    ) => {
+      if (session.agent === "Codex") {
+        return (
+          <CodexPromptSettingsCard
+            paneId={panelPaneId}
+            session={session}
+            isUpdating={panelIsUpdating}
+            isRefreshingModelOptions={isRefreshingModelOptions}
+            modelOptionsError={modelOptionsError}
+            sessionNotice={
+              session.id === activeSession?.id ? sessionSettingNotice : null
+            }
+            onRequestModelOptions={onRefreshSessionModelOptions}
+            onArchiveThread={onArchiveCodexThread}
+            onCompactThread={onCompactCodexThread}
+            onForkThread={onForkCodexThread}
+            onRollbackThread={onRollbackCodexThread}
+            onSessionSettingsChange={handleSettingsChange}
+            onUnarchiveThread={onUnarchiveCodexThread}
+          />
+        );
+      }
+
+      if (session.agent === "Claude") {
+        return (
+          <ClaudePromptSettingsCard
+            paneId={panelPaneId}
+            session={session}
+            isUpdating={panelIsUpdating}
+            isRefreshingModelOptions={isRefreshingModelOptions}
+            modelOptionsError={modelOptionsError}
+            onRequestModelOptions={onRefreshSessionModelOptions}
+            onSessionSettingsChange={handleSettingsChange}
+          />
+        );
+      }
+
+      if (session.agent === "Cursor") {
+        return (
+          <CursorPromptSettingsCard
+            paneId={panelPaneId}
+            session={session}
+            isUpdating={panelIsUpdating}
+            isRefreshingModelOptions={isRefreshingModelOptions}
+            modelOptionsError={modelOptionsError}
+            onRequestModelOptions={onRefreshSessionModelOptions}
+            onSessionSettingsChange={handleSettingsChange}
+          />
+        );
+      }
+
+      if (session.agent === "Gemini") {
+        return (
+          <GeminiPromptSettingsCard
+            paneId={panelPaneId}
+            session={session}
+            isUpdating={panelIsUpdating}
+            isRefreshingModelOptions={isRefreshingModelOptions}
+            modelOptionsError={modelOptionsError}
+            onRequestModelOptions={onRefreshSessionModelOptions}
+            onSessionSettingsChange={handleSettingsChange}
+          />
+        );
+      }
+
+      return null;
+    },
+    [
+      activeSession?.id,
+      isRefreshingModelOptions,
+      modelOptionsError,
+      onArchiveCodexThread,
+      onCompactCodexThread,
+      onForkCodexThread,
+      onRefreshSessionModelOptions,
+      onRollbackCodexThread,
+      onUnarchiveCodexThread,
+      sessionSettingNotice,
+    ],
+  );
+
   return (
     <section
       ref={paneRootRef}
@@ -3072,152 +3261,10 @@ export function SessionPaneView({
               activeSessionSearchMatch?.itemKey ?? null
             }
             onConversationSearchItemMount={handleConversationSearchItemMount}
-            renderCommandCard={(message) => <CommandCard message={message} />}
-            renderDiffCard={(message) => (
-              <DiffCard
-                message={message}
-                onOpenPreview={() =>
-                  onOpenDiffPreviewTab(
-                    pane.id,
-                    message,
-                    activeSession?.id ?? null,
-                    activeSession?.projectId ?? null,
-                  )
-                }
-                workspaceRoot={activeSession?.workdir ?? null}
-              />
-            )}
-            renderMessageCard={(
-              message,
-              preferImmediateHeavyRender,
-              handleDecision,
-              handleUserInput,
-              handleMcpElicitation,
-              handleCodexAppRequest,
-            ) => (
-              <MessageCard
-                appearance={editorAppearance}
-                message={message}
-                onOpenDiffPreview={(diffMessage) =>
-                  onOpenDiffPreviewTab(
-                    pane.id,
-                    diffMessage,
-                    activeSession?.id ?? null,
-                    activeSession?.projectId ?? null,
-                  )
-                }
-                onOpenSourceLink={(target) =>
-                  onOpenSourceTab(
-                    pane.id,
-                    target.path,
-                    activeSession?.id ?? null,
-                    activeSession?.projectId ?? null,
-                    {
-                      line: target.line,
-                      column: target.column,
-                      openInNewTab: target.openInNewTab,
-                    },
-                  )
-                }
-                preferImmediateHeavyRender={preferImmediateHeavyRender}
-                onApprovalDecision={handleDecision}
-                onUserInputSubmit={handleUserInput}
-                onMcpElicitationSubmit={handleMcpElicitation}
-                onCodexAppRequestSubmit={handleCodexAppRequest}
-                searchQuery={
-                  activeSessionSearchMatch?.itemKey === `message:${message.id}`
-                    ? sessionFindQuery
-                    : ""
-                }
-                searchHighlightTone={
-                  activeSessionSearchMatch?.itemKey === `message:${message.id}`
-                    ? "active"
-                    : "match"
-                }
-                preferStreamingPlainTextRender={
-                  activeSession?.status === "active" &&
-                  message.id === latestAssistantMessageId
-                }
-                isLatestAssistantMessage={
-                  message.id === latestAssistantMessageId
-                }
-                workspaceRoot={activeSession?.workdir ?? null}
-              />
-            )}
-            renderPromptSettings={(
-              panelPaneId,
-              session,
-              panelIsUpdating,
-              handleSettingsChange,
-            ) => {
-              if (session.agent === "Codex") {
-                return (
-                  <CodexPromptSettingsCard
-                    paneId={panelPaneId}
-                    session={session}
-                    isUpdating={panelIsUpdating}
-                    isRefreshingModelOptions={isRefreshingModelOptions}
-                    modelOptionsError={modelOptionsError}
-                    sessionNotice={
-                      session.id === activeSession?.id
-                        ? sessionSettingNotice
-                        : null
-                    }
-                    onRequestModelOptions={onRefreshSessionModelOptions}
-                    onArchiveThread={onArchiveCodexThread}
-                    onCompactThread={onCompactCodexThread}
-                    onForkThread={onForkCodexThread}
-                    onRollbackThread={onRollbackCodexThread}
-                    onSessionSettingsChange={handleSettingsChange}
-                    onUnarchiveThread={onUnarchiveCodexThread}
-                  />
-                );
-              }
-
-              if (session.agent === "Claude") {
-                return (
-                  <ClaudePromptSettingsCard
-                    paneId={panelPaneId}
-                    session={session}
-                    isUpdating={panelIsUpdating}
-                    isRefreshingModelOptions={isRefreshingModelOptions}
-                    modelOptionsError={modelOptionsError}
-                    onRequestModelOptions={onRefreshSessionModelOptions}
-                    onSessionSettingsChange={handleSettingsChange}
-                  />
-                );
-              }
-
-              if (session.agent === "Cursor") {
-                return (
-                  <CursorPromptSettingsCard
-                    paneId={panelPaneId}
-                    session={session}
-                    isUpdating={panelIsUpdating}
-                    isRefreshingModelOptions={isRefreshingModelOptions}
-                    modelOptionsError={modelOptionsError}
-                    onRequestModelOptions={onRefreshSessionModelOptions}
-                    onSessionSettingsChange={handleSettingsChange}
-                  />
-                );
-              }
-
-              if (session.agent === "Gemini") {
-                return (
-                  <GeminiPromptSettingsCard
-                    paneId={panelPaneId}
-                    session={session}
-                    isUpdating={panelIsUpdating}
-                    isRefreshingModelOptions={isRefreshingModelOptions}
-                    modelOptionsError={modelOptionsError}
-                    onRequestModelOptions={onRefreshSessionModelOptions}
-                    onSessionSettingsChange={handleSettingsChange}
-                  />
-                );
-              }
-
-              return null;
-            }}
+            renderCommandCard={renderSessionCommandCard}
+            renderDiffCard={renderSessionDiffCard}
+            renderMessageCard={renderSessionMessageCard}
+            renderPromptSettings={renderSessionPromptSettings}
           />
         )}
       </section>

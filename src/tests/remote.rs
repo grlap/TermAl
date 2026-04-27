@@ -3126,16 +3126,18 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
         "remote-project-1",
     );
 
-    let mut full_remote_session = sample_remote_orchestrator_state(
+    let sample_remote_state = sample_remote_orchestrator_state(
         "remote-project-1",
         "/remote/repo",
         1,
         OrchestratorInstanceStatus::Running,
-    )
-    .sessions
-    .into_iter()
-    .find(|session| session.id == "remote-session-1")
-    .expect("sample remote session should exist");
+    );
+    let mut full_remote_session = sample_remote_state
+        .sessions
+        .iter()
+        .find(|session| session.id == "remote-session-1")
+        .cloned()
+        .expect("sample remote session should exist");
     full_remote_session.messages = vec![remote_text_message("remote-message-1", "Hello world")];
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 1;
@@ -3156,6 +3158,28 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
             },
         )
         .expect("remote summary session create delta should apply");
+
+    let mut sibling_session = sample_remote_state
+        .sessions
+        .iter()
+        .find(|session| session.id == "remote-session-2")
+        .cloned()
+        .expect("sample sibling remote session should exist");
+    sibling_session.messages = vec![remote_text_message("remote-message-2", "Other")];
+    sibling_session.messages_loaded = true;
+    sibling_session.message_count = 1;
+    sibling_session.preview = "Other".to_owned();
+    sibling_session.session_mutation_stamp = Some(20);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: sibling_session.id.clone(),
+                session: sibling_session,
+            },
+        )
+        .expect("sibling remote session create delta should apply");
 
     let (port, _requests, server) = spawn_remote_session_response_server(SessionResponse {
         // The remote revision is global, so a busy upstream can already be
@@ -3250,6 +3274,42 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
         ),
         "targeted hydration should skip later stale deltas for the repaired session"
     );
+    drop(inner);
+
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::TextDelta {
+                revision: 4,
+                session_id: "remote-session-2".to_owned(),
+                message_id: "remote-message-2".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                delta: " updated".to_owned(),
+                preview: Some("Other updated".to_owned()),
+                session_mutation_stamp: Some(21),
+            },
+        )
+        .expect("intermediate sibling session delta should still apply");
+    let published = delta_receiver
+        .try_recv()
+        .expect("intermediate sibling session delta should publish");
+    let published_delta: DeltaEvent =
+        serde_json::from_str(&published).expect("published delta should decode");
+    assert!(matches!(
+        published_delta,
+        DeltaEvent::TextDelta { delta, .. } if delta == " updated"
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let sibling_index = inner
+        .find_remote_session_index(&remote.id, "remote-session-2")
+        .expect("sibling remote proxy session should exist");
+    assert!(matches!(
+        &inner.sessions[sibling_index].session.messages[0],
+        Message::Text { text, .. } if text == "Other updated"
+    ));
+    assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&4));
     drop(inner);
 
     join_test_server(server);

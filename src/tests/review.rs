@@ -531,17 +531,15 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
         .iter()
         .find(|session| session.id == session_id)
         .expect("updated Claude session should be present");
-    assert_eq!(session.status, SessionStatus::Active);
-    assert_eq!(
-        session.preview,
-        approval_preview_text("Claude", ApprovalDecision::AcceptedForSession)
+    let expected_preview =
+        approval_preview_text("Claude", ApprovalDecision::AcceptedForSession);
+    assert_interaction_response_session_hydrated(
+        session,
+        SessionStatus::Active,
+        &expected_preview,
+        1,
+        &message_id,
     );
-    assert!(session.messages_loaded);
-    assert!(session.messages.iter().any(|message| matches!(
-        message,
-        Message::Approval { id, decision, .. }
-            if id == &message_id && *decision == ApprovalDecision::AcceptedForSession
-    )));
     match input_rx.recv_timeout(Duration::from_millis(50)) {
         Ok(ClaudeRuntimeCommand::SetPermissionMode(mode)) => {
             assert_eq!(mode, "acceptEdits");
@@ -597,10 +595,7 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
             assert_eq!(message_index, 0);
             assert_eq!(message_count, 1);
             assert_eq!(session_mutation_stamp, session.session_mutation_stamp);
-            assert_eq!(
-                preview,
-                approval_preview_text("Claude", ApprovalDecision::AcceptedForSession)
-            );
+            assert_eq!(preview, expected_preview);
             assert_eq!(status, SessionStatus::Active);
             assert!(matches!(
                 message,
@@ -631,6 +626,21 @@ fn attach_test_codex_runtime(
         .expect("Codex session should exist");
     inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
     input_rx
+}
+
+fn assert_interaction_response_session_hydrated(
+    session: &Session,
+    expected_status: SessionStatus,
+    expected_preview: &str,
+    expected_message_count: u32,
+    expected_message_id: &str,
+) {
+    assert_eq!(session.status, expected_status);
+    assert_eq!(session.preview, expected_preview);
+    assert!(session.messages_loaded);
+    assert_eq!(session.message_count, expected_message_count);
+    assert_eq!(session.messages.len(), expected_message_count as usize);
+    assert_eq!(session.messages[0].id(), expected_message_id);
 }
 
 fn assert_no_state_and_one_message_updated_delta(
@@ -756,17 +766,15 @@ async fn submit_codex_user_input_route_updates_message_and_publishes_message_upd
         .iter()
         .find(|session| session.id == session_id)
         .expect("updated Codex session should be present");
-    assert_eq!(session.status, SessionStatus::Active);
-    assert!(session.messages_loaded);
-    assert!(session.messages.iter().any(|message| matches!(
-        message,
-        Message::UserInputRequest {
-            id,
-            state: InteractionRequestState::Submitted,
-            submitted_answers: Some(answers),
-            ..
-        } if id == &message_id && answers.get("choice") == Some(&vec!["Yes".to_owned()])
-    )));
+    let expected_preview =
+        user_input_request_preview_text(session.agent.name(), InteractionRequestState::Submitted);
+    assert_interaction_response_session_hydrated(
+        session,
+        SessionStatus::Active,
+        &expected_preview,
+        1,
+        &message_id,
+    );
 
     match input_rx.recv_timeout(Duration::from_millis(50)) {
         Ok(CodexRuntimeCommand::JsonRpcResponse { response }) => {
@@ -785,8 +793,6 @@ async fn submit_codex_user_input_route_updates_message_and_publishes_message_upd
         Ok(_) => panic!("expected Codex JSON-RPC user input response"),
         Err(err) => panic!("Codex user input response should arrive: {err}"),
     }
-    let expected_preview =
-        user_input_request_preview_text(session.agent.name(), InteractionRequestState::Submitted);
     let message = assert_no_state_and_one_message_updated_delta(
         &mut state_rx,
         &mut delta_rx,
@@ -886,18 +892,18 @@ async fn submit_codex_mcp_elicitation_route_updates_message_and_publishes_messag
         .iter()
         .find(|session| session.id == session_id)
         .expect("updated Codex session should be present");
-    assert_eq!(session.status, SessionStatus::Active);
-    assert!(session.messages_loaded);
-    assert!(session.messages.iter().any(|message| matches!(
-        message,
-        Message::McpElicitationRequest {
-            id,
-            state: InteractionRequestState::Submitted,
-            submitted_action: Some(McpElicitationAction::Decline),
-            submitted_content: None,
-            ..
-        } if id == &message_id
-    )));
+    let expected_preview = mcp_elicitation_request_preview_text(
+        session.agent.name(),
+        InteractionRequestState::Submitted,
+        Some(McpElicitationAction::Decline),
+    );
+    assert_interaction_response_session_hydrated(
+        session,
+        SessionStatus::Active,
+        &expected_preview,
+        1,
+        &message_id,
+    );
 
     match input_rx.recv_timeout(Duration::from_millis(50)) {
         Ok(CodexRuntimeCommand::JsonRpcResponse { response }) => {
@@ -913,11 +919,6 @@ async fn submit_codex_mcp_elicitation_route_updates_message_and_publishes_messag
         Ok(_) => panic!("expected Codex JSON-RPC MCP elicitation response"),
         Err(err) => panic!("Codex MCP elicitation response should arrive: {err}"),
     }
-    let expected_preview = mcp_elicitation_request_preview_text(
-        session.agent.name(),
-        InteractionRequestState::Submitted,
-        Some(McpElicitationAction::Decline),
-    );
     let message = assert_no_state_and_one_message_updated_delta(
         &mut state_rx,
         &mut delta_rx,
@@ -1007,17 +1008,15 @@ async fn submit_codex_app_request_route_updates_message_and_publishes_message_up
         .iter()
         .find(|session| session.id == session_id)
         .expect("updated Codex session should be present");
-    assert_eq!(session.status, SessionStatus::Active);
-    assert!(session.messages_loaded);
-    assert!(session.messages.iter().any(|message| matches!(
-        message,
-        Message::CodexAppRequest {
-            id,
-            state: InteractionRequestState::Submitted,
-            submitted_result: Some(submitted_result),
-            ..
-        } if id == &message_id && submitted_result == &json!({ "ok": true, "value": 42 })
-    )));
+    let expected_preview =
+        codex_app_request_preview_text(session.agent.name(), InteractionRequestState::Submitted);
+    assert_interaction_response_session_hydrated(
+        session,
+        SessionStatus::Active,
+        &expected_preview,
+        1,
+        &message_id,
+    );
 
     match input_rx.recv_timeout(Duration::from_millis(50)) {
         Ok(CodexRuntimeCommand::JsonRpcResponse { response }) => {
@@ -1030,8 +1029,6 @@ async fn submit_codex_app_request_route_updates_message_and_publishes_message_up
         Ok(_) => panic!("expected Codex JSON-RPC app request response"),
         Err(err) => panic!("Codex app request response should arrive: {err}"),
     }
-    let expected_preview =
-        codex_app_request_preview_text(session.agent.name(), InteractionRequestState::Submitted);
     let message = assert_no_state_and_one_message_updated_delta(
         &mut state_rx,
         &mut delta_rx,

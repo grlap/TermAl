@@ -5,166 +5,170 @@ cleanup notes, implementation task ledgers, and external limitations do not belo
 
 ## Active Repo Bugs
 
-## `SessionBody` re-wraps render callbacks already stabilized by `AgentSessionPanel.useRenderCallback`
+## Cross-instance snapshots can still adopt unknown server instances
 
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:416-435`. The new `useRenderCallback` hook in `AgentSessionPanel` (lines 206-208) now produces stable identities for `renderCommandCard`, `renderDiffCard`, and `renderMessageCard`. But `SessionBody` still hand-rolls the same `useRef + useCallback` indirection for the same three callbacks. The comparator comment at lines 552-559 still describes them as "inline closures whose identity changes every render" — which is no longer true.
+**Severity:** Medium - `ui/src/app-live-state.ts` now rejects targeted session hydration responses from a different backend instance, but full snapshot adoption paths can still accept an unseen mismatched `serverInstanceId`.
 
-The round's stated goal was to "formalize the render-phase ref pattern" with a single named hook. The inner pattern wasn't removed, leaving three callback patterns coexisting (`useStableEvent`, `useRenderCallback`, plus inline ref-wraps in `SessionBody`). This is the opposite of formalization.
-
-**Current behavior:**
-- `AgentSessionPanel` wraps three callbacks in `useRenderCallback` → stable identity.
-- `SessionBody` re-wraps the same three (now-stable) callbacks via internal `useRef + useCallback` → no behavior change, just dead weight.
-- Comparator's exclusion comment refers to the old inline-closure semantics.
-
-**Proposal:**
-- Drop the inner `renderMessageCardRef`/`renderCommandCardRef`/`renderDiffCardRef` blocks in `SessionBody` and pass props through directly (they're already stable from the parent).
-- Update the comparator comment: "AgentSessionPanel stabilizes these via `useRenderCallback` — they're already reference-equal across renders, but excluded from the comparator anyway because the comparator exists for prop-identity flow, and equality on stable identities is a no-op."
-- Keep `renderPromptSettingsRef` — it's distinct because the outer panel does NOT stabilize `renderPromptSettings` and the comparator depends on identity comparison for prompt mode.
-
-## `useRenderCallback` hook lacks documentation despite living next to `useStableEvent`
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:125-131`. The new `useRenderCallback` hook has zero JSDoc. Its sibling `useStableEvent` (in `ui/src/panels/use-stable-event.ts`) has a thorough header explaining ownership, the layout-effect ordering rationale, and what it does NOT own. The two hooks have near-identical signatures and ~95% identical bodies but differ in their publication point — `useLayoutEffect` (post-commit) vs render-phase ref-mutation (pre-layout) — which matters for callees invoked during the same render.
-
-A future contributor sees two near-identical hooks living next to each other and won't know which to reach for.
+The targeted hydration path correctly treats an unknown cross-instance `/api/sessions/{id}` response as a restart boundary and requests recovery. The broader snapshot paths (`adoptState`, action/create responses, and any shared revision gate they use) still need the same policy. A late `/api/state` or action response from an old server process can otherwise pass the revision gate, roll client state backward, and replace the current UI with stale metadata.
 
 **Current behavior:**
-- `useStableEvent` has a header comment.
-- `useRenderCallback` has none.
-- The decision rule for choosing between them lives only in the file-level comparator comment.
+- Targeted session hydration detects unknown mismatched server instances and refuses direct adoption.
+- Other snapshot-producing paths can still accept an unseen mismatched `serverInstanceId`.
+- Restart recovery is therefore only partially enforced at the state-adoption boundary.
 
 **Proposal:**
-- Add a header comment matching `use-stable-event.ts`'s style: render-phase ref mutation; intended for callbacks invoked synchronously during render (e.g., `renderMessageCard(message)` inside a `.map()`); not safe for `flushSync`-driven event handlers (use `useStableEvent` for those).
-- Optionally split into `panels/use-render-callback.ts` for findability and side-by-side discovery with `use-stable-event.ts`.
+- Move the unknown-mismatched-server policy into the shared snapshot revision/adoption gate.
+- Apply it consistently to `adoptState`, `adoptCreatedSessionResponse`, and any other full-snapshot response path.
+- Add coverage proving a stale cross-instance full snapshot cannot downgrade or replace current client state.
 
-## `renderPromptSettings` inline arrow at `SessionPaneView.tsx:3147` defeats the prompt-mode comparator
+## Interaction-response tests do not assert submitted payload state
 
-**Severity:** Low - `ui/src/SessionPaneView.tsx:3147` × `ui/src/panels/AgentSessionPanel.tsx:550-551`. The `SessionBody` comparator now checks `(previous.viewMode !== "prompt" || previous.renderPromptSettings === next.renderPromptSettings)`. When `viewMode === "prompt"`, this compares prop identity. But the upstream `renderPromptSettings` prop is defined as a fresh inline arrow function in `SessionPaneView.tsx` on every render, so the comparator returns `false` on every parent render in prompt mode.
+**Severity:** Medium - `src/tests/review.rs` interaction-response coverage verifies that the hydrated session contains the expected message id, but not that the message's submitted payload/state changed to the expected answer/action/content/result.
 
-The whole point of the comparator is to avoid re-rendering `SessionBody` on unrelated parent updates. In prompt mode it does the opposite — re-renders every time.
+That leaves an assertion hole: a route could return a hydrated `StateResponse` with a stale or still-pending interaction message while publishing the correct delta and sending the correct runtime response. The test would pass even though the response body no longer proves the persisted/hydrated session state is correct.
 
 **Current behavior:**
-- Prompt-mode comparator branch defeats memoization due to inline-arrow prop.
-- Non-prompt mode is unaffected.
+- Shared interaction-response assertion checks for the message id in the returned hydrated session.
+- It does not assert the exact submitted interaction payload or final message state.
+- Per-route tests can miss stale hydrated response bodies.
 
 **Proposal:**
-- Either (a) decide prompt-mode re-rendering on every parent render is intentional and document it (comment at the inline arrow site).
-- Or (b) wrap `renderPromptSettings` in `useRenderCallback` in `AgentSessionPanel` the same way the other three render callbacks are wrapped, and leave the comparator gate as a safety net.
+- Extend the helper to accept a message predicate, or add per-test assertions on `session.messages[0]`.
+- Assert exact submitted answers, actions, content, and result state for each interaction route.
 
-## `MARKDOWN_INTERNAL_LINK_HREF_ATTRIBUTE` constant has no doc comment for the cross-file contract
+## `SessionPaneView.tsx` past 2,000-line review threshold for TSX components
 
-**Severity:** Low - `ui/src/markdown-links.ts:71`. The new exported constant `MARKDOWN_INTERNAL_LINK_HREF_ATTRIBUTE = "data-markdown-link-href"` underpins a cross-file contract: the renderer in `ui/src/message-cards.tsx` writes this attribute when scrubbing a workspace-link href; the serializer in `ui/src/panels/markdown-diff-edit-pipeline.ts` reads it before falling back to `href` for round-trip preservation.
+**Severity:** Medium - `ui/src/SessionPaneView.tsx`. File is now ~3,311 lines after this round's +172 net additions extracting four stable render callbacks (`renderSessionCommandCard`, `renderSessionDiffCard`, `renderSessionMessageCard`, `renderSessionPromptSettings`). The architecture rubric §9 sets a pragmatic ~2,000-line threshold for TSX components and asks reviewers to flag "existing large files that grow substantially without a clear reason."
 
-Without a doc comment, a future maintainer cleaning up "unused" data-attributes could break the editor's link round-trip silently. Tests would catch it, but the contract should be discoverable from the constant itself.
+The render-callback cluster is a clean extraction candidate — pure render-callback definitions tied only to `pane.id`, `activeSession`, and a handful of card-handler props. They form a cohesive unit with no other panel-state dependencies.
 
 **Current behavior:**
-- Constant declared and exported with no documentation.
-- Two consumers in different files rely on the attribute name as a string.
-- The round-trip purpose lives only in commit-message context.
+- Single 3,311-line TSX file mixes panel orchestration, render-callback definitions, source/diff state, focus management, drag-drop wiring, and many other concerns.
+- This round's growth (+172 net lines) is the largest in recent rounds.
+- No tracked extraction plan.
 
 **Proposal:**
-- Add a 3-4 line doc comment on the constant: "Renderer writes the original href into this attribute when scrubbing the visible `href` to `#`; serializer reads it first when re-emitting `[text](href)` so workspace-file links round-trip through the rendered-Markdown editor without dropping the destination. Both `message-cards.tsx` and `markdown-diff-edit-pipeline.ts` import this symbol — keep the contract on this name."
+- Pure code move (per CLAUDE.md): extract the four `useCallback`-stabilized render callbacks into `ui/src/SessionPaneView.render-callbacks.tsx` (or a hook like `useSessionRenderCallbacks`).
+- Defer to a dedicated split commit; do not couple with feature changes.
+- Keep the orchestration logic in `SessionPaneView.tsx`.
 
-## `shouldScrubMarkdownDomHref` has no direct unit test
+## `request<T>` invalid-JSON-with-application/json-content-type path is not directly tested
 
-**Severity:** Low - `ui/src/markdown-links.ts:195`. The new exported predicate has multiple regex branches (`file://`, `/[A-Za-z]:[\\/]`, `[A-Za-z]:[\\/]`, decoded variants). It's currently covered only via integration through the new `MarkdownContent.test.tsx` test "scrubs encoded Windows file-link hrefs even when source resolution fails".
+**Severity:** Medium - `ui/src/api.test.ts`. The new simplified `request<T>` flow at `ui/src/api.ts:403-425` propagates a raw `SyntaxError` for the case: response carries `Content-Type: application/json`, body is NOT HTML (so `looksLikeHtmlResponse` returns false), body is invalid JSON (so `JSON.parse(raw)` throws). The pre-simplification suite explicitly mocked `json: () => { throw new SyntaxError(...) }`; that branch is now exercised only by HTML-shaped invalid JSON, leaving the "looks like JSON garbage but isn't HTML" path silent.
 
-A regex regression that broke one branch (e.g., dropping the `safeDecodeMarkdownHref` chain) would only be caught if a `MarkdownContent` test happened to exercise that exact input shape.
+A future regression that accidentally double-reads the body (consuming the stream and producing an empty `raw`) or mis-handles JSON parse errors would not be caught by the new test suite.
 
 **Current behavior:**
-- Helper has multiple branches.
-- Coverage is integration-only via one specific test.
-- No direct unit-level coverage in `markdown-links.test.ts`.
+- HTML-shaped invalid JSON path is tested.
+- Truncated or invalid non-HTML JSON path is NOT tested.
+- A `SyntaxError` from `JSON.parse(raw)` propagates raw to consumers — `isBackendUnavailableError(e)` returns `false`, no `ApiRequestError` shape.
 
 **Proposal:**
-- Add a small `describe("shouldScrubMarkdownDomHref")` block in `markdown-links.test.ts` covering each branch: raw `file://`, raw drive letter, encoded drive letter, slash-prefixed encoded drive letter, plus negative cases like `https://...` and `#anchor`.
+- Add a test that returns `Content-Type: application/json` with a body like `'{"foo":'` (truncated, non-HTML) and asserts the resulting error shape.
+- Decide whether the contract is (a) `SyntaxError` propagates as-is (current behavior), or (b) wrap `JSON.parse(raw)` in try/catch and throw `new ApiRequestError("request-failed", "The TermAl backend returned an unparseable JSON response.", ...)` for consistent error-shape with the rest of `api.ts`.
 
-## No regression test for hostile `data-markdown-link-href` round-trip
+## Dead branches on `isCrossInstanceHydrationResponse` after the new early return
 
-**Severity:** Low - `ui/src/panels/markdown-diff-edit-pipeline.test.ts`. The serializer reads `data-markdown-link-href` FIRST and falls back to `href`. Logic correctly rejects unsafe protocols via `isSerializableMarkdownHref`, but a regression that bypassed the protocol check on the data-attribute branch (e.g., if someone "fixed" the round-trip path to skip validation) would not be caught.
+**Severity:** Low - `ui/src/app-live-state.ts:1222, 1239`. The function now returns `"restartResync"` at line 1181 whenever `isCrossInstanceHydrationResponse` is true. Lines 1222 (`!isCrossInstanceHydrationResponse`) and 1239 (`|| isCrossInstanceHydrationResponse`) preserve flag references that are now always evaluated against `false` and `true` respectively.
 
-The existing safety test (line 807) only exercises the `href` path with `javascript:alert(1)`. The new round-trip test (line 825) only uses a benign `C:\repo\docs\README.md` href.
+The conditions are correct but encode an invariant that the early return now guarantees, making future maintainers reason about a path that no longer exists. If the early return is later relaxed (e.g., to allow some same-session cross-instance hydration to adopt directly), these now-dead branches could spring back to life with a different meaning.
 
 **Current behavior:**
-- Hostile-protocol rejection works at the `href` attribute path.
-- The newer `data-markdown-link-href` precedence path is not pinned for hostile inputs.
+- Early return at line 1181 makes the downstream `isCrossInstanceHydrationResponse` checks unreachable in their `true` branch.
+- The flag references read as if cross-instance adoption were still possible inside this function.
+- Future maintainers will be misled or trip on the contradiction.
 
 **Proposal:**
-- Add a test that builds an editable section with `<a href="#" data-markdown-link-href="javascript:alert(1)">Unsafe</a>` and asserts `serializeEditableMarkdownSection` returns just `"Unsafe"` (no link).
+- Drop both downstream guards on `isCrossInstanceHydrationResponse`.
+- Or replace with a `// invariant: same-instance only past this point` comment near the early return.
 
-## `useRenderCallback` not pinned by a "latest renderer fires after handler-only rerender" test
+## Restart hydration recovery can drop the transcript retry after server-instance mismatch
 
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx`. The new "refreshes prompt settings when only the prompt renderer changes" test exercises the `renderPromptSettings` path, which is NOT bridged via `useRenderCallback` (it's directly compared by the comparator). The `renderMessageCard`/`renderCommandCard`/`renderDiffCard` paths use `useRenderCallback` and aren't tested for the "after rerender, the latest renderer is invoked" path.
+**Severity:** Medium - `ui/src/app-live-state.ts` sets `hydrationRestartResyncPendingRef` when targeted hydration rejects a cross-instance session response, but the recovery path can clear that intent before recovery is confirmed and does not guarantee a transcript hydration retry.
 
-A regression that froze `useRenderCallback` to the initial closure would silently break visible rendering — children would keep showing the original render output even after the parent passes a new render function.
+The recovery flow relies on a follow-up `/api/state` request. That request is metadata-first and may return the same current revision, so `adoptState()` can reject it as a no-op. If the recovery probe is offline, cancelled, fails, or resolves to a same-revision snapshot, the visible session can remain `messagesLoaded: false` with no durable retry until an unrelated state event or user action happens.
 
 **Current behavior:**
-- `useRenderCallback` has no direct test.
-- `renderPromptSettings` (the non-`useRenderCallback` path) is tested.
-- `renderMessageCard`/`renderCommandCard`/`renderDiffCard` (the `useRenderCallback` paths) are not.
+- Targeted hydration rejects unknown cross-instance session responses with `"restartResync"`.
+- The recovery marker can be cleared before the resync actually runs or succeeds.
+- A same-revision `/api/state` recovery response does not materialize transcripts and may not schedule another hydration pass.
 
 **Proposal:**
-- Add a test that rerenders with a new `renderMessageCard` returning visibly different DOM ("Initial card" → "Latest card") and asserts the latest text appears, mirroring the prompt-renderer test but for the `useRenderCallback`-bridged path.
+- Keep the restart-hydration recovery intent pending until a recovery snapshot is successfully requested/adopted or a session hydration retry is explicitly scheduled.
+- Re-arm the intent on offline/cancelled/failed recovery probes.
+- After a restart resync, schedule a hydration retry for the affected visible session even if `/api/state` is a revision no-op.
 
-## `seenServerInstanceIdsRef` unbounded set growth is undocumented
+## `AdoptFetchedSessionOutcome` enum has no exhaustive switch with `assertNever`
 
-**Severity:** Low - `ui/src/App.tsx:490` × `ui/src/app-live-state.ts:355-362`. `rememberServerInstanceId` only `.add()`s to `seenServerInstanceIdsRef`; there's no eviction or cap. Each entry is ~36 chars (UUID); growth is bounded by "number of distinct server-restart UUIDs in this tab's lifetime".
-
-For Phase 1 single-user local that bound is small enough to be irrelevant (1000 restarts ≈ 50KB). But the new contract has no documented upper bound and no eviction strategy. The architecture-review brief explicitly asked us to flag if not capped.
+**Severity:** Low - `ui/src/app-live-state.ts:1303-1317`. The new string-union outcome `"adopted" | "stale" | "restartResync"` has a single call site that handles it via if/else-if/else without an exhaustiveness assertion. A future fourth outcome (e.g., `"deferred"`) would silently hit the `else` branch and trigger `shouldRetryHydration = true`.
 
 **Current behavior:**
-- Set grows monotonically over the tab's lifetime.
-- No documented bound or eviction strategy.
-- No comment near the ref initialization explaining why unboundedness is acceptable.
+- TypeScript enforces only that current callers cover the three documented outcomes.
+- A new variant added to the union would compile cleanly while silently routing through the catch-all branch.
 
 **Proposal:**
-- Either (a) document the boundedness assumption next to `useRef<Set<string>>(new Set())` at `App.tsx:490`: "Bounded set; older ids never evict because the only consumer (`shouldAdoptSnapshotRevision`) just needs to recognize already-seen instance ids during the current tab's lifetime."
-- Or (b) cap the set at a small bound (e.g., 64 entries) using insertion-order eviction. A `Map<string, never>` works as an ordered-set replacement.
+- Convert to `switch (adoptOutcome) { case "adopted": …; case "stale": …; case "restartResync": …; default: assertNever(adoptOutcome); }`.
+- Use the project's existing `assertNever` helper or add one to a shared util module if not present.
 
-## `codex_thread_actions.rs:156-164` has `if let Some(index)` followed by trailing `expect()` — contradictory invariant claims
+## `adoptFetchedSession` contract comment still documents a boolean return
 
-**Severity:** Low - `src/codex_thread_actions.rs:156-164`. The block uses `if let Some(index) = inner.find_session_index(&record.session.id)` (silent no-op on lookup failure) but the trailing `.expect("just-created Codex session must be present in the index")` at line 171 panics on the same condition. The two patterns express opposite beliefs about the same invariant.
+**Severity:** Low - `ui/src/app-live-state.ts` now returns `AdoptFetchedSessionOutcome` from `adoptFetchedSession`, but the nearby contract comment still describes a boolean return with two false outcomes.
 
-Verified upstream: `inner.create_session(...)` (in `state_inner.rs:175`) calls `self.push_session(record.clone())` synchronously, so the index is always populated before `find_session_index` runs. Both should be `expect()`.
+This function is on the hydration/restart recovery boundary. A stale contract comment here is more than cosmetic: it can mislead future changes into treating `"restartResync"` as a normal stale/no-op branch instead of a distinct recovery path that must trigger a resync and transcript retry.
 
 **Current behavior:**
-- `if let Some(index) = ...` silently no-ops if lookup fails.
-- The trailing `.expect()` panics in the same case.
-- The two branches contradict each other; the silent fallback is dead code.
+- Implementation returns `"adopted"`, `"stale"`, or `"restartResync"`.
+- Comment still describes the previous boolean contract.
+- The new cross-instance restart behavior is not documented at the function boundary.
 
 **Proposal:**
-- Replace `if let Some(index) = ...` at line 156 with `let index = inner.find_session_index(...).expect("just-created Codex session must be present in the index")`, mirroring the trailing assertion.
-- This makes both branches honest about the invariant and avoids the silent no-op.
+- Rewrite the contract comment to describe all three outcomes.
+- Explicitly document that `"restartResync"` rejects cross-instance hydration and requires recovery instead of direct adoption.
 
-## `shouldScrubMarkdownDomHref` doesn't include UNC paths in its predicate
+## `renderSessionMessageCard` deps cause SessionBody to re-render per streaming chunk
 
-**Severity:** Low - `ui/src/markdown-links.ts:202-208`. The predicate covers `file://`, `/[A-Za-z]:[\\/]`, `[A-Za-z]:[\\/]`, plus URI-decoded variants, but does not match `^\\\\` (UNC paths like `\\server\share\file.md`).
+**Severity:** Low - `ui/src/SessionPaneView.tsx:2299-2367`. The `useCallback` deps include `activeSession?.status` and `latestAssistantMessageId`, both of which change on every streaming chunk. Combined with the new comparator gate `(previous.viewMode !== "session" || previous.renderMessageCard === next.renderMessageCard)`, `SessionBody` no longer absorbs streaming-chunk parent rerenders the way it did under the old `useRenderCallback` + render-phase-ref bridge. Streaming now causes one extra `SessionBody` rerender per chunk in the active-session view.
 
-UNC paths are caught indirectly: `looksLikeAbsoluteMarkdownFilePath` (in the same file, line 319) returns true for `^\\\\`, so `resolveMarkdownFileLinkTarget` produces a non-null `fileLinkTarget`, which already forces `scrubDomHref = true` in `message-cards.tsx`. No exposure under the current renderer pipeline. But the predicate's coverage is non-obvious from its name — its safety relies on the resolver's UNC branch, not on the predicate itself.
+The downstream `useDeferredValue(deferredMessages)` still buffers, so the user-visible regression is bounded. But the prior architecture's stated rationale for the render-phase ref bridge ("keep streaming light") has shifted — the trade-off is real and not commented.
 
 **Current behavior:**
-- UNC paths are scrubbed via `fileLinkTarget` resolution path.
-- `shouldScrubMarkdownDomHref` doesn't match them directly.
-- Predicate's defense-in-depth coverage is incomplete from its name.
+- `renderSessionMessageCard` identity changes per streaming chunk.
+- `SessionBody` memo no longer absorbs those identity changes — it re-renders.
+- `useDeferredValue` buffers downstream so visible UX is bounded.
+- The architectural invariant "SessionBody does not re-render mid-stream" changed without a note.
 
 **Proposal:**
-- Add `/^\\\\/.test(normalizedHref)` and `/^\\\\/.test(decodedHref)` to `shouldScrubMarkdownDomHref` so the predicate's coverage matches its comment-level intent.
-- Aligns with the absolute-path detection in `looksLikeAbsoluteMarkdownFilePath` and removes the implicit dependency on resolver behavior.
+- Either accept the trade-off and update the comparator comment to record it ("renderMessageCard identity tracks streaming flags by design; SessionBody re-renders per chunk in session view").
+- Or memoize `renderSessionMessageCard` more aggressively by splitting the streaming-flag computation into an inner callback closed over via ref.
+- Bias toward the comment — the simpler approach is architecturally preferable unless profiling shows real cost.
 
-## `hydrationRetainedMessagesMatch` "extra fields" test only pins matcher strictness, not Message type purity
+## `renderSessionPromptSettings` deps include Codex-only fields, over-invalidating non-Codex sessions
 
-**Severity:** Low - `ui/src/app-live-state.test.ts:78-86`. The test casts a fake field via `as Message` to simulate the bypass: `{ messages: [{ ...message, localRenderCache: true } as Message] }`. This pins the matcher's strictness against synthetic divergence — but a future legitimate `Message` field added to `BaseMessage` (`ui/src/types.ts:310`) would be present on both sides; `JSON.stringify` would still match; the contract would silently drift.
+**Severity:** Low - `ui/src/SessionPaneView.tsx:2369`. The deps array includes `sessionSettingNotice`, `onArchiveCodexThread`, `onCompactCodexThread`, `onForkCodexThread`, `onRollbackCodexThread`, `onUnarchiveCodexThread` — all only consumed inside the `session.agent === "Codex"` branch. While a Claude/Cursor/Gemini session is active in prompt mode, any change to those Codex-only inputs still rebuilds the callback. Combined with the new comparator (`previous.viewMode !== "prompt" || ...`), that forces the prompt panel to re-render each time.
 
-The source-side comment at `ui/src/app-live-state.ts:225-227` warns about this, but the comment is remote from where the change would be made (the `Message` type definition).
+The deps array is correct under the exhaustive-deps rule and TypeScript closure semantics, but the renderer body conflates four agent surfaces into one closure.
 
 **Current behavior:**
-- Test rejects synthetic extra fields via type cast.
-- The contract relies on a comment in the matcher file, far from `BaseMessage` where new fields would be added.
-- A legitimate `Message` field added to both sides would silently bypass the matcher.
+- All Codex-specific dependencies invalidate `renderSessionPromptSettings` even for non-Codex active sessions.
+- Bounded UX impact (settings toasts are infrequent).
+- Re-renders the prompt pane unnecessarily.
 
 **Proposal:**
-- Either (a) add a separate "persisted-message projection" function (`pickPersistedMessageFields(message)`) used by both sides of the comparison, with a brand or lint check pinning its field list.
-- Or (b) put a comment on `BaseMessage` itself in `ui/src/types.ts` warning that any new field there must also be reflected in `hydrationRetainedMessagesMatch`'s persistence contract.
-- Optionally add a snapshot assertion on `Object.keys(message)` against an explicit allowlist tied to `Message`'s persisted shape.
+- Either accept this (current behavior is bounded), or split the four agent-specific renderers into separate `useCallback`s and dispatch by agent at the call site so each renderer's deps narrow to the inputs it actually reads.
+
+## `SessionBody` comparator lacks commands/diffs renderer coverage
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx` comparator branches now account for renderer identity in `commands` and `diffs` view modes, but tests only cover the session-message renderer and prompt settings renderer.
+
+The comparator decides whether the body rerenders when render callbacks change. Without command and diff renderer-only tests, a future regression can leave those views stale while existing tests still pass.
+
+**Current behavior:**
+- Tests cover `renderMessageCard` and prompt settings identity paths.
+- `renderCommandCard` and `renderDiffCard` comparator branches have no direct rerender coverage.
+
+**Proposal:**
+- Add renderer-only rerender tests for `viewMode="commands"` and `viewMode="diffs"`.
+- Assert latest command/diff renderer output appears after the parent supplies a new renderer.
 
 ## `app-live-state.ts` past 1,500-line review threshold for TypeScript utility modules
 
@@ -563,19 +567,6 @@ through a broad module instead of a small boundary with a clear contract.
 - Consider extracting the heavy Markdown/code rendering path separately so
   virtualization policy and content rendering can evolve independently.
 
-## `useState` initializer in `SessionComposer` writes to a shared ref
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:788-806` includes `committedDraftsRef.current[initialSessionId] = initialCommittedDraft;` inside a `useState(() => { ... })` initializer. React's documentation explicitly warns against side effects in state initializers because the initializer can run more than once (StrictMode double-invoke, discarded concurrent renders). The write is idempotent today, but the pattern is a known footgun and any future code making the initialization non-idempotent would silently double-apply.
-
-**Current behavior:**
-- The `useState` initializer writes the initial committed draft into `committedDraftsRef.current[initialSessionId]`.
-- Under React 18 StrictMode the initializer runs twice; the write is idempotent so no observable difference today.
-- Any future non-idempotent logic (e.g. appending to an array, incrementing a counter, allocating a derived id) added to the initializer would silently double-apply.
-
-**Proposal:**
-- Move the `committedDraftsRef.current[initialSessionId] = initialCommittedDraft` write into the first `useLayoutEffect` keyed on `[activeSessionId]`.
-- The state initializer can still compute the initial draft from `session?.committedDraft ?? ""` without writing the ref.
-
 ## `preferImmediateHeavyRender` is computed from a non-reactive ref during render
 
 **Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:666-667` computes the `preferImmediateHeavyRender` prop for `MeasuredPageBand` by reading `hasUserScrollInteractionRef.current` during render. Refs are not reactive, so the computed value only propagates when something else forces a re-render. Today that works because every scroll-event path that flips the ref to `true` also triggers `setViewport(...)` via `syncViewportFromScrollNode` within the same handler, which causes a re-render and re-reads the ref. But the coupling is implicit, undocumented, and brittle.
@@ -590,22 +581,6 @@ Any future scroll path that flips `hasUserScrollInteractionRef.current = true` w
 **Proposal:**
 - Promote `hasUserScrollInteraction` to component state (or state+ref pair), so every mutation triggers a re-render automatically.
 - Alternatively, expose a helper like `setHasUserScrollInteraction(true)` that both writes the ref and calls a dedicated state-setter, and use that everywhere. Add a comment at the two existing setter sites naming the invariant.
-
-## Composer switched to uncontrolled `<textarea>` without documenting the narrow-state contract
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:1132-1172` migrated the composer from a controlled input (`value={composerDraft}`) to an uncontrolled input (`defaultValue={initialComposerDraft}`) with imperative `composerInputRef.current.value = ...` writes for everything but slash-prefixed drafts. The React state `composerDraft` is populated only when the current input starts with `/`; plain-text drafts live exclusively in the DOM and `composerDraft` reads `""`.
-
-Today this is intentional — only the slash palette cares about the draft, and it only cares about slash drafts. But any future consumer of `composerDraft` through props, memo deps, or a derived state calculation will see empty strings for plain text and not understand why. The invariant "current draft text must be read via `getComposerDraftValue()`, not `composerDraft`" is implicit.
-
-**Current behavior:**
-- `<textarea>` is uncontrolled; `defaultValue={initialComposerDraft}` sets the first paint, imperative `ref.current.value = ...` handles later writes.
-- `composerDraft` (React state) tracks only slash-prefixed drafts for palette rendering.
-- Any non-slash reader of `composerDraft` observes empty strings for typed plain text.
-- Nothing in code documents that current draft text MUST be read via `getComposerDraftValue()` / `composerInputRef.current?.value`.
-
-**Proposal:**
-- Add a block comment at the `currentLocalDraftState` declaration explaining the narrow slash-only meaning and that readers of current draft text MUST use `getComposerDraftValue()`.
-- Rename `composerDraft` → `composerSlashDraft` (or `trackedSlashDraft`) to make the narrow purpose visible at every call site.
 
 ## `CodexUpdated` delta carries a full subsystem snapshot despite the "delta" name
 
@@ -745,43 +720,6 @@ process-local marker.
 - Add a backend serialization/localization regression that proves persisted
   sessions do not contain `sessionMutationStamp`.
 
-## `looksLikeHtmlResponse` 256-char slice drops leading-whitespace tolerance
-
-**Severity:** Low - `ui/src/api.ts::looksLikeHtmlResponse(...)` now slices the first 256 raw characters before `trimStart().toLowerCase()`. A proxy or dev-server error page that emits more than 256 bytes of leading whitespace before `<html>` is no longer detected as HTML and falls through to `JSON.parse`, so the "Restart TermAl" guidance never surfaces for that response.
-
-The bounded prefix probe is a performance improvement over the old "scan the whole body" behaviour, but the old code trimmed leading whitespace before inspecting the prefix, which this version does not. Realistic proxies are unlikely to emit >256 bytes of whitespace, but when they do the user sees a generic parse error instead of the restart prompt.
-
-**Current behavior:**
-- `raw.slice(0, 256).trimStart().toLowerCase()` — whitespace that exceeds 256 bytes pushes the `<html>` marker past the probe window.
-
-**Proposal:**
-- Reorder the operations: `raw.trimStart().slice(0, 256).toLowerCase()` — preserves the old semantics while still bounding the slice cost.
-
-## `response.clone()` buffers every successful JSON response a second time
-
-**Severity:** Low - the new JSON fast-path in `ui/src/api.ts::request(...)` calls `response.clone()` eagerly before parsing so the rare JSON-parse-failure branch can read the body as text. For large responses (full state snapshots, file reads, terminal-run transcripts) this doubles the memory footprint of every healthy JSON response just to preserve a fallback that is never consumed.
-
-The existing `api.test.ts` case ("uses the JSON fast path for successful application/json responses") asserts the clone's `text()` call does NOT run on success — confirming the clone's buffered body is dead weight >99% of the time.
-
-**Current behavior:**
-- Every `response.ok` + JSON content-type path clones the response body immediately.
-- The clone is only read in the catch branch, which the fast path almost never reaches.
-
-**Proposal:**
-- Consume `response.text()` once and `JSON.parse` the string, trading one allocation for avoiding the double-buffering. The HTML-sniff fallback becomes a plain branch on the already-materialised text string.
-
-## `useDeferredValue(pendingPrompts)` receives a fresh `[]` each render
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:555-557` reads `session.pendingPrompts ?? []`, allocating a new empty array on every render when `pendingPrompts` is `undefined` (the common case). `useDeferredValue` treats each render as a changed value and schedules a transition even though the content is identical, which mildly defeats the purpose of deferring the value.
-
-**Current behavior:**
-- `pendingPrompts` is `session.pendingPrompts ?? []`.
-- Every render when `pendingPrompts` is absent allocates a fresh array.
-- `useDeferredValue` schedules a transition for identical empty content.
-
-**Proposal:**
-- Hoist a module-scope `const EMPTY_PENDING_PROMPTS: readonly PendingPrompt[] = [];` and use it as the fallback, so the deferred-value input has stable identity when the list is empty.
-
 ## Composer sizing double-resets on session switch
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:918-931` runs `resizeComposerInput(true)` synchronously inside a `useLayoutEffect` keyed on `[activeSessionId]`, and a following `useEffect` keyed on `[composerDraft]` schedules another resize via `requestAnimationFrame` on the same first render. The rAF resize is redundant because the synchronous one already measured the new metrics.
@@ -794,31 +732,6 @@ The existing `api.test.ts` case ("uses the JSON fast path for successful applica
 **Proposal:**
 - Track a "just-resized-synchronously" flag set in the layout effect and checked at the top of `scheduleComposerResize`, or gate the draft effect with a prev-draft ref so the "initial draft equals committed" case is a no-op.
 
-## Composer autosize does not shrink on width-only pane resize
-
-**Severity:** Low - the optimized composer resize path no longer forces a
-shrink-capable measurement when only the textarea width changes.
-
-`ui/src/panels/AgentSessionPanel.tsx` coalesces autosize work and only forces
-the shrink-capable measurement (previously `height = "auto"`, now
-`height = "0px"`) for session switches or panel-height changes. Widening a pane
-can reduce text wrapping and therefore reduce the required textarea height, but
-a width-only `ResizeObserver` update calls `scheduleComposerResize(...)`
-without the force flag. The measured height can remain taller than its content
-until another draft or session change triggers a full reset.
-
-**Current behavior:**
-- Pane width changes can alter wrapping without changing panel height.
-- The resize scheduler does not force the textarea through a shrink-capable
-  measurement pass for width-only changes.
-- The composer can stay over-tall after widening the pane.
-
-**Proposal:**
-- Treat `widthChanged || panelHeightChanged` as a shrink-capable resize input,
-  or otherwise force a shrink-capable measurement whenever wrapping can change.
-- Add a focused test that widens the composer container and asserts the textarea
-  height can shrink without requiring another keystroke.
-
 ## Duplicated `Session` projection types in `session-store.ts` and `session-slash-palette.ts`
 
 **Severity:** Low - `ComposerSessionSnapshot` (`ui/src/session-store.ts:36-83`) and `SlashPaletteSession` (`ui/src/panels/session-slash-palette.ts:51-65`) each re-pick overlapping-but-non-identical field sets from `Session`. Three `Session`-like shapes now exist (`Session`, `ComposerSessionSnapshot`, `SlashPaletteSession`) with no compile-time check that additions to `Session` reach both projections — a new agent setting added to `Session` could silently default to `undefined` in consumers that read through either projection.
@@ -830,17 +743,6 @@ until another draft or session change triggers a full reset.
 **Proposal:**
 - Derive both types via `Pick<Session, ...>`, or express `SlashPaletteSession` as `Omit<ComposerSessionSnapshot, ...>` where their field sets differ.
 - Colocate the derivations in `session-store.ts` so the projection contract is visible in one place.
-
-## `activeSessionId` vs. `session` dual identity in `SessionComposer`
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:791-797` computes `activeSessionId = session?.id ?? sessionId` so `activeSessionId` is truthy while the store is still catching up and `session` is still null. Other call sites guard differently (some check `!session`, some check `!activeSessionId || !session`). A future caller that guards only on `activeSessionId` will proceed with a null snapshot.
-
-**Current behavior:**
-- `activeSessionId` is truthy in a narrow window where `session` is still null.
-- The two notions of "active" diverge in that window, and nothing documents the invariant.
-
-**Proposal:**
-- Either treat "snapshot null but id truthy" as "no session" (fall back to `null`), or add a comment near the fallback documenting that `activeSessionId` is a best-effort fallback and callers must still check `session` before reading capability fields.
 
 ## `resolvedWaitingIndicatorPrompt` duplicates `findLastUserPrompt` derivation across `SessionBody` and `SessionPaneView`
 

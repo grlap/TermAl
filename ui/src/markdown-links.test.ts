@@ -21,7 +21,10 @@
 
 import { describe, expect, it } from "vitest";
 
-import { transformMarkdownLinkUri } from "./markdown-links";
+import {
+  shouldScrubMarkdownDomHref,
+  transformMarkdownLinkUri,
+} from "./markdown-links";
 
 describe("transformMarkdownLinkUri", () => {
   describe("dangerous protocols", () => {
@@ -36,6 +39,9 @@ describe("transformMarkdownLinkUri", () => {
       ["VBScript:msgbox('pwn')"],
       ["data:text/html,<script>alert(1)</script>"],
       ["data:application/javascript,alert(1)"],
+      ["%6A%61%76%61%73%63%72%69%70%74%3Aalert(1)"],
+      ["%76%62%73%63%72%69%70%74%3Amsgbox('pwn')"],
+      ["%64%61%74%61%3Atext/html,<script>alert(1)</script>"],
       // `data:image/*` is NOT on `uriTransformer`'s allowlist
       // (only http/https/mailto/tel + `#`/`/` early returns), so
       // even image data URIs get neutralized. Pinning this here so a
@@ -112,5 +118,30 @@ describe("transformMarkdownLinkUri", () => {
       // navigate to in either case.
       expect(transformMarkdownLinkUri("")).toBe("");
     });
+  });
+});
+
+describe("shouldScrubMarkdownDomHref", () => {
+  it.each([
+    ["file:///C:/repo/docs/README.md"],
+    ["C:/repo/docs/README.md"],
+    ["C:\\repo\\docs\\README.md"],
+    ["/C:/repo/docs/README.md"],
+    ["/C:%5Crepo%5Cdocs%5CREADME.md"],
+    ["C:%5Crepo%5Cdocs%5CREADME.md"],
+    ["%5C%5Cserver%5Cshare%5CREADME.md"],
+    ["\\\\server\\share\\README.md"],
+  ])("scrubs local absolute href %s", (href) => {
+    expect(shouldScrubMarkdownDomHref(href)).toBe(true);
+  });
+
+  it.each([
+    ["https://example.com/docs"],
+    ["mailto:alice@example.com"],
+    ["#anchor"],
+    ["docs/README.md"],
+    ["../docs/README.md"],
+  ])("does not scrub non-local href %s", (href) => {
+    expect(shouldScrubMarkdownDomHref(href)).toBe(false);
   });
 });

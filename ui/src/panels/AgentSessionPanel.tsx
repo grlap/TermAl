@@ -77,6 +77,8 @@ type PromptHistoryState = {
   draft: string;
 };
 
+const EMPTY_PENDING_PROMPTS: readonly PendingPrompt[] = [];
+
 type SessionSettingsField =
   | "model"
   | "sandboxMode"
@@ -121,15 +123,6 @@ function isSpaceKey(event: {
     event.which === 32
   );
 }
-
-function useRenderCallback<TArgs extends unknown[], TResult>(
-  callback: (...args: TArgs) => TResult,
-) {
-  const callbackRef = useRef(callback);
-  callbackRef.current = callback;
-  return useCallback((...args: TArgs) => callbackRef.current(...args), []);
-}
-
 
 export function AgentSessionPanel({
   paneId,
@@ -203,9 +196,6 @@ export function AgentSessionPanel({
   );
   const stableOnCancelQueuedPrompt = useStableEvent(onCancelQueuedPrompt);
   const stableOnSessionSettingsChange = useStableEvent(onSessionSettingsChange);
-  const stableRenderCommandCard = useRenderCallback(renderCommandCard);
-  const stableRenderDiffCard = useRenderCallback(renderDiffCard);
-  const stableRenderMessageCard = useRenderCallback(renderMessageCard);
 
   return (
     <SessionBody
@@ -229,9 +219,9 @@ export function AgentSessionPanel({
       conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
       conversationSearchActiveItemKey={conversationSearchActiveItemKey}
       onConversationSearchItemMount={onConversationSearchItemMount}
-      renderCommandCard={stableRenderCommandCard}
-      renderDiffCard={stableRenderDiffCard}
-      renderMessageCard={stableRenderMessageCard}
+      renderCommandCard={renderCommandCard}
+      renderDiffCard={renderDiffCard}
+      renderMessageCard={renderMessageCard}
       renderPromptSettings={renderPromptSettings}
     />
   );
@@ -400,12 +390,6 @@ const SessionBody = memo(function SessionBody({
     ) => void,
   ) => JSX.Element | null;
 }): JSX.Element | null {
-  // Stabilize render callbacks so children receive a constant function identity.
-  // These are render-time callbacks, not event callbacks: children invoke them
-  // while rendering, and the prompt-settings callback is invoked below during
-  // this component's render. Do not replace this with `useStableEvent`, whose
-  // layout-effect publish point is intentionally too late for same-render calls.
-  // The render-phase ref update keeps in-progress render closures available.
   const activeSession = useSessionRecordSnapshot(activeSessionId);
   const resolvedWaitingIndicatorPrompt =
     showWaitingIndicator &&
@@ -413,29 +397,6 @@ const SessionBody = memo(function SessionBody({
     (activeSession.status === "active" || activeSession.status === "approval")
       ? findLastUserPrompt(activeSession)
       : waitingIndicatorPrompt;
-  const renderMessageCardRef = useRef(renderMessageCard);
-  renderMessageCardRef.current = renderMessageCard;
-  const stableRenderMessageCard = useCallback<RenderMessageCard>(
-    (...args) => renderMessageCardRef.current(...args),
-    [],
-  );
-
-  const renderCommandCardRef = useRef(renderCommandCard);
-  renderCommandCardRef.current = renderCommandCard;
-  const stableRenderCommandCard = useCallback(
-    (message: CommandMessage) => renderCommandCardRef.current(message),
-    [],
-  );
-
-  const renderDiffCardRef = useRef(renderDiffCard);
-  renderDiffCardRef.current = renderDiffCard;
-  const stableRenderDiffCard = useCallback(
-    (message: DiffMessage) => renderDiffCardRef.current(message),
-    [],
-  );
-
-  const renderPromptSettingsRef = useRef(renderPromptSettings);
-  renderPromptSettingsRef.current = renderPromptSettings;
 
   if (!activeSession) {
     return (
@@ -447,7 +408,8 @@ const SessionBody = memo(function SessionBody({
   }
 
   if (viewMode === "session") {
-    const activePendingPrompts = activeSession.pendingPrompts ?? [];
+    const activePendingPrompts =
+      activeSession.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
     if (activeSession.messages.length === 0 && activePendingPrompts.length === 0 && !showWaitingIndicator) {
       return (
         <PanelEmptyState
@@ -465,7 +427,7 @@ const SessionBody = memo(function SessionBody({
       <>
         <SessionConversationPage
           key={activeSession.id}
-          renderMessageCard={stableRenderMessageCard}
+          renderMessageCard={renderMessageCard}
           session={activeSession}
           scrollContainerRef={scrollContainerRef}
           isActive
@@ -487,7 +449,7 @@ const SessionBody = memo(function SessionBody({
   }
 
   if (viewMode === "prompt") {
-    return renderPromptSettingsRef.current(paneId, activeSession, isUpdating, onSessionSettingsChange) ?? (
+    return renderPromptSettings(paneId, activeSession, isUpdating, onSessionSettingsChange) ?? (
       <PanelEmptyState
         title="No prompt settings"
         body="Prompt controls are only available for supported agent sessions."
@@ -499,7 +461,7 @@ const SessionBody = memo(function SessionBody({
     return commandMessages.length > 0 ? (
       <>
         {commandMessages.map((message) => (
-          <MessageSlot key={message.id}>{stableRenderCommandCard(message)}</MessageSlot>
+          <MessageSlot key={message.id}>{renderCommandCard(message)}</MessageSlot>
         ))}
       </>
     ) : (
@@ -514,7 +476,7 @@ const SessionBody = memo(function SessionBody({
     return diffMessages.length > 0 ? (
       <>
         {diffMessages.map((message) => (
-          <MessageSlot key={message.id}>{stableRenderDiffCard(message)}</MessageSlot>
+          <MessageSlot key={message.id}>{renderDiffCard(message)}</MessageSlot>
         ))}
       </>
     ) : (
@@ -547,16 +509,17 @@ const SessionBody = memo(function SessionBody({
   previous.conversationSearchMatchedItemKeys === next.conversationSearchMatchedItemKeys &&
   previous.conversationSearchActiveItemKey === next.conversationSearchActiveItemKey &&
   previous.onConversationSearchItemMount === next.onConversationSearchItemMount &&
+  (previous.viewMode !== "commands" ||
+    previous.renderCommandCard === next.renderCommandCard) &&
+  (previous.viewMode !== "diffs" ||
+    previous.renderDiffCard === next.renderDiffCard) &&
+  (previous.viewMode !== "session" ||
+    previous.renderMessageCard === next.renderMessageCard) &&
   (previous.viewMode !== "prompt" ||
     previous.renderPromptSettings === next.renderPromptSettings)
-  // Child render callbacks (renderMessageCard, renderDiffCard, renderCommandCard)
-  // are intentionally excluded — they are inline closures whose identity changes
-  // every render. AgentSessionPanel bridges them through render-phase refs so
-  // child rerenders can still call the latest version without retriggering this
-  // subtree. Prompt settings are different: SessionBody invokes that renderer
-  // directly, so prompt mode compares it to refresh the rendered prompt pane.
-  // Future callbacks: render-time invocations use refs; child event handlers
-  // belong in this comparator so handler-only rerenders publish latest callbacks.
+  // Render callbacks are invoked during render, so they stay in normal React
+  // dataflow. Compare only the renderer that can affect the active view mode;
+  // event handlers above are committed stable callbacks.
 );
 
 const SessionConversationPage = memo(function SessionConversationPage({
@@ -594,7 +557,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   conversationSearchActiveItemKey: string | null;
   onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
 }) {
-  const pendingPrompts = session.pendingPrompts ?? [];
+  const pendingPrompts = session.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
   const deferredMessages = useDeferredValue(session.messages);
   const deferredPendingPrompts = useDeferredValue(pendingPrompts);
   const visibleMessages = isActive ? deferredMessages : session.messages;
@@ -836,6 +799,9 @@ const SessionComposer = memo(function SessionComposer({
   const requestedSlashAgentCommandsRef = useRef<string | null>(null);
   const slashOptionsRef = useRef<HTMLDivElement | null>(null);
   const session = useComposerSessionSnapshot(sessionId);
+  // This state is intentionally narrow: it exists so slash-palette rendering
+  // has a reactive draft. Plain prompt text lives in the uncontrolled textarea;
+  // read the current prompt through `getComposerDraftValue()`.
   const [currentLocalDraftState, setCurrentLocalDraftState] = useState<{
     draft: string;
     sessionId: string | null;
@@ -846,7 +812,6 @@ const SessionComposer = memo(function SessionComposer({
     }
 
     const initialCommittedDraft = session?.committedDraft ?? "";
-    committedDraftsRef.current[initialSessionId] = initialCommittedDraft;
     const initialLocalDraft = localDraftsRef.current[initialSessionId];
     const initialDraft =
       initialLocalDraft !== undefined ? initialLocalDraft : initialCommittedDraft;
@@ -861,6 +826,9 @@ const SessionComposer = memo(function SessionComposer({
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashNavModality, setSlashNavModality] = useState<"keyboard" | "mouse">("keyboard");
 
+  // `activeSessionId` is a best-effort identity for draft bookkeeping while
+  // the store snapshot catches up. Callers that need capability/session fields
+  // must still check `session`.
   const activeSessionId = session?.id ?? sessionId;
   const committedDraft = session?.committedDraft ?? "";
   const draftAttachments = session?.draftAttachments ?? EMPTY_COMPOSER_ATTACHMENTS;
@@ -1155,7 +1123,7 @@ const SessionComposer = memo(function SessionComposer({
 
       previousWidth = nextWidth;
       previousAvailablePanelHeight = nextAvailablePanelHeight;
-      scheduleComposerResize(panelHeightChanged);
+      scheduleComposerResize(widthChanged || panelHeightChanged);
     });
 
     resizeObserver.observe(textarea);

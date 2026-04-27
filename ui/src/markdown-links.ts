@@ -68,6 +68,12 @@ export type MarkdownFileLinkTarget = {
   openInNewTab?: boolean;
 };
 
+/**
+ * Renderer/serializer contract for local Markdown links whose visible DOM href
+ * is scrubbed to `#`. The renderer stores the original destination here, and
+ * the editable-Markdown serializer reads this attribute first so workspace
+ * file links round-trip without exposing unsafe local paths as clickable hrefs.
+ */
 export const MARKDOWN_INTERNAL_LINK_HREF_ATTRIBUTE = "data-markdown-link-href";
 
 export function resolveMarkdownFileLinkTarget(
@@ -162,20 +168,29 @@ export function isExternalMarkdownHref(href: string) {
   }
   const decodedHref = safeDecodeMarkdownHref(normalizedHref);
 
-  if (
-    /^file:\/\//i.test(normalizedHref) ||
-    /^\/[A-Za-z]:[\\/]/.test(normalizedHref) ||
-    /^[A-Za-z]:[\\/]/.test(normalizedHref) ||
-    /^\/[A-Za-z]:[\\/]/.test(decodedHref) ||
-    /^[A-Za-z]:[\\/]/.test(decodedHref)
-  ) {
+  if (isLocalAbsoluteMarkdownHref(normalizedHref, decodedHref)) {
     return false;
   }
 
-  return /^\/\//.test(normalizedHref) || /^[a-z][a-z\d+.-]*:/i.test(normalizedHref);
+  return (
+    /^\/\//.test(normalizedHref) ||
+    MARKDOWN_PROTOCOL_PREFIX.test(normalizedHref) ||
+    MARKDOWN_PROTOCOL_PREFIX.test(decodedHref)
+  );
 }
 
 export function transformMarkdownLinkUri(href: string) {
+  const normalizedHref = normalizeMarkdownLocalFileHref(href);
+  const decodedHref = normalizedHref ? safeDecodeMarkdownHref(normalizedHref) : href;
+  if (
+    normalizedHref &&
+    !isLocalAbsoluteMarkdownHref(normalizedHref, decodedHref) &&
+    decodedHref !== normalizedHref &&
+    MARKDOWN_PROTOCOL_PREFIX.test(decodedHref) &&
+    uriTransformer(decodedHref) === "javascript:void(0)"
+  ) {
+    return "";
+  }
   if (!isExternalMarkdownHref(href)) {
     return href;
   }
@@ -201,8 +216,10 @@ export function shouldScrubMarkdownDomHref(href: string | undefined) {
   const decodedHref = safeDecodeMarkdownHref(normalizedHref);
   return (
     /^file:\/\//i.test(normalizedHref) ||
+    /^\\\\/.test(normalizedHref) ||
     /^\/[A-Za-z]:[\\/]/.test(normalizedHref) ||
     /^[A-Za-z]:[\\/]/.test(normalizedHref) ||
+    /^\\\\/.test(decodedHref) ||
     /^\/[A-Za-z]:[\\/]/.test(decodedHref) ||
     /^[A-Za-z]:[\\/]/.test(decodedHref)
   );
@@ -214,6 +231,18 @@ export function safeDecodeMarkdownHref(href: string) {
   } catch {
     return href;
   }
+}
+
+const MARKDOWN_PROTOCOL_PREFIX = /^[a-z][a-z\d+.-]*:/i;
+
+function isLocalAbsoluteMarkdownHref(normalizedHref: string, decodedHref: string) {
+  return (
+    /^file:\/\//i.test(normalizedHref) ||
+    /^\/[A-Za-z]:[\\/]/.test(normalizedHref) ||
+    /^[A-Za-z]:[\\/]/.test(normalizedHref) ||
+    /^\/[A-Za-z]:[\\/]/.test(decodedHref) ||
+    /^[A-Za-z]:[\\/]/.test(decodedHref)
+  );
 }
 
 export function normalizeMarkdownLocalFileHref(href: string | undefined) {

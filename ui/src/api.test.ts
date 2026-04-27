@@ -1198,7 +1198,7 @@ describe("fetchState", () => {
     }
   });
 
-  it("uses the JSON fast path for successful application/json responses", async () => {
+  it("parses successful application/json responses from a single text body read", async () => {
     const payload = {
       revision: 1,
       serverInstanceId: "server-1",
@@ -1210,15 +1210,9 @@ describe("fetchState", () => {
       workspaces: [],
       sessions: [],
     };
-    const json = vi.fn(async () => payload);
     const text = vi.fn(async () => JSON.stringify(payload));
-    const cloneText = vi.fn(async () => JSON.stringify(payload));
-    const clone = vi.fn(
-      () =>
-        ({
-          text: cloneText,
-        }) as unknown as Response,
-    );
+    const json = vi.fn(async () => payload);
+    const clone = vi.fn();
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -1234,18 +1228,17 @@ describe("fetchState", () => {
     );
 
     await expect(fetchState()).resolves.toEqual(payload);
-    expect(json).toHaveBeenCalledTimes(1);
-    expect(text).not.toHaveBeenCalled();
-    expect(cloneText).not.toHaveBeenCalled();
+    expect(text).toHaveBeenCalledTimes(1);
+    expect(json).not.toHaveBeenCalled();
+    expect(clone).not.toHaveBeenCalled();
   });
 
   it("classifies mislabelled HTML JSON success responses as restart-required backend errors", async () => {
     expect.assertions(5);
     const html = "<!DOCTYPE html><html><body>Old backend</body></html>";
-    const json = vi.fn(async () => {
-      throw new SyntaxError("Unexpected token <");
-    });
-    const cloneText = vi.fn(async () => html);
+    const text = vi.fn(async () => html);
+    const json = vi.fn();
+    const clone = vi.fn();
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -1255,12 +1248,8 @@ describe("fetchState", () => {
           "Content-Type": "application/json",
         }),
         json,
-        clone: vi.fn(
-          () =>
-            ({
-              text: cloneText,
-            }) as unknown as Response,
-        ),
+        text,
+        clone,
       } as unknown as Response),
     );
 
@@ -1268,8 +1257,35 @@ describe("fetchState", () => {
       await fetchState();
       throw new Error("Expected fetchState to reject");
     } catch (error) {
-      expect(json).toHaveBeenCalledTimes(1);
-      expect(cloneText).toHaveBeenCalledTimes(1);
+      expect(text).toHaveBeenCalledTimes(1);
+      expect(clone).not.toHaveBeenCalled();
+      expect(isBackendUnavailableError(error)).toBe(true);
+      expect((error as ApiRequestError).restartRequired).toBe(true);
+      expect((error as Error).message).toContain("Restart TermAl");
+    }
+  });
+
+  it("detects HTML fallbacks after more than 256 bytes of leading whitespace", async () => {
+    expect.assertions(3);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          `${" ".repeat(300)}<!DOCTYPE html><html><body>Old backend</body></html>`,
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      ),
+    );
+
+    try {
+      await fetchState();
+      throw new Error("Expected fetchState to reject");
+    } catch (error) {
       expect(isBackendUnavailableError(error)).toBe(true);
       expect((error as ApiRequestError).restartRequired).toBe(true);
       expect((error as Error).message).toContain("Restart TermAl");

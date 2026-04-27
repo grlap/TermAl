@@ -307,6 +307,10 @@ export type PendingPrompt = {
   attachments?: ImageAttachment[];
 };
 
+// Persisted transcript identity fields. If a new field is added here, update
+// `hydrationRetainedMessagesMatch` in `app-live-state.ts` (or its extracted
+// projection helper) so targeted hydration does not silently treat new persisted
+// message data as interchangeable during retained-message comparisons.
 type BaseMessage = {
   id: string;
   timestamp: string;

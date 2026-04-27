@@ -400,34 +400,10 @@ export function isBackendUnavailableError(
   );
 }
 
-function isJsonResponseContentType(contentType: string) {
-  const normalized = contentType.toLowerCase();
-  return (
-    normalized.includes("application/json") || normalized.includes("+json")
-  );
-}
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await performRequest(path, init);
 
   const contentType = response.headers.get("content-type") ?? "";
-  if (response.ok && isJsonResponseContentType(contentType)) {
-    const fallbackResponse = response.clone();
-    try {
-      return (await response.json()) as T;
-    } catch (error) {
-      const raw = await fallbackResponse.text().catch(() => "");
-      if (looksLikeHtmlResponse(raw, contentType)) {
-        throw createBackendUnavailableError(
-          formatUnavailableApiMessage(path, response.status),
-          response.status,
-          { restartRequired: true },
-        );
-      }
-      throw error;
-    }
-  }
-
   const raw = await response.text();
   if (looksLikeHtmlResponse(raw, contentType)) {
     throw createBackendUnavailableError(
@@ -1480,8 +1456,8 @@ function looksLikeHtmlResponse(raw: string, contentType: string) {
   }
 
   const trimmed = raw
-    .slice(0, 256)
     .trimStart()
+    .slice(0, 256)
     .toLowerCase();
   return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
 }

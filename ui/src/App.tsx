@@ -486,6 +486,9 @@ export default function App() {
   // late response from an old process and must not roll the UI back.
   // Updated in lockstep with `latestStateRevisionRef` inside
   // `adoptState` / `adoptCreatedSessionResponse` / `adoptFetchedSession`.
+  // The set is intentionally tab-lifetime scoped: even thousands of
+  // dev-server restarts are only tens of KB, and retaining every adopted id
+  // lets late old-process responses stay recognizable without eviction races.
   const lastSeenServerInstanceIdRef = useRef<string | null>(null);
   const seenServerInstanceIdsRef = useRef<Set<string>>(new Set());
   // Populated by the live-state hook's transport useEffect on

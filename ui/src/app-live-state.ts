@@ -204,6 +204,8 @@ type SessionHydrationRequestContext = {
   sessionMutationStamp: number | null;
 };
 
+type AdoptFetchedSessionOutcome = "adopted" | "stale" | "restartResync";
+
 export function resolveAdoptStateSessionOptions(
   options: AdoptStateOptions | undefined,
   serverInstanceChanged: boolean,
@@ -565,6 +567,7 @@ export function useAppLiveState(
   const lastFullStateServerInstanceIdRef = useRef<string | null>(
     lastSeenServerInstanceIdRef.current,
   );
+  const hydrationRestartResyncPendingRef = useRef(false);
   const hydrationRetryTimersRef = useRef<Map<string, number>>(new Map());
   const hydrationRetryAttemptsRef = useRef<Map<string, number>>(new Map());
   const forceAdoptNextStateEventRef = useRef(false);
@@ -1151,27 +1154,32 @@ export function useAppLiveState(
     revision: number,
     serverInstanceId: string,
     requestContext: SessionHydrationRequestContext,
-  ) {
+  ): AdoptFetchedSessionOutcome {
     const previousRevision = latestStateRevisionRef.current;
     const previousSessions = sessionsRef.current;
     const existingIndex = previousSessions.findIndex(
       (entry) => entry.id === session.id,
     );
     if (existingIndex === -1) {
-      return false;
+      return "stale";
     }
 
     const currentSession = previousSessions[existingIndex];
     if (
       isStaleHydrationFromSupersededInstance(requestContext, serverInstanceId)
     ) {
-      return false;
+      return "stale";
     }
 
-    const isServerRestartResponse = isServerInstanceMismatch(
-      lastSeenServerInstanceIdRef.current,
+    const requestServerInstanceBaseline =
+      requestContext.serverInstanceId ?? lastSeenServerInstanceIdRef.current;
+    const isCrossInstanceHydrationResponse = isServerInstanceMismatch(
+      requestServerInstanceBaseline,
       serverInstanceId,
     );
+    if (isCrossInstanceHydrationResponse) {
+      return "restartResync";
+    }
     const responseIsNotOlderThanRequest =
       requestContext.revision === null || revision >= requestContext.revision;
     const canAdoptLowerRevisionHydration =
@@ -1183,16 +1191,13 @@ export function useAppLiveState(
     // "metadata-only": the request and response must still match the current
     // summary, otherwise a delayed full-session response can clobber newer
     // delta metadata and mark stale text as loaded.
-    // Routing through `shouldAdoptSnapshotRevision` gives us the
-    // `serverInstanceId` restart-detection branch while preserving the
-    // pre-existing nuance: on a genuine first hydration (no local
-    // messages yet) we accept even a lower revision, but once the
-    // session has hydrated messages we refuse to clobber them with an
-    // older snapshot. `force + allowRevisionDowngrade: <messages empty>`
-    // encodes exactly that — force=true enters the downgrade branch,
-    // and `allowRevisionDowngrade` decides whether same-instance
-    // downgrades are permitted. Instance mismatch wins over both, so
-    // a restart mid-hydration is always adopted regardless of revision.
+    // Mismatched session-hydration responses are not authoritative enough to
+    // prove whether the responding instance is newer or a late old process, so
+    // they trigger a full /api/state resync above instead of being adopted
+    // directly. For same-instance hydration, preserve the existing nuance: on
+    // a genuine first hydration (no local messages yet) we accept even a lower
+    // revision, but once the session has hydrated messages we refuse to clobber
+    // them with an older snapshot.
     if (
       !shouldAdoptSnapshotRevision(previousRevision, revision, {
         lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
@@ -1202,7 +1207,7 @@ export function useAppLiveState(
         allowRevisionDowngrade: canAdoptLowerRevisionHydration,
       })
     ) {
-      return false;
+      return "stale";
     }
 
     const latestSessions = sessionsRef.current;
@@ -1210,25 +1215,32 @@ export function useAppLiveState(
       (entry) => entry.id === session.id,
     );
     if (latestExistingIndex === -1) {
-      return false;
+      return "stale";
     }
     const latestCurrentSession = latestSessions[latestExistingIndex];
     if (
-      !isServerRestartResponse &&
+      !isCrossInstanceHydrationResponse &&
       (!hydrationRequestStillMatchesSession(
         requestContext,
         latestCurrentSession,
       ) ||
         !hydrationResponseMatchesSession(session, latestCurrentSession))
     ) {
-      return false;
+      return "stale";
     }
 
     const hydratedSession = { ...session, messagesLoaded: true };
     const nextSessions = latestSessions.map((entry, index) =>
       index === latestExistingIndex ? hydratedSession : entry,
     );
-    if (previousRevision === null || revision > previousRevision) {
+    if (
+      previousRevision === null ||
+      revision > previousRevision ||
+      isCrossInstanceHydrationResponse
+    ) {
+      // A fresh server instance starts a new revision counter, so adopting its
+      // targeted hydration response may legitimately step this ref backward.
+      // Cross-instance ordering is handled by the server-instance gate above.
       latestStateRevisionRef.current = revision;
     }
     if (serverInstanceId) {
@@ -1239,7 +1251,7 @@ export function useAppLiveState(
     upsertSessionSlice(hydratedSession);
     flushAndCancelPendingSessionRender(nextSessions);
     setSessions(nextSessions);
-    return true;
+    return "adopted";
   }
 
   useEffect(() => {
@@ -1288,16 +1300,18 @@ export function useAppLiveState(
             requestActionRecoveryResyncRef.current();
             return;
           }
-          if (
-            adoptFetchedSession(
-              response.session,
-              response.revision,
-              response.serverInstanceId,
-              requestContext,
-            )
-          ) {
+          const adoptOutcome = adoptFetchedSession(
+            response.session,
+            response.revision,
+            response.serverInstanceId,
+            requestContext,
+          );
+          if (adoptOutcome === "adopted") {
             clearHydrationRetry(sessionId);
             hydratedSessionIdsRef.current.add(sessionId);
+          } else if (adoptOutcome === "restartResync") {
+            hydrationRestartResyncPendingRef.current = true;
+            requestActionRecoveryResyncRef.current();
           } else {
             shouldRetryHydration = true;
           }
@@ -1928,6 +1942,7 @@ export function useAppLiveState(
       });
     };
     requestActionRecoveryResyncRef.current = (options) => {
+      hydrationRestartResyncPendingRef.current = false;
       if (cancelled || !readNavigatorOnline()) {
         return;
       }
@@ -1950,6 +1965,9 @@ export function useAppLiveState(
         paneId: options?.paneId,
       });
     };
+    if (hydrationRestartResyncPendingRef.current) {
+      requestActionRecoveryResyncRef.current();
+    }
 
     function hasPotentiallyStaleLiveSession() {
       return sessionsRef.current.some((session) => session.status !== "idle");

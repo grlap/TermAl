@@ -56,16 +56,29 @@
 // bodies, same allowlists / denylists, same attribute names;
 // consumers import from here directly.
 
-import { MARKDOWN_INTERNAL_LINK_HREF_ATTRIBUTE } from "../markdown-links";
+import {
+  MARKDOWN_INTERNAL_LINK_HREF_ATTRIBUTE,
+  safeDecodeMarkdownHref,
+} from "../markdown-links";
 import { shouldSkipMarkdownEditableNode } from "./editable-markdown-focus";
 
 const MARKDOWN_HREF_POLICY_IGNORED_CHARACTERS =
   /[\u0000-\u001F\u007F\s]+|\p{Default_Ignorable_Code_Point}+/gu;
 const UNSAFE_MARKDOWN_LINK_DESTINATION_CHARACTERS =
   /[\u0000-\u001F\u007F\s[\]<>]|\p{Default_Ignorable_Code_Point}/u;
+const SAFE_EXTERNAL_MARKDOWN_PROTOCOLS = new Set(["http", "https", "mailto"]);
 
 function normalizeMarkdownHrefForPolicy(href: string) {
   return href.trim().replace(MARKDOWN_HREF_POLICY_IGNORED_CHARACTERS, "");
+}
+
+function getMarkdownHrefProtocol(href: string) {
+  const colonIndex = href.indexOf(":");
+  return colonIndex === -1 ? null : href.slice(0, colonIndex).toLowerCase();
+}
+
+function looksLikeSerializableWindowsDriveHref(href: string) {
+  return /^\/?[a-zA-Z]:[\\/]/.test(href);
 }
 
 export function insertSanitizedMarkdownPaste(
@@ -261,13 +274,20 @@ export function isSafePastedMarkdownHref(href: string) {
     return false;
   }
 
-  const colonIndex = normalized.indexOf(":");
-  if (colonIndex === -1) {
-    return !normalized.startsWith("/") && !normalized.startsWith("\\");
+  const decoded = normalizeMarkdownHrefForPolicy(safeDecodeMarkdownHref(normalized));
+  const protocol =
+    getMarkdownHrefProtocol(normalized) ??
+    (decoded !== normalized ? getMarkdownHrefProtocol(decoded) : null);
+  if (!protocol) {
+    return (
+      !normalized.startsWith("/") &&
+      !normalized.startsWith("\\") &&
+      !decoded.startsWith("/") &&
+      !decoded.startsWith("\\")
+    );
   }
 
-  const protocol = normalized.slice(0, colonIndex).toLowerCase();
-  return protocol === "http" || protocol === "https" || protocol === "mailto";
+  return SAFE_EXTERNAL_MARKDOWN_PROTOCOLS.has(protocol);
 }
 
 export function serializeEditableMarkdownSection(section: HTMLElement) {
@@ -410,17 +430,22 @@ function isSerializableMarkdownHref(href: string) {
     return false;
   }
 
-  const colonIndex = trimmed.indexOf(":");
-  if (colonIndex === -1) {
+  const decodedHref = safeDecodeMarkdownHref(trimmed);
+  if (
+    looksLikeSerializableWindowsDriveHref(trimmed) ||
+    looksLikeSerializableWindowsDriveHref(decodedHref)
+  ) {
     return true;
   }
 
-  if (/^[a-zA-Z]:[\\/]/.test(trimmed)) {
+  const protocol =
+    getMarkdownHrefProtocol(trimmed) ??
+    (decodedHref !== trimmed ? getMarkdownHrefProtocol(decodedHref) : null);
+  if (!protocol) {
     return true;
   }
 
-  const protocol = trimmed.slice(0, colonIndex).toLowerCase();
-  return protocol === "http" || protocol === "https" || protocol === "mailto";
+  return SAFE_EXTERNAL_MARKDOWN_PROTOCOLS.has(protocol);
 }
 
 function formatSafeMarkdownLinkDestination(href: string) {

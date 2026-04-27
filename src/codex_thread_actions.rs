@@ -153,15 +153,14 @@ impl AppState {
             );
         }
 
-        if let Some(index) = inner.find_session_index(&record.session.id) {
-            if let Some(slot) = inner.sessions.get_mut(index) {
-                *slot = record.clone();
-            }
-            // See `create_session`: re-stamp the record after the
-            // whole-struct replace so the persist thread picks up the
-            // rewrite instead of skipping it at the delta watermark.
-            let _ = inner.session_mut_by_index(index);
-        }
+        let index = inner
+            .find_session_index(&record.session.id)
+            .expect("just-created Codex session must be present in the index");
+        inner.sessions[index] = record.clone();
+        // See `create_session`: re-stamp the record after the
+        // whole-struct replace so the persist thread picks up the
+        // rewrite instead of skipping it at the delta watermark.
+        let _ = inner.session_mut_by_index(index);
         let revision = self.commit_session_created_locked(&mut inner, &record).map_err(|err| {
             ApiError::internal(format!("failed to persist forked Codex session: {err:#}"))
         })?;
