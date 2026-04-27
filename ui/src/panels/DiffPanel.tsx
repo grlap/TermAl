@@ -985,8 +985,7 @@ export function DiffPanel({
       const draftsApplied = commitRenderedMarkdownDrafts();
       const savedContent = response?.content ?? currentEditValue;
       const latestEditValue = editValueRef.current;
-      const hasLocalEditsAfterSaveStarted =
-        draftsApplied && latestEditValue !== currentEditValue;
+      const hasLocalEditsAfterSaveStarted = latestEditValue !== currentEditValue;
       if (hasLocalEditsAfterSaveStarted) {
         pendingEditValueRef.current = latestEditValue;
       }
@@ -1102,7 +1101,7 @@ export function DiffPanel({
       );
     if (nextDocumentContentLf === sourceContent) {
       for (const commit of commits) {
-        commit.onApplied?.();
+        commit.onApplied?.({ resetRenderedContent: false });
         setRenderedMarkdownDraftSegmentActive(commit.segment.id, false);
       }
       return true;

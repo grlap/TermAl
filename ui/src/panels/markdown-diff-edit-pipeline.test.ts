@@ -24,6 +24,7 @@ import { cleanup, render } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { safeDecodeMarkdownHref } from "../markdown-links";
 import { MarkdownContent } from "../message-cards";
 import {
   insertSanitizedMarkdownPaste,
@@ -98,6 +99,10 @@ describe("isSafePastedMarkdownHref", () => {
       ["java\u0000script:alert(1)"],
       ["jav\nascript:alert(1)"],
       ["\u0001javascript:alert(1)"],
+      ["java\u00ADscript:alert(1)"],
+      ["java\u200Bscript:alert(1)"],
+      ["java\uFE0Fscript:alert(1)"],
+      ["\uFEFFjavascript:alert(1)"],
     ])("returns false for %s", (href) => {
       expect(isSafePastedMarkdownHref(href)).toBe(false);
     });
@@ -145,6 +150,14 @@ describe("isSafePastedMarkdownHref", () => {
       ["\\Windows\\System32\\cmd.exe"],
       ["\t//example.com/path"],
       [" /\u0000/etc/passwd"],
+      ["\u00AD/etc/passwd"],
+      ["\u200B/etc/passwd"],
+      ["\u2060//example.com/path"],
+      ["\u3164//example.com/path"],
+      ["\uFE0F/etc/passwd"],
+      ["\uFEFF\\Windows\\System32\\cmd.exe"],
+      ["\u{E0001}//example.com/path"],
+      ["\u{E0100}/etc/passwd"],
     ])("returns false for %s", (href) => {
       expect(isSafePastedMarkdownHref(href)).toBe(false);
     });
@@ -155,6 +168,10 @@ describe("isSafePastedMarkdownHref", () => {
           '<a href="\\\\server\\share\\file.md">UNC path</a>',
           '<a href="//example.com/path">Protocol-relative path</a>',
           '<a href="/etc/passwd">Rooted path</a>',
+          '<a href="\u200B/etc/passwd">Hidden rooted path</a>',
+          '<a href="\u3164//example.com/path">Hidden network path</a>',
+          '<a href="\u{E0001}//example.com/path">Supplementary hidden network path</a>',
+          '<a href="\u{E0100}/etc/passwd">Supplementary hidden rooted path</a>',
         ].join(""),
       );
 
@@ -164,8 +181,14 @@ describe("isSafePastedMarkdownHref", () => {
         false,
         false,
         false,
+        false,
+        false,
+        false,
+        false,
       ]);
-      expect(fragment.textContent).toBe("UNC pathProtocol-relative pathRooted path");
+      expect(fragment.textContent).toBe(
+        "UNC pathProtocol-relative pathRooted pathHidden rooted pathHidden network pathSupplementary hidden network pathSupplementary hidden rooted path",
+      );
     });
   });
 
@@ -799,13 +822,32 @@ describe("serializeEditableMarkdownSection", () => {
     );
   });
 
+  it.each([
+    ["https://example.com/\u00ADdocs"],
+    ["https://example.com/\u200Bdocs"],
+    ["https://example.com/\u3164docs"],
+    ["https://example.com/\uFE0Fdocs"],
+    ["https://example.com/\u{E0001}docs"],
+    ["https://example.com/\u{E0100}docs"],
+  ])("does not serialize default-ignorable href %s into Markdown links", (href) => {
+    const section = buildEditableSection(
+      `<p><a href="${href}">Hidden link</a></p>`,
+    );
+
+    expect(serializeEditableMarkdownSection(section)).toBe("Hidden link");
+  });
+
   it("escapes parens in safe Markdown link destinations", () => {
     const section = buildEditableSection(
       '<p><a href="https://en.wikipedia.org/wiki/Foo_(bar)">Paren link</a></p>',
     );
 
-    expect(serializeEditableMarkdownSection(section)).toBe(
-      "[Paren link](https://en.wikipedia.org/wiki/Foo_\\(bar\\))",
+    const markdown = serializeEditableMarkdownSection(section);
+
+    expect(markdown).toBe("[Paren link](https://en.wikipedia.org/wiki/Foo_\\(bar\\))");
+    const { container } = render(createElement(MarkdownContent, { markdown }));
+    expect(container.querySelector("a")?.getAttribute("href")).toBe(
+      "https://en.wikipedia.org/wiki/Foo_(bar)",
     );
   });
 
@@ -814,8 +856,12 @@ describe("serializeEditableMarkdownSection", () => {
       '<p><a href="https://example.com/foo\\bar">Backslash link</a></p>',
     );
 
-    expect(serializeEditableMarkdownSection(section)).toBe(
-      "[Backslash link](https://example.com/foo\\\\bar)",
+    const markdown = serializeEditableMarkdownSection(section);
+
+    expect(markdown).toBe("[Backslash link](https://example.com/foo\\\\bar)");
+    const { container } = render(createElement(MarkdownContent, { markdown }));
+    expect(container.querySelector("a")?.getAttribute("href")).toBe(
+      "https://example.com/foo%5Cbar",
     );
   });
 
@@ -827,18 +873,43 @@ describe("serializeEditableMarkdownSection", () => {
     expect(serializeEditableMarkdownSection(section)).toBe("Safe-looking link");
   });
 
-  it("does not serialize no-colon local or network-looking hrefs into Markdown links", () => {
+  it("round-trips existing no-colon local and network-looking Markdown links", () => {
     const section = buildEditableSection(
       [
         '<p><a href="\\\\server\\share\\file.md">UNC path</a></p>',
         '<p><a href="//example.com/path">Protocol-relative path</a></p>',
         '<p><a href="/etc/passwd">Rooted path</a></p>',
+        '<p><a href="C:\\repo\\docs\\README.md">Drive path</a></p>',
       ].join(""),
     );
 
-    expect(serializeEditableMarkdownSection(section)).toBe(
-      ["UNC path", "Protocol-relative path", "Rooted path"].join("\n\n"),
+    const markdown = serializeEditableMarkdownSection(section);
+
+    expect(markdown).toBe(
+      [
+        String.raw`[UNC path](\\\\server\\share\\file.md)`,
+        "[Protocol-relative path](//example.com/path)",
+        "[Rooted path](/etc/passwd)",
+        String.raw`[Drive path](C:\\repo\\docs\\README.md)`,
+      ].join("\n\n"),
     );
+
+    const { container } = render(createElement(MarkdownContent, { markdown }));
+    const renderedHrefs = Array.from(container.querySelectorAll("a")).map(
+      (anchor) => anchor.getAttribute("href"),
+    );
+    expect(renderedHrefs).toEqual([
+      "%5C%5Cserver%5Cshare%5Cfile.md",
+      "//example.com/path",
+      "/etc/passwd",
+      "C:%5Crepo%5Cdocs%5CREADME.md",
+    ]);
+    expect(renderedHrefs.map((href) => (href ? safeDecodeMarkdownHref(href) : href))).toEqual([
+      "\\\\server\\share\\file.md",
+      "//example.com/path",
+      "/etc/passwd",
+      "C:\\repo\\docs\\README.md",
+    ]);
   });
 
   it("escapes Markdown link label brackets while preserving safe destinations", () => {

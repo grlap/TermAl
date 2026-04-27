@@ -3919,6 +3919,7 @@ textarea {
   background: var(--surface-card);
   border: 1px solid var(--line);
   border-radius: max(1rem, calc(1.4rem * var(--density-scale)));
+  min-width: 0;
   padding: var(--message-card-padding-y) var(--message-card-padding-x);
   animation: rise-in 360ms ease-out both;
 }
@@ -6898,6 +6899,8 @@ textarea {
 .markdown-copy {
   display: grid;
   gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .markdown-copy-shell {
@@ -7011,6 +7014,7 @@ textarea {
 
 .markdown-copy > * {
   margin: 0;
+  min-width: 0;
 }
 
 .markdown-copy h1,
@@ -7053,6 +7057,10 @@ textarea {
   padding-left: 1.55rem;
 }
 
+.markdown-copy li {
+  min-width: 0;
+}
+
 .markdown-copy blockquote {
   margin: 0;
   padding-left: 1rem;
@@ -7069,6 +7077,8 @@ textarea {
 .markdown-copy a.inline-code-link {
   text-decoration: none;
   cursor: pointer;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-copy a.inline-code-link > code {
@@ -7190,6 +7200,11 @@ textarea {
   border-radius: 0.45rem;
   background: var(--inline-code-bg);
   color: var(--inline-code-fg);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .markdown-table-scroll {

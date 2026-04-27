@@ -988,12 +988,9 @@ export function SessionPaneView({
           ? options.baseHash
           : fileState.status === "ready" && fileState.path === path
             ? fileState.contentHash
-            : null,
+        : null,
       overwrite: options?.overwrite,
     });
-    sourceEditorDirtyRef.current = false;
-    setSourceEditorDirty(false);
-    setFileState(sourceFileStateFromResponse(response));
     return response;
   }
 
@@ -1007,9 +1004,7 @@ export function SessionPaneView({
       sessionId,
       projectId,
     );
-    sourceEditorDirtyRef.current = false;
-    setSourceEditorDirty(false);
-    setFileState(nextFileState);
+    return nextFileState;
   }
 
   async function handleSourceFileFetchLatest(
@@ -2692,13 +2687,14 @@ export function SessionPaneView({
               )
             }
             onSaveFile={async (path, content, options) => {
-              await handleSourceFileSave(
+              const response = await handleSourceFileSave(
                 path,
                 content,
                 activeSourceOriginSessionId,
                 activeSourceOriginProjectId,
                 options,
               );
+              return sourceFileStateFromResponse(response);
             }}
             onOpenSourceLink={(target) =>
               onOpenSourceTab(

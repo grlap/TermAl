@@ -99,6 +99,7 @@ describe("transformMarkdownLinkUri", () => {
       ["../sibling.md#L10", "../sibling.md#L10"],
       ["docs/architecture.md", "docs/architecture.md"],
       ["foo/bar.md#L42C3", "foo/bar.md#L42C3"],
+      ["C:%5Crepo%5Cdocs%5CREADME.md", "C:%5Crepo%5Cdocs%5CREADME.md"],
     ])("passes %s through unchanged", (href, expected) => {
       expect(transformMarkdownLinkUri(href)).toBe(expected);
     });

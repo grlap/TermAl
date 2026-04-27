@@ -175,6 +175,47 @@ describe("reconcileSessions", () => {
     expect(merged[0]).toBe(previous[0]);
   });
 
+  it("does not let the mutation-stamp fast path block unloaded-to-loaded promotion", () => {
+    const previous = [
+      makeSession("session-a", {
+        preview: "ready",
+        messagesLoaded: false,
+        messageCount: 1,
+        sessionMutationStamp: 42,
+        messages: [],
+      }),
+    ];
+
+    const next = [
+      makeSession("session-a", {
+        preview: "ready",
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 42,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Hydrated transcript",
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0]).not.toBe(previous[0]);
+    expect(merged[0].messagesLoaded).toBe(true);
+    expect(merged[0].messages).toHaveLength(1);
+    expect(merged[0].messages[0]).toMatchObject({
+      id: "message-1",
+      text: "Hydrated transcript",
+    });
+  });
+
   it("can disable the mutation-stamp fast path after a server restart", () => {
     const previous = [
       makeSession("session-a", {

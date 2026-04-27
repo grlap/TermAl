@@ -1,3 +1,8 @@
+// Shared Markdown document segmentation and normalization helpers for
+// rendered-Markdown editing. DiffPanel uses these helpers to render a
+// before/after Markdown diff; SourcePanel uses the same segment shape
+// for full-document rendered preview editing and commit range mapping.
+
 import type { GitDiffDocumentSideSource } from "../api";
 import type { buildDiffPreviewModel } from "../diff-preview";
 

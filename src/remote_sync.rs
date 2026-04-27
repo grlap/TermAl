@@ -276,12 +276,13 @@ fn sync_remote_state_inner(
 /// Revision-gated wrapper around [`sync_remote_state_inner`]. Returns
 /// `true` if the snapshot was applied, `false` if skipped as stale.
 ///
-/// Checks the stored `applied_remote_revision` for the remote via
-/// `StateInner::should_skip_remote_applied_revision`. Remote events
+/// Checks the stored state-snapshot watermark for the remote via
+/// `StateInner::should_skip_remote_applied_snapshot_revision`. Remote events
 /// can arrive out of order (especially after a reconnect where the
-/// full snapshot races the buffered event stream), so any revision
-/// not strictly greater than what was already applied for this remote
-/// is dropped. Broad-snapshot callers should always use this; focused
+/// full snapshot races the buffered event stream), so stale snapshots
+/// are dropped. Same-revision snapshots are still accepted after ordinary
+/// deltas so fallback repair can materialize the rest of that revision.
+/// Broad-snapshot callers should always use this; focused
 /// per-session applies from the forced-resync path
 /// (`resync_remote_state_snapshot` → 404 retry) bypass the gate and
 /// call `sync_remote_state_inner` directly.
@@ -291,11 +292,30 @@ fn apply_remote_state_if_newer_locked(
     remote_state: &StateResponse,
     focus_remote_session_id: Option<&str>,
 ) -> bool {
-    if inner.should_skip_remote_applied_revision(remote_id, remote_state.revision) {
+    if inner.should_skip_remote_applied_snapshot_revision(remote_id, remote_state.revision) {
         return false;
     }
     sync_remote_state_inner(inner, remote_id, remote_state, focus_remote_session_id);
     true
+}
+
+fn remote_state_materializes_all_session_transcripts(remote_state: &StateResponse) -> bool {
+    remote_state.sessions.iter().all(|session| {
+        session.messages_loaded
+            && session.message_count == u32::try_from(session.messages.len()).unwrap_or(u32::MAX)
+    })
+}
+
+fn note_remote_applied_state_snapshot_revision(
+    inner: &mut StateInner,
+    remote_id: &str,
+    remote_state: &StateResponse,
+) {
+    if remote_state_materializes_all_session_transcripts(remote_state) {
+        inner.note_remote_applied_transcript_snapshot_revision(remote_id, remote_state.revision);
+    } else {
+        inner.note_remote_applied_snapshot_revision(remote_id, remote_state.revision);
+    }
 }
 
 /// Applies remote session to record.
@@ -310,13 +330,16 @@ fn apply_remote_session_to_record(
     let previous_messages_loaded = record.session.messages_loaded;
     let previous_remote_mutation_stamp = record.session.session_mutation_stamp;
     record.session = localize_remote_session(&local_session_id, local_project_id, remote_session);
+    if remote_session.session_mutation_stamp.is_none() {
+        record.session.session_mutation_stamp = previous_remote_mutation_stamp;
+    }
     if let Some(messages) = previous_messages {
         let count_matches =
             record.session.message_count == u32::try_from(messages.len()).unwrap_or(u32::MAX);
-        let remote_mutation_stamp_matches = remote_session
-            .session_mutation_stamp
-            .zip(previous_remote_mutation_stamp)
-            .is_some_and(|(next_stamp, previous_stamp)| next_stamp == previous_stamp);
+        let remote_mutation_stamp_matches = remote_mutation_stamp_allows_cached_transcript(
+            previous_remote_mutation_stamp,
+            remote_session.session_mutation_stamp,
+        );
         let has_complete_previous_transcript =
             previous_messages_loaded && count_matches && remote_mutation_stamp_matches;
         record.session.messages = messages;
@@ -341,6 +364,21 @@ fn apply_remote_session_to_record(
     clear_all_pending_requests(record);
     if remote_session.messages_loaded {
         record.message_positions = build_message_positions(&record.session.messages);
+    }
+}
+
+/// Returns whether a metadata-only remote summary allows retaining the cached
+/// full transcript. A present incoming stamp is authoritative; an omitted stamp
+/// means the upstream cannot provide freshness evidence, so same-count cached
+/// transcripts are retained for compatibility with older remotes.
+fn remote_mutation_stamp_allows_cached_transcript(
+    previous_stamp: Option<u64>,
+    incoming_stamp: Option<u64>,
+) -> bool {
+    match (previous_stamp, incoming_stamp) {
+        (Some(previous), Some(incoming)) => previous == incoming,
+        (_, None) => true,
+        (None, Some(_)) => false,
     }
 }
 

@@ -126,6 +126,9 @@ impl PersistedState {
             projects: self.projects,
             ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids,
             remote_applied_revisions: HashMap::new(),
+            remote_snapshot_applied_revisions: HashMap::new(),
+            remote_transcript_snapshot_applied_revisions: HashMap::new(),
+            remote_session_transcript_applied_revisions: HashMap::new(),
             orchestrator_instances: self.orchestrator_instances,
             workspace_layouts: self.workspace_layouts,
             sessions: self

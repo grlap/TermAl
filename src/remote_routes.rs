@@ -763,7 +763,11 @@ impl AppState {
                     None,
                 ) {
                     remote_state_applied = true;
-                    inner.note_remote_applied_revision(&target.remote.id, remote_state.revision);
+                    note_remote_applied_state_snapshot_revision(
+                        &mut inner,
+                        &target.remote.id,
+                        remote_state,
+                    );
                 }
             }
 
@@ -827,8 +831,11 @@ impl AppState {
                 }
             }
             if let Some(remote_revision) = min_remote_revision {
-                if inner.should_skip_remote_applied_delta_revision(&target.remote.id, remote_revision)
-                {
+                if inner.should_skip_remote_session_applied_delta_revision(
+                    &target.remote.id,
+                    &target.remote_session_id,
+                    remote_revision,
+                ) {
                     let record = inner.sessions.get(index).ok_or_else(|| {
                         ApiError::not_found("session not found")
                     })?;
@@ -855,7 +862,14 @@ impl AppState {
                 apply_remote_session_to_record(record, local_project_id, &remote_response.session);
                 Self::wire_session_from_record(record)
             };
-            if let Some(remote_revision) = min_remote_revision {
+            if min_remote_revision.is_none() {
+                inner.note_remote_session_transcript_applied_revision(
+                    &target.remote.id,
+                    &target.remote_session_id,
+                    remote_response.revision,
+                );
+                inner.note_remote_applied_revision(&target.remote.id, remote_response.revision);
+            } else if let Some(remote_revision) = min_remote_revision {
                 inner.note_remote_applied_revision(&target.remote.id, remote_revision);
             }
             let revision = self.commit_locked(&mut inner).map_err(|err| {
@@ -884,7 +898,11 @@ impl AppState {
     ) -> Result<bool, anyhow::Error> {
         let target = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+            if inner.should_skip_remote_session_applied_delta_revision(
+                remote_id,
+                remote_session_id,
+                remote_revision,
+            ) {
                 return Ok(true);
             }
             let Some(index) = inner.find_remote_session_index(remote_id, remote_session_id) else {
@@ -966,7 +984,11 @@ impl AppState {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if apply_remote_state_if_newer_locked(&mut inner, &target.remote.id, &remote_state, None)
         {
-            inner.note_remote_applied_revision(&target.remote.id, remote_state.revision);
+            note_remote_applied_state_snapshot_revision(
+                &mut inner,
+                &target.remote.id,
+                &remote_state,
+            );
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!(
                     "failed to persist remote orchestrator `{}` state: {err:#}",
@@ -996,7 +1018,7 @@ impl AppState {
         if !apply_remote_state_if_newer_locked(&mut inner, remote_id, &remote_state, None) {
             return Ok(());
         }
-        inner.note_remote_applied_revision(remote_id, remote_state.revision);
+        note_remote_applied_state_snapshot_revision(&mut inner, remote_id, &remote_state);
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist remote state: {err:#}"))
         })?;
@@ -1038,9 +1060,13 @@ impl AppState {
                         session.id
                     ));
                 }
-                let Some((local_session, delta_session, revision)) = ({
+                let Some((published_session_id, delta_session, revision)) = ({
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                    if inner.should_skip_remote_session_applied_delta_revision(
+                        remote_id,
+                        &session_id,
+                        remote_revision,
+                    ) {
                         return Ok(());
                     }
                     let local_project_ids_by_remote_project_id =
@@ -1073,10 +1099,10 @@ impl AppState {
                         let local_record = inner.sessions.get(local_index).ok_or_else(|| {
                             anyhow!("local proxy session `{local_session_id}` not found")
                         })?;
-                        let local_session = AppState::wire_session_from_record(local_record);
                         let delta_session = AppState::wire_session_summary_from_record(local_record);
+                        let published_session_id = delta_session.id.clone();
                         inner.note_remote_applied_revision(remote_id, remote_revision);
-                        Some((local_session, delta_session, revision))
+                        Some((published_session_id, delta_session, revision))
                     }
                 }) else {
                     self.note_remote_applied_delta_replay(&remote_delta_replay_key);
@@ -1084,7 +1110,7 @@ impl AppState {
                 };
                 self.publish_delta(&DeltaEvent::SessionCreated {
                     revision,
-                    session_id: local_session.id.clone(),
+                    session_id: published_session_id,
                     session: delta_session,
                 });
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
@@ -1124,7 +1150,11 @@ impl AppState {
                     session_mutation_stamp,
                 ) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                    if inner.should_skip_remote_session_applied_delta_revision(
+                        remote_id,
+                        &session_id,
+                        remote_revision,
+                    ) {
                         return Ok(());
                     }
                     let index = inner
@@ -1210,7 +1240,11 @@ impl AppState {
             } => {
                 {
                     let inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                    if inner.should_skip_remote_session_applied_delta_revision(
+                        remote_id,
+                        &session_id,
+                        remote_revision,
+                    ) {
                         return Ok(());
                     }
                 }
@@ -1232,7 +1266,11 @@ impl AppState {
                 }
                 {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                    if inner.should_skip_remote_session_applied_delta_revision(
+                        remote_id,
+                        &session_id,
+                        remote_revision,
+                    ) {
                         return Ok(());
                     }
                     let index = inner
@@ -1309,7 +1347,11 @@ impl AppState {
                 }
                 let (local_session_id, message_index, message_count, revision, session_mutation_stamp) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                    if inner.should_skip_remote_session_applied_delta_revision(
+                        remote_id,
+                        &session_id,
+                        remote_revision,
+                    ) {
                         return Ok(());
                     }
                     let index = inner
@@ -1390,7 +1432,11 @@ impl AppState {
                 }
                 let (local_session_id, message_index, message_count, revision, session_mutation_stamp) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                    if inner.should_skip_remote_session_applied_delta_revision(
+                        remote_id,
+                        &session_id,
+                        remote_revision,
+                    ) {
                         return Ok(());
                     }
                     let index = inner
@@ -1489,7 +1535,11 @@ impl AppState {
                     session_mutation_stamp,
                 ) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                    if inner.should_skip_remote_session_applied_delta_revision(
+                        remote_id,
+                        &session_id,
+                        remote_revision,
+                    ) {
                         return Ok(());
                     }
                     let index = inner
@@ -1645,7 +1695,11 @@ impl AppState {
                     session_mutation_stamp,
                 ) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
+                    if inner.should_skip_remote_session_applied_delta_revision(
+                        remote_id,
+                        &session_id,
+                        remote_revision,
+                    ) {
                         return Ok(());
                     }
                     let index = inner

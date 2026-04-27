@@ -141,10 +141,17 @@ enum RemoteDeltaReplayPayload {
 /// Bounded exact remote-delta replay suppression.
 ///
 /// Entries are keyed by remote id, remote revision, and semantic delta payload
-/// identity. The cap is intentionally small because the cache only covers the
-/// short same-revision replay window around remote event delivery; older
-/// revisions still fall back to the monotonic remote-applied watermark. Per
-/// remote entries are cleared when event-stream continuity is lost.
+/// identity. The per-remote cap is intentionally small because the cache only
+/// covers the short same-revision replay window around remote event delivery;
+/// older revisions still fall back to the monotonic remote-applied watermark.
+/// Per-remote entries are cleared when event-stream continuity is lost. Memory
+/// grows linearly with active remote count (`remotes * limit`), which is the
+/// fairness tradeoff versus the previous globally-FIFO cache. Insertion is
+/// O(total cache size) once a remote is over cap because we scan the shared
+/// order queue to evict that remote's oldest entry; this is acceptable while
+/// the cache is bounded and only records successfully applied deltas. If this
+/// appears in profiles, split storage into per-remote queues to restore O(1)
+/// eviction without losing cross-remote isolation.
 #[derive(Default)]
 struct RemoteDeltaReplayCache {
     keys: HashSet<RemoteDeltaReplayKey>,
@@ -160,11 +167,25 @@ impl RemoteDeltaReplayCache {
         if self.keys.contains(&key) {
             return;
         }
+        let remote_id = key.remote_id.clone();
         self.order.push_back(key.clone());
         self.keys.insert(key);
-        while self.order.len() > REMOTE_DELTA_REPLAY_CACHE_LIMIT {
-            if let Some(expired) = self.order.pop_front() {
+        let mut remote_entry_count = self
+            .order
+            .iter()
+            .filter(|entry| entry.remote_id == remote_id)
+            .count();
+        while remote_entry_count > REMOTE_DELTA_REPLAY_CACHE_LIMIT {
+            let Some(expired_index) = self
+                .order
+                .iter()
+                .position(|entry| entry.remote_id == remote_id)
+            else {
+                break;
+            };
+            if let Some(expired) = self.order.remove(expired_index) {
                 self.keys.remove(&expired);
+                remote_entry_count -= 1;
             }
         }
     }
@@ -478,9 +499,35 @@ struct StateInner {
     /// Stable project records used by local and remote session routing.
     projects: Vec<Project>,
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
+    /// Remote revision watermarks are ordered from weakest to strongest:
+    /// `remote_applied_revisions`, `remote_snapshot_applied_revisions`, then
+    /// `remote_transcript_snapshot_applied_revisions`. Recording a stronger
+    /// broad-state watermark also records every weaker one. The skip checks use
+    /// `>=` only when that watermark already materialized the same kind of data
+    /// at the supplied revision; otherwise they use `>` so same-revision repair
+    /// paths can still fill data omitted by a narrower event.
+    ///
+    /// Focused `/api/sessions/{id}` hydration is narrower than a broad
+    /// transcript snapshot, so it uses
+    /// `remote_session_transcript_applied_revisions` instead of bumping the
+    /// broad transcript watermark. That suppresses duplicate same-revision
+    /// transcript deltas for the hydrated session without dropping unrelated
+    /// sessions from the same remote revision.
     /// Tracks the latest remote revision applied for each mirrored remote so
     /// stale snapshots and deltas cannot roll local proxy state backward.
     remote_applied_revisions: HashMap<String, u64>,
+    /// Tracks the latest broad full-state snapshot applied for each mirrored
+    /// remote. Cleared with `remote_applied_revisions` and the per-remote replay
+    /// cache when event-stream continuity is lost.
+    remote_snapshot_applied_revisions: HashMap<String, u64>,
+    /// Tracks the latest broad snapshot that fully materialized session
+    /// transcripts for a mirrored remote. Same-revision deltas are allowed after
+    /// metadata-first snapshots because those snapshots may omit the transcript
+    /// bytes carried by the delta.
+    remote_transcript_snapshot_applied_revisions: HashMap<String, u64>,
+    /// Tracks focused full-session transcript hydration per remote session.
+    /// This is intentionally narrower than `remote_transcript_snapshot_applied_revisions`.
+    remote_session_transcript_applied_revisions: HashMap<String, HashMap<String, u64>>,
     /// Session records carry the serializable session plus runtime-only state.
     sessions: Vec<SessionRecord>,
     /// Runtime instances for orchestrator templates live beside ordinary sessions.
@@ -514,6 +561,9 @@ impl StateInner {
             projects: Vec::new(),
             ignored_discovered_codex_thread_ids: BTreeSet::new(),
             remote_applied_revisions: HashMap::new(),
+            remote_snapshot_applied_revisions: HashMap::new(),
+            remote_transcript_snapshot_applied_revisions: HashMap::new(),
+            remote_session_transcript_applied_revisions: HashMap::new(),
             sessions: Vec::new(),
             orchestrator_instances: Vec::new(),
             workspace_layouts: BTreeMap::new(),
@@ -529,6 +579,23 @@ impl StateInner {
             .is_some_and(|latest_revision| *latest_revision >= remote_revision)
     }
 
+    /// Returns whether the supplied remote state snapshot revision is stale for
+    /// this remote. Same-revision snapshots are allowed after ordinary deltas so
+    /// repair paths can materialize state after a sibling delta at that revision.
+    fn should_skip_remote_applied_snapshot_revision(
+        &self,
+        remote_id: &str,
+        remote_revision: u64,
+    ) -> bool {
+        self.remote_applied_revisions
+            .get(remote_id)
+            .is_some_and(|latest_revision| *latest_revision > remote_revision)
+            || self
+                .remote_snapshot_applied_revisions
+                .get(remote_id)
+                .is_some_and(|latest_revision| *latest_revision >= remote_revision)
+    }
+
     /// Returns whether the supplied remote delta revision is stale for this remote.
     fn should_skip_remote_applied_delta_revision(
         &self,
@@ -538,12 +605,83 @@ impl StateInner {
         self.remote_applied_revisions
             .get(remote_id)
             .is_some_and(|latest_revision| *latest_revision > remote_revision)
+            || self
+                .remote_snapshot_applied_revisions
+                .get(remote_id)
+                .is_some_and(|latest_revision| *latest_revision > remote_revision)
+            || self
+                .remote_transcript_snapshot_applied_revisions
+                .get(remote_id)
+                .is_some_and(|latest_revision| *latest_revision >= remote_revision)
+    }
+
+    /// Returns whether a session-scoped remote delta is stale for this remote
+    /// session. This extends the broad remote delta rule with focused transcript
+    /// hydration for one remote session only.
+    fn should_skip_remote_session_applied_delta_revision(
+        &self,
+        remote_id: &str,
+        remote_session_id: &str,
+        remote_revision: u64,
+    ) -> bool {
+        self.should_skip_remote_applied_delta_revision(remote_id, remote_revision)
+            || self
+                .remote_session_transcript_applied_revisions
+                .get(remote_id)
+                .and_then(|sessions| sessions.get(remote_session_id))
+                .is_some_and(|latest_revision| *latest_revision >= remote_revision)
     }
 
     /// Records the latest applied remote revision for a mirrored remote.
     fn note_remote_applied_revision(&mut self, remote_id: &str, remote_revision: u64) {
         self.remote_applied_revisions
             .entry(remote_id.to_owned())
+            .and_modify(|latest_revision| {
+                *latest_revision = (*latest_revision).max(remote_revision);
+            })
+            .or_insert(remote_revision);
+    }
+
+    /// Records that a broad full-state snapshot, not just a narrow delta or
+    /// focused session response, has materialized this remote revision.
+    fn note_remote_applied_snapshot_revision(&mut self, remote_id: &str, remote_revision: u64) {
+        self.note_remote_applied_revision(remote_id, remote_revision);
+        self.remote_snapshot_applied_revisions
+            .entry(remote_id.to_owned())
+            .and_modify(|latest_revision| {
+                *latest_revision = (*latest_revision).max(remote_revision);
+            })
+            .or_insert(remote_revision);
+    }
+
+    /// Records that a broad full-state snapshot included complete session
+    /// transcripts for this remote revision.
+    fn note_remote_applied_transcript_snapshot_revision(
+        &mut self,
+        remote_id: &str,
+        remote_revision: u64,
+    ) {
+        self.note_remote_applied_snapshot_revision(remote_id, remote_revision);
+        self.remote_transcript_snapshot_applied_revisions
+            .entry(remote_id.to_owned())
+            .and_modify(|latest_revision| {
+                *latest_revision = (*latest_revision).max(remote_revision);
+            })
+            .or_insert(remote_revision);
+    }
+
+    /// Records that focused full-session hydration materialized a single remote
+    /// session transcript at this revision.
+    fn note_remote_session_transcript_applied_revision(
+        &mut self,
+        remote_id: &str,
+        remote_session_id: &str,
+        remote_revision: u64,
+    ) {
+        self.remote_session_transcript_applied_revisions
+            .entry(remote_id.to_owned())
+            .or_default()
+            .entry(remote_session_id.to_owned())
             .and_modify(|latest_revision| {
                 *latest_revision = (*latest_revision).max(remote_revision);
             })

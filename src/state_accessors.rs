@@ -229,10 +229,14 @@ impl AppState {
     /// Clears the latest applied remote revision when event-stream continuity
     /// is lost, such as after a disconnect or restart.
     fn clear_remote_applied_revision(&self, remote_id: &str) {
-        self.inner
-            .lock()
-            .expect("state mutex poisoned")
-            .remote_applied_revisions
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        inner.remote_applied_revisions.remove(remote_id);
+        inner.remote_snapshot_applied_revisions.remove(remote_id);
+        inner
+            .remote_transcript_snapshot_applied_revisions
+            .remove(remote_id);
+        inner
+            .remote_session_transcript_applied_revisions
             .remove(remote_id);
         self.remote_delta_replay_cache
             .lock()

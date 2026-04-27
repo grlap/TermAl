@@ -877,25 +877,9 @@ describe("App scroll behaviour", () => {
   it("smoothly follows new assistant messages while pinned to the bottom", async () => {
     await withSuppressedActWarnings(async () => {
       let scrollHeight = 1000;
-      const originalScrollHeight = Object.getOwnPropertyDescriptor(
-        HTMLElement.prototype,
-        "scrollHeight",
-      );
-      const originalClientHeight = Object.getOwnPropertyDescriptor(
-        HTMLElement.prototype,
-        "clientHeight",
-      );
-      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-        configurable: true,
-        get() {
-          return scrollHeight;
-        },
-      });
-      Object.defineProperty(HTMLElement.prototype, "clientHeight", {
-        configurable: true,
-        get() {
-          return 200;
-        },
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: () => scrollHeight,
       });
       const scrollToMock = mockScrollToAndApplyTop();
       const context = await renderAppWithProjectAndSession();
@@ -942,6 +926,11 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         messageStack.scrollTop = 800;
+        expect(
+          messageStack.scrollHeight -
+            messageStack.scrollTop -
+            messageStack.clientHeight,
+        ).toBe(0);
         await act(async () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
@@ -993,6 +982,11 @@ describe("App scroll behaviour", () => {
         ).not.toBeInTheDocument();
 
         messageStack.scrollTop = 760;
+        expect(
+          messageStack.scrollHeight -
+            messageStack.scrollTop -
+            messageStack.clientHeight,
+        ).toBeGreaterThan(0);
         await act(async () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
@@ -1049,28 +1043,73 @@ describe("App scroll behaviour", () => {
         expect(
           screen.queryByRole("button", { name: "New response" }),
         ).not.toBeInTheDocument();
+
+        scrollToMock.mockClear();
+        messageStack.scrollTop = 760;
+        await act(async () => {
+          fireEvent.mouseDown(messageStack);
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+
+        scrollHeight = 1300;
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 5,
+          projects: [
+            {
+              id: "project-termal",
+              name: "TermAl",
+              rootPath: "/projects/termal",
+            },
+          ],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              preview: "Fourth assistant response.",
+              messages: [
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "First assistant response.",
+                },
+                {
+                  id: "message-assistant-2",
+                  type: "text",
+                  timestamp: "10:02",
+                  author: "assistant",
+                  text: "Second assistant response.",
+                },
+                {
+                  id: "message-assistant-3",
+                  type: "text",
+                  timestamp: "10:03",
+                  author: "assistant",
+                  text: "Third assistant response.",
+                },
+                {
+                  id: "message-assistant-4",
+                  type: "text",
+                  timestamp: "10:04",
+                  author: "assistant",
+                  text: "Fourth assistant response.",
+                },
+              ],
+            }),
+          ],
+        });
+        await settleAsyncUi();
+
+        expect(filterScrollToCallsAt(scrollToMock, 1100, "smooth")).toEqual([]);
+        expect(
+          await screen.findByRole("button", { name: "New response" }),
+        ).toBeInTheDocument();
       } finally {
         context.cleanup();
-        if (originalScrollHeight) {
-          Object.defineProperty(
-            HTMLElement.prototype,
-            "scrollHeight",
-            originalScrollHeight,
-          );
-        } else {
-          delete (HTMLElement.prototype as unknown as Record<string, unknown>)
-            .scrollHeight;
-        }
-        if (originalClientHeight) {
-          Object.defineProperty(
-            HTMLElement.prototype,
-            "clientHeight",
-            originalClientHeight,
-          );
-        } else {
-          delete (HTMLElement.prototype as unknown as Record<string, unknown>)
-            .clientHeight;
-        }
+        restoreScrollGeometry();
       }
     });
   });

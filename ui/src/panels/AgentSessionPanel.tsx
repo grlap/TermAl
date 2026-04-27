@@ -187,6 +187,15 @@ export function AgentSessionPanel({
     ) => void,
   ) => JSX.Element | null;
 }): JSX.Element {
+  const stableOnApprovalDecision = useStableEvent(onApprovalDecision);
+  const stableOnUserInputSubmit = useStableEvent(onUserInputSubmit);
+  const stableOnMcpElicitationSubmit = useStableEvent(onMcpElicitationSubmit);
+  const stableOnCodexAppRequestSubmit = useStableEvent(
+    onCodexAppRequestSubmit,
+  );
+  const stableOnCancelQueuedPrompt = useStableEvent(onCancelQueuedPrompt);
+  const stableOnSessionSettingsChange = useStableEvent(onSessionSettingsChange);
+
   return (
     <SessionBody
       paneId={paneId}
@@ -199,12 +208,12 @@ export function AgentSessionPanel({
       waitingIndicatorPrompt={waitingIndicatorPrompt}
       commandMessages={commandMessages}
       diffMessages={diffMessages}
-      onApprovalDecision={onApprovalDecision}
-      onUserInputSubmit={onUserInputSubmit}
-      onMcpElicitationSubmit={onMcpElicitationSubmit}
-      onCodexAppRequestSubmit={onCodexAppRequestSubmit}
-      onCancelQueuedPrompt={onCancelQueuedPrompt}
-      onSessionSettingsChange={onSessionSettingsChange}
+      onApprovalDecision={stableOnApprovalDecision}
+      onUserInputSubmit={stableOnUserInputSubmit}
+      onMcpElicitationSubmit={stableOnMcpElicitationSubmit}
+      onCodexAppRequestSubmit={stableOnCodexAppRequestSubmit}
+      onCancelQueuedPrompt={stableOnCancelQueuedPrompt}
+      onSessionSettingsChange={stableOnSessionSettingsChange}
       conversationSearchQuery={conversationSearchQuery}
       conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
       conversationSearchActiveItemKey={conversationSearchActiveItemKey}
@@ -276,18 +285,6 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
   onStopSession: (sessionId: string) => void;
   onPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
 }): JSX.Element {
-  const stableOnScrollToLatest = useStableEvent(onScrollToLatest);
-  const stableOnDraftCommit = useStableEvent(onDraftCommit);
-  const stableOnDraftAttachmentRemove = useStableEvent(onDraftAttachmentRemove);
-  const stableOnRefreshSessionModelOptions = useStableEvent(
-    onRefreshSessionModelOptions,
-  );
-  const stableOnRefreshAgentCommands = useStableEvent(onRefreshAgentCommands);
-  const stableOnSend = useStableEvent(onSend);
-  const stableOnSessionSettingsChange = useStableEvent(onSessionSettingsChange);
-  const stableOnStopSession = useStableEvent(onStopSession);
-  const stableOnPaste = useStableEvent(onPaste);
-
   if (viewMode === "session") {
     return (
       <SessionComposer
@@ -300,21 +297,21 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
         isSessionBusy={isSessionBusy}
         isUpdating={isUpdating}
         showNewResponseIndicator={showNewResponseIndicator}
-        onScrollToLatest={stableOnScrollToLatest}
-        onDraftCommit={stableOnDraftCommit}
-        onDraftAttachmentRemove={stableOnDraftAttachmentRemove}
+        onScrollToLatest={onScrollToLatest}
+        onDraftCommit={onDraftCommit}
+        onDraftAttachmentRemove={onDraftAttachmentRemove}
         isRefreshingModelOptions={isRefreshingModelOptions}
         modelOptionsError={modelOptionsError}
         agentCommands={agentCommands}
         hasLoadedAgentCommands={hasLoadedAgentCommands}
         isRefreshingAgentCommands={isRefreshingAgentCommands}
         agentCommandsError={agentCommandsError}
-        onRefreshSessionModelOptions={stableOnRefreshSessionModelOptions}
-        onRefreshAgentCommands={stableOnRefreshAgentCommands}
-        onSend={stableOnSend}
-        onSessionSettingsChange={stableOnSessionSettingsChange}
-        onStopSession={stableOnStopSession}
-        onPaste={stableOnPaste}
+        onRefreshSessionModelOptions={onRefreshSessionModelOptions}
+        onRefreshAgentCommands={onRefreshAgentCommands}
+        onSend={onSend}
+        onSessionSettingsChange={onSessionSettingsChange}
+        onStopSession={onStopSession}
+        onPaste={onPaste}
       />
     );
   }
@@ -1824,5 +1821,14 @@ const SessionComposer = memo(function SessionComposer({
   previous.hasLoadedAgentCommands === next.hasLoadedAgentCommands &&
   previous.isRefreshingAgentCommands === next.isRefreshingAgentCommands &&
   previous.agentCommandsError === next.agentCommandsError &&
-  previous.showNewResponseIndicator === next.showNewResponseIndicator
+  previous.showNewResponseIndicator === next.showNewResponseIndicator &&
+  previous.onScrollToLatest === next.onScrollToLatest &&
+  previous.onDraftCommit === next.onDraftCommit &&
+  previous.onDraftAttachmentRemove === next.onDraftAttachmentRemove &&
+  previous.onRefreshSessionModelOptions === next.onRefreshSessionModelOptions &&
+  previous.onRefreshAgentCommands === next.onRefreshAgentCommands &&
+  previous.onSend === next.onSend &&
+  previous.onSessionSettingsChange === next.onSessionSettingsChange &&
+  previous.onStopSession === next.onStopSession &&
+  previous.onPaste === next.onPaste
 );

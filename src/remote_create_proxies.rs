@@ -167,9 +167,9 @@ impl AppState {
             );
             if update_existing {
                 // When we refreshed from the POST, record its revision
-                // as the most-recent-applied for this remote so a
-                // later delta at the same revision is correctly
-                // recognized as a duplicate and ignored.
+                // as the most-recent-applied for this remote. Exact
+                // same-revision payload replays are deduplicated by
+                // the per-remote replay cache, not by this watermark.
                 inner.note_remote_applied_revision(
                     &binding.remote.id,
                     remote_response.revision,
@@ -298,9 +298,10 @@ impl AppState {
                 }
             };
             if applied_remote_revision {
-                inner.note_remote_applied_revision(
+                note_remote_applied_state_snapshot_revision(
+                    &mut inner,
                     &binding.remote.id,
-                    remote_response.state.revision,
+                    &remote_response.state,
                 );
             }
             if applied_remote_revision || changed {

@@ -1637,6 +1637,42 @@ fn shared_codex_global_notices_update_codex_state() {
     ));
 }
 
+// Tests that Codex global notices are capped in most-recent-first order.
+#[test]
+fn codex_notice_cap_retains_most_recent_notices() {
+    let state = test_app_state();
+
+    for index in 0..7 {
+        state
+            .note_codex_notice(CodexNotice {
+                kind: CodexNoticeKind::RuntimeNotice,
+                level: CodexNoticeLevel::Info,
+                title: format!("Runtime notice {index}"),
+                detail: format!("Runtime detail {index}"),
+                timestamp: format!("2026-04-26T00:00:0{index}Z"),
+                code: Some(format!("runtime-notice-{index}")),
+            })
+            .expect("notice should be recorded");
+    }
+
+    let notices = state.snapshot().codex.notices;
+    assert_eq!(CODEX_NOTICE_CAP, 5);
+    assert_eq!(notices.len(), CODEX_NOTICE_CAP);
+    assert_eq!(
+        notices
+            .iter()
+            .map(|notice| notice.title.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Runtime notice 6",
+            "Runtime notice 5",
+            "Runtime notice 4",
+            "Runtime notice 3",
+            "Runtime notice 2",
+        ]
+    );
+}
+
 // Tests that shared Codex rate-limit updates use a narrow delta rather
 // than publishing a full state snapshot with every transcript attached.
 #[test]

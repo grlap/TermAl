@@ -1,4 +1,5 @@
 import { act, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { copyTextToClipboard } from "../clipboard";
@@ -22,11 +23,13 @@ vi.mock("../MonacoCodeEditor", () => ({
     ariaLabel,
     inlineZones,
     onChange,
+    onSave,
     value,
   }: {
     ariaLabel: string;
     inlineZones?: Array<{ id: string; afterLineNumber: number }>;
     onChange: (nextValue: string) => void;
+    onSave?: () => void;
     value: string;
   }) => (
     <textarea
@@ -35,6 +38,12 @@ vi.mock("../MonacoCodeEditor", () => ({
       data-inline-zone-first-after-line={inlineZones?.[0]?.afterLineNumber ?? ""}
       data-inline-zone-ids={inlineZones?.map((zone) => zone.id).join(",") ?? ""}
       onChange={(event) => onChange(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+          event.preventDefault();
+          onSave?.();
+        }
+      }}
       value={value}
     />
   ),
@@ -86,6 +95,17 @@ function selectRenderedMarkdownSectionContents(section: HTMLElement) {
     const markdownRoot = section.querySelector<HTMLElement>(".markdown-copy") ?? section;
     const range = document.createRange();
     range.selectNodeContents(markdownRoot);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+}
+
+function selectRenderedMarkdownNode(section: HTMLElement, node: Node) {
+  act(() => {
+    section.focus();
+    const range = document.createRange();
+    range.selectNode(node);
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
@@ -580,6 +600,53 @@ describe("SourcePanel", () => {
     );
   });
 
+  it("does not copy a whole rendered Markdown segment for an unserialized partial selection", async () => {
+    const setClipboardData = vi.fn();
+
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Before\n\n![diagram](https://example.com/diagram.png)\n\nAfter\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+    const image = await waitFor(() => {
+      const candidate = renderedSection.querySelector("img");
+      expect(candidate).not.toBeNull();
+      return candidate!;
+    });
+
+    selectRenderedMarkdownNode(renderedSection, image);
+    const copyEvent = createEvent.copy(renderedSection, {
+      clipboardData: {
+        setData: setClipboardData,
+      },
+    });
+    fireEvent(renderedSection, copyEvent);
+
+    expect(copyEvent.defaultPrevented).toBe(true);
+    expect(setClipboardData).toHaveBeenCalledWith("text/plain", "");
+    expect(setClipboardData).not.toHaveBeenCalledWith(
+      "text/plain",
+      "Before\n\n![diagram](https://example.com/diagram.png)\n\nAfter\n",
+    );
+  });
+
   it("cuts editable rendered Markdown as text/plain Markdown and commits the deletion", async () => {
     const onSaveFile = vi.fn().mockResolvedValue(undefined);
     const setClipboardData = vi.fn();
@@ -633,6 +700,54 @@ describe("SourcePanel", () => {
         undefined,
       );
     });
+  });
+
+  it("does not cut a whole rendered Markdown segment for an unserialized partial selection", async () => {
+    const onSaveFile = vi.fn().mockResolvedValue(undefined);
+    const setClipboardData = vi.fn();
+
+    render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: "Before\n\n![diagram](https://example.com/diagram.png)\n\nAfter\n",
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={onSaveFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+    const image = await waitFor(() => {
+      const candidate = renderedSection.querySelector("img");
+      expect(candidate).not.toBeNull();
+      return candidate!;
+    });
+
+    selectRenderedMarkdownNode(renderedSection, image);
+    const cutEvent = createEvent.cut(renderedSection, {
+      clipboardData: {
+        setData: setClipboardData,
+      },
+    });
+    fireEvent(renderedSection, cutEvent);
+
+    expect(cutEvent.defaultPrevented).toBe(true);
+    expect(setClipboardData).toHaveBeenCalledWith("text/plain", "");
+    expect(setClipboardData).not.toHaveBeenCalledWith(
+      "text/plain",
+      "Before\n\n![diagram](https://example.com/diagram.png)\n\nAfter\n",
+    );
   });
 
   it("commits rendered Markdown split edits back into the code editor buffer", async () => {
@@ -694,6 +809,7 @@ describe("SourcePanel", () => {
         canEdit
         className="markdown-diff-rendered-section-body"
         documentPath="/repo/docs/readme.md"
+        editableAriaLabel="Edit rendered Markdown preview for /repo/docs/readme.md"
         onCommitDrafts={() => true}
         onCommitSectionDraft={onCommitSectionDraft}
         onDraftChange={onDraftChange}
@@ -716,6 +832,12 @@ describe("SourcePanel", () => {
       ".markdown-diff-rendered-section-content",
     );
     expect(renderedContent).not.toBeNull();
+    expect(
+      screen.getByRole("textbox", {
+        name: "Edit rendered Markdown preview for /repo/docs/readme.md",
+      }),
+    ).toBe(renderedSection);
+    expect(renderedSection).toHaveAttribute("aria-multiline", "true");
 
     editRenderedMarkdownSection(renderedSection, "<p>Edited paragraph.</p>");
     fireEvent.blur(renderedSection);
@@ -725,6 +847,55 @@ describe("SourcePanel", () => {
     expect(
       renderedSection.querySelector(".markdown-diff-rendered-section-content"),
     ).toBe(renderedContent);
+  });
+
+  it("keeps rendered Markdown committer registration stable across prop rerenders", async () => {
+    const markdown = "Original paragraph.\n";
+    const segment: MarkdownDiffDocumentSegment = {
+      afterEndOffset: markdown.length,
+      afterStartOffset: 0,
+      id: "segment-1",
+      isInAfterDocument: true,
+      kind: "normal",
+      markdown,
+      newStart: 1,
+      oldStart: 1,
+    };
+    const unregisterCommitter = vi.fn();
+    const onRegisterCommitter = vi.fn(() => unregisterCommitter);
+
+    const renderSection = (sourceContent: string) => (
+      <EditableRenderedMarkdownSection
+        allowReadOnlyCaret={false}
+        allowCurrentSegmentFallback={false}
+        appearance={editorAppearance}
+        canEdit
+        className="markdown-diff-rendered-section-body"
+        documentPath="/repo/docs/readme.md"
+        editableAriaLabel="Edit rendered Markdown preview for /repo/docs/readme.md"
+        onCommitDrafts={() => true}
+        onCommitSectionDraft={() => true}
+        onDraftChange={vi.fn()}
+        onOpenSourceLink={vi.fn()}
+        onReadOnlyMutation={vi.fn()}
+        onRegisterCommitter={onRegisterCommitter}
+        onSave={vi.fn()}
+        segment={segment}
+        sourceContent={sourceContent}
+        workspaceRoot="/repo"
+      />
+    );
+
+    const { rerender } = render(renderSection(markdown));
+
+    await waitFor(() => {
+      expect(onRegisterCommitter).toHaveBeenCalledTimes(1);
+    });
+
+    rerender(renderSection(`${markdown}\nExternal context.`));
+
+    expect(onRegisterCommitter).toHaveBeenCalledTimes(1);
+    expect(unregisterCommitter).not.toHaveBeenCalled();
   });
 
   it("commits rendered Markdown edits before switching document modes", async () => {
@@ -877,6 +1048,90 @@ describe("SourcePanel", () => {
     expect(editor).toHaveValue("Code pane edit.\n");
     expect(renderedSection).toHaveTextContent("Rendered paragraph.");
     expect(onSaveFile).not.toHaveBeenCalled();
+  });
+
+  it("adopts a successful save while preserving failed post-save rendered drafts", async () => {
+    const savedFile = createDeferred<SourceFileState>();
+    const onSaveFile = vi.fn().mockReturnValue(savedFile.promise);
+    const onAdoptFileState = vi.fn();
+    const savedFileState: SourceFileState = {
+      status: "ready",
+      path: "/repo/docs/readme.md",
+      content: "Rendered paragraph.\n",
+      contentHash: "sha256:saved",
+      error: null,
+      language: "markdown",
+      sizeBytes: "Rendered paragraph.\n".length,
+    };
+
+    function Harness() {
+      const [currentFileState, setCurrentFileState] = useState<SourceFileState>({
+        ...readyFileState,
+        path: "/repo/docs/readme.md",
+        content: "Original paragraph.\n",
+        language: "markdown",
+      });
+      return (
+        <SourcePanel
+          editorAppearance={editorAppearance}
+          editorFontSizePx={14}
+          fileState={currentFileState}
+          sourcePath="/repo/docs/readme.md"
+          workspaceRoot="/repo"
+          onAdoptFileState={(nextFileState) => {
+            onAdoptFileState(nextFileState);
+            setCurrentFileState(nextFileState);
+          }}
+          onSaveFile={onSaveFile}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    const editor = await screen.findByLabelText("Source editor for /repo/docs/readme.md");
+    const renderedSection = await waitFor(() => {
+      const section = document.querySelector<HTMLElement>("[data-markdown-editable='true']");
+      expect(section).not.toBeNull();
+      return section!;
+    });
+
+    editRenderedMarkdownSection(renderedSection, "<p>Rendered paragraph.</p>");
+    fireEvent.keyDown(editor, {
+      key: "s",
+      code: "KeyS",
+      ctrlKey: true,
+    });
+
+    await waitFor(() => {
+      expect(onSaveFile).toHaveBeenCalledWith(
+        "/repo/docs/readme.md",
+        "Rendered paragraph.\n",
+        undefined,
+      );
+    });
+
+    editRenderedMarkdownSection(renderedSection, "<p>Post-save rendered draft.</p>");
+    fireEvent.change(editor, {
+      target: { value: "Code pane edit.\n" },
+    });
+
+    await act(async () => {
+      savedFile.resolve(savedFileState);
+      await savedFile.promise;
+    });
+
+    await waitFor(() => {
+      expect(onAdoptFileState).toHaveBeenCalledWith(savedFileState);
+      expect(screen.getByLabelText("Source editor for /repo/docs/readme.md")).toHaveValue(
+        "Code pane edit.\n",
+      );
+    });
+    expect(
+      screen.getByText(/Rendered Markdown edit could not be applied/),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Action failed").length).toBeGreaterThan(0);
   });
 
   it("does not save when Ctrl+S cannot apply a rendered Markdown draft", async () => {
@@ -1062,6 +1317,14 @@ describe("SourcePanel", () => {
     // Chip says "Mermaid", not "Markdown".
     const chip = screen.getByText("Mermaid");
     expect(chip).toHaveClass("chip");
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(await screen.findByLabelText("Rendered preview")).toBeInTheDocument();
+    expect(await screen.findByText(/Lines 1.*3/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    expect(await screen.findByLabelText("Source editor for /repo/diagrams/flow.mmd")).toBeInTheDocument();
+    expect(screen.getByText(/Lines 1.*3/)).toBeInTheDocument();
   });
 
   // A plain Rust file with no doc comments and no recognized content
@@ -1124,6 +1387,14 @@ describe("SourcePanel", () => {
     expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
     // The chip labels the renderer kind.
     expect(screen.getByText("Mermaid")).toHaveClass("chip");
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(await screen.findByLabelText("Rendered preview")).toBeInTheDocument();
+    expect(await screen.findByText(/Lines 3.*6/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    expect(await screen.findByLabelText("Source editor for /repo/src/architecture.rs")).toBeInTheDocument();
+    expect(screen.getByText(/Lines 3.*6/)).toBeInTheDocument();
   });
 
   // Inline rendering is now directly part of Code mode: the Source
@@ -1235,7 +1506,7 @@ describe("SourcePanel", () => {
   // non-Markdown file context where the preview would otherwise not
   // appear at all.
   it("re-detects renderable regions from the current editor buffer (not the saved content)", async () => {
-    const { rerender } = render(
+    render(
       <SourcePanel
         editorAppearance={editorAppearance}
         editorFontSizePx={14}
@@ -1250,25 +1521,15 @@ describe("SourcePanel", () => {
       />,
     );
 
+    const editor = await screen.findByLabelText(
+      "Source editor for /repo/notes.mmd",
+    );
     // Empty `.mmd` file has no renderable region, so no Preview.
     expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
 
-    // Saved-content update that introduces a Mermaid diagram should
-    // expose the mode switcher.
-    rerender(
-      <SourcePanel
-        editorAppearance={editorAppearance}
-        editorFontSizePx={14}
-        fileState={{
-          ...readyFileState,
-          path: "/repo/notes.mmd",
-          content: "flowchart TD\n  A --> B\n",
-          language: null,
-        }}
-        sourcePath="/repo/notes.mmd"
-        onSaveFile={vi.fn()}
-      />,
-    );
+    fireEvent.change(editor, {
+      target: { value: "flowchart TD\n  A --> B\n" },
+    });
 
     expect(await screen.findByRole("button", { name: "Preview" })).toBeInTheDocument();
   });
@@ -1757,6 +2018,303 @@ describe("SourcePanel", () => {
     });
     expect(screen.queryByLabelText("Source compare for src/second.rs")).not.toBeInTheDocument();
     expect(screen.queryByTestId("diff-original")).not.toBeInTheDocument();
+  });
+
+  it("ignores stale copy-path completions after the source tab changes", async () => {
+    const copiedPath = createDeferred<void>();
+    copyTextToClipboardMock.mockReturnValue(copiedPath.promise);
+
+    const { rerender } = render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "src/first.rs",
+          content: "fn first() {}\n",
+          contentHash: "sha256:first",
+        }}
+        sourcePath="src/first.rs"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Copy path" }));
+    await waitFor(() => {
+      expect(copyTextToClipboardMock).toHaveBeenCalledWith("src/first.rs");
+    });
+
+    rerender(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "src/second.rs",
+          content: "fn second() {}\n",
+          contentHash: "sha256:second",
+        }}
+        sourcePath="src/second.rs"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    await act(async () => {
+      copiedPath.resolve();
+      await copiedPath.promise;
+    });
+
+    expect(screen.getByText("src/second.rs")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy path" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Path copied" })).not.toBeInTheDocument();
+  });
+
+  it("adopts save responses only while the saved source path is still active", async () => {
+    const savedFile = createDeferred<SourceFileState>();
+    const onSaveFile = vi.fn().mockReturnValue(savedFile.promise);
+    const onAdoptFileState = vi.fn();
+
+    const { rerender } = render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "src/first.rs",
+          content: "fn first() {}\n",
+          contentHash: "sha256:first",
+        }}
+        sourcePath="src/first.rs"
+        onAdoptFileState={onAdoptFileState}
+        onSaveFile={onSaveFile}
+      />,
+    );
+
+    const editor = await screen.findByLabelText("Source editor for src/first.rs");
+    fireEvent.change(editor, {
+      target: { value: "fn first() { println!(\"mine\"); }\n" },
+    });
+    fireEvent.keyDown(editor, { ctrlKey: true, key: "s" });
+
+    await waitFor(() => {
+      expect(onSaveFile).toHaveBeenCalledWith(
+        "src/first.rs",
+        "fn first() { println!(\"mine\"); }\n",
+        undefined,
+      );
+    });
+
+    rerender(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "src/second.rs",
+          content: "fn second() {}\n",
+          contentHash: "sha256:second",
+        }}
+        sourcePath="src/second.rs"
+        onAdoptFileState={onAdoptFileState}
+        onSaveFile={onSaveFile}
+      />,
+    );
+
+    await act(async () => {
+      savedFile.resolve({
+        ...readyFileState,
+        path: "src/first.rs",
+        content: "fn first() { println!(\"mine\"); }\n",
+        contentHash: "sha256:first-saved",
+      });
+      await savedFile.promise;
+    });
+
+    expect(onAdoptFileState).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Source editor for src/second.rs")).toHaveValue(
+      "fn second() {}\n",
+    );
+  });
+
+  it("preserves edits typed while adopting a same-path save response", async () => {
+    const savedFile = createDeferred<SourceFileState>();
+    const onSaveFile = vi.fn().mockReturnValue(savedFile.promise);
+    const onAdoptFileState = vi.fn();
+    const saveStartedContent = "fn main() {\n  println!(\"before\");\n}\n";
+    const liveContentAfterSaveStarted =
+      "fn main() {\n  println!(\"before\");\n  println!(\"after\");\n}\n";
+    const savedFileState: SourceFileState = {
+      ...readyFileState,
+      content: saveStartedContent,
+      contentHash: "sha256:saved",
+      sizeBytes: saveStartedContent.length,
+    };
+
+    function Harness() {
+      const [currentFileState, setCurrentFileState] =
+        useState<SourceFileState>(readyFileState);
+      return (
+        <SourcePanel
+          editorAppearance={editorAppearance}
+          editorFontSizePx={14}
+          fileState={currentFileState}
+          sourcePath="src/main.rs"
+          onAdoptFileState={(nextFileState) => {
+            onAdoptFileState(nextFileState);
+            setCurrentFileState(nextFileState);
+          }}
+          onSaveFile={onSaveFile}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const editor = await screen.findByLabelText("Source editor for src/main.rs");
+    fireEvent.change(editor, {
+      target: { value: saveStartedContent },
+    });
+    fireEvent.keyDown(editor, { ctrlKey: true, key: "s" });
+
+    await waitFor(() => {
+      expect(onSaveFile).toHaveBeenCalledWith(
+        "src/main.rs",
+        saveStartedContent,
+        undefined,
+      );
+    });
+
+    fireEvent.change(editor, {
+      target: { value: liveContentAfterSaveStarted },
+    });
+
+    await act(async () => {
+      savedFile.resolve(savedFileState);
+      await savedFile.promise;
+    });
+
+    await waitFor(() => {
+      expect(onAdoptFileState).toHaveBeenCalledWith(savedFileState);
+      expect(screen.getByLabelText("Source editor for src/main.rs")).toHaveValue(
+        liveContentAfterSaveStarted,
+      );
+    });
+  });
+
+  it("adopts same-path reload responses", async () => {
+    const reloadedFile = createDeferred<SourceFileState>();
+    const onReloadFile = vi.fn().mockReturnValue(reloadedFile.promise);
+    const onAdoptFileState = vi.fn();
+    const reloadedFileState: SourceFileState = {
+      ...readyFileState,
+      content: "fn main() {\n  println!(\"disk\");\n}\n",
+      contentHash: "sha256:disk",
+      staleOnDisk: false,
+      externalContentHash: null,
+      sizeBytes: 37,
+    };
+
+    function Harness() {
+      const [currentFileState, setCurrentFileState] = useState<SourceFileState>({
+        ...readyFileState,
+        staleOnDisk: true,
+        externalContentHash: "sha256:disk",
+      });
+      return (
+        <SourcePanel
+          editorAppearance={editorAppearance}
+          editorFontSizePx={14}
+          fileState={currentFileState}
+          sourcePath="src/main.rs"
+          onAdoptFileState={(nextFileState) => {
+            onAdoptFileState(nextFileState);
+            setCurrentFileState(nextFileState);
+          }}
+          onReloadFile={onReloadFile}
+          onSaveFile={vi.fn()}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reload from disk" }));
+    await waitFor(() => {
+      expect(onReloadFile).toHaveBeenCalledWith("src/main.rs");
+    });
+
+    await act(async () => {
+      reloadedFile.resolve(reloadedFileState);
+      await reloadedFile.promise;
+    });
+
+    await waitFor(() => {
+      expect(onAdoptFileState).toHaveBeenCalledWith(reloadedFileState);
+      expect(screen.getByLabelText("Source editor for src/main.rs")).toHaveValue(
+        reloadedFileState.content,
+      );
+    });
+    expect(screen.queryByText("File changed on disk")).not.toBeInTheDocument();
+  });
+
+  it("adopts reload responses only while the reloaded source path is still active", async () => {
+    const reloadedFile = createDeferred<SourceFileState>();
+    const onReloadFile = vi.fn().mockReturnValue(reloadedFile.promise);
+    const onAdoptFileState = vi.fn();
+
+    const { rerender } = render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "src/first.rs",
+          staleOnDisk: true,
+          externalContentHash: "sha256:first-disk",
+        }}
+        sourcePath="src/first.rs"
+        onAdoptFileState={onAdoptFileState}
+        onReloadFile={onReloadFile}
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reload from disk" }));
+    await waitFor(() => {
+      expect(onReloadFile).toHaveBeenCalledWith("src/first.rs");
+    });
+
+    rerender(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "src/second.rs",
+          content: "fn second() {}\n",
+          contentHash: "sha256:second",
+        }}
+        sourcePath="src/second.rs"
+        onAdoptFileState={onAdoptFileState}
+        onReloadFile={onReloadFile}
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    await act(async () => {
+      reloadedFile.resolve({
+        ...readyFileState,
+        path: "src/first.rs",
+        content: "fn first() { println!(\"disk\"); }\n",
+        contentHash: "sha256:first-disk",
+      });
+      await reloadedFile.promise;
+    });
+
+    expect(onAdoptFileState).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Source editor for src/second.rs")).toHaveValue(
+      "fn second() {}\n",
+    );
   });
 
   it("automatically rebases dirty buffers when disk changes do not overlap", async () => {

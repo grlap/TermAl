@@ -829,12 +829,17 @@ impl SessionModelOption {
     }
 }
 
+/// Maximum number of Codex notices retained in state and sent over SSE.
+const CODEX_NOTICE_CAP: usize = 5;
+
 /// Tracks Codex state.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CodexState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     rate_limits: Option<CodexRateLimits>,
+    /// Most-recent-first Codex notices, capped at [`CODEX_NOTICE_CAP`] by
+    /// `AppState::note_codex_notice`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     notices: Vec<CodexNotice>,
 }

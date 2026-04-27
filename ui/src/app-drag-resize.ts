@@ -116,6 +116,8 @@ export function useAppDragResize({
   const dragChannelRef = useRef<BroadcastChannel | null>(null);
   const draggedTabRef = useRef<WorkspaceTabDrag | null>(null);
   const launcherDraggedTabRef = useRef<WorkspaceTabDrag | null>(null);
+  const applyControlPanelLayoutRef = useRef(applyControlPanelLayout);
+  applyControlPanelLayoutRef.current = applyControlPanelLayout;
 
   const broadcastTabDragMessage = useCallback(
     (message: WorkspaceTabDragChannelMessage) => {
@@ -447,7 +449,7 @@ export function useAppDragResize({
             current?.dragId === message.dragId ? null : current,
           );
           setWorkspace((current) =>
-            applyControlPanelLayout(
+            applyControlPanelLayoutRef.current(
               closeWorkspaceTab(current, message.sourcePaneId, message.tabId),
             ),
           );
@@ -461,7 +463,7 @@ export function useAppDragResize({
         dragChannelRef.current = null;
       }
     };
-  }, [applyControlPanelLayout, setWorkspace, windowId]);
+  }, [setWorkspace, windowId]);
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {

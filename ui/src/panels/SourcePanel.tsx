@@ -11,6 +11,8 @@ import {
 } from "../source-renderers";
 import type { WorkspaceFileChangeKind } from "../types";
 import { rebaseContentOntoDisk } from "./content-rebase";
+// Rendered-Markdown editing is shared with DiffPanel; these diff-named
+// modules own the neutral segment and commit-range contract.
 import { EditableRenderedMarkdownSection } from "./markdown-diff-change-section";
 import {
   hasOverlappingMarkdownCommitRanges,
@@ -122,12 +124,12 @@ export function SourcePanel({
   onFetchLatestFile?: (path: string) => Promise<SourceFileState>;
   onAdoptFileState?: (fileState: SourceFileState) => void;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
-  onReloadFile?: (path: string) => Promise<void>;
+  onReloadFile?: (path: string) => Promise<SourceFileState | void>;
   onSaveFile: (
     path: string,
     content: string,
     options?: SourceSaveOptions,
-  ) => Promise<void>;
+  ) => Promise<SourceFileState | void>;
   workspaceRoot?: string | null;
 }) {
   const [editorValue, setEditorValue] = useState("");
@@ -143,6 +145,7 @@ export function SourcePanel({
   const [copiedPath, setCopiedPath] = useState(false);
   const [hasRenderedMarkdownDraftActive, setHasRenderedMarkdownDraftActive] = useState(false);
   const pendingEditorValueRef = useRef<string | null>(null);
+  const preserveActionErrorOnFileStateAdoptionRef = useRef(false);
   const lastAutoRebaseKeyRef = useRef<string | null>(null);
   const mountedRef = useRef(false);
   const rebaseRequestTokenRef = useRef(0);
@@ -289,13 +292,17 @@ export function SourcePanel({
   useEffect(() => {
     if (fileState.status === "ready") {
       const pendingEditorValue = pendingEditorValueRef.current;
+      const shouldPreserveActionError = preserveActionErrorOnFileStateAdoptionRef.current;
       pendingEditorValueRef.current = null;
+      preserveActionErrorOnFileStateAdoptionRef.current = false;
       const nextEditorValue = pendingEditorValue ?? fileState.content;
       setEditorValueState(nextEditorValue);
-      setActionError(null);
+      if (!shouldPreserveActionError) {
+        setActionError(null);
+      }
       setSaveConflictOnDisk(false);
       setCompareDiskContent(null);
-      setHasRenderedMarkdownDraftActive(false);
+      setHasRenderedMarkdownDraftActive(shouldPreserveActionError);
       setEditorStatus(createEditorStatusSnapshot(nextEditorValue));
       return;
     }
@@ -487,7 +494,21 @@ export function SourcePanel({
     const savePath = currentFileState.path;
     const requestToken = beginSourceRequest(saveRequestTokenRef);
     try {
-      await onSaveFile(savePath, currentEditorValue, options);
+      const savedFileState = await onSaveFile(savePath, currentEditorValue, options);
+      if (
+        savedFileState &&
+        isActiveSourceRequest(saveRequestTokenRef, requestToken, savePath)
+      ) {
+        const draftsApplied = commitRenderedMarkdownDrafts();
+        const latestEditorValue = editorValueRef.current;
+        if (latestEditorValue !== currentEditorValue) {
+          pendingEditorValueRef.current = latestEditorValue;
+        }
+        if (!draftsApplied && onAdoptFileState) {
+          preserveActionErrorOnFileStateAdoptionRef.current = true;
+        }
+        onAdoptFileState?.(savedFileState);
+      }
     } catch (error) {
       if (!isActiveSourceRequest(saveRequestTokenRef, requestToken, savePath)) {
         return;
@@ -518,7 +539,13 @@ export function SourcePanel({
     const reloadPath = fileState.path;
     const requestToken = beginSourceRequest(reloadRequestTokenRef);
     try {
-      await onReloadFile(reloadPath);
+      const reloadedFileState = await onReloadFile(reloadPath);
+      if (
+        reloadedFileState &&
+        isActiveSourceRequest(reloadRequestTokenRef, requestToken, reloadPath)
+      ) {
+        onAdoptFileState?.(reloadedFileState);
+      }
     } catch (error) {
       if (isActiveSourceRequest(reloadRequestTokenRef, requestToken, reloadPath)) {
         setActionError(getErrorMessage(error));
@@ -909,6 +936,7 @@ export function SourcePanel({
                 <EditableMarkdownPreviewPane
                   appearance={editorAppearance}
                   documentPath={fileState.path}
+                  editableAriaLabel={`Edit rendered Markdown preview for ${fileState.path}`}
                   onCommitDrafts={commitRenderedMarkdownDrafts}
                   onCommitSectionDraft={commitRenderedMarkdownSectionDraft}
                   onDraftChange={handleRenderedMarkdownSectionDraftChange}
@@ -956,6 +984,7 @@ export function SourcePanel({
                     <EditableMarkdownPreviewPane
                       appearance={editorAppearance}
                       documentPath={fileState.path}
+                      editableAriaLabel={`Edit rendered Markdown preview for ${fileState.path}`}
                       onCommitDrafts={commitRenderedMarkdownDrafts}
                       onCommitSectionDraft={commitRenderedMarkdownSectionDraft}
                       onDraftChange={handleRenderedMarkdownSectionDraftChange}
@@ -1023,6 +1052,7 @@ const noopOpenSourceLink = (_target: MarkdownFileLinkTarget) => {};
 function EditableMarkdownPreviewPane({
   appearance,
   documentPath,
+  editableAriaLabel,
   onCommitDrafts,
   onCommitSectionDraft,
   onDraftChange,
@@ -1036,6 +1066,7 @@ function EditableMarkdownPreviewPane({
 }: {
   appearance: MonacoAppearance;
   documentPath: string | null;
+  editableAriaLabel: string;
   onCommitDrafts: () => boolean;
   onCommitSectionDraft: (commit: RenderedMarkdownSectionCommit) => boolean;
   onDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
@@ -1056,6 +1087,7 @@ function EditableMarkdownPreviewPane({
         canEdit
         className="source-rendered-markdown-section markdown-diff-normal-section"
         documentPath={documentPath}
+        editableAriaLabel={editableAriaLabel}
         onCommitDrafts={onCommitDrafts}
         onCommitSectionDraft={onCommitSectionDraft}
         onDraftChange={onDraftChange}

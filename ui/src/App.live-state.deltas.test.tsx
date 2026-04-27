@@ -607,6 +607,177 @@ describe("App live state - delta-gap core", () => {
     });
   });
 
+  it("does not let stale hydration clobber an in-flight text delta with matching metadata", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const initialSession = makeSession("session-1", {
+        name: "Codex Session",
+        status: "active",
+        preview: "Hello",
+        messagesLoaded: false,
+        messageCount: 1,
+        sessionMutationStamp: 11,
+        messages: [],
+      });
+      const loadedSession = makeSession("session-1", {
+        ...initialSession,
+        preview: "Hello",
+        messagesLoaded: true,
+        messages: [
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Hello",
+          },
+        ],
+      });
+      const staleHydratedSession = makeSession("session-1", {
+        ...loadedSession,
+        preview: "Hello",
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 11,
+        messages: [
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Hello",
+          },
+        ],
+      });
+      const sessionFetch = createDeferred<Response>();
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse(
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [initialSession],
+            }),
+          );
+        }
+        if (requestUrl.pathname === "/api/sessions/session-1") {
+          return sessionFetch.promise;
+        }
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/tmp",
+            upstream: "origin/main",
+            workdir: "/tmp",
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [initialSession],
+          }),
+        );
+        await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        const sessionRowButton =
+          within(sessionList).getByText("Codex Session").closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+        await clickAndSettle(sessionRowButton);
+        await waitFor(() => {
+          expect(
+            fetchMock.mock.calls.some(
+              ([input]) =>
+                new URL(String(input), "http://localhost").pathname ===
+                "/api/sessions/session-1",
+            ),
+          ).toBe(true);
+        });
+
+        await dispatchStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 2,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [loadedSession],
+          }),
+        );
+        await settleAsyncUi();
+        expect(screen.getAllByText("Hello").length).toBeGreaterThan(0);
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "textDelta",
+            revision: 3,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 0,
+            messageCount: 1,
+            delta: " world",
+            preview: "Hello world",
+            sessionMutationStamp: 11,
+          });
+          await flushUiWork();
+        });
+        expect(screen.getAllByText("Hello world").length).toBeGreaterThan(0);
+
+        await act(async () => {
+          sessionFetch.resolve(
+            jsonResponse({
+              revision: 4,
+              serverInstanceId: "test-instance",
+              session: staleHydratedSession,
+            }),
+          );
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        expect(screen.getAllByText("Hello world").length).toBeGreaterThan(0);
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("rejects stale session hydration after a newer metadata delta", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
@@ -971,6 +1142,180 @@ describe("App live state - delta-gap core", () => {
         expect(
           screen.queryByText("Old instance transcript"),
         ).not.toBeInTheDocument();
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("deep-reconciles the first full snapshot after a partial restart response", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const sessionOneOldSummary = makeSession("session-1", {
+        name: "Session One",
+        status: "active",
+        preview: "Old instance first summary",
+        messagesLoaded: false,
+        messageCount: 1,
+        sessionMutationStamp: 0,
+        messages: [],
+      });
+      const sessionOneNew = makeSession("session-1", {
+        ...sessionOneOldSummary,
+        preview: "New instance first transcript",
+        messagesLoaded: true,
+        messages: [
+          {
+            id: "message-new-first",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "New instance first transcript",
+          },
+        ],
+      });
+      const sessionTwoOld = makeSession("session-2", {
+        name: "Session Two",
+        status: "idle",
+        preview: "Old instance second transcript",
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 0,
+        messages: [
+          {
+            id: "message-old-second",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Old instance second transcript",
+          },
+        ],
+      });
+      const sessionTwoNew = makeSession("session-2", {
+        ...sessionTwoOld,
+        preview: "New instance second transcript",
+        messages: [
+          {
+            id: "message-new-second",
+            type: "text",
+            timestamp: "10:02",
+            author: "assistant",
+            text: "New instance second transcript",
+          },
+        ],
+      });
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse(
+            makeStateResponse({
+              revision: 5,
+              serverInstanceId: "old-instance",
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [sessionOneOldSummary, sessionTwoOld],
+            }),
+          );
+        }
+        if (requestUrl.pathname === "/api/sessions/session-1") {
+          return jsonResponse({
+            revision: 1,
+            serverInstanceId: "new-instance",
+            session: sessionOneNew,
+          });
+        }
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/tmp",
+            upstream: "origin/main",
+            workdir: "/tmp",
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 5,
+            serverInstanceId: "old-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [sessionOneOldSummary, sessionTwoOld],
+          }),
+        );
+        await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        const sessionOneButton =
+          within(sessionList).getByText("Session One").closest("button");
+        if (!sessionOneButton) {
+          throw new Error("Session one row button not found");
+        }
+        await clickAndSettle(sessionOneButton);
+
+        await waitFor(() => {
+          expect(
+            screen.getAllByText("New instance first transcript").length,
+          ).toBeGreaterThan(0);
+        });
+
+        await dispatchStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 2,
+            serverInstanceId: "new-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [sessionOneNew, sessionTwoNew],
+          }),
+        );
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          const latestSessionList = document.querySelector(".session-list");
+          if (!(latestSessionList instanceof HTMLDivElement)) {
+            throw new Error("Session list not found after full restart state");
+          }
+          expect(
+            within(latestSessionList).getByText(
+              "New instance second transcript",
+            ),
+          ).toBeInTheDocument();
+          expect(
+            within(latestSessionList).queryByText(
+              "Old instance second transcript",
+            ),
+          ).not.toBeInTheDocument();
+        });
       } finally {
         scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);

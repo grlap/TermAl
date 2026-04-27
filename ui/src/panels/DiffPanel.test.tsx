@@ -1540,6 +1540,115 @@ describe("DiffPanel", () => {
     });
   });
 
+  it("preserves code-mode edits when post-save rendered draft commit fails", async () => {
+    fetchFileMock.mockResolvedValue({
+      content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+      contentHash: "sha256:base",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+    const firstSave = createDeferred<{
+      content: string;
+      contentHash: string;
+      language: string;
+      path: string;
+    }>();
+    const onSaveFile = vi.fn().mockImplementationOnce(() => firstSave.promise);
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " Shared intro.",
+            "-# Base document",
+            "+# Draft document",
+            " Shared middle.",
+            "-Committed text.",
+            "+Ready to commit.",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "Shared intro.\n# Base document\nShared middle.\nCommitted text.\nShared outro.\n",
+              source: "index",
+            },
+            after: {
+              content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-save-code-edit-preserved"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={onSaveFile}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    const addedSections = await waitFor(() => {
+      const sections = document.querySelectorAll<HTMLElement>(
+        ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+      );
+      expect(sections.length).toBeGreaterThanOrEqual(2);
+      return sections;
+    });
+
+    const savedContent = "Shared intro.\n# Draft document\nShared middle.\nReady to ship.\nShared outro.\n";
+    const codeEditedContent =
+      "Shared intro.\n# Draft document\nShared middle.\nReady from code mode.\nShared outro.\n";
+
+    hasOverlappingMarkdownCommitRangesMock
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    editRenderedMarkdownSection(addedSections[1], "<p>Ready to ship.</p>");
+    await clickAndSettle(screen.getByRole("button", { name: "Save Markdown" }));
+
+    await clickAndSettle(screen.getByRole("button", { name: "Edit mode" }));
+    await changeAndSettle(await screen.findByTestId("monaco-code-editor"), {
+      target: { value: codeEditedContent },
+    });
+    await clickAndSettle(screen.getByRole("button", { name: "Rendered Markdown" }));
+
+    const pendingSection = await waitFor(() => {
+      const sections = document.querySelectorAll<HTMLElement>(
+        ".markdown-diff-rendered-section-added [data-markdown-editable='true']",
+      );
+      expect(sections.length).toBeGreaterThan(0);
+      return sections[sections.length - 1];
+    });
+    editRenderedMarkdownSection(pendingSection, "<p>Ready from rendered mode.</p>");
+
+    await act(async () => {
+      firstSave.resolve({
+        content: savedContent,
+        contentHash: "sha256:first",
+        language: "markdown",
+        path: "/repo/README.md",
+      });
+      await Promise.resolve();
+    });
+
+    expect(
+      await screen.findByText(
+        "Save failed: Rendered Markdown edit could not be applied because the document changed under that section. Review the latest diff and edit again.",
+      ),
+    ).toBeInTheDocument();
+
+    await clickAndSettle(screen.getByRole("button", { name: "Edit mode" }));
+    expect(await screen.findByTestId("monaco-code-editor")).toHaveValue(codeEditedContent);
+  });
+
   it("keeps rendered Markdown focus and caret when saving with Ctrl+S", async () => {
     fetchFileMock.mockResolvedValue({
       content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
@@ -3095,10 +3204,9 @@ describe("DiffPanel", () => {
     expect(stillSelected?.isCollapsed).toBe(false);
   });
 
-  // Regression: editable sections set `role="button"` on a container with
-  // rich interactive descendants, which violates ARIA and collapses the
-  // whole subtree into a single screen-reader label.
-  it("does not mark editable Markdown sections with role=button", async () => {
+  // Regression: editable sections previously had no text-editing semantics
+  // (and an earlier variant used role=button on a rich editor subtree).
+  it("marks editable Markdown sections as multiline textboxes, not buttons", async () => {
     fetchFileMock.mockResolvedValue({
       content: "Shared intro.\n# Draft document\nShared middle.\nReady to commit.\nShared outro.\n",
       language: "markdown",
@@ -3154,8 +3262,15 @@ describe("DiffPanel", () => {
       return sections;
     });
     for (const section of Array.from(editableSections)) {
-      expect(section.getAttribute("role")).toBeNull();
+      expect(section).toHaveAttribute("role", "textbox");
+      expect(section).toHaveAttribute("aria-multiline", "true");
+      expect(section).not.toHaveAttribute("role", "button");
     }
+    expect(
+      screen.getAllByRole("textbox", {
+        name: /Edit (added|unchanged) Markdown section/,
+      }).length,
+    ).toBe(editableSections.length);
   });
 
   it("moves the rendered Markdown caret between editable sections and skips deleted sections", async () => {

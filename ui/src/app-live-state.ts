@@ -497,6 +497,9 @@ export function useAppLiveState(
 
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
   const hydratedSessionIdsRef = useRef<Set<string>>(new Set());
+  const lastFullStateServerInstanceIdRef = useRef<string | null>(
+    lastSeenServerInstanceIdRef.current,
+  );
   const hydrationRetryTimersRef = useRef<Map<string, number>>(new Map());
   const hydrationRetryAttemptsRef = useRef<Map<string, number>>(new Map());
   const forceAdoptNextStateEventRef = useRef(false);
@@ -1016,6 +1019,23 @@ export function useAppLiveState(
     return session.sessionMutationStamp ?? null;
   }
 
+  function hydrationRetainedMessagesMatch(
+    responseSession: Session,
+    currentSession: Session,
+  ) {
+    if (
+      responseSession.messages.length === 0 ||
+      currentSession.messages.length === 0
+    ) {
+      return true;
+    }
+
+    return (
+      JSON.stringify(responseSession.messages) ===
+      JSON.stringify(currentSession.messages)
+    );
+  }
+
   function captureHydrationRequestContext(
     sessionId: string,
   ): SessionHydrationRequestContext | null {
@@ -1063,6 +1083,10 @@ export function useAppLiveState(
       responseMutationStamp !== null &&
       responseMutationStamp !== currentMutationStamp
     ) {
+      return false;
+    }
+
+    if (!hydrationRetainedMessagesMatch(responseSession, currentSession)) {
       return false;
     }
 
@@ -1148,16 +1172,34 @@ export function useAppLiveState(
         lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
         nextServerInstanceId: serverInstanceId,
         force: true,
-        allowRevisionDowngrade:
-          isServerRestartResponse || canAdoptLowerRevisionHydration,
+        allowRevisionDowngrade: canAdoptLowerRevisionHydration,
       })
     ) {
       return false;
     }
 
+    const latestSessions = sessionsRef.current;
+    const latestExistingIndex = latestSessions.findIndex(
+      (entry) => entry.id === session.id,
+    );
+    if (latestExistingIndex === -1) {
+      return false;
+    }
+    const latestCurrentSession = latestSessions[latestExistingIndex];
+    if (
+      !isServerRestartResponse &&
+      (!hydrationRequestStillMatchesSession(
+        requestContext,
+        latestCurrentSession,
+      ) ||
+        !hydrationResponseMatchesSession(session, latestCurrentSession))
+    ) {
+      return false;
+    }
+
     const hydratedSession = { ...session, messagesLoaded: true };
-    const nextSessions = previousSessions.map((entry, index) =>
-      index === existingIndex ? hydratedSession : entry,
+    const nextSessions = latestSessions.map((entry, index) =>
+      index === latestExistingIndex ? hydratedSession : entry,
     );
     if (previousRevision === null || revision > previousRevision) {
       latestStateRevisionRef.current = revision;
@@ -1289,12 +1331,19 @@ export function useAppLiveState(
       return false;
     }
 
+    const fullStateServerInstanceChanged =
+      !!nextState.serverInstanceId &&
+      nextState.serverInstanceId !== lastFullStateServerInstanceIdRef.current;
     if (
       !shouldAdoptSnapshotRevision(
         latestStateRevisionRef.current,
         nextState.revision,
         {
           ...options,
+          force: options?.force === true || fullStateServerInstanceChanged,
+          allowRevisionDowngrade:
+            options?.allowRevisionDowngrade === true ||
+            fullStateServerInstanceChanged,
           lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
           nextServerInstanceId: nextState.serverInstanceId,
         },
@@ -1303,14 +1352,12 @@ export function useAppLiveState(
       return false;
     }
 
-    const serverInstanceChanged =
-      !!nextState.serverInstanceId &&
-      nextState.serverInstanceId !== lastSeenServerInstanceIdRef.current;
     latestStateRevisionRef.current = nextState.revision;
     if (nextState.serverInstanceId) {
       lastSeenServerInstanceIdRef.current = nextState.serverInstanceId;
+      lastFullStateServerInstanceIdRef.current = nextState.serverInstanceId;
     }
-    if (serverInstanceChanged) {
+    if (fullStateServerInstanceChanged) {
       hydratingSessionIdsRef.current.clear();
       hydratedSessionIdsRef.current.clear();
     }
@@ -1355,7 +1402,7 @@ export function useAppLiveState(
       options?.openSessionId ?? pendingRecoveryOpenSessionIdRef.current;
     adoptSessions(
       nextState.sessions,
-      resolveAdoptStateSessionOptions(options, serverInstanceChanged),
+      resolveAdoptStateSessionOptions(options, fullStateServerInstanceChanged),
     );
     // Local state adoptions can resume or create active sessions before any SSE arrives.
     syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current(
@@ -1994,6 +2041,9 @@ export function useAppLiveState(
           payload,
           "_sseFallback",
         );
+        const rawFullStateServerInstanceChanged =
+          !!rawServerInstanceId &&
+          rawServerInstanceId !== lastFullStateServerInstanceIdRef.current;
         profiler?.mark("peek");
         if (
           rawRevision !== null &&
@@ -2002,8 +2052,12 @@ export function useAppLiveState(
             latestStateRevisionRef.current,
             rawRevision,
             {
-              force: forceAdoptNextStateEventRef.current,
-              allowRevisionDowngrade: forceAdoptNextStateEventRef.current,
+              force:
+                forceAdoptNextStateEventRef.current ||
+                rawFullStateServerInstanceChanged,
+              allowRevisionDowngrade:
+                forceAdoptNextStateEventRef.current ||
+                rawFullStateServerInstanceChanged,
               lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
               nextServerInstanceId: rawServerInstanceId,
             },

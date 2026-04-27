@@ -1722,7 +1722,10 @@ fn remote_orchestrators_updated_delta_rolls_back_proxy_sessions_when_localizatio
 
 // Seeds a remote proxy record directly through `StateInner`/upsert. Use this
 // for protocol tests that do not need to exercise the remote delta apply path.
-fn seed_remote_proxy_session_for_delta_test(state: &AppState, remote: &RemoteConfig) -> String {
+fn seed_remote_proxy_session_via_state_inner_upsert(
+    state: &AppState,
+    remote: &RemoteConfig,
+) -> String {
     let local_project_id = create_test_remote_project(
         state,
         remote,
@@ -2335,6 +2338,170 @@ fn remote_summary_same_count_with_same_stamp_preserves_cached_transcript() {
 }
 
 #[test]
+fn remote_summary_without_stamp_preserves_cached_transcript_and_stamp() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut full_remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    full_remote_session.messages = vec![remote_text_message(
+        "remote-message-1",
+        "Cached text from stamped full transcript.",
+    )];
+    full_remote_session.messages_loaded = true;
+    full_remote_session.message_count = 1;
+    full_remote_session.session_mutation_stamp = Some(10);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: full_remote_session.id.clone(),
+                session: full_remote_session.clone(),
+            },
+        )
+        .expect("remote full session create delta should apply");
+
+    let mut summary_session = full_remote_session;
+    make_remote_session_summary_only(&mut summary_session, 1);
+    summary_session.preview = "Unstamped metadata refresh.".to_owned();
+    summary_session.session_mutation_stamp = None;
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 3,
+                session_id: summary_session.id.clone(),
+                session: summary_session,
+            },
+        )
+        .expect("remote unstamped summary should apply");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_remote_session_index(&remote.id, "remote-session-1")
+        .expect("remote proxy session should exist");
+    let record = &inner.sessions[index];
+    assert!(record.session.messages_loaded);
+    assert_eq!(record.session.messages.len(), 1);
+    assert_eq!(record.session.message_count, 1);
+    assert_eq!(record.session.preview, "Unstamped metadata refresh.");
+    assert_eq!(record.session.session_mutation_stamp, Some(10));
+    assert!(matches!(
+        &record.session.messages[0],
+        Message::Text { text, .. } if text == "Cached text from stamped full transcript."
+    ));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_summary_without_any_stamps_preserves_cached_transcript() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Local,
+        enabled: true,
+        host: None,
+        port: None,
+        user: None,
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut full_remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    full_remote_session.messages = vec![remote_text_message(
+        "remote-message-1",
+        "Cached text from unstamped full transcript.",
+    )];
+    full_remote_session.messages_loaded = true;
+    full_remote_session.message_count = 1;
+    full_remote_session.session_mutation_stamp = None;
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: full_remote_session.id.clone(),
+                session: full_remote_session.clone(),
+            },
+        )
+        .expect("remote unstamped full session create delta should apply");
+
+    let mut summary_session = full_remote_session;
+    make_remote_session_summary_only(&mut summary_session, 1);
+    summary_session.preview = "Unstamped same-count summary.".to_owned();
+    summary_session.session_mutation_stamp = None;
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 3,
+                session_id: summary_session.id.clone(),
+                session: summary_session,
+            },
+        )
+        .expect("remote unstamped same-count summary should apply");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_remote_session_index(&remote.id, "remote-session-1")
+        .expect("remote proxy session should exist");
+    let record = &inner.sessions[index];
+    assert!(record.session.messages_loaded);
+    assert_eq!(record.session.messages.len(), 1);
+    assert_eq!(record.session.message_count, 1);
+    assert_eq!(record.session.preview, "Unstamped same-count summary.");
+    assert_eq!(record.session.session_mutation_stamp, None);
+    assert!(matches!(
+        &record.session.messages[0],
+        Message::Text { text, .. } if text == "Cached text from unstamped full transcript."
+    ));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn get_session_hydrates_unloaded_remote_proxy_from_remote_owner() {
     let state = test_app_state();
     let remote = RemoteConfig {
@@ -2455,6 +2622,270 @@ fn get_session_hydrates_unloaded_remote_proxy_from_remote_owner() {
             .any(|line| line.starts_with("GET /api/state ")),
         "expected remote state resync before applying newer session response, saw {request_lines:?}"
     );
+    join_test_server(server);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn get_session_hydration_skips_side_fetch_when_remote_revision_is_already_seen() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut full_remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    full_remote_session.messages = vec![remote_text_message(
+        "remote-message-1",
+        "Hydrated transcript without state side fetch.",
+    )];
+    full_remote_session.messages_loaded = true;
+    full_remote_session.message_count = 1;
+
+    let mut summary_session = full_remote_session.clone();
+    make_remote_session_summary_only(&mut summary_session, 1);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: summary_session.id.clone(),
+                session: summary_session,
+            },
+        )
+        .expect("remote summary session create delta should apply");
+
+    let local_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.note_remote_applied_revision(&remote.id, 3);
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .expect("remote proxy session should exist");
+        inner.sessions[index].session.id.clone()
+    };
+
+    let (port, requests, server) = spawn_remote_session_response_server(SessionResponse {
+        revision: 3,
+        session: full_remote_session,
+        server_instance_id: "remote-instance".to_owned(),
+    });
+    insert_test_remote_connection(&state, &remote, port);
+
+    let response = state
+        .get_session(&local_session_id)
+        .expect("remote proxy should hydrate from owner");
+    assert!(response.session.messages_loaded);
+    assert_eq!(response.session.messages.len(), 1);
+
+    let request_lines = requests.lock().expect("requests mutex poisoned").clone();
+    assert!(
+        request_lines
+            .iter()
+            .any(|line| line.starts_with("GET /api/sessions/remote-session-1 ")),
+        "expected targeted remote session fetch, saw {request_lines:?}"
+    );
+    assert!(
+        request_lines
+            .iter()
+            .all(|line| !line.starts_with("GET /api/state ")),
+        "remote state resync should be skipped when the watermark already covers the session response, saw {request_lines:?}"
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&3));
+    drop(inner);
+
+    join_test_server(server);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn get_session_hydration_suppresses_same_revision_delta_for_hydrated_session_only() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let sample_remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    );
+    let mut hydrated_session = sample_remote_state
+        .sessions
+        .iter()
+        .find(|session| session.id == "remote-session-1")
+        .cloned()
+        .expect("sample remote session should exist");
+    hydrated_session.messages = vec![remote_text_message("remote-message-1", "Hello world")];
+    hydrated_session.messages_loaded = true;
+    hydrated_session.message_count = 1;
+    hydrated_session.preview = "Hello world".to_owned();
+    hydrated_session.session_mutation_stamp = Some(10);
+
+    let mut summary_session = hydrated_session.clone();
+    make_remote_session_summary_only(&mut summary_session, 1);
+    summary_session.preview = "Hello".to_owned();
+    summary_session.session_mutation_stamp = Some(9);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: summary_session.id.clone(),
+                session: summary_session,
+            },
+        )
+        .expect("remote summary session create delta should apply");
+
+    let mut sibling_session = sample_remote_state
+        .sessions
+        .iter()
+        .find(|session| session.id == "remote-session-2")
+        .cloned()
+        .expect("sample sibling remote session should exist");
+    sibling_session.messages = vec![remote_text_message("remote-message-2", "Other")];
+    sibling_session.messages_loaded = true;
+    sibling_session.message_count = 1;
+    sibling_session.preview = "Other".to_owned();
+    sibling_session.session_mutation_stamp = Some(20);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: sibling_session.id.clone(),
+                session: sibling_session,
+            },
+        )
+        .expect("sibling remote session create delta should apply");
+
+    let local_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.note_remote_applied_revision(&remote.id, 3);
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .expect("remote proxy session should exist");
+        inner.sessions[index].session.id.clone()
+    };
+
+    let (port, _requests, server) = spawn_remote_session_response_server(SessionResponse {
+        revision: 3,
+        session: hydrated_session,
+        server_instance_id: "remote-instance".to_owned(),
+    });
+    insert_test_remote_connection(&state, &remote, port);
+
+    state
+        .get_session(&local_session_id)
+        .expect("remote proxy should hydrate from owner");
+
+    let mut delta_receiver = state.subscribe_delta_events();
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::TextDelta {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                delta: " world".to_owned(),
+                preview: Some("Hello world".to_owned()),
+                session_mutation_stamp: Some(10),
+            },
+        )
+        .expect("same-revision delta for hydrated session should be skipped");
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "hydrated-session same-revision delta should not publish"
+    );
+
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::TextDelta {
+                revision: 3,
+                session_id: "remote-session-2".to_owned(),
+                message_id: "remote-message-2".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                delta: " updated".to_owned(),
+                preview: Some("Other updated".to_owned()),
+                session_mutation_stamp: Some(21),
+            },
+        )
+        .expect("same-revision sibling session delta should still apply");
+    let published = delta_receiver
+        .try_recv()
+        .expect("sibling session delta should publish");
+    let published_delta: DeltaEvent =
+        serde_json::from_str(&published).expect("published delta should decode");
+    assert!(matches!(
+        published_delta,
+        DeltaEvent::TextDelta { delta, .. } if delta == " updated"
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let hydrated_index = inner
+        .find_remote_session_index(&remote.id, "remote-session-1")
+        .expect("hydrated remote proxy session should exist");
+    let sibling_index = inner
+        .find_remote_session_index(&remote.id, "remote-session-2")
+        .expect("sibling remote proxy session should exist");
+    assert!(matches!(
+        &inner.sessions[hydrated_index].session.messages[0],
+        Message::Text { text, .. } if text == "Hello world"
+    ));
+    assert!(matches!(
+        &inner.sessions[sibling_index].session.messages[0],
+        Message::Text { text, .. } if text == "Other updated"
+    ));
+    let session_watermarks = inner
+        .remote_session_transcript_applied_revisions
+        .get(&remote.id)
+        .expect("remote should have a focused session transcript watermark");
+    assert_eq!(session_watermarks.get("remote-session-1"), Some(&3));
+    assert_eq!(session_watermarks.get("remote-session-2"), None);
+    drop(inner);
+
     join_test_server(server);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -2611,6 +3042,7 @@ fn remote_message_delta_hydrates_unloaded_proxy_before_gap_check() {
     ];
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 2;
+    full_remote_session.session_mutation_stamp = Some(11);
 
     let mut summary_session = full_remote_session.clone();
     make_remote_session_summary_only(&mut summary_session, 1);
@@ -2648,7 +3080,7 @@ fn remote_message_delta_hydrates_unloaded_proxy_before_gap_check() {
                 ),
                 preview: "New remote message from delta revision.".to_owned(),
                 status: SessionStatus::Idle,
-                session_mutation_stamp: None,
+                session_mutation_stamp: Some(11),
             },
         )
         .expect("unloaded proxy should hydrate instead of failing gap check");
@@ -2817,7 +3249,7 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
 fn remote_text_delta_exact_replay_is_skipped_for_loaded_proxy_session() {
     let state = test_app_state();
     let remote = local_replay_test_remote();
-    seed_loaded_remote_proxy_session(
+    seed_remote_proxy_session_via_apply_delta(
         &state,
         &remote,
         vec![remote_text_message("remote-message-1", "Hello")],
@@ -2875,7 +3307,7 @@ fn local_replay_test_remote() -> RemoteConfig {
 
 // Seeds through `apply_remote_delta_event(SessionCreated)` so replay-cache
 // tests exercise the same apply/note path as live remote deltas.
-fn seed_loaded_remote_proxy_session(
+fn seed_remote_proxy_session_via_apply_delta(
     state: &AppState,
     remote: &RemoteConfig,
     messages: Vec<Message>,
@@ -2955,7 +3387,7 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
     {
         let state = test_app_state();
         let remote = local_replay_test_remote();
-        seed_loaded_remote_proxy_session(&state, &remote, Vec::new());
+        seed_remote_proxy_session_via_apply_delta(&state, &remote, Vec::new());
 
         assert_delta_publishes_once_then_replay_skips(
             &state,
@@ -2984,7 +3416,7 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
     {
         let state = test_app_state();
         let remote = local_replay_test_remote();
-        seed_loaded_remote_proxy_session(
+        seed_remote_proxy_session_via_apply_delta(
             &state,
             &remote,
             vec![remote_text_message("remote-message-1", "Before update.")],
@@ -3017,7 +3449,7 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
     {
         let state = test_app_state();
         let remote = local_replay_test_remote();
-        seed_loaded_remote_proxy_session(
+        seed_remote_proxy_session_via_apply_delta(
             &state,
             &remote,
             vec![remote_text_message("remote-message-1", "Before replace.")],
@@ -3049,7 +3481,7 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
     {
         let state = test_app_state();
         let remote = local_replay_test_remote();
-        seed_loaded_remote_proxy_session(
+        seed_remote_proxy_session_via_apply_delta(
             &state,
             &remote,
             vec![remote_command_message(
@@ -3089,7 +3521,7 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
     {
         let state = test_app_state();
         let remote = local_replay_test_remote();
-        seed_loaded_remote_proxy_session(
+        seed_remote_proxy_session_via_apply_delta(
             &state,
             &remote,
             vec![remote_parallel_agents_message(
@@ -3831,6 +4263,373 @@ fn remote_delta_replay_key_isolates_individual_fingerprinted_fields() {
 }
 
 #[test]
+fn remote_delta_replay_key_includes_revision_and_routing_fields() {
+    let remote_id = "ssh-lab";
+    let replay_key = |event: DeltaEvent| {
+        AppState::remote_delta_replay_key(remote_id, &event)
+            .expect("sample replay payloads should serialize")
+    };
+    let assert_changed = |left: DeltaEvent, right: DeltaEvent, reason: &str| {
+        assert_ne!(replay_key(left), replay_key(right), "{reason}");
+    };
+
+    let remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    );
+    let mut session = remote_state.sessions[0].clone();
+    session.message_count = 1;
+    session.session_mutation_stamp = Some(10);
+    let session_created = |revision: u64, session_id: &str| DeltaEvent::SessionCreated {
+        revision,
+        session_id: session_id.to_owned(),
+        session: session.clone(),
+    };
+    assert_changed(
+        session_created(3, "remote-session-1"),
+        session_created(4, "remote-session-1"),
+        "SessionCreated replay identity must include revision",
+    );
+    assert_changed(
+        session_created(3, "remote-session-1"),
+        session_created(3, "remote-session-2"),
+        "SessionCreated replay identity must include session_id",
+    );
+
+    let message_created = |revision: u64,
+                           session_id: &str,
+                           message_id: &str,
+                           message_index: usize,
+                           message_count: u32,
+                           session_mutation_stamp: Option<u64>| {
+        DeltaEvent::MessageCreated {
+            revision,
+            session_id: session_id.to_owned(),
+            message_id: message_id.to_owned(),
+            message_index,
+            message_count,
+            message: remote_text_message(message_id, "same message"),
+            preview: "same preview".to_owned(),
+            status: SessionStatus::Idle,
+            session_mutation_stamp,
+        }
+    };
+    assert_changed(
+        message_created(4, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        message_created(5, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        "MessageCreated replay identity must include revision",
+    );
+    assert_changed(
+        message_created(4, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        message_created(4, "remote-session-2", "remote-message-1", 0, 1, Some(11)),
+        "MessageCreated replay identity must include session_id",
+    );
+    assert_changed(
+        message_created(4, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        message_created(4, "remote-session-1", "remote-message-2", 0, 1, Some(11)),
+        "MessageCreated replay identity must include message_id",
+    );
+    assert_changed(
+        message_created(4, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        message_created(4, "remote-session-1", "remote-message-1", 1, 1, Some(11)),
+        "MessageCreated replay identity must include message_index",
+    );
+    assert_changed(
+        message_created(4, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        message_created(4, "remote-session-1", "remote-message-1", 0, 2, Some(11)),
+        "MessageCreated replay identity must include message_count",
+    );
+    assert_changed(
+        message_created(4, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        message_created(4, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        "MessageCreated replay identity must include session_mutation_stamp",
+    );
+
+    let message_updated = |revision: u64,
+                           session_id: &str,
+                           message_id: &str,
+                           message_index: usize,
+                           message_count: u32,
+                           stamp: Option<u64>| {
+        DeltaEvent::MessageUpdated {
+            revision,
+            session_id: session_id.to_owned(),
+            message_id: message_id.to_owned(),
+            message_index,
+            message_count,
+            message: remote_text_message(message_id, "same message"),
+            preview: "same preview".to_owned(),
+            status: SessionStatus::Idle,
+            session_mutation_stamp: stamp,
+        }
+    };
+    assert_changed(
+        message_updated(4, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        message_updated(5, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        "MessageUpdated replay identity must include revision",
+    );
+    assert_changed(
+        message_updated(4, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        message_updated(4, "remote-session-2", "remote-message-1", 0, 1, Some(11)),
+        "MessageUpdated replay identity must include session_id",
+    );
+    assert_changed(
+        message_updated(4, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        message_updated(4, "remote-session-1", "remote-message-2", 0, 1, Some(11)),
+        "MessageUpdated replay identity must include message_id",
+    );
+    assert_changed(
+        message_updated(4, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        message_updated(4, "remote-session-1", "remote-message-1", 1, 1, Some(11)),
+        "MessageUpdated replay identity must include message_index",
+    );
+    assert_changed(
+        message_updated(4, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        message_updated(4, "remote-session-1", "remote-message-1", 0, 2, Some(11)),
+        "MessageUpdated replay identity must include message_count",
+    );
+    assert_changed(
+        message_updated(4, "remote-session-1", "remote-message-1", 0, 1, Some(11)),
+        message_updated(4, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        "MessageUpdated replay identity must include session_mutation_stamp",
+    );
+
+    let text_delta = |revision: u64,
+                      session_id: &str,
+                      message_id: &str,
+                      message_index: usize,
+                      message_count: u32,
+                      stamp: Option<u64>| {
+        DeltaEvent::TextDelta {
+            revision,
+            session_id: session_id.to_owned(),
+            message_id: message_id.to_owned(),
+            message_index,
+            message_count,
+            delta: " same delta".to_owned(),
+            preview: Some("same preview".to_owned()),
+            session_mutation_stamp: stamp,
+        }
+    };
+    assert_changed(
+        text_delta(5, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        text_delta(6, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        "TextDelta replay identity must include revision",
+    );
+    assert_changed(
+        text_delta(5, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        text_delta(5, "remote-session-2", "remote-message-1", 0, 1, Some(12)),
+        "TextDelta replay identity must include session_id",
+    );
+    assert_changed(
+        text_delta(5, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        text_delta(5, "remote-session-1", "remote-message-2", 0, 1, Some(12)),
+        "TextDelta replay identity must include message_id",
+    );
+    assert_changed(
+        text_delta(5, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        text_delta(5, "remote-session-1", "remote-message-1", 1, 1, Some(12)),
+        "TextDelta replay identity must include message_index",
+    );
+    assert_changed(
+        text_delta(5, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        text_delta(5, "remote-session-1", "remote-message-1", 0, 2, Some(12)),
+        "TextDelta replay identity must include message_count",
+    );
+    assert_changed(
+        text_delta(5, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        text_delta(5, "remote-session-1", "remote-message-1", 0, 1, Some(13)),
+        "TextDelta replay identity must include session_mutation_stamp",
+    );
+
+    let text_replace = |revision: u64,
+                        session_id: &str,
+                        message_id: &str,
+                        message_index: usize,
+                        message_count: u32,
+                        stamp: Option<u64>| {
+        DeltaEvent::TextReplace {
+            revision,
+            session_id: session_id.to_owned(),
+            message_id: message_id.to_owned(),
+            message_index,
+            message_count,
+            text: "same replacement".to_owned(),
+            preview: Some("same preview".to_owned()),
+            session_mutation_stamp: stamp,
+        }
+    };
+    assert_changed(
+        text_replace(5, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        text_replace(6, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        "TextReplace replay identity must include revision",
+    );
+    assert_changed(
+        text_replace(5, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        text_replace(5, "remote-session-2", "remote-message-1", 0, 1, Some(12)),
+        "TextReplace replay identity must include session_id",
+    );
+    assert_changed(
+        text_replace(5, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        text_replace(5, "remote-session-1", "remote-message-2", 0, 1, Some(12)),
+        "TextReplace replay identity must include message_id",
+    );
+    assert_changed(
+        text_replace(5, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        text_replace(5, "remote-session-1", "remote-message-1", 1, 1, Some(12)),
+        "TextReplace replay identity must include message_index",
+    );
+    assert_changed(
+        text_replace(5, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        text_replace(5, "remote-session-1", "remote-message-1", 0, 2, Some(12)),
+        "TextReplace replay identity must include message_count",
+    );
+    assert_changed(
+        text_replace(5, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
+        text_replace(5, "remote-session-1", "remote-message-1", 0, 1, Some(13)),
+        "TextReplace replay identity must include session_mutation_stamp",
+    );
+
+    let command_update = |revision: u64,
+                          session_id: &str,
+                          message_id: &str,
+                          message_index: usize,
+                          message_count: u32,
+                          stamp: Option<u64>| {
+        DeltaEvent::CommandUpdate {
+            revision,
+            session_id: session_id.to_owned(),
+            message_id: message_id.to_owned(),
+            message_index,
+            message_count,
+            command: "cargo test".to_owned(),
+            command_language: Some("shell".to_owned()),
+            output: "same output".to_owned(),
+            output_language: Some("text".to_owned()),
+            status: CommandStatus::Running,
+            preview: "same preview".to_owned(),
+            session_mutation_stamp: stamp,
+        }
+    };
+    assert_changed(
+        command_update(6, "remote-session-1", "remote-command-1", 0, 1, Some(13)),
+        command_update(7, "remote-session-1", "remote-command-1", 0, 1, Some(13)),
+        "CommandUpdate replay identity must include revision",
+    );
+    assert_changed(
+        command_update(6, "remote-session-1", "remote-command-1", 0, 1, Some(13)),
+        command_update(6, "remote-session-2", "remote-command-1", 0, 1, Some(13)),
+        "CommandUpdate replay identity must include session_id",
+    );
+    assert_changed(
+        command_update(6, "remote-session-1", "remote-command-1", 0, 1, Some(13)),
+        command_update(6, "remote-session-1", "remote-command-2", 0, 1, Some(13)),
+        "CommandUpdate replay identity must include message_id",
+    );
+    assert_changed(
+        command_update(6, "remote-session-1", "remote-command-1", 0, 1, Some(13)),
+        command_update(6, "remote-session-1", "remote-command-1", 1, 1, Some(13)),
+        "CommandUpdate replay identity must include message_index",
+    );
+    assert_changed(
+        command_update(6, "remote-session-1", "remote-command-1", 0, 1, Some(13)),
+        command_update(6, "remote-session-1", "remote-command-1", 0, 2, Some(13)),
+        "CommandUpdate replay identity must include message_count",
+    );
+    assert_changed(
+        command_update(6, "remote-session-1", "remote-command-1", 0, 1, Some(13)),
+        command_update(6, "remote-session-1", "remote-command-1", 0, 1, Some(14)),
+        "CommandUpdate replay identity must include session_mutation_stamp",
+    );
+
+    let parallel_agents_update = |revision: u64,
+                                  session_id: &str,
+                                  message_id: &str,
+                                  message_index: usize,
+                                  message_count: u32,
+                                  stamp: Option<u64>| {
+        DeltaEvent::ParallelAgentsUpdate {
+            revision,
+            session_id: session_id.to_owned(),
+            message_id: message_id.to_owned(),
+            message_index,
+            message_count,
+            agents: vec![ParallelAgentProgress {
+                detail: Some("same detail".to_owned()),
+                id: "agent-1".to_owned(),
+                status: ParallelAgentStatus::Running,
+                title: "Agent one".to_owned(),
+            }],
+            preview: "same preview".to_owned(),
+            session_mutation_stamp: stamp,
+        }
+    };
+    assert_changed(
+        parallel_agents_update(7, "remote-session-1", "remote-parallel-1", 0, 1, Some(14)),
+        parallel_agents_update(8, "remote-session-1", "remote-parallel-1", 0, 1, Some(14)),
+        "ParallelAgentsUpdate replay identity must include revision",
+    );
+    assert_changed(
+        parallel_agents_update(7, "remote-session-1", "remote-parallel-1", 0, 1, Some(14)),
+        parallel_agents_update(7, "remote-session-2", "remote-parallel-1", 0, 1, Some(14)),
+        "ParallelAgentsUpdate replay identity must include session_id",
+    );
+    assert_changed(
+        parallel_agents_update(7, "remote-session-1", "remote-parallel-1", 0, 1, Some(14)),
+        parallel_agents_update(7, "remote-session-1", "remote-parallel-2", 0, 1, Some(14)),
+        "ParallelAgentsUpdate replay identity must include message_id",
+    );
+    assert_changed(
+        parallel_agents_update(7, "remote-session-1", "remote-parallel-1", 0, 1, Some(14)),
+        parallel_agents_update(7, "remote-session-1", "remote-parallel-1", 1, 1, Some(14)),
+        "ParallelAgentsUpdate replay identity must include message_index",
+    );
+    assert_changed(
+        parallel_agents_update(7, "remote-session-1", "remote-parallel-1", 0, 1, Some(14)),
+        parallel_agents_update(7, "remote-session-1", "remote-parallel-1", 0, 2, Some(14)),
+        "ParallelAgentsUpdate replay identity must include message_count",
+    );
+    assert_changed(
+        parallel_agents_update(7, "remote-session-1", "remote-parallel-1", 0, 1, Some(14)),
+        parallel_agents_update(7, "remote-session-1", "remote-parallel-1", 0, 1, Some(15)),
+        "ParallelAgentsUpdate replay identity must include session_mutation_stamp",
+    );
+
+    let codex_updated = |revision: u64| DeltaEvent::CodexUpdated {
+        revision,
+        codex: CodexState {
+            rate_limits: None,
+            notices: vec![CodexNotice {
+                kind: CodexNoticeKind::RuntimeNotice,
+                level: CodexNoticeLevel::Info,
+                title: "same notice".to_owned(),
+                detail: "detail".to_owned(),
+                timestamp: "2026-04-05 10:00:00".to_owned(),
+                code: None,
+            }],
+        },
+    };
+    assert_changed(
+        codex_updated(9),
+        codex_updated(10),
+        "CodexUpdated replay identity must include revision",
+    );
+
+    let orchestrators_updated = |revision: u64| DeltaEvent::OrchestratorsUpdated {
+        revision,
+        orchestrators: vec![remote_state.orchestrators[0].clone()],
+        sessions: Vec::new(),
+    };
+    assert_changed(
+        orchestrators_updated(8),
+        orchestrators_updated(9),
+        "OrchestratorsUpdated replay identity must include revision",
+    );
+}
+
+#[test]
 fn remote_delta_payload_fingerprint_returns_none_for_unserializable_payload() {
     struct UnserializablePayload;
 
@@ -3935,6 +4734,34 @@ fn remote_delta_replay_cache_evicts_oldest_entries_fifo() {
 }
 
 #[test]
+fn remote_delta_replay_cache_eviction_is_scoped_per_remote() {
+    let mut cache = RemoteDeltaReplayCache::default();
+    let quiet_remote_key = test_remote_delta_replay_key("ssh-lab-quiet", 10);
+
+    cache.insert(quiet_remote_key.clone());
+    for revision in 0..=REMOTE_DELTA_REPLAY_CACHE_LIMIT as u64 {
+        cache.insert(test_remote_delta_replay_key("ssh-lab-noisy", revision));
+    }
+
+    assert_remote_delta_replay_cache_shape(&cache, REMOTE_DELTA_REPLAY_CACHE_LIMIT + 1);
+    assert!(
+        cache.contains(&quiet_remote_key),
+        "a noisy remote must not evict another remote's replay key"
+    );
+    assert!(
+        !cache.contains(&test_remote_delta_replay_key("ssh-lab-noisy", 0)),
+        "same-remote FIFO eviction should still drop the noisy remote's oldest key"
+    );
+    assert!(
+        cache.contains(&test_remote_delta_replay_key(
+            "ssh-lab-noisy",
+            REMOTE_DELTA_REPLAY_CACHE_LIMIT as u64,
+        )),
+        "same-remote FIFO eviction should retain the noisy remote's newest key"
+    );
+}
+
+#[test]
 fn remote_delta_replay_cache_remove_remote_preserves_other_remotes() {
     let mut cache = RemoteDeltaReplayCache::default();
     let remote_a_key = test_remote_delta_replay_key("ssh-lab-a", 10);
@@ -3955,6 +4782,52 @@ fn remote_delta_replay_cache_remove_remote_preserves_other_remotes() {
         cache.contains(&remote_b_key),
         "clearing one remote must not drop another remote's replay keys"
     );
+}
+
+#[test]
+fn clear_remote_applied_revision_preserves_other_remote_replay_keys() {
+    let state = test_app_state();
+    let remote_a_key = Some(test_remote_delta_replay_key("ssh-lab-a", 10));
+    let remote_a_second_key = Some(test_remote_delta_replay_key("ssh-lab-a", 11));
+    let remote_b_key = Some(test_remote_delta_replay_key("ssh-lab-b", 10));
+
+    state.note_remote_applied_delta_replay(&remote_a_key);
+    state.note_remote_applied_delta_replay(&remote_a_second_key);
+    state.note_remote_applied_delta_replay(&remote_b_key);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.note_remote_applied_revision("ssh-lab-a", 11);
+        inner.note_remote_applied_revision("ssh-lab-b", 10);
+    }
+
+    state.clear_remote_applied_revision("ssh-lab-a");
+
+    assert!(
+        !state.should_skip_remote_applied_delta_replay(&remote_a_key),
+        "clearing remote A should remove its replay keys"
+    );
+    assert!(
+        !state.should_skip_remote_applied_delta_replay(&remote_a_second_key),
+        "clearing remote A should remove all of its replay keys"
+    );
+    assert!(
+        state.should_skip_remote_applied_delta_replay(&remote_b_key),
+        "clearing remote A must preserve remote B's replay protection"
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(inner.remote_applied_revisions.get("ssh-lab-a"), None);
+        assert_eq!(inner.remote_applied_revisions.get("ssh-lab-b"), Some(&10));
+    }
+    {
+        let cache = state
+            .remote_delta_replay_cache
+            .lock()
+            .expect("remote delta replay cache mutex poisoned");
+        assert_remote_delta_replay_cache_shape(&cache, 1);
+    }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 #[test]
@@ -4032,6 +4905,191 @@ fn remote_delta_replay_cache_clears_with_remote_revision_watermark() {
         Message::Text { text, .. } if text == "Hello world world"
     ));
     assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&3));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn full_remote_state_snapshot_suppresses_same_revision_deltas() {
+    let state = test_app_state();
+    let remote = local_replay_test_remote();
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    );
+    remote_state.revision = 3;
+    let remote_session = remote_state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == "remote-session-1")
+        .expect("sample remote session should exist");
+    remote_session.messages = vec![remote_text_message("remote-message-1", "Hello")];
+    remote_session.messages_loaded = true;
+    remote_session.message_count = 1;
+    remote_session.preview = "Hello".to_owned();
+    remote_session.session_mutation_stamp = Some(10);
+
+    state
+        .apply_remote_state_snapshot(&remote.id, remote_state)
+        .expect("full remote state snapshot should apply");
+
+    let mut delta_receiver = state.subscribe_delta_events();
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::TextDelta {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                delta: " world".to_owned(),
+                preview: Some("Hello world".to_owned()),
+                session_mutation_stamp: Some(11),
+            },
+        )
+        .expect("same-revision delta after full snapshot should be skipped");
+
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "same-revision delta after a full snapshot must not publish"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_remote_session_index(&remote.id, "remote-session-1")
+        .expect("remote proxy session should exist");
+    let record = &inner.sessions[index];
+    assert!(matches!(
+        &record.session.messages[0],
+        Message::Text { text, .. } if text == "Hello"
+    ));
+    assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&3));
+    assert_eq!(
+        inner.remote_snapshot_applied_revisions.get(&remote.id),
+        Some(&3)
+    );
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn metadata_remote_state_snapshot_allows_same_revision_transcript_delta() {
+    let state = test_app_state();
+    let remote = local_replay_test_remote();
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut full_remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    );
+    full_remote_state.revision = 2;
+    let full_remote_session = full_remote_state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == "remote-session-1")
+        .expect("sample remote session should exist");
+    full_remote_session.messages = vec![remote_text_message("remote-message-1", "Hello")];
+    full_remote_session.messages_loaded = true;
+    full_remote_session.message_count = 1;
+    full_remote_session.preview = "Hello".to_owned();
+    full_remote_session.session_mutation_stamp = Some(10);
+
+    state
+        .apply_remote_state_snapshot(&remote.id, full_remote_state)
+        .expect("full remote state snapshot should apply");
+
+    let mut metadata_remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    );
+    metadata_remote_state.revision = 3;
+    let metadata_remote_session = metadata_remote_state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == "remote-session-1")
+        .expect("sample remote session should exist");
+    metadata_remote_session.messages.clear();
+    metadata_remote_session.messages_loaded = false;
+    metadata_remote_session.message_count = 1;
+    metadata_remote_session.preview = "Hello".to_owned();
+    metadata_remote_session.session_mutation_stamp = Some(10);
+
+    state
+        .apply_remote_state_snapshot(&remote.id, metadata_remote_state)
+        .expect("metadata remote state snapshot should apply");
+
+    let mut delta_receiver = state.subscribe_delta_events();
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::TextDelta {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                delta: " world".to_owned(),
+                preview: Some("Hello world".to_owned()),
+                session_mutation_stamp: Some(11),
+            },
+        )
+        .expect("same-revision delta after metadata snapshot should apply");
+
+    let published = delta_receiver
+        .try_recv()
+        .expect("same-revision text delta should publish after metadata snapshot");
+    let published_delta: DeltaEvent =
+        serde_json::from_str(&published).expect("published delta should decode");
+    assert!(matches!(
+        published_delta,
+        DeltaEvent::TextDelta {
+            revision: _,
+            delta,
+            ..
+        } if delta == " world"
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_remote_session_index(&remote.id, "remote-session-1")
+        .expect("remote proxy session should exist");
+    let record = &inner.sessions[index];
+    assert!(matches!(
+        &record.session.messages[0],
+        Message::Text { text, .. } if text == "Hello world"
+    ));
+    assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&3));
+    assert_eq!(
+        inner.remote_snapshot_applied_revisions.get(&remote.id),
+        Some(&3)
+    );
+    assert_eq!(
+        inner
+            .remote_transcript_snapshot_applied_revisions
+            .get(&remote.id),
+        Some(&2)
+    );
     drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -4166,6 +5224,7 @@ fn remote_delta_repair_rejects_newer_targeted_session_revision() {
     ];
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 2;
+    full_remote_session.session_mutation_stamp = Some(99);
 
     let mut summary_session = full_remote_session.clone();
     make_remote_session_summary_only(&mut summary_session, 1);
@@ -4202,7 +5261,7 @@ fn remote_delta_repair_rejects_newer_targeted_session_revision() {
                 ),
                 preview: "Newer transcript from future revision.".to_owned(),
                 status: SessionStatus::Idle,
-                session_mutation_stamp: None,
+                session_mutation_stamp: Some(40),
             },
         )
         .expect_err("newer targeted session response should reject narrow repair");
@@ -4291,7 +5350,7 @@ fn stale_remote_delta_skips_before_targeted_hydration_fetch() {
                 ),
                 preview: "Stale delta should not trigger a remote fetch.".to_owned(),
                 status: SessionStatus::Idle,
-                session_mutation_stamp: None,
+                session_mutation_stamp: Some(60),
             },
         )
         .expect("stale unloaded-proxy delta should be skipped before hydration");
@@ -4359,7 +5418,7 @@ fn remote_summary_state_snapshot_preserves_existing_proxy_transcript() {
         port: None,
         user: None,
     };
-    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     state
         .apply_remote_delta_event(
             &remote.id,
@@ -4422,7 +5481,7 @@ fn remote_message_created_delta_replaces_and_reorders_existing_message() {
         port: None,
         user: None,
     };
-    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     apply_remote_created_text_message(&state, &remote.id, 2, "message-1", "First remote message.");
     apply_remote_created_text_message_at(&state, &remote.id, 3, "message-2", 1, 2, "Second draft.");
     let mut delta_receiver = state.subscribe_delta_events();
@@ -4525,7 +5584,7 @@ fn remote_message_created_delta_rejects_gap_without_advancing_revision() {
         port: None,
         user: None,
     };
-    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     let initial_revision = state.snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
@@ -4582,7 +5641,7 @@ fn remote_message_created_delta_rejects_payload_id_mismatch_without_advancing_re
         port: None,
         user: None,
     };
-    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     let initial_revision = state.snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
@@ -4640,7 +5699,7 @@ fn remote_message_created_delta_rejects_existing_message_out_of_bounds_without_a
         port: None,
         user: None,
     };
-    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     apply_remote_created_text_message(&state, &remote.id, 2, "message-1", "First message.");
     apply_remote_created_text_message_at(
         &state,
@@ -4719,7 +5778,7 @@ fn remote_command_update_missing_target_rejects_gap_without_advancing_revision()
         port: None,
         user: None,
     };
-    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     let initial_revision = state.snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
@@ -4781,7 +5840,7 @@ fn remote_parallel_agents_update_missing_target_rejects_gap_without_advancing_re
         port: None,
         user: None,
     };
-    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     let initial_revision = state.snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
@@ -4849,7 +5908,7 @@ fn remote_message_updated_delta_replaces_existing_message_and_publishes_local_de
         port: None,
         user: None,
     };
-    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     apply_remote_created_text_message(&state, &remote.id, 2, "message-1", "Draft remote message.");
     let mut delta_receiver = state.subscribe_delta_events();
 
@@ -4941,7 +6000,7 @@ fn remote_message_updated_delta_uses_message_id_when_remote_index_is_stale() {
         port: None,
         user: None,
     };
-    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     apply_remote_created_text_message(&state, &remote.id, 2, "message-1", "First message.");
     state
         .apply_remote_delta_event(
@@ -5061,7 +6120,7 @@ fn remote_message_updated_delta_missing_target_errors_without_creating_or_advanc
         port: None,
         user: None,
     };
-    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     let initial_revision = state.snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
 
@@ -5123,7 +6182,7 @@ fn stale_remote_message_updated_delta_is_ignored() {
         port: None,
         user: None,
     };
-    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     apply_remote_created_text_message(&state, &remote.id, 4, "message-1", "Current text.");
     let revision_after_create = state.snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
@@ -5181,7 +6240,7 @@ fn stale_remote_message_updated_delta_with_mismatched_payload_id_is_ignored() {
         port: None,
         user: None,
     };
-    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     apply_remote_created_text_message(&state, &remote.id, 4, "message-1", "Current text.");
     let revision_after_create = state.snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
@@ -5242,7 +6301,7 @@ fn remote_message_updated_delta_rejects_payload_id_mismatch() {
         port: None,
         user: None,
     };
-    let local_session_id = seed_remote_proxy_session_for_delta_test(&state, &remote);
+    let local_session_id = seed_remote_proxy_session_via_state_inner_upsert(&state, &remote);
     apply_remote_created_text_message(&state, &remote.id, 2, "message-1", "Current text.");
     let revision_after_create = state.snapshot().revision;
     let mut delta_receiver = state.subscribe_delta_events();
@@ -7508,6 +8567,17 @@ fn state_inner_remote_applied_revision_methods_cover_monotonic_cases() {
     assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 5));
     assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 4));
     assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 5));
+
+    inner.note_remote_applied_snapshot_revision("ssh-lab", 6);
+    assert!(inner.should_skip_remote_applied_revision("ssh-lab", 6));
+    assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 6));
+    assert!(inner.should_skip_remote_applied_delta_revision("ssh-lab", 5));
+    assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 7));
+
+    inner.note_remote_applied_transcript_snapshot_revision("ssh-lab", 8);
+    assert!(inner.should_skip_remote_applied_delta_revision("ssh-lab", 8));
+    assert!(inner.should_skip_remote_applied_delta_revision("ssh-lab", 7));
+    assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 9));
     assert!(!inner.should_skip_remote_applied_revision("ssh-lab-2", 1));
     assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab-2", 1));
 }
@@ -7713,17 +8783,21 @@ fn remote_applied_revision_tracking_is_per_remote_and_monotonic() {
         assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 1));
         assert!(!inner.should_skip_remote_applied_revision("ssh-lab-2", 0));
 
-        inner.note_remote_applied_revision("ssh-lab", 2);
+        inner.note_remote_applied_snapshot_revision("ssh-lab", 2);
         inner.note_remote_applied_revision("ssh-lab", 1);
         assert!(inner.should_skip_remote_applied_revision("ssh-lab", 2));
         assert!(inner.should_skip_remote_applied_revision("ssh-lab", 1));
         assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 3));
+        assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 2));
+        inner.note_remote_applied_transcript_snapshot_revision("ssh-lab", 2);
+        assert!(inner.should_skip_remote_applied_delta_revision("ssh-lab", 2));
         assert!(!inner.should_skip_remote_applied_revision("ssh-lab-2", 2));
     }
 
     state.clear_remote_applied_revision("ssh-lab");
     let inner = state.inner.lock().expect("state mutex poisoned");
     assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 2));
+    assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 2));
     assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 0));
     assert!(!inner.should_skip_remote_applied_revision("ssh-lab-2", 2));
     drop(inner);

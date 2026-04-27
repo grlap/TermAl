@@ -5,232 +5,201 @@ cleanup notes, implementation task ledgers, and external limitations do not belo
 
 ## Active Repo Bugs
 
-## In-flight SourcePanel save/reload can overwrite the active source tab
+## `should_skip_remote_applied_snapshot_revision` is not directly unit-tested
 
-**Severity:** High - `ui/src/SessionPaneView.tsx:996,1012`. `SourcePanel` now token-guards async save/reload completions after the callback returns, but `SessionPaneView` mutates shared `fileState` inside `handleSourceFileSave` and `handleSourceFileReload` before those callbacks resolve. A stale save/reload from file A can therefore complete after the user switches to file B and replace B's pane state with A's response.
+**Severity:** Low - `src/state.rs:567`. The two existing direct watermark tests (`state_inner_remote_applied_revision_methods_cover_monotonic_cases`, `remote_applied_revision_tracking_is_per_remote_and_monotonic`) cover `should_skip_remote_applied_revision` and `should_skip_remote_applied_delta_revision` with explicit assertions, but `should_skip_remote_applied_snapshot_revision` is exercised only indirectly via `try_apply_pending_remote_state` in integration tests.
 
-This bypasses the request-token guard at the component boundary: the child can ignore stale local status updates, but the parent has already adopted stale file content and dirty-state metadata.
-
-**Current behavior:**
-- `handleSourceFileSave` calls `setFileState(sourceFileStateFromResponse(response))` before `SourcePanel` can reject the stale completion.
-- `handleSourceFileReload` calls `setFileState(nextFileState)` before `SourcePanel` can reject the stale completion.
-- Switching source tabs while a save or reload is in flight can adopt the stale response into the newly active tab.
-
-**Proposal:**
-- Move file-state adoption out of `SessionPaneView` save/reload callbacks and let `SourcePanel` adopt only after `isActiveSourceRequest(..., path)` passes.
-- Or guard the parent `setFileState` calls with the current active source path/origin before adopting the response.
-- Add dynamic tests that switch paths while save/reload promises are pending and assert the new tab is not overwritten.
-
-## Rendered-edit serialization strips existing absolute/local Markdown links
-
-**Severity:** Medium - `ui/src/panels/markdown-diff-edit-pipeline.ts:374`. DOM-to-Markdown serialization now uses `isSafePastedMarkdownHref` for all anchors, including anchors that came from already-rendered trusted document content. That paste sanitizer rejects rooted no-colon hrefs such as `/repo/docs/a.md` and `\\server\share`, so editing rendered Markdown can silently turn existing links into plain text.
-
-Paste sanitization and serialization have different trust boundaries. Pasted content should reject local-path-looking links, but an existing document link should round-trip unless the serializer has document/workspace context proving it is unsafe.
+The snapshot predicate has unique semantics (strict `>` on `remote_applied_revisions` AND inclusive `>=` on `remote_snapshot_applied_revisions`). A regression that flipped one branch — say, changing the strict-greater to greater-or-equal on the applied-revisions branch — could go undetected if the integration flow happens to trigger the still-correct branch first.
 
 **Current behavior:**
-- Pasted anchors and existing rendered anchors use the same href allowlist.
-- Existing rooted/local links can be stripped during a rendered-edit copy/save round trip.
-- Tests cover string escaping but not this existing-link preservation contract.
+- Direct unit tests cover 2 of 3 watermark predicates.
+- The snapshot predicate is reachable only through integration tests.
 
 **Proposal:**
-- Split paste sanitization from DOM-to-Markdown serialization, or add a serialization-specific policy that preserves existing document links.
-- Add tests for authored rooted/document-relative links and local/UNC-looking links that should either round-trip or be explicitly documented as unsupported.
+- Add direct `inner.should_skip_remote_applied_snapshot_revision("ssh-lab", N)` assertions covering the four boundary cases: applied-only at N (allow), applied-only at N+1 (block), snapshot-only at N (block), snapshot-only at N-1 (allow).
 
-## Touch-scroll prewarm lacks direct regression coverage
+## `codex_notice_cap_retains_most_recent_notices` doesn't exercise dedupe-and-promote
 
-**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:1770`. The new touch-scroll prewarm path tracks `lastTouchClientYRef` and computes upward touch deltas, but no test directly fires `touchstart` plus upward `touchmove` and asserts the virtualizer prewarms the mounted range.
+**Severity:** Low - `src/tests/mod.rs:1640-1674`. The new test pushes 7 notices with distinct `code` values, so each insertion lands at index 0 and gets truncated. The middle-promotion branch in `note_codex_notice` (`session_sync.rs:197-204`) — where a redelivered notice is removed from its current position and reinserted at the front — is not covered.
 
-Wheel prewarm tests do not cover touch-specific state, including stale coordinate cleanup after `touchend` / `touchcancel`.
+The dedupe-and-promote path is what makes the cap genuinely MRU under repeated emissions of the same notice; without it, distinct notices simply replace each other.
 
 **Current behavior:**
-- Touch events update a separate coordinate ref.
-- Existing tests primarily cover wheel or generic virtualizer behavior.
-- A sign error, stale `lastTouchClientYRef`, or missing cleanup could break touch prewarm while tests still pass.
+- All 7 test notices have distinct identities; no dedup branch is reachable.
+- The first-element early-return path is exercised by `shared_codex_global_notices_update_codex_state`.
+- The middle-promotion branch has no test.
 
 **Proposal:**
-- Add a virtualizer test that fires `touchstart` and upward `touchmove`, then asserts the prewarmed range behavior.
-- Verify a subsequent gesture after `touchend` does not reuse stale coordinates.
+- Either expand `codex_notice_cap_retains_most_recent_notices` to push a notice, then a different notice, then the first notice again, and assert the result is `[A, B]`.
+- Or add a sibling test focused on the dedupe-and-promote branch.
 
-## Replay-cache clearing lacks AppState-level two-remote isolation coverage
+## SourcePanel post-save commit-failure test uses weak `length > 0` assertion
 
-**Severity:** Medium - `src/state_accessors.rs:231`. `RemoteDeltaReplayCache::remove_remote` has direct coverage, but `AppState::clear_remote_applied_revision(remote_id)` does not have a state-level test proving it preserves other remotes' replay keys.
-
-The production path clears the remote-applied revision and replay keys together. A regression in the accessor could accidentally clear every remote's replay-cache entries while the direct cache test still passes.
+**Severity:** Low - `ui/src/panels/SourcePanel.test.tsx:1053-1135`. The new test for the post-save preserve-actionError flow uses `expect(screen.getAllByText("Action failed").length).toBeGreaterThan(0)` to assert the actionError remains visible. A regression that swapped the actionError to a generic save-failure message (or to the wrong key) would still satisfy `length > 0` if any "Action failed" badge stayed mounted from the prior render.
 
 **Current behavior:**
-- Direct `RemoteDeltaReplayCache::remove_remote` isolation is covered.
-- State-level `clear_remote_applied_revision` coverage does not seed two remotes and assert the untouched remote remains protected.
+- Assertion confirms `≥ 1` occurrence of "Action failed" rather than pinning the exact actionError text.
+- The exact "Rendered Markdown edit could not be applied" diagnostic is asserted separately on line 1132 via `findByText`.
 
 **Proposal:**
-- Seed replay keys for two remotes through `AppState`.
-- Call `clear_remote_applied_revision` for one remote.
-- Assert the other remote's exact replay is still suppressed.
+- Replace the `length > 0` check with `findByText` against the exact diagnostic string.
+- Or add an accessible name/role assertion (e.g., `getByRole("alert", { name: ... })`).
 
-## Partial rendered-Markdown copy/cut can fall back to the whole segment
+## `isSerializableMarkdownHref` redundantly normalizes the href after `formatSafeMarkdownLinkDestination` already rejected the same characters
 
-**Severity:** Low - `ui/src/panels/markdown-diff-change-section.tsx:164`. `serializeSelectedMarkdown` falls back to `fallbackMarkdown` whenever a selected fragment serializes to empty. For partial selections over non-serialized nodes, images, Mermaid frames, or whitespace, this can place the entire Markdown segment on the clipboard.
+**Severity:** Low - `ui/src/panels/markdown-diff-edit-pipeline.ts:404-422`. After `formatSafeMarkdownLinkDestination(trimmed)` enforces `UNSAFE_MARKDOWN_LINK_DESTINATION_CHARACTERS` rejection (control chars, whitespace, brackets, angle brackets, default-ignorables) on the unnormalized destination, the subsequent `normalizeMarkdownHrefForPolicy(trimmed)` call is a no-op for any string that reached it: the only characters `normalizeMarkdownHrefForPolicy` strips are a strict subset of what was already rejected.
 
-That is broader than the user's selection and can copy adjacent file content or secrets that were visible in the same rendered section but not selected.
+The redundancy is a code-clarity smell rather than a security hole. It also leaves a footgun: if someone later loosens `formatSafeMarkdownLinkDestination` (e.g., to permit a single space), `isSerializableMarkdownHref`'s normalize will silently start sanitizing that input rather than rejecting it.
 
 **Current behavior:**
-- Empty serialized fragment -> whole segment fallback.
-- The fallback does not distinguish full-section selection from partial selection.
+- `isSerializableMarkdownHref` calls both functions sequentially.
+- The second normalization is unreachable for any input that survives the first rejection.
 
 **Proposal:**
-- Use the whole-segment fallback only when the selection covers the entire editable section.
-- For partial selections, fall back to `range.toString()` or an empty clipboard payload.
-- Add copy/cut tests for partial selections over non-serialized rendered nodes.
+- Drop the `normalizeMarkdownHrefForPolicy` call inside `isSerializableMarkdownHref` and use `trimmed.indexOf(":")` directly.
+- Keep the comment explaining why this serializer-side variant accepts Windows drive-letter paths and no-colon hrefs that the paste-time variant rejects.
 
-## Remote delta replay cache is globally FIFO across remotes
+## Percent-encoded Windows drive links can bypass Markdown URI sanitization
 
-**Severity:** Low - `src/state.rs:149`. `RemoteDeltaReplayCache` enforces one global FIFO limit across all remotes. A noisy remote can evict another remote's exact-replay keys, reducing replay protection for same-revision duplicates from that other remote.
+**Severity:** Low - `ui/src/markdown-links.ts:167`. Percent-encoded Windows drive-letter paths such as `C:%5C...` can be classified as local/source links, but the rendered DOM href still has a `c:` scheme when no source-link handler catches it or resolution fails.
 
-The monotonic watermark remains the primary guard, but same-revision sibling replays depend on the cache. Cross-remote eviction makes that protection dependent on unrelated remote traffic.
+That bypasses the normal `react-markdown` URI sanitization behavior for non-allowlisted schemes and can turn a source-file link into an external/local protocol navigation target.
 
 **Current behavior:**
-- Replay keys for every remote share one bounded FIFO.
-- A burst from remote A can evict remote B's recent replay keys.
-- A later exact same-revision replay from remote B may apply again after eviction.
+- Encoded drive-letter links can be treated as local file links.
+- The encoded `c:` scheme can still reach the DOM as an href in some render paths.
+- Clicking can navigate instead of being neutralized when the source-link handler does not intercept it.
 
 **Proposal:**
-- Partition the replay cache by `remote_id` or by `(remote_id, revision)`.
-- Enforce the cap per partition, or otherwise reserve per-remote capacity.
-- Add a test that one remote's burst cannot evict another remote's recent replay key.
+- Do not pass encoded drive-letter paths through as DOM `href` values.
+- Render local/source-file links with an inert href and route opening through `onOpenSourceLink`, or normalize them to a same-origin-safe internal route/path before rendering.
+- Add a regression covering `C:%5Crepo%5Cfile.md` with and without `onOpenSourceLink`.
 
-## FlushSync warning regression test still allows React warning noise
+## `remote_state_materializes_all_session_transcripts` returns true for an empty sessions list
 
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:561`. The new regression test filters for the specific `flushSync was called from inside a lifecycle method` warning, but the targeted virtualizer test run can still emit unrelated React `act(...)` warnings.
-
-The test's purpose is warning prevention. Passing while React warning noise remains makes it easier to miss adjacent lifecycle warnings in future changes.
+**Severity:** Low - `src/remote_sync.rs:302-307`. The vacuous `iter().all()` returns `true` for an empty `sessions` list. An empty broad snapshot at revision N would set the **transcript-bearing** watermark, blocking same-revision deltas via the `>=` rule. Functionally safe (deltas at revision N are either part of that snapshot or older, so the skip is correct), but the documented intent ("metadata-first snapshots may omit transcript bytes the delta carries") doesn't really apply to an empty-snapshot case.
 
 **Current behavior:**
-- The test spies on `console.error` and checks for one specific warning substring.
-- Other React warnings can still be emitted without failing the test.
+- Empty-sessions snapshot is classified as transcript-bearing.
+- Subsequent same-revision deltas are blocked.
+- The result is correct; the path is just not what the doc comment describes.
 
 **Proposal:**
-- Settle pending virtualizer updates with async `act`.
-- Assert no unexpected React `console.error` warnings were emitted after filtering known/intentional messages.
+- Add an inline comment in `remote_state_materializes_all_session_transcripts` noting that empty-sessions snapshots fall on the transcript-bearing branch and that this is intentional.
+- Or refactor to explicitly handle the empty case: `if sessions.is_empty() { return false; }` so empty snapshots are treated as metadata-only (allowing same-revision deltas to apply if any arrive).
 
-## Two replay-test-fixture helpers with similar names exercise different paths (re-opened)
+## Render-phase ref-mutation pattern in `SessionBody` not migrated to `useStableEvent`-style
 
-**Severity:** Medium - `src/tests/remote.rs:1725, 2878`. The prior round's resolution claimed a rename to `seed_remote_proxy_session_via_state_inner_upsert` and `seed_remote_proxy_session_via_apply_delta`, but the rename was not actually applied. Both helpers retain their original names (`seed_remote_proxy_session_for_delta_test` and `seed_loaded_remote_proxy_session`) at all 21 call sites. Doc comments were added at lines 1723-1724 and 2876-2877, which helps but does not remove the original ambiguity at the call sites.
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:402-403,409-410,416-417,423-424`. `renderMessageCardRef.current = renderMessageCard;` (and three sibling assignments) run during render. The newly-introduced `useStableEvent` (`ui/src/panels/use-stable-event.ts:32-34`) explicitly uses `useLayoutEffect` for ordering reasons documented in the hook ("publish the latest callback before layout-phase work can run"). The two patterns now diverge across the same file.
 
-The bug entry tracking this concern was removed from `docs/bugs.md` on the same round, so the open item is currently invisible. Future test authors copying one helper's call site into a replay-cache test could silently exercise the wrong path.
+With render-phase mutation, an aborted render (StrictMode double-render, suspended/discarded concurrent render) still mutates the ref to the would-be-discarded closure — meaning the wrapper can dispatch to a callback closure whose render never committed. `useStableEvent`'s `useLayoutEffect` publishes only after commit, avoiding that.
 
 **Current behavior:**
-- `seed_remote_proxy_session_for_delta_test` (uses `upsert_remote_proxy_session_record` directly) and `seed_loaded_remote_proxy_session` (drives `apply_remote_delta_event(SessionCreated)` so the replay-cache path is exercised) coexist with similar names.
-- Both have new doc comments.
-- The intended rename was not applied.
+- Four ref-mutation sites in `SessionBody` write during render.
+- Six callback-stable wrappers in `AgentSessionPanel` use `useStableEvent` and publish in layout-effect.
+- The two patterns coexist for the same problem.
 
 **Proposal:**
-- Apply the renames as previously scoped: `seed_remote_proxy_session_via_state_inner_upsert` and `seed_remote_proxy_session_via_apply_delta`.
-- Update all call sites (~21 references).
-- Or, if the doc comments are judged sufficient, delete this bug entry and leave a note in the helpers' doc comments noting that the rename was deliberately deferred.
+- Replace the four `renderXxxRef.current = renderXxx;` render-time assignments with the `useStableEvent` hook (or a thin generic wrapper for the render-card signatures).
+- Or document the intentional asymmetry in a comment near each ref-mutation site, explaining why these specific render callbacks should fire from in-progress renders rather than committed ones.
 
-## Paren/backslash escape tests don't round-trip through `MarkdownContent`
+## `SessionBody` memo comparator covers 2 of 6 stable callback wrappers asymmetrically
 
-**Severity:** Medium - `ui/src/panels/markdown-diff-edit-pipeline.test.ts:802-820`. The new tests for `formatSafeMarkdownLinkDestination` paren-bearing URLs and backslash escape only assert the serializer's exact output string (e.g., `Foo_(bar)` → `Foo_\(bar\)`, `foo\bar` → `foo\\bar`) without re-rendering through `MarkdownContent` to confirm the CommonMark parser reverses the escape correctly.
-
-Other tests in the same describe block (code fences, inline-code, `<script>` boundary-backtick) DO use the round-trip pattern via `render(createElement(MarkdownContent, { markdown }))`. The paren/backslash pair was missed. The actual regression these tests target is "after our serializer runs, the next render still resolves to the same href" — that requires the round-trip step, not just an output-string check.
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:527-548`. The comparator checks `onUserInputSubmit` and `onMcpElicitationSubmit` but skips `onApprovalDecision`, `onCodexAppRequestSubmit`, `onCancelQueuedPrompt`, `onSessionSettingsChange` — all of which are now `useStableEvent`-wrapped upstream. Because all six should be reference-equal across renders, the asymmetric comparator costs nothing in practice — but if the wrap promise breaks later (e.g., a refactor passes an inline closure straight in), the four uncovered handlers would silently skip the equality check while the two covered ones would re-render correctly. A reviewer can't tell if the asymmetry is intentional.
 
 **Current behavior:**
-- Tests assert the serializer produces a specific Markdown string.
-- They do not render that string through `MarkdownContent` and verify the resulting `<a>` element's `href` attribute matches the original URL.
-- A regression that broke CommonMark parser compatibility (e.g., emitted a different escape form that didn't reverse) would still pass.
+- Comparator includes 2 of 6 stable callback props.
+- Inline-closure exclusion is documented in the comment.
+- The 4 missing handler exclusions are not.
 
 **Proposal:**
-- After the `expect(serializeEditableMarkdownSection(section)).toBe(...)` assertion, add `const { container } = render(createElement(MarkdownContent, { markdown }));`.
-- Assert `container.querySelector("a")?.getAttribute("href")` equals the original URL (`https://en.wikipedia.org/wiki/Foo_(bar)` and `https://example.com/foo\bar` respectively).
+- Either add the missing four to the comparator (free now that they're stable).
+- Or strip all six and rely entirely on `memo`'s default identity check + the inline-closure exclusion comment.
+- Add a rerender regression for `onSessionSettingsChange`: replace the callback, apply a slash setting command, and assert only the latest callback receives the update.
 
-## SourcePanel token-guard dynamic stale-completion tests cover only compare path
+## `useAppDragResize` test file covers 1 of 7 returned handlers
 
-**Severity:** Medium - `ui/src/panels/SourcePanel.test.tsx`. The four async handlers `handleSave`, `handleReload`, `handleShowCompare`, `handleCopyPath` all use `beginSourceRequest` / `isActiveSourceRequest` token guards in production. Only the **compare** path has a dynamic test that switches source tabs while an async operation is pending and asserts stale completion does not update the new tab's UI.
+**Severity:** Low - `ui/src/app-drag-resize.test.tsx`. This is the FIRST test file for the 560-line `useAppDragResize` hook, but provides limited coverage. The single test asserts BroadcastChannel stability across rerenders and one `drop-commit` message path. Most public surface is untested: `handleSplitResizeStart` (pointer events drive split-ratio updates), `handleTabDragStart`/`End`, `handleControlPanelLauncherDragStart`/`End`, and `handleTabDrop` placement variants.
 
-The other three handlers have only unit-level guards in production code. A future refactor that breaks the token-comparison branch in any of those three handlers wouldn't fail any test.
+The test was specifically a regression test for cross-window drag-channel stability and is well-scoped to that, but the file's existence shouldn't be misread as comprehensive coverage.
 
 **Current behavior:**
-- Compare path: dynamic stale-completion test exists (`ignores stale compare results after the source tab changes`).
-- Save / reload / copyPath: no dynamic stale-completion regression test.
-- The token-guard helpers are exercised in isolation, not as a guard against tab-switch-during-pending-await.
+- `useAppDragResize` has one regression test for `BroadcastChannel` stability + `drop-commit`.
+- 6 of 7 returned handlers are untested.
 
 **Proposal:**
-- Add three rerender-while-pending tests modeled on the compare test, one each for save (deferred `onSaveFile`), reload (deferred `onReloadFile`), and copyPath (deferred `copyTextToClipboard`).
-- Each test should resolve the pending promise after the rerender and assert the stale resolution does NOT update the new tab's UI (status banners, error messages, copied indicators).
+- Add `it` blocks per handler covering the basic happy path: split resize via pointer events, tab drag start/end, control-panel launcher drag, and tab drop placement variants (same pane, different pane, last tab edge case).
 
-## `<RenderedMarkdownChangeSection>` defaults `allowCurrentSegmentFallback` to `true` while the data type is required
+## `hydrationRetainedMessagesMatch` not directly unit-tested
 
-**Severity:** Low - `ui/src/panels/markdown-diff-change-section.tsx:169,230`. The prior round inverted the polarity of `RenderedMarkdownSectionCommit.allowCurrentSegmentFallback` so callers must opt in. The data type is now `boolean` (no `?`), forcing explicit construction at the commit-build site. But the React component prop on `<RenderedMarkdownChangeSection>` and `<EditableRenderedMarkdownSection>` still defaults to `true`.
+**Severity:** Low - `ui/src/app-live-state.ts:1022-1037`. The function performs `JSON.stringify` equality on `responseSession.messages` vs `currentSession.messages` (returning true when both are empty or stringified-equal). It's reachable through `App.live-state.deltas.test.tsx` "does not let stale hydration clobber" tests, but only as part of a larger flow.
 
-A forgetful caller of these components who omits the prop silently picks the looser ("allow fallback") behavior — defeating part of the safety the polarity flip was supposed to add.
+A future change that adds a client-side enrichment field to a `Message` (e.g., a local-render cache, a UI-only marker, a reconciliation hint) would silently break the equality check without a unit test catching it. The flow-level tests would pass / fail based on the entire hydration pipeline, making the JSON.stringify equality contract harder to maintain in isolation.
 
 **Current behavior:**
-- `RenderedMarkdownSectionCommit.allowCurrentSegmentFallback` is required at the data-type level.
-- The React component prop defaults to `true`.
-- TypeScript does not flag missing props.
+- Function is module-private and exercised only by integration tests.
+- No unit-level test pins its contract.
 
 **Proposal:**
-- Drop the default values on lines 169 and 230 and make the prop required.
-- TypeScript will then force every `<RenderedMarkdownChangeSection>` / `<EditableRenderedMarkdownSection>` call site to be explicit, matching the data-type contract.
+- Export or add a smaller helper that pins the contract: "structurally identical messages match" / "extra client-side fields would mismatch" / "empty + non-empty returns true" / "non-empty + non-empty with different shapes returns false".
+- Add a comment noting that any new `Message` field must be either persistent or excluded from the comparison.
 
-## DiffPanel doesn't pass `{ resetRenderedContent: false }` for the no-op equivalent commit branch
+## `messagesLoaded: true→true` stable transition has no explicit test in `session-reconcile.test.ts`
 
-**Severity:** Low - `ui/src/panels/DiffPanel.tsx:1104-1107` calls `commit.onApplied?.()` without `{ resetRenderedContent: false }` even on the no-op-equivalent commit branch (where `nextDocumentContentLf === sourceContent`). SourcePanel's matching branch (`SourcePanel.tsx:414-416`) does pass `{ resetRenderedContent: false }`.
+**Severity:** Low - `ui/src/session-reconcile.test.ts`. The new gate `(next.messagesLoaded !== true || previous.messagesLoaded === true)` was added in `reconcileSession` to bypass the mutation-stamp fast-path when messages flip from unloaded to loaded. The new test covers the `false → true` promotion. The `true → true` stable case (matching mutation stamps + both sides explicitly `messagesLoaded: true`) is not directly tested — existing tests rely on `messagesLoaded: undefined` being treated like "loaded".
 
-The new `clearCommittedDraft` option exists specifically so that no-op/equivalent commits can clear refs without flashing the contentEditable DOM through a `renderResetVersion` bump. DiffPanel still bumps the version for equivalent commits, so a typed-and-serialized-equivalent edit causes a remount in the diff view but not in the source view.
+A regression that broke object identity preservation for the `true → true` stable case would not be caught by an explicit test.
 
 **Current behavior:**
-- DiffPanel's no-op-equivalent commit branch fires `onApplied()` with no options, defaulting to `resetRenderedContent: true`.
-- SourcePanel's matching branch passes `{ resetRenderedContent: false }`.
-- The two panels handle the same commit shape inconsistently.
+- `false → true` transition: explicit test.
+- `true → true` stable case: implicit via `undefined` being treated like loaded.
 
 **Proposal:**
-- Mirror SourcePanel's `{ resetRenderedContent: false }` for the no-op branch in DiffPanel.
-- Keep the default reset for the post-EOL-applied path (real change).
+- Add a test that explicitly sets `messagesLoaded: true` on both previous and next with matching `sessionMutationStamp`, asserts `merged === previous`.
 
-## `event instanceof TouchEvent` could throw in environments where `TouchEvent` is undefined
+## Partial-selection clipboard tests cover image-empty case only
 
-**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:1783`. The `markUserScroll` handler now serves `wheel`, `touchmove`, AND `keydown`. Once `event instanceof WheelEvent` is false (e.g., a keyboard arrow keydown), the engine evaluates the `else if (event instanceof TouchEvent)` right-hand side. If `TouchEvent` is undefined in that environment, the listener throws `ReferenceError` and the keyboard navigation path breaks silently.
+**Severity:** Low - `ui/src/panels/SourcePanel.test.tsx:603-648,705-747`. The two new partial-selection copy/cut tests select an `<img>` element and assert the clipboard receives `("text/plain", "")` — confirming partial selections do NOT produce whole-segment Markdown. They do not, however, cover the positive case where a partial text selection (e.g., a sub-range inside a paragraph) produces the corresponding partial Markdown.
 
-Modern Chromium/Firefox/Safari ship `TouchEvent` globally, so this is borderline today — but a defensive guard would harden against any environment (older browsers, jsdom-without-touch-polyfill, embedded Webview shells) where `TouchEvent` is undefined.
+A regression that always returned empty for ANY non-whole-section selection (instead of just unserializable selections) would pass these tests but break legitimate partial copy/cut for real text selections.
 
 **Current behavior:**
-- `event instanceof TouchEvent` runs unconditionally on every keydown (and on wheel events that don't match `WheelEvent`).
-- A missing `TouchEvent` global would throw and break the handler.
+- Negative case (image alone → empty clipboard): covered.
+- Positive case (partial paragraph text → partial Markdown clipboard): not covered.
 
 **Proposal:**
-- Replace `else if (event instanceof TouchEvent)` with `else if (typeof TouchEvent !== "undefined" && event instanceof TouchEvent)`.
-- Or feature-detect via `"touches" in event` / `event.type.startsWith("touch")`.
+- Add a test that selects a sub-range of a paragraph's text node and asserts the clipboard receives the partial Markdown corresponding to that selection (e.g., select "world" from "Hello world!" and assert `"text/plain"` is `"world"`).
 
-## Multi-touch `clearTouchPosition` clears the ref unconditionally
+## `AgentSessionPanel.test.tsx` past 5,000-line review threshold
 
-**Severity:** Low - `ui/src/panels/VirtualizedConversationMessageList.tsx:1965-1968`. When a user starts with one finger then puts a second finger down: if finger 0 lifts first, `touchend` fires with `event.touches.length > 0` (finger 1 still down) but `clearTouchPosition` unconditionally nulls the ref. The next `touchmove` from finger 1 sees `previousTouchClientY === null` and doesn't compute a delta — silent prewarm degradation.
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx`. File is now 5,659 lines (+511 this round), past the project's review threshold for test files. The added blocks cluster naturally by concern — composer memo coverage, scroll-following coverage, ResizeObserver fixtures — and would extract cleanly into siblings without behavioral change.
 
-The new touch-prewarm regression test only covers single-touch, so this gap is invisible. Not a correctness bug — just silent prewarm degradation that defeats the work the new touch handler is supposed to do.
+The adjacent `App.live-state.*.test.tsx` split (April 20) is the precedent for per-cluster `.test.tsx` files. Per `CLAUDE.md`, splits must be pure code moves and live in their own commit.
 
 **Current behavior:**
-- `touchend` and `touchcancel` always null `lastTouchClientYRef`.
-- A second-finger-still-down scenario silently disables prewarm for the remaining finger.
+- Single `AgentSessionPanel.test.tsx` mixes composer, scroll, resize, and lifecycle clusters.
+- Per-cluster grep tax growing with each replay-cache-adjacent feature round.
 
 **Proposal:**
-- In `clearTouchPosition`, only null the ref when `event.touches.length === 0`.
-- Optionally, on `touchstart` with multiple touches, track the "most recent" finger rather than always finger 0.
-- Add a multi-touch regression test covering at least the two-finger scroll case.
+- Pure code move: extract into `AgentSessionPanel.composer.test.tsx`, `AgentSessionPanel.scroll.test.tsx`, `AgentSessionPanel.resize.test.tsx` (matching the App.live-state cluster shape).
+- Defer to a dedicated split commit; do not couple with feature changes.
 
-## Default-ignorable Unicode bypass in `isSafePastedMarkdownHref` rooted-path rejection
+## `markdown-diff-change-section.tsx` clipboard/Range helpers should extract to a sibling module
 
-**Severity:** Low - `ui/src/panels/markdown-diff-edit-pipeline.ts:252`. The normalization regex `/[\u0000-\u001F\u007F\s]+/g` matches NBSP (U+00A0) but not zero-width characters (U+200B ZWSP, U+200C ZWNJ, U+200D ZWJ, U+FEFF BOM, U+2060 word joiner). An href like `\u200B/etc/passwd` is NOT trimmed by `String.prototype.trim()` either, slips past the `!normalized.startsWith("/")` rooted-path check (the first character is U+200B), and arrives at `formatSafeMarkdownLinkDestination` where U+200B is also outside the rejection regex.
+**Severity:** Low - `ui/src/panels/markdown-diff-change-section.tsx`. The file grew 724 → 860 lines this round (+180). Four new helpers — `setDropCaretFromPoint`, `getSelectionRangeInsideSection`, `rangeCoversNodeContents`, and `serializeSelectedMarkdown` — form a cohesive cluster (range/selection geometry + clipboard serialization) with no React-component dependency. Per CLAUDE.md, the project is "actively splitting" rather than growing the existing large files.
 
-The source comment explicitly anticipates a future Tauri/Electron wrapper or native link opener as the threat model. In that future scenario, this default-ignorable bypass would resurface as an arbitrary-local-file hazard.
+The current size (~860 lines) is below the 2,000-line review threshold for TSX components, but the cluster is exactly the kind of natural extraction boundary the project's "pure code move" pattern was set up for. Current file header now has to describe both the per-section component and the clipboard plumbing, blurring its contract.
 
 **Current behavior:**
-- ASCII and BMP whitespace (including NBSP) are stripped during normalization.
-- Default-ignorable code points (ZWSP, BOM, word joiner, etc.) survive normalization.
-- A leading default-ignorable character lets a rooted local path through the rejection.
+- Four pure DOM/Range helpers live alongside the React components.
+- The file header has to cover both responsibilities.
+- Future clipboard-pointer-geometry work would continue to widen the file.
 
 **Proposal:**
-- Widen the normalization regex to also strip default-ignorable characters: `/[\u0000-\u001F\u007F\s\u200B-\u200F\u2028-\u202F\u2060-\u206F\uFEFF]+/g`.
-- Or test for any default-ignorable code point as a leading character and reject.
-- Add a test asserting `\u200B/etc/passwd` is rejected.
+- Pure code move: extract the four helpers into `ui/src/panels/markdown-diff-clipboard-pointer.ts` in a dedicated commit.
+- Add a header comment to the new file explaining what it owns + provenance.
+- Update the change-section file header to drop the clipboard plumbing references.
+- Keep React event handlers (`handleCopy`, `handleCut`, `handleDrop`) in `markdown-diff-change-section.tsx`.
 
 ## `src/tests/remote.rs` past the 5,000-line review threshold
 
@@ -245,18 +214,6 @@ The growth is incremental across many rounds of replay-cache hardening, not a si
 **Proposal:**
 - Extract the replay-cache cluster (lines ~2,810–4,040) into `src/tests/remote_delta_replay.rs` as a pure code move — including the helpers and all `remote_delta_replay_*` tests.
 - Defer to a dedicated split commit; do not couple with feature changes.
-
-## `registerRenderedMarkdownCommitter` lacks idempotency guard
-
-**Severity:** Low - `SourcePanel.tsx:300-305`. Adds to the live ref Set with no idempotency guard. A section that re-runs its register effect (which it does on every parent render — see "Inconsistent `useCallback` discipline" entry) will momentarily have two committer closures registered in the brief window between adding the new closure and the cleanup running. `collectRenderedMarkdownCommits` invokes BOTH; each closure inside the section calls `collectSectionEdit(section)` against the same DOM section. The first one mutates `hasUncommittedUserEditRef.current = false` and clears `draftSegmentRef.current`; the second sees the cleared state and returns `null`. Today benign, but order-sensitive — a regression here could re-introduce the previously-flagged "double-fire" parent dirty notification.
-
-**Current behavior:**
-- Set-based registration with no dedup.
-- Transient duplicate registrations during effect cycles.
-
-**Proposal:**
-- Key by a stable id (e.g., the section's `useId()` value) so duplicate registrations dedupe.
-- Or track a registration count and warn in dev when more than one committer is alive for the same section.
 
 ## `SourcePanel.tsx` is growing along a separable axis
 
@@ -284,80 +241,6 @@ This is the exact regression the React review checklist warns about — complex 
 - Wrap the prop-crossing handlers in `useCallback` with the right deps.
 - Compute `normalizedEditorValue` once at the top via `useMemo([editorValue])` and reuse in both call sites.
 - Or document why identity stability is unnecessary if `EditableRenderedMarkdownSection` is robust to inline-handler thrash.
-
-## Editable rendered Markdown surface lacks textbox semantics
-
-**Severity:** Low - keyboard and screen-reader users can focus an editable
-rendered Markdown region without an accessible control role or name.
-
-`ui/src/panels/SourcePanel.tsx:988` labels the preview wrapper as
-`aria-label="Rendered preview"`, but the actual focusable
-`contentEditable` section created by `EditableRenderedMarkdownSection` does not
-receive a textbox role or accessible name. Once the rendered preview becomes an
-editing surface, the focus target should announce itself as editable content
-rather than as an unnamed generic element.
-
-**Current behavior:**
-- The wrapper has an accessible label.
-- The contentEditable child is the focusable/editable element.
-- The child lacks `role="textbox"`, `aria-multiline`, and a specific label.
-
-**Proposal:**
-- Extend `EditableRenderedMarkdownSection` with an editable-only
-  `aria-label` prop.
-- When `canEdit` is true, set `role="textbox"` and
-  `aria-multiline="true"` on the contentEditable target.
-- Add a focused React Testing Library assertion for the editable rendered
-  preview role/name.
-
-## Rendered Markdown editing reuses diff-owned modules without updating ownership docs
-
-**Severity:** Low - SourcePanel now treats `markdown-diff-*` modules as a
-general rendered-Markdown editing layer, but their ownership still reads as
-diff-only.
-
-`ui/src/panels/SourcePanel.tsx` imports `EditableRenderedMarkdownSection`,
-`markdown-commit-ranges`, and `markdown-diff-segments` for full-document source
-editing. That reuse is practical, but the module names and comments still
-present the code as diff-pane infrastructure. Future maintainers can therefore
-change a "diff-only" helper without realizing SourcePanel's editable preview
-depends on the same commit/range contract.
-
-**Current behavior:**
-- Diff-named modules are now consumed by SourcePanel's normal source-editing
-  path.
-- Ownership comments do not name SourcePanel as a supported consumer.
-- The shared commit contract spans both rendered diffs and full-document
-  rendered source preview.
-
-**Proposal:**
-- Either extract the shared rendered-Markdown edit contract into neutral
-  modules, or update the existing module headers to document SourcePanel as a
-  supported consumer.
-- Add a brief SourcePanel comment near the imports naming the shared contract
-  so future refactors do not accidentally break the full-document editor path.
-
-## `bottom_follow` "enter state" reset block duplicated across two branches
-
-**Severity:** Low - `ui/src/panels/VirtualizedConversationMessageList.tsx:1482-1495` and `:1610-1625`. Two branches duplicate the same ~six-line ref-reset (`pendingProgrammaticScrollTopRef`, `lastNativeScrollTopRef`, `shouldKeepBottomAfterLayoutRef`, `isDetachedFromBottomRef`, `hasUserScrollInteractionRef`, `lastUserScrollKindRef`, `lastUserScrollInputTimeRef`). Future ref additions risk getting added to one but not the other.
-
-**Current behavior:**
-- The `syncViewport` re-arm path and the `syncProgrammaticScrollWrite` event handler each duplicate the ref-reset cluster.
-
-**Proposal:**
-- Extract a small helper inside the effect (`function enterBottomFollowMode(node) { ... }`) and call it from both sites.
-
-## New scroll-intent ref lacks local contract documentation
-
-**Severity:** Low - `ui/src/panels/VirtualizedConversationMessageList.tsx:336-338` adds `pendingProgrammaticBottomFollowUntilRef` to the already-large cluster of ~30 scroll-intent / mounted-range / cooldown refs without a local doc comment. The shared scroll-sync seam now documents `bottom_follow`, but the ref itself still needs an inline reset-semantics note where future virtualizer edits will happen.
-
-The session-virtualized-transcript subsystem is already cited in `bugs.md` history as a maintenance hazard. Each new ref or scroll-kind expands the surface that future refactors must reset / clear correctly.
-
-**Current behavior:**
-- New ref has no inline comment explaining its role or reset semantics.
-
-**Proposal:**
-- Add a one-line comment near `pendingProgrammaticBottomFollowUntilRef` explaining "Latest deadline at which a programmatic `bottom_follow` smooth-scroll can still claim native scroll ticks. Reset to `Number.NEGATIVE_INFINITY` from `markUserScroll` so user gestures cancel the cooldown."
 
 ## `bottom_follow` virtualizer state machine has no synthetic-native-scroll test coverage
 
@@ -392,35 +275,6 @@ This leaves the main producer path for heavy Markdown deferral unpinned even tho
 - Add an integration-style virtualized-list test with a heavy Markdown message.
 - Fire a wheel/scroll gesture, assert the marker is set and heavy content stays deferred, then advance timers and assert the marker clears and `termal:deferred-render-resume` fires.
 
-## Non-Markdown SourcePanel Preview/Split tests do not assert rendered output
-
-**Severity:** Medium - `ui/src/panels/SourcePanel.tsx` now exposes Preview/Split modes for non-Markdown renderer sources such as `.mmd` files and doc-comment Mermaid/math regions, but the current tests primarily assert controls and chip labels. They do not click those modes and assert the detected renderer output actually appears.
-
-This means `RendererPreviewPane`, synthetic Markdown generation, or the SourcePanel preview wiring can break while the mode availability tests still pass.
-
-**Current behavior:**
-- Tests confirm Preview/Split controls are exposed for detected renderer sources.
-- Tests do not assert Mermaid/math preview output after selecting those modes.
-- Renderer wiring regressions can pass as long as the controls remain visible.
-
-**Proposal:**
-- Add SourcePanel tests that open Preview and Split for a `.mmd` file or Rust doc-comment Mermaid file.
-- Assert a rendered preview signal appears, such as the Mermaid frame or source-line label.
-
-## `App.scroll-behavior.test.tsx` "scroll away from bottom" geometry never moves away from bottom
-
-**Severity:** Medium - `ui/src/App.scroll-behavior.test.tsx:944-948`. The test writes `scrollTop = 800` with `scrollHeight = 1000` and `clientHeight = 200` — i.e., `scrollHeight - scrollTop - clientHeight = 0`. That's exactly the bottom. The "still smooth-follow even when not yet pinned" intent of the test name is undermined: the panel was already pinned, so the assertions about smooth-follow and the absence of the "New response" indicator are trivially satisfied even if `bottom_follow` did nothing.
-
-The geometry helper duplication at `:879-899` (re-implementing `stubElementScrollGeometry` inline) compounds the issue — future definition-shape changes would need to be updated in two places.
-
-**Current behavior:**
-- Test passes regardless of whether `bottom_follow` is wired through to the virtualizer.
-- Test name doesn't match the geometry it sets up.
-
-**Proposal:**
-- Change `scrollTop` to a non-bottom value (e.g., 200) and dispatch a `wheel` event with `deltaY: -300` to actually establish the "scrolled up" state, OR rename the test to match what it does.
-- Extract a `stubMutableElementScrollGeometry` helper returning `{ setScrollHeight, restore }` and use it instead of the inline `Object.defineProperty` block.
-
 ## Newer-revision targeted-repair acceptance leaves local watermark behind actual response revision
 
 **Severity:** Medium - `src/remote_routes.rs:497-512` × `:655-657`. When the remote returns `revision=5` for a delta-driven repair targeting `min_revision=3` and metadata matches, the apply path stamps `note_remote_applied_revision(min_remote_revision)` (i.e., 3, the *triggering delta's* revision) — not `remote_response.revision=5`. The local remote applied-revision stays at 3 even though the response demonstrably reflects state at revision 5. Future deltas at revisions 4 and 5 then re-apply (hitting the replay cache as the only protection), which is fragile because the cache only protects against exact-payload replays.
@@ -434,37 +288,6 @@ The geometry helper duplication at `:879-899` (re-implementing `stubElementScrol
 **Proposal:**
 - Either stamp `remote_response.revision` (and rely on the replay cache for sibling protection), OR document the contract explicitly at the `note_remote_applied_revision` call site so a future maintainer doesn't get surprised by the asymmetry.
 - Add a regression that lands an interleaving `MessageCreated` (or `TextDelta`) at `revision = remote_response.revision - 1` after a successful metadata-matching repair, asserting transcript correctness.
-
-## Pane-level `handleMessageStackUserScrollIntent` doesn't cancel `bottom_follow` cooldown on scrollbar drag
-
-**Severity:** Medium - `ui/src/SessionPaneView.tsx:2572-2574`. The new pane-level cooldown (`paneProgrammaticBottomFollowUntilRef`) is cancelled only on `onWheel`, `onTouchMove`, `onKeyDown`. A user dragging the scrollbar (mousedown on the thumb) does not produce wheel/touch/key events and gets re-pinned to the bottom by the `isPaneProgrammaticBottomFollowActive()` branch at lines 2552-2563. The user perceives "I dragged the scrollbar but it snaps back."
-
-The virtualizer-side `markUserScroll` has the same gap (binds wheel/touchmove/keydown only at `VirtualizedConversationMessageList.tsx:1814-1816`); both should add mousedown coverage.
-
-**Current behavior:**
-- Scrollbar drag during a `bottom_follow` cooldown is silently re-classified as part of the programmatic animation.
-- Mouse-only users lose scroll control during the 1.2 s window.
-
-**Proposal:**
-- Add `onMouseDown` to the message-stack wrapper that calls `handleMessageStackUserScrollIntent`, AND add `mousedown` to `markUserScroll`'s event bindings in the virtualizer.
-- Add a regression that fires `mousedown` on the scroll container during a `bottom_follow` cooldown and asserts the cooldown clears.
-
-
-## Stamp-preservation contract not honored for `SessionCreated` / `OrchestratorsUpdated.sessions[]` payloads
-
-**Severity:** Medium - the new `docs/architecture.md` note documents that "session-scoped deltas preserve cached `session_mutation_stamp` when the wire payload omits it." The fix landed for the six message-mutating delta arms (gated with `if remote_session_mutation_stamp.is_some()`), but `SessionCreated` and `OrchestratorsUpdated.sessions[]` payloads still flow through `apply_remote_session_to_record` → `localize_remote_session(&remote_session.clone())` (`src/remote_sync.rs:312` and `:368-411`), which clobbers a cached `Some(stamp)` to `None` if the inbound payload omits it.
-
-After such a delta lands, the next metadata-only summary's freshness gate (`remote_mutation_stamp_matches`) sees `previous == None && next == Some(_)` and demotes the proxy to `messages_loaded: false` — exactly the symptom the message-arm fix was meant to prevent. Per-delta hydration HTTP fan-out then re-issues `/api/sessions/{id}` until a stamp arrives.
-
-**Current behavior:**
-- `apply_remote_session_to_record` writes the inbound `session_mutation_stamp` directly without checking presence.
-- A `SessionCreated` (or `OrchestratorsUpdated.sessions[]`) payload omitting the stamp wipes a cached `Some(_)` value.
-- The `docs/architecture.md` doc note implies this path also preserves cached stamps; the implementation diverges.
-
-**Proposal:**
-- Gate the stamp assignment in `apply_remote_session_to_record` on `remote_session.session_mutation_stamp.is_some()` (with the existing `previous_remote_mutation_stamp` already captured at line 311).
-- Or tighten the doc note to say "narrow message-mutating deltas" and explicitly call out that `SessionCreated`/`OrchestratorsUpdated.sessions[]` payloads are authoritative session shapes whose absent stamps replace the cached value.
-- Add a regression where a `SessionCreated` summary with `session_mutation_stamp: None` lands against a cached `Some(_)`; assert the cached stamp survives.
 
 ## Repeated `commit_locked` boilerplate at four early-exit paths in `hydrate_remote_session_target`
 
@@ -501,21 +324,6 @@ After such a delta lands, the next metadata-only summary's freshness gate (`remo
 - Refine the message to "remote session response revision {} cannot be safely applied; broad state advanced to revision {} but transcript may have changed".
 - Or split the check so the broad-state apply happens only after rejection-eligibility is confirmed.
 
-## `remote_mutation_stamp_matches` demotes on either-side `None`
-
-**Severity:** Medium - `src/remote_sync.rs:316-319` uses `Option::zip(...).is_some_and(...)`, which evaluates to `false` whenever either side is `None`. Combined with the just-listed stamp-clobber behavior, any remote that does not emit `session_mutation_stamp` will demote loaded proxy transcripts to `messages_loaded: false` on every metadata-only summary. The per-delta hydration HTTP fan-out then re-issues `/api/sessions/{id}` for every subsequent delta on that proxy until a stamp arrives.
-
-The contract isn't documented at the call site — a future reader cannot tell whether `None` means "unknown freshness, be safe" or "no mutation observed."
-
-**Current behavior:**
-- `Option::zip(None, _) == None`, so any missing stamp on either side fails the match.
-- A Phase-1-compatible upstream (older builds without stamps) demotes loaded transcripts on every metadata refresh.
-
-**Proposal:**
-- Add a `///` doc comment near `apply_remote_session_to_record` describing the four `(prev, next)` stamp-presence cases and the chosen demotion policy.
-- If a Phase-1-compat mode is desired (preserve when both are `None`), make it explicit via `previous_stamp == next_stamp || (previous_stamp.is_none() && next_stamp.is_none())` and document the rationale.
-- Add a regression for the both-None case.
-
 ## GET-path resync broadens the route's side-effect surface from "one session" to "all proxy records for the remote"
 
 **Severity:** Medium - `src/remote_routes.rs:470-525` calls `apply_remote_state_if_newer_locked(..., None)` with `focus_remote_session_id: None`. The broad sync runs `retain_sessions`/upsert across every proxy record for that remote, so a single `GET /api/sessions/{id}` for one proxy can mutate all proxy records on the remote. `docs/architecture.md:183` still describes the route as "Fetch one session (full transcript hydration)" with no mention of the global-resync side-effect or the additional `/api/state` outbound call.
@@ -527,46 +335,6 @@ The contract isn't documented at the call site — a future reader cannot tell w
 **Proposal:**
 - Pass `focus_remote_session_id: Some(&target.remote_session_id)` to scope the sweep to the targeted session, OR explicitly document the broad sweep with a comment near line 506.
 - Update `docs/architecture.md` to reflect the new latency contract: targeted hydration may issue an additional `/api/state` fetch and a global SSE broadcast.
-
-## GET-path skipped-side-fetch branch does not advance the per-session watermark
-
-**Severity:** Medium - `src/remote_routes.rs:559-564` advances `note_remote_applied_revision` only when the side-fetch ran and `apply_remote_state_if_newer_locked` accepted it. If `latest_remote_revision >= remote_response.revision` at the pre-lock check, the side-fetch is skipped and the watermark is never explicitly bumped for `remote_response.revision`. This works today because the watermark already covers the response revision, but the implicit invariant ("if we skipped because we're caught up, we don't need to advance") is undocumented and a future refactor could break it.
-
-**Current behavior:**
-- Three branches diverge in whether the watermark is advanced: side-fetch ran and applied / side-fetch ran and was rejected / side-fetch skipped.
-- The skipped branch relies on `latest_remote_revision >= remote_response.revision` already holding.
-
-**Proposal:**
-- Unconditionally call `inner.note_remote_applied_revision(&target.remote.id, remote_response.revision)` after applying the targeted response. The op is idempotent (`max`-based) so it is safe under all three branches and removes the implicit invariant.
-- Move the `note_remote_applied_revision` call above the `commit_locked` invocation so the published SSE state event reflects an already-advanced watermark (consistent with `apply_remote_delta_event`'s ordering).
-
-## New stale-skip / equality-rejection tests use unrealistic fixtures
-
-**Severity:** Low - `src/tests/remote.rs:2475,2580` construct `MessageCreated` deltas with `session_mutation_stamp: None`. Real backend emitters always emit `Some(record.mutation_stamp)`. The unrealistic fixture masks the stamp-clobber issue (the delta arms unconditionally write `None` over cached `Some(_)`).
-
-**Current behavior:**
-- New tests use `session_mutation_stamp: None` instead of the production wire shape.
-- The stamp-clobber bug is not surfaced because the cache is also `None` in the fixture.
-
-**Proposal:**
-- Change the fixtures to `session_mutation_stamp: Some(...)` matching the production wire shape.
-- Add a separate dedicated regression for the `None`-clobber case once that bug is fixed.
-
-## `adoptFetchedSession` clobbers in-flight deltas read from a stale `sessionsRef` snapshot
-
-**Severity:** High - `ui/src/app-live-state.ts:1099-1172` reads `previousSessions = sessionsRef.current` at the top of the function, computes `existingIndex` and `currentSession = previousSessions[existingIndex]`, runs the hydration-still-matches predicates against that stale snapshot, then does `sessionsRef.current = nextSessions; setSessions(nextSessions)` where `nextSessions = previousSessions.map(...)`. Between the snapshot read and the eventual write, same-instance SSE delta paths (e.g., `messageCreated`, `textDelta`) may have already mutated `sessionsRef.current` in place. The captured `messageCount` / `sessionMutationStamp` guard catches *count*-changing deltas but not in-place text mutations on the latest assistant message.
-
-The Phase 2 hydration test scenarios pass because they add a delta that bumps `messageCount`. A same-`messageCount` shape mismatch — e.g., a `textDelta` that only changes content of the same message — is uncovered. The result on a live system would be a hydration response landing after a streaming chunk and silently rewinding the visible text to the snapshot.
-
-**Current behavior:**
-- `adoptFetchedSession` snapshots `sessionsRef.current` once at the top of an async-resolved path.
-- After the awaited `fetchSession()` resolves, the function writes back via `previousSessions.map(...)`, discarding any same-instance deltas that landed during the in-flight fetch.
-- The `hydrationRequestStillMatchesSession` predicate runs against the same stale snapshot, so the gate cannot detect in-place mutations.
-
-**Proposal:**
-- Re-read `sessionsRef.current` immediately before constructing `nextSessions` and re-derive `existingIndex` / `currentSession` against that fresh snapshot.
-- Re-run `hydrationResponseMatchesSession` on the fresh snapshot before writing.
-- Add a regression that lands a `textDelta` that does not change `messageCount` while a hydration is in flight, and asserts the streamed text survives.
 
 ## `get_session()` for unloaded remote proxies silently changed its latency contract
 
@@ -615,20 +383,6 @@ A 100-delta burst on an unloaded proxy issues up to 100 HTTP fetches in sequence
 - Have parallel callers `await` the same future, falling through to the existing skip path on the first success.
 - Add a regression with concurrent same-session `MessageCreated` deltas that asserts only one HTTP fetch is issued.
 
-## `adoptFetchedSession` allow-downgrade flag duplicates the server-restart guard at two layers
-
-**Severity:** Medium - `ui/src/app-live-state.ts:1146-1156` ORs `isServerRestartResponse` with `canAdoptLowerRevisionHydration` to compute `allowRevisionDowngrade`, but `shouldAdoptSnapshotRevision` already short-circuits restart cases via the `isServerInstanceMismatch` branch. The dead-flag interaction means restart vs. downgrade semantics are encoded across two layers of branching that must stay aligned — a regression that narrows `shouldAdoptSnapshotRevision`'s instance-mismatch branch would silently start using the downgrade path for restart cases, with subtle semantic differences.
-
-This gate is the only frontend defense against the prior High-severity stale-hydration data loss. Two near-redundant guards encoding the same intent are fragile.
-
-**Current behavior:**
-- Restart-vs-downgrade decisions are computed at two layers (`adoptFetchedSession` and `shouldAdoptSnapshotRevision`).
-- A regression in either layer can silently shift behavior without surfacing in tests.
-
-**Proposal:**
-- Split into three explicit branches: `if (isServerRestartResponse) { adopt unconditionally } else if (canAdoptLowerRevisionHydration) { adopt with downgrade } else { gate via shouldAdoptSnapshotRevision }`.
-- Same observable behavior, single layer of branching, easier to audit.
-
 ## `scheduleHydrationRetry` re-runs the entire hydration effect on every tick
 
 **Severity:** Medium - `ui/src/app-live-state.ts:647-670` arms a `setTimeout` whose callback fires `setHydrationRetryTick(...)`, a `useState` counter included in the visible-session hydration effect's deps. Each tick re-runs the whole effect and walks every visible session in `sessionIdsToHydrate`, even if only one session was retrying. With multiple sessions in pending-retry state, the cascading effect re-runs multiply network requests and CPU work under load.
@@ -644,19 +398,6 @@ The early-out at the top of the effect (`hydratingSessionIdsRef.current.has(sess
 - Replace the tick counter with a per-session `Set<string>` ref of pending-retry ids; the timer adds the id and triggers a targeted re-fetch through a stable `useCallback` rather than re-running the effect.
 - Or have the retry timer call into the fetch loop directly, bypassing the effect entirely.
 - Skip work in the effect for sessions not in the retry set.
-
-## `apply_remote_delta_event::SessionCreated` clones the full transcript only to read `.id`
-
-**Severity:** Medium - `src/remote_routes.rs:681-690` builds `local_session = wire_session_from_record(local_record)` (a full transcript-bearing `Session`) just to consume `.id`. Both `delta_session.id` and the in-scope `local_session_id` already hold the same value. For a long-lived remote session whose proxy mirror already has a non-trivial transcript, every inbound `SessionCreated` redelivery rebuilds and drops the full message vec under the state mutex.
-
-This is the same clone-and-discard anti-pattern the rest of this changeset migrated away from for `wire_session_summary_from_session`. The publish path here only reads the id.
-
-**Current behavior:**
-- `wire_session_from_record(local_record)` runs once per `SessionCreated` redelivery, just to access `.id`.
-- The cloned `Session` is then dropped without further use.
-
-**Proposal:**
-- Drop the `local_session` binding entirely; publish using `delta_session.id.clone()` or the already-in-scope `local_session_id`.
 
 ## `commit_session_created_locked` summary fallback diverges between branches
 
@@ -957,121 +698,6 @@ stale.
 - Keep the reconnect-state assertions so the test proves both facts: the UI is
   still recovering and the live delta was applied.
 
-## Cross-window tab drag channel restarts on ordinary renders
-
-**Severity:** High - `useAppDragResize` recreates its `BroadcastChannel` subscription on ordinary renders, which can drop cross-window tab drag coordination messages.
-
-The extracted drag/resize hook now owns the `BroadcastChannel` that carries `drag-start`, `drop-commit`, and `drag-end` across windows. That effect depends on `applyControlPanelLayout`, but `App.tsx` still defines `applyControlPanelLayout(...)` inline, so its identity changes on every render. Any render while a cross-window tab drag is in flight tears down the active channel and creates a fresh one. Because the tab-drag protocol is transient and message-based, the source or target window can miss `drop-commit` / `drag-end`, leaving stale external drag state or failing to close the source tab after a successful cross-window drop.
-
-**Current behavior:**
-- `ui/src/app-drag-resize.ts` registers the tab-drag `BroadcastChannel` in a `useEffect` keyed by `applyControlPanelLayout`.
-- `ui/src/App.tsx` recreates `applyControlPanelLayout(...)` on ordinary renders.
-- A render during cross-window drag/drop can close and reopen the channel mid-protocol, dropping in-flight drag messages.
-
-**Proposal:**
-- Keep the channel effect stable per `windowId` instead of per render.
-- Read the latest layout helper through a ref inside `channel.onmessage` rather than making it an effect dependency.
-- Add a regression test that forces a render between `drag-start` and `drop-commit` and asserts the source tab still closes cleanly.
-
-
-
-## Session store subscribers can dispatch stale action callbacks
-
-**Severity:** High - `SessionBody` and `SessionComposer` now rerender from `session-store`, but their custom `memo` comparators still let mutating action callbacks stay frozen on older closures.
-
-The new store-backed session slices in `ui/src/panels/AgentSessionPanel.tsx`
-move transcript and composer data onto `useSessionRecordSnapshot(...)` /
-`useComposerSessionSnapshot(...)`, while the panel and footer still receive
-actions such as `onSend`, `onStopSession`, `onApprovalDecision`,
-`onCancelQueuedPrompt`, `onRefreshSessionModelOptions`,
-`onRefreshAgentCommands`, and `onSessionSettingsChange` from the parent. Unlike
-the render callbacks, those actions were not wrapped in ref-backed adapters, yet
-the `memo(...)` comparators still exclude them. That lets the store-driven UI
-show fresh session data while user actions continue to execute through stale
-closures captured before the latest parent render.
-
-**Current behavior:**
-- `SessionBody` and `SessionComposer` rerender from store subscriptions even
-  when their parent props comparator short-circuits.
-- The comparators at `ui/src/panels/AgentSessionPanel.tsx` omit mutating action
-  props such as `onSend`, `onStopSession`, `onApprovalDecision`, and related
-  refresh/settings callbacks.
-- Those actions come from `useAppSessionActions(...)` closures that still read
-  live lookups such as `sessionLookup`, `workspace`, and active session state,
-  so invoking them through stale closures can target older app state than the UI
-  currently renders.
-
-**Proposal:**
-- Treat mutating action props the same way the render callbacks are treated:
-  either include them in the memo comparators or route them through stable
-  ref-backed adapters inside `AgentSessionPanel`.
-- Add focused regression coverage that updates the parent action closures while
-  the store-backed composer/body rerender, then asserts send/approval/settings
-  actions hit the latest session/workspace state.
-
-## Session switches can briefly show the previous transcript and route actions to the new session
-
-**Severity:** High - the refactor reuses one `SessionConversationPage` across session switches while still deferring `messages` and `pendingPrompts`, so the UI can briefly render stale cards from the previous session under the new session id.
-
-`ui/src/panels/AgentSessionPanel.tsx` now keeps a single conversation page
-mounted for the active session instead of keying or remounting that subtree per
-session. At the same time, `SessionConversationPage` still runs
-`useDeferredValue(session.messages)` and `useDeferredValue(pendingPrompts)`.
-During a session switch, React can therefore keep the previous transcript data
-alive for a deferred frame while `session.id` and the action bindings already
-point at the newly selected session. That is no longer just a visual lag: cards
-from session A can momentarily render while approval, queued-prompt, or
-Codex-app actions are already bound to session B.
-
-**Current behavior:**
-- `SessionConversationPage` reuses the same component instance across session
-  switches.
-- `messages` and `pendingPrompts` are still deferred with `useDeferredValue(...)`.
-- A session switch can render stale cards from the previous session for a
-  deferred frame while action handlers are already bound to the newly selected
-  `session.id`.
-
-**Proposal:**
-- Cut over immediately on `session.id` changes instead of deferring transcript
-  arrays across session boundaries.
-- Key the conversation subtree by `session.id`, or only use deferred
-  message/prompt arrays when the session id is unchanged.
-- Add a regression that switches sessions while the previous one has visible
-  approval/pending cards and asserts no stale card is actionable under the new
-  session id.
-
-## Partial responses can consume restart detection before full snapshot adoption
-
-**Severity:** High - the mutation-stamp fast path disables deep session
-reconciliation only when `adoptState(...)` sees a server-instance change, but
-partial create/fetch responses can update `lastSeenServerInstanceIdRef` first.
-
-Backend `SessionRecord::mutation_stamp` values reset every process lifetime.
-If a restarted backend returns a partial `CreateSessionResponse` or
-`SessionResponse` before the next full `/api/state` snapshot, the partial
-adoption updates `lastSeenServerInstanceIdRef`. The following full snapshot
-then appears to come from the same instance, so `adoptState(...)` may leave the
-mutation-stamp fast path enabled. Existing sessions whose stamps collide with
-the previous process, especially stamp `0`, can keep stale client objects after
-restart.
-
-**Current behavior:**
-- `adoptCreatedSessionResponse(...)` and `adoptFetchedSession(...)` can update
-  `lastSeenServerInstanceIdRef` before a full state snapshot adopts.
-- `adoptState(...)` computes `serverInstanceChanged` from that same ref.
-- A full restart snapshot can therefore skip the deep reconcile that should
-  run when process-local mutation stamps reset.
-
-**Proposal:**
-- Track "server instance changed since last full snapshot" separately from the
-  latest instance id observed by any response.
-- Or keep a full-state-specific server instance marker and compare full
-  snapshots against that marker when deciding whether to disable the
-  mutation-stamp fast path.
-- Add App/live-state coverage where a partial response from instance B arrives
-  before a full instance-B snapshot with colliding stamps, and assert the full
-  snapshot still replaces stale session content.
-
 ## Session store publication can race ahead of React session state
 
 **Severity:** Medium - the new `session-store` publishes some session slices before the corresponding React `sessions` state commits, so the UI can mix newer store-backed session data with older prop-derived session state in one render.
@@ -1192,21 +818,6 @@ Today this is intentional — only the slash palette cares about the draft, and 
 - Add a block comment at the `currentLocalDraftState` declaration explaining the narrow slash-only meaning and that readers of current draft text MUST use `getComposerDraftValue()`.
 - Rename `composerDraft` → `composerSlashDraft` (or `trackedSlashDraft`) to make the narrow purpose visible at every call site.
 
-## `disableMutationStampFastPath` is not threaded through `sameSessionSummary`
-
-**Severity:** Medium - `ui/src/session-reconcile.ts:76-110` passes `disableMutationStampFastPath` down to `reconcileSession(...)` but not to `sameSessionSummary(...)`. The summary comparator already checks `previous.sessionMutationStamp === next.sessionMutationStamp` directly (line 79). When the caller requests a deep reconcile (`disableMutationStampFastPath: true`) but the pre/post-restart summaries happen to be equal AND the stamps happen to collide (e.g. both `0` on fresh runtimes, or an unrelated u64 match), `sameSessionSummary` returns `true` and `reconcileSession` early-returns `previous` before `reconcileMessages` runs.
-
-The existing test (`can disable the mutation-stamp fast path after a server restart` in `session-reconcile.test.ts`) forces a summary difference (preview text or messages length), so it passes even though the failure mode — summary-equal with colliding stamps and divergent messages — is the scenario the flag is supposed to address.
-
-**Current behavior:**
-- `sameSessionSummary(prev, next)` checks the stamp at line 79, outside any `options` gate.
-- When `disableMutationStampFastPath` is `true` but summaries and stamps happen to match, the fast path is re-entered through a different door.
-- The restart-divergent-transcript scenario is unprotected when summaries don't change.
-
-**Proposal:**
-- Pass `options` through to `sameSessionSummary` and, when `disableMutationStampFastPath` is `true`, treat the stamps as non-equal there too. Alternatively, factor the stamp check out of `sameSessionSummary` entirely and gate it in `reconcileSession` only.
-- Add a regression test: two sessions with identical summaries, identical stamps, but diverging message arrays; assert that `disableMutationStampFastPath: true` causes `reconcileMessages` to produce the new messages.
-
 ## `CodexUpdated` delta carries a full subsystem snapshot despite the "delta" name
 
 **Severity:** Medium - `src/wire.rs::DeltaEvent::CodexUpdated { revision, codex: CodexState }` publishes the entire `CodexState` on every rate-limit tick and every notice addition. The architectural contract the codebase otherwise respects is "state events for full snapshots, delta events for scoped changes". `CodexUpdated` is small today (rate_limits + notices capped at 5), but the naming invites future bulky additions to `CodexState` (login state, model-availability maps, per-provider metadata) to be broadcast in full on every tiny change.
@@ -1219,18 +830,6 @@ The existing test (`can disable the mutation-stamp fast path after a server rest
 **Proposal:**
 - Split into narrower variants: `CodexRateLimitsUpdated { revision, rate_limits }` and `CodexNoticesUpdated { revision, notices }`. The two call sites in `session_sync.rs` already pick their publish trigger, so split dispatch is straightforward.
 - Alternatively, add a source-level comment on the `CodexUpdated` variant stating that `codex` is intentionally the full subsystem snapshot and any future field addition to `CodexState` must reconsider whether a narrower event is needed.
-
-## `CodexState.notices` 5-item cap is enforced in the mutator, not the type
-
-**Severity:** Medium - `src/session_sync.rs::note_codex_notice` calls `notices.truncate(5)` to bound the notices vector, but the cap lives only at that call site. `CodexState.notices: Vec<CodexNotice>` in `src/wire.rs` declares no bound. A future caller that assembles a `CodexState` differently (constructing it directly, deserializing from a remote, or adding a second mutator) will bypass the cap and broadcast an unbounded vector over SSE.
-
-**Current behavior:**
-- `notices.truncate(5)` runs only inside `note_codex_notice`.
-- Any other path that produces a `CodexState` is unconstrained.
-
-**Proposal:**
-- Extract a `const CODEX_NOTICE_CAP: usize = 5;` at module scope and use it at both the mutator and any future assembler. Document it in a doc comment on `CodexState.notices`.
-- Alternatively, wrap the field in a newtype (`NoticeRingBuffer`) that enforces the cap on insertion.
 
 ## `DeferredHeavyContent` near-viewport activation now deferred by one paint
 

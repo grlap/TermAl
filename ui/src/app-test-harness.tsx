@@ -309,8 +309,8 @@ export function stubElementScrollGeometry({
   clientHeight,
   scrollHeight,
 }: {
-  clientHeight: number;
-  scrollHeight: number;
+  clientHeight: number | (() => number);
+  scrollHeight: number | (() => number);
 }) {
   const originalScrollHeight = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
@@ -323,13 +323,13 @@ export function stubElementScrollGeometry({
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
     configurable: true,
     get() {
-      return scrollHeight;
+      return typeof scrollHeight === "function" ? scrollHeight() : scrollHeight;
     },
   });
   Object.defineProperty(HTMLElement.prototype, "clientHeight", {
     configurable: true,
     get() {
-      return clientHeight;
+      return typeof clientHeight === "function" ? clientHeight() : clientHeight;
     },
   });
 

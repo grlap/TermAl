@@ -1,6 +1,6 @@
-// Pure helpers that resolve and verify document offsets when the
-// Markdown diff editor commits a single section back into the full
-// document.
+// Pure helpers that resolve and verify document offsets when a
+// rendered-Markdown editor (DiffPanel or SourcePanel) commits a
+// single rendered section back into the full document.
 //
 // What this file owns:
 //   - `RenderedMarkdownSectionCommit` — the per-section commit
@@ -40,12 +40,13 @@
 // What this file does NOT own:
 //   - `MarkdownDiffDocumentSegment` — the segment type itself
 //     lives in `./markdown-diff-segments`.
-//   - The commit-queue orchestration in `DiffPanel.tsx`; this
-//     module provides the pure math it runs over each commit.
+//   - The commit-queue orchestration in `DiffPanel.tsx` or
+//     `SourcePanel.tsx`; this module provides the pure math those
+//     panels run over each commit.
 //
 // Split out of `ui/src/panels/DiffPanel.tsx`. Same types, same
-// function bodies, same thresholds; consumers (including
-// `DiffPanel.test.tsx`) import directly from here.
+// function bodies, same thresholds; consumers (including DiffPanel,
+// SourcePanel, and their tests) import directly from here.
 
 import {
   normalizeMarkdownDocumentLineEndings,

@@ -204,7 +204,7 @@ impl AppState {
             }
 
             inner.codex.notices.insert(0, notice);
-            inner.codex.notices.truncate(5);
+            inner.codex.notices.truncate(CODEX_NOTICE_CAP);
             let revision = self.commit_persisted_delta_locked(&mut inner)?;
             (revision, inner.codex.clone())
         };

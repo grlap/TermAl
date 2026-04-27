@@ -364,10 +364,12 @@ function renderMarkdownDiffSegments({
       rendered.push(
         <EditableRenderedMarkdownSection
           allowReadOnlyCaret={allowReadOnlyCaret && segment.isInAfterDocument}
+          allowCurrentSegmentFallback={true}
           appearance={appearance}
           canEdit={canEdit && segment.isInAfterDocument}
           className="markdown-diff-normal-section"
           documentPath={documentPath}
+          editableAriaLabel="Edit unchanged Markdown section"
           key={segment.id}
           onDraftChange={onRenderedMarkdownSectionDraftChange}
           onOpenSourceLink={onOpenSourceLink}
@@ -411,9 +413,11 @@ function renderMarkdownDiffSegments({
           return (
             <RenderedMarkdownChangeSection
               allowReadOnlyCaret={allowReadOnlyCaret && tone === "added" && changedSegment.isInAfterDocument}
+              allowCurrentSegmentFallback={true}
               appearance={appearance}
               canEdit={canEdit && tone === "added" && changedSegment.isInAfterDocument}
               documentPath={documentPath}
+              editableAriaLabel={`Edit ${tone} Markdown section`}
               key={changedSegment.id}
               onDraftChange={onRenderedMarkdownSectionDraftChange}
               onOpenSourceLink={onOpenSourceLink}

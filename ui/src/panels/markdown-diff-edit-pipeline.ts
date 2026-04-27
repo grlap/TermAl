@@ -13,7 +13,9 @@
 //     `isSafePastedMarkdownHref` (allowlist anchors,
 //     document-relative hrefs, `http(s)`, and `mailto`; local
 //     absolute / network-looking hrefs and everything else are
-//     rejected).
+//     rejected), and `isSerializableMarkdownHref` (serializer-side
+//     href policy for links that already exist in trusted rendered
+//     document content).
 //   - The allow/deny sets
 //     `PASTED_MARKDOWN_ALLOWED_ELEMENTS`,
 //     `PASTED_MARKDOWN_DROPPED_ELEMENTS`, and the
@@ -55,6 +57,15 @@
 // consumers import from here directly.
 
 import { shouldSkipMarkdownEditableNode } from "./editable-markdown-focus";
+
+const MARKDOWN_HREF_POLICY_IGNORED_CHARACTERS =
+  /[\u0000-\u001F\u007F\s]+|\p{Default_Ignorable_Code_Point}+/gu;
+const UNSAFE_MARKDOWN_LINK_DESTINATION_CHARACTERS =
+  /[\u0000-\u001F\u007F\s[\]<>]|\p{Default_Ignorable_Code_Point}/u;
+
+function normalizeMarkdownHrefForPolicy(href: string) {
+  return href.trim().replace(MARKDOWN_HREF_POLICY_IGNORED_CHARACTERS, "");
+}
 
 export function insertSanitizedMarkdownPaste(
   section: HTMLElement,
@@ -244,12 +255,11 @@ export function isSafePastedMarkdownHref(href: string) {
   // or authors continue to work through the rendered-Markdown
   // pathway in `markdown-links.ts::resolveMarkdownFileLinkTarget`;
   // only the paste-sanitize entry point is tightened here.
-  const trimmed = href.trim();
-  if (!trimmed) {
+  const normalized = normalizeMarkdownHrefForPolicy(href);
+  if (!normalized) {
     return false;
   }
 
-  const normalized = trimmed.replace(/[\u0000-\u001F\u007F\s]+/g, "");
   const colonIndex = normalized.indexOf(":");
   if (colonIndex === -1) {
     return !normalized.startsWith("/") && !normalized.startsWith("\\");
@@ -371,7 +381,7 @@ export function serializeMarkdownInlineNode(node: Node): string {
 
     const href = node.getAttribute("href");
     const destination =
-      href && isSafePastedMarkdownHref(href)
+      href && isSerializableMarkdownHref(href)
         ? formatSafeMarkdownLinkDestination(href)
         : null;
     return destination
@@ -386,11 +396,36 @@ function escapeMarkdownLinkLabel(label: string) {
   return label.replace(/[\\[\]]/g, "\\$&");
 }
 
+// Serializer-side href policy for links that already exist in the
+// trusted document. This intentionally shares the paste-time
+// protocol surface with `isSafePastedMarkdownHref`, but keeps
+// Windows drive-letter paths round-trippable because the link is
+// authored document content rather than untrusted pasted input.
+function isSerializableMarkdownHref(href: string) {
+  const trimmed = href.trim();
+  if (!trimmed || formatSafeMarkdownLinkDestination(trimmed) === null) {
+    return false;
+  }
+
+  const normalized = normalizeMarkdownHrefForPolicy(trimmed);
+  const colonIndex = normalized.indexOf(":");
+  if (colonIndex === -1) {
+    return true;
+  }
+
+  if (/^[a-zA-Z]:[\\/]/.test(normalized)) {
+    return true;
+  }
+
+  const protocol = normalized.slice(0, colonIndex).toLowerCase();
+  return protocol === "http" || protocol === "https" || protocol === "mailto";
+}
+
 function formatSafeMarkdownLinkDestination(href: string) {
   const destination = href.trim();
   if (
     destination.length === 0 ||
-    /[\u0000-\u001F\u007F\s[\]<>]/.test(destination)
+    UNSAFE_MARKDOWN_LINK_DESTINATION_CHARACTERS.test(destination)
   ) {
     return null;
   }

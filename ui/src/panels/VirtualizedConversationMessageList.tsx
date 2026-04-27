@@ -376,6 +376,8 @@ export function VirtualizedConversationMessageList({
   const pendingDeferredRenderResumeTimerRef = useRef<number | null>(null);
   const pendingDeferredRenderSuspendedNodeRef = useRef<HTMLElement | null>(null);
   const pendingProgrammaticViewportSyncRef = useRef(false);
+  // Deadline until which a programmatic `bottom_follow` smooth-scroll can
+  // claim native scroll ticks. User gestures reset it to negative infinity.
   const pendingProgrammaticBottomFollowUntilRef = useRef(
     Number.NEGATIVE_INFINITY,
   );
@@ -1684,6 +1686,16 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
+    const enterBottomFollowMode = () => {
+      pendingProgrammaticScrollTopRef.current = null;
+      lastNativeScrollTopRef.current = node.scrollTop;
+      shouldKeepBottomAfterLayoutRef.current = true;
+      isDetachedFromBottomRef.current = false;
+      hasUserScrollInteractionRef.current = false;
+      lastUserScrollKindRef.current = null;
+      lastUserScrollInputTimeRef.current = Number.NEGATIVE_INFINITY;
+    };
+
     const syncViewport = (options: { isNativeScrollEvent?: boolean } = {}) => {
       const isBottomBoundaryRevealScroll =
         pendingBottomBoundaryRevealNodeRef.current === node;
@@ -1701,15 +1713,9 @@ export function VirtualizedConversationMessageList({
           pendingProgrammaticScrollTopRef.current = null;
           lastNativeScrollTopRef.current = node.scrollTop;
         } else if (isProgrammaticBottomFollowScroll) {
-          pendingProgrammaticScrollTopRef.current = null;
-          lastNativeScrollTopRef.current = node.scrollTop;
           pendingProgrammaticBottomFollowUntilRef.current =
             performance.now() + MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS;
-          shouldKeepBottomAfterLayoutRef.current = true;
-          isDetachedFromBottomRef.current = false;
-          hasUserScrollInteractionRef.current = false;
-          lastUserScrollKindRef.current = null;
-          lastUserScrollInputTimeRef.current = Number.NEGATIVE_INFINITY;
+          enterBottomFollowMode();
         } else {
           if (isMeasuringPostActivation) {
             cancelPostActivationBottomRestore();
@@ -1780,7 +1786,7 @@ export function VirtualizedConversationMessageList({
         ) {
           return;
         }
-      } else if (event instanceof TouchEvent) {
+      } else if (typeof TouchEvent !== "undefined" && event instanceof TouchEvent) {
         const touch = event.touches[0] ?? event.changedTouches[0] ?? null;
         if (touch) {
           const previousTouchClientY = lastTouchClientYRef.current;
@@ -1877,13 +1883,7 @@ export function VirtualizedConversationMessageList({
       if (explicitScrollKind === "bottom_follow") {
         pendingProgrammaticBottomFollowUntilRef.current =
           performance.now() + MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS;
-        pendingProgrammaticScrollTopRef.current = null;
-        lastNativeScrollTopRef.current = node.scrollTop;
-        shouldKeepBottomAfterLayoutRef.current = true;
-        isDetachedFromBottomRef.current = false;
-        hasUserScrollInteractionRef.current = false;
-        lastUserScrollKindRef.current = null;
-        lastUserScrollInputTimeRef.current = Number.NEGATIVE_INFINITY;
+        enterBottomFollowMode();
         pendingAggressiveIdleCompactionRef.current = true;
         pendingMountedPrependRestoreRef.current = null;
         skipNextMountedPrependRestoreRef.current = false;
@@ -1966,8 +1966,8 @@ export function VirtualizedConversationMessageList({
     const recordTouchStart = (event: TouchEvent) => {
       lastTouchClientYRef.current = event.touches[0]?.clientY ?? null;
     };
-    const clearTouchPosition = () => {
-      lastTouchClientYRef.current = null;
+    const recordTouchEnd = (event: TouchEvent) => {
+      lastTouchClientYRef.current = event.touches[0]?.clientY ?? null;
     };
 
     syncViewport();
@@ -1980,8 +1980,8 @@ export function VirtualizedConversationMessageList({
     node.addEventListener("wheel", markUserScroll, { passive: true });
     node.addEventListener("touchstart", recordTouchStart, { passive: true });
     node.addEventListener("touchmove", markUserScroll, { passive: true });
-    node.addEventListener("touchend", clearTouchPosition, { passive: true });
-    node.addEventListener("touchcancel", clearTouchPosition, { passive: true });
+    node.addEventListener("touchend", recordTouchEnd, { passive: true });
+    node.addEventListener("touchcancel", recordTouchEnd, { passive: true });
     node.addEventListener("keydown", markUserScroll);
     node.addEventListener("mousedown", cancelBottomFollowOnMouseDown);
     const resizeObserver = new ResizeObserver(() => {
@@ -1995,8 +1995,8 @@ export function VirtualizedConversationMessageList({
       node.removeEventListener("wheel", markUserScroll);
       node.removeEventListener("touchstart", recordTouchStart);
       node.removeEventListener("touchmove", markUserScroll);
-      node.removeEventListener("touchend", clearTouchPosition);
-      node.removeEventListener("touchcancel", clearTouchPosition);
+      node.removeEventListener("touchend", recordTouchEnd);
+      node.removeEventListener("touchcancel", recordTouchEnd);
       node.removeEventListener("keydown", markUserScroll);
       node.removeEventListener("mousedown", cancelBottomFollowOnMouseDown);
       resizeObserver.disconnect();

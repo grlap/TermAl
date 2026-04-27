@@ -121,6 +121,86 @@ afterEach(() => {
 });
 
 describe("AgentSessionPanel conversation caching", () => {
+  it("dispatches visible message actions through the latest parent callbacks", async () => {
+    const initialApproval = vi.fn();
+    const latestApproval = vi.fn();
+    const activeSession = makeSession("session-a", {
+      messages: [
+        {
+          author: "assistant",
+          id: "approval-message",
+          text: "Needs approval",
+          timestamp: "10:00",
+          type: "text",
+        },
+      ],
+    });
+    syncComposerSessionsStore({
+      sessions: [activeSession],
+      draftsBySessionId: {},
+      draftAttachmentsBySessionId: {},
+    });
+
+    const renderPanel = (
+      onApprovalDecision: Parameters<typeof AgentSessionPanel>[0]["onApprovalDecision"],
+    ) => (
+      <AgentSessionPanel
+        paneId="pane-1"
+        viewMode="session"
+        activeSessionId={activeSession.id}
+        isLoading={false}
+        isUpdating={false}
+        showWaitingIndicator={false}
+        waitingIndicatorPrompt={null}
+        commandMessages={[]}
+        diffMessages={[]}
+        scrollContainerRef={{ current: document.createElement("section") }}
+        onApprovalDecision={onApprovalDecision}
+        onUserInputSubmit={() => {}}
+        onMcpElicitationSubmit={() => {}}
+        onCodexAppRequestSubmit={() => {}}
+        onCancelQueuedPrompt={() => {}}
+        onSessionSettingsChange={() => {}}
+        conversationSearchQuery=""
+        conversationSearchMatchedItemKeys={new Set()}
+        conversationSearchActiveItemKey={null}
+        onConversationSearchItemMount={() => {}}
+        renderCommandCard={() => null}
+        renderDiffCard={() => null}
+        renderMessageCard={(message, _isLive, approve) => (
+          <button
+            type="button"
+            onClick={() => approve(message.id, "accepted")}
+          >
+            Approve latest
+          </button>
+        )}
+        renderPromptSettings={() => null}
+      />
+    );
+
+    const { rerender } = render(renderPanel(initialApproval));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      rerender(renderPanel(latestApproval));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Approve latest" }));
+      await Promise.resolve();
+    });
+
+    expect(initialApproval).not.toHaveBeenCalled();
+    expect(latestApproval).toHaveBeenCalledWith(
+      "session-a",
+      "approval-message",
+      "accepted",
+    );
+  });
+
   it("refreshes the live turn tooltip from the latest session store record", () => {
     const initialSession = makeSession("active-session", {
       status: "active",
@@ -198,6 +278,81 @@ describe("AgentSessionPanel conversation caching", () => {
     ).toHaveLength(1);
     expect(container.querySelector(".virtualized-message-list")).toBeNull();
     expect(screen.getByText(activeSession.messages[0]?.id ?? "")).toBeInTheDocument();
+  });
+
+  it("does not carry deferred transcript cards across session switches", async () => {
+    const sessionA = makeSession("session-a", {
+      messages: [
+        {
+          author: "assistant",
+          id: "message-a",
+          text: "Session A transcript",
+          timestamp: "10:00",
+          type: "text",
+        },
+      ],
+    });
+    const sessionB = makeSession("session-b", {
+      messages: [
+        {
+          author: "assistant",
+          id: "message-b",
+          text: "Session B transcript",
+          timestamp: "10:00",
+          type: "text",
+        },
+      ],
+    });
+    syncComposerSessionsStore({
+      sessions: [sessionA, sessionB],
+      draftsBySessionId: {},
+      draftAttachmentsBySessionId: {},
+    });
+
+    const renderPanel = (activeSessionId: string) => (
+      <AgentSessionPanel
+        paneId="pane-1"
+        viewMode="session"
+        activeSessionId={activeSessionId}
+        isLoading={false}
+        isUpdating={false}
+        showWaitingIndicator={false}
+        waitingIndicatorPrompt={null}
+        commandMessages={[]}
+        diffMessages={[]}
+        scrollContainerRef={{ current: document.createElement("section") }}
+        onApprovalDecision={() => {}}
+        onUserInputSubmit={() => {}}
+        onMcpElicitationSubmit={() => {}}
+        onCodexAppRequestSubmit={() => {}}
+        onCancelQueuedPrompt={() => {}}
+        onSessionSettingsChange={() => {}}
+        conversationSearchQuery=""
+        conversationSearchMatchedItemKeys={new Set()}
+        conversationSearchActiveItemKey={null}
+        onConversationSearchItemMount={() => {}}
+        renderCommandCard={() => null}
+        renderDiffCard={() => null}
+        renderMessageCard={(message) => (
+          <article className="message-card">{message.id}</article>
+        )}
+        renderPromptSettings={() => null}
+      />
+    );
+
+    const { rerender } = render(renderPanel(sessionA.id));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText("message-a")).toBeInTheDocument();
+
+    await act(async () => {
+      rerender(renderPanel(sessionB.id));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("message-a")).not.toBeInTheDocument();
+    expect(screen.getByText("message-b")).toBeInTheDocument();
   });
 
   it("keeps long session find virtualized while typing a query", async () => {
@@ -446,7 +601,7 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
-  it("does not flush virtualizer range updates from layout-effect scroll writes", () => {
+  it("does not flush virtualizer range updates from layout-effect scroll writes", async () => {
     // Regression guard for React's "flushSync was called from inside a
     // lifecycle method" warning. SessionPaneView restores saved positions from
     // a layout effect and immediately dispatches the message-stack scroll-write
@@ -553,19 +708,23 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(scrollTop).toBe(estimatedLayout.totalHeight - clientHeight);
       expect(screen.queryByText("message-120")).toBeInTheDocument();
 
-      act(() => {
+      await act(async () => {
         rerender(<Harness restoreToTop />);
+        await Promise.resolve();
       });
 
       expect(screen.queryByText("message-1")).toBeInTheDocument();
+      const consoleErrorMessages = consoleErrorSpy.mock.calls.map((call) =>
+        call.map((part) => String(part)).join(" "),
+      );
       expect(
-        consoleErrorSpy.mock.calls.some((call) =>
-          call
-            .map((part) => String(part))
-            .join(" ")
-            .includes("flushSync was called from inside a lifecycle method"),
+        consoleErrorMessages.filter(
+          (message) =>
+            message.includes("flushSync was called from inside a lifecycle method") ||
+            message.includes("not wrapped in act") ||
+            message.startsWith("Warning:"),
         ),
-      ).toBe(false);
+      ).toEqual([]);
     } finally {
       consoleErrorSpy.mockRestore();
       window.ResizeObserver = OriginalResizeObserver;
@@ -2272,8 +2431,9 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
-  it("prewarms pages above on a large upward wheel before native scroll paints", async () => {
+  it("prewarms pages above on large upward wheel and touch gestures before native scroll paints", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
+    const OriginalTouchEvent = window.TouchEvent;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
     const originalGetBoundingClientRectDescriptor = Object.getOwnPropertyDescriptor(
@@ -2292,6 +2452,17 @@ describe("AgentSessionPanel conversation caching", () => {
         resizeCallbacks.set(target, this.callback);
       }
       disconnect() {}
+    }
+
+    class TouchEventMock extends Event {
+      readonly changedTouches: Touch[];
+      readonly touches: Touch[];
+
+      constructor(type: string, init: TouchEventInit = {}) {
+        super(type, { bubbles: init.bubbles ?? true, cancelable: init.cancelable });
+        this.changedTouches = init.changedTouches ?? [];
+        this.touches = init.touches ?? [];
+      }
     }
 
     const getVirtualNodeHeight = (node: HTMLElement): number => {
@@ -2385,6 +2556,7 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    window.TouchEvent = TouchEventMock as unknown as typeof TouchEvent;
     let nextFrameId = 1;
     window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
       const frameId = nextFrameId;
@@ -2487,6 +2659,24 @@ describe("AgentSessionPanel conversation caching", () => {
         }
         return wheelInput.deltaY ?? 0;
       };
+      const dispatchTouchGesture = (
+        touchStartClientY: number,
+        touchMoveClientY: number,
+      ) => {
+        dispatchTouch("touchstart", [touchStartClientY], [touchStartClientY]);
+        dispatchTouch("touchmove", [touchMoveClientY], [touchMoveClientY]);
+      };
+      const dispatchTouch = (
+        type: string,
+        touchClientYs: number[],
+        changedTouchClientYs = touchClientYs,
+      ) => {
+        scrollNode.dispatchEvent(new TouchEvent(type, {
+          bubbles: true,
+          changedTouches: changedTouchClientYs.map((clientY) => ({ clientY }) as Touch),
+          touches: touchClientYs.map((clientY) => ({ clientY }) as Touch),
+        }));
+      };
 
       for (const wheelInput of wheelInputs) {
         await act(async () => {
@@ -2534,6 +2724,87 @@ describe("AgentSessionPanel conversation caching", () => {
       await waitFor(() => {
         expect(getFirstMountedMessageIndex(container)).toBeGreaterThan(1);
       });
+      const firstMountedBeforeStaleTouchMove = getFirstMountedMessageIndex(container);
+
+      act(() => {
+        dispatchTouch("touchstart", [100], [100]);
+        dispatchTouch("touchend", [], [100]);
+        dispatchTouch("touchmove", [1900], [1900]);
+      });
+
+      expect(getFirstMountedMessageIndex(container)).toBe(
+        firstMountedBeforeStaleTouchMove,
+      );
+
+      const firstMountedBeforeMultiTouch = getFirstMountedMessageIndex(container);
+
+      act(() => {
+        // If the first finger lifts while another finger remains down,
+        // touchend must keep tracking the remaining touch. The following
+        // touchmove should still prewarm before native scroll writes.
+        dispatchTouch("touchstart", [100, 300], [100, 300]);
+        dispatchTouch("touchend", [300], [100]);
+        dispatchTouch("touchmove", [1900], [1900]);
+      });
+
+      expect(getFirstMountedMessageIndex(container)).toBeLessThan(
+        firstMountedBeforeMultiTouch,
+      );
+      expect(
+        container
+          .querySelector<HTMLElement>(".virtualized-message-page")
+          ?.getBoundingClientRect().top,
+      ).toBeLessThanOrEqual(0);
+
+      await act(async () => {
+        scrollTop = 0;
+        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
+        await Promise.resolve();
+      });
+      await act(async () => {
+        scrollTop = 3600;
+        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(getFirstMountedMessageIndex(container)).toBeGreaterThan(1);
+      });
+      const firstMountedBeforeTouch = getFirstMountedMessageIndex(container);
+
+      act(() => {
+        // Finger moving down by 1800 px scrolls content upward by the same
+        // magnitude, so the touch path should prewarm the pages above before
+        // the browser's native scroll write paints.
+        dispatchTouchGesture(100, 1900);
+        scrollTop = 1800;
+        notifyMessageStackScrollWrite(scrollNode);
+      });
+
+      await waitFor(() => {
+        expect(getFirstMountedMessageIndex(container)).toBeLessThan(
+          firstMountedBeforeTouch,
+        );
+        const firstMountedPage = container.querySelector<HTMLElement>(
+          ".virtualized-message-page",
+        );
+        expect(firstMountedPage?.getBoundingClientRect().top).toBeLessThanOrEqual(0);
+      });
+
+      await act(async () => {
+        scrollTop = 0;
+        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
+        await Promise.resolve();
+      });
+      await act(async () => {
+        scrollTop = 3600;
+        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(getFirstMountedMessageIndex(container)).toBeGreaterThan(1);
+      });
       const firstMountedBeforeLargeWrite = getFirstMountedMessageIndex(container);
 
       act(() => {
@@ -2554,6 +2825,7 @@ describe("AgentSessionPanel conversation caching", () => {
       });
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
+      window.TouchEvent = OriginalTouchEvent;
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
       if (originalGetBoundingClientRectDescriptor) {
@@ -4106,6 +4378,48 @@ describe("AgentSessionPanelFooter", () => {
     expect(initialCommit).not.toHaveBeenCalled();
     expect(nextCommit).not.toHaveBeenCalled();
     expect(screen.getByLabelText(`Message ${sessionId}`)).toHaveValue("draft in progress");
+  });
+
+  it("dispatches composer sends through the latest parent callback", async () => {
+    const initialSend = vi.fn(() => true);
+    const latestSend = vi.fn(() => true);
+    const session = makeSession("session-a");
+    const { rerender } = render(
+      renderFooter({
+        onSend: initialSend,
+        session,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      fireEvent.change(screen.getByLabelText("Message session-a"), {
+        target: { value: "use the newest sender" },
+      });
+    });
+
+    await act(async () => {
+      rerender(
+        renderFooter({
+          onSend: latestSend,
+          session,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      await Promise.resolve();
+    });
+
+    expect(initialSend).not.toHaveBeenCalled();
+    expect(latestSend).toHaveBeenCalledWith(
+      "session-a",
+      "use the newest sender",
+    );
   });
 
   it("does not recompute the composer slash palette during assistant-only session churn", () => {

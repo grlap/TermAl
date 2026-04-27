@@ -96,7 +96,8 @@ function reconcileSession(
     !options?.disableMutationStampFastPath &&
     previous.sessionMutationStamp !== null &&
     previous.sessionMutationStamp !== undefined &&
-    previous.sessionMutationStamp === next.sessionMutationStamp
+    previous.sessionMutationStamp === next.sessionMutationStamp &&
+    (next.messagesLoaded !== true || previous.messagesLoaded === true)
   ) {
     return previous;
   }

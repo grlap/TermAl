@@ -158,11 +158,14 @@ export function isExternalMarkdownHref(href: string) {
   if (!normalizedHref) {
     return false;
   }
+  const decodedHref = safeDecodeMarkdownHref(normalizedHref);
 
   if (
     /^file:\/\//i.test(normalizedHref) ||
     /^\/[A-Za-z]:[\\/]/.test(normalizedHref) ||
-    /^[A-Za-z]:[\\/]/.test(normalizedHref)
+    /^[A-Za-z]:[\\/]/.test(normalizedHref) ||
+    /^\/[A-Za-z]:[\\/]/.test(decodedHref) ||
+    /^[A-Za-z]:[\\/]/.test(decodedHref)
   ) {
     return false;
   }

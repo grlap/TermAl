@@ -1,12 +1,13 @@
-// Rendered-Markdown diff change sections: the per-segment shell
-// (`RenderedMarkdownChangeSection`) and the content-editable
-// section body (`EditableRenderedMarkdownSection`) that hosts the
-// actual inline editor for a markdown diff segment.
+// Rendered-Markdown edit sections shared by DiffPanel and SourcePanel:
+// the diff-tone per-segment shell (`RenderedMarkdownChangeSection`)
+// and the content-editable section body
+// (`EditableRenderedMarkdownSection`) that hosts the actual inline
+// editor for a markdown document segment.
 //
 // Together these two components are responsible for:
 //   - Rendering a markdown diff segment as a styled `<section>`
-//     with added / removed tone, line gutter, and the rendered
-//     Markdown body.
+//     with optional added / removed tone, line gutter, and the
+//     rendered Markdown body.
 //   - When `canEdit`, turning the section into a
 //     `contentEditable` editor that serialises back to Markdown on
 //     input, captures + restores focus across re-renders, swallows
@@ -156,20 +157,42 @@ function getSelectionRangeInsideSection(section: HTMLElement) {
   return range;
 }
 
-function serializeSelectedMarkdown(range: Range, fallbackMarkdown: string) {
+function rangeCoversNodeContents(range: Range, node: HTMLElement) {
+  const fullRange = node.ownerDocument.createRange();
+  fullRange.selectNodeContents(node);
+  return (
+    range.compareBoundaryPoints(Range.START_TO_START, fullRange) <= 0 &&
+    range.compareBoundaryPoints(Range.END_TO_END, fullRange) >= 0
+  );
+}
+
+function serializeSelectedMarkdown(
+  range: Range,
+  fallbackMarkdown: string,
+  fallbackScope: HTMLElement,
+) {
   const ownerDocument = range.commonAncestorContainer.ownerDocument ?? document;
   const container = ownerDocument.createElement("div");
   container.append(range.cloneContents());
   const markdown = serializeEditableMarkdownSection(container);
-  return markdown.trim().length > 0 ? markdown : fallbackMarkdown;
+  if (markdown.trim().length > 0) {
+    return markdown;
+  }
+
+  const markdownRoot =
+    fallbackScope.querySelector<HTMLElement>(".markdown-copy") ?? fallbackScope;
+  return rangeCoversNodeContents(range, markdownRoot)
+    ? fallbackMarkdown
+    : range.toString();
 }
 
 export function RenderedMarkdownChangeSection({
   allowReadOnlyCaret,
-  allowCurrentSegmentFallback = true,
+  allowCurrentSegmentFallback,
   appearance,
   canEdit,
   documentPath,
+  editableAriaLabel,
   onCommitDrafts,
   onCommitSectionDraft,
   onDraftChange,
@@ -183,10 +206,11 @@ export function RenderedMarkdownChangeSection({
   workspaceRoot,
 }: {
   allowReadOnlyCaret: boolean;
-  allowCurrentSegmentFallback?: boolean;
+  allowCurrentSegmentFallback: boolean;
   appearance: MonacoAppearance;
   canEdit: boolean;
   documentPath: string | null;
+  editableAriaLabel: string;
   onCommitDrafts: () => boolean;
   onCommitSectionDraft: (commit: RenderedMarkdownSectionCommit) => boolean;
   onDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
@@ -210,6 +234,7 @@ export function RenderedMarkdownChangeSection({
         canEdit={canEdit}
         className="markdown-diff-rendered-section-body"
         documentPath={documentPath}
+        editableAriaLabel={editableAriaLabel}
         onCommitDrafts={onCommitDrafts}
         onCommitSectionDraft={onCommitSectionDraft}
         onDraftChange={onDraftChange}
@@ -227,11 +252,12 @@ export function RenderedMarkdownChangeSection({
 
 export function EditableRenderedMarkdownSection({
   allowReadOnlyCaret,
-  allowCurrentSegmentFallback = true,
+  allowCurrentSegmentFallback,
   appearance,
   canEdit,
   className,
   documentPath,
+  editableAriaLabel,
   onCommitDrafts,
   onCommitSectionDraft,
   onDraftChange,
@@ -245,11 +271,12 @@ export function EditableRenderedMarkdownSection({
   workspaceRoot,
 }: {
   allowReadOnlyCaret: boolean;
-  allowCurrentSegmentFallback?: boolean;
+  allowCurrentSegmentFallback: boolean;
   appearance: MonacoAppearance;
   canEdit: boolean;
   className: string;
   documentPath: string | null;
+  editableAriaLabel: string;
   onCommitDrafts: () => boolean;
   onCommitSectionDraft: (commit: RenderedMarkdownSectionCommit) => boolean;
   onDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
@@ -414,6 +441,8 @@ export function EditableRenderedMarkdownSection({
     onDraftChange(commitSegment, commitSegment.markdown);
     return null;
   }, [allowCurrentSegmentFallback, canEdit, onDraftChange, segment, sourceContent]);
+  const collectSectionEditRef = useRef(collectSectionEdit);
+  collectSectionEditRef.current = collectSectionEdit;
 
   function commitOwnDraft() {
     const section = sectionRef.current;
@@ -453,7 +482,7 @@ export function EditableRenderedMarkdownSection({
     const baseSegment = draftSegmentRef.current ?? segment;
     event.clipboardData.setData(
       "text/plain",
-      serializeSelectedMarkdown(range, baseSegment.markdown),
+      serializeSelectedMarkdown(range, baseSegment.markdown, event.currentTarget),
     );
     event.preventDefault();
   }
@@ -472,7 +501,7 @@ export function EditableRenderedMarkdownSection({
     const baseSegment = draftSegmentRef.current ?? segment;
     event.clipboardData.setData(
       "text/plain",
-      serializeSelectedMarkdown(range, baseSegment.markdown),
+      serializeSelectedMarkdown(range, baseSegment.markdown, event.currentTarget),
     );
     event.preventDefault();
     range.deleteContents();
@@ -551,9 +580,9 @@ export function EditableRenderedMarkdownSection({
     () =>
       onRegisterCommitter(() => {
         const section = sectionRef.current;
-        return section ? collectSectionEdit(section) : null;
+        return section ? collectSectionEditRef.current(section) : null;
       }),
-    [collectSectionEdit, onRegisterCommitter],
+    [onRegisterCommitter],
   );
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -797,6 +826,8 @@ export function EditableRenderedMarkdownSection({
   return (
     <section
       className={classNames}
+      aria-label={canEdit ? editableAriaLabel : undefined}
+      aria-multiline={canEdit ? true : undefined}
       aria-readonly={allowReadOnlyCaret && !canEdit ? true : undefined}
       contentEditable={canUseCaret}
       data-markdown-caret={canUseCaret ? "true" : undefined}
@@ -817,6 +848,7 @@ export function EditableRenderedMarkdownSection({
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
       ref={sectionRef}
+      role={canEdit ? "textbox" : undefined}
       suppressContentEditableWarning
       tabIndex={canUseCaret ? 0 : undefined}
     >
