@@ -3,125 +3,124 @@
 This file tracks reproduced, current issues. Resolved work, speculative refactors,
 cleanup notes, implementation task ledgers, and external limitations do not belong here.
 
+Also fixed in the current tree: preferences fallback recovery now only trusts replacement `serverInstanceId` snapshots after backend-unavailable evidence, and preferences are no longer synced before `adoptState` accepts the fallback. The preferences regression test now uses lazy deferreds, drives the async recovery path explicitly, suppresses only the known detached-handler React warning, and asserts a recovered session that can only appear through successful state adoption.
+
+Also fixed in the current tree: snapshot-bearing action responses now route rejected snapshots through authoritative action recovery with `allowUnknownServerInstance: true`, and resume-triggered recovery now opts into replacement-instance adoption. Focused visibility tests cover both a replacement-instance approval response and a resume-triggered replacement `/api/state` snapshot.
+
+Also fixed in the current tree: fork-thread notice coverage now asserts unmaterialized stale fork responses do not render phantom notices, while a direct materialized fork response still shows the intended fork notice.
+
 ## Active Repo Bugs
 
-## Recovery probes reject newer unknown replacement snapshots
+## Reconnect fallback polling can stop before SSE recovers
 
-**Severity:** Medium - explicit `/api/state` recovery can fail after a backend restart if the replacement server instance has already advanced beyond the requested revision.
+**Severity:** High - replacement-instance `/api/state` recovery can refresh visible state but accidentally disarm fallback polling before EventSource has reopened.
 
-The cross-instance safety gate now correctly rejects unknown server-instance ids by default, but the recovery loop only opts into unknown-instance adoption when the fetched state is same-revision or older via the rollback branch. A restarted backend can legitimately return a newer snapshot, especially under active traffic. In that case the recovery probe rejects the authoritative replacement snapshot and waits for a later SSE event or another resync trigger.
-
-**Current behavior:**
-- Reconnect, action-recovery, watchdog, or manual recovery can fetch `/api/state` after restart evidence exists.
-- Unknown replacement `serverInstanceId` values are allowed only for the same/lower-revision rollback path or when an explicit caller flag is already set.
-- A newer replacement snapshot is rejected even though the recovery probe is the trusted authoritative path.
-
-**Proposal:**
-- Treat explicit recovery probes as restart evidence regardless of revision direction while still rejecting already-seen mismatched server-instance ids.
-- Derive the unknown-instance allowance from the authoritative recovery decision, not only from the rollback-only branch.
-- Add coverage where `/api/state` returns a newer revision with an unknown replacement instance and the client adopts it.
-
-## Cross-instance full-state test only exercises stale-revision rejection
-
-**Severity:** Medium - the new full-state rejection test does not prove the unknown-server-instance guard because its fixture is already stale by revision.
-
-The test that should pin unknown cross-instance full-state rejection uses a lower revision than the current client state. It would pass even if the server-instance check were removed, because the ordinary stale-revision guard rejects the snapshot first. This leaves the load-bearing restart-safety rule under-tested for snapshots that otherwise pass monotonic revision checks.
+Reconnect recovery is supposed to keep polling until a real SSE `open` event or confirmed live SSE event proves the stream is healthy again. The newer replacement-instance adoption path can advance `latestStateRevisionRef` from the fallback fetch itself, so the `rearmOnSuccess` guard no longer sees the originally requested revision and skips the next recovery poll.
 
 **Current behavior:**
-- The app-level unknown-instance snapshot test sends a lower revision than the current state.
-- The test passes through the stale-revision path instead of proving the server-instance mismatch path.
-- `state-revision.test.ts` does not pair the higher-revision unknown mismatch with a negative assertion in the same context.
+- `EventSource.onerror` can arm reconnect fallback polling.
+- A fallback `/api/state` response from a replacement server instance can be adopted and advance the latest revision.
+- The fallback snapshot itself can make the rearm guard fail even though SSE has not reopened.
 
 **Proposal:**
-- Change the app-level fixture to use a higher revision so only the unknown-instance guard can reject it.
-- Add a focused `state-revision.test.ts` case where a higher-revision unknown replacement is rejected without `allowUnknownServerInstance`.
-- Keep the positive authorized case so both directions of the flag are pinned.
+- Track live-stream recovery separately from fallback snapshot adoption.
+- Keep reconnect fallback polling armed after successful fallback adoption until `EventSource.onopen` or a confirmed live event clears reconnect recovery.
+- Add a fake-timer regression test where fallback fetch returns `revision > requestedRevision`, visible state updates, and another recovery fetch is attempted before SSE reopens.
 
-## Authorized unknown-instance recovery probes lack positive integration coverage
+## Stale successful action snapshots can block UI cleanup
 
-**Severity:** Medium - the recovery path that is supposed to trust a replacement server instance can regress without a focused integration failure.
+**Severity:** Medium - `adoptActionState` can treat a successful HTTP action response as failure-like when SSE already applied the action first.
 
-The current tests prove that unknown cross-instance responses are rejected and that recovery is requested. They do not prove that the subsequent authoritative `/api/state` recovery snapshot from the replacement instance is adopted and can reopen the intended session. That is the exact path users depend on after backend restart races.
+`adoptState` can reject a response snapshot for benign stale/same-instance reasons after the action has already materialized through SSE. The shared action wrapper currently returns `false` for every rejected snapshot, so callers that use the boolean to decide local cleanup can skip success cleanup even though the action succeeded.
 
 **Current behavior:**
-- Cross-instance create-response tests assert rejection and recovery dispatch.
-- Recovery snapshots in those tests are empty or same-instance enough that adoption success is not visible.
-- A regression that drops `allowUnknownServerInstance` propagation in the recovery loop can still pass the existing rejection-side assertions.
+- Successful action responses call `adoptActionState`.
+- If SSE wins the race and the response snapshot is stale, `adoptActionState` schedules recovery and returns `false`.
+- Callers can return early and leave UI affordances such as rename dialogs open.
 
 **Proposal:**
-- Add an integration test where the client starts on one `serverInstanceId`, recovery fetches `/api/state` from a replacement instance, and the replacement state is adopted.
-- Resolve action-recovery fixtures with a non-empty session and assert the recovered session is visible or opened in the requested pane.
-- Include both same/lower-revision and newer-revision replacement cases if the production fix distinguishes them.
+- Distinguish recovery-needed snapshots from stale-but-already-materialized success.
+- For non-create actions, treat a successful HTTP response as UI success after scheduling recovery, or verify the expected mutation already exists in current state before returning `false`.
+- Add coverage for an action whose SSE update arrives before the HTTP response and still performs caller cleanup.
 
-## `AdoptCreatedSessionOutcome` `"recovering"` doc comment is now stale
+## Active-prompt stale-send replacement recovery lacks coverage
 
-**Severity:** Medium - `ui/src/app-live-state.ts` `AdoptCreatedSessionOutcome` typedef and adjacent doc comment. The `"recovering"` variant doc still describes only "wire-contract violation (`session.id !== sessionId`)". After the cross-instance fix in this round, the same outcome is also returned for unknown cross-instance create responses (see the new `isUnknownCrossInstanceCreateResponse` branch at line ~1064). Both call sites (`handleCreateSession`, `handleForkCodexThread`) treat all non-`"adopted"` outcomes the same, so the immediate behavior is correct — but a future caller that wants to distinguish the two failure modes (e.g., to surface a different toast) will misread the contract.
+**Severity:** Low - the stale-send recovery poll now trusts replacement server instances, but tests only cover same-instance poll responses.
+
+This path is load-bearing for latest assistant-message visibility after backend restart races. If replacement-instance poll adoption regresses, the completed assistant response can remain hidden while same-instance tests still pass.
 
 **Current behavior:**
-- The `"recovering"` outcome doc only mentions wire-contract violation.
-- The cross-instance recovery branch is the realistic path for backend-restart races — a backend restart between create-request and create-response is not rare.
-- Future call-site authors may infer that `"recovering"` is rare/unexpected and write code that tolerates only the wire-contract violation case.
+- Active-prompt stale-send recovery passes `allowUnknownServerInstance`.
+- Existing tests cover same-instance `/api/state` poll responses.
+- No test proves a replacement-instance poll response containing the completed assistant message is adopted.
 
 **Proposal:**
-- Extend the doc to add: `"recovering"` is also returned when an unknown cross-instance create response is detected and `requestActionRecoveryResyncRef` is dispatched with `allowUnknownServerInstance: true`. Callers MUST NOT open a workspace pane in either case.
-- Optionally split into two outcome variants (e.g., `"recoveringWireMismatch"` and `"recoveringCrossInstance"`) if call sites grow to need different handling.
+- Add a session-lifecycle poll test starting from one `serverInstanceId`.
+- Return a replacement-instance `/api/state` snapshot with the completed assistant response.
+- Assert the latest assistant message becomes visible.
 
-## `handleForkCodexThread` fires settings notice for unmaterialized session id on cross-instance recovery
+## Preferences fallback lacks non-backend-error rejection coverage
 
-**Severity:** Medium - `ui/src/app-session-actions.ts:1603-1632`. `handleCreateSession` (line 668) gates the `setSessionSettingNotices` / `handleRefreshSessionModelOptions` follow-up work on `canUseCreatedSession` (false for `"recovering"` and for un-openable `"stale"`). `handleForkCodexThread` calls `setSessionSettingNotices` unconditionally on lines 1627-1632 — keyed by `created.sessionId`, an id that may not exist in the recovered snapshot and was never inserted into `sessionsRef`.
+**Severity:** Low - preferences fallback recovery tests cover the backend-unavailable branch but not the non-backend failure branch.
 
-The asymmetry is pre-existing under the old wire-contract-violation case for `"recovering"`, but the new cross-instance branch makes this path materially more reachable: a single backend restart during a fork can trigger it.
+The safety contract is that replacement-instance snapshots are trusted only when the settings save failed with backend-unavailable evidence. A future regression could broaden this trust after any settings-save failure and the current tests would not catch it.
 
 **Current behavior:**
-- `handleCreateSession` and `handleForkCodexThread` handle the `"recovering"` outcome from `adoptCreatedSessionResponse` differently.
-- `handleForkCodexThread` sets a notice keyed by a session id that may never materialize.
-- The notice would briefly point at a non-existent session record after a cross-instance recovery.
+- Backend-unavailable settings-save failures are covered and may adopt replacement-instance recovery snapshots.
+- Non-backend settings-save failures are not paired with a replacement-instance rejection test.
+- A broadening of replacement-instance trust after arbitrary preference errors could pass existing coverage.
 
 **Proposal:**
-- Mirror the `canUseCreatedSession` gate in `handleForkCodexThread` and skip notice-setting on `"recovering"` (and `"stale"` without `canOpenStaleCreatedSession`).
-- Or extract a shared helper that handles the three-way outcome consistently across both call sites.
+- Add a companion preferences test where `updateAppSettings` fails with a non-backend-unavailable error.
+- Return a replacement-instance `/api/state` snapshot.
+- Assert replacement preferences and sessions are not adopted.
 
-## Cross-instance create-response recovery integration test pins only the rejection half
+## Three recovery-dispatch sites missing `allowUnknownServerInstance: true` flag
 
-**Severity:** Low - `ui/src/App.session-lifecycle.test.tsx:2492-2592`. The new test "recovers instead of directly adopting an unknown cross-instance create response" asserts (a) the cross-instance session is NOT visible after the create response resolves and (b) `fetchState` is called for recovery. Both are correct rejection-side assertions. But both the cross-instance create response and the recovery snapshot have `sessions: []`, so the final negative assertion ("Cross Instance Session" not in document) passes regardless of whether the recovery snapshot was actually adopted, or whether it errored mid-adoption.
+**Severity:** Low - three pre-existing recovery-dispatch paths now sit asymmetrically next to the new `adoptActionState` helper, which always trusts replacement instances on recovery:
 
-The whole point of the new `allowUnknownServerInstance` flag is "trust the recovery probe to adopt a new id when we have evidence." That contract is currently unpinned by integration tests; only `state-revision.test.ts` covers the underlying primitive.
+- `ui/src/app-session-actions.ts:665` — `openCreatedSession` "stale-but-id-not-in-local-sessions" branch calls `requestActionRecoveryResync({ openSessionId: created.sessionId, paneId: preferredPaneId })` without trusting replacement instances.
+- `ui/src/app-session-actions.ts:1651` — `handleForkCodexThread` mirror of the same pattern.
+- `ui/src/app-live-state.ts:2165` — `handleLiveSessionResumeWatchdogTick` calls `requestStateResync({ allowAuthoritativeRollback: true, preserveWatchdogCooldown: true })` while the sibling `resumeStateIfNeeded` (line 2099) was just updated to also pass `allowUnknownServerInstance: true`. Both fire on machine-suspend signatures.
+
+These are exactly the create/fork-during-restart and wake-gap-during-restart races the rest of the diff is hardening against. If the backend restarts before the recovery probe lands, the probe's `/api/state` snapshot is rejected as an unknown server-instance and the user is stuck until the next SSE event.
 
 **Current behavior:**
-- Test verifies recovery is *triggered* but not *completed* with usable post-state.
-- Recovery snapshot is empty, so a buggy recovery adoption that errored silently would still pass.
-- Sibling test "opens the created session after action-recovery resync adopts a stale create response" (lines 2692-2694) shows the established pattern for verifying recovery success.
+- The new `adoptActionState` helper establishes a uniform "action-recovery probes trust replacement instances" contract.
+- Three pre-existing recovery dispatchers do not follow that contract.
+- Recovery from backend restart in those code paths blocks until SSE delivers a fresh state event.
 
 **Proposal:**
-- Resolve `actionRecoveryDeferred` with a non-empty session payload (e.g., `sessions: [makeSession("session-after-recovery", { name: "Recovery Session" })]`).
-- Assert `screen.findByLabelText("Message Recovery Session")` after recovery resolves.
+- Add `allowUnknownServerInstance: true` at each of the three sites to align with the helper's contract.
+- The new `shouldTrustAuthoritativeReplacementInstance` gate inside `startStateResyncLoop` already guards adoption, so this is purely about getting the option through the resync queue.
 
-## Protocol-drift recovery does not opt into `allowUnknownServerInstance`
+## `adoptActionState` `options` parameter is currently dead at every call site
 
-**Severity:** Low - `ui/src/app-live-state.ts:1054-1062`. The wire-contract violation case (`created.session.id !== created.sessionId`) calls `requestActionRecoveryResyncRef.current()` with no args, so `allowUnknownServerInstance` defaults to `false`. If a backend restart and a wire-contract violation coincide (rare), the recovery probe will reject the new-instance snapshot. The new cross-instance branch at line 1064-1078 explicitly handles the realistic restart case; this older sibling does not.
+**Severity:** Low - `ui/src/app-session-actions.ts:325-338`. The new helper declares `options?: { openSessionId?: string; paneId?: string | null }` and forwards it to `requestActionRecoveryResync` on the rejection path, but no caller supplies these args at any of the 13 use sites. Worse, the `options` is *not* threaded to the inner `adoptState(state)` call — so a future caller that DID supply them would get the resync hint but not the adoption-time hint, since `AdoptStateOptions` also accepts `openSessionId`/`paneId`.
 
 **Current behavior:**
-- Two "recovering" branches in `adoptCreatedSessionResponse` thread different recovery permissions.
-- The protocol-drift branch silently no-ops on a coinciding cross-instance restart.
-- Both branches signal "we already know something is off about this response", so the trust treatment should be consistent.
+- 13 call sites use `adoptActionState(state)` with no options.
+- The `options` parameter is type-safe but currently unexercised.
+- Only the recovery branch reads `options`; the success branch ignores it.
+- A future caller relying on this would silently fail to influence adoption-time behavior.
 
 **Proposal:**
-- Pass `allowUnknownServerInstance: true` in the protocol-drift recovery path so both branches converge on the same post-failure recovery contract.
+- Drop the `options` parameter until a caller needs it (YAGNI), OR
+- Thread `options` through to `adoptState(state, options)` as well so the contract is symmetric across success and failure paths.
+- If the asymmetry is intentional, add a one-line comment explaining why `options` matters only on the resync side.
 
-## `persistAppPreferences` fallback `adoptState` silently no-ops on cross-instance after restart
+## `handleCancelQueuedPrompt` catch-path "best-effort refresh" silently escalated to recovery resync
 
-**Severity:** Low - `ui/src/App.tsx:~1230`. `adoptState(state)` is called after `fetchState()` in the `persistAppPreferences` catch block. After this round, an SSE-tracked instance change between the failed `updateAppSettings` and this fallback `fetchState` will reject the snapshot (no `allowUnknownServerInstance` flag), leaving the preferences UI desynced from the actual backend until the next regular SSE state event arrives.
-
-Pre-fix the call would have silently accepted the new instance (the bug being fixed). Default-deny is still the safer baseline, but the silent no-op here is a small UX regression for the "user changed prefs while backend restarted" race.
+**Severity:** Low - `ui/src/app-session-actions.ts:1262-1269`. The catch path's post-error refresh was changed from `adoptState(state)` to `adoptActionState(state)`. Pre-change it was a documented best-effort refresh (comment: `// Keep the original request error below; state refresh is best-effort.`). Post-change, a stale `fetchState` response now triggers a full action-recovery resync chain that the previous code suppressed.
 
 **Current behavior:**
-- `persistAppPreferences` catch path calls `adoptState(state)` directly without recovery routing.
-- A cross-instance fallback response is silently rejected.
-- The preferences UI desyncs from the backend until SSE delivers a fresh state.
+- Catch path runs `fetchState()` and feeds the result to `adoptActionState`.
+- A stale or rejected snapshot fires a recovery dispatch with `allowUnknownServerInstance: true`.
+- The `// state refresh is best-effort.` comment is now misleading.
 
 **Proposal:**
-- Route this fallback through `requestStateResync({ allowAuthoritativeRollback: true })` so the recovery probe owns the trust decision.
-- Or pass `allowUnknownServerInstance: true` if the fallback should always trust the post-restart backend.
+- Either revert this site to bare `adoptState(state)` to preserve documented best-effort semantics, or update the comment to reflect that recovery may be triggered.
+- If recovery is intended, also flag the change in the commit message so future readers understand why the `cancelQueuedPrompt` failure path is now a recovery trigger.
 
 ## State-resync option bag is spread across 10+ parallel module-scoped refs
 
@@ -138,29 +137,6 @@ A single `pendingResyncOptionsRef: useRef<RequestStateResyncOptions | null>(null
 - Defer to a dedicated cleanup commit per CLAUDE.md.
 - Replace the parallel refs with `pendingResyncOptionsRef: useRef<PendingResyncState | null>(null)` carrying the combined option set.
 - Add a small reducer that ORs flag fields and overwrites session/pane targets on subsequent calls.
-
-## `state-revision.test.ts` `allowUnknownServerInstance` paired negative test missing
-
-**Severity:** Note - `ui/src/state-revision.test.ts:160-173`. The renamed test "authorized restart signal wins over the explicit allowRevisionDowngrade: false gate" combines `allowRevisionDowngrade: false` with `allowUnknownServerInstance: true` and asserts `true`. A regression that ignored `allowUnknownServerInstance` and instead used `force` to bypass the rule would still pass.
-
-**Current behavior:**
-- Single positive assertion locks the "flag set → adoption allowed" direction.
-- No paired negative test locks "flag NOT set → adoption rejected" in the same context.
-
-**Proposal:**
-- Add a one-line companion: same inputs WITHOUT `allowUnknownServerInstance` should return `false`.
-- Pin both directions of the boolean to make the flag's role unambiguous.
-
-## Recovery-probe `paneId`/`openSessionId` propagation untested
-
-**Severity:** Note - `ui/src/app-live-state.ts:1071-1077` passes `openSessionId` and `paneId` into `requestActionRecoveryResyncRef` so the recovery probe can re-open the right pane after the authoritative snapshot lands. No test asserts they survive into `pendingRecoveryOpenSessionIdRef` — a regression that swallowed the openSessionId would not be caught.
-
-**Current behavior:**
-- The cross-instance recovery branch threads `openSessionId` and `paneId` through.
-- No integration test verifies the values survive the recovery round-trip.
-
-**Proposal:**
-- Optional follow-up — variant where the recovery snapshot includes the original session id and the test asserts it gets auto-opened on the active pane.
 
 ## `SessionPaneView.tsx` past 2,000-line review threshold for TSX components
 
@@ -579,22 +555,6 @@ and miss metadata-first regressions.
 - Introduce a typed test helper for `DeltaEvent` fixtures and require
   `messageCount` on all session-scoped deltas.
 - Update hand-written fixtures to match the current SSE contract.
-
-## `messageUpdated` count validation lacks direct regression tests
-
-**Severity:** Low - invalid or regressing `messageCount` values on `messageUpdated` deltas can regress without a focused test failure.
-
-The reducer has protocol-violation logic for `messageUpdated` count metadata, but current coverage mostly exercises other delta shapes and fixture validity. Since `messageCount` now participates in hydration and resync decisions, invalid counts should be pinned directly.
-
-**Current behavior:**
-- `messageUpdatedDeltaHasProtocolViolation` rejects invalid and regressing counts in production code.
-- Tests do not directly cover `messageCount: Number.NaN` on a `messageUpdated` delta.
-- Tests do not directly cover a lower-than-retained or lower-than-hydrated `messageCount` producing `needsResync`.
-
-**Proposal:**
-- Add `live-updates.test.ts` coverage for `messageUpdated` with `messageCount: Number.NaN` returning `needsResync`.
-- Add coverage for a `messageUpdated` count regression below retained/hydrated state returning `needsResync`.
-- Prefer typed delta fixture helpers so future tests cannot omit required count metadata accidentally.
 
 ## Hydration retry loop can spam persistent failures
 

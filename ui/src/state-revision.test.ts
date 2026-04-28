@@ -136,6 +136,16 @@ describe("state revision helpers", () => {
       ).toBe(false);
     });
 
+    it("rejects a newer unseen replacement instance without restart evidence", () => {
+      expect(
+        shouldAdoptSnapshotRevision(237, 238, {
+          lastSeenServerInstanceId: "uuid-before-restart",
+          nextServerInstanceId: "uuid-after-restart",
+          seenServerInstanceIds: new Set(["uuid-before-restart"]),
+        }),
+      ).toBe(false);
+    });
+
     it("still rejects a stale revision on the same server instance", () => {
       // No restart — just an out-of-order stale response. Keep the
       // monotonic guard.
@@ -161,6 +171,14 @@ describe("state revision helpers", () => {
       // Safety-net poll used to pass { force: true, allowRevisionDowngrade: true }
       // unconditionally; after the unification it passes no options,
       // but the restart branch must still fire on genuine restarts.
+      expect(
+        shouldAdoptSnapshotRevision(5, 3, {
+          force: true,
+          allowRevisionDowngrade: false,
+          lastSeenServerInstanceId: "uuid-before",
+          nextServerInstanceId: "uuid-after",
+        }),
+      ).toBe(false);
       expect(
         shouldAdoptSnapshotRevision(5, 3, {
           force: true,

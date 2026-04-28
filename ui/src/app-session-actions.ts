@@ -12,11 +12,7 @@
 //
 // Split out of: ui/src/App.tsx (Slice 14 of docs/app-split-plan.md).
 
-import type {
-  Dispatch,
-  MutableRefObject,
-  SetStateAction,
-} from "react";
+import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import {
   archiveCodexThread,
   cancelQueuedPrompt,
@@ -42,9 +38,7 @@ import {
   type StateResponse,
 } from "./api";
 import type { UseAppLiveStateReturn } from "./app-live-state";
-import {
-  startActivePromptPoll,
-} from "./active-prompt-poll";
+import { startActivePromptPoll } from "./active-prompt-poll";
 import {
   getErrorMessage,
   releaseDraftAttachments,
@@ -54,10 +48,7 @@ import {
   type SessionAgentCommandMap,
   type SessionFlagMap,
 } from "./app-utils";
-import type {
-  SessionErrorMap,
-  SessionNoticeMap,
-} from "./app-shell-internals";
+import type { SessionErrorMap, SessionNoticeMap } from "./app-shell-internals";
 import { CREATE_SESSION_WORKSPACE_ID } from "./app-shell-internals";
 import {
   describeCodexModelAdjustmentNotice,
@@ -95,7 +86,11 @@ import type {
   SessionSettingsField,
   SessionSettingsValue,
 } from "./types";
-import { resolveProjectRemoteId, isLocalRemoteId, LOCAL_REMOTE_ID } from "./remotes";
+import {
+  resolveProjectRemoteId,
+  isLocalRemoteId,
+  LOCAL_REMOTE_ID,
+} from "./remotes";
 
 type UseAppSessionActionsLookups = {
   sessionLookup: Map<string, Session>;
@@ -168,17 +163,12 @@ type UseAppSessionActionsParams = {
     nextWorkspace: WorkspaceState,
     side?: "left" | "right",
   ) => WorkspaceState;
-  reportRequestError: (
-    error: unknown,
-    options?: { message?: string },
-  ) => void;
-  requestActionRecoveryResync: (
-    options?: {
-      openSessionId?: string;
-      paneId?: string | null;
-      allowUnknownServerInstance?: boolean;
-    },
-  ) => void;
+  reportRequestError: (error: unknown, options?: { message?: string }) => void;
+  requestActionRecoveryResync: (options?: {
+    openSessionId?: string;
+    paneId?: string | null;
+    allowUnknownServerInstance?: boolean;
+  }) => void;
 };
 
 type HandleNewSessionArgs = {
@@ -236,7 +226,10 @@ export type UseAppSessionActionsReturn = {
   ) => Promise<void>;
   handleStopSession: (sessionId: string) => Promise<void>;
   executeKillSession: (sessionId: string) => Promise<void>;
-  handleRenameSession: (sessionId: string, nextName: string) => Promise<boolean>;
+  handleRenameSession: (
+    sessionId: string,
+    nextName: string,
+  ) => Promise<boolean>;
   handleSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -329,20 +322,41 @@ export function useAppSessionActions(
     activePromptPollSessionIdRef.current = null;
   }
 
+  function adoptActionState(
+    state: StateResponse,
+    options?: { openSessionId?: string; paneId?: string | null },
+  ) {
+    const adopted = adoptState(state);
+    if (!adopted) {
+      requestActionRecoveryResync(
+        options
+          ? { ...options, allowUnknownServerInstance: true }
+          : { allowUnknownServerInstance: true },
+      );
+    }
+    return adopted;
+  }
+
   function startStaleSendResponseRecoveryPoll(sessionId: string) {
     stopStaleSendResponseRecoveryPoll();
     const cancelPoll = startActivePromptPoll({
       fetchState,
       isMounted: () => isMountedRef.current,
       onState: (freshState) => {
-        adoptState(freshState);
+        const adopted = adoptState(freshState, {
+          allowUnknownServerInstance: true,
+        });
         const shouldStop = !freshState.sessions?.some(
           (session) => session.id === sessionId && session.status === "active",
         );
-        if (shouldStop && activePromptPollSessionIdRef.current === sessionId) {
+        if (
+          adopted &&
+          shouldStop &&
+          activePromptPollSessionIdRef.current === sessionId
+        ) {
           activePromptPollSessionIdRef.current = null;
         }
-        return shouldStop;
+        return adopted && shouldStop;
       },
     });
     activePromptPollSessionIdRef.current = sessionId;
@@ -643,7 +657,9 @@ export function useAppSessionActions(
     agent: AgentType,
   ) {
     const canOpenStaleCreatedSession = () => {
-      if (sessionsRef.current.some((session) => session.id === created.sessionId)) {
+      if (
+        sessionsRef.current.some((session) => session.id === created.sessionId)
+      ) {
         return true;
       }
       requestActionRecoveryResync({
@@ -657,7 +673,8 @@ export function useAppSessionActions(
       paneId,
     });
     const canUseCreatedSession =
-      adopted === "adopted" || (adopted === "stale" && canOpenStaleCreatedSession());
+      adopted === "adopted" ||
+      (adopted === "stale" && canOpenStaleCreatedSession());
     if (adopted === "stale" && canUseCreatedSession) {
       setWorkspace((current) =>
         applyControlPanelLayout(
@@ -688,8 +705,7 @@ export function useAppSessionActions(
     const expandedText = expandedTextOverride?.trim() || null;
     const normalizedExpandedText =
       expandedText && expandedText !== prompt ? expandedText : null;
-    const attachments =
-      draftAttachmentsBySessionIdRef.current[sessionId] ?? [];
+    const attachments = draftAttachmentsBySessionIdRef.current[sessionId] ?? [];
     if (!prompt && attachments.length === 0) {
       return false;
     }
@@ -1066,7 +1082,9 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return false;
       }
-      adoptState(created.state);
+      if (!adoptActionState(created.state)) {
+        return false;
+      }
       setSelectedProjectId(created.projectId);
       setNewProjectRootPath("");
       setNewProjectRemoteId(LOCAL_REMOTE_ID);
@@ -1125,7 +1143,9 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      adoptState(state);
+      if (!adoptActionState(state)) {
+        return;
+      }
       setRequestError(null);
     } catch (error) {
       if (!isMountedRef.current) {
@@ -1145,7 +1165,9 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      adoptState(state);
+      if (!adoptActionState(state)) {
+        return;
+      }
       setRequestError(null);
     } catch (error) {
       if (!isMountedRef.current) {
@@ -1171,7 +1193,9 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      adoptState(state);
+      if (!adoptActionState(state)) {
+        return;
+      }
       setRequestError(null);
     } catch (error) {
       if (!isMountedRef.current) {
@@ -1191,7 +1215,9 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      adoptState(state);
+      if (!adoptActionState(state)) {
+        return;
+      }
       setRequestError(null);
     } catch (error) {
       if (!isMountedRef.current) {
@@ -1225,7 +1251,9 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      adoptState(state);
+      if (!adoptActionState(state)) {
+        return;
+      }
       setRequestError(null);
     } catch (error) {
       if (!isMountedRef.current) {
@@ -1234,7 +1262,7 @@ export function useAppSessionActions(
       try {
         const state = await fetchState();
         if (isMountedRef.current) {
-          adoptState(state);
+          adoptActionState(state);
         }
       } catch {
         // Keep the original request error below; state refresh is best-effort.
@@ -1255,7 +1283,9 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      adoptState(state);
+      if (!adoptActionState(state)) {
+        return;
+      }
       setRequestError(null);
     } catch (error) {
       if (!isMountedRef.current) {
@@ -1279,7 +1309,9 @@ export function useAppSessionActions(
         return;
       }
 
-      adoptState(state);
+      if (!adoptActionState(state)) {
+        return;
+      }
       setRequestError(null);
     } catch (error) {
       if (!isMountedRef.current) {
@@ -1306,7 +1338,9 @@ export function useAppSessionActions(
         return false;
       }
 
-      adoptState(state);
+      if (!adoptActionState(state)) {
+        return false;
+      }
       setRequestError(null);
       return true;
     } catch (error) {
@@ -1420,7 +1454,9 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      adoptState(state);
+      if (!adoptActionState(state)) {
+        return;
+      }
       const updatedSession =
         state.sessions.find((entry) => entry.id === sessionId) ?? null;
       const nextNotice =
@@ -1501,7 +1537,9 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      adoptState(state);
+      if (!adoptActionState(state)) {
+        return;
+      }
       if (previousSession?.agent === "Codex") {
         const refreshedSession =
           state.sessions.find((entry) => entry.id === sessionId) ?? null;
@@ -1568,7 +1606,9 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      adoptState(state);
+      if (!adoptActionState(state)) {
+        return;
+      }
       setSessionSettingNotices((current) => ({
         ...current,
         [sessionId]: successNotice,
@@ -1613,6 +1653,8 @@ export function useAppSessionActions(
           paneId: preferredPaneId,
         });
       }
+      const canUseCreatedSession =
+        adopted === "adopted" || canOpenStaleCreatedSession;
       if (canOpenStaleCreatedSession) {
         setWorkspace((current) =>
           applyControlPanelLayout(
@@ -1624,12 +1666,14 @@ export function useAppSessionActions(
           ),
         );
       }
-      setSessionSettingNotices((current) => ({
-        ...current,
-        [sessionId]: "Forked the live Codex thread into a new session.",
-        [created.sessionId]:
-          "This session is attached to a forked Codex thread. Earlier Codex history was restored from Codex where available.",
-      }));
+      if (canUseCreatedSession) {
+        setSessionSettingNotices((current) => ({
+          ...current,
+          [sessionId]: "Forked the live Codex thread into a new session.",
+          [created.sessionId]:
+            "This session is attached to a forked Codex thread. Earlier Codex history was restored from Codex where available.",
+        }));
+      }
     } catch (error) {
       if (!isMountedRef.current) {
         return;

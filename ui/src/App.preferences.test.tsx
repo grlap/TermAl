@@ -433,17 +433,19 @@ describe("App preferences", () => {
     try {
       await renderApp();
       await act(async () => {
-        fetchStateDeferred.resolve(makeStateResponse({
-          revision: 1,
-          preferences: {
-            defaultCodexReasoningEffort: "medium",
-            defaultClaudeEffort: "default",
-          },
-          projects: [],
-          orchestrators: [],
-          workspaces: [],
-          sessions: [],
-        }));
+        fetchStateDeferred.resolve(
+          makeStateResponse({
+            revision: 1,
+            preferences: {
+              defaultCodexReasoningEffort: "medium",
+              defaultClaudeEffort: "default",
+            },
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }),
+        );
         await flushUiWork();
       });
 
@@ -461,9 +463,7 @@ describe("App preferences", () => {
         screen.queryByRole("heading", { level: 3, name: "Font sizes" }),
       ).not.toBeInTheDocument();
 
-      await clickAndSettle(
-        screen.getByRole("tab", { name: "Editor & UI" }),
-      );
+      await clickAndSettle(screen.getByRole("tab", { name: "Editor & UI" }));
 
       expect(
         screen.getByRole("heading", { level: 3, name: "Font sizes" }),
@@ -480,6 +480,158 @@ describe("App preferences", () => {
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+  });
+
+  it("adopts a replacement-instance preferences fallback after a failed settings save", async () => {
+    await withSuppressedActWarnings(async () => {
+      // This flow intentionally exercises a detached async settings-save
+      // rejection. The fallback fetch is resolved in act below; keep the known
+      // React warning local so the assertion remains load-bearing.
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      type FetchStateResult = Awaited<ReturnType<typeof api.fetchState>>;
+      const createFetchStateDeferred = () => createDeferred<FetchStateResult>();
+      let initialStateDeferred: ReturnType<
+        typeof createFetchStateDeferred
+      > | null = null;
+      let replacementFallbackDeferred: ReturnType<
+        typeof createFetchStateDeferred
+      > | null = null;
+      let fetchStateCallCount = 0;
+      let useReplacementFallback = false;
+      let rejectUpdateAppSettings: (error: unknown) => void = () => {};
+      const updateAppSettingsPromise = new Promise<
+        Awaited<ReturnType<typeof api.updateAppSettings>>
+      >((_resolve, reject) => {
+        rejectUpdateAppSettings = reject;
+      });
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => {
+          fetchStateCallCount += 1;
+          if (useReplacementFallback) {
+            replacementFallbackDeferred ??= createFetchStateDeferred();
+            return replacementFallbackDeferred.promise;
+          }
+          initialStateDeferred ??= createFetchStateDeferred();
+          return initialStateDeferred.promise;
+        });
+      const updateAppSettingsSpy = vi
+        .spyOn(api, "updateAppSettings")
+        .mockImplementation(() => updateAppSettingsPromise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const currentState = makeStateResponse({
+          revision: 5,
+          serverInstanceId: "current-instance",
+          preferences: {
+            defaultCodexReasoningEffort: "medium",
+            defaultClaudeApprovalMode: "ask",
+            defaultClaudeEffort: "default",
+          },
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [],
+        });
+        if (initialStateDeferred) {
+          await act(async () => {
+            initialStateDeferred?.resolve(currentState);
+            await flushUiWork();
+          });
+        } else {
+          await dispatchOpenedStateEvent(latestEventSource(), currentState);
+        }
+
+        useReplacementFallback = true;
+        const fetchStateCallsBeforeSave = fetchStateCallCount;
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Open preferences" }),
+        );
+        await clickAndSettle(screen.getByRole("tab", { name: "Codex" }));
+        await selectComboboxOption("Default reasoning effort", /high/i);
+
+        await waitFor(() => {
+          expect(updateAppSettingsSpy).toHaveBeenCalledWith({
+            defaultCodexReasoningEffort: "high",
+          });
+        });
+        await act(async () => {
+          rejectUpdateAppSettings(
+            new api.ApiRequestError(
+              "backend-unavailable",
+              "backend restarted",
+              {
+                restartRequired: true,
+              },
+            ),
+          );
+          await flushUiWork();
+        });
+        await waitFor(() => {
+          expect(fetchStateSpy).toHaveBeenCalledTimes(
+            fetchStateCallsBeforeSave + 1,
+          );
+        });
+        const replacementState = makeStateResponse({
+          revision: 6,
+          serverInstanceId: "replacement-instance",
+          preferences: {
+            defaultCodexReasoningEffort: "low",
+            defaultClaudeApprovalMode: "ask",
+            defaultClaudeEffort: "default",
+          },
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [
+            makeSession("session-replacement", {
+              name: "Replacement Session",
+              preview: "Recovered preferences fallback",
+            }),
+          ],
+        });
+        await act(async () => {
+          replacementFallbackDeferred?.resolve(replacementState);
+          await flushUiWork();
+        });
+        await waitFor(() => {
+          expect(
+            screen.getByRole("combobox", { name: "Default reasoning effort" }),
+          ).toHaveTextContent("low");
+        });
+        await clickAndSettle(
+          screen.getByRole("button", { name: "Close dialog" }),
+        );
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Sessions" }),
+        );
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        expect(
+          within(sessionList).getByText("Replacement Session"),
+        ).toBeInTheDocument();
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        updateAppSettingsSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
   });
 
   it("persists UI density changes from the appearance preferences", async () => {
@@ -505,26 +657,26 @@ describe("App preferences", () => {
     try {
       await renderApp();
       await act(async () => {
-        fetchStateDeferred.resolve(makeStateResponse({
-          revision: 1,
-          preferences: {
-            defaultCodexReasoningEffort: "medium",
-            defaultClaudeEffort: "default",
-          },
-          projects: [],
-          orchestrators: [],
-          workspaces: [],
-          sessions: [],
-        }));
+        fetchStateDeferred.resolve(
+          makeStateResponse({
+            revision: 1,
+            preferences: {
+              defaultCodexReasoningEffort: "medium",
+              defaultClaudeEffort: "default",
+            },
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }),
+        );
         await flushUiWork();
       });
 
       await clickAndSettle(
         await screen.findByRole("button", { name: "Open preferences" }),
       );
-      await clickAndSettle(
-        screen.getByRole("tab", { name: "Editor & UI" }),
-      );
+      await clickAndSettle(screen.getByRole("tab", { name: "Editor & UI" }));
 
       const densitySlider = screen.getByRole("slider", { name: "UI density" });
       expect((densitySlider as HTMLInputElement).value).toBe("100");
@@ -569,17 +721,19 @@ describe("App preferences", () => {
     try {
       await renderApp();
       await act(async () => {
-        fetchStateDeferred.resolve(makeStateResponse({
-          revision: 1,
-          preferences: {
-            defaultCodexReasoningEffort: "medium",
-            defaultClaudeEffort: "default",
-          },
-          projects: [],
-          orchestrators: [],
-          workspaces: [],
-          sessions: [],
-        }));
+        fetchStateDeferred.resolve(
+          makeStateResponse({
+            revision: 1,
+            preferences: {
+              defaultCodexReasoningEffort: "medium",
+              defaultClaudeEffort: "default",
+            },
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }),
+        );
         await flushUiWork();
       });
 

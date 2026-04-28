@@ -1278,6 +1278,94 @@ describe("applyDeltaToSessions", () => {
     });
   });
 
+  it("requests a resync when a whole-message update carries an invalid message count", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messageCount: 1,
+        messages: [
+          {
+            id: "approval-1",
+            type: "approval",
+            timestamp: "10:00",
+            author: "assistant",
+            title: "Run command?",
+            command: "cargo check",
+            detail: "Allow this command",
+            decision: "pending",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageUpdated",
+      revision: 4,
+      sessionId: "session-a",
+      messageId: "approval-1",
+      messageIndex: 0,
+      messageCount: Number.NaN,
+      message: {
+        id: "approval-1",
+        type: "approval",
+        timestamp: "10:00",
+        author: "assistant",
+        title: "Run command?",
+        command: "cargo check",
+        detail: "Allow this command",
+        decision: "accepted",
+      },
+      preview: "Approved",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("requests a resync when a whole-message update regresses the known message count", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messageCount: 2,
+        messages: [
+          {
+            id: "approval-1",
+            type: "approval",
+            timestamp: "10:00",
+            author: "assistant",
+            title: "Run command?",
+            command: "cargo check",
+            detail: "Allow this command",
+            decision: "pending",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageUpdated",
+      revision: 4,
+      sessionId: "session-a",
+      messageId: "approval-1",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "approval-1",
+        type: "approval",
+        timestamp: "10:00",
+        author: "assistant",
+        title: "Run command?",
+        command: "cargo check",
+        detail: "Allow this command",
+        decision: "accepted",
+      },
+      preview: "Approved",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
   it("applies whole-message updates when the message exists at a different index", () => {
     const sessions = [
       makeSession("session-a", {

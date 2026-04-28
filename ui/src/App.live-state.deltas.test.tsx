@@ -1605,7 +1605,7 @@ describe("App live state - delta-gap core", () => {
         await dispatchStateEvent(
           eventSource,
           makeStateResponse({
-            revision: 4,
+            revision: 6,
             serverInstanceId: "unknown-old-instance",
             projects: [],
             orchestrators: [],

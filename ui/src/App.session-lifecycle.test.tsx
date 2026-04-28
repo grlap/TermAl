@@ -377,9 +377,8 @@ describe("App session lifecycle", () => {
           throw new Error("Session list not found");
         }
 
-        const sessionRowLabel = await within(sessionList).findByText(
-          "Session 1",
-        );
+        const sessionRowLabel =
+          await within(sessionList).findByText("Session 1");
         const sessionRowButton = sessionRowLabel.closest("button");
         if (!sessionRowButton) {
           throw new Error("Session row button not found");
@@ -607,9 +606,8 @@ describe("App session lifecycle", () => {
           throw new Error("Session list not found");
         }
 
-        const sessionRowLabel = await within(sessionList).findByText(
-          "Session 1",
-        );
+        const sessionRowLabel =
+          await within(sessionList).findByText("Session 1");
         const sessionRowButton = sessionRowLabel.closest("button");
         if (!sessionRowButton) {
           throw new Error("Session row button not found");
@@ -798,9 +796,8 @@ describe("App session lifecycle", () => {
           throw new Error("Session list not found");
         }
 
-        const sessionRowLabel = await within(sessionList).findByText(
-          "Session 1",
-        );
+        const sessionRowLabel =
+          await within(sessionList).findByText("Session 1");
         const sessionRowButton = sessionRowLabel.closest("button");
         if (!sessionRowButton) {
           throw new Error("Session row button not found");
@@ -955,9 +952,8 @@ describe("App session lifecycle", () => {
           throw new Error("Session list not found");
         }
 
-        const sessionRowLabel = await within(sessionList).findByText(
-          "Session 1",
-        );
+        const sessionRowLabel =
+          await within(sessionList).findByText("Session 1");
         const sessionRowButton = sessionRowLabel.closest("button");
         if (!sessionRowButton) {
           throw new Error("Session row button not found");
@@ -1215,42 +1211,44 @@ describe("App session lifecycle", () => {
           ).not.toBeInTheDocument();
         });
         await act(async () => {
-          refreshSessionModelOptionsDeferred.resolve(makeStateResponse({
-            revision: 3,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              {
-                id: "session-1",
-                name: "Codex 1",
-                emoji: "O",
-                agent: "Codex",
-                workdir: "/tmp",
-                model: "gpt-5.4",
-                modelOptions: [
-                  {
-                    label: "gpt-5.4",
-                    value: "gpt-5.4",
-                    description: "Latest frontier agentic coding model.",
-                    defaultReasoningEffort: "medium",
-                    supportedReasoningEfforts: [
-                      "low",
-                      "medium",
-                      "high",
-                      "xhigh",
-                    ],
-                  },
-                ],
-                approvalPolicy: "never",
-                reasoningEffort: "medium",
-                sandboxMode: "workspace-write",
-                status: "idle",
-                preview: "Ready for a prompt.",
-                messages: [],
-              },
-            ],
-          }));
+          refreshSessionModelOptionsDeferred.resolve(
+            makeStateResponse({
+              revision: 3,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                {
+                  id: "session-1",
+                  name: "Codex 1",
+                  emoji: "O",
+                  agent: "Codex",
+                  workdir: "/tmp",
+                  model: "gpt-5.4",
+                  modelOptions: [
+                    {
+                      label: "gpt-5.4",
+                      value: "gpt-5.4",
+                      description: "Latest frontier agentic coding model.",
+                      defaultReasoningEffort: "medium",
+                      supportedReasoningEfforts: [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                      ],
+                    },
+                  ],
+                  approvalPolicy: "never",
+                  reasoningEffort: "medium",
+                  sandboxMode: "workspace-write",
+                  status: "idle",
+                  preview: "Ready for a prompt.",
+                  messages: [],
+                },
+              ],
+            }),
+          );
           await flushUiWork();
         });
         await screen.findAllByText("Codex 1");
@@ -1511,42 +1509,44 @@ describe("App session lifecycle", () => {
 
         expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith("session-1");
         await act(async () => {
-          refreshSessionModelOptionsDeferred.resolve(makeStateResponse({
-            revision: 3,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-1", {
-                name: "Codex 1",
-                status: "active",
-                preview: "run the command",
-                modelOptions: [
-                  {
-                    label: "gpt-5.4",
-                    value: "gpt-5.4",
-                    description: "Latest frontier agentic coding model.",
-                    defaultReasoningEffort: "medium",
-                    supportedReasoningEfforts: [
-                      "low",
-                      "medium",
-                      "high",
-                      "xhigh",
-                    ],
-                  },
-                ],
-                messages: [
-                  {
-                    id: "message-user-1",
-                    type: "text",
-                    timestamp: "10:00",
-                    author: "you",
-                    text: "run the command",
-                  },
-                ],
-              }),
-            ],
-          }));
+          refreshSessionModelOptionsDeferred.resolve(
+            makeStateResponse({
+              revision: 3,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Codex 1",
+                  status: "active",
+                  preview: "run the command",
+                  modelOptions: [
+                    {
+                      label: "gpt-5.4",
+                      value: "gpt-5.4",
+                      description: "Latest frontier agentic coding model.",
+                      defaultReasoningEffort: "medium",
+                      supportedReasoningEfforts: [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                      ],
+                    },
+                  ],
+                  messages: [
+                    {
+                      id: "message-user-1",
+                      type: "text",
+                      timestamp: "10:00",
+                      author: "you",
+                      text: "run the command",
+                    },
+                  ],
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
         await settleAsyncUi();
@@ -1618,13 +1618,15 @@ describe("App session lifecycle", () => {
       try {
         await renderApp();
         await act(async () => {
-          fetchStateDeferred.resolve(makeStateResponse({
-            revision: 1,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          fetchStateDeferred.resolve(
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -1664,38 +1666,40 @@ describe("App session lifecycle", () => {
           );
         });
         await act(async () => {
-          refreshSessionModelOptionsDeferred.resolve(makeStateResponse({
-            revision: 3,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              {
-                id: "session-1",
-                name: "Codex 1",
-                emoji: "O",
-                agent: "Codex",
-                workdir: "/tmp",
-                model: "gpt-5-codex-mini",
-                modelOptions: [
-                  {
-                    label: "GPT-5 Codex Mini",
-                    value: "gpt-5-codex-mini",
-                    description:
-                      "Optimized for codex. Cheaper, faster, but less capable.",
-                    defaultReasoningEffort: "medium",
-                    supportedReasoningEfforts: ["medium", "high"],
-                  },
-                ],
-                approvalPolicy: "never",
-                reasoningEffort: "medium",
-                sandboxMode: "workspace-write",
-                status: "idle",
-                preview: "Ready for a prompt.",
-                messages: [],
-              },
-            ],
-          }));
+          refreshSessionModelOptionsDeferred.resolve(
+            makeStateResponse({
+              revision: 3,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                {
+                  id: "session-1",
+                  name: "Codex 1",
+                  emoji: "O",
+                  agent: "Codex",
+                  workdir: "/tmp",
+                  model: "gpt-5-codex-mini",
+                  modelOptions: [
+                    {
+                      label: "GPT-5 Codex Mini",
+                      value: "gpt-5-codex-mini",
+                      description:
+                        "Optimized for codex. Cheaper, faster, but less capable.",
+                      defaultReasoningEffort: "medium",
+                      supportedReasoningEfforts: ["medium", "high"],
+                    },
+                  ],
+                  approvalPolicy: "never",
+                  reasoningEffort: "medium",
+                  sandboxMode: "workspace-write",
+                  status: "idle",
+                  preview: "Ready for a prompt.",
+                  messages: [],
+                },
+              ],
+            }),
+          );
           await flushUiWork();
         });
         await clickAndSettle(
@@ -1760,27 +1764,27 @@ describe("App session lifecycle", () => {
       try {
         await renderApp();
         await act(async () => {
-          fetchStateDeferred.resolve(makeStateResponse({
-            revision: 1,
-            preferences: {
-              defaultCodexReasoningEffort: "medium",
-              defaultClaudeApprovalMode: "auto-approve",
-              defaultClaudeEffort: "default",
-            },
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          fetchStateDeferred.resolve(
+            makeStateResponse({
+              revision: 1,
+              preferences: {
+                defaultCodexReasoningEffort: "medium",
+                defaultClaudeApprovalMode: "auto-approve",
+                defaultClaudeEffort: "default",
+              },
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
 
         await clickAndSettle(
           await screen.findByRole("button", { name: "Open preferences" }),
         );
-        await clickAndSettle(
-          screen.getByRole("tab", { name: "Codex" }),
-        );
+        await clickAndSettle(screen.getByRole("tab", { name: "Codex" }));
         await selectComboboxOption("Default reasoning effort", /high/i);
         await waitFor(() => {
           expect(updateAppSettingsSpy).toHaveBeenCalledWith({
@@ -1788,17 +1792,19 @@ describe("App session lifecycle", () => {
           });
         });
         await act(async () => {
-          updateSettingsDeferred.resolve(makeStateResponse({
-            revision: 2,
-            preferences: {
-              defaultCodexReasoningEffort: "high",
-              defaultClaudeEffort: "default",
-            },
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          updateSettingsDeferred.resolve(
+            makeStateResponse({
+              revision: 2,
+              preferences: {
+                defaultCodexReasoningEffort: "high",
+                defaultClaudeEffort: "default",
+              },
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
         await clickAndSettle(
@@ -1850,32 +1856,34 @@ describe("App session lifecycle", () => {
           );
         });
         await act(async () => {
-          refreshSessionModelOptionsDeferred.resolve(makeStateResponse({
-            revision: 4,
-            preferences: {
-              defaultCodexReasoningEffort: "high",
-              defaultClaudeEffort: "default",
-            },
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              {
-                id: "session-1",
-                name: "Codex 1",
-                emoji: "O",
-                agent: "Codex",
-                workdir: "/tmp",
-                model: "gpt-5.4",
-                approvalPolicy: "never",
-                reasoningEffort: "high",
-                sandboxMode: "workspace-write",
-                status: "idle",
-                preview: "Ready for a prompt.",
-                messages: [],
+          refreshSessionModelOptionsDeferred.resolve(
+            makeStateResponse({
+              revision: 4,
+              preferences: {
+                defaultCodexReasoningEffort: "high",
+                defaultClaudeEffort: "default",
               },
-            ],
-          }));
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                {
+                  id: "session-1",
+                  name: "Codex 1",
+                  emoji: "O",
+                  agent: "Codex",
+                  workdir: "/tmp",
+                  model: "gpt-5.4",
+                  approvalPolicy: "never",
+                  reasoningEffort: "high",
+                  sandboxMode: "workspace-write",
+                  status: "idle",
+                  preview: "Ready for a prompt.",
+                  messages: [],
+                },
+              ],
+            }),
+          );
           await flushUiWork();
         });
         await settleAsyncUi();
@@ -1931,26 +1939,26 @@ describe("App session lifecycle", () => {
       try {
         await renderApp();
         await act(async () => {
-          fetchStateDeferred.resolve(makeStateResponse({
-            revision: 1,
-            preferences: {
-              defaultCodexReasoningEffort: "medium",
-              defaultClaudeEffort: "default",
-            },
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          fetchStateDeferred.resolve(
+            makeStateResponse({
+              revision: 1,
+              preferences: {
+                defaultCodexReasoningEffort: "medium",
+                defaultClaudeEffort: "default",
+              },
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
 
         await clickAndSettle(
           await screen.findByRole("button", { name: "Open preferences" }),
         );
-        await clickAndSettle(
-          screen.getByRole("tab", { name: "Claude" }),
-        );
+        await clickAndSettle(screen.getByRole("tab", { name: "Claude" }));
         await selectComboboxOption("Default Claude effort", /max/i);
         await waitFor(() => {
           expect(updateAppSettingsSpy).toHaveBeenCalledWith({
@@ -1958,18 +1966,20 @@ describe("App session lifecycle", () => {
           });
         });
         await act(async () => {
-          updateSettingsDeferred.resolve(makeStateResponse({
-            revision: 2,
-            preferences: {
-              defaultCodexReasoningEffort: "medium",
-              defaultClaudeApprovalMode: "auto-approve",
-              defaultClaudeEffort: "max",
-            },
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          updateSettingsDeferred.resolve(
+            makeStateResponse({
+              revision: 2,
+              preferences: {
+                defaultCodexReasoningEffort: "medium",
+                defaultClaudeApprovalMode: "auto-approve",
+                defaultClaudeEffort: "max",
+              },
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
         await clickAndSettle(
@@ -2022,32 +2032,34 @@ describe("App session lifecycle", () => {
           );
         });
         await act(async () => {
-          refreshSessionModelOptionsDeferred.resolve(makeStateResponse({
-            revision: 4,
-            preferences: {
-              defaultCodexReasoningEffort: "medium",
-              defaultClaudeApprovalMode: "auto-approve",
-              defaultClaudeEffort: "max",
-            },
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              {
-                id: "session-1",
-                name: "Claude 1",
-                emoji: "C",
-                agent: "Claude",
-                workdir: "/tmp",
-                model: "claude-sonnet-4-20250514",
-                claudeApprovalMode: "auto-approve",
-                claudeEffort: "max",
-                status: "idle",
-                preview: "Ready for a prompt.",
-                messages: [],
+          refreshSessionModelOptionsDeferred.resolve(
+            makeStateResponse({
+              revision: 4,
+              preferences: {
+                defaultCodexReasoningEffort: "medium",
+                defaultClaudeApprovalMode: "auto-approve",
+                defaultClaudeEffort: "max",
               },
-            ],
-          }));
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                {
+                  id: "session-1",
+                  name: "Claude 1",
+                  emoji: "C",
+                  agent: "Claude",
+                  workdir: "/tmp",
+                  model: "claude-sonnet-4-20250514",
+                  claudeApprovalMode: "auto-approve",
+                  claudeEffort: "max",
+                  status: "idle",
+                  preview: "Ready for a prompt.",
+                  messages: [],
+                },
+              ],
+            }),
+          );
           await flushUiWork();
         });
         await settleAsyncUi();
@@ -2343,29 +2355,31 @@ describe("App session lifecycle", () => {
         });
 
         await act(async () => {
-          refreshSessionModelOptionsDeferred.resolve(makeStateResponse({
-            revision: 3,
-            preferences: {
-              defaultCodexReasoningEffort: "medium",
-              defaultClaudeEffort: "default",
-              remotes,
-            },
-            projects,
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-1", {
-                name: "Remote Session",
-                workdir: "/remote/repo/subdir",
-                projectId: "project-remote",
-              }),
-              makeSession("session-2", {
-                name: "Codex 2",
-                workdir: "/remote/repo",
-                projectId: "project-remote",
-              }),
-            ],
-          }));
+          refreshSessionModelOptionsDeferred.resolve(
+            makeStateResponse({
+              revision: 3,
+              preferences: {
+                defaultCodexReasoningEffort: "medium",
+                defaultClaudeEffort: "default",
+                remotes,
+              },
+              projects,
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Remote Session",
+                  workdir: "/remote/repo/subdir",
+                  projectId: "project-remote",
+                }),
+                makeSession("session-2", {
+                  name: "Codex 2",
+                  workdir: "/remote/repo",
+                  projectId: "project-remote",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2413,13 +2427,16 @@ describe("App session lifecycle", () => {
 
         await act(async () => {
           eventSource.dispatchOpen();
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 1,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2434,13 +2451,16 @@ describe("App session lifecycle", () => {
         });
 
         await act(async () => {
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 3,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 3,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2466,13 +2486,15 @@ describe("App session lifecycle", () => {
         });
 
         await act(async () => {
-          actionRecoveryDeferred.resolve(makeStateResponse({
-            revision: 4,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          actionRecoveryDeferred.resolve(
+            makeStateResponse({
+              revision: 4,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2520,14 +2542,17 @@ describe("App session lifecycle", () => {
 
         await act(async () => {
           eventSource.dispatchOpen();
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 5,
-            serverInstanceId: "current-instance",
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 5,
+              serverInstanceId: "current-instance",
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2565,20 +2590,26 @@ describe("App session lifecycle", () => {
         });
 
         await act(async () => {
-          actionRecoveryDeferred.resolve(makeStateResponse({
-            revision: 6,
-            serverInstanceId: "current-instance",
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          actionRecoveryDeferred.resolve(
+            makeStateResponse({
+              revision: 6,
+              serverInstanceId: "replacement-instance",
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-cross-instance", {
+                  name: "Cross Instance Session",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 
         expect(
-          screen.queryByText("Cross Instance Session"),
-        ).not.toBeInTheDocument();
+          await screen.findByLabelText("Message Cross Instance Session"),
+        ).toBeInTheDocument();
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
@@ -2622,13 +2653,16 @@ describe("App session lifecycle", () => {
 
         await act(async () => {
           eventSource.dispatchOpen();
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 1,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2643,13 +2677,16 @@ describe("App session lifecycle", () => {
         });
 
         await act(async () => {
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 3,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 3,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2675,17 +2712,19 @@ describe("App session lifecycle", () => {
         });
 
         await act(async () => {
-          actionRecoveryDeferred.resolve(makeStateResponse({
-            revision: 4,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-recovered", {
-                name: "Recovered Session",
-              }),
-            ],
-          }));
+          actionRecoveryDeferred.resolve(
+            makeStateResponse({
+              revision: 4,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-recovered", {
+                  name: "Recovered Session",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2735,13 +2774,16 @@ describe("App session lifecycle", () => {
 
         await act(async () => {
           eventSource.dispatchOpen();
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 1,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2756,13 +2798,16 @@ describe("App session lifecycle", () => {
         });
 
         await act(async () => {
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 3,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 3,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2788,13 +2833,15 @@ describe("App session lifecycle", () => {
         });
 
         await act(async () => {
-          actionRecoveryDeferred.resolve(makeStateResponse({
-            revision: 4,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [],
-          }));
+          actionRecoveryDeferred.resolve(
+            makeStateResponse({
+              revision: 4,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2804,17 +2851,20 @@ describe("App session lifecycle", () => {
         ).not.toBeInTheDocument();
 
         await act(async () => {
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 5,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-recovered-late", {
-                name: "Recovered Later",
-              }),
-            ],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 5,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-recovered-late", {
+                  name: "Recovered Later",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2864,20 +2914,23 @@ describe("App session lifecycle", () => {
 
         await act(async () => {
           eventSource.dispatchOpen();
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 1,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-1", {
-                agent: "Codex",
-                name: "Codex Session",
-                externalSessionId: "thread-live",
-                codexThreadState: "active",
-              }),
-            ],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  agent: "Codex",
+                  name: "Codex Session",
+                  externalSessionId: "thread-live",
+                  codexThreadState: "active",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2885,9 +2938,8 @@ describe("App session lifecycle", () => {
         if (!(sessionList instanceof HTMLDivElement)) {
           throw new Error("Session list not found");
         }
-        const sessionRowLabel = await within(sessionList).findByText(
-          "Codex Session",
-        );
+        const sessionRowLabel =
+          await within(sessionList).findByText("Codex Session");
         const sessionRowButton = sessionRowLabel.closest("button");
         if (!(sessionRowButton instanceof HTMLButtonElement)) {
           throw new Error("Session row button not found");
@@ -2906,20 +2958,23 @@ describe("App session lifecycle", () => {
         });
 
         await act(async () => {
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 3,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-1", {
-                agent: "Codex",
-                name: "Codex Session",
-                externalSessionId: "thread-live",
-                codexThreadState: "active",
-              }),
-            ],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 3,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  agent: "Codex",
+                  name: "Codex Session",
+                  externalSessionId: "thread-live",
+                  codexThreadState: "active",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -2942,30 +2997,167 @@ describe("App session lifecycle", () => {
         expect(
           screen.queryByRole("tab", { name: "Phantom Fork" }),
         ).not.toBeInTheDocument();
+        expect(
+          screen.queryByText(
+            "Forked the live Codex thread into a new session.",
+          ),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByText(/attached to a forked Codex thread/i),
+        ).not.toBeInTheDocument();
 
         await waitFor(() => {
           expect(fetchStateSpy).toHaveBeenCalledTimes(1);
         });
 
         await act(async () => {
-          actionRecoveryDeferred.resolve(makeStateResponse({
-            revision: 4,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-1", {
-                agent: "Codex",
-                name: "Codex Session",
-                externalSessionId: "thread-live",
-                codexThreadState: "active",
-              }),
-            ],
-          }));
+          actionRecoveryDeferred.resolve(
+            makeStateResponse({
+              revision: 4,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  agent: "Codex",
+                  name: "Codex Session",
+                  externalSessionId: "thread-live",
+                  codexThreadState: "active",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 
         expect(screen.queryByText("Phantom Fork")).not.toBeInTheDocument();
+        expect(
+          screen.queryByText(
+            "Forked the live Codex thread into a new session.",
+          ),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByText(/attached to a forked Codex thread/i),
+        ).not.toBeInTheDocument();
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        forkCodexThreadSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("shows fork notice when the fork response materializes the new session", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const forkCodexThreadDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.forkCodexThread>>>();
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
+        makeStateResponse({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [
+            makeSession("session-1", {
+              agent: "Codex",
+              name: "Codex Session",
+              externalSessionId: "thread-live",
+              codexThreadState: "active",
+            }),
+          ],
+        }),
+      );
+      const forkCodexThreadSpy = vi
+        .spyOn(api, "forkCodexThread")
+        .mockImplementation(() => forkCodexThreadDeferred.promise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+
+        await act(async () => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  agent: "Codex",
+                  name: "Codex Session",
+                  externalSessionId: "thread-live",
+                  codexThreadState: "active",
+                }),
+              ],
+            }),
+          );
+          await flushUiWork();
+        });
+
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        const sessionRowLabel =
+          await within(sessionList).findByText("Codex Session");
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!(sessionRowButton instanceof HTMLButtonElement)) {
+          throw new Error("Session row button not found");
+        }
+        await clickAndSettle(sessionRowButton);
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Prompt" }),
+        );
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Fork thread" }),
+        );
+
+        await waitFor(() => {
+          expect(forkCodexThreadSpy).toHaveBeenCalledWith("session-1");
+        });
+
+        await act(async () => {
+          forkCodexThreadDeferred.resolve({
+            sessionId: "session-fork-direct",
+            revision: 2,
+            serverInstanceId: "test-instance",
+            session: makeSession("session-fork-direct", {
+              agent: "Codex",
+              name: "Direct Fork",
+              externalSessionId: "thread-fork",
+              codexThreadState: "active",
+            }),
+          });
+          await flushUiWork();
+        });
+
+        const directForkTab = await screen.findByRole("tab", {
+          name: "Direct Fork",
+        });
+        await clickAndSettle(directForkTab);
+        expect(
+          await screen.findByText(/attached to a forked Codex thread/i),
+        ).toBeInTheDocument();
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
@@ -3009,20 +3201,23 @@ describe("App session lifecycle", () => {
 
         await act(async () => {
           eventSource.dispatchOpen();
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 1,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-1", {
-                agent: "Codex",
-                name: "Codex Session",
-                externalSessionId: "thread-live",
-                codexThreadState: "active",
-              }),
-            ],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  agent: "Codex",
+                  name: "Codex Session",
+                  externalSessionId: "thread-live",
+                  codexThreadState: "active",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -3030,9 +3225,8 @@ describe("App session lifecycle", () => {
         if (!(sessionList instanceof HTMLDivElement)) {
           throw new Error("Session list not found");
         }
-        const sessionRowLabel = await within(sessionList).findByText(
-          "Codex Session",
-        );
+        const sessionRowLabel =
+          await within(sessionList).findByText("Codex Session");
         const sessionRowButton = sessionRowLabel.closest("button");
         if (!(sessionRowButton instanceof HTMLButtonElement)) {
           throw new Error("Session row button not found");
@@ -3051,20 +3245,23 @@ describe("App session lifecycle", () => {
         });
 
         await act(async () => {
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 3,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-1", {
-                agent: "Codex",
-                name: "Codex Session",
-                externalSessionId: "thread-live",
-                codexThreadState: "active",
-              }),
-            ],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 3,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  agent: "Codex",
+                  name: "Codex Session",
+                  externalSessionId: "thread-live",
+                  codexThreadState: "active",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -3093,32 +3290,35 @@ describe("App session lifecycle", () => {
         });
 
         await act(async () => {
-          actionRecoveryDeferred.resolve(makeStateResponse({
-            revision: 4,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-1", {
-                agent: "Codex",
-                name: "Codex Session",
-                externalSessionId: "thread-live",
-                codexThreadState: "active",
-              }),
-              makeSession("session-fork-recovered", {
-                agent: "Codex",
-                name: "Recovered Fork",
-                externalSessionId: "thread-fork",
-                codexThreadState: "active",
-              }),
-            ],
-          }));
+          actionRecoveryDeferred.resolve(
+            makeStateResponse({
+              revision: 4,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  agent: "Codex",
+                  name: "Codex Session",
+                  externalSessionId: "thread-live",
+                  codexThreadState: "active",
+                }),
+                makeSession("session-fork-recovered", {
+                  agent: "Codex",
+                  name: "Recovered Fork",
+                  externalSessionId: "thread-fork",
+                  codexThreadState: "active",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 
-        expect(
-          await screen.findByRole("tab", { name: "Recovered Fork" }),
-        ).toBeInTheDocument();
+        const recoveredForkTab = await screen.findByRole("tab", {
+          name: "Recovered Fork",
+        });
+        expect(recoveredForkTab).toBeInTheDocument();
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
         window.localStorage.clear();
@@ -3162,20 +3362,23 @@ describe("App session lifecycle", () => {
 
         await act(async () => {
           eventSource.dispatchOpen();
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 1,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-1", {
-                agent: "Codex",
-                name: "Codex Session",
-                externalSessionId: "thread-live",
-                codexThreadState: "active",
-              }),
-            ],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  agent: "Codex",
+                  name: "Codex Session",
+                  externalSessionId: "thread-live",
+                  codexThreadState: "active",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -3183,9 +3386,8 @@ describe("App session lifecycle", () => {
         if (!(sessionList instanceof HTMLDivElement)) {
           throw new Error("Session list not found");
         }
-        const sessionRowLabel = await within(sessionList).findByText(
-          "Codex Session",
-        );
+        const sessionRowLabel =
+          await within(sessionList).findByText("Codex Session");
         const sessionRowButton = sessionRowLabel.closest("button");
         if (!(sessionRowButton instanceof HTMLButtonElement)) {
           throw new Error("Session row button not found");
@@ -3204,20 +3406,23 @@ describe("App session lifecycle", () => {
         });
 
         await act(async () => {
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 3,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-1", {
-                agent: "Codex",
-                name: "Codex Session",
-                externalSessionId: "thread-live",
-                codexThreadState: "active",
-              }),
-            ],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 3,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  agent: "Codex",
+                  name: "Codex Session",
+                  externalSessionId: "thread-live",
+                  codexThreadState: "active",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 
@@ -3236,7 +3441,9 @@ describe("App session lifecycle", () => {
           await flushUiWork();
         });
 
-        expect(screen.queryByText("Recovered Fork Later")).not.toBeInTheDocument();
+        expect(
+          screen.queryByText("Recovered Fork Later"),
+        ).not.toBeInTheDocument();
         expect(
           screen.queryByRole("tab", { name: "Recovered Fork Later" }),
         ).not.toBeInTheDocument();
@@ -3246,49 +3453,56 @@ describe("App session lifecycle", () => {
         });
 
         await act(async () => {
-          actionRecoveryDeferred.resolve(makeStateResponse({
-            revision: 4,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-1", {
-                agent: "Codex",
-                name: "Codex Session",
-                externalSessionId: "thread-live",
-                codexThreadState: "active",
-              }),
-            ],
-          }));
+          actionRecoveryDeferred.resolve(
+            makeStateResponse({
+              revision: 4,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  agent: "Codex",
+                  name: "Codex Session",
+                  externalSessionId: "thread-live",
+                  codexThreadState: "active",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 
-        expect(screen.queryByText("Recovered Fork Later")).not.toBeInTheDocument();
+        expect(
+          screen.queryByText("Recovered Fork Later"),
+        ).not.toBeInTheDocument();
         expect(
           screen.queryByRole("tab", { name: "Recovered Fork Later" }),
         ).not.toBeInTheDocument();
 
         await act(async () => {
-          eventSource.dispatchNamedEvent("state", makeStateResponse({
-            revision: 5,
-            projects: [],
-            orchestrators: [],
-            workspaces: [],
-            sessions: [
-              makeSession("session-1", {
-                agent: "Codex",
-                name: "Codex Session",
-                externalSessionId: "thread-live",
-                codexThreadState: "active",
-              }),
-              makeSession("session-fork-recovered-late", {
-                agent: "Codex",
-                name: "Recovered Fork Later",
-                externalSessionId: "thread-fork",
-                codexThreadState: "active",
-              }),
-            ],
-          }));
+          eventSource.dispatchNamedEvent(
+            "state",
+            makeStateResponse({
+              revision: 5,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  agent: "Codex",
+                  name: "Codex Session",
+                  externalSessionId: "thread-live",
+                  codexThreadState: "active",
+                }),
+                makeSession("session-fork-recovered-late", {
+                  agent: "Codex",
+                  name: "Recovered Fork Later",
+                  externalSessionId: "thread-fork",
+                  codexThreadState: "active",
+                }),
+              ],
+            }),
+          );
           await flushUiWork();
         });
 

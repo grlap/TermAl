@@ -80,10 +80,7 @@ import {
 import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
 import { useAppPreferencesState } from "./app-preferences-state";
 import { useAppWorkspaceLayout } from "./app-workspace-layout";
-import {
-  useAppLiveState,
-  type SessionHydrationTarget,
-} from "./app-live-state";
+import { useAppLiveState, type SessionHydrationTarget } from "./app-live-state";
 import { useAppSessionActions } from "./app-session-actions";
 import { useAppDragResize } from "./app-drag-resize";
 import { useAppDialogState } from "./app-dialog-state";
@@ -119,9 +116,7 @@ import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { OrchestratorTemplateLibraryPanel } from "./panels/OrchestratorTemplateLibraryPanel";
 import { OrchestratorTemplatesPanel } from "./panels/OrchestratorTemplatesPanel";
-import {
-  pruneTerminalPanelHistory,
-} from "./panels/TerminalPanel";
+import { pruneTerminalPanelHistory } from "./panels/TerminalPanel";
 import {
   buildSessionListSearchResultFromIndex,
   buildSessionSearchIndex,
@@ -190,10 +185,7 @@ import {
   ensureWorkspaceViewId,
   type ControlPanelSide,
 } from "./workspace-storage";
-import {
-  attachSessionDragData,
-  readSessionDragData,
-} from "./session-drag";
+import { attachSessionDragData, readSessionDragData } from "./session-drag";
 import {
   MARKDOWN_STYLES,
   MARKDOWN_THEMES,
@@ -499,13 +491,11 @@ export default function App() {
   // declared before the hook is called.
   const requestBackendReconnectRef = useRef<() => void>(() => {});
   const requestActionRecoveryResyncRef = useRef<
-    (
-      options?: {
-        openSessionId?: string;
-        paneId?: string | null;
-        allowUnknownServerInstance?: boolean;
-      },
-    ) => void
+    (options?: {
+      openSessionId?: string;
+      paneId?: string | null;
+      allowUnknownServerInstance?: boolean;
+    }) => void
   >(() => {});
   const paneShouldStickToBottomRef = useRef<
     Record<string, boolean | undefined>
@@ -1214,7 +1204,13 @@ export default function App() {
       if (!isMountedRef.current) {
         return;
       }
-      adoptState(state);
+      const adopted = adoptState(state);
+      if (!adopted) {
+        requestActionRecoveryResyncRef.current({
+          allowUnknownServerInstance: true,
+        });
+        return;
+      }
       setRequestError(null);
     } catch (error) {
       if (!isMountedRef.current) {
@@ -1226,8 +1222,9 @@ export default function App() {
         if (!isMountedRef.current) {
           return;
         }
-        syncPreferencesFromState(state);
-        adoptState(state);
+        adoptState(state, {
+          allowUnknownServerInstance: isBackendUnavailableError(error),
+        });
       } catch {
         // Keep the optimistic selection until the next successful sync.
       }
@@ -2039,7 +2036,9 @@ export default function App() {
         pendingKillPopoverRef={pendingKillPopoverRef}
         pendingKillPopoverStyle={pendingKillPopoverStyle}
         pendingKillConfirmButtonRef={pendingKillConfirmButtonRef}
-        schedulePendingKillConfirmationClose={schedulePendingKillConfirmationClose}
+        schedulePendingKillConfirmationClose={
+          schedulePendingKillConfirmationClose
+        }
         clearPendingKillCloseTimeout={clearPendingKillCloseTimeout}
         closePendingKillConfirmation={closePendingKillConfirmation}
         confirmKillSession={confirmKillSession}
@@ -2053,7 +2052,9 @@ export default function App() {
         isPendingSessionRenameSubmitting={isPendingSessionRenameSubmitting}
         isPendingSessionRenameKilling={isPendingSessionRenameKilling}
         schedulePendingSessionRenameClose={schedulePendingSessionRenameClose}
-        clearPendingSessionRenameCloseTimeout={clearPendingSessionRenameCloseTimeout}
+        clearPendingSessionRenameCloseTimeout={
+          clearPendingSessionRenameCloseTimeout
+        }
         closePendingSessionRename={closePendingSessionRename}
         confirmSessionRename={confirmSessionRename}
         setPendingSessionRenameDraft={setPendingSessionRenameDraft}
@@ -2069,7 +2070,9 @@ export default function App() {
         handleCreateSessionDialogSubmit={handleCreateSessionDialogSubmit}
         newSessionAgent={newSessionAgent}
         onChangeNewSessionAgent={setNewSessionAgent}
-        createSessionUsesSessionModelPicker={createSessionUsesSessionModelPicker}
+        createSessionUsesSessionModelPicker={
+          createSessionUsesSessionModelPicker
+        }
         newSessionModel={newSessionModel}
         newSessionModelOptions={newSessionModelOptions}
         onChangeNewSessionModel={(nextValue) =>
@@ -2079,7 +2082,9 @@ export default function App() {
           }))
         }
         defaultCodexReasoningEffort={defaultCodexReasoningEffort}
-        handleDefaultCodexReasoningEffortChange={handleDefaultCodexReasoningEffortChange}
+        handleDefaultCodexReasoningEffortChange={
+          handleDefaultCodexReasoningEffortChange
+        }
         defaultClaudeEffort={defaultClaudeEffort}
         handleDefaultClaudeEffortChange={handleDefaultClaudeEffortChange}
         defaultCursorMode={defaultCursorMode}

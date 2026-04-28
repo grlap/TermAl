@@ -153,13 +153,12 @@ import {
 //                   unrelated state probes can advance the
 //                   revision without ever inserting the created
 //                   session locally.
-//   - "recovering": wire-contract violation
-//                   (`session.id !== sessionId`) — a resync was
-//                   scheduled and the caller MUST NOT open a
-//                   workspace pane for the mismatched id. That
-//                   id was never inserted into `sessionsRef`,
-//                   so opening it would leave a phantom pane
-//                   that persists until the resync reconciles.
+//   - "recovering": protocol drift (`session.id !== sessionId`)
+//                   or unknown cross-instance response. A resync was
+//                   scheduled and the caller MUST NOT open a workspace
+//                   pane for the response id. That id was never inserted
+//                   into `sessionsRef`, so opening it would leave a
+//                   phantom pane that persists until the resync reconciles.
 //
 // A plain boolean could not carry the "stale vs recovering"
 // distinction, so the call-site fallback (`if (!adopted) { open
@@ -486,13 +485,11 @@ export type UseAppLiveStateParams = {
    * reconnect state. Reset to a no-op on cleanup.
    */
   requestActionRecoveryResyncRef: MutableRefObject<
-    (
-      options?: {
-        openSessionId?: string;
-        paneId?: string | null;
-        allowUnknownServerInstance?: boolean;
-      },
-    ) => void
+    (options?: {
+      openSessionId?: string;
+      paneId?: string | null;
+      allowUnknownServerInstance?: boolean;
+    }) => void
   >;
   activeSession: Session | null;
   visibleSessionHydrationTargets: readonly SessionHydrationTarget[];
@@ -729,8 +726,9 @@ export function useAppLiveState(
       return;
     }
 
-    pendingCodexStateRenderFrameRef.current =
-      window.requestAnimationFrame(flushPendingCodexStateRender);
+    pendingCodexStateRenderFrameRef.current = window.requestAnimationFrame(
+      flushPendingCodexStateRender,
+    );
   }
 
   function clearHydrationRetry(sessionId: string) {
@@ -752,8 +750,7 @@ export function useAppLiveState(
 
   function sessionStillNeedsHydration(sessionId: string) {
     return sessionsRef.current.some(
-      (session) =>
-        session.id === sessionId && session.messagesLoaded === false,
+      (session) => session.id === sessionId && session.messagesLoaded === false,
     );
   }
 
@@ -820,8 +817,9 @@ export function useAppLiveState(
       return;
     }
 
-    pendingSessionRenderFrameRef.current =
-      window.requestAnimationFrame(flushPendingSessionRender);
+    pendingSessionRenderFrameRef.current = window.requestAnimationFrame(
+      flushPendingSessionRender,
+    );
   }
 
   useEffect(() => {
@@ -1017,9 +1015,10 @@ export function useAppLiveState(
     }
     if (hasRemovedSessions || unhydratedSessionIds.size > 0) {
       hydratedSessionIdsRef.current = new Set(
-        [...hydratedSessionIdsRef.current].filter((sessionId) =>
-          availableSessionIds.has(sessionId) &&
-          !unhydratedSessionIds.has(sessionId),
+        [...hydratedSessionIdsRef.current].filter(
+          (sessionId) =>
+            availableSessionIds.has(sessionId) &&
+            !unhydratedSessionIds.has(sessionId),
         ),
       );
     }
@@ -1057,7 +1056,9 @@ export function useAppLiveState(
       // reconciles against authoritative state instead of opening a
       // workspace pane for a session that was never inserted into
       // `sessionsRef`. Mirrors the sibling path in `adoptFetchedSession`.
-      requestActionRecoveryResyncRef.current();
+      requestActionRecoveryResyncRef.current({
+        allowUnknownServerInstance: true,
+      });
       return "recovering";
     }
 
@@ -1150,8 +1151,10 @@ export function useAppLiveState(
     currentSession: Session,
   ) {
     return (
-      requestContext.messageCount === getHydrationMessageCount(currentSession) &&
-      requestContext.sessionMutationStamp === getHydrationMutationStamp(currentSession)
+      requestContext.messageCount ===
+        getHydrationMessageCount(currentSession) &&
+      requestContext.sessionMutationStamp ===
+        getHydrationMutationStamp(currentSession)
     );
   }
 
@@ -1276,10 +1279,7 @@ export function useAppLiveState(
       session,
       latestCurrentSession,
     );
-    if (
-      !latestRequestStillMatches ||
-      !latestResponseMatches
-    ) {
+    if (!latestRequestStillMatches || !latestResponseMatches) {
       if (
         latestRequestStillMatches &&
         hydrationSessionMetadataIsAhead(session, latestCurrentSession)
@@ -1293,10 +1293,7 @@ export function useAppLiveState(
     const nextSessions = latestSessions.map((entry, index) =>
       index === latestExistingIndex ? hydratedSession : entry,
     );
-    if (
-      previousRevision === null ||
-      revision > previousRevision
-    ) {
+    if (previousRevision === null || revision > previousRevision) {
       // A fresh server instance starts a new revision counter, so adopting its
       // targeted hydration response may legitimately step this ref backward.
       // Cross-instance ordering is handled by the server-instance gate above.
@@ -1851,8 +1848,14 @@ export function useAppLiveState(
                 requestedRevision !== null &&
                 latestStateRevisionRef.current === requestedRevision &&
                 state.revision <= requestedRevision;
+              const shouldTrustAuthoritativeReplacementInstance =
+                allowAuthoritativeRollback &&
+                shouldPreferAuthoritativeSnapshot &&
+                requestedRevision !== null &&
+                latestStateRevisionRef.current === requestedRevision;
               const shouldAllowUnknownServerInstance =
-                allowUnknownServerInstance || shouldForceAuthoritativeSnapshot;
+                allowUnknownServerInstance ||
+                shouldTrustAuthoritativeReplacementInstance;
 
               const adopted = adoptState(state, {
                 // A reconnect fallback snapshot is authoritative if no newer SSE state landed
@@ -2096,7 +2099,10 @@ export function useAppLiveState(
       }
 
       shouldResyncOnResume = false;
-      requestStateResync({ allowAuthoritativeRollback: true });
+      requestStateResync({
+        allowAuthoritativeRollback: true,
+        allowUnknownServerInstance: true,
+      });
     }
 
     function handleLiveSessionResumeWatchdogTick() {

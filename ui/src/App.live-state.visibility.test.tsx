@@ -280,133 +280,288 @@ describe("App live state - visibility and wake recovery", () => {
   });
 
   it("resyncs when the page becomes visible again after a live reply finishes while hidden", async () => {
-    const originalFetch = globalThis.fetch;
-    const originalEventSource = globalThis.EventSource;
-    const originalResizeObserver = globalThis.ResizeObserver;
-    const originalVisibilityState = document.visibilityState;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/state") {
-        return jsonResponse({
-          revision: 2,
-          projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Codex Session",
-              status: "idle",
-              preview: "Here while hidden.",
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "test",
-                },
-                {
-                  id: "message-assistant-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Here while hidden.",
-                },
-              ],
-            }),
-          ],
-        });
-      }
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalVisibilityState = document.visibilityState;
+      const hiddenState = {
+        revision: 2,
+        serverInstanceId: "replacement-instance",
+        projects: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Codex Session",
+            status: "idle",
+            preview: "Here while hidden.",
+            messages: [
+              {
+                id: "message-user-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "test",
+              },
+              {
+                id: "message-assistant-1",
+                type: "text",
+                timestamp: "10:01",
+                author: "assistant",
+                text: "Here while hidden.",
+              },
+            ],
+          }),
+        ],
+      };
+      const stateResponseDeferred = createDeferred<Response>();
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/state") {
+          return stateResponseDeferred.promise;
+        }
 
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal(
-      "EventSource",
-      EventSourceMock as unknown as typeof EventSource,
-    );
-    vi.stubGlobal(
-      "ResizeObserver",
-      ResizeObserverMock as unknown as typeof ResizeObserver,
-    );
-    const scrollIntoViewSpy = stubScrollIntoView();
-    setDocumentVisibilityState("visible");
-    try {
-      await renderApp();
-      const eventSource = latestEventSource();
-      act(() => {
-        eventSource.dispatchOpen();
-        eventSource.dispatchNamedEvent("state", {
-          revision: 1,
-          projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Codex Session",
-              status: "active",
-              preview: "test",
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "test",
-                },
-              ],
-            }),
-          ],
-        });
+        throw new Error(`Unexpected fetch: ${url}`);
       });
-
-      await clickAndSettle(
-        await screen.findByRole("button", { name: "Sessions" }),
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
       );
-      const sessionList = document.querySelector(".session-list");
-      if (!(sessionList instanceof HTMLDivElement)) {
-        throw new Error("Session list not found");
-      }
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      setDocumentVisibilityState("visible");
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        act(() => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", {
+            revision: 1,
+            serverInstanceId: "current-instance",
+            projects: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Codex Session",
+                status: "active",
+                preview: "test",
+                messages: [
+                  {
+                    id: "message-user-1",
+                    type: "text",
+                    timestamp: "10:00",
+                    author: "you",
+                    text: "test",
+                  },
+                ],
+              }),
+            ],
+          });
+        });
 
-      const sessionRowLabel =
-        await within(sessionList).findByText("Codex Session");
-      const sessionRowButton = sessionRowLabel.closest("button");
-      if (!sessionRowButton) {
-        throw new Error("Session row button not found");
-      }
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Sessions" }),
+        );
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
 
-      await clickAndSettle(sessionRowButton);
-      await screen.findByText("Waiting for the next chunk of output...");
-      fetchMock.mockClear();
+        const sessionRowLabel =
+          await within(sessionList).findByText("Codex Session");
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
 
-      act(() => {
-        setDocumentVisibilityState("hidden");
-        document.dispatchEvent(new Event("visibilitychange"));
-      });
+        await clickAndSettle(sessionRowButton);
+        await screen.findByText("Waiting for the next chunk of output...");
+        fetchMock.mockClear();
 
-      expect(
-        fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
-      ).toBe(false);
+        act(() => {
+          setDocumentVisibilityState("hidden");
+          document.dispatchEvent(new Event("visibilitychange"));
+        });
 
-      act(() => {
-        setDocumentVisibilityState("visible");
-        document.dispatchEvent(new Event("visibilitychange"));
-      });
-
-      await waitFor(() => {
         expect(
           fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
-        ).toBe(true);
+        ).toBe(false);
+
+        act(() => {
+          setDocumentVisibilityState("visible");
+          document.dispatchEvent(new Event("visibilitychange"));
+        });
+
+        await waitFor(() => {
+          expect(
+            fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
+          ).toBe(true);
+        });
+        await act(async () => {
+          stateResponseDeferred.resolve(jsonResponse(hiddenState));
+          await flushUiWork();
+        });
+        await waitFor(() => {
+          expect(screen.getAllByText("Here while hidden.")).toHaveLength(2);
+        });
+        expect(
+          screen.queryByText("Waiting for the next chunk of output..."),
+        ).not.toBeInTheDocument();
+      } finally {
+        setDocumentVisibilityState(originalVisibilityState);
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("recovers a replacement-instance snapshot returned by an approval action", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const approvalEndpoint =
+        "/api/sessions/session-1/approvals/message-approval-1";
+      const recoveredState = {
+        revision: 2,
+        serverInstanceId: "replacement-instance",
+        projects: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Codex Session",
+            status: "idle",
+            preview: "Recovered after approval action.",
+            messages: [
+              {
+                id: "message-user-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "run the command",
+              },
+              {
+                id: "message-approval-1",
+                type: "approval",
+                timestamp: "10:01",
+                author: "assistant",
+                title: "Codex needs approval",
+                command: "npm test",
+                detail: "Need permission to run the test suite.",
+                decision: "accepted",
+              },
+              {
+                id: "message-assistant-1",
+                type: "text",
+                timestamp: "10:02",
+                author: "assistant",
+                text: "Recovered after approval action.",
+              },
+            ],
+          }),
+        ],
+      };
+      let stateRequestCount = 0;
+      const stateResponseDeferred = createDeferred<Response>();
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === approvalEndpoint) {
+          return jsonResponse(recoveredState);
+        }
+        if (url === "/api/state") {
+          stateRequestCount += 1;
+          return stateResponseDeferred.promise;
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
       });
-      await waitFor(() => {
-        expect(screen.getAllByText("Here while hidden.")).toHaveLength(2);
-      });
-      expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
-      ).not.toBeInTheDocument();
-    } finally {
-      setDocumentVisibilityState(originalVisibilityState);
-      scrollIntoViewSpy.mockRestore();
-      restoreGlobal("fetch", originalFetch);
-      restoreGlobal("EventSource", originalEventSource);
-      restoreGlobal("ResizeObserver", originalResizeObserver);
-    }
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        act(() => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", {
+            revision: 1,
+            serverInstanceId: "current-instance",
+            projects: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Codex Session",
+                status: "approval",
+                preview: "Approval pending.",
+                messages: [
+                  {
+                    id: "message-user-1",
+                    type: "text",
+                    timestamp: "10:00",
+                    author: "you",
+                    text: "run the command",
+                  },
+                  {
+                    id: "message-approval-1",
+                    type: "approval",
+                    timestamp: "10:01",
+                    author: "assistant",
+                    title: "Codex needs approval",
+                    command: "npm test",
+                    detail: "Need permission to run the test suite.",
+                    decision: "pending",
+                  },
+                ],
+              }),
+            ],
+          });
+        });
+        await settleAsyncUi();
+
+        await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+
+        const sessionRowButton = within(sessionList)
+          .getByText("Codex Session")
+          .closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+
+        await clickAndSettle(sessionRowButton);
+        await clickAndSettle(screen.getByRole("button", { name: "Approve" }));
+
+        await waitFor(() => {
+          expect(stateRequestCount).toBe(1);
+        });
+        await act(async () => {
+          stateResponseDeferred.resolve(jsonResponse(recoveredState));
+          await flushUiWork();
+        });
+        await waitFor(() => {
+          expect(
+            screen.getAllByText("Recovered after approval action."),
+          ).toHaveLength(2);
+        });
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
   });
 
   it("ignores focus-triggered resync while the document remains hidden", async () => {
@@ -1222,6 +1377,4 @@ describe("App live state - visibility and wake recovery", () => {
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
   });
-
-
 });

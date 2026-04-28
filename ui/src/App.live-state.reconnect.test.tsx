@@ -1391,6 +1391,70 @@ describe("App live state — reconnect", () => {
     });
   });
 
+  it("adopts a newer replacement-instance snapshot from reconnect fallback recovery", async () => {
+    await withSuppressedActWarnings(async () => {
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
+        makeStateResponse({
+          revision: 6,
+          serverInstanceId: "replacement-instance",
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [
+            makeSession("session-recovered", {
+              name: "Replacement Session",
+              preview: "Recovered from replacement instance",
+            }),
+          ],
+        }),
+      );
+
+      try {
+        await withFallbackStateHarness(async ({ eventSource, sessionList }) => {
+          await dispatchOpenedStateEvent(
+            eventSource,
+            makeStateResponse({
+              revision: 5,
+              serverInstanceId: "current-instance",
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-current", {
+                  name: "Current Session",
+                  preview: "Current preview",
+                }),
+              ],
+            }),
+          );
+          await within(sessionList).findByText("Current Session");
+
+          await dispatchStateEvent(eventSource, {
+            _sseFallback: true,
+            revision: 6,
+            serverInstanceId: "replacement-instance",
+            projects: [],
+            sessions: [],
+          });
+          await settleAsyncUi();
+
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+          expect(
+            within(sessionList).getByText("Replacement Session"),
+          ).toBeInTheDocument();
+          expect(
+            within(sessionList).getByText("Recovered from replacement instance"),
+          ).toBeInTheDocument();
+          expect(
+            within(sessionList).queryByText("Current Session"),
+          ).not.toBeInTheDocument();
+        });
+      } finally {
+        fetchStateSpy.mockRestore();
+      }
+    });
+  });
+
   it("retries initial-connect fallback resyncs after a transient /api/state failure", async () => {
     await withSuppressedActWarnings(async () => {
       let fetchStateCallCount = 0;
