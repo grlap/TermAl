@@ -105,6 +105,13 @@ function isValidMessageCount(messageCount: number) {
   return Number.isSafeInteger(messageCount) && messageCount >= 0;
 }
 
+function isValidMessageIndexForCount(
+  messageIndex: number,
+  messageCount: number,
+) {
+  return isValidMessageIndex(messageIndex) && messageIndex < messageCount;
+}
+
 function applyMetadataOnlySessionDelta(
   session: Session,
   delta: Exclude<SessionDeltaEvent, { type: "sessionCreated" }>,
@@ -156,8 +163,8 @@ function messageCreatedDeltaHasProtocolViolation(
 ) {
   if (
     delta.message.id !== delta.messageId ||
-    !isValidMessageIndex(delta.messageIndex) ||
-    !isValidMessageCount(delta.messageCount)
+    !isValidMessageCount(delta.messageCount) ||
+    !isValidMessageIndexForCount(delta.messageIndex, delta.messageCount)
   ) {
     return true;
   }
@@ -187,8 +194,8 @@ function messageUpdatedDeltaHasProtocolViolation(
 ) {
   if (
     delta.message.id !== delta.messageId ||
-    !isValidMessageIndex(delta.messageIndex) ||
-    !isValidMessageCount(delta.messageCount)
+    !isValidMessageCount(delta.messageCount) ||
+    !isValidMessageIndexForCount(delta.messageIndex, delta.messageCount)
   ) {
     return true;
   }
@@ -214,10 +221,14 @@ function applyMessageCreatedDeltaToRetainedTranscript(
     updatedMessages.splice(existingMessageIndex, 1);
   }
   if (delta.messageIndex > updatedMessages.length) {
-    return null;
+    if (session.messagesLoaded !== false) {
+      return null;
+    }
+    updatedMessages.push(delta.message);
+  } else {
+    updatedMessages.splice(delta.messageIndex, 0, delta.message);
   }
 
-  updatedMessages.splice(delta.messageIndex, 0, delta.message);
   const pendingPrompts = removePendingPromptById(
     session.pendingPrompts,
     delta.messageId,

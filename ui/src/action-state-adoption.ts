@@ -5,6 +5,8 @@
 // Split out of: ui/src/app-session-actions.ts. The hook owns UI cleanup and
 // recovery dispatch; this module only decides whether a rejected action state
 // has enough target-specific evidence to be treated as already materialized.
+// Relies on `state-revision.ts:isStaleSameInstanceSnapshot` for the
+// same-server-instance monotonic-revision/stamp-reset invariant.
 
 import type { StateResponse } from "./api";
 import { isStaleSameInstanceSnapshot } from "./state-revision";

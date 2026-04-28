@@ -108,6 +108,29 @@ const EMPTY_COMPOSER_ATTACHMENTS: readonly {
 }[] = [];
 const EMPTY_COMPOSER_PROMPT_HISTORY: readonly string[] = [];
 
+function includeUndeferredMessageTail(
+  deferredMessages: Message[],
+  currentMessages: Message[],
+) {
+  if (deferredMessages === currentMessages || currentMessages.length === 0) {
+    return deferredMessages;
+  }
+  if (deferredMessages.length === 0) {
+    return currentMessages;
+  }
+  if (deferredMessages.length >= currentMessages.length) {
+    return deferredMessages;
+  }
+
+  for (let index = 0; index < deferredMessages.length; index += 1) {
+    if (currentMessages[index]?.id !== deferredMessages[index]?.id) {
+      return deferredMessages;
+    }
+  }
+
+  return [...deferredMessages, ...currentMessages.slice(deferredMessages.length)];
+}
+
 function isSpaceKey(event: {
   key: string;
   code?: string;
@@ -563,8 +586,25 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const pendingPrompts = session.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
   const deferredMessages = useDeferredValue(session.messages);
   const deferredPendingPrompts = useDeferredValue(pendingPrompts);
-  const visibleMessages = isActive ? deferredMessages : session.messages;
-  const visiblePendingPrompts = isActive ? deferredPendingPrompts : pendingPrompts;
+  const visibleMessages = isActive
+    ? includeUndeferredMessageTail(deferredMessages, session.messages)
+    : session.messages;
+  const visiblePendingPromptsBase = isActive ? deferredPendingPrompts : pendingPrompts;
+  const visiblePendingPrompts = useMemo(() => {
+    if (visiblePendingPromptsBase.length === 0 || visibleMessages.length === 0) {
+      return visiblePendingPromptsBase;
+    }
+
+    const visibleMessageIds = new Set(
+      visibleMessages.map((message) => message.id),
+    );
+    const filteredPendingPrompts = visiblePendingPromptsBase.filter(
+      (prompt) => !visibleMessageIds.has(prompt.id),
+    );
+    return filteredPendingPrompts.length === visiblePendingPromptsBase.length
+      ? visiblePendingPromptsBase
+      : filteredPendingPrompts;
+  }, [visibleMessages, visiblePendingPromptsBase]);
 
   if (visibleMessages.length === 0 && visiblePendingPrompts.length === 0 && !showWaitingIndicator) {
     return (

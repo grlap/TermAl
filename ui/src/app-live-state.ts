@@ -212,7 +212,14 @@ export function resolveAdoptStateSessionOptions(
   };
 }
 
-const SESSION_HYDRATION_RETRY_DELAYS_MS = [50, 250, 1000, 3000] as const;
+/** First retry after a metadata-only hydration response. Exported for tests. */
+export const SESSION_HYDRATION_FIRST_RETRY_DELAY_MS = 50;
+const SESSION_HYDRATION_RETRY_DELAYS_MS = [
+  SESSION_HYDRATION_FIRST_RETRY_DELAY_MS,
+  250,
+  1000,
+  3000,
+] as const;
 const SLOW_STATE_EVENT_WARNING_MS = 50;
 const STATE_EVENT_METADATA_PEEK_CHARS = 4096;
 
@@ -1434,6 +1441,12 @@ export function useAppLiveState(
     > | null = null;
     let sawReconnectOpenSinceLastError = false;
     let reconnectRecoveryConfirmedSinceLastError = false;
+    // True only between a bad reopened SSE payload and the next confirmed live
+    // event or outage reset. This separates "bad SSE needs proof" from
+    // ordinary reconnect wake-gap polling after `/api/state` progress.
+    // Invariant: producers set this only when sawReconnectOpenSinceLastError
+    // is true, and onerror clears both flags together for the next outage.
+    let pendingBadLiveEventRecovery = false;
     let nextReconnectStateResyncDelayMs = RECONNECT_STATE_RESYNC_DELAY_MS;
     let liveSessionResumeWatchdogIntervalId: ReturnType<
       typeof window.setInterval
@@ -1531,9 +1544,16 @@ export function useAppLiveState(
       }
 
       clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+      pendingBadLiveEventRecovery = false;
       setBackendConnectionState("connected");
     }
 
+    /**
+     * Arms the delayed `/api/state` reconnect poll. Manual retry uses
+     * `rearmAfterSameInstanceProgressUntilLiveEvent` so a stale-then-fresh
+     * same-instance recovery still waits for data-bearing SSE confirmation
+     * before the reconnect loop stops.
+     */
     function scheduleReconnectStateResync({
       rearmAfterSameInstanceProgressUntilLiveEvent = false,
     }: {
@@ -1675,27 +1695,51 @@ export function useAppLiveState(
                 preserveWatchdogCooldown ||
                 rearmOnSuccess ||
                 rearmOnFailure;
-              const shouldForceAuthoritativeSnapshot =
-                allowAuthoritativeRollback &&
-                shouldPreferAuthoritativeSnapshot &&
-                requestedRevision !== null &&
-                latestStateRevisionRef.current === requestedRevision &&
-                state.revision <= requestedRevision;
-              const shouldTrustAuthoritativeReplacementInstance =
+              const receivedReplacementInstance = isServerInstanceMismatch(
+                requestedServerInstanceId,
+                state.serverInstanceId,
+              );
+              const shouldConsiderAuthoritativeSnapshot =
                 allowAuthoritativeRollback &&
                 shouldPreferAuthoritativeSnapshot &&
                 requestedRevision !== null &&
                 latestStateRevisionRef.current === requestedRevision;
+              const shouldTrustAuthoritativeReplacementInstance =
+                shouldConsiderAuthoritativeSnapshot &&
+                receivedReplacementInstance;
+              const isEqualRevisionSnapshot =
+                requestedRevision !== null &&
+                state.revision === requestedRevision;
+              const isNotNewerReplacementSnapshot =
+                shouldTrustAuthoritativeReplacementInstance &&
+                requestedRevision !== null &&
+                state.revision <= requestedRevision;
+              const shouldTrustWatchdogSnapshot =
+                shouldConsiderAuthoritativeSnapshot &&
+                preserveWatchdogCooldown &&
+                !receivedReplacementInstance &&
+                requestedRevision !== null &&
+                state.revision <= requestedRevision;
+              // Trusting a replacement instance lets newer restart snapshots
+              // through the server-instance guard. Force/downgrade remains
+              // limited to equal-revision snapshots, not-newer replacement
+              // snapshots, and watchdog probes that intentionally ask
+              // /api/state to repair a stale active session after unrelated
+              // live deltas advanced the global revision gate.
+              const shouldForceAuthoritativeSnapshot =
+                shouldConsiderAuthoritativeSnapshot &&
+                (isEqualRevisionSnapshot ||
+                  isNotNewerReplacementSnapshot ||
+                  shouldTrustWatchdogSnapshot);
               const shouldAllowUnknownServerInstance =
                 allowUnknownServerInstance ||
                 shouldTrustAuthoritativeReplacementInstance;
 
               const adopted = adoptState(state, {
-                // A reconnect fallback snapshot is authoritative if no newer SSE state landed
-                // while it was in flight, even when a crashed backend restarted below the last
-                // streamed client revision. Keep this broader than restart-only rollback:
-                // reconnect/watchdog/manual-retry probes are explicitly asking `/api/state`
-                // to replace any buffered or non-session SSE view once the fetch resolves.
+                // A reconnect fallback snapshot is authoritative if no newer
+                // SSE state landed while it was in flight. Downgrades are only
+                // force-adopted for a confirmed replacement instance; lower
+                // same-instance snapshots stay stale and keep polling.
                 force: shouldForceAuthoritativeSnapshot,
                 allowRevisionDowngrade: shouldForceAuthoritativeSnapshot,
                 allowUnknownServerInstance: shouldAllowUnknownServerInstance,
@@ -1739,7 +1783,12 @@ export function useAppLiveState(
                 // locally adopted revision can arrive during create/fork wake-gap
                 // recovery. Do not roll back to it, but keep probing until the
                 // authoritative snapshot catches up.
-                scheduleReconnectStateResync();
+                scheduleReconnectStateResync({
+                  // Preserve manual-retry semantics only for probes that were
+                  // already allowed to require live-SSE proof after same-instance
+                  // progress; automatic reconnect probes keep the narrower guard.
+                  rearmAfterSameInstanceProgressUntilLiveEvent,
+                });
               }
               setBackendConnectionIssueDetail(null);
               clearRecoveredBackendRequestError();
@@ -1770,16 +1819,26 @@ export function useAppLiveState(
                   !reconnectRecoveryConfirmedSinceLastError &&
                   (!adoptedSameInstanceProgress ||
                     rearmAfterSameInstanceProgressUntilLiveEvent);
+                const carryManualRetryContractForward =
+                  rearmAfterSameInstanceProgressUntilLiveEvent &&
+                  shouldRearmUntilLiveEvent;
+                // Keep polling after success only for one of these contracts:
+                // explicit live-SSE proof is still required, a bad reopened SSE
+                // event needs recovery, no newer snapshot progress was made, or
+                // a replacement instance was adopted and should be confirmed.
                 const shouldRearmAfterSuccess =
                   shouldRearmUntilLiveEvent ||
+                  (pendingBadLiveEventRecovery &&
+                    !reconnectRecoveryConfirmedSinceLastError) ||
                   (requestedRevision !== null &&
                     latestStateRevisionRef.current === requestedRevision) ||
                   adoptedReplacementInstance;
                 if (shouldRearmAfterSuccess) {
                   scheduleReconnectStateResync({
+                    // Carry the manual-retry contract forward only while this
+                    // poll is still waiting for live-SSE proof.
                     rearmAfterSameInstanceProgressUntilLiveEvent:
-                      rearmAfterSameInstanceProgressUntilLiveEvent &&
-                      shouldRearmUntilLiveEvent,
+                      carryManualRetryContractForward,
                   });
                 }
               }
@@ -1866,6 +1925,7 @@ export function useAppLiveState(
 
       sawReconnectOpenSinceLastError = false;
       reconnectRecoveryConfirmedSinceLastError = false;
+      pendingBadLiveEventRecovery = false;
       clearInitialStateResyncRetryTimeout();
       clearReconnectStateResyncTimeout();
       resetReconnectStateResyncBackoff();
@@ -1907,6 +1967,9 @@ export function useAppLiveState(
       requestStateResync({
         allowAuthoritativeRollback: latestStateRevisionRef.current !== null,
         allowUnknownServerInstance,
+        // Explicit false is self-documentation; coalescing cannot lower an
+        // already-queued stronger recovery request.
+        rearmOnSuccess: false,
         rearmUntilLiveEventOnSuccess: false,
         openSessionId: options?.openSessionId,
         paneId: options?.paneId,
@@ -2064,7 +2127,9 @@ export function useAppLiveState(
           profiledRevision = rawRevision;
           profiledAdopted = false;
           forceAdoptNextStateEventRef.current = false;
-          confirmReconnectRecoveryFromLiveEvent();
+          if (!pendingBadLiveEventRecovery) {
+            confirmReconnectRecoveryFromLiveEvent();
+          }
           profiler?.mark("stalePeekReject");
           setBackendConnectionIssueDetail(null);
           clearRecoveredBackendRequestError();
@@ -2101,11 +2166,13 @@ export function useAppLiveState(
         profiler?.mark("adoptState");
         profiledAdopted = adopted;
         forceAdoptNextStateEventRef.current = false;
-        // Confirm recovery only after adoption succeeds. If adoptState throws
-        // (bad payload, reducer error), the catch block must keep the client in
-        // the reconnecting state with fallback polling armed rather than
-        // prematurely marking the connection as healthy.
-        confirmReconnectRecoveryFromLiveEvent();
+        // Confirm recovery after an adopted state. A parseable but rejected
+        // state is still useful stream proof in ordinary reconnects, but it
+        // must not clear pending bad-event recovery because it did not repair
+        // the malformed event.
+        if (adopted || !pendingBadLiveEventRecovery) {
+          confirmReconnectRecoveryFromLiveEvent();
+        }
         if (adopted) {
           cancelStaleSendResponseRecoveryPollForSessions(
             state.sessions.map((session) => session.id),
@@ -2136,6 +2203,8 @@ export function useAppLiveState(
           // retry affordance stays available (onopen already set "connected"),
           // and re-arm fallback polling so recovery continues via /api/state.
           if (sawReconnectOpenSinceLastError) {
+            pendingBadLiveEventRecovery = true;
+            reconnectRecoveryConfirmedSinceLastError = false;
             setBackendConnectionState("reconnecting");
             if (reconnectStateResyncTimeoutId === null) {
               scheduleReconnectStateResync();
@@ -2176,11 +2245,21 @@ export function useAppLiveState(
               delta.sessions.map((session) => session.id),
             );
           }
-          // An ignored delta proves the client already has data at this
-          // revision or newer — the snapshot that advanced the revision was
-          // authoritative. Transport is healthy and the client is caught up.
-          confirmReconnectRecoveryFromLiveEvent();
-          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+          // An ignored delta normally proves the client already has data at
+          // this revision or newer. After a bad reopened live event, only a
+          // current-revision ignored delta proves the stream is healthy again;
+          // lower stale frames do not repair the lost event.
+          const ignoredDeltaConfirmsBadLiveEventRecovery =
+            pendingBadLiveEventRecovery &&
+            latestStateRevisionRef.current !== null &&
+            delta.revision === latestStateRevisionRef.current;
+          if (
+            !pendingBadLiveEventRecovery ||
+            ignoredDeltaConfirmsBadLiveEventRecovery
+          ) {
+            confirmReconnectRecoveryFromLiveEvent();
+            clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+          }
           setBackendConnectionIssueDetail(null);
           clearRecoveredBackendRequestError();
           return;
@@ -2283,6 +2362,8 @@ export function useAppLiveState(
         // Parse or reducer failure — restore reconnecting state so the retry
         // affordance stays available, and re-arm polling.
         if (sawReconnectOpenSinceLastError) {
+          pendingBadLiveEventRecovery = true;
+          reconnectRecoveryConfirmedSinceLastError = false;
           setBackendConnectionState("reconnecting");
           if (reconnectStateResyncTimeoutId === null) {
             scheduleReconnectStateResync();
@@ -2302,8 +2383,10 @@ export function useAppLiveState(
         const filesChanged = JSON.parse(
           event.data,
         ) as WorkspaceFilesChangedEvent;
-        confirmReconnectRecoveryFromLiveEvent();
-        clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+        if (!pendingBadLiveEventRecovery) {
+          confirmReconnectRecoveryFromLiveEvent();
+          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+        }
         setBackendConnectionIssueDetail(null);
         clearRecoveredBackendRequestError();
         enqueueWorkspaceFilesChangedEvent(filesChanged);
@@ -2341,6 +2424,7 @@ export function useAppLiveState(
       const hadReconnectOpenSinceLastError = sawReconnectOpenSinceLastError;
       sawReconnectOpenSinceLastError = false;
       reconnectRecoveryConfirmedSinceLastError = false;
+      pendingBadLiveEventRecovery = false;
       const isOnline = readNavigatorOnline();
       const hasHydratedState = latestStateRevisionRef.current !== null;
       setBackendConnectionState(

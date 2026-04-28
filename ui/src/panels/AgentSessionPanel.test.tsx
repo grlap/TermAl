@@ -136,6 +136,35 @@ afterEach(() => {
 });
 
 describe("AgentSessionPanel conversation caching", () => {
+  it("does not render a queued prompt once the matching message is visible", () => {
+    const activeSession = makeSession("session-a", {
+      messages: [
+        {
+          id: "queued-prompt",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Queued prompt body",
+        },
+      ],
+      pendingPrompts: [
+        {
+          id: "queued-prompt",
+          timestamp: "10:00",
+          text: "Queued prompt body",
+        },
+      ],
+    });
+
+    renderSessionPanelWithDefaults({ activeSession });
+
+    expect(screen.getByText("queued-prompt")).toBeInTheDocument();
+    expect(screen.queryByText("Queued prompt body")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Cancel queued prompt" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("dispatches visible message actions through the latest parent callbacks", async () => {
     const initialApproval = vi.fn();
     const latestApproval = vi.fn();

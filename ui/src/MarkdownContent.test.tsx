@@ -49,6 +49,7 @@ const mermaidInitializeMock = vi.mocked(mermaid.initialize);
 const mermaidRenderMock = vi.mocked(mermaid.render);
 
 beforeEach(() => {
+  parseConnectionRetryNoticeMock.mockClear();
   mermaidInitializeMock.mockClear();
   mermaidRenderMock.mockClear();
   mermaidRenderMock.mockResolvedValue({

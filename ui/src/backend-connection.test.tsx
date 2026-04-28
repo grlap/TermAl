@@ -9,21 +9,44 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { StateResponse } from "./api";
 import App from "./App";
-import { RECONNECT_STATE_RESYNC_DELAY_MS } from "./app-shell-internals";
+import {
+  RECONNECT_STATE_RESYNC_DELAY_MS,
+  RECONNECT_STATE_RESYNC_MAX_DELAY_MS,
+} from "./app-shell-internals";
 import {
   BackendConnectionStatus,
   ControlPanelConnectionIndicator,
 } from "./workspace-shell-controls";
 
-const RECONNECT_STATE_RESYNC_TEST_BUFFER_MS = Math.max(
-  1,
-  Math.min(100, Math.floor(RECONNECT_STATE_RESYNC_DELAY_MS / 4)),
-);
-const RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS =
-  RECONNECT_STATE_RESYNC_DELAY_MS - RECONNECT_STATE_RESYNC_TEST_BUFFER_MS - 1;
+// Fresh-timer pre-deadline constants assume the reconnect timer was just armed
+// or just consumed.
+const RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ARM_MS =
+  RECONNECT_STATE_RESYNC_DELAY_MS - 1;
+const RECONNECT_STATE_RESYNC_SECOND_DELAY_MS =
+  RECONNECT_STATE_RESYNC_DELAY_MS * 2;
+const RECONNECT_STATE_RESYNC_SECOND_PRE_DEADLINE_MS =
+  RECONNECT_STATE_RESYNC_SECOND_DELAY_MS - 1;
+const RECONNECT_STATE_RESYNC_FOURTH_PRE_DEADLINE_MS =
+  RECONNECT_STATE_RESYNC_DELAY_MS * 4 - 1;
+const RECONNECT_STATE_RESYNC_EIGHTH_PRE_DEADLINE_MS =
+  RECONNECT_STATE_RESYNC_DELAY_MS * 8 - 1;
+const RECONNECT_STATE_RESYNC_MAX_PRE_DEADLINE_MS =
+  RECONNECT_STATE_RESYNC_MAX_DELAY_MS - 1;
+
+// From-error pre-deadline constants account for tests that intentionally
+// advance a small interval between dispatchError() and a deadline assertion.
+const RECONNECT_STATE_RESYNC_INTER_EVENT_GAP_MS = 100;
+// Scenario B uses the same elapsed gap, but keeps a separate name so call sites
+// spell out the timer reference frame under test.
+const RECONNECT_STATE_RESYNC_SCENARIO_B_ELAPSED_MS =
+  RECONNECT_STATE_RESYNC_INTER_EVENT_GAP_MS;
+const RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ERROR_MS =
+  RECONNECT_STATE_RESYNC_DELAY_MS -
+  RECONNECT_STATE_RESYNC_SCENARIO_B_ELAPSED_MS -
+  1;
 const FRAME_ADVANCE_MS = 16;
 const RECONNECT_STATE_RESYNC_FRAME_SAFE_PRE_DEADLINE_MS =
-  RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS - FRAME_ADVANCE_MS;
+  RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ERROR_MS - FRAME_ADVANCE_MS;
 
 class EventSourceMock {
   static instances: EventSourceMock[] = [];
@@ -571,7 +594,7 @@ describe("Backend connection state", () => {
         eventSource.dispatchError();
       });
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
 
       const reconnectBadge = screen.getByLabelText(
@@ -721,7 +744,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(1);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ARM_MS);
       });
       expect(countStateFetches()).toBe(1);
 
@@ -731,7 +754,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(2);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(799);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_SECOND_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(2);
 
@@ -939,11 +962,13 @@ describe("Backend connection state", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
-        return jsonResponse({
-          revision: 1,
-          projects: [],
-          sessions: [],
-        });
+        return jsonResponse(
+          makeBackendStateResponse({
+            revision: 2,
+            sessionName: "Recovered Session",
+            preview: "Recovered preview",
+          }),
+        );
       }
       if (target.startsWith("/api/workspaces/")) {
         if (init?.method === "PUT") {
@@ -1031,7 +1056,7 @@ describe("Backend connection state", () => {
       expect(screen.getByText("Recovered Session")).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ARM_MS);
       });
       expect(countStateFetches()).toBe(reconnectFetchCount);
     } finally {
@@ -1057,11 +1082,207 @@ describe("Backend connection state", () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    let stateRequestCount = 0;
+    let recoveryStateRequestCount = 0;
+    let serveRecoveryResponses = false;
+    const recoveryResponses = [
+      {
+        revision: 2,
+        preview: "Recovered preview 1",
+      },
+      {
+        revision: 3,
+        preview: "Recovered preview 2",
+      },
+      {
+        revision: 4,
+        preview: "Recovered preview 3",
+      },
+    ];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = String(input);
+        if (target === "/api/state") {
+          if (serveRecoveryResponses) {
+            const recoveryResponse =
+              recoveryResponses[
+                Math.min(recoveryStateRequestCount, recoveryResponses.length - 1)
+              ]!;
+            recoveryStateRequestCount += 1;
+            return jsonResponse(
+              makeBackendStateResponse({
+                revision: recoveryResponse.revision,
+                sessionName: "Recovered Session",
+                preview: recoveryResponse.preview,
+              }),
+            );
+          }
+          return jsonResponse(
+            makeBackendStateResponse({
+              revision: 2,
+              sessionName: "Recovered Session",
+              preview: "Recovered preview",
+            }),
+          );
+        }
+        if (target.startsWith("/api/workspaces/")) {
+          if (init?.method === "PUT") {
+            return jsonResponse({
+              layout: {
+                id: "workspace-live",
+                revision: 1,
+                updatedAt: "2026-04-04 21:15:00",
+                controlPanelSide: "left",
+                workspace: { panes: [] },
+              },
+            });
+          }
+          return new Response("", { status: 404 });
+        }
+
+        throw new Error(`Unexpected fetch: ${target}`);
+      },
+    );
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState(
+          makeBackendStateResponse({
+            revision: 1,
+            sessionName: "Original Session",
+            preview: "Original preview",
+          }),
+        );
+      });
+      expect(await screen.findByText("Original Session")).toBeInTheDocument();
+      await waitForNoControlPanelConnectionIssue();
+
+      const hydratedStateFetchCount = countStateFetches();
+      serveRecoveryResponses = true;
+      vi.useFakeTimers();
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+
+      act(() => {
+        eventSource.dispatchOpen();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expectNoControlPanelConnectionIssue();
+
+      act(() => {
+        eventSource.dispatchState({
+          revision: 1,
+          codex: {},
+          agentReadiness: [],
+          preferences: {
+            defaultCodexReasoningEffort: "medium",
+            defaultClaudeEffort: "default",
+          },
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: null,
+        });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ARM_MS);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_SECOND_PRE_DEADLINE_MS);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
+      expect(screen.getByText("Recovered preview 2")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_FOURTH_PRE_DEADLINE_MS);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 3);
+
+      act(() => {
+        eventSource.dispatchState(
+          makeBackendStateResponse({
+            revision: 5,
+            sessionName: "Live Recovered Session",
+            preview: "Live recovered preview",
+          }),
+        );
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expectNoControlPanelConnectionIssue();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_MAX_DELAY_MS);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 3);
+    } finally {
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("clears bad reopened-SSE recovery when a live session delta applies", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
-        stateRequestCount += 1;
         return jsonResponse(
           makeBackendStateResponse({
             revision: 2,
@@ -1086,7 +1307,8 @@ describe("Backend connection state", () => {
       }
 
       throw new Error(`Unexpected fetch: ${target}`);
-    });
+      },
+    );
     const countStateFetches = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;
@@ -1136,40 +1358,45 @@ describe("Backend connection state", () => {
       expectNoControlPanelConnectionIssue();
 
       act(() => {
-        eventSource.dispatchState({
-          revision: 1,
-          codex: {},
-          agentReadiness: [],
-          preferences: {
-            defaultCodexReasoningEffort: "medium",
-            defaultClaudeEffort: "default",
-          },
-          projects: [],
-          orchestrators: [],
-          workspaces: [],
-          sessions: null,
-        });
+        eventSource.dispatchState(null);
       });
       await act(async () => {
         await Promise.resolve();
       });
-
       expect(
         screen.getByLabelText("Control panel backend reconnecting"),
       ).toBeInTheDocument();
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
-      });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1);
+      act(() => {
+        eventSource.dispatchDelta({
+          type: "messageCreated",
+          revision: 2,
+          sessionId: "session-1",
+          messageId: "message-live-delta",
+          messageIndex: 0,
+          messageCount: 1,
+          message: {
+            id: "message-live-delta",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Delta confirmed recovery.",
+          },
+          preview: "Delta confirmed recovery.",
+          status: "active",
+        });
       });
-      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
-      expect(
-        screen.getByLabelText("Control panel backend reconnecting"),
-      ).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(FRAME_ADVANCE_MS);
+      });
+      expectNoControlPanelConnectionIssue();
+      expect(screen.getByText("Delta confirmed recovery.")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_MAX_DELAY_MS);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount);
     } finally {
       if (vi.isFakeTimers()) {
         vi.useRealTimers();
@@ -1272,7 +1499,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ARM_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -1282,7 +1509,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(799);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_SECOND_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
@@ -1392,7 +1619,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
       expect(
         screen.getByLabelText("Control panel backend reconnecting"),
@@ -1400,7 +1627,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(799);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_SECOND_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
@@ -1500,7 +1727,7 @@ describe("Backend connection state", () => {
       });
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
@@ -1541,7 +1768,179 @@ describe("Backend connection state", () => {
       expectNoControlPanelConnectionIssue();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(5000);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_MAX_DELAY_MS);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 3);
+    } finally {
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("keeps manual reconnect polling armed after stale-then-fresh same-instance snapshots", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let reconnectStateRequestCount = 0;
+    let serveReconnectResponses = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        if (serveReconnectResponses) {
+          reconnectStateRequestCount += 1;
+          if (reconnectStateRequestCount === 1) {
+            return jsonResponse(
+              makeBackendStateResponse({
+                revision: 1,
+                sessionName: "Stale Session",
+                preview: "Stale preview",
+              }),
+            );
+          }
+          if (reconnectStateRequestCount === 2) {
+            return jsonResponse(
+              makeBackendStateResponse({
+                revision: 3,
+                sessionName: "Recovered Session",
+                preview: "Recovered preview",
+              }),
+            );
+          }
+          return jsonResponse(
+            makeBackendStateResponse({
+              revision: 4,
+              sessionName: "Recovered Session",
+              preview: "Recovered preview after second poll",
+            }),
+          );
+        }
+        return jsonResponse(
+          makeBackendStateResponse({
+            revision: 1,
+            sessionName: "Original Session",
+            preview: "Original preview",
+          }),
+        );
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+    const countStateFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState(
+          makeBackendStateResponse({
+            revision: 2,
+            sessionName: "Original Session",
+            preview: "Original preview",
+          }),
+        );
+      });
+      expect(await screen.findByText("Original Session")).toBeInTheDocument();
+      await waitForNoControlPanelConnectionIssue();
+
+      const hydratedStateFetchCount = countStateFetches();
+      serveReconnectResponses = true;
+      vi.useFakeTimers();
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+
+      fireEvent.click(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+      expect(screen.queryByText("Stale Session")).toBeNull();
+      expect(screen.queryByText("Stale preview")).toBeNull();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ARM_MS);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
+      expect(screen.getByText("Recovered Session")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_SECOND_PRE_DEADLINE_MS);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 3);
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState(
+          makeBackendStateResponse({
+            revision: 5,
+            sessionName: "Live Session",
+            preview: "Live preview",
+          }),
+        );
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expectNoControlPanelConnectionIssue();
+      expect(screen.getByText("Live Session")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_MAX_DELAY_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 3);
     } finally {
@@ -1611,6 +2010,7 @@ describe("Backend connection state", () => {
         eventSource.dispatchState(
           makeBackendStateResponse({
             revision: 1,
+            serverInstanceId: "initial-instance",
             sessionName: "Original Session",
             preview: "Original preview",
           }),
@@ -1630,7 +2030,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
       expect(
@@ -1640,7 +2040,7 @@ describe("Backend connection state", () => {
       expect(screen.getByText("Original preview")).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(799);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_SECOND_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
       expect(
@@ -1658,10 +2058,10 @@ describe("Backend connection state", () => {
       // that polling is still armed (the stale snapshot did NOT stop it).
       expectNoControlPanelConnectionIssue();
 
-      // Advance past the next backoff interval — if the stale-snapshot
+      // Advance past the next backoff interval â€” if the stale-snapshot
       // rearm is working, another fallback fetch fires.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(800);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_SECOND_DELAY_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
 
@@ -1692,9 +2092,9 @@ describe("Backend connection state", () => {
       expectNoControlPanelConnectionIssue();
       expect(screen.getByText("Live output restored.")).toBeInTheDocument();
 
-      // After the live delta, polling should stop — no more fetches.
+      // After the live delta, polling should stop â€” no more fetches.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(5000);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_MAX_DELAY_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
     } finally {
@@ -1785,7 +2185,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ARM_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -1800,12 +2200,12 @@ describe("Backend connection state", () => {
       });
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ARM_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
@@ -1815,7 +2215,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(1599);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_FOURTH_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
 
@@ -1825,7 +2225,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 3);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(3199);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_EIGHTH_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 3);
 
@@ -1835,7 +2235,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 4);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(4999);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_MAX_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 4);
 
@@ -1845,7 +2245,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 5);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(4999);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_MAX_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 5);
 
@@ -1951,7 +2351,7 @@ describe("Backend connection state", () => {
       expectNoControlPanelConnectionIssue();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ARM_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -2044,7 +2444,9 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_INTER_EVENT_GAP_MS,
+        );
       });
       act(() => {
         eventSource.dispatchOpen();
@@ -2052,7 +2454,9 @@ describe("Backend connection state", () => {
       expectNoControlPanelConnectionIssue();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_INTER_EVENT_GAP_MS,
+        );
       });
       act(() => {
         eventSource.dispatchError();
@@ -2062,7 +2466,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ARM_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -2155,7 +2559,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ARM_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -2248,7 +2652,9 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_INTER_EVENT_GAP_MS,
+        );
       });
       act(() => {
         eventSource.dispatchOpen();
@@ -2263,7 +2669,7 @@ describe("Backend connection state", () => {
       expectNoControlPanelConnectionIssue();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
     } finally {
@@ -2351,7 +2757,9 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_INTER_EVENT_GAP_MS,
+        );
       });
       act(() => {
         eventSource.dispatchOpen();
@@ -2364,7 +2772,7 @@ describe("Backend connection state", () => {
       expectNoControlPanelConnectionIssue();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
     } finally {
@@ -2452,7 +2860,9 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_SCENARIO_B_ELAPSED_MS,
+        );
       });
       act(() => {
         // Intentionally omit dispatchOpen(): a buffered pre-error delta must not
@@ -2468,7 +2878,9 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ERROR_MS,
+        );
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -2575,7 +2987,9 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_SCENARIO_B_ELAPSED_MS,
+        );
       });
       act(() => {
         // Intentionally omit dispatchOpen(): even an applied session delta may be
@@ -2707,7 +3121,9 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_INTER_EVENT_GAP_MS,
+        );
       });
       act(() => {
         eventSource.dispatchOpen();
@@ -2732,7 +3148,7 @@ describe("Backend connection state", () => {
       expectNoControlPanelConnectionIssue();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
     } finally {
@@ -2831,7 +3247,9 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_SCENARIO_B_ELAPSED_MS,
+        );
       });
       act(() => {
         // Intentionally omit dispatchOpen(): the immediate resync gets a stale snapshot,
@@ -2860,7 +3278,9 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ERROR_MS,
+        );
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
@@ -2963,7 +3383,9 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_SCENARIO_B_ELAPSED_MS,
+        );
       });
       act(() => {
         // Intentionally omit dispatchOpen(): a buffered gap delta must not cancel
@@ -2992,7 +3414,9 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ERROR_MS,
+        );
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
@@ -3092,7 +3516,9 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_SCENARIO_B_ELAPSED_MS,
+        );
       });
       act(() => {
         // Intentionally omit dispatchOpen(): a reducer-rejected buffered delta must
@@ -3121,7 +3547,9 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ERROR_MS,
+        );
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
@@ -3214,7 +3642,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
       expect(countStateFetches()).toBe(1);
       expect(screen.getByText("Recovered Session")).toBeInTheDocument();
@@ -3266,7 +3694,7 @@ describe("Backend connection state", () => {
       expect(screen.queryByText("Live preview")).toBeNull();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
       expect(countStateFetches()).toBe(1);
     } finally {
@@ -3285,6 +3713,7 @@ describe("Backend connection state", () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     let fallbackState = makeBackendStateResponse({
       revision: 1,
+      serverInstanceId: "replacement-instance",
       sessionName: "Recovered Session",
       preview: "Recovered preview",
     });
@@ -3334,6 +3763,7 @@ describe("Backend connection state", () => {
         eventSource.dispatchState(
           makeBackendStateResponse({
             revision: 1,
+            serverInstanceId: "initial-instance",
             sessionName: "Original Session",
             preview: "Original preview",
           }),
@@ -3351,7 +3781,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
 
       expect(
@@ -3380,6 +3810,7 @@ describe("Backend connection state", () => {
         return jsonResponse(
           makeBackendStateResponse({
             revision: 3,
+            serverInstanceId: "replacement-instance",
             sessionName: "Recovered Session",
             preview: "Recovered preview",
           }),
@@ -3426,6 +3857,7 @@ describe("Backend connection state", () => {
         eventSource.dispatchState(
           makeBackendStateResponse({
             revision: 5,
+            serverInstanceId: "initial-instance",
             sessionName: "Original Session",
             preview: "Original preview",
           }),
@@ -3443,7 +3875,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
 
       expect(
@@ -3462,13 +3894,118 @@ describe("Backend connection state", () => {
     }
   });
 
-  it("re-arms reconnect polling after a failed manual retry", async () => {
+  it("adopts a newer-revision reconnect fallback snapshot after backend restart", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
+        return jsonResponse(
+          makeBackendStateResponse({
+            revision: 7,
+            serverInstanceId: "replacement-instance",
+            sessionName: "Fresh Replacement Session",
+            preview: "Fresh replacement preview",
+          }),
+        );
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      expect(eventSource).toBeDefined();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState(
+          makeBackendStateResponse({
+            revision: 5,
+            serverInstanceId: "initial-instance",
+            sessionName: "Original Session",
+            preview: "Original preview",
+          }),
+        );
+      });
+      expect(await screen.findByText("Original Session")).toBeInTheDocument();
+      expect(screen.getByText("Original preview")).toBeInTheDocument();
+
+      vi.useFakeTimers();
+      act(() => {
+        eventSource.dispatchError();
+      });
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
+      });
+
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
+      ).toBe(true);
+      expect(screen.getByText("Fresh Replacement Session")).toBeInTheDocument();
+      expect(screen.getByText("Fresh replacement preview")).toBeInTheDocument();
+      expect(screen.queryByText("Original Session")).toBeNull();
+    } finally {
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("re-arms reconnect polling after a failed manual retry", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let allowRecoveredSnapshot = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        if (allowRecoveredSnapshot) {
+          return jsonResponse(
+            makeBackendStateResponse({
+              revision: 2,
+              serverInstanceId: "initial-instance",
+              sessionName: "Recovered Session",
+              preview: "Recovered preview",
+            }),
+          );
+        }
         return new Response(
           JSON.stringify({ error: "proxy failed" }),
           {
@@ -3514,13 +4051,14 @@ describe("Backend connection state", () => {
       const eventSource = latestEventSource();
       act(() => {
         eventSource.dispatchOpen();
-        eventSource.dispatchState({
-          revision: 1,
-          projects: [],
-          orchestrators: [],
-          workspaces: [],
-          sessions: [],
-        });
+        eventSource.dispatchState(
+          makeBackendStateResponse({
+            revision: 1,
+            serverInstanceId: "initial-instance",
+            sessionName: "Original Session",
+            preview: "Original preview",
+          }),
+        );
       });
       await waitForNoControlPanelConnectionIssue();
 
@@ -3532,7 +4070,7 @@ describe("Backend connection state", () => {
 
       // First reconnect fallback fires at 400ms and fails with 502.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
       expect(countStateFetches()).toBe(baseCount + 1);
 
@@ -3545,11 +4083,13 @@ describe("Backend connection state", () => {
       });
       expect(countStateFetches()).toBe(baseCount + 2);
 
-      // The failed manual retry should re-arm the reconnect polling at the
-      // reset backoff (400ms). Previously no more fetches would fire until
-      // the next EventSource onerror.
+      allowRecoveredSnapshot = true;
+
+      // The failed manual retry should re-arm reconnect polling at the reset
+      // backoff. The next poll adopts same-instance forward progress, but
+      // must keep polling until live SSE proves data-bearing recovery.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ARM_MS);
       });
       expect(countStateFetches()).toBe(baseCount + 2);
 
@@ -3557,6 +4097,49 @@ describe("Backend connection state", () => {
         await vi.advanceTimersByTimeAsync(1);
       });
       expect(countStateFetches()).toBe(baseCount + 3);
+      expect(screen.getByText("Recovered Session")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_SECOND_PRE_DEADLINE_MS);
+      });
+      expect(countStateFetches()).toBe(baseCount + 3);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(baseCount + 4);
+
+      act(() => {
+        eventSource.dispatchDelta({
+          type: "messageCreated",
+          revision: 3,
+          sessionId: "session-1",
+          messageId: "message-live-delta",
+          messageIndex: 0,
+          messageCount: 1,
+          message: {
+            id: "message-live-delta",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Live retry recovery.",
+          },
+          preview: "Live retry recovery.",
+          status: "active",
+        });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(FRAME_ADVANCE_MS);
+      });
+      expectNoControlPanelConnectionIssue();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_MAX_DELAY_MS);
+      });
+      expect(countStateFetches()).toBe(baseCount + 4);
     } finally {
       if (vi.isFakeTimers()) {
         vi.useRealTimers();
@@ -3718,7 +4301,7 @@ describe("Backend connection state", () => {
 
       // The reconnect fallback at 400ms fetches HTML -- restart-required error.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
       expect(countStateFetches()).toBe(baseCount + 1);
 
@@ -3810,7 +4393,7 @@ describe("Backend connection state", () => {
       });
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
       expect(resolveStateFetch).not.toBeNull();
 

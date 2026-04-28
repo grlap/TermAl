@@ -221,6 +221,47 @@ describe("detectRenderableRegions: Markdown files", () => {
     );
   });
 
+  it("pins the accepted same-body ordinal shift when one duplicate Mermaid fence changes", () => {
+    const before = [
+      "```mermaid",
+      "flowchart TD",
+      "  A --> B",
+      "```",
+      "",
+      "```mermaid",
+      "flowchart TD",
+      "  A --> B",
+      "```",
+    ].join("\n");
+    const after = [
+      "```mermaid",
+      "flowchart TD",
+      "  A --> C",
+      "```",
+      "",
+      "```mermaid",
+      "flowchart TD",
+      "  A --> B",
+      "```",
+    ].join("\n");
+
+    const beforeIds = detectRenderableRegions(markdownContext(before)).map(
+      (region) => region.id,
+    );
+    const afterIds = detectRenderableRegions(markdownContext(after)).map(
+      (region) => region.id,
+    );
+
+    expect(beforeIds[0]).toMatch(/^mermaid:0:/);
+    expect(afterIds[0]).toMatch(/^mermaid:0:/);
+    expect(beforeIds[1]).toMatch(/^mermaid:1:/);
+    expect(afterIds[1]).toMatch(/^mermaid:0:/);
+    expect(afterIds[1]).not.toBe(beforeIds[1]);
+    expect(afterIds[1]?.replace(/^mermaid:\d+:/, "mermaid:")).toBe(
+      beforeIds[1]?.replace(/^mermaid:\d+:/, "mermaid:"),
+    );
+  });
+
   it("locates `math` / `latex` / `tex` / `katex` fences as math regions", () => {
     const md = [
       "Opening.", // 1

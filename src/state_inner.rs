@@ -375,11 +375,19 @@ impl StateInner {
     /// Hidden-session deletes are synthesized from still-hidden records on each
     /// collection pass, so they must not be restored into this explicit queue.
     fn restore_drained_explicit_tombstones(&mut self, session_ids: &[String]) {
+        let mut known_removed_ids: HashSet<&str> = self
+            .removed_session_ids
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let mut restored_session_ids = Vec::new();
         for session_id in session_ids {
-            if !self.removed_session_ids.contains(session_id) {
-                self.removed_session_ids.push(session_id.clone());
+            if known_removed_ids.insert(session_id.as_str()) {
+                restored_session_ids.push(session_id.clone());
             }
         }
+        drop(known_removed_ids);
+        self.removed_session_ids.extend(restored_session_ids);
     }
 
     /// Inserts a new session record, stamping it so the persist thread

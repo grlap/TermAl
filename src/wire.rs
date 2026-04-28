@@ -85,7 +85,11 @@
 // api.rs can now stay focused on axum HTTP route handlers + the
 // `impl AppState` block.
 
-/// Represents the API error.
+/// In-process-only classifier metadata for `ApiError`.
+///
+/// This enum is intentionally not serialized in HTTP error responses. Remote
+/// proxy decoding reconstructs an `ApiError` from status plus `{ error }`, so
+/// any caller that needs typed recovery must attach the kind locally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ApiErrorKind {
     #[cfg_attr(not(unix), allow(dead_code))]
@@ -94,6 +98,9 @@ enum ApiErrorKind {
     GitDocumentNotFile,
     GitDocumentNotFound,
     GitDocumentTooLarge,
+    /// Local session lookup vanished during visible-session hydration,
+    /// fallback, or remote-session-target resolution.
+    LocalSessionMissing,
     RemoteConnectionUnavailable,
     RemoteSessionHydrationFreshnessRace,
     RemoteSessionMissingFullTranscript,
@@ -134,6 +141,10 @@ impl ApiError {
             status: StatusCode::NOT_FOUND,
             kind: None,
         }
+    }
+
+    fn local_session_missing() -> Self {
+        Self::not_found("session not found").with_kind(ApiErrorKind::LocalSessionMissing)
     }
 
     fn internal(message: impl Into<String>) -> Self {

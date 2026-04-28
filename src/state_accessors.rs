@@ -40,14 +40,11 @@ const REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT: Duration = Duration::from_secs(5
 /// metadata without hiding local lookup or protocol errors.
 ///
 /// Visible-pane hydration uses this to return a cached summary. Delta replay
-/// uses the same set to mean "targeted transcript repair is unavailable; try
-/// the narrow delta apply instead." The status guard is intentional: these
-/// recoverable kinds are constructed locally as BAD_GATEWAY errors, and a
-/// different status should make the caller opt into recoverability explicitly.
-fn is_recoverable_visible_session_hydration_error(err: &ApiError) -> bool {
-    if err.status != StatusCode::BAD_GATEWAY {
-        return false;
-    }
+/// (`hydrate_remote_session_via_delta_replay` in `remote_routes.rs`) uses the
+/// same set to mean "targeted transcript repair is unavailable; try the narrow
+/// delta apply instead." The typed kind is the recovery contract; status
+/// controls the wire response but does not change local recoverability.
+fn is_recoverable_remote_hydration_miss(err: &ApiError) -> bool {
     matches!(
         err.kind,
         Some(
@@ -58,24 +55,66 @@ fn is_recoverable_visible_session_hydration_error(err: &ApiError) -> bool {
     )
 }
 
+fn select_visible_session_hydration_fallback_error(
+    original: ApiError,
+    fallback: ApiError,
+) -> ApiError {
+    // A typed local miss proves the cached summary no longer exists, so it is
+    // more actionable for the visible-pane caller than the recoverable remote
+    // hydration miss that triggered fallback. Other fallback failures preserve
+    // the original remote error because the local path only failed while trying
+    // to produce a degraded response.
+    // `LocalSessionMissing` is produced by local session lookup/fallback paths;
+    // new producers should review this selection policy before reusing it.
+    if fallback.kind == Some(ApiErrorKind::LocalSessionMissing) {
+        fallback
+    } else {
+        original
+    }
+}
+
 #[cfg(test)]
 mod visible_session_hydration_error_tests {
     use super::*;
 
+    struct TempStateDir {
+        path: PathBuf,
+    }
+
+    impl TempStateDir {
+        fn new(prefix: &str) -> Self {
+            let path = std::env::temp_dir().join(format!("{prefix}-{}", Uuid::new_v4()));
+            std::fs::create_dir_all(&path).expect("test root should be created");
+            Self { path }
+        }
+
+        fn path(&self) -> &FsPath {
+            &self.path
+        }
+    }
+
+    impl Drop for TempStateDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
     #[test]
-    fn recoverable_visible_session_hydration_errors_are_typed() {
+    fn recoverable_remote_hydration_misses_are_typed() {
         for kind in [
             ApiErrorKind::RemoteConnectionUnavailable,
             ApiErrorKind::RemoteSessionHydrationFreshnessRace,
             ApiErrorKind::RemoteSessionMissingFullTranscript,
         ] {
-            let err = ApiError::bad_gateway("copy can change").with_kind(kind);
-            assert!(is_recoverable_visible_session_hydration_error(&err));
+            for status in [StatusCode::BAD_GATEWAY, StatusCode::SERVICE_UNAVAILABLE] {
+                let err = ApiError::from_status(status, "copy can change").with_kind(kind);
+                assert!(is_recoverable_remote_hydration_miss(&err));
+            }
         }
     }
 
     #[test]
-    fn visible_session_hydration_recovery_does_not_parse_copy() {
+    fn remote_hydration_recovery_does_not_parse_copy() {
         let legacy_connection_copy = ApiError::bad_gateway(
             "Could not connect to remote \"SSH Lab\" over SSH. Check the host, network, and SSH settings, then try again.",
         );
@@ -83,16 +122,78 @@ mod visible_session_hydration_error_tests {
             "remote session response revision 5 cannot be safely applied; latest synchronized remote state revision is 4 and the transcript may have changed",
         );
 
-        assert!(!is_recoverable_visible_session_hydration_error(
+        assert!(!is_recoverable_remote_hydration_miss(
             &legacy_connection_copy
         ));
-        assert!(!is_recoverable_visible_session_hydration_error(
+        assert!(!is_recoverable_remote_hydration_miss(
             &legacy_freshness_copy
         ));
-        assert!(!is_recoverable_visible_session_hydration_error(
-            &ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE, "retry later")
-                .with_kind(ApiErrorKind::RemoteConnectionUnavailable),
-        ));
+    }
+
+    #[test]
+    fn local_not_found_fallback_error_wins_over_recoverable_remote_error() {
+        let original = ApiError::bad_gateway("remote unavailable")
+            .with_kind(ApiErrorKind::RemoteConnectionUnavailable);
+        let fallback =
+            ApiError::local_session_missing();
+
+        let selected = select_visible_session_hydration_fallback_error(original, fallback);
+
+        assert_eq!(selected.status, StatusCode::NOT_FOUND);
+        assert_eq!(selected.message, "session not found");
+    }
+
+    #[test]
+    fn untyped_not_found_fallback_error_preserves_recoverable_remote_error() {
+        let original = ApiError::bad_gateway("remote unavailable")
+            .with_kind(ApiErrorKind::RemoteConnectionUnavailable);
+        let fallback = ApiError::not_found("generic not found");
+
+        let selected = select_visible_session_hydration_fallback_error(original, fallback);
+
+        assert_eq!(selected.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(selected.message, "remote unavailable");
+        assert_eq!(
+            selected.kind,
+            Some(ApiErrorKind::RemoteConnectionUnavailable)
+        );
+    }
+
+    #[test]
+    fn transient_fallback_error_preserves_recoverable_remote_error() {
+        let original = ApiError::bad_gateway("remote unavailable")
+            .with_kind(ApiErrorKind::RemoteConnectionUnavailable);
+        let fallback = ApiError::internal("fallback failed");
+
+        let selected = select_visible_session_hydration_fallback_error(original, fallback);
+
+        assert_eq!(selected.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(selected.message, "remote unavailable");
+        assert_eq!(
+            selected.kind,
+            Some(ApiErrorKind::RemoteConnectionUnavailable)
+        );
+    }
+
+    #[test]
+    fn hydration_fallback_response_tags_missing_local_session() {
+        let root = TempStateDir::new("termal-visible-session-fallback");
+        let state_path = root.path().join("state.json");
+        let templates_path = root.path().join("orchestrators.json");
+        let state = AppState::new_with_paths(
+            root.path().to_string_lossy().into_owned(),
+            state_path,
+            templates_path,
+        )
+        .expect("test state should initialize");
+
+        let err = match state.get_session_hydration_fallback_response("missing-session") {
+            Ok(_) => panic!("missing local session should return a typed error"),
+            Err(err) => err,
+        };
+
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+        assert_eq!(err.kind, Some(ApiErrorKind::LocalSessionMissing));
     }
 }
 
@@ -221,7 +322,7 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
-                .ok_or_else(|| ApiError::not_found("session not found"))?;
+                .ok_or_else(ApiError::local_session_missing)?;
             let record = &inner.sessions[index];
             if record.remote_id.is_some()
                 && record.remote_session_id.is_some()
@@ -246,6 +347,12 @@ impl AppState {
                         eprintln!(
                             "remote session hydration for {session_id} fell back to cached summary: missing remote target"
                         );
+                        // There is no upstream remote error to preserve here:
+                        // the proxy record changed between the initial
+                        // visibility check and target resolution. Return the
+                        // cached summary directly; if the local record also
+                        // disappeared, the fallback helper tags that miss as
+                        // `LocalSessionMissing`.
                         return self.get_session_hydration_fallback_response(session_id);
                     }
                     Err(err) => return Err(err),
@@ -256,29 +363,37 @@ impl AppState {
                     None,
                     REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT,
                 )
-                .or_else(|err| {
-                    if !is_recoverable_visible_session_hydration_error(&err) {
-                        return Err(err);
-                    }
-                    eprintln!(
-                        "remote session hydration for {session_id} fell back to cached summary: status={} kind={:?} message={}",
-                        err.status,
-                        err.kind,
-                        err.message
-                    );
-                    self.get_session_hydration_fallback_response(session_id)
-                        .map_err(|fallback_err| {
-                            eprintln!(
-                                "remote session hydration fallback for {session_id} failed: status={} kind={:?} message={}",
-                                fallback_err.status,
-                                fallback_err.kind,
-                                fallback_err.message
-                            );
-                            err
-                        })
-                })
+                .or_else(|err| self.recover_visible_session_hydration(session_id, err))
             }
         }
+    }
+
+    /// Recover a visible remote-proxy hydration miss with the best local
+    /// cached summary. Non-recoverable remote errors pass through unchanged;
+    /// if the local summary disappeared too, the typed local miss wins over
+    /// the transient remote miss.
+    fn recover_visible_session_hydration(
+        &self,
+        session_id: &str,
+        err: ApiError,
+    ) -> Result<SessionResponse, ApiError> {
+        if !is_recoverable_remote_hydration_miss(&err) {
+            return Err(err);
+        }
+        eprintln!(
+            "remote session hydration for {session_id} fell back to cached summary: status={} kind={:?} message={}",
+            err.status, err.kind, err.message
+        );
+        self.get_session_hydration_fallback_response(session_id)
+            .map_err(|fallback_err| {
+                eprintln!(
+                    "remote session hydration fallback for {session_id} failed: status={} kind={:?} message={}",
+                    fallback_err.status, fallback_err.kind, fallback_err.message
+                );
+                // `select_*` consumes both errors; log before this call if
+                // future diagnostics need fields from either value.
+                select_visible_session_hydration_fallback_error(err, fallback_err)
+            })
     }
 
     /// Return the best local session shape when remote full-transcript
@@ -295,7 +410,7 @@ impl AppState {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_visible_session_index(session_id)
-            .ok_or_else(|| ApiError::not_found("session not found"))?;
+            .ok_or_else(ApiError::local_session_missing)?;
         let record = &inner.sessions[index];
         let session = if record.remote_id.is_some()
             && record.remote_session_id.is_some()

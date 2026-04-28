@@ -86,6 +86,9 @@ export function shouldAdoptSnapshotRevision(
  * revision <= N. If two different snapshots could share the same
  * `(serverInstanceId, revision)`, stale action responses could be reported as
  * success without the corresponding mutation being visible locally.
+ * Session mutation stamps are also instance-local: persisted records
+ * intentionally clear `sessionMutationStamp` on save/load, so a backend restart
+ * must use a new `serverInstanceId` before the stamp sequence restarts.
  */
 export function isStaleSameInstanceSnapshot(
   currentRevision: number | null,

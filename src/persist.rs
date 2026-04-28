@@ -144,12 +144,32 @@ fn harden_local_state_file_permissions(path: &FsPath) -> Result<()> {
 
 #[cfg(unix)]
 fn harden_local_state_directory_permissions(path: &FsPath) -> Result<()> {
-    reject_existing_state_directory_symlink(path)?;
+    reject_existing_state_directory_redirection_unix(path)?;
     harden_local_state_permissions(path, 0o700)
 }
 
-#[cfg(all(not(test), not(unix)))]
+#[cfg(unix)]
+fn reject_existing_state_directory_redirection(path: &FsPath) -> Result<()> {
+    reject_existing_state_directory_redirection_unix(path)
+}
+
+#[cfg(all(not(test), windows))]
+fn harden_local_state_directory_permissions(path: &FsPath) -> Result<()> {
+    reject_existing_windows_state_path_redirection(path)
+}
+
+#[cfg(all(not(test), windows))]
+fn reject_existing_state_directory_redirection(path: &FsPath) -> Result<()> {
+    reject_existing_windows_state_path_redirection(path)
+}
+
+#[cfg(all(not(test), not(unix), not(windows)))]
 fn harden_local_state_directory_permissions(_path: &FsPath) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(all(not(test), not(unix), not(windows)))]
+fn reject_existing_state_directory_redirection(_path: &FsPath) -> Result<()> {
     Ok(())
 }
 
@@ -190,6 +210,31 @@ fn harden_persist_commit_files(path: &FsPath) -> Result<()> {
     })
 }
 
+#[cfg(not(test))]
+fn verify_persist_commit_integrity(path: &FsPath) -> Result<()> {
+    let hardening_result = harden_persist_commit_files(path);
+    if let Err(redirection_err) = reject_existing_sqlite_state_path_redirection(path) {
+        if let Err(err) = &hardening_result {
+            eprintln!(
+                "backend warning> committed persisted state to `{}` but failed to re-harden \
+                 state files before post-commit redirection check failed: {err:#}",
+                path.display()
+            );
+        }
+        return Err(redirection_err).with_context(|| {
+            if let Err(err) = &hardening_result {
+                format!("post-commit redirection check failed after hardening error: {err}")
+            } else {
+                format!(
+                    "post-commit redirection check failed after hardening `{}`",
+                    path.display()
+                )
+            }
+        });
+    }
+    hardening_result
+}
+
 #[cfg(all(not(test), not(unix)))]
 fn harden_sqlite_state_file_permissions(_path: &FsPath) -> Result<()> {
     Ok(())
@@ -206,9 +251,6 @@ fn reject_existing_sqlite_state_file_symlinks(path: &FsPath) -> Result<()> {
 
 #[cfg(all(not(test), windows))]
 fn reject_existing_sqlite_state_file_symlinks(path: &FsPath) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        reject_existing_windows_state_path_redirection(parent)?;
-    }
     reject_existing_windows_state_path_redirection(path)?;
     reject_existing_windows_state_path_redirection(&sqlite_sidecar_path(path, "-wal"))?;
     reject_existing_windows_state_path_redirection(&sqlite_sidecar_path(path, "-shm"))?;
@@ -221,6 +263,13 @@ fn reject_existing_sqlite_state_file_symlinks(_path: &FsPath) -> Result<()> {
     Ok(())
 }
 
+/// Rejects Windows reparse points before SQLite can open the TermAl state
+/// directory, database, or sidecars. A reparse point can redirect persisted
+/// session history through a symlink, junction, or mount point; this is path
+/// integrity, not Unix-style chmod hardening, so the insecure-permissions
+/// escape hatch intentionally does not apply. `0x400` is the stable
+/// `FILE_ATTRIBUTE_REPARSE_POINT` value; spelling it locally avoids adding a
+/// Windows API crate only for this metadata bit.
 #[cfg(all(not(test), windows))]
 fn reject_existing_windows_state_path_redirection(path: &FsPath) -> Result<()> {
     use std::os::windows::fs::MetadataExt;
@@ -241,6 +290,14 @@ fn reject_existing_windows_state_path_redirection(path: &FsPath) -> Result<()> {
     }
 }
 
+#[cfg(not(test))]
+fn reject_existing_sqlite_state_path_redirection(path: &FsPath) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        reject_existing_state_directory_redirection(parent)?;
+    }
+    reject_existing_sqlite_state_file_symlinks(path)
+}
+
 #[cfg(unix)]
 fn reject_existing_state_file_symlink(path: &FsPath) -> Result<()> {
     match fs::symlink_metadata(path) {
@@ -255,7 +312,7 @@ fn reject_existing_state_file_symlink(path: &FsPath) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn reject_existing_state_directory_symlink(path: &FsPath) -> Result<()> {
+fn reject_existing_state_directory_redirection_unix(path: &FsPath) -> Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(anyhow!(
             "refusing to use symlinked state directory `{}`",
@@ -783,7 +840,11 @@ fn persist_state_parts_via_connection(
     }
     tx.commit()
         .with_context(|| format!("failed to commit persisted state to `{}`", path.display()))?;
-    harden_sqlite_state_file_permissions(path)?;
+    // Keep post-commit redirection and owner-only permission verification
+    // fatal. The chmod helper itself honors
+    // TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS when the operator explicitly
+    // accepts insecure state-file modes.
+    verify_persist_commit_integrity(path)?;
     Ok(())
 }
 
@@ -827,8 +888,6 @@ impl SqlitePersistConnectionCache {
             // validation because SQLite may create sidecars between the two
             // points; cached reuses skip this until the next successful commit.
             harden_sqlite_state_file_permissions(path)?;
-            self.connection = None;
-            self.path = None;
             self.path = Some(path.to_path_buf());
             self.connection = Some(connection);
         }
@@ -912,6 +971,11 @@ fn persist_delta_via_cache_inner(
     let metadata_json = serde_json::to_string(&delta.metadata)
         .context("failed to serialize persisted state metadata")?;
     let connection = cache.connection_for(path)?;
+    // Keep state-path redirection failures fatal on cached writes too. Directory
+    // chmod hardening runs when the cached connection is opened; the hot path
+    // intentionally repeats only symlink/reparse checks before each transaction
+    // so path swaps are caught without chmoding the state directory every tick.
+    reject_existing_sqlite_state_path_redirection(path)?;
     let tx = connection.transaction().with_context(|| {
         format!(
             "failed to start SQLite transaction for `{}`",
@@ -964,7 +1028,11 @@ fn persist_delta_via_cache_inner(
             path.display()
         )
     })?;
-    harden_persist_commit_files(path)?;
+    // Keep post-commit redirection and owner-only permission verification
+    // fatal. The chmod helper itself honors
+    // TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS when the operator explicitly
+    // accepts insecure state-file modes.
+    verify_persist_commit_integrity(path)?;
     Ok(())
 }
 

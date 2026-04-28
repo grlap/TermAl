@@ -103,7 +103,7 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
-                .ok_or_else(|| ApiError::not_found("session not found"))?;
+                .ok_or_else(ApiError::local_session_missing)?;
             let record = &inner.sessions[index];
             let Some(remote_id) = record.remote_id.clone() else {
                 return Ok(None);
@@ -977,7 +977,7 @@ impl AppState {
         );
         match hydration_result {
             Ok(_) => {}
-            Err(err) if is_recoverable_visible_session_hydration_error(&err) => {
+            Err(err) if is_recoverable_remote_hydration_miss(&err) => {
                 return Ok(false);
             }
             Err(err) => {

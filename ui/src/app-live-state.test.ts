@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
 import {
+  SESSION_HYDRATION_FIRST_RETRY_DELAY_MS,
   resolveAdoptStateSessionOptions,
   useAppLiveState,
   type SessionHydrationTarget,
@@ -569,7 +570,9 @@ describe("hydration adoption side effects", () => {
     expect(fetchSession).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      vi.advanceTimersByTime(50);
+      // Advance the first targeted hydration retry after the initial fetch
+      // returns a still-stale metadata summary.
+      vi.advanceTimersByTime(SESSION_HYDRATION_FIRST_RETRY_DELAY_MS);
       await Promise.resolve();
     });
 
@@ -638,7 +641,8 @@ describe("hydration adoption side effects", () => {
     expect(fetchSession).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      vi.advanceTimersByTime(50);
+      // Only session-1 is still stale, so only its retry timer should fire.
+      vi.advanceTimersByTime(SESSION_HYDRATION_FIRST_RETRY_DELAY_MS);
       await Promise.resolve();
     });
 
@@ -803,6 +807,31 @@ describe("hydrationRetainedMessagesMatch", () => {
     ).toBe(true);
   });
 
+  it("matches retained messages that appear as an ordered subsequence of the hydrated transcript", () => {
+    const olderMessage: Message = {
+      ...message,
+      id: "message-older",
+      text: "Older retained message",
+    };
+    const missingMessage: Message = {
+      ...message,
+      id: "message-missing",
+      text: "Message only present after hydration",
+    };
+    const latestMessage: Message = {
+      ...message,
+      id: "message-latest",
+      text: "Latest retained message",
+    };
+
+    expect(
+      hydrationRetainedMessagesMatch(
+        { messages: [olderMessage, missingMessage, latestMessage] },
+        { messages: [olderMessage, latestMessage] },
+      ),
+    ).toBe(true);
+  });
+
   it("treats either empty side as retainable", () => {
     expect(
       hydrationRetainedMessagesMatch(
@@ -823,6 +852,35 @@ describe("hydrationRetainedMessagesMatch", () => {
       hydrationRetainedMessagesMatch(
         { messages: [{ ...message, text: "Hello" }] },
         { messages: [{ ...message, text: "Goodbye" }] },
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects retained messages that are missing from the hydrated transcript", () => {
+    expect(
+      hydrationRetainedMessagesMatch(
+        { messages: [{ ...message, id: "message-other" }] },
+        { messages: [message] },
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects retained messages that appear out of order in the hydrated transcript", () => {
+    const firstMessage: Message = {
+      ...message,
+      id: "message-first",
+      text: "First",
+    };
+    const secondMessage: Message = {
+      ...message,
+      id: "message-second",
+      text: "Second",
+    };
+
+    expect(
+      hydrationRetainedMessagesMatch(
+        { messages: [secondMessage, firstMessage] },
+        { messages: [firstMessage, secondMessage] },
       ),
     ).toBe(false);
   });

@@ -748,7 +748,8 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
             "Rendered Markdown is unavailable because the document could not be found.".to_owned(),
         ),
         Some(
-            ApiErrorKind::RemoteConnectionUnavailable
+            ApiErrorKind::LocalSessionMissing
+            | ApiErrorKind::RemoteConnectionUnavailable
             | ApiErrorKind::RemoteSessionHydrationFreshnessRace
             | ApiErrorKind::RemoteSessionMissingFullTranscript,
         ) => None,

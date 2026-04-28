@@ -40,11 +40,30 @@ export function hydrationRetainedMessagesMatch(
   // This comparison intentionally covers the persisted message shape exactly.
   // UI-only message fields must either stay out of `Message` or be excluded
   // here explicitly, otherwise hydration can treat equivalent transcripts as
-  // divergent and drop retained messages.
-  return (
-    JSON.stringify(responseSession.messages) ===
-    JSON.stringify(currentSession.messages)
+  // divergent and drop retained messages. The current client may retain a
+  // gapped transcript tail from live deltas while waiting for hydration; every
+  // retained message must appear in the fetched transcript, in order.
+  const responseMessageKeys = responseSession.messages.map((message) =>
+    JSON.stringify(message),
   );
+  let responseIndex = 0;
+  for (const currentMessage of currentSession.messages) {
+    const currentSerialized = JSON.stringify(currentMessage);
+    let matched = false;
+    while (responseIndex < responseMessageKeys.length) {
+      const responseSerialized = responseMessageKeys[responseIndex];
+      responseIndex += 1;
+      if (responseSerialized === currentSerialized) {
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export function getHydrationMessageCount(

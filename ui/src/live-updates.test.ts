@@ -599,7 +599,7 @@ describe("applyDeltaToSessions", () => {
     ]);
   });
 
-  it("updates metadata for unhydrated summaries without forcing a state resync", () => {
+  it("retains created messages for unhydrated summaries without forcing a state resync", () => {
     const sessions = [
       makeSession("session-a", {
         messagesLoaded: false,
@@ -619,7 +619,7 @@ describe("applyDeltaToSessions", () => {
         type: "text",
         timestamp: "10:00",
         author: "assistant",
-        text: "Dropped until hydration",
+        text: "Visible before hydration",
       },
       preview: "Waiting for activity.",
       status: "active",
@@ -634,7 +634,13 @@ describe("applyDeltaToSessions", () => {
     }
 
     expect(result.sessions[0].messagesLoaded).toBe(false);
-    expect(result.sessions[0].messages).toEqual([]);
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
+      "message-1",
+    ]);
+    expect(result.sessions[0].messages[0]).toMatchObject({
+      author: "assistant",
+      text: "Visible before hydration",
+    });
     expect(result.sessions[0].status).toBe("active");
     expect(result.sessions[0].preview).toBe("Waiting for activity.");
     expect(result.sessions[0].messageCount).toBe(2);
@@ -697,7 +703,7 @@ describe("applyDeltaToSessions", () => {
     expect(result.sessions[0].sessionMutationStamp).toBe(101);
   });
 
-  it("does not insert a retained prompt delta across an unhydrated transcript gap", () => {
+  it("retains a new prompt delta across an unhydrated transcript gap without marking it loaded", () => {
     const sessions = [
       makeSession("session-a", {
         messagesLoaded: false,
@@ -737,13 +743,18 @@ describe("applyDeltaToSessions", () => {
 
     expect(result.kind).toBe("applied");
     if (result.kind !== "applied") {
-      throw new Error("expected metadata-only delta to apply");
+      throw new Error("expected prompt delta to apply");
     }
 
     expect(result.sessions[0].messagesLoaded).toBe(false);
     expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
       "message-previous",
+      "message-late-prompt",
     ]);
+    expect(result.sessions[0].messages[1]).toMatchObject({
+      author: "you",
+      text: "Prompt after missing messages",
+    });
     expect(result.sessions[0].messageCount).toBe(4);
     expect(result.sessions[0].preview).toBe("Prompt after missing messages");
     expect(result.sessions[0].sessionMutationStamp).toBe(101);
@@ -810,6 +821,45 @@ describe("applyDeltaToSessions", () => {
       sessionId: "session-a",
       messageId: "message-new-prompt",
       messageIndex: -1,
+      messageCount: 2,
+      message: {
+        id: "message-new-prompt",
+        type: "text",
+        timestamp: "10:01",
+        author: "you",
+        text: "Latest prompt",
+      },
+      preview: "Latest prompt",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("requests a resync when a created message index is outside the message count", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 1,
+        messages: [
+          {
+            id: "message-previous",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Previous answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: "message-new-prompt",
+      messageIndex: 3,
       messageCount: 2,
       message: {
         id: "message-new-prompt",

@@ -538,8 +538,9 @@ fn git_diff_document_enrichment_note_uses_structured_error_kind() {
 }
 
 #[test]
-fn git_diff_document_enrichment_note_suppresses_recoverable_remote_hydration_kinds() {
+fn git_diff_document_enrichment_note_suppresses_session_lookup_recovery_kinds() {
     for kind in [
+        ApiErrorKind::LocalSessionMissing,
         ApiErrorKind::RemoteConnectionUnavailable,
         ApiErrorKind::RemoteSessionHydrationFreshnessRace,
         ApiErrorKind::RemoteSessionMissingFullTranscript,
