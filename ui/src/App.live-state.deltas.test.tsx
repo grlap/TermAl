@@ -407,6 +407,7 @@ describe("App live state - delta-gap core", () => {
               sessionId: "session-1",
               messageId: "message-assistant-1",
               messageIndex: 1,
+              messageCount: 2,
               text: `Live output ${revision}`,
               preview: `Live output ${revision}`,
             });
@@ -2506,6 +2507,7 @@ describe("App live state - delta-gap core", () => {
             sessionId: "session-1",
             messageId: "message-assistant-1",
             messageIndex: 1,
+            messageCount: 2,
             text: "Partial output.",
             preview: "Partial output.",
           });
@@ -3052,6 +3054,7 @@ describe("App live state - delta-gap core", () => {
             sessionId: "session-2",
             messageId: "message-assistant-noisy-1",
             messageIndex: 1,
+            messageCount: 2,
             text: `Busy output ${noisyRevision}`,
             preview: `Busy output ${noisyRevision}`,
           });
@@ -3241,6 +3244,7 @@ describe("App live state - delta-gap core", () => {
           sessionId: "session-1",
           messageId: "message-assistant-quiet-1",
           messageIndex: 1,
+          messageCount: 2,
           text: "Quiet partial refreshed.",
           preview: "Quiet partial refreshed.",
         });
@@ -3261,6 +3265,7 @@ describe("App live state - delta-gap core", () => {
             sessionId: "session-2",
             messageId: "message-assistant-noisy-1",
             messageIndex: 1,
+            messageCount: 2,
             text: `Busy output ${noisyRevision}`,
             preview: `Busy output ${noisyRevision}`,
           });
@@ -3281,6 +3286,7 @@ describe("App live state - delta-gap core", () => {
             sessionId: "session-2",
             messageId: "message-assistant-noisy-1",
             messageIndex: 1,
+            messageCount: 2,
             text: `Busy output ${noisyRevision}`,
             preview: `Busy output ${noisyRevision}`,
           });

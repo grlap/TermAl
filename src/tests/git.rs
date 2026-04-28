@@ -537,6 +537,18 @@ fn git_diff_document_enrichment_note_uses_structured_error_kind() {
     );
 }
 
+#[test]
+fn git_diff_document_enrichment_note_suppresses_recoverable_remote_hydration_kinds() {
+    for kind in [
+        ApiErrorKind::RemoteConnectionUnavailable,
+        ApiErrorKind::RemoteSessionHydrationFreshnessRace,
+        ApiErrorKind::RemoteSessionMissingFullTranscript,
+    ] {
+        let error = ApiError::bad_gateway("recoverable remote hydration").with_kind(kind);
+        assert_eq!(git_diff_document_enrichment_note(&error), None);
+    }
+}
+
 // Pins that every status in `DEGRADED_UNTAGGED_STATUSES` both
 // triggers degradation and produces a user-visible note, keeping the
 // two helpers in lockstep. Guards against adding a status to the

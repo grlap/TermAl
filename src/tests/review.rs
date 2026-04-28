@@ -531,8 +531,7 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
         .iter()
         .find(|session| session.id == session_id)
         .expect("updated Claude session should be present");
-    let expected_preview =
-        approval_preview_text("Claude", ApprovalDecision::AcceptedForSession);
+    let expected_preview = approval_preview_text("Claude", ApprovalDecision::AcceptedForSession);
     assert_interaction_response_session_hydrated(
         session,
         SessionStatus::Active,

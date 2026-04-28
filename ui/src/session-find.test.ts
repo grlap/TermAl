@@ -229,50 +229,230 @@ describe("session find helpers", () => {
     expect(buildSessionListSearchResult(conversationSession, "missing")).toBeNull();
   });
 
-  it("indexes connection-retry notices so both live and resolved card copy match", () => {
-    // Regression guard for the "resolved retry notice text
-    // diverges from session find indexing" bug. A
-    // `ConnectionRetryCard` renders two distinct text
-    // surfaces depending on whether the turn has resumed:
-    //   - Live      → `notice.detail` (the stored
-    //                 `message.text`).
-    //   - Resolved  → a synthesized "Connection recovered" /
-    //                 "Connection dropped briefly; the turn
-    //                 continued after …" heading + detail.
-    // Before the fix, the search index only carried
-    // `message.text`, so a search for terms visible ONLY in the
-    // resolved card (e.g. "Connection recovered", "the turn
-    // continued") missed the message — and a search for
-    // live-card terms ("Retrying automatically") landed on a
-    // resolved card whose visible copy didn't contain the
-    // query, making search look broken. Include both forms in
-    // the search index for connection-retry notices.
-    const session = createSession({
-      messages: [
-        {
-          id: "message-retry",
-          type: "text",
-          author: "assistant",
-          timestamp: "09:00",
-          text: "Connection dropped before the response finished. Retrying automatically (attempt 2 of 5).",
-        },
-      ],
-    });
-    // Live-card detail text (the raw stored message text).
-    expect(buildSessionSearchMatches(session, "Retrying automatically")).toEqual([
-      expect.objectContaining({ itemId: "message-retry" }),
-    ]);
-    // Resolved-card heading.
-    expect(buildSessionSearchMatches(session, "Connection recovered")).toEqual([
-      expect.objectContaining({ itemId: "message-retry" }),
-    ]);
-    // Resolved-card synthesized detail (past-tense, with the
-    // attempt label lowercased to match the rendered copy).
-    expect(
-      buildSessionSearchMatches(session, "the turn continued after attempt 2 of 5"),
-    ).toEqual([expect.objectContaining({ itemId: "message-retry" })]);
-  });
+  describe("indexes rendered connection-retry notice state", () => {
+    const retryText =
+      "Connection dropped before the response finished. Retrying automatically (attempt 2 of 5).";
 
+    it("indexes a live retry notice as active retry copy", () => {
+      const liveSession = createSession({
+        status: "active",
+        messages: [
+          {
+            id: "message-retry-live",
+            type: "text",
+            author: "assistant",
+            timestamp: "09:00",
+            text: retryText,
+          },
+        ],
+      });
+
+      expect(buildSessionSearchMatches(liveSession, "Retrying automatically")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-live" }),
+      ]);
+      expect(buildSessionSearchMatches(liveSession, "Connection recovered")).toEqual([]);
+    });
+
+    it("indexes an inactive retry notice as ended plus literal stored copy", () => {
+      const inactiveSession = createSession({
+        status: "idle",
+        messages: [
+          {
+            id: "message-retry-inactive",
+            type: "text",
+            author: "assistant",
+            timestamp: "09:00",
+            text: retryText,
+          },
+        ],
+      });
+
+      expect(buildSessionSearchMatches(inactiveSession, "Connection retry ended")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-inactive" }),
+      ]);
+      expect(buildSessionSearchMatches(inactiveSession, "Retrying automatically")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-inactive" }),
+      ]);
+    });
+
+    it("indexes a resolved retry notice as recovered copy", () => {
+      const resolvedSession = createSession({
+        status: "idle",
+        messages: [
+          {
+            id: "message-retry-resolved",
+            type: "text",
+            author: "assistant",
+            timestamp: "09:00",
+            text: retryText,
+          },
+          {
+            id: "message-response",
+            type: "text",
+            author: "assistant",
+            timestamp: "09:01",
+            text: "The turn continued after reconnecting.",
+          },
+        ],
+      });
+
+      expect(buildSessionSearchMatches(resolvedSession, "Connection recovered")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-resolved" }),
+      ]);
+      expect(
+        buildSessionSearchMatches(resolvedSession, "the turn continued after attempt 2 of 5"),
+      ).toEqual([expect.objectContaining({ itemId: "message-retry-resolved" })]);
+      expect(buildSessionSearchMatches(resolvedSession, "Retrying automatically")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-resolved" }),
+      ]);
+      expect(buildSessionSearchMatches(resolvedSession, "Connection retry ended")).toEqual([]);
+    });
+
+    it("indexes an older retry notice as superseded when a newer retry is active", () => {
+      const supersededSession = createSession({
+        status: "active",
+        messages: [
+          {
+            id: "message-retry-superseded",
+            type: "text",
+            author: "assistant",
+            timestamp: "09:00",
+            text: retryText,
+          },
+          {
+            id: "message-retry-newer",
+            type: "text",
+            author: "assistant",
+            timestamp: "09:01",
+            text: "Connection dropped before the response finished. Retrying automatically (attempt 3 of 5).",
+          },
+        ],
+      });
+
+      expect(buildSessionSearchMatches(supersededSession, "Retry superseded")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-superseded" }),
+      ]);
+      expect(
+        buildSessionSearchMatches(supersededSession, "Reconnecting to continue this turn"),
+      ).toEqual([expect.objectContaining({ itemId: "message-retry-newer" })]);
+      expect(buildSessionSearchMatches(supersededSession, "Retrying automatically")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-superseded" }),
+        expect.objectContaining({ itemId: "message-retry-newer" }),
+      ]);
+    });
+
+    it("indexes retry-then-resolved sequences with superseded and recovered states", () => {
+      const retryThenResolvedSession = createSession({
+        status: "idle",
+        messages: [
+          {
+            id: "message-retry-first",
+            type: "text",
+            author: "assistant",
+            timestamp: "09:00",
+            text: retryText,
+          },
+          {
+            id: "message-retry-second",
+            type: "text",
+            author: "assistant",
+            timestamp: "09:01",
+            text: "Connection dropped before the response finished. Retrying automatically (attempt 3 of 5).",
+          },
+          {
+            id: "message-response-after-retries",
+            type: "text",
+            author: "assistant",
+            timestamp: "09:02",
+            text: "The turn recovered after the second retry.",
+          },
+        ],
+      });
+
+      expect(buildSessionSearchMatches(retryThenResolvedSession, "Retry superseded")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-first" }),
+      ]);
+      expect(buildSessionSearchMatches(retryThenResolvedSession, "Connection recovered")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-second" }),
+      ]);
+      expect(buildSessionSearchMatches(retryThenResolvedSession, "Retrying automatically")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-first" }),
+        expect.objectContaining({ itemId: "message-retry-second" }),
+      ]);
+    });
+
+    it("indexes a retry before a new user prompt as inactive", () => {
+      const newPromptSession = createSession({
+        status: "active",
+        messages: [
+          {
+            id: "message-retry-before-user",
+            type: "text",
+            author: "assistant",
+            timestamp: "09:00",
+            text: retryText,
+          },
+          {
+            id: "message-new-user-prompt",
+            type: "text",
+            author: "you",
+            timestamp: "09:01",
+            text: "Try a different task.",
+          },
+        ],
+      });
+
+      expect(buildSessionSearchMatches(newPromptSession, "Connection retry ended")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-before-user" }),
+      ]);
+      expect(
+        buildSessionSearchMatches(newPromptSession, "Reconnecting to continue this turn"),
+      ).toEqual([]);
+      expect(buildSessionSearchMatches(newPromptSession, "Retrying automatically")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-before-user" }),
+      ]);
+    });
+
+    it("indexes interleaved recovered and current retry notices independently", () => {
+      const interleavedSession = createSession({
+        status: "active",
+        messages: [
+          {
+            id: "message-retry-old",
+            type: "text",
+            author: "assistant",
+            timestamp: "09:00",
+            text: retryText,
+          },
+          {
+            id: "message-response-between",
+            type: "text",
+            author: "assistant",
+            timestamp: "09:01",
+            text: "Recovered before another reconnect attempt.",
+          },
+          {
+            id: "message-retry-current",
+            type: "text",
+            author: "assistant",
+            timestamp: "09:02",
+            text: "Connection dropped before the response finished. Retrying automatically (attempt 3 of 5).",
+          },
+        ],
+      });
+
+      expect(buildSessionSearchMatches(interleavedSession, "Connection recovered")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-old" }),
+      ]);
+      expect(
+        buildSessionSearchMatches(interleavedSession, "Reconnecting to continue this turn"),
+      ).toEqual([expect.objectContaining({ itemId: "message-retry-current" })]);
+      expect(buildSessionSearchMatches(interleavedSession, "Retrying automatically")).toEqual([
+        expect.objectContaining({ itemId: "message-retry-old" }),
+        expect.objectContaining({ itemId: "message-retry-current" }),
+      ]);
+    });
+  });
   it("reuses prebuilt indexes for conversation and session-list search", () => {
     const session = createSession({
       name: "Deploy checks",

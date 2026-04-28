@@ -519,7 +519,10 @@ const SessionBody = memo(function SessionBody({
     previous.renderPromptSettings === next.renderPromptSettings)
   // Render callbacks are invoked during render, so they stay in normal React
   // dataflow. Compare only the renderer that can affect the active view mode;
-  // event handlers above are committed stable callbacks.
+  // event handlers above are committed stable callbacks. In session view the
+  // message renderer intentionally tracks streaming flags, so active streaming
+  // chunks can re-render SessionBody; the conversation page still defers the
+  // visible message list before rendering heavy message content.
 );
 
 const SessionConversationPage = memo(function SessionConversationPage({

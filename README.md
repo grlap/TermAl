@@ -19,18 +19,15 @@ TermAl gives you one place to run, supervise, review, and steer long-running sof
 - **Prompt queueing** — send follow-up prompts while an agent is working; they run automatically in order
 - **Session model controls** — Claude, Codex, Cursor, and Gemini sessions refresh live model lists, allow manual model IDs, and expose session-scoped mode/approval/effort controls
 - **SSH remotes** — connect to remote machines over SSH tunnels; run agents on a build server while supervising from your laptop
-- **Session persistence** — sessions and message history survive restart (`~/.termal/sessions.json`)
+- **Session persistence** — sessions and message history survive restart (`~/.termal/termal.sqlite`)
 - **Filesystem and git panels** — browse files, view git status, edit source, review diffs, and react to local file watcher updates directly from the workspace
 - **18 themes + 4 chrome styles** — hand-crafted color palettes, independent chrome styles (Terminal, Editorial, Studio, Blueprint), font-size controls, and a density control switchable at runtime
 
-## Agent support
+## Agent Integrations
 
-| Agent | Status |
-|-------|--------|
-| Claude Code | Supported |
-| OpenAI Codex | Supported |
-| Gemini CLI | Supported |
-| Cursor | Supported |
+TermAl integrates with Claude Code, OpenAI Codex, Gemini CLI, and Cursor. Agent
+protocol differences are normalized into the same session, message, approval,
+and streaming model in the UI.
 
 ## Architecture
 
@@ -55,9 +52,9 @@ Browser (React + TypeScript)        Rust Backend (axum + tokio)
 ```
 
 - **Backend:** Rust + axum + tokio on `:8787`. Spawns agents as child processes, communicates via stdin/stdout.
-- **Frontend:** React 18 + TypeScript + Vite on `:4173` (dev). No external state library — state lives in `App.tsx`.
+- **Frontend:** React 18 + TypeScript + Vite on `:4173` (dev). State is split across focused app hooks, local stores, and typed API/live-update helpers; no Redux-style external state library.
 - **Real-time:** Server-Sent Events with a monotonic revision counter. Delta events for streaming; full snapshots for sync.
-- **Persistence:** Sessions, projects, preferences, remotes, workspace layouts, and orchestrator instances in `~/.termal/sessions.json`; orchestrator templates in `~/.termal/orchestrators.json`.
+- **Persistence:** Sessions, projects, preferences, remotes, workspace layouts, and orchestrator instances in `~/.termal/termal.sqlite`; orchestrator templates in `~/.termal/orchestrators.json`.
 
 ## SSH remotes
 
@@ -215,7 +212,7 @@ already be running on the remote host.
 | `port` | SSH port | `22` |
 | `enabled` | Whether the remote is available for new projects | `true` |
 
-Remotes are configured in Settings > Remotes and persisted in `~/.termal/sessions.json` alongside session data. A built-in `local` remote is always present and cannot be removed.
+Remotes are configured in Settings > Remotes and persisted in `~/.termal/termal.sqlite` alongside session data. A built-in `local` remote is always present and cannot be removed.
 
 ## Getting started
 
@@ -277,22 +274,27 @@ termal/
 ├── src/
 │   ├── main.rs              # Entry point and CLI
 │   ├── api.rs               # Axum HTTP routes
-│   ├── state.rs             # AppState, sessions, persistence
-│   ├── runtime.rs           # Agent runtimes (Claude, Codex, Gemini, Cursor)
-│   ├── remote.rs            # SSH tunnels, remote registry, SSE bridge
-│   ├── orchestrators.rs     # Orchestrator templates, instances, and transitions
-│   ├── telegram.rs          # Telegram polling relay for project digests and actions
-│   ├── turns.rs             # Turn lifecycle, types, shared structures
-│   └── tests.rs             # Rust unit tests
+│   ├── api_*.rs             # Route groups for files, git, review, SSE, etc.
+│   ├── state*.rs            # AppState, boot, accessors, and persistence-facing state
+│   ├── session_*.rs         # Session lifecycle, messages, config, runtime, and sync
+│   ├── claude*.rs           # Claude runtime integration
+│   ├── codex*.rs            # Codex runtime, RPC, events, and thread actions
+│   ├── gemini.rs / acp.rs   # Gemini and ACP runtime integration
+│   ├── remote*.rs           # SSH tunnels, remote routing, proxies, and sync
+│   ├── orchestrator*.rs     # Orchestrator templates, instances, and transitions
+│   ├── terminal*.rs         # Terminal run/stream support
+│   ├── wire*.rs             # HTTP/SSE wire types
+│   └── tests/               # Backend test modules
 ├── ui/
 │   ├── src/
-│   │   ├── App.tsx              # Main React component
-│   │   ├── api.ts               # API client
-│   │   ├── types.ts             # Shared TypeScript types
-│   │   ├── workspace.ts         # Pane/tab/split state
-│   │   ├── workspace-storage.ts # Multi-browser workspace view ID and layout persistence
-│   │   ├── live-updates.ts      # Delta event application
-│   │   ├── themes/              # 18 color themes + chrome style presets
+│   │   ├── App.tsx                  # App composition
+│   │   ├── app-*.ts                 # Focused app hooks and state orchestration
+│   │   ├── api.ts / types.ts        # API client and shared TypeScript types
+│   │   ├── live-updates.ts          # SSE delta event application
+│   │   ├── session-store.ts         # Session slice publication for heavy panels
+│   │   ├── workspace*.ts            # Pane/tab/split state and layout persistence
+│   │   ├── message-*.tsx            # Message cards, icons, and render helpers
+│   │   ├── themes/                  # 18 color themes + chrome style presets
 │   │   └── panels/
 │   │       ├── AgentSessionPanel.tsx                # Chat session view
 │   │       ├── ControlPanelSurface.tsx              # Dockable sidebar with section tabs
@@ -310,7 +312,6 @@ termal/
 │   ├── architecture.md      # Full architecture reference
 │   ├── vision.md            # Product vision
 │   ├── roadmap.md           # Phased roadmap
-│   ├── bugs.md              # Bug tracker and implementation backlog
 │   └── features/            # Feature briefs (orchestration, workspaces, agent integrations, etc.)
 ├── Cargo.toml
 └── Cargo.lock
@@ -347,25 +348,11 @@ Instances can be **paused**, **resumed**, or **stopped** from the control panel 
 | Input mode | `Queue`, `Consolidate` | How multiple inbound transitions are handled |
 | Prompt template | Free text with `{{result}}` placeholder | Custom prompt wrapping the result |
 
-## Roadmap
-
-TermAl evolves in four phases:
-
-| Phase | Goal | Status |
-|-------|------|--------|
-| 1 — Local AI terminal | Reliable local control room for agent sessions | **In progress** |
-| 2 — Remote PC access | Connect to running sessions from another computer | **In progress** |
-| 3 — Mobile access | Supervise, approve, and review from a phone | Planned |
-| 4 — Remote pair programming | Two humans collaborating around the same agent session | Planned |
-
-See [`docs/roadmap.md`](docs/roadmap.md) for the full breakdown.
-
 ## Docs
 
 - [`docs/architecture.md`](docs/architecture.md) — system design, API reference, agent protocol details
 - [`docs/vision.md`](docs/vision.md) — product framing and guiding principles
 - [`docs/roadmap.md`](docs/roadmap.md) — phased roadmap
-- [`docs/bugs.md`](docs/bugs.md) — implementation backlog
 - [`docs/themes.md`](docs/themes.md) — current theme, chrome style, font, and density system
 - [`docs/test.md`](docs/test.md) — current backend/frontend test strategy
 - [`docs/features/`](docs/features/) — feature briefs including:

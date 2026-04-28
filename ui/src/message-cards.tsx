@@ -97,10 +97,14 @@ import {
   getErrorMessage,
   imageAttachmentSummaryLabel,
   mapCommandStatus,
-  parseConnectionRetryNotice,
   renderDecision,
-  type ConnectionRetryNotice,
 } from "./app-utils";
+import {
+  connectionRetryPresentationFor,
+  parseConnectionRetryNotice,
+  type ConnectionRetryDisplayState,
+  type ConnectionRetryNotice,
+} from "./connection-retry";
 import {
   DEFERRED_RENDER_RESUME_EVENT,
   DEFERRED_RENDER_ROOT_MARGIN_PX,
@@ -222,6 +226,7 @@ export const MessageCard = memo(
     searchQuery = "",
     searchHighlightTone = "match",
     isLatestAssistantMessage = true,
+    connectionRetryDisplayState,
     workspaceRoot = null,
   }: {
     appearance?: MonacoAppearance;
@@ -248,6 +253,7 @@ export const MessageCard = memo(
     // succeeded. Defaults to true so tests and callers that have not opted in
     // keep the pre-existing "live spinner" behaviour.
     isLatestAssistantMessage?: boolean;
+    connectionRetryDisplayState?: ConnectionRetryDisplayState;
     workspaceRoot?: string | null;
   }) {
     switch (message.type) {
@@ -271,13 +277,16 @@ export const MessageCard = memo(
           shouldUseStreamingAssistantFastPath && !shouldRenderStreamingMarkdown;
 
         if (connectionRetryNotice) {
+          const retryDisplayState =
+            connectionRetryDisplayState ??
+            (isLatestAssistantMessage ? "live" : "resolved");
           return (
             <ConnectionRetryCard
               message={message}
               notice={connectionRetryNotice}
               searchQuery={searchQuery}
               searchHighlightTone={searchHighlightTone}
-              isLive={isLatestAssistantMessage}
+              displayState={retryDisplayState}
             />
           );
         }
@@ -479,6 +488,8 @@ export const MessageCard = memo(
     previous.searchQuery === next.searchQuery &&
     previous.searchHighlightTone === next.searchHighlightTone &&
     previous.isLatestAssistantMessage === next.isLatestAssistantMessage &&
+    previous.connectionRetryDisplayState ===
+      next.connectionRetryDisplayState &&
     previous.workspaceRoot === next.workspaceRoot,
 );
 
@@ -509,41 +520,31 @@ function ConnectionRetryCard({
   notice,
   searchQuery,
   searchHighlightTone,
-  isLive,
+  displayState,
 }: {
   message: TextMessage;
   notice: ConnectionRetryNotice;
   searchQuery: string;
   searchHighlightTone: SearchHighlightTone;
-  // True while this retry notice is still the last assistant-authored message
-  // in the session. Flipping to false means later assistant output exists, so
-  // the reconnect obviously succeeded — the spinner stops and the copy moves
-  // to past tense.
-  isLive: boolean;
+  displayState: ConnectionRetryDisplayState;
 }) {
-  const heading = isLive
-    ? "Reconnecting to continue this turn"
-    : "Connection recovered";
-  const detail = isLive
-    ? notice.detail
-    : notice.attemptLabel
-      ? `Connection dropped briefly; the turn continued after ${notice.attemptLabel.toLowerCase()}.`
-      : "Connection dropped briefly; the turn continued after an automatic retry.";
-  const chipClassName = isLive
-    ? "chip chip-status chip-status-active"
-    : "chip chip-status";
-  const cardClassName = isLive
-    ? "message-card connection-notice-card"
-    : "message-card connection-notice-card connection-notice-card-resolved";
+  const {
+    ariaLive,
+    cardClassName,
+    chipClassName,
+    detail,
+    heading,
+    showSpinner,
+  } = connectionRetryPresentationFor(notice, displayState);
   return (
     <article
       className={cardClassName}
       role="status"
-      aria-live={isLive ? "polite" : "off"}
+      aria-live={ariaLive}
     >
       <MessageMeta author={message.author} timestamp={message.timestamp} />
       <div className="connection-notice-body">
-        {isLive ? (
+        {showSpinner ? (
           <div
             className="activity-spinner connection-notice-spinner"
             aria-hidden="true"

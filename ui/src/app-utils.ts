@@ -202,26 +202,6 @@ export function primaryModifierLabel() {
   return navigator.platform.toLowerCase().includes("mac") ? "Cmd" : "Ctrl";
 }
 
-export type ConnectionRetryNotice = {
-  attemptLabel: string | null;
-  detail: string;
-};
-
-export function parseConnectionRetryNotice(text: string): ConnectionRetryNotice | null {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("Connection dropped before the response finished.")) {
-    return null;
-  }
-
-  const attemptMatch = trimmed.match(/Retrying automatically \(attempt (\d+) of (\d+)\)\.?$/);
-  const attemptLabel = attemptMatch ? `Attempt ${attemptMatch[1]} of ${attemptMatch[2]}` : null;
-
-  return {
-    attemptLabel,
-    detail: trimmed,
-  };
-}
-
 export function buildMessageListSignature(messages: Message[]) {
   const lastMessage = messages[messages.length - 1];
 

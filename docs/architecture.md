@@ -22,7 +22,7 @@ Optional sidecar:
 
 **Frontend:** React 18 + TypeScript, served on `:4173` in dev with a Vite proxy to the backend.
 **Backend:** Rust + axum + tokio, bound to `127.0.0.1:8787` by default, overridable with `TERMAL_PORT`.
-**Persistence:** `~/.termal/termal.sqlite` is the primary store for sessions, projects, preferences, remote config, workspace layouts, and orchestrator instances. `~/.termal/sessions.json` is the legacy import path used to derive the SQLite file, and successful imports are backed up as `sessions.imported-<timestamp>.json`. `~/.termal/orchestrators.json` stores reusable orchestrator templates.
+**Persistence:** `~/.termal/termal.sqlite` stores sessions, projects, preferences, remote config, workspace layouts, and orchestrator instances. `~/.termal/orchestrators.json` stores reusable orchestrator templates.
 **Real-time:** Server-Sent Events with a monotonic revision counter for ordering.
 
 **Current status:** The current implementation includes server-backed workspace layouts, project-scoped SSH remotes, orchestrator templates and runtime instances, session-scoped model controls, workspace terminal tabs, file-change awareness, and the Telegram relay.
@@ -48,8 +48,7 @@ The binary has three modes:
 ```rust
 AppState {
     default_workdir: String,
-    persistence_path: Arc<PathBuf>,            // ~/.termal/termal.sqlite (the legacy sessions.json path
-                                               //  anchors the filename; actual storage is SQLite)
+    persistence_path: Arc<PathBuf>,            // ~/.termal/termal.sqlite
     orchestrator_templates_path: Arc<PathBuf>, // ~/.termal/orchestrators.json
     state_events: broadcast::Sender<String>,
     delta_events: broadcast::Sender<String>,
@@ -180,7 +179,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/projects/{id}/actions/{action_id}` | Dispatch a digest action such as approve, continue, or stop |
 | POST | `/api/projects/pick` | Pick a local project root |
 | POST | `/api/sessions` | Create session |
-| GET | `/api/sessions/{id}` | Fetch one session (full transcript hydration) -> `SessionResponse { revision, session }` |
+| GET | `/api/sessions/{id}` | Fetch one session -> `SessionResponse { revision, serverInstanceId, session }`. Local sessions return full transcripts; remote-proxy sessions can return an unloaded cached summary (`messagesLoaded: false`) on recoverable hydration fallback. |
 | POST | `/api/sessions/{id}/settings` | Update session config |
 | POST | `/api/sessions/{id}/model-options/refresh` | Refresh live model list/options |
 | POST | `/api/sessions/{id}/codex/thread/fork` | Fork the live Codex thread into a new session |
@@ -205,8 +204,12 @@ when the remote session response is ahead of the locally applied remote
 revision. That `/api/state` fetch is a freshness check and global remote resync:
 it can update other proxy records for the same remote and publish local state
 before returning the requested `SessionResponse`. If the upstream session route
-returns `messagesLoaded: false`, TermAl rejects it as a bad gateway because this
-route's local contract is full transcript hydration.
+cannot provide a full transcript before the visible-pane timeout, returns
+`messagesLoaded: false`, or loses a freshness race with a newer remote-state
+snapshot, TermAl can return the cached local summary with
+`messagesLoaded: false`. Frontend targeted hydration must keep that response
+unloaded and retry later rather than treating HTTP success as full transcript
+hydration.
 
 `GET /api/health` currently returns `{ ok: true, supportsInlineOrchestratorTemplates: true }`. Remote launchers use `supportsInlineOrchestratorTemplates` during health probes to decide whether a remote can accept inline local orchestrator templates or must be upgraded first.
 
@@ -324,10 +327,7 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 ```
 ~/.termal/
 |-- termal.sqlite          # primary store: app_state + sessions tables (+ WAL/-shm sidecars)
-|-- sessions.json          # legacy JSON snapshot path; kept as the identifier that
-|                          # termal.sqlite is derived from (see sqlite_persistence_path_for_json_path)
 |-- orchestrators.json     # reusable orchestrator templates
-|-- termal.sqlite.imported-<timestamp>.json  # one-shot backup of a migrated legacy JSON
 `-- telegram-bot.json      # optional Telegram relay chat binding
 ```
 
@@ -341,11 +341,10 @@ split lets the background persist thread write only the **changed** session
 rows on each commit — see `collect_persist_delta`, `persist_delta_via_cache`,
 and `SqlitePersistConnectionCache` in `src/persist.rs`.
 
-On startup, the backend loads state from SQLite if `termal.sqlite` exists;
-otherwise it falls back to the legacy `sessions.json` and one-shot-imports
-it into SQLite, renaming the JSON aside to preserve it as a backup. Template
-definitions live in `orchestrators.json` so reusable workflow designs can
-be managed separately from running instances.
+On startup, the backend loads state from `termal.sqlite` when it exists and
+otherwise boots a fresh local state. Template definitions live in
+`orchestrators.json` so reusable workflow designs can be managed separately
+from running instances.
 
 ---
 

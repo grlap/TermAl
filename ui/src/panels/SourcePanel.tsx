@@ -190,23 +190,31 @@ export function SourcePanel({
   // (`.mmd`) surface a whole-file region, so they get the switcher.
   const canShowRendererPreview =
     fileState.status === "ready" && (isMarkdownSource || renderableRegions.length > 0);
+  const normalizedEditorValue = useMemo(
+    () => normalizeMarkdownDocumentLineEndings(editorValue),
+    [editorValue],
+  );
   const renderedMarkdownSegment = useMemo<MarkdownDiffDocumentSegment | null>(() => {
     if (!isMarkdownSource || fileState.status !== "ready") {
       return null;
     }
 
-    const markdown = normalizeMarkdownDocumentLineEndings(editorValue);
     return {
-      afterEndOffset: markdown.length,
+      afterEndOffset: normalizedEditorValue.length,
       afterStartOffset: 0,
       id: `source-preview:${fileState.path}`,
       isInAfterDocument: true,
       kind: "normal",
-      markdown,
+      markdown: normalizedEditorValue,
       newStart: 1,
       oldStart: 1,
     };
-  }, [editorValue, fileState.path, fileState.status, isMarkdownSource]);
+  }, [
+    fileState.path,
+    fileState.status,
+    isMarkdownSource,
+    normalizedEditorValue,
+  ]);
   // Inline Monaco view zones: each detected renderable region gets a
   // zone pinned AFTER its last source line, hosting a portal that
   // renders the region's display text via MarkdownContent. Keyed by
@@ -233,10 +241,10 @@ export function SourcePanel({
       ),
     }));
   }, [editorAppearance, fileState.path, renderableRegions, workspaceRoot]);
-  const setEditorValueState = (nextValue: string) => {
+  const setEditorValueState = useCallback((nextValue: string) => {
     editorValueRef.current = nextValue;
     setEditorValue(nextValue);
-  };
+  }, []);
 
   function beginSourceRequest(requestTokenRef: { current: number }) {
     const requestToken = requestTokenRef.current + 1;
@@ -346,20 +354,94 @@ export function SourcePanel({
     };
   }, [copiedPath]);
 
-  const registerRenderedMarkdownCommitter = useCallback((committer: () => RenderedMarkdownSectionCommit | null) => {
-    renderedMarkdownCommittersRef.current.add(committer);
-    return () => {
-      renderedMarkdownCommittersRef.current.delete(committer);
-    };
-  }, []);
+  const registerRenderedMarkdownCommitter = useCallback(
+    (committer: () => RenderedMarkdownSectionCommit | null) => {
+      renderedMarkdownCommittersRef.current.add(committer);
+      return () => {
+        renderedMarkdownCommittersRef.current.delete(committer);
+      };
+    },
+    [],
+  );
 
-  function collectRenderedMarkdownCommits() {
+  const collectRenderedMarkdownCommits = useCallback(() => {
     return Array.from(renderedMarkdownCommittersRef.current)
       .map((committer) => committer())
       .filter((commit): commit is RenderedMarkdownSectionCommit => commit != null);
-  }
+  }, []);
 
-  function commitRenderedMarkdownDrafts(): boolean {
+  const handleRenderedMarkdownSectionCommits = useCallback(
+    (commits: RenderedMarkdownSectionCommit[]) => {
+      const currentFileState = fileStateRef.current;
+      if (!isMarkdownSource || currentFileState.status !== "ready") {
+        return false;
+      }
+
+      const rawSourceContent = editorValueRef.current;
+      const originalEolStyle = detectMarkdownDocumentEolStyle(rawSourceContent);
+      const sourceContent =
+        normalizeMarkdownDocumentLineEndings(rawSourceContent);
+      const resolvedCommits = commits.map((commit) => ({
+        commit,
+        range: resolveRenderedMarkdownCommitRange(sourceContent, commit),
+      }));
+      const unresolvedCommitCount = resolvedCommits.filter(
+        (entry) => entry.range === null,
+      ).length;
+      const validResolvedCommits = resolvedCommits.filter(
+        (entry): entry is {
+          commit: RenderedMarkdownSectionCommit;
+          range: MarkdownDocumentRange;
+        } => entry.range !== null,
+      );
+      const hasOverlappingRange =
+        hasOverlappingMarkdownCommitRanges(validResolvedCommits);
+      if (unresolvedCommitCount > 0 || hasOverlappingRange) {
+        setActionError(
+          "Rendered Markdown edit could not be applied because the document changed under that section. Review the latest file and edit again.",
+        );
+        return false;
+      }
+
+      const nextDocumentContentLf = validResolvedCommits
+        .sort((left, right) => right.range.start - left.range.start)
+        .reduce(
+          (currentContent, { commit, range }) =>
+            replaceMarkdownDocumentRange(
+              currentContent,
+              range.start,
+              range.end,
+              normalizeEditedMarkdownSection(
+                commit.nextMarkdown,
+                commit.segment.markdown,
+              ),
+            ),
+          sourceContent,
+        );
+      if (nextDocumentContentLf === sourceContent) {
+        commits.forEach((commit) =>
+          commit.onApplied?.({ resetRenderedContent: false }),
+        );
+        setHasRenderedMarkdownDraftActive(false);
+        return true;
+      }
+
+      const nextDocumentContent = applyMarkdownDocumentEolStyle(
+        nextDocumentContentLf,
+        originalEolStyle,
+      );
+      setHasRenderedMarkdownDraftActive(false);
+      setEditorValueState(nextDocumentContent);
+      setEditorStatus(createEditorStatusSnapshot(nextDocumentContent));
+      setActionError(null);
+      setSaveConflictOnDisk(false);
+      commits.forEach((commit) => commit.onApplied?.());
+      return true;
+    },
+    [isMarkdownSource],
+  );
+
+  const commitRenderedMarkdownDrafts = useCallback((): boolean => {
     const commits = collectRenderedMarkdownCommits();
     if (commits.length === 0) {
       setHasRenderedMarkdownDraftActive(false);
@@ -367,106 +449,50 @@ export function SourcePanel({
     }
 
     return handleRenderedMarkdownSectionCommits(commits);
-  }
+  }, [collectRenderedMarkdownCommits, handleRenderedMarkdownSectionCommits]);
 
-  function commitRenderedMarkdownSectionDraft(commit: RenderedMarkdownSectionCommit) {
-    return handleRenderedMarkdownSectionCommits([commit]);
-  }
+  const commitRenderedMarkdownSectionDraft = useCallback(
+    (commit: RenderedMarkdownSectionCommit) => {
+      return handleRenderedMarkdownSectionCommits([commit]);
+    },
+    [handleRenderedMarkdownSectionCommits],
+  );
 
-  function handleRenderedMarkdownSectionCommits(
-    commits: RenderedMarkdownSectionCommit[],
-  ) {
-    const currentFileState = fileStateRef.current;
-    if (!isMarkdownSource || currentFileState.status !== "ready") {
-      return false;
-    }
+  const handleRenderedMarkdownSectionDraftChange = useCallback(
+    (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => {
+      if (!isMarkdownSource || fileStateRef.current.status !== "ready") {
+        return;
+      }
 
-    const rawSourceContent = editorValueRef.current;
-    const originalEolStyle = detectMarkdownDocumentEolStyle(rawSourceContent);
-    const sourceContent = normalizeMarkdownDocumentLineEndings(rawSourceContent);
-    const resolvedCommits = commits.map((commit) => ({
-      commit,
-      range: resolveRenderedMarkdownCommitRange(sourceContent, commit),
-    }));
-    const unresolvedCommitCount = resolvedCommits.filter(
-      (entry) => entry.range === null,
-    ).length;
-    const validResolvedCommits = resolvedCommits.filter(
-      (entry): entry is {
-        commit: RenderedMarkdownSectionCommit;
-        range: MarkdownDocumentRange;
-      } => entry.range !== null,
-    );
-    const hasOverlappingRange = hasOverlappingMarkdownCommitRanges(validResolvedCommits);
-    if (unresolvedCommitCount > 0 || hasOverlappingRange) {
-      setActionError(
-        "Rendered Markdown edit could not be applied because the document changed under that section. Review the latest file and edit again.",
+      const normalizedDraft = normalizeEditedMarkdownSection(
+        nextMarkdown,
+        segment.markdown,
       );
-      return false;
-    }
+      const nextHasDraft = normalizedDraft !== segment.markdown;
+      setHasRenderedMarkdownDraftActive(nextHasDraft);
+      setActionError(null);
+      setSaveConflictOnDisk(false);
+    },
+    [isMarkdownSource],
+  );
 
-    const nextDocumentContentLf = validResolvedCommits
-      .sort((left, right) => right.range.start - left.range.start)
-      .reduce(
-        (currentContent, { commit, range }) =>
-          replaceMarkdownDocumentRange(
-            currentContent,
-            range.start,
-            range.end,
-            normalizeEditedMarkdownSection(commit.nextMarkdown, commit.segment.markdown),
-          ),
-        sourceContent,
-      );
-    if (nextDocumentContentLf === sourceContent) {
-      commits.forEach((commit) =>
-        commit.onApplied?.({ resetRenderedContent: false }),
-      );
-      setHasRenderedMarkdownDraftActive(false);
-      return true;
-    }
-
-    const nextDocumentContent = applyMarkdownDocumentEolStyle(
-      nextDocumentContentLf,
-      originalEolStyle,
-    );
-    setHasRenderedMarkdownDraftActive(false);
-    setEditorValueState(nextDocumentContent);
-    setEditorStatus(createEditorStatusSnapshot(nextDocumentContent));
-    setActionError(null);
-    setSaveConflictOnDisk(false);
-    commits.forEach((commit) => commit.onApplied?.());
-    return true;
-  }
-
-  function handleRenderedMarkdownSectionDraftChange(
-    segment: MarkdownDiffDocumentSegment,
-    nextMarkdown: string,
-  ) {
-    if (!isMarkdownSource || fileStateRef.current.status !== "ready") {
-      return;
-    }
-
-    const normalizedDraft = normalizeEditedMarkdownSection(nextMarkdown, segment.markdown);
-    const nextHasDraft = normalizedDraft !== segment.markdown;
-    setHasRenderedMarkdownDraftActive(nextHasDraft);
-    setActionError(null);
-    setSaveConflictOnDisk(false);
-  }
-
-  function handleRenderedMarkdownReadOnlyMutation() {
+  const handleRenderedMarkdownReadOnlyMutation = useCallback(() => {
     // SourcePanel Markdown preview is editable; this is only required by
     // the shared rendered-Markdown section API.
-  }
+  }, []);
 
-  function handleSelectDocumentMode(nextMode: SourceDocumentMode) {
-    if (documentMode === nextMode) {
-      return;
-    }
-    if (!commitRenderedMarkdownDrafts()) {
-      return;
-    }
-    setDocumentMode(nextMode);
-  }
+  const handleSelectDocumentMode = useCallback(
+    (nextMode: SourceDocumentMode) => {
+      if (documentMode === nextMode) {
+        return;
+      }
+      if (!commitRenderedMarkdownDrafts()) {
+        return;
+      }
+      setDocumentMode(nextMode);
+    },
+    [commitRenderedMarkdownDrafts, documentMode],
+  );
 
   async function handleSave(options?: SourceSaveOptions) {
     if (!commitRenderedMarkdownDrafts()) {
@@ -525,9 +551,9 @@ export function SourcePanel({
     }
   }
 
-  function handleEditorChange(nextValue: string) {
+  const handleEditorChange = useCallback((nextValue: string) => {
     setEditorValueState(nextValue);
-  }
+  }, [setEditorValueState]);
 
   async function handleReloadFromDisk() {
     if (fileState.status !== "ready" || !onReloadFile || isReloading) {
@@ -945,7 +971,7 @@ export function SourcePanel({
                   onRegisterCommitter={registerRenderedMarkdownCommitter}
                   onSave={() => handleSave()}
                   segment={renderedMarkdownSegment}
-                  sourceContent={normalizeMarkdownDocumentLineEndings(editorValue)}
+                  sourceContent={normalizedEditorValue}
                   workspaceRoot={workspaceRoot}
                 />
               ) : (
@@ -993,7 +1019,7 @@ export function SourcePanel({
                       onRegisterCommitter={registerRenderedMarkdownCommitter}
                       onSave={() => handleSave()}
                       segment={renderedMarkdownSegment}
-                      sourceContent={normalizeMarkdownDocumentLineEndings(editorValue)}
+                      sourceContent={normalizedEditorValue}
                       workspaceRoot={workspaceRoot}
                     />
                   ) : (

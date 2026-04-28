@@ -415,11 +415,19 @@ function detectMarkdownRegions(
 ): SourceRenderableRegion[] {
   const regions: SourceRenderableRegion[] = [];
   const editable = context.mode === "source" || context.mode === "diff-edit";
+  const mermaidOrdinalByBodyHash = new Map<string, number>();
 
   for (const fence of detectMarkdownFenceRegions(context.content)) {
     if (isMermaidFenceLanguage(fence.language)) {
+      const bodyHash = quickHash(fence.body);
+      // Ordinals only disambiguate duplicate Mermaid bodies within the current
+      // parse. Editing one of two identical sibling fences can transiently
+      // remount the unedited sibling, but this keeps the common line-shift case
+      // stable without retaining cross-render fence identity state.
+      const bodyOrdinal = mermaidOrdinalByBodyHash.get(bodyHash) ?? 0;
+      mermaidOrdinalByBodyHash.set(bodyHash, bodyOrdinal + 1);
       regions.push({
-        id: `mermaid:${fence.startLine}:${fence.endLine}:${quickHash(fence.body)}`,
+        id: `mermaid:${bodyOrdinal}:${bodyHash}`,
         renderer: "mermaid",
         sourceStartLine: fence.startLine,
         sourceEndLine: fence.endLine,
@@ -431,6 +439,8 @@ function detectMarkdownRegions(
     }
     if (isMathFenceLanguage(fence.language)) {
       regions.push({
+        // Math remounts are cheap compared with Mermaid iframe churn, so keep
+        // line position in the id to distinguish repeated identical equations.
         id: `math:${fence.startLine}:${fence.endLine}:${quickHash(fence.body)}`,
         renderer: "math",
         sourceStartLine: fence.startLine,

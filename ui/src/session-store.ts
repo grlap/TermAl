@@ -113,6 +113,10 @@ type UpsertSessionStoreSessionParams = Readonly<{
   session: Session;
 }>;
 
+type RemoveSessionFromStoreParams = Readonly<{
+  sessionId: string;
+}>;
+
 const EMPTY_PROMPT_HISTORY: readonly string[] = [];
 const EMPTY_DRAFT_ATTACHMENTS: readonly ComposerDraftAttachment[] = [];
 const EMPTY_COMPOSER_SESSIONS_BY_ID: Readonly<Record<string, ComposerSessionSnapshot>> = {};
@@ -748,6 +752,44 @@ export function upsertSessionStoreSession({
             ...previousSummaryById,
             [session.id]: nextSummary,
           },
+  };
+  emitStoreChange();
+}
+
+export function removeSessionFromStore({
+  sessionId,
+}: RemoveSessionFromStoreParams) {
+  const previousComposerById = currentState.composerSessionsById;
+  const previousRecordsById = currentState.sessionRecordsById;
+  const previousSummaryById = currentState.sessionSummariesById;
+  if (
+    !(sessionId in previousComposerById) &&
+    !(sessionId in previousRecordsById) &&
+    !(sessionId in previousSummaryById)
+  ) {
+    return;
+  }
+
+  const nextComposerById = { ...previousComposerById };
+  const nextRecordsById = { ...previousRecordsById };
+  const nextSummaryById = { ...previousSummaryById };
+  delete nextComposerById[sessionId];
+  delete nextRecordsById[sessionId];
+  delete nextSummaryById[sessionId];
+
+  currentState = {
+    composerSessionsById:
+      Object.keys(nextComposerById).length === 0
+        ? EMPTY_COMPOSER_SESSIONS_BY_ID
+        : nextComposerById,
+    sessionRecordsById:
+      Object.keys(nextRecordsById).length === 0
+        ? EMPTY_SESSION_RECORDS_BY_ID
+        : nextRecordsById,
+    sessionSummariesById:
+      Object.keys(nextSummaryById).length === 0
+        ? EMPTY_SESSION_SUMMARIES_BY_ID
+        : nextSummaryById,
   };
   emitStoreChange();
 }

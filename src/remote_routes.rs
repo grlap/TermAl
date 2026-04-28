@@ -56,6 +56,9 @@ struct RemoteDeltaHydrationExpectation {
     session_mutation_stamp: Option<u64>,
 }
 
+const REMOTE_SESSION_RESPONSE_MISSING_FULL_TRANSCRIPT: &str =
+    "remote session response did not include a full transcript";
+
 impl AppState {
     // -- event bridge lifecycle --
 
@@ -427,6 +430,24 @@ impl AppState {
         Ok(())
     }
 
+    fn commit_applied_remote_state_before_rejection(
+        &self,
+        inner: &mut StateInner,
+        remote_state_applied: bool,
+        rejection_context: &str,
+    ) -> Result<(), ApiError> {
+        if !remote_state_applied {
+            return Ok(());
+        }
+
+        self.commit_locked(inner).map_err(|err| {
+            ApiError::internal(format!(
+                "failed to persist remote state before {rejection_context}: {err:#}"
+            ))
+        })?;
+        Ok(())
+    }
+
     /// Fetches the remote owner's full session transcript for a local proxy,
     /// localizes it into the proxy record, and returns the local full-session
     /// response shape. This keeps `/api/sessions/{id}` full-transcript-only
@@ -670,8 +691,11 @@ impl AppState {
         target: &RemoteSessionTarget,
         min_remote_revision: Option<u64>,
         delta_expectation: Option<RemoteDeltaHydrationExpectation>,
+        // Applied independently to each remote round-trip below; this is not
+        // a shared end-to-end budget across `/api/sessions` and `/api/state`.
+        request_timeout: Duration,
     ) -> Result<SessionResponse, ApiError> {
-        let remote_response: SessionResponse = self.remote_registry.request_json(
+        let remote_response: SessionResponse = self.remote_registry.request_json_with_timeout(
             &target.remote,
             Method::GET,
             &format!(
@@ -680,6 +704,7 @@ impl AppState {
             ),
             &[],
             None,
+            request_timeout,
         )?;
 
         if remote_response.session.id != target.remote_session_id {
@@ -690,8 +715,9 @@ impl AppState {
         }
         if !remote_response.session.messages_loaded {
             return Err(ApiError::bad_gateway(
-                "remote session response did not include a full transcript",
-            ));
+                REMOTE_SESSION_RESPONSE_MISSING_FULL_TRANSCRIPT,
+            )
+            .with_kind(ApiErrorKind::RemoteSessionMissingFullTranscript));
         }
         let loaded_message_count =
             u32::try_from(remote_response.session.messages.len()).unwrap_or(u32::MAX);
@@ -737,12 +763,13 @@ impl AppState {
                 .map(|revision| revision < remote_response.revision)
                 .unwrap_or(true)
             {
-                let remote_state: StateResponse = self.remote_registry.request_json(
+                let remote_state: StateResponse = self.remote_registry.request_json_with_timeout(
                     &target.remote,
                     Method::GET,
                     "/api/state",
                     &[],
                     None,
+                    request_timeout,
                 )?;
                 Some(remote_state)
             } else {
@@ -785,36 +812,33 @@ impl AppState {
                 if current_remote_revision
                     .is_none_or(|revision| revision < remote_response.revision)
                 {
-                    if remote_state_applied {
-                        self.commit_locked(&mut inner).map_err(|err| {
-                            ApiError::internal(format!(
-                                "failed to persist remote state before stale session rejection: {err:#}"
-                            ))
-                        })?;
-                    }
+                    self.commit_applied_remote_state_before_rejection(
+                        &mut inner,
+                        remote_state_applied,
+                        "stale session rejection",
+                    )?;
                     let synchronized_revision = current_remote_revision
                         .map(|revision| revision.to_string())
                         .unwrap_or_else(|| "none".to_owned());
                     return Err(ApiError::bad_gateway(format!(
                         "remote session response revision {} cannot be safely applied; latest synchronized remote state revision is {synchronized_revision} and the transcript may have changed",
                         remote_response.revision,
-                    )));
+                    ))
+                    .with_kind(ApiErrorKind::RemoteSessionHydrationFreshnessRace));
                 }
             }
             let Some(index) = inner
                 .find_remote_session_index(&target.remote.id, &target.remote_session_id)
                 .or_else(|| inner.find_session_index(&target.local_session_id))
             else {
-                if remote_state_applied {
-                    // Preserve the newer remote state fetched for this hydration even if the
-                    // requested proxy disappeared or was replaced before we localized the full
-                    // transcript.
-                    self.commit_locked(&mut inner).map_err(|err| {
-                        ApiError::internal(format!(
-                            "failed to persist remote state before missing-session rejection: {err:#}"
-                        ))
-                    })?;
-                }
+                // Preserve the newer remote state fetched for this hydration even if the
+                // requested proxy disappeared or was replaced before we localized the full
+                // transcript.
+                self.commit_applied_remote_state_before_rejection(
+                    &mut inner,
+                    remote_state_applied,
+                    "missing-session rejection",
+                )?;
                 return Err(ApiError::not_found("session not found"));
             };
             if min_remote_revision.is_none()
@@ -825,18 +849,17 @@ impl AppState {
                     .get(index)
                     .ok_or_else(|| ApiError::not_found("session not found"))?;
                 if !Self::remote_session_metadata_matches_record(record, &remote_response.session) {
-                    if remote_state_applied {
-                        self.commit_locked(&mut inner).map_err(|err| {
-                            ApiError::internal(format!(
-                                "failed to persist remote state before stale session rejection: {err:#}"
-                            ))
-                        })?;
-                    }
+                    self.commit_applied_remote_state_before_rejection(
+                        &mut inner,
+                        remote_state_applied,
+                        "stale session rejection",
+                    )?;
                     return Err(ApiError::bad_gateway(format!(
                         "remote session response revision {} is older than synchronized remote state revision {} and does not match current session metadata",
                         remote_response.revision,
                         current_remote_revision.expect("checked as newer")
-                    )));
+                    ))
+                    .with_kind(ApiErrorKind::RemoteSessionHydrationFreshnessRace));
                 }
             }
             if let Some(remote_revision) = min_remote_revision {
@@ -943,15 +966,27 @@ impl AppState {
             }
         };
 
-        self.hydrate_remote_session_target(
+        let hydration_result = self.hydrate_remote_session_target(
             &target,
             Some(remote_revision),
             Some(RemoteDeltaHydrationExpectation {
                 message_count: remote_message_count,
                 session_mutation_stamp: remote_session_mutation_stamp,
             }),
-        )
-            .map_err(|err| anyhow!("failed to hydrate remote session `{remote_session_id}`: {}", err.message))?;
+            REMOTE_REQUEST_TIMEOUT,
+        );
+        match hydration_result {
+            Ok(_) => {}
+            Err(err) if is_recoverable_visible_session_hydration_error(&err) => {
+                return Ok(false);
+            }
+            Err(err) => {
+                return Err(anyhow!(
+                    "failed to hydrate remote session `{remote_session_id}`: {}",
+                    err.message
+                ));
+            }
+        }
         Ok(true)
     }
 

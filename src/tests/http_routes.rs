@@ -363,13 +363,7 @@ fn local_streaming_delta_events_include_message_count() {
     }
 
     state
-        .upsert_command_message(
-            &session_id,
-            "command-1",
-            "pwd",
-            "",
-            CommandStatus::Running,
-        )
+        .upsert_command_message(&session_id, "command-1", "pwd", "", CommandStatus::Running)
         .expect("command message should be created");
     let _ = next_delta_event(&mut delta_events);
     state

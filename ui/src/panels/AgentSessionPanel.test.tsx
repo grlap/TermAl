@@ -23,7 +23,7 @@ import {
   getScrollContainerBottomGap,
   isScrollContainerNearBottom,
 } from "./conversation-virtualization";
-import type { Message, Session } from "../types";
+import type { CommandMessage, DiffMessage, Message, Session } from "../types";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
@@ -50,7 +50,7 @@ function makeTextMessages(count: number): Message[] {
   }));
 }
 
-function makeCommandMessages(count: number): Message[] {
+function makeCommandMessages(count: number): CommandMessage[] {
   return Array.from({ length: count }, (_, index) => ({
     id: `command-${index + 1}`,
     type: "command",
@@ -59,6 +59,19 @@ function makeCommandMessages(count: number): Message[] {
     command: "pwd",
     output: ".",
     status: "success",
+  }));
+}
+
+function makeDiffMessages(count: number): DiffMessage[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `diff-${index + 1}`,
+    type: "diff",
+    timestamp: `10:${String(index).padStart(2, "0")}`,
+    author: "assistant",
+    filePath: `file-${index + 1}.ts`,
+    summary: `Changed file ${index + 1}`,
+    diff: "@@ -1 +1 @@\n-old\n+new",
+    changeType: "edit",
   }));
 }
 
@@ -351,6 +364,144 @@ describe("AgentSessionPanel conversation caching", () => {
 
     expect(screen.queryByText("Initial prompt renderer")).not.toBeInTheDocument();
     expect(screen.getByText("Latest prompt renderer")).toBeInTheDocument();
+  });
+
+  it("refreshes command cards when only the command renderer changes", async () => {
+    const activeSession = makeSession("session-a");
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [activeSession],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+
+    const commandMessages = makeCommandMessages(1);
+    const scrollContainerRef = { current: document.createElement("section") };
+    const matchedItemKeys = new Set<string>();
+    const noopApproval = () => {};
+    const noopUserInput = () => {};
+    const noopElicitation = () => {};
+    const noopAppRequest = () => {};
+    const noopCancel = () => {};
+    const noopSettingsChange = () => {};
+    const noopSearchMount = () => {};
+    const renderDiffCard = () => null;
+    const renderMessageCard = (message: Message) => (
+      <article className="message-card">{message.id}</article>
+    );
+    const renderPromptSettings = () => null;
+
+    const renderPanel = (label: string) => (
+      <AgentSessionPanel
+        paneId="pane-1"
+        viewMode="commands"
+        activeSessionId={activeSession.id}
+        isLoading={false}
+        isUpdating={false}
+        showWaitingIndicator={false}
+        waitingIndicatorPrompt={null}
+        commandMessages={commandMessages}
+        diffMessages={[]}
+        scrollContainerRef={scrollContainerRef}
+        onApprovalDecision={noopApproval}
+        onUserInputSubmit={noopUserInput}
+        onMcpElicitationSubmit={noopElicitation}
+        onCodexAppRequestSubmit={noopAppRequest}
+        onCancelQueuedPrompt={noopCancel}
+        onSessionSettingsChange={noopSettingsChange}
+        conversationSearchQuery=""
+        conversationSearchMatchedItemKeys={matchedItemKeys}
+        conversationSearchActiveItemKey={null}
+        onConversationSearchItemMount={noopSearchMount}
+        renderCommandCard={(message) => (
+          <article>{`${label}: ${message.id}`}</article>
+        )}
+        renderDiffCard={renderDiffCard}
+        renderMessageCard={renderMessageCard}
+        renderPromptSettings={renderPromptSettings}
+      />
+    );
+
+    const { rerender } = render(renderPanel("Initial command renderer"));
+    expect(screen.getByText("Initial command renderer: command-1")).toBeInTheDocument();
+
+    await act(async () => {
+      rerender(renderPanel("Latest command renderer"));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("Initial command renderer: command-1")).not.toBeInTheDocument();
+    expect(screen.getByText("Latest command renderer: command-1")).toBeInTheDocument();
+  });
+
+  it("refreshes diff cards when only the diff renderer changes", async () => {
+    const activeSession = makeSession("session-a");
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [activeSession],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+
+    const diffMessages = makeDiffMessages(1);
+    const scrollContainerRef = { current: document.createElement("section") };
+    const matchedItemKeys = new Set<string>();
+    const noopApproval = () => {};
+    const noopUserInput = () => {};
+    const noopElicitation = () => {};
+    const noopAppRequest = () => {};
+    const noopCancel = () => {};
+    const noopSettingsChange = () => {};
+    const noopSearchMount = () => {};
+    const renderCommandCard = () => null;
+    const renderMessageCard = (message: Message) => (
+      <article className="message-card">{message.id}</article>
+    );
+    const renderPromptSettings = () => null;
+
+    const renderPanel = (label: string) => (
+      <AgentSessionPanel
+        paneId="pane-1"
+        viewMode="diffs"
+        activeSessionId={activeSession.id}
+        isLoading={false}
+        isUpdating={false}
+        showWaitingIndicator={false}
+        waitingIndicatorPrompt={null}
+        commandMessages={[]}
+        diffMessages={diffMessages}
+        scrollContainerRef={scrollContainerRef}
+        onApprovalDecision={noopApproval}
+        onUserInputSubmit={noopUserInput}
+        onMcpElicitationSubmit={noopElicitation}
+        onCodexAppRequestSubmit={noopAppRequest}
+        onCancelQueuedPrompt={noopCancel}
+        onSessionSettingsChange={noopSettingsChange}
+        conversationSearchQuery=""
+        conversationSearchMatchedItemKeys={matchedItemKeys}
+        conversationSearchActiveItemKey={null}
+        onConversationSearchItemMount={noopSearchMount}
+        renderCommandCard={renderCommandCard}
+        renderDiffCard={(message) => (
+          <article>{`${label}: ${message.id}`}</article>
+        )}
+        renderMessageCard={renderMessageCard}
+        renderPromptSettings={renderPromptSettings}
+      />
+    );
+
+    const { rerender } = render(renderPanel("Initial diff renderer"));
+    expect(screen.getByText("Initial diff renderer: diff-1")).toBeInTheDocument();
+
+    await act(async () => {
+      rerender(renderPanel("Latest diff renderer"));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("Initial diff renderer: diff-1")).not.toBeInTheDocument();
+    expect(screen.getByText("Latest diff renderer: diff-1")).toBeInTheDocument();
   });
 
   it("uses the latest message renderer after a renderer-only parent rerender", async () => {

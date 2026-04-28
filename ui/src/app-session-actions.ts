@@ -37,7 +37,7 @@ import {
   updateSessionSettings,
   type StateResponse,
 } from "./api";
-import type { UseAppLiveStateReturn } from "./app-live-state";
+import type { AdoptStateOptions, UseAppLiveStateReturn } from "./app-live-state";
 import { startActivePromptPoll } from "./active-prompt-poll";
 import {
   getErrorMessage,
@@ -68,6 +68,10 @@ import {
   reconcileWorkspaceState,
   type WorkspaceState,
 } from "./workspace";
+import {
+  classifyRejectedActionState,
+  type StaleActionTargetEvidenceOptions,
+} from "./action-state-adoption";
 import type {
   AgentReadiness,
   AgentType,
@@ -112,7 +116,10 @@ type UseAppSessionActionsDefaults = {
 
 type UseAppSessionActionsRefs = {
   isMountedRef: MutableRefObject<boolean>;
+  latestStateRevisionRef: MutableRefObject<number | null>;
+  lastSeenServerInstanceIdRef: MutableRefObject<string | null>;
   sessionsRef: MutableRefObject<Session[]>;
+  projectsRef: MutableRefObject<Project[]>;
   draftsBySessionIdRef: MutableRefObject<Record<string, string>>;
   draftAttachmentsBySessionIdRef: MutableRefObject<
     Record<string, DraftImageAttachment[]>
@@ -159,6 +166,7 @@ type UseAppSessionActionsParams = {
   setters: UseAppSessionActionsSetters;
   adoptState: UseAppLiveStateReturn["adoptState"];
   adoptCreatedSessionResponse: UseAppLiveStateReturn["adoptCreatedSessionResponse"];
+  clearHydrationMismatchSessionIds: UseAppLiveStateReturn["clearHydrationMismatchSessionIds"];
   applyControlPanelLayout: (
     nextWorkspace: WorkspaceState,
     side?: "left" | "right",
@@ -177,6 +185,36 @@ type HandleNewSessionArgs = {
   preferredPaneId?: string | null;
   projectSelectionId?: string;
 };
+
+type AdoptActionStateForwardOptions = Pick<
+  AdoptStateOptions,
+  "openSessionId" | "paneId"
+>;
+
+// Adoption navigation and recovery navigation are intentionally separate:
+// `openSessionId`/`paneId` are forwarded only to accepted `adoptState` calls,
+// while `recoveryOpenSessionId`/`recoveryPaneId` are used only when a rejected
+// snapshot schedules authoritative recovery. Session-scoped callers should use
+// `adoptSessionActionState` so the recovery target stays tied to the acted
+// session without forcing ordinary successful adoption to open that session.
+type AdoptActionStateOptions = AdoptActionStateForwardOptions &
+  StaleActionTargetEvidenceOptions & {
+    hydrationMismatchSessionIds?: Iterable<string>;
+    recoveryOpenSessionId?: string;
+    recoveryPaneId?: string | null;
+  };
+
+// `deferred` covers both defensive unmounted calls and recovery resyncs. Current
+// callers only need to distinguish immediate UI success from no-success.
+type AdoptActionStateOutcome =
+  | "adopted"
+  | "stale-success"
+  | "deferred";
+
+type SuccessfulAdoptActionStateOutcome = Extract<
+  AdoptActionStateOutcome,
+  "adopted" | "stale-success"
+>;
 
 export type UseAppSessionActionsReturn = {
   handleSend: (
@@ -278,7 +316,10 @@ export function useAppSessionActions(
     },
     refs: {
       isMountedRef,
+      latestStateRevisionRef,
+      lastSeenServerInstanceIdRef,
       sessionsRef,
+      projectsRef,
       draftsBySessionIdRef,
       draftAttachmentsBySessionIdRef,
       confirmedUnknownModelSendsRef,
@@ -311,6 +352,7 @@ export function useAppSessionActions(
     },
     adoptState,
     adoptCreatedSessionResponse,
+    clearHydrationMismatchSessionIds,
     applyControlPanelLayout,
     reportRequestError,
     requestActionRecoveryResync,
@@ -324,17 +366,92 @@ export function useAppSessionActions(
 
   function adoptActionState(
     state: StateResponse,
-    options?: { openSessionId?: string; paneId?: string | null },
-  ) {
-    const adopted = adoptState(state);
-    if (!adopted) {
-      requestActionRecoveryResync(
-        options
-          ? { ...options, allowUnknownServerInstance: true }
-          : { allowUnknownServerInstance: true },
-      );
+    options?: AdoptActionStateOptions,
+  ): AdoptActionStateOutcome {
+    // Defensive for direct helper calls; current action callers check mount
+    // immediately before invoking this.
+    if (!isMountedRef.current) {
+      return "deferred";
     }
-    return adopted;
+    const hydrationMismatchSessionIds = options?.hydrationMismatchSessionIds;
+    const recoveryOpenSessionId = options?.recoveryOpenSessionId;
+    const recoveryPaneId = options?.recoveryPaneId;
+    const forwardedAdoptOptions: AdoptActionStateForwardOptions | undefined =
+      options?.openSessionId !== undefined || options?.paneId !== undefined
+        ? {
+            openSessionId: options.openSessionId,
+            paneId: options.paneId,
+          }
+        : undefined;
+    const adopted = adoptState(state, forwardedAdoptOptions);
+    if (adopted) {
+      return "adopted";
+    }
+    const rejectedDecision = classifyRejectedActionState({
+      currentProjects: new Map(
+        projectsRef.current.map((project) => [project.id, project]),
+      ),
+      currentRevision: latestStateRevisionRef.current,
+      currentServerInstanceId: lastSeenServerInstanceIdRef.current,
+      currentSessions: sessionsRef.current,
+      options,
+      state,
+    });
+    if (rejectedDecision === "stale-success") {
+      const sessionIds =
+        hydrationMismatchSessionIds ??
+        (options?.openSessionId ? [options.openSessionId] : []);
+      clearHydrationMismatchSessionIds(sessionIds);
+      return "stale-success";
+    }
+    const recoveryOptions: {
+      openSessionId?: string;
+      paneId?: string | null;
+      allowUnknownServerInstance: true;
+    } = {
+      allowUnknownServerInstance: true,
+    };
+    if (recoveryOpenSessionId !== undefined) {
+      recoveryOptions.openSessionId = recoveryOpenSessionId;
+      recoveryOptions.paneId = recoveryPaneId ?? null;
+    }
+    requestActionRecoveryResync(recoveryOptions);
+    return "deferred";
+  }
+
+  function isSuccessfulAdoptActionStateOutcome(
+    outcome: AdoptActionStateOutcome,
+  ): outcome is SuccessfulAdoptActionStateOutcome {
+    return outcome === "adopted" || outcome === "stale-success";
+  }
+
+  function sessionAfterActionStateOutcome(
+    sessionId: string,
+    state: StateResponse,
+    outcome: SuccessfulAdoptActionStateOutcome,
+  ) {
+    const sessions =
+      outcome === "adopted" ? state.sessions : sessionsRef.current;
+    return sessions.find((entry) => entry.id === sessionId) ?? null;
+  }
+
+  function adoptSessionActionState(
+    sessionId: string,
+    state: StateResponse,
+    options?: Pick<
+      AdoptActionStateOptions,
+      "recoveryPaneId" | "staleSuccessSessionEvidence"
+    >,
+  ) {
+    return adoptActionState(state, {
+      ...options,
+      staleSuccessSessionId: sessionId,
+      hydrationMismatchSessionIds: [sessionId],
+      recoveryOpenSessionId: sessionId,
+      recoveryPaneId:
+        options?.recoveryPaneId ??
+        findWorkspacePaneIdForSession(workspace, sessionId),
+    });
   }
 
   function startStaleSendResponseRecoveryPoll(sessionId: string) {
@@ -665,6 +782,7 @@ export function useAppSessionActions(
       requestActionRecoveryResync({
         openSessionId: created.sessionId,
         paneId,
+        allowUnknownServerInstance: true,
       });
       return false;
     };
@@ -1082,7 +1200,15 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return false;
       }
-      if (!adoptActionState(created.state)) {
+      // Project creation is global; there is no session-scoped hydration
+      // mismatch entry for `adoptSessionActionState` to clear.
+      if (
+        !isSuccessfulAdoptActionStateOutcome(
+          adoptActionState(created.state, {
+            staleSuccessProjectId: created.projectId,
+          }),
+        )
+      ) {
         return false;
       }
       setSelectedProjectId(created.projectId);
@@ -1143,7 +1269,11 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      if (!adoptActionState(state)) {
+      if (
+        !isSuccessfulAdoptActionStateOutcome(
+          adoptSessionActionState(sessionId, state),
+        )
+      ) {
         return;
       }
       setRequestError(null);
@@ -1165,7 +1295,11 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      if (!adoptActionState(state)) {
+      if (
+        !isSuccessfulAdoptActionStateOutcome(
+          adoptSessionActionState(sessionId, state),
+        )
+      ) {
         return;
       }
       setRequestError(null);
@@ -1193,7 +1327,11 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      if (!adoptActionState(state)) {
+      if (
+        !isSuccessfulAdoptActionStateOutcome(
+          adoptSessionActionState(sessionId, state),
+        )
+      ) {
         return;
       }
       setRequestError(null);
@@ -1215,7 +1353,11 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      if (!adoptActionState(state)) {
+      if (
+        !isSuccessfulAdoptActionStateOutcome(
+          adoptSessionActionState(sessionId, state),
+        )
+      ) {
         return;
       }
       setRequestError(null);
@@ -1251,7 +1393,11 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      if (!adoptActionState(state)) {
+      if (
+        !isSuccessfulAdoptActionStateOutcome(
+          adoptSessionActionState(sessionId, state),
+        )
+      ) {
         return;
       }
       setRequestError(null);
@@ -1262,7 +1408,10 @@ export function useAppSessionActions(
       try {
         const state = await fetchState();
         if (isMountedRef.current) {
-          adoptActionState(state);
+          // Passive refresh after a failed cancel request. Do not classify stale
+          // same-instance snapshots as action success or trigger action recovery
+          // from this best-effort probe; the original error is reported below.
+          adoptState(state);
         }
       } catch {
         // Keep the original request error below; state refresh is best-effort.
@@ -1283,7 +1432,11 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      if (!adoptActionState(state)) {
+      if (
+        !isSuccessfulAdoptActionStateOutcome(
+          adoptSessionActionState(sessionId, state),
+        )
+      ) {
         return;
       }
       setRequestError(null);
@@ -1309,7 +1462,11 @@ export function useAppSessionActions(
         return;
       }
 
-      if (!adoptActionState(state)) {
+      if (
+        !isSuccessfulAdoptActionStateOutcome(
+          adoptSessionActionState(sessionId, state),
+        )
+      ) {
         return;
       }
       setRequestError(null);
@@ -1338,7 +1495,11 @@ export function useAppSessionActions(
         return false;
       }
 
-      if (!adoptActionState(state)) {
+      if (
+        !isSuccessfulAdoptActionStateOutcome(
+          adoptSessionActionState(sessionId, state),
+        )
+      ) {
         return false;
       }
       setRequestError(null);
@@ -1441,6 +1602,8 @@ export function useAppSessionActions(
       value,
     );
     const hasOptimisticUpdate = optimisticSession !== session;
+    const preOptimisticSession =
+      sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
 
     setRequestError(null);
     if (hasOptimisticUpdate) {
@@ -1454,11 +1617,17 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      if (!adoptActionState(state)) {
+      const adoptionOutcome = adoptSessionActionState(sessionId, state, {
+        staleSuccessSessionEvidence: preOptimisticSession,
+      });
+      if (!isSuccessfulAdoptActionStateOutcome(adoptionOutcome)) {
         return;
       }
-      const updatedSession =
-        state.sessions.find((entry) => entry.id === sessionId) ?? null;
+      const updatedSession = sessionAfterActionStateOutcome(
+        sessionId,
+        state,
+        adoptionOutcome,
+      );
       const nextNotice =
         session.agent === "Codex" && field === "model" && updatedSession
           ? describeCodexModelAdjustmentNotice(session, updatedSession)
@@ -1537,12 +1706,16 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      if (!adoptActionState(state)) {
+      const adoptionOutcome = adoptSessionActionState(sessionId, state);
+      if (!isSuccessfulAdoptActionStateOutcome(adoptionOutcome)) {
         return;
       }
       if (previousSession?.agent === "Codex") {
-        const refreshedSession =
-          state.sessions.find((entry) => entry.id === sessionId) ?? null;
+        const refreshedSession = sessionAfterActionStateOutcome(
+          sessionId,
+          state,
+          adoptionOutcome,
+        );
         const nextNotice = refreshedSession
           ? describeCodexModelAdjustmentNotice(
               previousSession,
@@ -1606,7 +1779,11 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      if (!adoptActionState(state)) {
+      if (
+        !isSuccessfulAdoptActionStateOutcome(
+          adoptSessionActionState(sessionId, state),
+        )
+      ) {
         return;
       }
       setSessionSettingNotices((current) => ({
@@ -1651,6 +1828,7 @@ export function useAppSessionActions(
         requestActionRecoveryResync({
           openSessionId: created.sessionId,
           paneId: preferredPaneId,
+          allowUnknownServerInstance: true,
         });
       }
       const canUseCreatedSession =

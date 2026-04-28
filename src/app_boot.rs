@@ -3,7 +3,7 @@
 //
 // This is the heaviest single function in the server. It:
 //
-// 1. Resolves canonical on-disk paths (`~/.termal/sessions.json`,
+// 1. Resolves canonical on-disk paths (`~/.termal/termal.sqlite`,
 //    orchestrator templates dir) and loads persisted state if
 //    present.
 // 2. Builds the `StateInner` tree: sessions, projects, remotes,
@@ -32,6 +32,52 @@
 // Separated out of `state.rs` because the sheer length of this
 // function made the types + struct definitions hard to navigate
 // when editing; nothing else needs to live in this file.
+
+const PERSIST_RETRY_SEED_DELAY: Duration = Duration::from_millis(250);
+const PERSIST_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PersistWorkerRetryState {
+    retry_after_failure: bool,
+    retry_delay: Duration,
+}
+
+impl Default for PersistWorkerRetryState {
+    fn default() -> Self {
+        Self {
+            retry_after_failure: false,
+            retry_delay: PERSIST_RETRY_SEED_DELAY,
+        }
+    }
+}
+
+impl PersistWorkerRetryState {
+    fn wait_for_next_tick(&self, persist_rx: &mpsc::Receiver<PersistRequest>) -> bool {
+        if self.retry_after_failure {
+            match persist_rx.recv_timeout(self.retry_delay) {
+                Ok(PersistRequest::Delta) => true,
+                Err(mpsc::RecvTimeoutError::Timeout) => true,
+                Err(mpsc::RecvTimeoutError::Disconnected) => false,
+            }
+        } else {
+            match persist_rx.recv() {
+                Ok(PersistRequest::Delta) => true,
+                Err(_) => false,
+            }
+        }
+    }
+
+    fn record_result(&mut self, result: &Result<()>) {
+        if result.is_err() {
+            self.retry_after_failure = true;
+            self.retry_delay =
+                std::cmp::min(self.retry_delay * 2, PERSIST_RETRY_MAX_DELAY);
+        } else {
+            self.retry_after_failure = false;
+            self.retry_delay = PERSIST_RETRY_SEED_DELAY;
+        }
+    }
+}
 
 impl AppState {
     /// Convenience constructor: resolves the default persistence
@@ -118,7 +164,11 @@ impl AppState {
                 let mut cache = SqlitePersistConnectionCache::new();
                 #[cfg_attr(test, allow(unused_mut, unused_variables))]
                 let mut watermark: u64 = 0;
-                while let Ok(PersistRequest::Delta) = persist_rx.recv() {
+                let mut retry_state = PersistWorkerRetryState::default();
+                loop {
+                    if !retry_state.wait_for_next_tick(&persist_rx) {
+                        break;
+                    }
                     // Drain any queued signals — the delta collection
                     // below captures everything that has changed since
                     // the last tick regardless of how many Delta
@@ -129,9 +179,7 @@ impl AppState {
                     #[cfg(not(test))]
                     let result: Result<()> = (|| {
                         let delta = {
-                            let mut inner = inner_for_persist
-                                .lock()
-                                .expect("state mutex poisoned");
+                            let mut inner = inner_for_persist.lock().expect("state mutex poisoned");
                             inner.collect_persist_delta(watermark)
                         };
                         let next_watermark = delta.watermark;
@@ -144,14 +192,12 @@ impl AppState {
                         // `changed_sessions` + `removed_session_ids` is
                         // fine; the transaction just upserts one
                         // app_state row.
-                        if let Err(err) = persist_delta_via_cache(
-                            &mut cache,
-                            &persist_path_for_persist,
-                            &delta,
-                        ) {
-                            // On write failure, restore the drained
-                            // `removed_session_ids` into `inner` so the
-                            // next tick can retry the tombstones.
+                        if let Err(err) =
+                            persist_delta_via_cache(&mut cache, &persist_path_for_persist, &delta)
+                        {
+                            // On write failure, restore only the drained
+                            // explicit `removed_session_ids` into `inner` so
+                            // the next tick can retry the tombstones.
                             // Without this, a transient SQLite error
                             // (locked DB, disk full, I/O error) would
                             // silently leak an orphan `sessions` row
@@ -161,20 +207,16 @@ impl AppState {
                             // `changed_sessions` side auto-retries on
                             // the next tick, but the tombstone side
                             // has no equivalent per-row signal.
-                            // `changed_sessions` recovers via
-                            // mutation-stamp re-collection; only
-                            // tombstones need manual restoration.
-                            if !delta.removed_session_ids.is_empty() {
-                                let mut inner = inner_for_persist
-                                    .lock()
-                                    .expect("state mutex poisoned");
-                                // Append-then-extend preserves any
-                                // tombstones queued between the drain
-                                // and this restore; order does not
-                                // matter for SQLite `DELETE WHERE id = ?`.
-                                inner
-                                    .removed_session_ids
-                                    .extend(delta.removed_session_ids.iter().cloned());
+                            // `changed_sessions` and synthesized hidden-session
+                            // deletes recover via mutation-stamp re-collection;
+                            // only drained explicit tombstones need manual
+                            // restoration.
+                            if !delta.drained_explicit_tombstones.is_empty() {
+                                let mut inner =
+                                    inner_for_persist.lock().expect("state mutex poisoned");
+                                inner.restore_drained_explicit_tombstones(
+                                    &delta.drained_explicit_tombstones,
+                                );
                             }
                             return Err(err);
                         }
@@ -188,20 +230,16 @@ impl AppState {
                         // existing persist-related assertions keep
                         // working without knowing about stamps.
                         let persisted = {
-                            let inner = inner_for_persist
-                                .lock()
-                                .expect("state mutex poisoned");
+                            let inner = inner_for_persist.lock().expect("state mutex poisoned");
                             PersistedState::from_inner(&inner)
                         };
-                        persist_state_from_persisted(
-                            &persist_path_for_persist,
-                            &persisted,
-                        )
+                        persist_state_from_persisted(&persist_path_for_persist, &persisted)
                     };
 
-                    if let Err(err) = result {
+                    if let Err(err) = &result {
                         eprintln!("[termal] background persist failed: {err:#}");
                     }
+                    retry_state.record_result(&result);
                 }
             })
             .expect("failed to spawn persist thread");

@@ -795,6 +795,10 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
+    // Restart assertions read the JSON fixture immediately; keep all setup
+    // commits on the synchronous test fallback instead of racing the
+    // background persist worker.
+    state.persist_tx = mpsc::channel().0;
     let project_id = create_test_project(&state, &project_root, "Persist Failure Restart");
     let template = state
         .create_orchestrator_template(sample_orchestrator_template_draft())
@@ -955,6 +959,10 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
+    // Restart assertions read the JSON fixture immediately; keep all setup
+    // commits on the synchronous test fallback instead of racing the
+    // background persist worker.
+    state.persist_tx = mpsc::channel().0;
     let project_id = create_test_project(&state, &project_root, "Persist Failure Restart Queue");
     let template = state
         .create_orchestrator_template(sample_orchestrator_template_draft())

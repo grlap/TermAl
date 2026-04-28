@@ -9,10 +9,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { StateResponse } from "./api";
 import App from "./App";
+import { RECONNECT_STATE_RESYNC_DELAY_MS } from "./app-shell-internals";
 import {
   BackendConnectionStatus,
   ControlPanelConnectionIndicator,
 } from "./workspace-shell-controls";
+
+const RECONNECT_STATE_RESYNC_TEST_BUFFER_MS = Math.max(
+  1,
+  Math.min(100, Math.floor(RECONNECT_STATE_RESYNC_DELAY_MS / 4)),
+);
+const RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS =
+  RECONNECT_STATE_RESYNC_DELAY_MS - RECONNECT_STATE_RESYNC_TEST_BUFFER_MS - 1;
+const FRAME_ADVANCE_MS = 16;
+const RECONNECT_STATE_RESYNC_FRAME_SAFE_PRE_DEADLINE_MS =
+  RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS - FRAME_ADVANCE_MS;
 
 class EventSourceMock {
   static instances: EventSourceMock[] = [];
@@ -124,6 +135,7 @@ describe("Backend connection state", () => {
   beforeEach(() => {
     HTMLElement.prototype.scrollTo =
       vi.fn() as unknown as typeof HTMLElement.prototype.scrollTo;
+    window.localStorage.clear();
     EventSourceMock.instances = [];
   });
 
@@ -139,14 +151,26 @@ describe("Backend connection state", () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
+    let stateRequestCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
-        return jsonResponse({
-          revision: 1,
-          projects: [],
-          sessions: [],
-        });
+        stateRequestCount += 1;
+        return jsonResponse(
+          stateRequestCount === 1
+            ? makeBackendStateResponse({
+                revision: 5,
+                serverInstanceId: "server-a",
+                sessionName: "Original Session",
+                preview: "Original preview",
+              })
+            : makeBackendStateResponse({
+                revision: 1,
+                serverInstanceId: "server-b",
+                sessionName: "Recovered Session",
+                preview: "Recovered preview",
+              }),
+        );
       }
       if (target === "/api/workspaces") {
         return jsonResponse({
@@ -530,15 +554,17 @@ describe("Backend connection state", () => {
       const eventSource = latestEventSource();
       act(() => {
         eventSource.dispatchOpen();
-        eventSource.dispatchState({
-          revision: 1,
-          projects: [],
-          orchestrators: [],
-          workspaces: [],
-          sessions: [],
-        });
+        eventSource.dispatchState(
+          makeBackendStateResponse({
+            revision: 5,
+            serverInstanceId: "server-a",
+            sessionName: "Original Session",
+            preview: "Original preview",
+          }),
+        );
       });
       await waitForNoControlPanelConnectionIssue();
+      expect(await screen.findByText("Original Session")).toBeInTheDocument();
 
       vi.useFakeTimers();
       act(() => {
@@ -695,7 +721,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(1);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(399);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(1);
 
@@ -998,12 +1024,14 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       // The online handler must have triggered at least one immediate
-      // reconnect fetch beyond what happened during bootstrap.
+      // reconnect fetch beyond what happened during bootstrap, and that
+      // fetch must still allow replacement-instance adoption.
       const reconnectFetchCount = countStateFetches();
       expect(reconnectFetchCount).toBeGreaterThan(preReconnectFetchCount);
+      expect(screen.getByText("Recovered Session")).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(399);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(reconnectFetchCount);
     } finally {
@@ -1131,7 +1159,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(399);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -1244,7 +1272,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(399);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -1252,6 +1280,16 @@ describe("Backend connection state", () => {
         await vi.advanceTimersByTimeAsync(1);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(799);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
     } finally {
       if (vi.isFakeTimers()) {
         vi.useRealTimers();
@@ -1480,21 +1518,32 @@ describe("Backend connection state", () => {
       // Manual click triggers an immediate state fetch.
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
 
-      // The successful probe adopted a newer revision, so reconnect polling
-      // correctly stops — there is no need to keep probing when the backend
-      // proved reachable with fresh data. Verify no further fetch fires.
+      // Manual retry repairs state from `/api/state`, but keeps proving the
+      // EventSource stream before it stops reconnect polling.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(5000);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
       });
-      expect(countStateFetches()).toBe(hydratedStateFetchCount + 2);
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 3);
 
       act(() => {
         eventSource.dispatchOpen();
+        eventSource.dispatchState({
+          revision: 999,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [],
+        });
       });
       await act(async () => {
         await Promise.resolve();
       });
       expectNoControlPanelConnectionIssue();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(countStateFetches()).toBe(hydratedStateFetchCount + 3);
     } finally {
       if (vi.isFakeTimers()) {
         vi.useRealTimers();
@@ -1736,7 +1785,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(399);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -1756,7 +1805,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(399);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
@@ -1902,7 +1951,7 @@ describe("Backend connection state", () => {
       expectNoControlPanelConnectionIssue();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(399);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -2013,7 +2062,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(399);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -2106,7 +2155,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(399);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -2419,7 +2468,7 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(299);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -2502,6 +2551,18 @@ describe("Backend connection state", () => {
         );
       });
       await screen.findByText("Original preview");
+      fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const sessionRowButton = screen.getByText("Original Session").closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Original session row button not found");
+      }
+      fireEvent.click(sessionRowButton);
+      await act(async () => {
+        await Promise.resolve();
+      });
 
       const hydratedStateFetchCount = countStateFetches();
       vi.useFakeTimers();
@@ -2531,22 +2592,25 @@ describe("Backend connection state", () => {
             type: "text",
             timestamp: "10:00",
             author: "assistant",
-            text: "",
+            text: "Streaming response text.",
           },
           preview: "Streaming preview",
           status: "active",
         });
       });
       await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(16);
       });
+      expect(screen.getByText("Streaming preview")).toBeInTheDocument();
+      expect(screen.getByText("Streaming response text.")).toBeInTheDocument();
       expect(
         screen.getByLabelText("Control panel backend reconnecting"),
       ).toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(299);
+        await vi.advanceTimersByTimeAsync(
+          RECONNECT_STATE_RESYNC_FRAME_SAFE_PRE_DEADLINE_MS,
+        );
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
@@ -2653,6 +2717,7 @@ describe("Backend connection state", () => {
           sessionId: "missing-session",
           messageId: "message-1",
           messageIndex: 0,
+          messageCount: 1,
           message: {
             id: "message-1",
             type: "text",
@@ -2777,6 +2842,7 @@ describe("Backend connection state", () => {
           sessionId: "session-1",
           messageId: "message-1",
           messageIndex: 0,
+          messageCount: 1,
           message: {
             id: "message-1",
             type: "text",
@@ -2794,7 +2860,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(299);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
@@ -2908,6 +2974,7 @@ describe("Backend connection state", () => {
           sessionId: "session-1",
           messageId: "message-1",
           messageIndex: 0,
+          messageCount: 1,
           message: {
             id: "message-1",
             type: "text",
@@ -2925,7 +2992,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(299);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
@@ -3036,6 +3103,7 @@ describe("Backend connection state", () => {
           sessionId: "missing-session",
           messageId: "message-1",
           messageIndex: 0,
+          messageCount: 1,
           message: {
             id: "message-1",
             type: "text",
@@ -3053,7 +3121,7 @@ describe("Backend connection state", () => {
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(299);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(hydratedStateFetchCount + 1);
 
@@ -3176,6 +3244,7 @@ describe("Backend connection state", () => {
           sessionId: "missing-session",
           messageId: "message-live",
           messageIndex: 0,
+          messageCount: 1,
           message: {
             id: "message-live",
             type: "text",
@@ -3480,7 +3549,7 @@ describe("Backend connection state", () => {
       // reset backoff (400ms). Previously no more fetches would fire until
       // the next EventSource onerror.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(399);
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS);
       });
       expect(countStateFetches()).toBe(baseCount + 2);
 
@@ -3787,16 +3856,18 @@ describe("Backend connection state", () => {
 
 function makeBackendStateResponse({
   revision,
+  serverInstanceId = "test-instance",
   sessionName,
   preview,
 }: {
   revision: number;
+  serverInstanceId?: string;
   sessionName: string;
   preview: string;
 }): StateResponse {
   return {
     revision,
-    serverInstanceId: "test-instance",
+    serverInstanceId,
     codex: {},
     agentReadiness: [],
     preferences: {

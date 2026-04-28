@@ -16,6 +16,7 @@ import {
   type TerminalCommandResponse,
 } from "../api";
 import { getErrorMessage } from "../app-utils";
+import { assertNever } from "../exhaustive";
 
 export type TerminalHistoryEntry = {
   command: string;
@@ -163,11 +164,7 @@ function appendTerminalOutput(
     };
   }
 
-  return assertNeverTerminalOutputStream(output.stream);
-}
-
-function assertNeverTerminalOutputStream(stream: never): never {
-  throw new Error(`Unhandled terminal output stream: ${String(stream)}`);
+  return assertNever(output.stream, "Unhandled terminal output stream");
 }
 
 function hasRunningTerminalEntry(history: readonly TerminalHistoryEntry[]) {

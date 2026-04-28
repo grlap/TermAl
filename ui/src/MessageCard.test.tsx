@@ -930,6 +930,141 @@ describe("MessageCard", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders an explicit resolved connection-retry display state", () => {
+    const message: TextMessage = {
+      id: "message-retry-resolved-explicit",
+      type: "text",
+      author: "assistant",
+      timestamp: "15:47:58",
+      text: "Connection dropped before the response finished. Retrying automatically (attempt 2 of 5).",
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        connectionRetryDisplayState="resolved"
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Connection recovered" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Connection dropped briefly; the turn continued after attempt 2 of 5.",
+      ),
+    ).toBeInTheDocument();
+    expect(container.querySelector(".connection-notice-spinner")).toBeNull();
+    const card = container.querySelector(".connection-notice-card");
+    expect(card?.getAttribute("aria-live")).toBe("off");
+    expect(
+      container.querySelector(".connection-notice-card-resolved"),
+    ).not.toBeNull();
+  });
+
+  it("renders a superseded connection-retry notice without claiming recovery", () => {
+    const message: TextMessage = {
+      id: "message-retry-superseded",
+      type: "text",
+      author: "assistant",
+      timestamp: "15:47:58",
+      text: "Connection dropped before the response finished. Retrying automatically (attempt 2 of 5).",
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        connectionRetryDisplayState="superseded"
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Retry superseded" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Connection recovered" }),
+    ).not.toBeInTheDocument();
+    expect(container.querySelector(".connection-notice-spinner")).toBeNull();
+    expect(
+      screen.getByText("A newer reconnect attempt continued the turn."),
+    ).toBeInTheDocument();
+    const card = container.querySelector(".connection-notice-card");
+    expect(card?.getAttribute("aria-live")).toBe("off");
+    expect(
+      container.querySelector(".connection-notice-card-settled"),
+    ).not.toBeNull();
+  });
+
+  it("renders an inactive latest connection-retry notice without a live spinner", () => {
+    const message: TextMessage = {
+      id: "message-retry-inactive",
+      type: "text",
+      author: "assistant",
+      timestamp: "15:47:58",
+      text: "Connection dropped before the response finished. Retrying automatically.",
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        connectionRetryDisplayState="inactive"
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Connection retry ended" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("The session is no longer running this turn."),
+    ).toBeInTheDocument();
+    expect(container.querySelector(".connection-notice-spinner")).toBeNull();
+    expect(
+      container
+        .querySelector(".connection-notice-card")
+        ?.getAttribute("aria-live"),
+    ).toBe("off");
+    expect(
+      container.querySelector(".connection-notice-card-settled"),
+    ).not.toBeNull();
+  });
+
+  it("renders an inactive connection-retry notice with the attempt chip", () => {
+    const message: TextMessage = {
+      id: "message-retry-inactive-attempt",
+      type: "text",
+      author: "assistant",
+      timestamp: "15:47:58",
+      text: "Connection dropped before the response finished. Retrying automatically (attempt 2 of 5).",
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        connectionRetryDisplayState="inactive"
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Connection retry ended" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Attempt 2 of 5")).toBeInTheDocument();
+    expect(
+      screen.getByText("The session is no longer running this turn."),
+    ).toBeInTheDocument();
+    expect(container.querySelector(".connection-notice-spinner")).toBeNull();
+    expect(
+      container.querySelector(".connection-notice-card-settled"),
+    ).not.toBeNull();
+  });
+
   it("hides the attempt chip and uses the generic copy when the retry notice omits the attempt suffix", () => {
     // Legacy / fallback backend path: `summarize_retryable_connectivity_error`
     // emits `"Connection dropped before the response finished. Retrying automatically."`

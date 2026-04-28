@@ -31,6 +31,71 @@
 // already received a resync so the fallback loop doesn't re-push
 // identical snapshots back to clients.
 
+#[cfg(test)]
+const REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT: Duration = Duration::from_millis(100);
+#[cfg(not(test))]
+const REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Returns true for locally-typed remote hydration misses that can fall back to
+/// metadata without hiding local lookup or protocol errors.
+///
+/// Visible-pane hydration uses this to return a cached summary. Delta replay
+/// uses the same set to mean "targeted transcript repair is unavailable; try
+/// the narrow delta apply instead." The status guard is intentional: these
+/// recoverable kinds are constructed locally as BAD_GATEWAY errors, and a
+/// different status should make the caller opt into recoverability explicitly.
+fn is_recoverable_visible_session_hydration_error(err: &ApiError) -> bool {
+    if err.status != StatusCode::BAD_GATEWAY {
+        return false;
+    }
+    matches!(
+        err.kind,
+        Some(
+            ApiErrorKind::RemoteConnectionUnavailable
+                | ApiErrorKind::RemoteSessionHydrationFreshnessRace
+                | ApiErrorKind::RemoteSessionMissingFullTranscript
+        )
+    )
+}
+
+#[cfg(test)]
+mod visible_session_hydration_error_tests {
+    use super::*;
+
+    #[test]
+    fn recoverable_visible_session_hydration_errors_are_typed() {
+        for kind in [
+            ApiErrorKind::RemoteConnectionUnavailable,
+            ApiErrorKind::RemoteSessionHydrationFreshnessRace,
+            ApiErrorKind::RemoteSessionMissingFullTranscript,
+        ] {
+            let err = ApiError::bad_gateway("copy can change").with_kind(kind);
+            assert!(is_recoverable_visible_session_hydration_error(&err));
+        }
+    }
+
+    #[test]
+    fn visible_session_hydration_recovery_does_not_parse_copy() {
+        let legacy_connection_copy = ApiError::bad_gateway(
+            "Could not connect to remote \"SSH Lab\" over SSH. Check the host, network, and SSH settings, then try again.",
+        );
+        let legacy_freshness_copy = ApiError::bad_gateway(
+            "remote session response revision 5 cannot be safely applied; latest synchronized remote state revision is 4 and the transcript may have changed",
+        );
+
+        assert!(!is_recoverable_visible_session_hydration_error(
+            &legacy_connection_copy
+        ));
+        assert!(!is_recoverable_visible_session_hydration_error(
+            &legacy_freshness_copy
+        ));
+        assert!(!is_recoverable_visible_session_hydration_error(
+            &ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE, "retry later")
+                .with_kind(ApiErrorKind::RemoteConnectionUnavailable),
+        ));
+    }
+}
+
 impl AppState {
     fn wire_session_from_record(record: &SessionRecord) -> Session {
         let mut session = record.session.clone();
@@ -175,12 +240,76 @@ impl AppState {
         match lookup {
             SessionLookup::Ready(response) => Ok(response),
             SessionLookup::HydrateRemoteProxy => {
-                let Some(target) = self.remote_session_target(session_id)? else {
-                    return Err(ApiError::bad_request("session is not assigned to a remote"));
+                let target = match self.remote_session_target(session_id) {
+                    Ok(Some(target)) => target,
+                    Ok(None) => {
+                        eprintln!(
+                            "remote session hydration for {session_id} fell back to cached summary: missing remote target"
+                        );
+                        return self.get_session_hydration_fallback_response(session_id);
+                    }
+                    Err(err) => return Err(err),
                 };
-                self.hydrate_remote_session_target(&target, None, None)
+                self.hydrate_remote_session_target(
+                    &target,
+                    None,
+                    None,
+                    REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT,
+                )
+                .or_else(|err| {
+                    if !is_recoverable_visible_session_hydration_error(&err) {
+                        return Err(err);
+                    }
+                    eprintln!(
+                        "remote session hydration for {session_id} fell back to cached summary: status={} kind={:?} message={}",
+                        err.status,
+                        err.kind,
+                        err.message
+                    );
+                    self.get_session_hydration_fallback_response(session_id)
+                        .map_err(|fallback_err| {
+                            eprintln!(
+                                "remote session hydration fallback for {session_id} failed: status={} kind={:?} message={}",
+                                fallback_err.status,
+                                fallback_err.kind,
+                                fallback_err.message
+                            );
+                            err
+                        })
+                })
             }
         }
+    }
+
+    /// Return the best local session shape when remote full-transcript
+    /// hydration cannot produce a fresh loaded response. Unloaded remote-proxy
+    /// sessions deliberately remain metadata-only (`messages_loaded = false`)
+    /// so clients keep them in the hydration retry path. Callers should only
+    /// use this for recoverable visible-pane misses; protocol and local
+    /// persistence failures must keep surfacing as errors. This helper acquires
+    /// `inner` itself; callers must not invoke it while holding the state lock.
+    fn get_session_hydration_fallback_response(
+        &self,
+        session_id: &str,
+    ) -> Result<SessionResponse, ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_visible_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let record = &inner.sessions[index];
+        let session = if record.remote_id.is_some()
+            && record.remote_session_id.is_some()
+            && !record.session.messages_loaded
+        {
+            Self::wire_session_summary_from_record(record)
+        } else {
+            Self::wire_session_from_record(record)
+        };
+        Ok(SessionResponse {
+            revision: inner.revision,
+            session,
+            server_instance_id: self.server_instance_id.clone(),
+        })
     }
 
     fn invalidate_agent_readiness_cache(&self) {

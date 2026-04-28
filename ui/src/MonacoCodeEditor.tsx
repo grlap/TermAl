@@ -68,7 +68,7 @@ export type MonacoInlineZone = {
  *
  * `\n` is used as the separator because it can't appear inside a
  * zone id (region ids from `source-renderers.ts` are of the form
- * `mermaid:<start>:<end>:<hash>` or `mermaid-file:<hash>` — all
+ * `mermaid:<body-ordinal>:<hash>` or `mermaid-file:<hash>` — all
  * single-line, URL-safe). Any id with an embedded `\n` would
  * collide with ids whose boundary sits at the `\n` position,
  * but the id format makes that impossible today; this is a

@@ -443,7 +443,12 @@ describe("App preferences", () => {
             projects: [],
             orchestrators: [],
             workspaces: [],
-            sessions: [],
+            sessions: [
+              makeSession("session-current", {
+                name: "Current Session",
+                preview: "Should remain visible",
+              }),
+            ],
           }),
         );
         await flushUiWork();
@@ -542,7 +547,12 @@ describe("App preferences", () => {
           projects: [],
           orchestrators: [],
           workspaces: [],
-          sessions: [],
+          sessions: [
+            makeSession("session-current", {
+              name: "Current Session",
+              preview: "Still present after rejected fallback",
+            }),
+          ],
         });
         if (initialStateDeferred) {
           await act(async () => {
@@ -623,6 +633,129 @@ describe("App preferences", () => {
         }
         expect(
           within(sessionList).getByText("Replacement Session"),
+        ).toBeInTheDocument();
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        updateAppSettingsSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("rejects replacement-instance preferences fallback after a non-backend settings save failure", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      type FetchStateResult = Awaited<ReturnType<typeof api.fetchState>>;
+      const fallbackDeferred = createDeferred<FetchStateResult>();
+      let rejectUpdateAppSettings: (error: unknown) => void = () => {};
+      const updateAppSettingsPromise = new Promise<
+        Awaited<ReturnType<typeof api.updateAppSettings>>
+      >((_resolve, reject) => {
+        rejectUpdateAppSettings = reject;
+      });
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => fallbackDeferred.promise);
+      const updateAppSettingsSpy = vi
+        .spyOn(api, "updateAppSettings")
+        .mockImplementation(() => updateAppSettingsPromise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        await dispatchOpenedStateEvent(
+          latestEventSource(),
+          makeStateResponse({
+            revision: 5,
+            serverInstanceId: "current-instance",
+            preferences: {
+              defaultCodexReasoningEffort: "medium",
+              defaultClaudeApprovalMode: "ask",
+              defaultClaudeEffort: "default",
+            },
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-current", {
+                name: "Current Session",
+                preview: "Should remain visible",
+              }),
+            ],
+          }),
+        );
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Open preferences" }),
+        );
+        await clickAndSettle(screen.getByRole("tab", { name: "Codex" }));
+        await selectComboboxOption("Default reasoning effort", /high/i);
+
+        await waitFor(() => {
+          expect(updateAppSettingsSpy).toHaveBeenCalledWith({
+            defaultCodexReasoningEffort: "high",
+          });
+        });
+        await act(async () => {
+          rejectUpdateAppSettings(new Error("validation failed"));
+          await flushUiWork();
+        });
+        await waitFor(() => {
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+        });
+        await act(async () => {
+          fallbackDeferred.resolve(
+            makeStateResponse({
+              revision: 6,
+              serverInstanceId: "replacement-instance",
+              preferences: {
+                defaultCodexReasoningEffort: "low",
+                defaultClaudeApprovalMode: "ask",
+                defaultClaudeEffort: "default",
+              },
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-replacement", {
+                  name: "Replacement Session",
+                  preview: "Should not adopt",
+                }),
+              ],
+            }),
+          );
+          await flushUiWork();
+        });
+
+        expect(
+          screen.getByRole("combobox", { name: "Default reasoning effort" }),
+        ).toHaveTextContent("high");
+        await clickAndSettle(
+          screen.getByRole("button", { name: "Close dialog" }),
+        );
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Sessions" }),
+        );
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        expect(
+          within(sessionList).queryByText("Replacement Session"),
+        ).not.toBeInTheDocument();
+        expect(
+          within(sessionList).getByText("Current Session"),
         ).toBeInTheDocument();
       } finally {
         scrollIntoViewSpy.mockRestore();

@@ -206,6 +206,7 @@ impl PersistedSessionRecord {
         if !record.is_remote_proxy() {
             session.pending_prompts.clear();
         }
+        session.session_mutation_stamp = None;
 
         Self {
             active_codex_approval_policy: record.active_codex_approval_policy,
@@ -227,6 +228,7 @@ impl PersistedSessionRecord {
     fn into_record(self) -> Result<SessionRecord> {
         let mut session = self.session;
         validate_persisted_session_fields(&session, self.external_session_id.as_deref())?;
+        session.session_mutation_stamp = None;
         session.external_session_id = self.external_session_id.clone();
         if session.agent.acp_runtime().is_none() {
             session.model_options.clear();

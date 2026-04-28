@@ -4137,7 +4137,8 @@ textarea {
   border-color: var(--activity-border);
 }
 
-.connection-notice-card-resolved {
+.connection-notice-card-resolved,
+.connection-notice-card-settled {
   /* Historical retries: keep the "Connection" label / timestamp legible but
      drop the active-tone accent so a later reader doesn't mistake the card
      for the current connection state. */
@@ -4146,7 +4147,9 @@ textarea {
 }
 
 .connection-notice-card-resolved .connection-notice-detail,
-.connection-notice-card-resolved .connection-notice-heading h3 {
+.connection-notice-card-resolved .connection-notice-heading h3,
+.connection-notice-card-settled .connection-notice-detail,
+.connection-notice-card-settled .connection-notice-heading h3 {
   color: var(--muted);
 }
 

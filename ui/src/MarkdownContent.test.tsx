@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import mermaid from "mermaid";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import * as appUtils from "./app-utils";
+import * as connectionRetry from "./connection-retry";
 import { MarkdownContent, MessageCard, areMarkdownLineMarkersEqual } from "./message-cards";
 import type {
   CodexAppRequestMessage,
@@ -20,7 +20,7 @@ vi.mock("mermaid", () => ({
   },
 }));
 
-// Wrap the real `app-utils` module and turn
+// Wrap the real `connection-retry` module and turn
 // `parseConnectionRetryNotice` into a spy that forwards to the
 // real implementation. `MessageCard`'s text-message path calls
 // this helper exactly once per render (see
@@ -30,17 +30,20 @@ vi.mock("mermaid", () => ({
 // props stable across re-renders` test below uses this to
 // assert that a parent re-render with identical props does NOT
 // re-run the body (i.e., the memo hit). All other tests in the
-// file pass the spy-wrapped real behaviour through unchanged, so
+// file pass the spy-wrapped real behavior through unchanged, so
 // the mock is safe to apply at module scope.
-vi.mock("./app-utils", async () => {
-  const actual = await vi.importActual<typeof appUtils>("./app-utils");
+vi.mock("./connection-retry", async () => {
+  const actual =
+    await vi.importActual<typeof connectionRetry>("./connection-retry");
   return {
     ...actual,
     parseConnectionRetryNotice: vi.fn(actual.parseConnectionRetryNotice),
   };
 });
 
-const parseConnectionRetryNoticeMock = vi.mocked(appUtils.parseConnectionRetryNotice);
+const parseConnectionRetryNoticeMock = vi.mocked(
+  connectionRetry.parseConnectionRetryNotice,
+);
 
 const mermaidInitializeMock = vi.mocked(mermaid.initialize);
 const mermaidRenderMock = vi.mocked(mermaid.render);

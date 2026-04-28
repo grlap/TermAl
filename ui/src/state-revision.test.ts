@@ -1,6 +1,7 @@
 import {
   decideDeltaRevisionAction,
   isServerInstanceMismatch,
+  isStaleSameInstanceSnapshot,
   shouldAdoptStateRevision,
   shouldAdoptSnapshotRevision,
 } from "./state-revision";
@@ -11,6 +12,39 @@ describe("state revision helpers", () => {
     expect(shouldAdoptStateRevision(4, 4)).toBe(false);
     expect(shouldAdoptStateRevision(4, 3)).toBe(false);
     expect(shouldAdoptStateRevision(4, 5)).toBe(true);
+  });
+
+  it("treats same-instance current and older revisions as stale action snapshots", () => {
+    expect(isStaleSameInstanceSnapshot(5, 5, "server-a", "server-a")).toBe(
+      true,
+    );
+    expect(isStaleSameInstanceSnapshot(5, 4, "server-a", "server-a")).toBe(
+      true,
+    );
+    expect(isStaleSameInstanceSnapshot(5, 6, "server-a", "server-a")).toBe(
+      false,
+    );
+  });
+
+  it("rejects different-instance snapshots as stale same-instance snapshots", () => {
+    expect(isStaleSameInstanceSnapshot(5, 4, "server-a", "server-b")).toBe(
+      false,
+    );
+  });
+
+  it("treats nullish or empty instance ids as not stale same-instance snapshots", () => {
+    expect(isStaleSameInstanceSnapshot(null, 4, "server-a", "server-a")).toBe(
+      false,
+    );
+    expect(isStaleSameInstanceSnapshot(5, 4, null, "server-a")).toBe(false);
+    expect(isStaleSameInstanceSnapshot(5, 4, undefined, "server-a")).toBe(
+      false,
+    );
+    expect(isStaleSameInstanceSnapshot(5, 4, "server-a", "")).toBe(false);
+    expect(isStaleSameInstanceSnapshot(5, 4, "server-a", null)).toBe(false);
+    expect(isStaleSameInstanceSnapshot(5, 4, "server-a", undefined)).toBe(
+      false,
+    );
   });
 
   it("guards forced revision downgrades unless explicitly allowed", () => {

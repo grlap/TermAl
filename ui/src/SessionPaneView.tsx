@@ -42,11 +42,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
-  CommandCard,
-  DiffCard,
-  MessageCard,
-} from "./message-cards";
-import {
   fetchFile,
   saveFile,
   type GitDiffRequestPayload,
@@ -84,13 +79,6 @@ import {
   type MessageStackScrollWriteKind,
 } from "./message-stack-scroll-sync";
 
-import {
-  CodexPromptSettingsCard,
-  ClaudePromptSettingsCard,
-  CursorPromptSettingsCard,
-  GeminiPromptSettingsCard,
-} from "./prompt-settings-cards";
-
 import { normalizeDisplayPath } from "./path-display";
 import {
   resolvePaneScrollCommand,
@@ -99,7 +87,6 @@ import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
 } from "./panels/AgentSessionPanel";
-import type { RenderMessageCard } from "./panels/VirtualizedConversationMessageList";
 import {
   type ControlPanelSectionId,
 } from "./panels/ControlPanelSurface";
@@ -172,8 +159,13 @@ import {
   type DraftImageAttachment,
 } from "./app-utils";
 import {
+  buildConnectionRetryDisplayStateByMessageId,
+  type ConnectionRetryDisplayState,
+} from "./connection-retry";
+import {
   workspaceFilesChangedEventChangeForPath,
 } from "./workspace-file-events";
+import { useSessionRenderCallbacks } from "./SessionPaneView.render-callbacks";
 
 const SESSION_PAGE_JUMP_VIEWPORT_FACTOR = 0.45;
 
@@ -856,9 +848,9 @@ export function SessionPaneView({
         : visibleMessages[visibleMessages.length - 1]?.author,
     [activeSession, pane.viewMode, visibleMessages],
   );
-  // Newest assistant message id, used by `ConnectionRetryCard` to tell whether
-  // a retry notice is still the live one (keep spinning) or historical (the
-  // reconnect obviously succeeded because later assistant output exists).
+  // Newest assistant message id drives streaming-render preference. Retry
+  // notice liveness uses the fuller map below so repeated retry notices and
+  // inactive sessions do not present contradictory connection states.
   const latestAssistantMessageId = useMemo(() => {
     const sessionMessages = activeSession?.messages ?? [];
     for (let index = sessionMessages.length - 1; index >= 0; index -= 1) {
@@ -869,6 +861,43 @@ export function SessionPaneView({
     }
     return null;
   }, [activeSession?.messages]);
+  const nextConnectionRetryDisplayStateByMessageId = useMemo(
+    () => buildConnectionRetryDisplayStateByMessageId(activeSession),
+    [activeSession?.messages, activeSession?.status],
+  );
+  const connectionRetryDisplayStateSignature = useMemo(() => {
+    if (nextConnectionRetryDisplayStateByMessageId.size === 0) {
+      return "";
+    }
+
+    return [...nextConnectionRetryDisplayStateByMessageId]
+      .map(([messageId, displayState]) => `${messageId}:${displayState}`)
+      .join("|");
+  }, [nextConnectionRetryDisplayStateByMessageId]);
+  const connectionRetryDisplayStateByMessageIdRef = useRef<{
+    signature: string;
+    map: Map<string, ConnectionRetryDisplayState>;
+  } | null>(null);
+  const connectionRetryDisplayStateByMessageId = useMemo(() => {
+    const previous = connectionRetryDisplayStateByMessageIdRef.current;
+    if (previous?.signature === connectionRetryDisplayStateSignature) {
+      return previous.map;
+    }
+
+    const next = {
+      signature: connectionRetryDisplayStateSignature,
+      map: nextConnectionRetryDisplayStateByMessageId,
+    };
+    connectionRetryDisplayStateByMessageIdRef.current = next;
+    return next.map;
+  }, [
+    connectionRetryDisplayStateSignature,
+    nextConnectionRetryDisplayStateByMessageId,
+  ]);
+  const getConnectionRetryDisplayState = useCallback(
+    (messageId: string) => connectionRetryDisplayStateByMessageId.get(messageId),
+    [connectionRetryDisplayStateByMessageId],
+  );
   const showNewResponseIndicator = Boolean(
     newResponseIndicatorByKey[scrollStateKey],
   );
@@ -2269,193 +2298,31 @@ export function SessionPaneView({
     return decoration ? { [activeSourceTab.id]: decoration } : {};
   }, [activeSourceTab, fileState, sourceEditorDirty]);
 
-  const renderSessionCommandCard = useCallback(
-    (message: CommandMessage) => <CommandCard message={message} />,
-    [],
-  );
-  const renderSessionDiffCard = useCallback(
-    (message: DiffMessage) => (
-      <DiffCard
-        message={message}
-        onOpenPreview={() =>
-          onOpenDiffPreviewTab(
-            pane.id,
-            message,
-            activeSession?.id ?? null,
-            activeSession?.projectId ?? null,
-          )
-        }
-        workspaceRoot={activeSession?.workdir ?? null}
-      />
-    ),
-    [
-      activeSession?.id,
-      activeSession?.projectId,
-      activeSession?.workdir,
-      onOpenDiffPreviewTab,
-      pane.id,
-    ],
-  );
-  const renderSessionMessageCard = useCallback<RenderMessageCard>(
-    (
-      message,
-      preferImmediateHeavyRender,
-      handleDecision,
-      handleUserInput,
-      handleMcpElicitation,
-      handleCodexAppRequest,
-    ) => (
-      <MessageCard
-        appearance={editorAppearance}
-        message={message}
-        onOpenDiffPreview={(diffMessage) =>
-          onOpenDiffPreviewTab(
-            pane.id,
-            diffMessage,
-            activeSession?.id ?? null,
-            activeSession?.projectId ?? null,
-          )
-        }
-        onOpenSourceLink={(target) =>
-          onOpenSourceTab(
-            pane.id,
-            target.path,
-            activeSession?.id ?? null,
-            activeSession?.projectId ?? null,
-            {
-              line: target.line,
-              column: target.column,
-              openInNewTab: target.openInNewTab,
-            },
-          )
-        }
-        preferImmediateHeavyRender={preferImmediateHeavyRender}
-        onApprovalDecision={handleDecision}
-        onUserInputSubmit={handleUserInput}
-        onMcpElicitationSubmit={handleMcpElicitation}
-        onCodexAppRequestSubmit={handleCodexAppRequest}
-        searchQuery={
-          activeSessionSearchMatch?.itemKey === `message:${message.id}`
-            ? sessionFindQuery
-            : ""
-        }
-        searchHighlightTone={
-          activeSessionSearchMatch?.itemKey === `message:${message.id}`
-            ? "active"
-            : "match"
-        }
-        preferStreamingPlainTextRender={
-          activeSession?.status === "active" &&
-          message.id === latestAssistantMessageId
-        }
-        isLatestAssistantMessage={message.id === latestAssistantMessageId}
-        workspaceRoot={activeSession?.workdir ?? null}
-      />
-    ),
-    [
-      activeSession?.id,
-      activeSession?.projectId,
-      activeSession?.status,
-      activeSession?.workdir,
-      activeSessionSearchMatch?.itemKey,
-      editorAppearance,
-      latestAssistantMessageId,
-      onOpenDiffPreviewTab,
-      onOpenSourceTab,
-      pane.id,
-      sessionFindQuery,
-    ],
-  );
-  const renderSessionPromptSettings = useCallback(
-    (
-      panelPaneId: string,
-      session: Session,
-      panelIsUpdating: boolean,
-      handleSettingsChange: (
-        sessionId: string,
-        field: SessionSettingsField,
-        value: SessionSettingsValue,
-      ) => void,
-    ) => {
-      if (session.agent === "Codex") {
-        return (
-          <CodexPromptSettingsCard
-            paneId={panelPaneId}
-            session={session}
-            isUpdating={panelIsUpdating}
-            isRefreshingModelOptions={isRefreshingModelOptions}
-            modelOptionsError={modelOptionsError}
-            sessionNotice={
-              session.id === activeSession?.id ? sessionSettingNotice : null
-            }
-            onRequestModelOptions={onRefreshSessionModelOptions}
-            onArchiveThread={onArchiveCodexThread}
-            onCompactThread={onCompactCodexThread}
-            onForkThread={onForkCodexThread}
-            onRollbackThread={onRollbackCodexThread}
-            onSessionSettingsChange={handleSettingsChange}
-            onUnarchiveThread={onUnarchiveCodexThread}
-          />
-        );
-      }
-
-      if (session.agent === "Claude") {
-        return (
-          <ClaudePromptSettingsCard
-            paneId={panelPaneId}
-            session={session}
-            isUpdating={panelIsUpdating}
-            isRefreshingModelOptions={isRefreshingModelOptions}
-            modelOptionsError={modelOptionsError}
-            onRequestModelOptions={onRefreshSessionModelOptions}
-            onSessionSettingsChange={handleSettingsChange}
-          />
-        );
-      }
-
-      if (session.agent === "Cursor") {
-        return (
-          <CursorPromptSettingsCard
-            paneId={panelPaneId}
-            session={session}
-            isUpdating={panelIsUpdating}
-            isRefreshingModelOptions={isRefreshingModelOptions}
-            modelOptionsError={modelOptionsError}
-            onRequestModelOptions={onRefreshSessionModelOptions}
-            onSessionSettingsChange={handleSettingsChange}
-          />
-        );
-      }
-
-      if (session.agent === "Gemini") {
-        return (
-          <GeminiPromptSettingsCard
-            paneId={panelPaneId}
-            session={session}
-            isUpdating={panelIsUpdating}
-            isRefreshingModelOptions={isRefreshingModelOptions}
-            modelOptionsError={modelOptionsError}
-            onRequestModelOptions={onRefreshSessionModelOptions}
-            onSessionSettingsChange={handleSettingsChange}
-          />
-        );
-      }
-
-      return null;
-    },
-    [
-      activeSession?.id,
-      isRefreshingModelOptions,
-      modelOptionsError,
-      onArchiveCodexThread,
-      onCompactCodexThread,
-      onForkCodexThread,
-      onRefreshSessionModelOptions,
-      onRollbackCodexThread,
-      onUnarchiveCodexThread,
-      sessionSettingNotice,
-    ],
-  );
+  const {
+    renderSessionCommandCard,
+    renderSessionDiffCard,
+    renderSessionMessageCard,
+    renderSessionPromptSettings,
+  } = useSessionRenderCallbacks({
+    activeSession,
+    activeSessionSearchMatchItemKey: activeSessionSearchMatch?.itemKey,
+    editorAppearance,
+    getConnectionRetryDisplayState,
+    isRefreshingModelOptions,
+    latestAssistantMessageId,
+    modelOptionsError,
+    onArchiveCodexThread,
+    onCompactCodexThread,
+    onForkCodexThread,
+    onOpenDiffPreviewTab,
+    onOpenSourceTab,
+    onRefreshSessionModelOptions,
+    onRollbackCodexThread,
+    onUnarchiveCodexThread,
+    paneId: pane.id,
+    sessionFindQuery,
+    sessionSettingNotice,
+  });
 
   return (
     <section

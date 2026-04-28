@@ -758,6 +758,7 @@ export default function App() {
     adoptState,
     adoptCreatedSessionResponse,
     syncPreferencesFromState,
+    clearHydrationMismatchSessionIds,
     hydratedSessionIdsRef,
     hydratingSessionIdsRef,
     forceAdoptNextStateEventRef,
@@ -876,7 +877,10 @@ export default function App() {
     },
     refs: {
       isMountedRef,
+      latestStateRevisionRef,
+      lastSeenServerInstanceIdRef,
       sessionsRef,
+      projectsRef,
       draftsBySessionIdRef: draftsRef,
       draftAttachmentsBySessionIdRef: draftAttachmentsRef,
       confirmedUnknownModelSendsRef,
@@ -909,6 +913,7 @@ export default function App() {
     },
     adoptState,
     adoptCreatedSessionResponse,
+    clearHydrationMismatchSessionIds,
     applyControlPanelLayout,
     reportRequestError,
     requestActionRecoveryResync: (options) =>

@@ -467,6 +467,8 @@ describe("applyDeltaToSessions", () => {
     expect(result.sessions[0].messageCount).toBe(1);
     expect(result.sessions[0].sessionMutationStamp).toBe(202);
     expect(result.sessions[0].messages).toEqual(sessions[0].messages);
+    expect(result.sessions[0].messages).toBe(sessions[0].messages);
+    expect(result.sessions[0].messages[0]).toBe(sessions[0].messages[0]);
   });
 
   it("applies authoritative sessionCreated metadata even when the mutation stamp matches", () => {
@@ -512,6 +514,8 @@ describe("applyDeltaToSessions", () => {
     expect(result.sessions[0].preview).toBe("Authoritative summary");
     expect(result.sessions[0].messagesLoaded).toBe(true);
     expect(result.sessions[0].messages).toEqual(sessions[0].messages);
+    expect(result.sessions[0].messages).toBe(sessions[0].messages);
+    expect(result.sessions[0].messages[0]).toBe(sessions[0].messages[0]);
   });
 
   it("appends a created message without needing a resync", () => {

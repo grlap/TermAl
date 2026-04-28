@@ -68,6 +68,7 @@ import {
   LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
   LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,
 } from "./live-updates";
+import { RECONNECT_STATE_RESYNC_DELAY_MS } from "./app-shell-internals";
 import type { AgentReadiness, OrchestratorInstance, Session } from "./types";
 import * as workspaceStorage from "./workspace-storage";
 import { WORKSPACE_LAYOUT_STORAGE_KEY } from "./workspace-storage";
@@ -107,6 +108,11 @@ import {
   withFallbackStateHarness,
   withSuppressedActWarnings,
 } from "./app-test-harness";
+
+const RECONNECT_STATE_RESYNC_TEST_BUFFER_MS = Math.max(
+  1,
+  Math.min(100, Math.floor(RECONNECT_STATE_RESYNC_DELAY_MS / 4)),
+);
 
 vi.mock("./MonacoDiffEditor", () => ({
   MonacoDiffEditor: forwardRef(function MonacoDiffEditorMock(
@@ -334,6 +340,7 @@ describe("App live state — reconnect", () => {
           sessionId: "session-1",
           messageId: "message-2",
           messageIndex: 1,
+          messageCount: 2,
           message: {
             id: "message-2",
             type: "text",
@@ -506,6 +513,19 @@ describe("App live state — reconnect", () => {
         eventSource.dispatchNamedEvent("delta", {
           type: "messageCreated",
           revision: 4,
+          sessionId: "session-1",
+          messageId: "message-gap-1",
+          messageIndex: 1,
+          messageCount: 2,
+          message: {
+            id: "message-gap-1",
+            type: "text",
+            timestamp: "10:02",
+            author: "assistant",
+            text: "Gap output",
+          },
+          preview: "Gap output",
+          status: "active",
         });
       });
       await settleAsyncUi();
@@ -689,6 +709,7 @@ describe("App live state — reconnect", () => {
           sessionId: "session-1",
           messageId: "message-assistant-1",
           messageIndex: 1,
+          messageCount: 2,
           message: {
             id: "message-assistant-1",
             type: "text",
@@ -704,7 +725,7 @@ describe("App live state — reconnect", () => {
 
       expect(stateRequestCount).toBe(1);
 
-      await advanceTimers(299);
+      await advanceTimers(RECONNECT_STATE_RESYNC_DELAY_MS - 101);
       await settleAsyncUi();
       expect(stateRequestCount).toBe(1);
 
@@ -855,6 +876,19 @@ describe("App live state — reconnect", () => {
         eventSource.dispatchNamedEvent("delta", {
           type: "messageCreated",
           revision: 4,
+          sessionId: "session-1",
+          messageId: "message-gap-1",
+          messageIndex: 1,
+          messageCount: 2,
+          message: {
+            id: "message-gap-1",
+            type: "text",
+            timestamp: "10:02",
+            author: "assistant",
+            text: "Gap output",
+          },
+          preview: "Gap output",
+          status: "active",
         });
       });
       await settleAsyncUi();
@@ -874,6 +908,19 @@ describe("App live state — reconnect", () => {
         eventSource.dispatchNamedEvent("delta", {
           type: "messageCreated",
           revision: 5,
+          sessionId: "session-1",
+          messageId: "message-gap-2",
+          messageIndex: 1,
+          messageCount: 2,
+          message: {
+            id: "message-gap-2",
+            type: "text",
+            timestamp: "10:03",
+            author: "assistant",
+            text: "Later gap output",
+          },
+          preview: "Later gap output",
+          status: "active",
         });
       });
       await settleAsyncUi();
@@ -1455,6 +1502,255 @@ describe("App live state — reconnect", () => {
     });
   });
 
+  it("keeps reconnect fallback polling armed after replacement-instance fallback adoption until SSE reopens", async () => {
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
+      makeStateResponse({
+        revision: 6,
+        serverInstanceId: "replacement-instance",
+        projects: [],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-recovered", {
+            name: "Replacement Session",
+            preview: "Recovered before SSE reopened",
+          }),
+        ],
+      }),
+    );
+
+    try {
+      await withFallbackStateHarness(async ({ eventSource, sessionList }) => {
+        let fakeTimersActive = false;
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 5,
+            serverInstanceId: "current-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-current", {
+                name: "Current Session",
+                preview: "Current preview",
+              }),
+            ],
+          }),
+        );
+        await within(sessionList).findByText("Current Session");
+
+        vi.useFakeTimers();
+        fakeTimersActive = true;
+        try {
+          act(() => {
+            eventSource.dispatchError();
+          });
+
+          await advanceTimers(RECONNECT_STATE_RESYNC_DELAY_MS);
+          await settleAsyncUi();
+
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+          expect(
+            within(sessionList).getByText("Replacement Session"),
+          ).toBeInTheDocument();
+
+          await advanceTimers(
+            RECONNECT_STATE_RESYNC_DELAY_MS * 2 -
+              RECONNECT_STATE_RESYNC_TEST_BUFFER_MS,
+          );
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+
+          await advanceTimers(RECONNECT_STATE_RESYNC_TEST_BUFFER_MS * 2);
+          await settleAsyncUi();
+
+          expect(fetchStateSpy).toHaveBeenCalledTimes(2);
+        } finally {
+          if (fakeTimersActive) {
+            vi.useRealTimers();
+          }
+        }
+      });
+    } finally {
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
+      fetchStateSpy.mockRestore();
+    }
+  });
+
+  it("stops automatic same-instance polling after catch-up advances the revision", async () => {
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
+      makeStateResponse({
+        revision: 6,
+        serverInstanceId: "current-instance",
+        projects: [],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-current", {
+            name: "Current Session",
+            preview: "Recovered before SSE delivered data",
+          }),
+        ],
+      }),
+    );
+
+    try {
+      await withFallbackStateHarness(async ({ eventSource, sessionList }) => {
+        let fakeTimersActive = false;
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 5,
+            serverInstanceId: "current-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-current", {
+                name: "Current Session",
+                preview: "Current preview",
+              }),
+            ],
+          }),
+        );
+        await within(sessionList).findByText("Current Session");
+
+        vi.useFakeTimers();
+        fakeTimersActive = true;
+        try {
+          act(() => {
+            eventSource.dispatchError();
+          });
+
+          await advanceTimers(RECONNECT_STATE_RESYNC_DELAY_MS);
+          await settleAsyncUi();
+
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+          expect(
+            within(sessionList).getByText("Recovered before SSE delivered data"),
+          ).toBeInTheDocument();
+
+          await advanceTimers(RECONNECT_STATE_RESYNC_DELAY_MS * 4);
+          await settleAsyncUi();
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+        } finally {
+          if (fakeTimersActive) {
+            vi.useRealTimers();
+          }
+        }
+      });
+    } finally {
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
+      fetchStateSpy.mockRestore();
+    }
+  });
+
+  it("disarms replacement-instance fallback polling after SSE state confirms recovery", async () => {
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
+      makeStateResponse({
+        revision: 6,
+        serverInstanceId: "replacement-instance",
+        projects: [],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-recovered", {
+            name: "Replacement Session",
+            preview: "Recovered before SSE reopened",
+          }),
+        ],
+      }),
+    );
+
+    try {
+      await withFallbackStateHarness(async ({ eventSource, sessionList }) => {
+        let fakeTimersActive = false;
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 5,
+            serverInstanceId: "current-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-current", {
+                name: "Current Session",
+                preview: "Current preview",
+              }),
+            ],
+          }),
+        );
+        await within(sessionList).findByText("Current Session");
+
+        vi.useFakeTimers();
+        fakeTimersActive = true;
+        try {
+          act(() => {
+            eventSource.dispatchError();
+          });
+
+          await advanceTimers(RECONNECT_STATE_RESYNC_DELAY_MS);
+          await settleAsyncUi();
+
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+          expect(
+            within(sessionList).getByText("Replacement Session"),
+          ).toBeInTheDocument();
+
+          await advanceTimers(
+            RECONNECT_STATE_RESYNC_DELAY_MS * 2 -
+              RECONNECT_STATE_RESYNC_TEST_BUFFER_MS,
+          );
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+
+          await advanceTimers(RECONNECT_STATE_RESYNC_TEST_BUFFER_MS * 2);
+          await settleAsyncUi();
+          expect(fetchStateSpy).toHaveBeenCalledTimes(2);
+
+          act(() => {
+            eventSource.dispatchOpen();
+          });
+          await dispatchStateEvent(
+            eventSource,
+            makeStateResponse({
+              revision: 7,
+              serverInstanceId: "replacement-instance",
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-recovered", {
+                  name: "Replacement Session",
+                  preview: "Recovered after SSE delivered data",
+                }),
+              ],
+            }),
+          );
+          await settleAsyncUi();
+
+          await advanceTimers(RECONNECT_STATE_RESYNC_DELAY_MS * 4);
+          await settleAsyncUi();
+
+          expect(fetchStateSpy).toHaveBeenCalledTimes(2);
+        } finally {
+          if (fakeTimersActive) {
+            vi.useRealTimers();
+          }
+        }
+      });
+    } finally {
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
+      fetchStateSpy.mockRestore();
+    }
+  });
+
   it("retries initial-connect fallback resyncs after a transient /api/state failure", async () => {
     await withSuppressedActWarnings(async () => {
       let fetchStateCallCount = 0;
@@ -1827,6 +2123,7 @@ describe("App live state — reconnect", () => {
           sessionId: "session-1",
           messageId: "message-assistant-1",
           messageIndex: 1,
+          messageCount: 2,
           text: "Partial output.",
           preview: "Partial output.",
         });

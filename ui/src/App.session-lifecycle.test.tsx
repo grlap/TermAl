@@ -283,7 +283,7 @@ describe("App session lifecycle", () => {
     vi.unstubAllGlobals();
   });
 
-  it("arms the active-prompt poll when a successful send response is stale", async () => {
+  it("arms the active-prompt poll and adopts a replacement-instance recovery state when a successful send response is stale", async () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -300,6 +300,7 @@ describe("App session lifecycle", () => {
       });
       const initialState = makeStateResponse({
         revision: 1,
+        serverInstanceId: "current-instance",
         projects: [project],
         orchestrators: [],
         workspaces: [],
@@ -307,6 +308,7 @@ describe("App session lifecycle", () => {
       });
       const pollState = makeStateResponse({
         revision: 3,
+        serverInstanceId: "replacement-instance",
         projects: [project],
         orchestrators: [],
         workspaces: [],
@@ -415,6 +417,7 @@ describe("App session lifecycle", () => {
           eventSource,
           makeStateResponse({
             revision: 2,
+            serverInstanceId: "current-instance",
             projects: [project],
             orchestrators: [],
             workspaces: [],
@@ -450,6 +453,7 @@ describe("App session lifecycle", () => {
             jsonResponse(
               makeStateResponse({
                 revision: 1,
+                serverInstanceId: "current-instance",
                 projects: [project],
                 orchestrators: [],
                 workspaces: [],

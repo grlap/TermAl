@@ -1345,6 +1345,7 @@ describe("App live state - visibility and wake recovery", () => {
           sessionId: "session-2",
           messageId: "message-assistant-noisy-1",
           messageIndex: 1,
+          messageCount: 2,
           text: "Still streaming from session 2.",
           preview: "Still streaming from session 2.",
         });

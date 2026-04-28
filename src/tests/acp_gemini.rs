@@ -590,9 +590,18 @@ fn prepare_termal_gemini_system_settings_writes_override_file() {
         return;
     }
 
+    let _env_lock = TEST_HOME_ENV_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let project_root =
         std::env::temp_dir().join(format!("termal-gemini-system-settings-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("Gemini override project root should be created");
+    let empty_home = std::env::temp_dir().join(format!(
+        "termal-gemini-system-settings-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&empty_home).expect("Gemini override home dir should be created");
+    let _home_env = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &empty_home);
     let workdir = project_root
         .to_str()
         .expect("test workdir should be valid UTF-8");
@@ -611,6 +620,7 @@ fn prepare_termal_gemini_system_settings_writes_override_file() {
     );
 
     let _ = fs::remove_dir_all(project_root);
+    let _ = fs::remove_dir_all(empty_home);
 }
 
 // Pins `gemini_interactive_shell_warning` (Windows only) producing a TermAl-forces

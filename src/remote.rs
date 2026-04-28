@@ -204,6 +204,7 @@ impl RemoteRegistry {
                 remote.host.as_deref().unwrap_or("unknown host")
             );
             ApiError::bad_gateway(remote_connection_issue_message(&remote.name))
+                .with_kind(ApiErrorKind::RemoteConnectionUnavailable)
         })?;
         Ok(response)
     }
@@ -385,7 +386,8 @@ impl RemoteConnection {
                         );
                         Err(ApiError::bad_gateway(remote_connection_issue_message(
                             &remote.name,
-                        )))
+                        ))
+                        .with_kind(ApiErrorKind::RemoteConnectionUnavailable))
                     }
                 }
             }
@@ -406,13 +408,9 @@ impl RemoteConnection {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        let child = command.spawn().map_err(|err| {
-            eprintln!(
-                "failed to start SSH connection for remote `{}`: {err}",
-                remote.name
-            );
-            ApiError::bad_gateway(local_ssh_start_issue_message(&remote.name))
-        })?;
+        let child = command
+            .spawn()
+            .map_err(|err| local_ssh_start_error(&remote.name, err))?;
         Ok(RemoteProcessHandle { child, mode })
     }
 
@@ -501,6 +499,12 @@ impl RemoteConnection {
             }
         });
     }
+}
+
+fn local_ssh_start_error(remote_name: &str, err: std::io::Error) -> ApiError {
+    eprintln!("failed to start SSH connection for remote `{remote_name}`: {err}");
+    ApiError::bad_gateway(local_ssh_start_issue_message(remote_name))
+        .with_kind(ApiErrorKind::RemoteConnectionUnavailable)
 }
 
 /// Represents the remote process handle.

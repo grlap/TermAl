@@ -481,6 +481,7 @@ describe("App orchestrators", () => {
             sessionId: "session-orchestrated",
             messageId: "message-1",
             messageIndex: 0,
+            messageCount: 1,
             message: {
               id: "message-1",
               type: "text",
@@ -741,6 +742,7 @@ describe("App orchestrators", () => {
             sessionId: "session-2",
             messageId: "message-assistant-reviewer-1",
             messageIndex: 1,
+            messageCount: 2,
             text: "Reviewer output updated.",
             preview: "Reviewer output updated.",
           });

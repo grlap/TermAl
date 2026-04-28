@@ -171,6 +171,56 @@ describe("detectRenderableRegions: Markdown files", () => {
     expect(region.editable).toBe(true);
   });
 
+  it("keeps Mermaid region ids stable when lines are inserted above a fence", () => {
+    const before = [
+      "# Title",
+      "",
+      "```mermaid",
+      "flowchart TD",
+      "  A --> B",
+      "```",
+    ].join("\n");
+    const after = [
+      "# Title",
+      "",
+      "Inserted paragraph.",
+      "",
+      "```mermaid",
+      "flowchart TD",
+      "  A --> B",
+      "```",
+    ].join("\n");
+
+    expect(detectRenderableRegions(markdownContext(after))[0]?.id).toBe(
+      detectRenderableRegions(markdownContext(before))[0]?.id,
+    );
+  });
+
+  it("deduplicates same-body Mermaid region ids by same-body ordinal", () => {
+    const md = [
+      "```mermaid",
+      "flowchart TD",
+      "  A --> B",
+      "```",
+      "",
+      "```mermaid",
+      "flowchart TD",
+      "  A --> B",
+      "```",
+    ].join("\n");
+
+    const ids = detectRenderableRegions(markdownContext(md)).map(
+      (region) => region.id,
+    );
+
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toMatch(/^mermaid:0:/);
+    expect(ids[1]).toMatch(/^mermaid:1:/);
+    expect(ids[0]?.replace(/^mermaid:\d+:/, "mermaid:")).toBe(
+      ids[1]?.replace(/^mermaid:\d+:/, "mermaid:"),
+    );
+  });
+
   it("locates `math` / `latex` / `tex` / `katex` fences as math regions", () => {
     const md = [
       "Opening.", // 1

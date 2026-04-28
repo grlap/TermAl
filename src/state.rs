@@ -17,7 +17,7 @@ remote bridge  -> | - coordination shell  |-> delta_events
                        +------+------+
                               |
                               v
-                    ~/.termal/sessions.json
+                    ~/.termal/termal.sqlite
 AppState owns live coordination primitives that should not be serialized.
 StateInner is the durable model plus counters and indexes protected by one
 mutex.
@@ -206,12 +206,15 @@ impl RemoteDeltaReplayCache {
 /// persist. The persist thread then writes the delta to SQLite with
 /// a targeted `INSERT OR UPDATE` per changed session and a targeted
 /// `DELETE WHERE id = ?` per removed id — no `DELETE FROM sessions`
-/// sweep.
+/// sweep. `drained_explicit_tombstones` keeps only the tombstones drained from
+/// state so a failed write can restore those without duplicating hidden-session
+/// deletes synthesized from still-hidden records.
 #[cfg_attr(test, allow(dead_code))]
 struct PersistDelta {
     metadata: PersistedState,
     changed_sessions: Vec<PersistedSessionRecord>,
     removed_session_ids: Vec<String>,
+    drained_explicit_tombstones: Vec<String>,
     watermark: u64,
 }
 

@@ -370,6 +370,18 @@ impl StateInner {
         }
     }
 
+    /// Restores explicit tombstones drained into a failed persist delta.
+    ///
+    /// Hidden-session deletes are synthesized from still-hidden records on each
+    /// collection pass, so they must not be restored into this explicit queue.
+    fn restore_drained_explicit_tombstones(&mut self, session_ids: &[String]) {
+        for session_id in session_ids {
+            if !self.removed_session_ids.contains(session_id) {
+                self.removed_session_ids.push(session_id.clone());
+            }
+        }
+    }
+
     /// Inserts a new session record, stamping it so the persist thread
     /// picks it up on its next tick. Returns the index at which the
     /// record was inserted (end of the `sessions` vec).
@@ -434,7 +446,8 @@ impl StateInner {
     #[cfg_attr(test, allow(dead_code))]
     fn collect_persist_delta(&mut self, watermark: u64) -> PersistDelta {
         let mut changed_sessions: Vec<PersistedSessionRecord> = Vec::new();
-        let mut removed_ids = std::mem::take(&mut self.removed_session_ids);
+        let retry_removed_ids = std::mem::take(&mut self.removed_session_ids);
+        let mut removed_ids = retry_removed_ids.clone();
         for record in &self.sessions {
             if record.mutation_stamp <= watermark {
                 continue;
@@ -452,6 +465,7 @@ impl StateInner {
             metadata: PersistedState::metadata_from_inner(self),
             changed_sessions,
             removed_session_ids: removed_ids,
+            drained_explicit_tombstones: retry_removed_ids,
             watermark: self.last_mutation_stamp,
         }
     }

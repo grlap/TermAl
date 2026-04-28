@@ -62,6 +62,7 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  removeSessionFromStore,
   syncComposerSessionsStoreIncremental,
   upsertSessionStoreSession,
 } from "./session-store";
@@ -93,6 +94,19 @@ import {
   isServerInstanceMismatch,
   shouldAdoptSnapshotRevision,
 } from "./state-revision";
+import {
+  coalescePendingStateResyncOptions,
+  consumePendingStateResyncOptions,
+  type PendingStateResyncOptions,
+  type RequestStateResyncOptions,
+} from "./app-live-state-resync-options";
+import {
+  classifyFetchedSessionAdoption,
+  getHydrationMessageCount,
+  getHydrationMutationStamp,
+  type AdoptFetchedSessionOutcome,
+  type SessionHydrationRequestContext,
+} from "./session-hydration-adoption";
 import { mergeOrchestratorDeltaSessions } from "./control-surface-state";
 import { reconcileSessions } from "./session-reconcile";
 import {
@@ -182,34 +196,10 @@ export type AdoptSessionsOptions = {
   disableMutationStampFastPath?: boolean;
 };
 
-export type RequestStateResyncOptions = {
-  allowAuthoritativeRollback?: boolean;
-  allowUnknownServerInstance?: boolean;
-  preserveReconnectFallback?: boolean;
-  preserveWatchdogCooldown?: boolean;
-  rearmOnSuccess?: boolean;
-  rearmOnFailure?: boolean;
-  openSessionId?: string;
-  paneId?: string | null;
-};
-
 export type SessionHydrationTarget = {
   id: string;
   messagesLoaded?: boolean | null;
 };
-
-type SessionHydrationRequestContext = {
-  messageCount: number | null;
-  revision: number | null;
-  serverInstanceId: string | null;
-  sessionMutationStamp: number | null;
-};
-
-type AdoptFetchedSessionOutcome =
-  | "adopted"
-  | "stale"
-  | "stateResync"
-  | "restartResync";
 
 export function resolveAdoptStateSessionOptions(
   options: AdoptStateOptions | undefined,
@@ -220,89 +210,6 @@ export function resolveAdoptStateSessionOptions(
     disableMutationStampFastPath:
       serverInstanceChanged || options?.disableMutationStampFastPath === true,
   };
-}
-
-export function hydrationRetainedMessagesMatch(
-  responseSession: Pick<Session, "messages">,
-  currentSession: Pick<Session, "messages">,
-) {
-  if (
-    responseSession.messages.length === 0 ||
-    currentSession.messages.length === 0
-  ) {
-    return true;
-  }
-
-  // This comparison intentionally covers the persisted message shape exactly.
-  // UI-only message fields must either stay out of `Message` or be excluded
-  // here explicitly, otherwise hydration can treat equivalent transcripts as
-  // divergent and drop retained messages.
-  return (
-    JSON.stringify(responseSession.messages) ===
-    JSON.stringify(currentSession.messages)
-  );
-}
-
-export function getHydrationMessageCount(
-  session: Pick<Session, "messageCount" | "messagesLoaded" | "messages">,
-) {
-  if (typeof session.messageCount === "number") {
-    return session.messageCount;
-  }
-  return session.messagesLoaded === true ? session.messages.length : null;
-}
-
-export function getHydrationMutationStamp(
-  session: Pick<Session, "sessionMutationStamp">,
-) {
-  return session.sessionMutationStamp ?? null;
-}
-
-export function hydrationSessionMetadataMatches(
-  responseSession: Pick<
-    Session,
-    "messageCount" | "messagesLoaded" | "messages" | "sessionMutationStamp"
-  >,
-  currentSession: Pick<
-    Session,
-    "messageCount" | "messagesLoaded" | "messages" | "sessionMutationStamp"
-  >,
-) {
-  return (
-    getHydrationMessageCount(responseSession) ===
-      getHydrationMessageCount(currentSession) &&
-    getHydrationMutationStamp(responseSession) ===
-      getHydrationMutationStamp(currentSession)
-  );
-}
-
-function hydrationSessionMetadataIsAhead(
-  responseSession: Pick<
-    Session,
-    "messageCount" | "messagesLoaded" | "messages" | "sessionMutationStamp"
-  >,
-  currentSession: Pick<
-    Session,
-    "messageCount" | "messagesLoaded" | "messages" | "sessionMutationStamp"
-  >,
-) {
-  const responseMessageCount = getHydrationMessageCount(responseSession);
-  const currentMessageCount = getHydrationMessageCount(currentSession);
-  if (
-    responseMessageCount !== null &&
-    currentMessageCount !== null &&
-    responseMessageCount > currentMessageCount
-  ) {
-    return true;
-  }
-
-  const responseMutationStamp = getHydrationMutationStamp(responseSession);
-  const currentMutationStamp = getHydrationMutationStamp(currentSession);
-  return (
-    responseMutationStamp !== null &&
-    currentMutationStamp !== null &&
-    responseMutationStamp > currentMutationStamp
-  );
 }
 
 const SESSION_HYDRATION_RETRY_DELAYS_MS = [50, 250, 1000, 3000] as const;
@@ -505,6 +412,9 @@ export type UseAppLiveStateReturn = {
     options?: { openSessionId?: string; paneId?: string | null },
   ) => AdoptCreatedSessionOutcome;
   syncPreferencesFromState: (nextState: StateResponse) => void;
+  // Action adoption clears the one-shot mismatch recovery gate after
+  // authoritative adoption or stale-success, so a later mismatch can recover.
+  clearHydrationMismatchSessionIds: (sessionIds: Iterable<string>) => void;
   hydratedSessionIdsRef: MutableRefObject<Set<string>>;
   hydratingSessionIdsRef: MutableRefObject<Set<string>>;
   forceAdoptNextStateEventRef: MutableRefObject<boolean>;
@@ -602,6 +512,7 @@ export function useAppLiveState(
 
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
   const hydratedSessionIdsRef = useRef<Set<string>>(new Set());
+  const hydrationMismatchSessionIdsRef = useRef<Set<string>>(new Set());
   const lastFullStateServerInstanceIdRef = useRef<string | null>(
     lastSeenServerInstanceIdRef.current,
   );
@@ -609,7 +520,6 @@ export function useAppLiveState(
   const hydrationRetryTimersRef = useRef<Map<string, number>>(new Map());
   const hydrationRetryAttemptsRef = useRef<Map<string, number>>(new Map());
   const forceAdoptNextStateEventRef = useRef(false);
-  const [hydrationRetryTick, setHydrationRetryTick] = useState(0);
 
   const [workspaceFilesChangedEvent, setWorkspaceFilesChangedEvent] =
     useState<WorkspaceFilesChangedEvent | null>(null);
@@ -622,14 +532,8 @@ export function useAppLiveState(
   // without losing the per-mount cleanup identity.
   const stateResyncInFlightRef = useRef(false);
   const stateResyncPendingRef = useRef(false);
-  const stateResyncAllowAuthoritativeRollbackRef = useRef(false);
-  const stateResyncAllowUnknownServerInstanceRef = useRef(false);
-  const stateResyncPreserveReconnectFallbackRef = useRef(false);
-  const stateResyncPreserveWatchdogCooldownRef = useRef(false);
-  const stateResyncRearmOnSuccessRef = useRef(false);
-  const stateResyncRearmOnFailureRef = useRef(false);
-  const stateResyncOpenSessionIdRef = useRef<string | undefined>(undefined);
-  const stateResyncPaneIdRef = useRef<string | null | undefined>(undefined);
+  const pendingStateResyncOptionsRef =
+    useRef<PendingStateResyncOptions | null>(null);
   const pendingRecoveryOpenSessionIdRef = useRef<string | undefined>(undefined);
   const pendingRecoveryPaneIdRef = useRef<string | null | undefined>(undefined);
   // Bridges `adoptState` (declared at the hook body so the
@@ -671,8 +575,17 @@ export function useAppLiveState(
       const session = sessionsById.get(sessionId);
       return session ? [session] : [];
     });
+    const removedSessionIds = [...pendingSessionIds].filter(
+      (sessionId) => !sessionsById.has(sessionId),
+    );
     pendingSessionIds.clear();
+    if (changedSessions.length === 0 && removedSessionIds.length === 0) {
+      return;
+    }
     if (changedSessions.length === 0) {
+      removedSessionIds.forEach((sessionId) => {
+        removeSessionFromStore({ sessionId });
+      });
       return;
     }
 
@@ -680,6 +593,7 @@ export function useAppLiveState(
       changedSessions,
       draftsBySessionId: draftsBySessionIdRef.current,
       draftAttachmentsBySessionId: draftAttachmentsBySessionIdRef.current,
+      removedSessionIds,
     });
   }
 
@@ -748,6 +662,12 @@ export function useAppLiveState(
     hydrationRetryAttemptsRef.current.clear();
   }
 
+  function clearHydrationMismatchSessionIds(sessionIds: Iterable<string>) {
+    for (const sessionId of sessionIds) {
+      hydrationMismatchSessionIdsRef.current.delete(sessionId);
+    }
+  }
+
   function sessionStillNeedsHydration(sessionId: string) {
     return sessionsRef.current.some(
       (session) => session.id === sessionId && session.messagesLoaded === false,
@@ -774,7 +694,7 @@ export function useAppLiveState(
       if (!isMountedRef.current || !sessionStillNeedsHydration(sessionId)) {
         return;
       }
-      setHydrationRetryTick((tick) => tick + 1);
+      startSessionHydration(sessionId);
     }, delayMs);
     hydrationRetryTimersRef.current.set(sessionId, timerId);
   }
@@ -1022,6 +942,15 @@ export function useAppLiveState(
         ),
       );
     }
+    if (hasRemovedSessions || unhydratedSessionIds.size > 0) {
+      hydrationMismatchSessionIdsRef.current = new Set(
+        [...hydrationMismatchSessionIdsRef.current].filter(
+          (sessionId) =>
+            availableSessionIds.has(sessionId) &&
+            !unhydratedSessionIds.has(sessionId),
+        ),
+      );
+    }
     if (hasRemovedSessions || hasWorkdirInvalidations) {
       refreshingAgentCommandSessionIdsRef.current =
         pruneSessionFlagsWithInvalidation(
@@ -1100,12 +1029,19 @@ export function useAppLiveState(
     const existingIndex = previousSessions.findIndex(
       (session) => session.id === created.sessionId,
     );
-    const nextSessions =
+    const nextSessionCandidates =
       existingIndex === -1
         ? [...previousSessions, created.session]
         : previousSessions.map((session, index) =>
             index === existingIndex ? created.session : session,
           );
+    const nextSessions = reconcileSessions(
+      previousSessions,
+      nextSessionCandidates,
+    );
+    const adoptedSession =
+      nextSessions.find((session) => session.id === created.sessionId) ??
+      created.session;
     latestStateRevisionRef.current = created.revision;
     if (created.serverInstanceId) {
       rememberServerInstanceId(
@@ -1115,7 +1051,7 @@ export function useAppLiveState(
       lastSeenServerInstanceIdRef.current = created.serverInstanceId;
     }
     sessionsRef.current = nextSessions;
-    upsertSessionSlice(created.session);
+    upsertSessionSlice(adoptedSession);
     flushAndCancelPendingSessionRender(nextSessions);
     setSessions(nextSessions);
     setWorkspace((current) =>
@@ -1146,47 +1082,6 @@ export function useAppLiveState(
     };
   }
 
-  function hydrationRequestStillMatchesSession(
-    requestContext: SessionHydrationRequestContext,
-    currentSession: Session,
-  ) {
-    return (
-      requestContext.messageCount ===
-        getHydrationMessageCount(currentSession) &&
-      requestContext.sessionMutationStamp ===
-        getHydrationMutationStamp(currentSession)
-    );
-  }
-
-  function hydrationResponseMatchesSession(
-    responseSession: Session,
-    currentSession: Session,
-  ) {
-    if (!hydrationSessionMetadataMatches(responseSession, currentSession)) {
-      return false;
-    }
-
-    if (!hydrationRetainedMessagesMatch(responseSession, currentSession)) {
-      return false;
-    }
-
-    return true;
-  }
-
-  function isStaleHydrationFromSupersededInstance(
-    requestContext: SessionHydrationRequestContext,
-    responseServerInstanceId: string,
-  ) {
-    const currentServerInstanceId = lastSeenServerInstanceIdRef.current;
-    return (
-      Boolean(requestContext.serverInstanceId) &&
-      Boolean(currentServerInstanceId) &&
-      Boolean(responseServerInstanceId) &&
-      requestContext.serverInstanceId !== currentServerInstanceId &&
-      requestContext.serverInstanceId === responseServerInstanceId
-    );
-  }
-
   // Returns a discriminated outcome because metadata mismatch needs different
   // recovery depending on direction: stale responses retry hydration, while a
   // full-session response ahead of the current summary must first force
@@ -1198,95 +1093,24 @@ export function useAppLiveState(
     requestContext: SessionHydrationRequestContext,
   ): AdoptFetchedSessionOutcome {
     const previousRevision = latestStateRevisionRef.current;
-    const previousSessions = sessionsRef.current;
-    const existingIndex = previousSessions.findIndex(
-      (entry) => entry.id === session.id,
-    );
-    if (existingIndex === -1) {
-      return "stale";
-    }
-
-    const currentSession = previousSessions[existingIndex];
-    if (
-      isStaleHydrationFromSupersededInstance(requestContext, serverInstanceId)
-    ) {
-      return "stale";
-    }
-
-    const requestServerInstanceBaseline =
-      requestContext.serverInstanceId ?? lastSeenServerInstanceIdRef.current;
-    const isCrossInstanceHydrationResponse = isServerInstanceMismatch(
-      requestServerInstanceBaseline,
-      serverInstanceId,
-    );
-    if (isCrossInstanceHydrationResponse) {
-      return "restartResync";
-    }
-    const currentRequestStillMatches = hydrationRequestStillMatchesSession(
-      requestContext,
-      currentSession,
-    );
-    if (
-      currentRequestStillMatches &&
-      !hydrationResponseMatchesSession(session, currentSession) &&
-      hydrationSessionMetadataIsAhead(session, currentSession)
-    ) {
-      return "stateResync";
-    }
-    const responseIsNotOlderThanRequest =
-      requestContext.revision === null || revision >= requestContext.revision;
-    const canAdoptLowerRevisionHydration =
-      currentSession.messagesLoaded !== true &&
-      responseIsNotOlderThanRequest &&
-      currentRequestStillMatches &&
-      hydrationResponseMatchesSession(session, currentSession);
-    // The downgrade allowance below is intentionally narrower than
-    // "metadata-only": the request and response must still match the current
-    // summary, otherwise a delayed full-session response can clobber newer
-    // delta metadata and mark stale text as loaded.
-    // Mismatched session-hydration responses are not authoritative enough to
-    // prove whether the responding instance is newer or a late old process, so
-    // they trigger a full /api/state resync above instead of being adopted
-    // directly. For same-instance hydration, preserve the existing nuance: on
-    // a genuine first hydration (no local messages yet) we accept even a lower
-    // revision, but once the session has hydrated messages we refuse to clobber
-    // them with an older snapshot.
-    if (
-      !shouldAdoptSnapshotRevision(previousRevision, revision, {
-        lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
-        nextServerInstanceId: serverInstanceId,
-        seenServerInstanceIds: seenServerInstanceIdsRef.current,
-        force: true,
-        allowRevisionDowngrade: canAdoptLowerRevisionHydration,
-      })
-    ) {
-      return "stale";
-    }
-
     const latestSessions = sessionsRef.current;
     const latestExistingIndex = latestSessions.findIndex(
       (entry) => entry.id === session.id,
     );
-    if (latestExistingIndex === -1) {
-      return "stale";
-    }
-    const latestCurrentSession = latestSessions[latestExistingIndex];
-    const latestRequestStillMatches = hydrationRequestStillMatchesSession(
+    const latestCurrentSession =
+      latestExistingIndex === -1 ? null : latestSessions[latestExistingIndex];
+    const adoptOutcome = classifyFetchedSessionAdoption({
+      responseSession: session,
+      responseRevision: revision,
+      responseServerInstanceId: serverInstanceId,
       requestContext,
-      latestCurrentSession,
-    );
-    const latestResponseMatches = hydrationResponseMatchesSession(
-      session,
-      latestCurrentSession,
-    );
-    if (!latestRequestStillMatches || !latestResponseMatches) {
-      if (
-        latestRequestStillMatches &&
-        hydrationSessionMetadataIsAhead(session, latestCurrentSession)
-      ) {
-        return "stateResync";
-      }
-      return "stale";
+      currentSession: latestCurrentSession,
+      currentRevision: previousRevision,
+      currentServerInstanceId: lastSeenServerInstanceIdRef.current,
+      seenServerInstanceIds: seenServerInstanceIdsRef.current,
+    });
+    if (adoptOutcome !== "adopted" || latestExistingIndex === -1) {
+      return adoptOutcome;
     }
 
     const hydratedSession = { ...session, messagesLoaded: true };
@@ -1307,7 +1131,96 @@ export function useAppLiveState(
     upsertSessionSlice(hydratedSession);
     flushAndCancelPendingSessionRender(nextSessions);
     setSessions(nextSessions);
+    hydrationMismatchSessionIdsRef.current.delete(session.id);
     return "adopted";
+  }
+
+  function startSessionHydration(sessionId: string) {
+    if (hydratingSessionIdsRef.current.has(sessionId)) {
+      return;
+    }
+
+    hydratingSessionIdsRef.current.add(sessionId);
+    const requestContext = captureHydrationRequestContext(sessionId);
+    if (!requestContext) {
+      hydratingSessionIdsRef.current.delete(sessionId);
+      return;
+    }
+    void (async () => {
+      let shouldRetryHydration = false;
+      try {
+        const response = await fetchSession(sessionId);
+        if (!isMountedRef.current) {
+          return;
+        }
+        if (response.session.id !== sessionId) {
+          // Suppressed until the next authoritative state adoption clears the
+          // set. A timer reset would re-open the mismatch -> resync loop.
+          if (!hydrationMismatchSessionIdsRef.current.has(sessionId)) {
+            hydrationMismatchSessionIdsRef.current.add(sessionId);
+            requestActionRecoveryResyncRef.current();
+          }
+          return;
+        }
+        const adoptOutcome = adoptFetchedSession(
+          response.session,
+          response.revision,
+          response.serverInstanceId,
+          requestContext,
+        );
+        switch (adoptOutcome) {
+          case "adopted":
+            clearHydrationRetry(sessionId);
+            hydratedSessionIdsRef.current.add(sessionId);
+            break;
+          case "restartResync":
+            hydrationRestartResyncPendingRef.current = true;
+            requestActionRecoveryResyncRef.current();
+            // The recovery state probe is the authoritative path after a
+            // backend restart. Do not stack a session retry on top of it.
+            break;
+          case "stateResync":
+            requestActionRecoveryResyncRef.current();
+            shouldRetryHydration = true;
+            break;
+          case "stale":
+            shouldRetryHydration = true;
+            break;
+          default: {
+            const _exhaustive: never = adoptOutcome;
+            void _exhaustive;
+            shouldRetryHydration = true;
+            break;
+          }
+        }
+      } catch (error) {
+        if (!isMountedRef.current) {
+          return;
+        }
+        // 404 is a benign race: the session was deleted, hidden,
+        // or renumbered between a delta event that referenced it
+        // and this hydration fetch. The action-recovery resync
+        // will repair our local view on the next SSE tick without
+        // dropping a toast on the user. Mirrors
+        // `fetchWorkspaceLayout`'s "404 -> silent recovery" UX
+        // posture; the transport shape differs (that one returns
+        // `null` at the API boundary so callers treat it as "no
+        // layout yet"; here `fetchSession` throws
+        // `ApiRequestError` and we branch on `instanceof` + status
+        // at the call site).
+        if (error instanceof ApiRequestError && error.status === 404) {
+          requestActionRecoveryResyncRef.current();
+          return;
+        }
+        reportRequestError(error);
+        shouldRetryHydration = true;
+      } finally {
+        hydratingSessionIdsRef.current.delete(sessionId);
+        if (shouldRetryHydration) {
+          scheduleHydrationRetry(sessionId);
+        }
+      }
+    })();
   }
 
   useEffect(() => {
@@ -1335,86 +1248,7 @@ export function useAppLiveState(
     }
 
     for (const sessionId of sessionIdsToHydrate) {
-      if (hydratingSessionIdsRef.current.has(sessionId)) {
-        continue;
-      }
-
-      hydratingSessionIdsRef.current.add(sessionId);
-      const requestContext = captureHydrationRequestContext(sessionId);
-      if (!requestContext) {
-        hydratingSessionIdsRef.current.delete(sessionId);
-        continue;
-      }
-      void (async () => {
-        let shouldRetryHydration = false;
-        try {
-          const response = await fetchSession(sessionId);
-          if (!isMountedRef.current) {
-            return;
-          }
-          if (response.session.id !== sessionId) {
-            requestActionRecoveryResyncRef.current();
-            return;
-          }
-          const adoptOutcome = adoptFetchedSession(
-            response.session,
-            response.revision,
-            response.serverInstanceId,
-            requestContext,
-          );
-          switch (adoptOutcome) {
-            case "adopted":
-              clearHydrationRetry(sessionId);
-              hydratedSessionIdsRef.current.add(sessionId);
-              break;
-            case "restartResync":
-              hydrationRestartResyncPendingRef.current = true;
-              requestActionRecoveryResyncRef.current();
-              // The recovery state probe is the authoritative path after a
-              // backend restart. Do not stack a session retry on top of it.
-              break;
-            case "stateResync":
-              requestActionRecoveryResyncRef.current();
-              shouldRetryHydration = true;
-              break;
-            case "stale":
-              shouldRetryHydration = true;
-              break;
-            default: {
-              const _exhaustive: never = adoptOutcome;
-              void _exhaustive;
-              shouldRetryHydration = true;
-              break;
-            }
-          }
-        } catch (error) {
-          if (!isMountedRef.current) {
-            return;
-          }
-          // 404 is a benign race: the session was deleted, hidden,
-          // or renumbered between a delta event that referenced it
-          // and this hydration fetch. The action-recovery resync
-          // will repair our local view on the next SSE tick without
-          // dropping a toast on the user. Mirrors
-          // `fetchWorkspaceLayout`'s "404 -> silent recovery" UX
-          // posture; the transport shape differs (that one returns
-          // `null` at the API boundary so callers treat it as "no
-          // layout yet"; here `fetchSession` throws
-          // `ApiRequestError` and we branch on `instanceof` + status
-          // at the call site).
-          if (error instanceof ApiRequestError && error.status === 404) {
-            requestActionRecoveryResyncRef.current();
-            return;
-          }
-          reportRequestError(error);
-          shouldRetryHydration = true;
-        } finally {
-          hydratingSessionIdsRef.current.delete(sessionId);
-          if (shouldRetryHydration) {
-            scheduleHydrationRetry(sessionId);
-          }
-        }
-      })();
+      startSessionHydration(sessionId);
     }
     // Deps intentionally do NOT include message counts:
     // the body only reads target ids and `messagesLoaded` flags.
@@ -1424,7 +1258,6 @@ export function useAppLiveState(
   }, [
     activeSession?.id,
     activeSession?.messagesLoaded,
-    hydrationRetryTick,
     visibleSessionHydrationTargets,
   ]);
 
@@ -1485,6 +1318,7 @@ export function useAppLiveState(
       hydratingSessionIdsRef.current.clear();
       hydratedSessionIdsRef.current.clear();
     }
+    hydrationMismatchSessionIdsRef.current.clear();
     const currentCodexState = codexStateRef.current;
     const currentAgentReadiness = agentReadinessRef.current;
     const currentProjects = projectsRef.current;
@@ -1599,6 +1433,7 @@ export function useAppLiveState(
       typeof window.setTimeout
     > | null = null;
     let sawReconnectOpenSinceLastError = false;
+    let reconnectRecoveryConfirmedSinceLastError = false;
     let nextReconnectStateResyncDelayMs = RECONNECT_STATE_RESYNC_DELAY_MS;
     let liveSessionResumeWatchdogIntervalId: ReturnType<
       typeof window.setInterval
@@ -1608,14 +1443,7 @@ export function useAppLiveState(
     // any stale in-flight resync bookkeeping from the previous mount.
     stateResyncInFlightRef.current = false;
     stateResyncPendingRef.current = false;
-    stateResyncAllowAuthoritativeRollbackRef.current = false;
-    stateResyncAllowUnknownServerInstanceRef.current = false;
-    stateResyncPreserveReconnectFallbackRef.current = false;
-    stateResyncPreserveWatchdogCooldownRef.current = false;
-    stateResyncRearmOnSuccessRef.current = false;
-    stateResyncRearmOnFailureRef.current = false;
-    stateResyncOpenSessionIdRef.current = undefined;
-    stateResyncPaneIdRef.current = undefined;
+    pendingStateResyncOptionsRef.current = null;
     pendingRecoveryOpenSessionIdRef.current = undefined;
     pendingRecoveryPaneIdRef.current = undefined;
     // Track transport activity per session so one noisy active session cannot
@@ -1686,10 +1514,13 @@ export function useAppLiveState(
     }
 
     function clearReconnectStateResyncTimeoutAfterConfirmedReopen() {
+      // Call only from data-bearing SSE handlers. A bare EventSource `onopen`
+      // means the socket handshook, not that fresh state is flowing again.
       if (!sawReconnectOpenSinceLastError) {
         return;
       }
 
+      reconnectRecoveryConfirmedSinceLastError = true;
       clearReconnectStateResyncTimeout();
       resetReconnectStateResyncBackoff();
     }
@@ -1723,6 +1554,7 @@ export function useAppLiveState(
         requestStateResync({
           allowAuthoritativeRollback: true,
           rearmOnSuccess: true,
+          rearmUntilLiveEventOnSuccess: true,
           rearmOnFailure: true,
         });
       }, delayMs);
@@ -1809,27 +1641,23 @@ export function useAppLiveState(
         try {
           while (!cancelled && stateResyncPendingRef.current) {
             stateResyncPendingRef.current = false;
-            const allowAuthoritativeRollback =
-              stateResyncAllowAuthoritativeRollbackRef.current;
-            stateResyncAllowAuthoritativeRollbackRef.current = false;
-            const allowUnknownServerInstance =
-              stateResyncAllowUnknownServerInstanceRef.current;
-            stateResyncAllowUnknownServerInstanceRef.current = false;
-            const preserveReconnectFallback =
-              stateResyncPreserveReconnectFallbackRef.current;
-            stateResyncPreserveReconnectFallbackRef.current = false;
-            const preserveWatchdogCooldown =
-              stateResyncPreserveWatchdogCooldownRef.current;
-            stateResyncPreserveWatchdogCooldownRef.current = false;
-            const rearmOnSuccess = stateResyncRearmOnSuccessRef.current;
-            stateResyncRearmOnSuccessRef.current = false;
-            const rearmOnFailure = stateResyncRearmOnFailureRef.current;
-            stateResyncRearmOnFailureRef.current = false;
-            const openSessionId = stateResyncOpenSessionIdRef.current;
-            stateResyncOpenSessionIdRef.current = undefined;
-            const paneId = stateResyncPaneIdRef.current;
-            stateResyncPaneIdRef.current = undefined;
+            const {
+              allowAuthoritativeRollback,
+              allowUnknownServerInstance,
+              preserveReconnectFallback,
+              preserveWatchdogCooldown,
+              rearmOnSuccess,
+              rearmUntilLiveEventOnSuccess,
+              rearmAfterSameInstanceProgressUntilLiveEvent,
+              rearmOnFailure,
+              openSessionId,
+              paneId,
+            } = consumePendingStateResyncOptions(
+              pendingStateResyncOptionsRef,
+            );
             const requestedRevision = latestStateRevisionRef.current;
+            const requestedServerInstanceId =
+              lastSeenServerInstanceIdRef.current;
 
             try {
               const state = await fetchState();
@@ -1880,11 +1708,12 @@ export function useAppLiveState(
                 clearInitialStateResyncRetryTimeout();
                 if (
                   reconnectStateResyncTimeoutId !== null &&
-                  sawReconnectOpenSinceLastError
+                  reconnectRecoveryConfirmedSinceLastError
                 ) {
-                  // Once the stream itself has reopened, an adopted snapshot can
-                  // disarm any leftover reconnect fallback timer and reset the
-                  // next reconnect cycle back to the fast initial delay.
+                  // Once live SSE data has confirmed recovery, an adopted
+                  // snapshot can disarm any leftover reconnect fallback timer
+                  // and reset the next reconnect cycle back to the fast
+                  // initial delay.
                   clearReconnectStateResyncTimeout();
                   resetReconnectStateResyncBackoff();
                 }
@@ -1911,15 +1740,39 @@ export function useAppLiveState(
               clearRecoveredBackendRequestError();
               if (
                 rearmOnSuccess &&
-                requestedRevision !== null &&
-                latestStateRevisionRef.current === requestedRevision &&
-                !sawReconnectOpenSinceLastError &&
+                !reconnectRecoveryConfirmedSinceLastError &&
                 reconnectStateResyncTimeoutId === null
               ) {
-                // Reconnect fallback probes must keep polling authoritative
-                // state until the live SSE transport proves it reopened.
-                // Generic watchdog or wake-gap resyncs stay one-shot.
-                scheduleReconnectStateResync();
+                const adoptedReplacementInstance =
+                  adopted &&
+                  isServerInstanceMismatch(
+                    requestedServerInstanceId,
+                    state.serverInstanceId,
+                  );
+                const adoptedSameInstanceProgress =
+                  adopted &&
+                  !adoptedReplacementInstance &&
+                  requestedRevision !== null &&
+                  state.revision > requestedRevision;
+                // Timer-driven reconnect fallbacks keep probing until a live
+                // EventSource data frame proves the SSE stream is healthy
+                // again unless a same-instance snapshot already made forward
+                // progress. Manual retry opts back into proving live SSE even
+                // after same-instance progress because the user explicitly
+                // asked to recover the backend connection, not just refresh UI.
+                const shouldRearmUntilLiveEvent =
+                  rearmUntilLiveEventOnSuccess &&
+                  !reconnectRecoveryConfirmedSinceLastError &&
+                  (!adoptedSameInstanceProgress ||
+                    rearmAfterSameInstanceProgressUntilLiveEvent);
+                const shouldRearmAfterSuccess =
+                  shouldRearmUntilLiveEvent ||
+                  (requestedRevision !== null &&
+                    latestStateRevisionRef.current === requestedRevision) ||
+                  adoptedReplacementInstance;
+                if (shouldRearmAfterSuccess) {
+                  scheduleReconnectStateResync();
+                }
               }
             } catch (error) {
               if (!cancelled) {
@@ -1978,7 +1831,7 @@ export function useAppLiveState(
       }
 
       if (
-        sawReconnectOpenSinceLastError &&
+        reconnectRecoveryConfirmedSinceLastError &&
         !options?.preserveReconnectFallback
       ) {
         clearReconnectStateResyncTimeout();
@@ -1987,28 +1840,11 @@ export function useAppLiveState(
       // will only disarm it once a /api/state snapshot is actually adopted.
       // Coalesced resync requests retain the strongest semantics until the next
       // loop iteration consumes them.
-      if (options?.allowAuthoritativeRollback) {
-        stateResyncAllowAuthoritativeRollbackRef.current = true;
-      }
-      if (options?.allowUnknownServerInstance) {
-        stateResyncAllowUnknownServerInstanceRef.current = true;
-      }
-      if (options?.preserveReconnectFallback) {
-        stateResyncPreserveReconnectFallbackRef.current = true;
-      }
-      if (options?.preserveWatchdogCooldown) {
-        stateResyncPreserveWatchdogCooldownRef.current = true;
-      }
-      if (options?.rearmOnSuccess) {
-        stateResyncRearmOnSuccessRef.current = true;
-      }
-      if (options?.rearmOnFailure) {
-        stateResyncRearmOnFailureRef.current = true;
-      }
-      if (options?.openSessionId !== undefined) {
-        stateResyncOpenSessionIdRef.current = options.openSessionId;
-        stateResyncPaneIdRef.current = options.paneId ?? null;
-      }
+      pendingStateResyncOptionsRef.current =
+        coalescePendingStateResyncOptions(
+          pendingStateResyncOptionsRef.current,
+          options,
+        );
       stateResyncPendingRef.current = true;
       startStateResyncLoop();
     }
@@ -2018,20 +1854,26 @@ export function useAppLiveState(
       }
 
       sawReconnectOpenSinceLastError = false;
+      reconnectRecoveryConfirmedSinceLastError = false;
       clearInitialStateResyncRetryTimeout();
       clearReconnectStateResyncTimeout();
       resetReconnectStateResyncBackoff();
       // Manual retry is intentionally an immediate `/api/state` probe. It does
-      // not preserve any currently armed reconnect timer, but success or
-      // failure both hand control back to the normal reconnect cycle.
+      // not preserve any currently armed reconnect timer, but it does keep
+      // polling after snapshot progress until live SSE confirms recovery.
       requestStateResync({
         allowAuthoritativeRollback: latestStateRevisionRef.current !== null,
         rearmOnSuccess: true,
+        rearmUntilLiveEventOnSuccess: true,
+        rearmAfterSameInstanceProgressUntilLiveEvent: true,
         rearmOnFailure: true,
       });
     };
     requestActionRecoveryResyncRef.current = (options) => {
       if (cancelled || !readNavigatorOnline()) {
+        // Preserve hydration restart intent across offline observations; the
+        // next online recovery should still be allowed to adopt a replacement
+        // server instance.
         return;
       }
       const allowUnknownServerInstance =
@@ -2054,6 +1896,7 @@ export function useAppLiveState(
       requestStateResync({
         allowAuthoritativeRollback: latestStateRevisionRef.current !== null,
         allowUnknownServerInstance,
+        rearmUntilLiveEventOnSuccess: false,
         openSessionId: options?.openSessionId,
         paneId: options?.paneId,
       });
@@ -2164,7 +2007,9 @@ export function useAppLiveState(
       lastWatchdogResyncAttemptAt = now;
       requestStateResync({
         allowAuthoritativeRollback: true,
+        allowUnknownServerInstance: true,
         preserveWatchdogCooldown: true,
+        rearmUntilLiveEventOnSuccess: false,
       });
     }
 
@@ -2484,6 +2329,7 @@ export function useAppLiveState(
 
       const hadReconnectOpenSinceLastError = sawReconnectOpenSinceLastError;
       sawReconnectOpenSinceLastError = false;
+      reconnectRecoveryConfirmedSinceLastError = false;
       const isOnline = readNavigatorOnline();
       const hasHydratedState = latestStateRevisionRef.current !== null;
       setBackendConnectionState(
@@ -2602,6 +2448,7 @@ export function useAppLiveState(
     adoptState,
     adoptCreatedSessionResponse,
     syncPreferencesFromState,
+    clearHydrationMismatchSessionIds,
     hydratedSessionIdsRef,
     hydratingSessionIdsRef,
     forceAdoptNextStateEventRef,

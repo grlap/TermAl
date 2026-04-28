@@ -94,12 +94,18 @@ enum ApiErrorKind {
     GitDocumentNotFile,
     GitDocumentNotFound,
     GitDocumentTooLarge,
+    RemoteConnectionUnavailable,
+    RemoteSessionHydrationFreshnessRace,
+    RemoteSessionMissingFullTranscript,
 }
 
 #[derive(Debug)]
 struct ApiError {
     message: String,
     status: StatusCode,
+    // In-process classifier metadata. `IntoResponse` intentionally omits this
+    // field, and remote proxy JSON decoding reconstructs `ApiError` with
+    // `kind: None`; callers that need typed recovery must tag errors locally.
     kind: Option<ApiErrorKind>,
 }
 

@@ -3823,14 +3823,36 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
         })))
         .unwrap();
 
-    std::thread::sleep(Duration::from_millis(50));
-    assert!(
-        matches!(
-            input_rx.recv_timeout(Duration::from_millis(50)),
-            Err(mpsc::RecvTimeoutError::Timeout)
-        ),
-        "failed thread registration should not queue StartTurnAfterSetup"
-    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        match input_rx.try_recv() {
+            Ok(_) => panic!("failed thread registration should not queue StartTurnAfterSetup"),
+            Err(mpsc::TryRecvError::Disconnected) => {
+                panic!("test input channel should remain open")
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+        }
+
+        let failed = {
+            let snapshot = state.full_snapshot();
+            snapshot
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .is_some_and(|session| {
+                    session.status == SessionStatus::Error
+                        && session.preview.contains("Failed to save session state")
+                })
+        };
+        if failed {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "failed thread registration should mark the session error"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
 
     {
         let inner = state.inner.lock().expect("state mutex poisoned");

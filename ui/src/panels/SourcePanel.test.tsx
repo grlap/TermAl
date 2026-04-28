@@ -1595,13 +1595,13 @@ describe("SourcePanel", () => {
   // Inline-zone id stability contract (what this block pins):
   //
   // - For a Markdown file with a fenced Mermaid block, the id is
-  //   `mermaid:${startLine}:${endLine}:${quickHash(fence.body)}`
+  //   `mermaid:${sameBodyOrdinal}:${quickHash(fence.body)}`
   //   (see `ui/src/source-renderers.ts::detectMarkdownRegions`).
-  //   So the id is stable IFF the fence's start line, end line,
-  //   AND body are all unchanged. The portal key in
-  //   `MonacoCodeEditor` uses the id, so stability here is what
-  //   keeps the Mermaid iframe DOM alive across keystrokes
-  //   (without it, the iframe reinitialises every time).
+  //   So the id is stable when edits outside the fence shift the
+  //   absolute line numbers but leave the Mermaid body unchanged.
+  //   The portal key in `MonacoCodeEditor` uses the id, so stability
+  //   here is what keeps the Mermaid iframe DOM alive across
+  //   keystrokes outside the diagram.
   //
   // - For a dedicated `.mmd` file, the id is
   //   `mermaid-file:${quickHash(context.content)}` — the WHOLE
@@ -1610,12 +1610,6 @@ describe("SourcePanel", () => {
   //   documented in the code; we pin it here so a future
   //   refactor doesn't silently drop the exception.
   //
-  // - Typing a line ABOVE the fence shifts `startLine` and
-  //   flips the id today. That's a latent stability gap
-  //   separate from this test-coverage bug; it's tracked as a
-  //   new entry in `docs/bugs.md`. Until that's fixed, we pin
-  //   the current (gap-bearing) behaviour here so a fix has a
-  //   clear place to flip the assertion.
   describe("inline-zone id stability", () => {
     it("keeps the zone id stable when the fence's line span and body are unchanged", async () => {
       render(
@@ -1649,9 +1643,8 @@ describe("SourcePanel", () => {
       const idsBeforeEdit = editor.getAttribute("data-inline-zone-ids");
       expect(idsBeforeEdit).toBeTruthy();
 
-      // In-place footer rewrite — no line-count change above the
-      // fence, no fence-body change. `startLine` / `endLine` /
-      // body all unchanged → id stable.
+      // In-place footer rewrite: no fence-body change and no
+      // same-body ordinal change, so the id stays stable.
       fireEvent.change(editor, {
         target: {
           value: [
@@ -1732,19 +1725,7 @@ describe("SourcePanel", () => {
       expect(idsAfterEdit).not.toBe(idsBeforeEdit);
     });
 
-    it("changes the zone id when lines are inserted above the fence (latent stability gap)", async () => {
-      // This is the gap flagged in `docs/bugs.md` → "Inline-zone
-      // id is line-number-dependent, reinitialises Mermaid on
-      // every edit above the fence". The id format includes
-      // `startLine:endLine`, so inserting a line above the fence
-      // shifts both and flips the id — which causes the portal
-      // to remount and the Mermaid iframe to reinitialise.
-      //
-      // This test pins the current (gap-bearing) behaviour. When
-      // the id format is reworked to be line-independent, flip
-      // the assertion to `toBe(idsBeforeEdit)` so a future
-      // regression that reintroduces line-sensitivity is
-      // caught.
+    it("keeps the zone id stable when lines are inserted above the fence", async () => {
       render(
         <SourcePanel
           editorAppearance={editorAppearance}
@@ -1774,9 +1755,9 @@ describe("SourcePanel", () => {
       const idsBeforeEdit = editor.getAttribute("data-inline-zone-ids");
       expect(idsBeforeEdit).toBeTruthy();
 
-      // Insert a new paragraph BEFORE the fence. The fence body
-      // and line span relative to the fence are unchanged, but
-      // its ABSOLUTE `startLine` shifts → id flips (today).
+      // Insert a new paragraph BEFORE the fence. The absolute
+      // source lines shift, but the fence body and same-body
+      // ordinal are unchanged, so the inline zone remains stable.
       fireEvent.change(editor, {
         target: {
           value: [
@@ -1798,10 +1779,7 @@ describe("SourcePanel", () => {
       });
       const idsAfterEdit = editor.getAttribute("data-inline-zone-ids");
       expect(idsAfterEdit).toBeTruthy();
-      // CURRENT behaviour — id flips. Flip this to `.toBe(
-      // idsBeforeEdit)` when the id format becomes line-
-      // independent.
-      expect(idsAfterEdit).not.toBe(idsBeforeEdit);
+      expect(idsAfterEdit).toBe(idsBeforeEdit);
     });
 
     it("changes the zone id on any `.mmd` whole-file edit (documented exception)", async () => {

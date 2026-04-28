@@ -76,6 +76,32 @@ export function shouldAdoptSnapshotRevision(
 }
 
 /**
+ * Returns true when a same-server-instance full snapshot is stale relative to
+ * the state this tab already adopted. Action handlers use this to treat an
+ * HTTP 200 response as UI success when SSE or another snapshot already landed
+ * a newer same-instance revision.
+ *
+ * This relies on the backend's monotonic-revision invariant: within one
+ * `serverInstanceId`, revision N represents a state at least as new as every
+ * revision <= N. If two different snapshots could share the same
+ * `(serverInstanceId, revision)`, stale action responses could be reported as
+ * success without the corresponding mutation being visible locally.
+ */
+export function isStaleSameInstanceSnapshot(
+  currentRevision: number | null,
+  nextRevision: number,
+  currentServerInstanceId: string | null | undefined,
+  nextServerInstanceId: string | null | undefined,
+): boolean {
+  return (
+    currentRevision !== null &&
+    nextRevision <= currentRevision &&
+    Boolean(currentServerInstanceId) &&
+    currentServerInstanceId === nextServerInstanceId
+  );
+}
+
+/**
  * Returns true when both ids are non-empty AND differ. Empty ids mean
  * "unknown instance" (older server, fallback payload) and cannot
  * trigger a restart branch — the caller stays on the revision-ordered

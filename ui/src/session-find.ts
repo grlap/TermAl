@@ -1,4 +1,9 @@
-import { parseConnectionRetryNotice } from "./app-utils";
+import {
+  buildConnectionRetryDisplayStateByMessageId,
+  connectionRetryPresentationFor,
+  parseConnectionRetryNotice,
+  type ConnectionRetryDisplayState,
+} from "./connection-retry";
 import type {
   ApprovalMessage,
   CommandMessage,
@@ -124,12 +129,17 @@ export function buildSessionSearchIndex(session: Session): SessionSearchIndex {
 }
 
 function buildSearchableSessionItems(session: Session): SearchableSessionItem[] {
+  const connectionRetryDisplayStateByMessageId =
+    buildConnectionRetryDisplayStateByMessageId(session);
   return [
     ...session.messages.flatMap((message) =>
       createSearchableSessionItems(
         "message",
         message.id,
-        collectMessageSearchText(message),
+        collectMessageSearchText(
+          message,
+          connectionRetryDisplayStateByMessageId.get(message.id),
+        ),
       ),
     ),
     ...(session.pendingPrompts ?? []).flatMap((prompt) =>
@@ -170,34 +180,30 @@ function createSearchableTextPart(text: string): SearchableTextPart {
   };
 }
 
-function collectMessageSearchText(message: Message) {
+function collectMessageSearchText(
+  message: Message,
+  connectionRetryDisplayState?: ConnectionRetryDisplayState,
+) {
   switch (message.type) {
-    case "text":
-      // Connection-retry notices render as TWO distinct cards
-      // depending on whether the retry is still live or the
-      // turn has since resumed:
-      //   - Live  → `notice.detail` (the stored `message.text`).
-      //   - Resolved → a synthesized past-tense summary
-      //     ("Connection dropped briefly; the turn continued
-      //     after …"). The stored text is NOT rendered.
-      // Indexing only `message.text` means a search for terms
-      // that only appear in the resolved card ("Connection
-      // recovered", "the turn continued") misses the match, and
-      // a search for terms that only appear in the live card
-      // ("Retrying automatically", "response finished") lands
-      // on a resolved card whose visible text doesn't contain
-      // the query — both look like broken search to the user.
-      // Include BOTH forms so the index answers "does this
-      // message match?" correctly regardless of which card
-      // variant is currently rendered. Per-card highlight
-      // positions are recomputed at render time against each
-      // card's rendered text, so the card that IS visible
-      // highlights correctly.
+    case "text": {
+      const connectionRetrySearchText =
+        message.author === "assistant"
+          ? collectConnectionRetrySearchText(
+              message.text,
+              connectionRetryDisplayState,
+            )
+          : [];
+      if (connectionRetrySearchText.length > 0) {
+        return joinSearchableParts([
+          collectAttachmentSearchText(message.attachments),
+          ...connectionRetrySearchText,
+        ]);
+      }
       return joinSearchableParts([
         collectAttachmentSearchText(message.attachments),
         message.text,
-        ...collectConnectionRetrySearchText(message.text),
       ]);
+    }
     case "thinking":
       return collectThinkingSearchText(message);
     case "command":
@@ -267,24 +273,32 @@ function collectAttachmentSearchText(attachments: ImageAttachment[] | undefined)
   );
 }
 
-// Returns the searchable text fragments a connection-retry
-// notice RENDERS into when the turn has resumed (the resolved
-// `ConnectionRetryCard` variant in `message-cards.tsx`). Empty
-// when the message text does not parse as a retry notice. The
-// strings here mirror the literals in
-// `message-cards.tsx::ConnectionRetryCard` — keep them in sync
-// with the rendered copy so search-over-resolved-cards stays
-// correct.
-function collectConnectionRetrySearchText(text: string): string[] {
+// Index the visible retry-card copy and the literal persisted notice text.
+// The visible copy tracks live/resolved/superseded/inactive lifecycle state,
+// while `notice.detail` preserves searches for the stored transcript text
+// after the card has settled.
+function collectConnectionRetrySearchText(
+  text: string,
+  displayState: ConnectionRetryDisplayState | undefined,
+): string[] {
   const notice = parseConnectionRetryNotice(text);
   if (!notice) {
     return [];
   }
-  const resolvedHeading = "Connection recovered";
-  const resolvedDetail = notice.attemptLabel
-    ? `Connection dropped briefly; the turn continued after ${notice.attemptLabel.toLowerCase()}.`
-    : "Connection dropped briefly; the turn continued after an automatic retry.";
-  return [resolvedHeading, resolvedDetail];
+  if (!displayState) {
+    return [notice.detail];
+  }
+
+  const { heading, detail } = connectionRetryPresentationFor(
+    notice,
+    displayState,
+  );
+  const uniqueParts = new Set(
+    [heading, notice.attemptLabel, detail, notice.detail].filter(
+      (part): part is string => Boolean(part),
+    ),
+  );
+  return [...uniqueParts];
 }
 
 function joinSearchableParts(parts: Array<string | null | undefined>) {

@@ -9,185 +9,446 @@ Also fixed in the current tree: snapshot-bearing action responses now route reje
 
 Also fixed in the current tree: fork-thread notice coverage now asserts unmaterialized stale fork responses do not render phantom notices, while a direct materialized fork response still shows the intended fork notice.
 
+Also fixed in the current tree: reconnect fallback polling now stays armed across replacement-instance fallback adoption until `EventSource.onopen` or a confirmed live event proves the SSE stream reopened (the revision-equality rearm guard now remains for same-instance probes while replacement-instance adoption gets a narrower rearm path). A fake-timer regression test asserts the second recovery poll fires after replacement-instance adoption when SSE has not reopened. The hydration adoption switch keeps its silent retry fallback for impossible outcomes, avoiding user-facing assertion text while retaining TypeScript exhaustiveness. Direct unit coverage was added for `hydrationSessionMetadataIsAhead` covering the equal-counts/newer-mutation-stamp branch and the missing-count fallback. The `requestActionRecoveryResyncRef` offline-preserve reorder now carries an inline comment naming the load-bearing invariant.
+
+Also fixed in the current tree: connection-retry notice liveness now derives from session lifecycle and retry sequencing instead of just "is this the latest assistant message". A new `ConnectionRetryDisplayState` union (`live` / `resolved` / `superseded` / `inactive`) drives the spinner, heading, and aria-live state via a per-message map computed in `SessionPaneView`. Two new MessageCard tests cover the `superseded` and `inactive` rendering paths.
+
+Also fixed in the current tree: the inline-zone id for Mermaid fences in Markdown files no longer depends on absolute line numbers, so editing text above a fence keeps the same id and preserves the diagram iframe DOM across keystrokes. The id is now `mermaid:${sameBodyOrdinal}:${quickHash(body)}`, with a same-body ordinal as a tiebreaker for collisions. New unit tests cover line-shift stability and same-body ordinal disambiguation; the `SourcePanel.test.tsx` "latent stability gap" assertion is flipped accordingly.
+
+Also fixed in the current tree: the persist worker now retries `persist_delta_via_cache` failures with capped exponential backoff through `recv_timeout`, preserving tombstones and changed-session deltas across transient SQLite errors while still observing shutdown during retry waits. The SQLite database file now gets `0o600` permissions on Unix via a new `harden_local_state_file_permissions` helper, applied immediately after open/commit. Windows relies on `~/.termal/` ACL inheritance.
+
+Also fixed in the current tree: SQLite WAL/SHM sidecars are now hardened alongside `termal.sqlite` on Unix after WAL setup, schema initialization, and successful write commits. Connection-retry card copy and retry-state classification now live in shared helpers, so transcript search indexes the rendered `live` / `resolved` / `superseded` / `inactive` notice text instead of stale alternate states. Settled retry notices now share the muted non-live card styling.
+
+Also fixed in the current tree: the lazy hydration effect now guards against repeated `requestActionRecoveryResyncRef` calls when `response.session.id !== sessionId` via a new `hydrationMismatchSessionIdsRef` "tried-once" gate, breaking the transient mismatch ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ resync ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ refetch ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ mismatch loop. The `sessionCreated` reducer's `existingIndex !== -1` branch is now routed through `reconcileSessions` so memoized `MessageCard` children keep stable identity when SSE materializes a session before the API response lands.
+
+Also fixed in the current tree: `adoptActionState` now schedules authoritative action recovery for unrecoverable adoption failures, but treats stale same-instance action snapshots as UI success because a newer local revision already includes that server-side mutation. Existing caller guards still stop success-side cleanup for replacement/unknown failures. `handleCancelQueuedPrompt` keeps its catch-path state fetch as a passive best-effort `adoptState` refresh, so failed requests are not classified as action success.
+
+Also fixed in the current tree: retry-display lookup no longer invalidates `renderSessionMessageCard` on every streaming chunk; `ConnectionRetryCard` now gets copy, classes, spinner, and aria state from one shared presentation helper; hydration mismatch suppression is pruned with unhydrated sessions and has inline invariants; created-session adoption reconciles both append and replace paths; reconnect fallback rearm now documents why replacement-instance recovery cannot rely solely on revision equality. SQLite hardening now tightens the TermAl data directory to `0700` before DB opens, treats chmod/metadata hardening failures as warnings rather than persistence blockers, and the persist worker retry loop uses capped exponential backoff with `recv_timeout` so shutdown is observed during retry waits.
+
+Also fixed in the current tree: retry-notice search now indexes the rendered lifecycle copy and the literal stored retry notice, so settled cards still match "Retrying automatically" while state-aware searches still find recovered/superseded/live copy. The thin `connectionRetryNoticeCopy` wrapper and bare `"Connection"` search token are gone, the retry-state classifier now documents its precedence contract, and the interleaved `retry -> response -> retry` search case is covered. `SessionPaneView` now documents the render-time retry-map ref invariant across assistant appends and lifecycle transitions. The inactive retry-card test now asserts the body detail. Persisted sessions now scrub runtime-only `session_mutation_stamp` on save and load, with a regression proving `sessionMutationStamp` is absent from serialized session records and manually injected stamps are cleared on load. `isStaleSameInstanceSnapshot` now documents its monotonic-revision invariant and covers null/undefined instance-id edge cases.
+
+Also fixed in the current tree: test-only legacy JSON state loading now rejects files larger than 100 MiB before reading them into memory, and the regression uses a small size cap instead of allocating a 100 MiB sparse fixture on Windows. Production SQLite state directory creation now uses a Unix `DirBuilder` mode of `0700` before DB open, then keeps the existing best-effort hardening pass. The disconnected create-session persistence fallback now writes a full persisted snapshot instead of only the created row, so sibling create-flow mutations follow the same durability shape as the normal background persist path. SQLite sidecar hardening now also covers `-journal`, and the reconnect fallback polling test derives its backoff waits from the exported reconnect delay constant.
+
+Also fixed in the current tree: session-scoped stale same-instance action responses now clear the hydration mismatch suppression entry for the affected session before reporting action success, so the "tried-once" hydration mismatch gate has the same cleanup behavior as accepted authoritative action snapshots.
+
+Also fixed in the current tree: `shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime` no longer relies on a fixed 50 ms sleep before asserting the background thread setup failure landed. It now polls up to a bounded deadline, fails immediately if `StartTurnAfterSetup` is queued, and waits for the expected in-memory Error state before checking runtime retention.
+
+Also fixed in the current tree: oversized test-only legacy JSON fixtures now name the `TERMAL_LEGACY_STATE_MAX_BYTES` escape hatch in the load error, and the fixture load path reads that env-var override while preserving the 100 MiB default cap. Tests pin the cap and the override parser. `AdoptActionStateOptions` now drops only the hydration-mismatch bookkeeping field via rest destructuring before forwarding adoption options, the global project-create adoption path has an explanatory comment, and the retry-map render-time ref comment now names the complete-message streaming assumption.
+
+Also fixed in the current tree: `MessageCard.test.tsx` now explicitly covers `connectionRetryDisplayState="resolved"`, the stale same-instance snapshot unit coverage is split into focused cases, same-body Mermaid region tests pin ordinal ids `[0, 1]`, the runtime mutation-stamp persistence test is split into save/load assertions, the `App.session-lifecycle.test.tsx` indentation regression is corrected, the defensive `adoptActionState` mount guard now documents that callers already check mount synchronously, and `app-session-actions.test.ts` pins that session-scoped stale same-instance action success clears exactly the acted session id without scheduling recovery.
+
+Also fixed in the current tree: hydration-only `AdoptActionStateOptions` now normalize to `undefined` before calling `adoptState`, so `app-session-actions.test.ts` matches the implementation. The reconnect fallback polling regression test now keeps harness setup on real timers and switches to fake timers only around the reconnect backoff window, restoring real timers before harness teardown.
+
+Also fixed in the current tree: action-state adoption now returns an explicit outcome (`adopted` / `stale-success` / `recovering` / `unmounted`), and the settings/model-refresh callers read from `sessionsRef.current` after stale same-instance success instead of the stale response body. Session-scoped action recovery now threads the acted session id as recovery-only navigation context without forcing ordinary successful adoption to open that session. `app-session-actions.test.ts` now covers stale same-instance action success and recovery context. The test-only legacy JSON max-bytes override emits a one-shot stderr warning, invalid override inputs now have regression coverage, the oversized fixture error uses named captures for the single measured byte count, and resolved/superseded connection-retry card tests now assert `aria-live` plus settled/resolved class names.
+
+Also fixed in the current tree: reconnect fallback polling now has the converse replacement-instance test proving a data-bearing SSE `state` event after `EventSource.onopen` disarms subsequent polls, while bare `onopen` does not. `SessionPaneView` narrows retry-display map memoization to the classifier inputs (`activeSession?.messages` and `activeSession?.status`), and the duplicated exhaustive-switch helpers now use a shared `ui/src/exhaustive.ts` `assertNever`.
+
+Also fixed in the current tree: reconnect rearm-on-success keeps the original same-instance revision-parity guard for one-shot probes while timer-driven reconnect fallback requests carry an explicit "rearm until live event" option. The replacement-instance fake-timer tests use a timing margin around the rearmed backoff boundary to account for `settleAsyncUi`'s fake-timer drain. The remaining same-instance catch-up behavior is tracked below because `/api/state` can still masquerade as SSE recovery.
+
+Also fixed in the current tree: action recovery options no longer inherit adoption-side `openSessionId`/`paneId`; only `recoveryOpenSessionId`/`recoveryPaneId` can set recovery navigation. Retry-display renderer invalidation now includes a retry-state signature so classification changes propagate without tying the renderer to every map rebuild. The defensive `"unmounted"` action outcome is documented as caller-equivalent to no-success, `app-session-actions.test.ts` covers the adopted branch reading from response sessions, and `ui/src/exhaustive.ts` has the required split-file provenance header.
+
+Also fixed in the current tree: the erroneous `clearReconnectStateResyncTimeoutAfterConfirmedReopen()` call was removed from `EventSource.onopen`, and the helper now carries an inline warning that it is only for data-bearing SSE handlers. The round-9 reconnect test dispatches live state after `dispatchOpen()` so the disarm path is exercised by confirmed data rather than by the socket handshake alone.
+
+Also fixed in the current tree: production persistence now resolves directly to `~/.termal/termal.sqlite` and `load_state` no longer imports or renames legacy `sessions.json`; the old JSON load helpers are compiled only for tests/fixtures. README, architecture docs, and the persistence comments now describe SQLite as the sole runtime session store.
+
+Also fixed in the current tree: connection-retry parsing, display-state classification, and presentation metadata now live in `ui/src/connection-retry.ts` with a split-file provenance header. `app-utils.ts` no longer owns that subsystem, and MessageCard, transcript search, SessionPaneView, and MarkdownContent tests import the dedicated module directly.
+
+Also fixed in the current tree: SQLite permission hardening re-runs after every cached delta persist commit, matching the direct full-snapshot path and covering WAL/SHM/journal sidecars that can be recreated after earlier hardening.
+
+Also fixed in the current tree: the `SessionBody` comparator comment now records the accepted streaming tradeoff: in session view the message renderer intentionally tracks streaming flags, so active streaming chunks can re-render `SessionBody` while `SessionConversationPage` still defers the visible message list before heavy content rendering.
+
+Also fixed in the current tree: `renderSessionPromptSettings` now documents the accepted callback-dependency tradeoff. SessionPaneView keeps one renderer for the four agent prompt cards, and Codex-only inputs can rebuild the callback for non-Codex agents only on explicit settings/thread actions.
+
+Also fixed in the current tree: `AgentSessionPanel.test.tsx` now covers the `SessionBody` comparator branches for `viewMode="commands"` and `viewMode="diffs"`, proving renderer-only parent rerenders refresh the visible command and diff cards.
+
+Also fixed in the current tree: `hydrate_remote_session_target` now routes broad-state commit-before-rejection through `commit_applied_remote_state_before_rejection`, preserving fetched remote state before stale/missing proxy errors without repeating the same commit/error boilerplate at each early return.
+
+Also fixed in the current tree: `prepare_termal_gemini_system_settings_writes_override_file` now holds `TEST_HOME_ENV_MUTEX` and redirects `USERPROFILE`/`HOME` to its own temp home before preparing the Windows override, removing the full-suite race with sibling Gemini env tests.
+
+Also fixed in the current tree: `live-updates.test.ts` now pins referential identity for the `sessionCreated` existing-session reconciliation path, asserting both the retained message array and unchanged message object survive summary replacement. This covers the memoized-card preservation invariant behind the `reconcileSessions` branch.
+
+Also fixed in the current tree: targeted remote delta hydration now treats an upstream `messages_loaded: false` session response as "no full repair available" and falls through to the narrow delta apply instead of hard-erroring. A remote regression covers the chained-summary case by returning a metadata-only session from `/api/sessions/{id}` and asserting the incoming delta still materializes the proxy transcript.
+
+Also fixed in the current tree: App-level live-delta fixtures now include required `messageCount` on session-scoped `messageCreated` and `textReplace` events across reconnect, visibility, orchestration, backend-connection, and live-state delta tests. A scan over `dispatchNamedEvent("delta", ...)` / `dispatchDelta(...)` fixtures now finds no current session-scoped delta test payload missing `messageCount`.
+
+Also fixed in the current tree: unloaded remote-proxy `get_session()` hydration now uses a bounded visible-pane fetch timeout and falls back to the cached local summary when the owner cannot provide a full transcript, returns metadata-only data, or loses a freshness race with a newer remote state snapshot. Remote regressions cover both metadata-only owner responses and stale transcript rejection after a side `/api/state` sync.
+
+Also fixed in the current tree: the remote orchestrator summary-preservation regression now validates every session in the republished `OrchestratorsUpdated.sessions` payload. The fixture includes both metadata-only and hydrated incoming remote sessions, asserts all localized output sessions are metadata-first, and checks the full multiset of preserved `message_count` values.
+
+Also fixed in the current tree: the backend reconnect fallback test for an applied pre-reopen session delta flushes the rAF-backed render, then proves both the streaming preview and active-pane message body appear while the reconnect badge remains active and before the fallback `/api/state` request fires.
+
+Also fixed in the current tree: targeted session hydration now treats `messagesLoaded: false` `SessionResponse` payloads as still-unhydrated instead of forcing them loaded, and the architecture docs describe the metadata-only fallback contract. Remote hydration fallback paths now log the fallback cause and the helper documents its lock and retry contract. Connection-retry notice classification now uses the nearest later assistant item, with search-index coverage for `retry -> retry -> final output` proving the older retry is superseded while only the newer retry resolves.
+
+Also fixed in the current tree: `REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT` now lives in `state_accessors.rs` next to the `get_session()` fallback path that consumes it, instead of relying on the `include!`-flattened namespace from `remote_routes.rs`.
+
+Also fixed in the current tree: `adoptActionState` now explicitly constructs the `AdoptStateOptions` object from only `openSessionId` and `paneId`, so future action-only option keys cannot silently pass through to `adoptState`.
+
+Also fixed in the current tree: `app-live-state.test.ts` now covers the `hydrationMismatchSessionIdsRef` tried-once gate directly. The hook-level tests prove repeated mismatched `fetchSession` responses only invoke action recovery once, and that an authoritative `adoptState` call clears the gate so a later mismatch can request recovery again.
+
+Also fixed in the current tree: `SessionPaneView.retry-display.test.tsx` now opens the Sessions surface and clicks the session row before asserting retry card headings, and it covers the resolved branch with a retry followed by ordinary assistant output. The backend reconnect delta test also opens the session pane before asserting streamed message body text. Timer-driven reconnect fallback requests keep replacement-instance polling armed until a confirmed live SSE event arrives.
+
+Also fixed in the current tree: the orchestrator restart persistence tests now disable the background persist channel immediately after constructing their test `AppState`, forcing setup commits through the synchronous test fallback before the tests read the JSON fixture on restart.
+
+Also fixed in the current tree: the persist worker retry bookkeeping now has direct Rust coverage. `src/tests/persist.rs` pins the capped-backoff state transition, timeout-driven retry tick, Delta wake during backoff, and disconnected-channel shutdown branch around `recv_timeout`.
+
+Also fixed in the current tree: state-resync request options now coalesce into one pending option bag instead of ten parallel refs. Boolean flags retain the strongest requested semantics, explicit navigation targets overwrite the prior pending target, and `app-live-state-resync-options.test.ts` pins empty defaults, flag preservation, navigation target retention, and consume-and-clear behavior.
+
+Also fixed in the current tree: `adoptFetchedSession` now delegates its four-outcome decision logic to a pure `classifyFetchedSessionAdoption` helper. Direct unit coverage pins `adopted`, `restartResync`, `stateResync`, and `stale` classifications.
+
+Also fixed in the current tree: visible remote-session hydration fallback is narrowed to explicit recoverable misses (metadata-only transcript, remote connectivity failure, or documented freshness races) and no longer masks local lookup/persistence or bad remote protocol errors. A remote regression proves an owner response with a mismatched session id returns `BAD_GATEWAY` instead of cached-summary success. Connection-retry classification now treats a later user prompt as a turn boundary so old retry notices settle while a new active turn runs, and transcript search covers that state. Persist retry restores only drained explicit tombstones after a failed delta write; hidden-session deletes are regenerated from still-hidden records instead of being duplicated in the retry queue.
+
+Also fixed in the current tree: `app-live-state.test.ts` now makes `makeCountingActionRecoveryRef` return a stable `.current` wrapper until the ref setter receives a new callback, matching production ref identity behavior. The direct helper-only assertion was removed; hook-level hydration recovery tests now exercise the behavior through `useAppLiveState`.
+
+Also fixed in the current tree: the pure state-resync option helpers moved from `app-live-state.ts` into `app-live-state-resync-options.ts`, and the session-hydration adoption classifier family moved into `session-hydration-adoption.ts`. Existing direct tests now import those split modules while `useAppLiveState` keeps only the side-effect orchestration.
+
+Also fixed in the current tree: `src/persist.rs` now documents that the legacy JSON byte cap and `TERMAL_LEGACY_STATE_MAX_BYTES` override are test-fixture safety for fixture/migration coverage, not production runtime import guardrails.
+
+Also fixed in the current tree: `SqlitePersistConnectionCache` no longer short-circuits state-file hardening after the first successful cached delta commit. The cached path now re-runs the existing best-effort SQLite main/sidecar hardening pass after every successful commit, so recreated WAL/SHM/journal sidecars are covered without waiting for cache invalidation.
+
+Also fixed in the current tree: the remote targeted-hydration "summary returned instead of full transcript" path now carries a typed `ApiErrorKind::RemoteSessionMissingFullTranscript` tag. The delta hydration fallback checks that tag instead of string-matching `err.message`, so message copy changes cannot widen or break the recoverable-summary branch.
+
+Also fixed in the current tree: `SessionPaneView`'s AgentSessionPanel render-callback cluster moved into `SessionPaneView.render-callbacks.tsx`. The pane component now imports `useSessionRenderCallbacks`, keeping the four stable card/prompt renderers out of the large pane orchestration file without changing their dependencies.
+
+Also fixed in the current tree: backend connection tests now clear localStorage between cases; hydration adoption's impossible default arm falls back to silent retry instead of surfacing an assertion toast; `SessionPaneView` no longer writes the retry-display map ref during render; visible remote hydration fallback uses the typed `RemoteSessionMissingFullTranscript` kind; Unix SQLite state hardening now returns verified errors unless `TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS` explicitly opts into insecure best-effort mode; and retry-display integration coverage now pins the active-session later-user-prompt transition that changes only the retry classification signature.
+
+Also fixed in the current tree: `connection-retry.test.ts` now covers retry notice parsing and `connectionRetryPresentationFor` across `live`, `resolved`, `superseded`, and `inactive` display states, including resolved copy with and without an explicit attempt label.
+
+Also fixed in the current tree: stale same-instance action responses now require target-specific evidence before reporting UI success. Session-scoped actions require the current session's `sessionMutationStamp` to be at least as new as the response session's stamp, deletion-style responses require the target session to already be absent locally, and project creation requires the created project id to already exist locally; otherwise the action schedules authoritative recovery.
+
+Also fixed in the current tree: `app-live-state.test.ts` now covers the hook-level hydration adoption side effects for `stateResync`, `restartResync`, offline restart-preserve retry, and stale hydration retry paths, so the switch that consumes `classifyFetchedSessionAdoption` outcomes is pinned beyond the pure classifier tests.
+
+Also fixed in the current tree: `connection-retry.test.ts` and `app-live-state-resync-options.test.ts` now provide direct unit coverage for the round-11 extractions. The connection-retry tests cover retry notice parsing and `connectionRetryPresentationFor` across `live` / `resolved` / `superseded` / `inactive` display states; the resync-options tests pin empty defaults, monotonic flag preservation, reconnect rearm preservation across coalesced requests, navigation-target retention, and consume-and-clear behavior.
+
+Also fixed in the current tree: stale same-instance session-settings success now preserves the pre-optimistic live session as target evidence, the dead `assertNever` import in `app-live-state.ts` is gone, and project-scoped stale create-project success has direct `useAppSessionActions` coverage. `rearmUntilLiveEventOnSuccess` is now OR-coalesced like the other strongest-semantics resync flags.
+
+Also fixed in the current tree: stale action adoption classification now lives in `ui/src/action-state-adoption.ts`, with direct tests for same-instance stale success, missing target evidence, preserved pre-optimistic session evidence, deletion-style absence evidence, and project-create evidence. `useAppSessionActions` now keeps the UI cleanup/recovery side effects while delegating the pure rejected-snapshot decision.
+
+Also fixed in the current tree: visible remote-session hydration fallback now branches on typed `ApiErrorKind` values for remote connection failures, freshness races, and missing full transcripts instead of parsing user-facing error text. Direct tests prove copy-only matching no longer controls recoverability. Local `ssh` spawn failures are now tagged as `RemoteConnectionUnavailable`, so they use the same recoverable cached-summary path as remote connectivity failures.
+
+Also fixed in the current tree: Unix SQLite state-permission hardening helpers are now test-visible on Unix, with direct `#[cfg(unix)]` tests for owner-only file mode, owner-only directory mode, SQLite `-wal`/`-shm`/`-journal` sidecar coverage, and the explicit insecure-permission override path. The tests compile out on Windows.
+
+Also fixed in the current tree: visible-session hydration retry timers now restart hydration for the specific stale session instead of bumping a global retry counter that reran the whole visible-target effect. `app-live-state.test.ts` covers a two-session retry where only the stale session is fetched again.
+
+Also fixed in the current tree: session-scoped action recovery now derives the recovery pane from the workspace tab that owns the acted session, so rejected/stale action snapshots recover into the originating pane instead of the currently active pane. The non-backend preferences fallback test now asserts the current-instance session remains present while rejecting the replacement snapshot. Unix state-file hardening now uses `symlink_metadata` and skips symlink sidecars, cached post-commit hardening failures are logged as warnings after the SQLite commit is durable, the persist retry seed constant is named for its actual role, the hydration-mismatch clear API documents its cross-module invariant, retry-display tests pin the settled/inactive and lifecycle-removal UI contracts, SourcePanel stabilizes rendered-Markdown prop callbacks while reusing one normalized editor buffer, and `AdoptActionStateOutcome` now collapses the previously indistinguishable recovery/unmounted branches into one `deferred` no-success outcome. Reconnect fallback tests now derive their pre-deadline waits from `RECONNECT_STATE_RESYNC_DELAY_MS` and use a wider boundary margin for the second backoff probe. The rendered connection-retry search coverage is split into named cases for live, inactive, resolved, superseded, retry-then-resolved, new-prompt, and interleaved sequences. `useAppDragResize` now has direct handler coverage for pane drag start/end, launcher drag start/end, tab drops, and split pointer resizing. `session-store.ts` now exposes a direct `removeSessionFromStore` eviction path, and pending incremental session-store flushes prune ids that disappear before the render frame.
+
+Also fixed in the current tree: action-recovery resync explicitly opts out of live-event rearming, and the session hydration endpoint table now documents `SessionResponse { revision, serverInstanceId, session }` plus recoverable remote-proxy `messagesLoaded: false` success.
+
+Also fixed in the current tree: `AdoptActionStateOptions` now documents the adoption-navigation versus recovery-navigation option split, project-scoped stale create-project handling has both classifier and hook negative-path coverage, and git diff enrichment tests now pin that recoverable remote hydration error kinds do not emit Markdown degradation notes. `PersistDelta` now names drained explicit tombstones separately from the full removed-id write set, the persist worker restores them through `StateInner::restore_drained_explicit_tombstones`, and a regression proves synthesized hidden-session deletes are regenerated rather than requeued as explicit tombstones. The repeated SQLite hardening passes after schema initialization now carry comments naming the deliberate defense-in-depth against sidecars created after connection open. Cached delta persistence now propagates post-commit hardening failures like the non-cache write paths, so a failed re-harden invalidates the cached connection and lets the persist retry loop retry instead of silently counting the tick as successful. Unix SQLite state-file hardening now rejects symlinked main or sidecar paths and chmods/verifies regular files through an `O_NOFOLLOW` file handle to close the residual path-swap window. The local SSH spawn-error mapping now has direct coverage proving it returns the sanitized OpenSSH/PATH message with `RemoteConnectionUnavailable`. The App-level online/offline reconnect test now proves the browser `online` listener triggers immediate reconnect fetches and still adopts replacement-instance state after a backend restart.
+
+Also fixed in the current tree: math fence ids still deliberately include line positions, but the source now documents why that asymmetry is acceptable compared with Mermaid iframe remounts.
+
+Also fixed in the current tree: same-instance reconnect fallback adoption no longer masquerades as live SSE recovery. Automatic reconnect probes stop self-rearming after a same-instance `/api/state` snapshot strictly advances the revision, which resets watchdog baselines without creating an endless polling loop. Manual reconnect retry has an explicit opt-in that keeps polling after same-instance snapshot progress until a data-bearing SSE event confirms the stream, and the backend-connection regression now pins that path. The non-backend preferences fallback regression now seeds the current-instance session before asserting the replacement snapshot was rejected. SQLite state-file symlink rejection now runs before SQLite opens/configures the database path, covers known sidecars, and cannot be downgraded by `TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS`.
+
+Also fixed in the current tree: failed queued-prompt cancel fallback now has `useAppSessionActions` coverage proving the passive `adoptState` refresh, no action-recovery resync, and original error reporting. Deferred session-store pruning now has hook-level coverage for queued delta ids that disappear before the pending render frame flushes. Connection-retry display state now keeps a content-stable map identity and the renderer callback depends on the actual map instead of a signature proxy. The duplicate Mermaid body ordinal edge case is documented as an accepted trade-off. Recoverable visible-session hydration errors now document their visible-pane/delta-replay semantics and BAD_GATEWAY kind contract, fallback logging records both the recoverable cause and any secondary fallback failure, and `ApiErrorKind` is documented as in-process-only metadata. Persist retry waiting now matches `PersistRequest` explicitly, SQLite cache replacement validates the new connection before replacing the old one, post-commit hardening is a path-keyed helper, and Unix directory hardening rejects symlinked state directories. The app-live-state test harness no longer uses the synthetic `hydrationRun` prop. (Backend reconnect tests still hardcode many `400/799/1599/3199/4999/5000` literals and the offline-restart regression still bypasses the actual `online` event listener — both tracked separately below.)
+
 ## Active Repo Bugs
 
-## Reconnect fallback polling can stop before SSE recovers
+## Watchdog test still fails — reconnect probe self-rearms after adopting a strictly-newer same-instance snapshot
 
-**Severity:** High - replacement-instance `/api/state` recovery can refresh visible state but accidentally disarm fallback polling before EventSource has reopened.
+**Severity:** High - `ui/src/app-live-state.ts:1741-1766`. `App.live-state.watchdog.test.tsx > "resets the watchdog drift baseline after a long reconnect resync completes"` still fails with `expected 4 to be 1`. After `dispatchError` arms a 400ms reconnect probe and the probe's fetch resolves with strictly-newer revision, the success branch executes `if (rearmOnSuccess && !reconnectRecoveryConfirmedSinceLastError && reconnectStateResyncTimeoutId === null) → scheduleReconnectStateResync()` because `reconnectRecoveryConfirmedSinceLastError` only flips inside data-bearing SSE handlers. In wake-gap scenarios where no fresh SSE data follows, the rearmed timer fires repeatedly. The test trace: probe #1 succeeds adopt → arms timer at 400ms; probe #2 throws (mock rejects) → rearmOnFailure schedules; #3 throws; #4 throws. Round-15 review summary erroneously stated this was fixed; round-16 verification confirms it remains red.
 
-Reconnect recovery is supposed to keep polling until a real SSE `open` event or confirmed live SSE event proves the stream is healthy again. The newer replacement-instance adoption path can advance `latestStateRevisionRef` from the fallback fetch itself, so the `rearmOnSuccess` guard no longer sees the originally requested revision and skips the next recovery poll.
-
-**Current behavior:**
-- `EventSource.onerror` can arm reconnect fallback polling.
-- A fallback `/api/state` response from a replacement server instance can be adopted and advance the latest revision.
-- The fallback snapshot itself can make the rearm guard fail even though SSE has not reopened.
-
-**Proposal:**
-- Track live-stream recovery separately from fallback snapshot adoption.
-- Keep reconnect fallback polling armed after successful fallback adoption until `EventSource.onopen` or a confirmed live event clears reconnect recovery.
-- Add a fake-timer regression test where fallback fetch returns `revision > requestedRevision`, visible state updates, and another recovery fetch is attempted before SSE reopens.
-
-## Stale successful action snapshots can block UI cleanup
-
-**Severity:** Medium - `adoptActionState` can treat a successful HTTP action response as failure-like when SSE already applied the action first.
-
-`adoptState` can reject a response snapshot for benign stale/same-instance reasons after the action has already materialized through SSE. The shared action wrapper currently returns `false` for every rejected snapshot, so callers that use the boolean to decide local cleanup can skip success cleanup even though the action succeeded.
+The conflict: `rearmUntilLiveEventOnSuccess: true` correctly keeps reconnect-fallback tests polling until SSE confirms recovery, but the same flag causes the watchdog test (which never feeds an SSE data event) to see 4 fetches instead of 1 after the probe successfully adopts a newer-revision snapshot.
 
 **Current behavior:**
-- Successful action responses call `adoptActionState`.
-- If SSE wins the race and the response snapshot is stale, `adoptActionState` schedules recovery and returns `false`.
-- Callers can return early and leave UI affordances such as rename dialogs open.
+- Reconnect probe with `rearmUntilLiveEventOnSuccess: true` rearms after every successful adoption while no live SSE data arrives.
+- An adopted snapshot whose `state.revision > requestedRevision` does not flip `reconnectRecoveryConfirmedSinceLastError`.
+- A backend whose SSE has degraded but whose `/api/state` works is polled forever.
+- This is the same regression carrying since round 12.
 
 **Proposal:**
-- Distinguish recovery-needed snapshots from stale-but-already-materialized success.
-- For non-create actions, treat a successful HTTP response as UI success after scheduling recovery, or verify the expected mutation already exists in current state before returning `false`.
-- Add coverage for an action whose SSE update arrives before the HTTP response and still performs caller cleanup.
+- Treat an adopted snapshot whose `state.revision > requestedRevision` (strictly advanced past the requested revision) as recovery confirmation: flip `reconnectRecoveryConfirmedSinceLastError = true` (or a narrower "snapshot recovery confirmed" flag) and stop the rearm.
+- Or split `rearmOnSuccess` from `rearmUntilLiveEventOnSuccess` so that without the latter, an adoption that advanced the revision disarms.
+- Either way, `shouldRearmAfterSuccess` should be false when the fetch advanced the revision.
+- Verify by re-running the full `App.live-state.*.test.tsx` suite (both the watchdog test and the three "keeps reconnect fallback polling armed" tests).
 
-## Active-prompt stale-send replacement recovery lacks coverage
+## `useAppSessionActions` ref cluster has grown from 1 to 4 to feed the rejected-action classifier
 
-**Severity:** Low - the stale-send recovery poll now trusts replacement server instances, but tests only cover same-instance poll responses.
-
-This path is load-bearing for latest assistant-message visibility after backend restart races. If replacement-instance poll adoption regresses, the completed assistant response can remain hidden while same-instance tests still pass.
+**Severity:** Medium - `ui/src/app-session-actions.ts:316-356`. `useAppSessionActions` now requires `latestStateRevisionRef`, `lastSeenServerInstanceIdRef`, `projectsRef`, and `sessionsRef` because of the inline `classifyRejectedActionState` call site. The ref count grew from 1 → 4 in a few rounds, all to feed one classifier function.
 
 **Current behavior:**
-- Active-prompt stale-send recovery passes `allowUnknownServerInstance`.
-- Existing tests cover same-instance `/api/state` poll responses.
-- No test proves a replacement-instance poll response containing the completed assistant message is adopted.
+- Every new evidence dimension for stale action snapshots pushes another ref into this hook.
+- App.tsx, the test harness, and the hook signature all need editing whenever a new dimension is added.
+- Same anti-pattern the resync-options ref cluster had before extraction.
 
 **Proposal:**
-- Add a session-lifecycle poll test starting from one `serverInstanceId`.
-- Return a replacement-instance `/api/state` snapshot with the completed assistant response.
-- Assert the latest assistant message becomes visible.
+- Pass a single `actionStateClassifierContextRef: MutableRefObject<{ revision, serverInstanceId, projects, sessions }>` (or a memoized snapshot getter) so adding a new evidence dimension does not require touching the hook signature, the caller, and the test harness.
+- Defer to a dedicated commit per CLAUDE.md.
 
-## Preferences fallback lacks non-backend-error rejection coverage
+## `connectionRetryDisplayStateByMessageId` two-stage memoization is correct but threaded through ~4 stability hops
 
-**Severity:** Low - preferences fallback recovery tests cover the backend-unavailable branch but not the non-backend failure branch.
-
-The safety contract is that replacement-instance snapshots are trusted only when the settings save failed with backend-unavailable evidence. A future regression could broaden this trust after any settings-save failure and the current tests would not catch it.
+**Severity:** Medium - `ui/src/SessionPaneView.tsx:858-895`. The retry-display memoization now uses `signature → ref-cached map → useCallback wrapper → useSessionRenderCallbacks deps → MessageCard renderer identity`. The map identity stability invariant is load-bearing for `SessionBody` memoization but only documented sparsely. A future change to retry-display semantics needs to be threaded through ~4 separate stability hops.
 
 **Current behavior:**
-- Backend-unavailable settings-save failures are covered and may adopt replacement-instance recovery snapshots.
-- Non-backend settings-save failures are not paired with a replacement-instance rejection test.
-- A broadening of replacement-instance trust after arbitrary preference errors could pass existing coverage.
+- Hand-rolled signature-stable memo bridges to a renderer that already had its own deps tax.
+- Reviewers have flagged this as "complex invariant without nearby comments" several rounds in a row.
 
 **Proposal:**
-- Add a companion preferences test where `updateAppSettings` fails with a non-backend-unavailable error.
-- Return a replacement-instance `/api/state` snapshot.
-- Assert replacement preferences and sessions are not adopted.
+- Extract the signature-stable memo into a small `useStableMapBySignature` hook in a sibling utility module so the pattern is reusable and named.
+- Or memoize directly on `(messages, status)` and accept one rebuild per message-list change — `MessageCard` is already memoized below the `SessionBody` memo gate.
 
-## Three recovery-dispatch sites missing `allowUnknownServerInstance: true` flag
+## `backend-connection.test.tsx` still hardcodes ~20 reconnect-fallback timer literals
 
-**Severity:** Low - three pre-existing recovery-dispatch paths now sit asymmetrically next to the new `adoptActionState` helper, which always trusts replacement instances on recovery:
-
-- `ui/src/app-session-actions.ts:665` — `openCreatedSession` "stale-but-id-not-in-local-sessions" branch calls `requestActionRecoveryResync({ openSessionId: created.sessionId, paneId: preferredPaneId })` without trusting replacement instances.
-- `ui/src/app-session-actions.ts:1651` — `handleForkCodexThread` mirror of the same pattern.
-- `ui/src/app-live-state.ts:2165` — `handleLiveSessionResumeWatchdogTick` calls `requestStateResync({ allowAuthoritativeRollback: true, preserveWatchdogCooldown: true })` while the sibling `resumeStateIfNeeded` (line 2099) was just updated to also pass `allowUnknownServerInstance: true`. Both fire on machine-suspend signatures.
-
-These are exactly the create/fork-during-restart and wake-gap-during-restart races the rest of the diff is hardening against. If the backend restarts before the recovery probe lands, the probe's `/api/state` snapshot is rejected as an unknown server-instance and the user is stuck until the next SSE event.
+**Severity:** Medium - `ui/src/backend-connection.test.tsx:574,734,1285,1395,1403,1503,1525,1622,1632,1653,1686,1792,1807,1817,1827,1837,2255,2356,2724,3206,…`. Round-15 carryover only addressed a subset of usages. The literals `400`, `799`, `800`, `1599`, `3199`, `4999`, `5000` correspond to `RECONNECT_STATE_RESYNC_DELAY_MS` and its `*2 - 1`, `*4 - 1`, `*8 - 1`, etc. multiples. Changing the production timer would silently break dozens of these tests.
 
 **Current behavior:**
-- The new `adoptActionState` helper establishes a uniform "action-recovery probes trust replacement instances" contract.
-- Three pre-existing recovery dispatchers do not follow that contract.
-- Recovery from backend restart in those code paths blocks until SSE delivers a fresh state event.
+- The named constants `RECONNECT_STATE_RESYNC_DELAY_MS`, `RECONNECT_STATE_RESYNC_PRE_DEADLINE_MS`, and `RECONNECT_STATE_RESYNC_TEST_BUFFER_MS` are imported and used in some places.
+- ~20 other call sites still use the literal arithmetic.
+- A future timer tuning becomes a multi-edit chase.
 
 **Proposal:**
-- Add `allowUnknownServerInstance: true` at each of the three sites to align with the helper's contract.
-- The new `shouldTrustAuthoritativeReplacementInstance` gate inside `startStateResyncLoop` already guards adoption, so this is purely about getting the option through the resync queue.
+- Replace the remaining literals with computed expressions tied to the constant (`RECONNECT_STATE_RESYNC_DELAY_MS`, `RECONNECT_STATE_RESYNC_DELAY_MS * 2 - RECONNECT_STATE_RESYNC_TEST_BUFFER_MS`, etc.).
+- Pure mechanical change.
 
-## `adoptActionState` `options` parameter is currently dead at every call site
+## `app-live-state.test.ts` offline-restart test still bypasses the `online` event listener
 
-**Severity:** Low - `ui/src/app-session-actions.ts:325-338`. The new helper declares `options?: { openSessionId?: string; paneId?: string | null }` and forwards it to `requestActionRecoveryResync` on the rejection path, but no caller supplies these args at any of the 13 use sites. Worse, the `options` is *not* threaded to the inner `adoptState(state)` call — so a future caller that DID supply them would get the resync hint but not the adoption-time hint, since `AdoptStateOptions` also accepts `openSessionId`/`paneId`.
+**Severity:** Medium - `ui/src/app-live-state.test.ts:521-525`. The "preserves restart recovery while offline and allows replacement-instance adoption on the next retry" test calls `params.requestActionRecoveryResyncRef.current()` directly. Round-15 carryover. Round-15 preamble incorrectly claimed this was reframed to "manual retry"; the test name was not changed and the wiring is still bypassed.
 
 **Current behavior:**
-- 13 call sites use `adoptActionState(state)` with no options.
-- The `options` parameter is type-safe but currently unexercised.
-- Only the recovery branch reads `options`; the success branch ignores it.
-- A future caller relying on this would silently fail to influence adoption-time behavior.
+- Test directly invokes the resync callback rather than dispatching an `online` event.
+- A regression where the `online` event listener fails to call the resync ref would not be caught.
 
 **Proposal:**
-- Drop the `options` parameter until a caller needs it (YAGNI), OR
-- Thread `options` through to `adoptState(state, options)` as well so the contract is symmetric across success and failure paths.
-- If the asymmetry is intentional, add a one-line comment explaining why `options` matters only on the resync side.
+- Dispatch `window.dispatchEvent(new Event("online"))` after flipping `onlineSpy.mockReturnValue(true)` so the test exercises the full subscription path.
+- Or rename the test to "...allows replacement-instance adoption on the next manual retry" if the direct-invocation behavior is the intent.
 
-## `handleCancelQueuedPrompt` catch-path "best-effort refresh" silently escalated to recovery resync
+## Post-commit hardening failure can spin the persist worker indefinitely
 
-**Severity:** Low - `ui/src/app-session-actions.ts:1262-1269`. The catch path's post-error refresh was changed from `adoptState(state)` to `adoptActionState(state)`. Pre-change it was a documented best-effort refresh (comment: `// Keep the original request error below; state refresh is best-effort.`). Post-change, a stale `fetchState` response now triggers a full action-recovery resync chain that the previous code suppressed.
+**Severity:** Low - `src/persist.rs:929-935`. `harden_persist_commit_files` runs after `tx.commit()`. If hardening fails, the persist worker returns an error, which triggers cache invalidation and tombstone restoration, but the data is already on disk. The next tick re-runs idempotent upserts and tries hardening again. On a misconfigured filesystem (no `TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS=1`), this becomes an unbounded retry loop.
 
 **Current behavior:**
-- Catch path runs `fetchState()` and feeds the result to `adoptActionState`.
-- A stale or rejected snapshot fires a recovery dispatch with `allowUnknownServerInstance: true`.
-- The `// state refresh is best-effort.` comment is now misleading.
+- The exponential backoff caps at 30s, so it's not a CPU pegging issue.
+- Log noise is significant; tombstones get restored repeatedly.
+- Data is durable but the worker keeps reporting a write failure.
 
 **Proposal:**
-- Either revert this site to bare `adoptState(state)` to preserve documented best-effort semantics, or update the comment to reflect that recovery may be triggered.
-- If recovery is intended, also flag the change in the commit message so future readers understand why the `cancelQueuedPrompt` failure path is now a recovery trigger.
+- Treat post-commit hardening failure as a warning that doesn't fail the persist (since data is already committed).
+- Or document the recovery model explicitly so operators understand the loop is non-fatal.
 
-## State-resync option bag is spread across 10+ parallel module-scoped refs
+## `connection_for` redundant `None` assignments before `Some(...)` overwrites
 
-**Severity:** Low - `ui/src/app-live-state.ts:625-634`. Every new resync option requires four edits: declare ref, reset on cleanup, consume + clear at top of `startStateResyncLoop`, set in `requestStateResync`. The `allowUnknownServerInstance` addition followed this pattern correctly, joining `stateResyncAllowAuthoritativeRollbackRef`, `stateResyncPreserveReconnectFallbackRef`, `stateResyncPreserveWatchdogCooldownRef`, `stateResyncRearmOnSuccessRef`, and several others. The per-option ref count keeps growing.
+**Severity:** Low - `src/persist.rs:798-801`. In `connection_for`, `self.connection = None; self.path = None;` is followed immediately by `self.path = Some(path.to_path_buf()); self.connection = Some(connection);`. Functionally identical to omitting the `None` writes; the `Some(_)` overwrites already drop the old values.
 
-A single `pendingResyncOptionsRef: useRef<RequestStateResyncOptions | null>(null)` (with coalescing logic that ORs flags and overwrites session/pane on subsequent calls) would centralize the bookkeeping and turn the four-edit cost into a one-edit cost. A missing edit at any of the four sites currently surfaces only at code-review time; a struct-based pending bag would make missing one a TypeScript error.
+**Proposal:**
+- Remove the two `None` assignments.
+
+## `or_else` in `get_session_hydration_fallback_response` swallows local-not-found into upstream "remote unavailable"
+
+**Severity:** Low - `src/state_accessors.rs:259-279`. The `or_else` for `hydrate_remote_session_target` now logs both fallback success and failure (round-15 fix). But the fallback always returns the original `err` (the remote hydration error), not the fallback error. If `find_visible_session_index` returns `None` (the session was deleted in parallel), the user sees "remote connection unavailable" rather than "session not found".
 
 **Current behavior:**
-- Per-option ref count is now 10 (`stateResync*Ref` cluster).
-- Every new option requires four parallel edits.
-- The pattern is correct but easy to break under future maintenance.
+- Operators debugging "why didn't fallback work?" lose the local cause.
+- The `not_found` case is a user-meaningful distinction that should not be subsumed into the upstream cause.
 
 **Proposal:**
-- Defer to a dedicated cleanup commit per CLAUDE.md.
-- Replace the parallel refs with `pendingResyncOptionsRef: useRef<PendingResyncState | null>(null)` carrying the combined option set.
-- Add a small reducer that ORs flag fields and overwrites session/pane targets on subsequent calls.
+- When the fallback fails with `ApiError::not_found`, surface that as the response error (the session genuinely no longer exists).
+- Only swallow into `err` for transient fallback errors.
 
-## `SessionPaneView.tsx` past 2,000-line review threshold for TSX components
+## `is_recoverable_visible_session_hydration_error` BAD_GATEWAY guard couples kind semantics to constructor choice
 
-**Severity:** Medium - `ui/src/SessionPaneView.tsx`. File is now ~3,311 lines after this round's +172 net additions extracting four stable render callbacks (`renderSessionCommandCard`, `renderSessionDiffCard`, `renderSessionMessageCard`, `renderSessionPromptSettings`). The architecture rubric §9 sets a pragmatic ~2,000-line threshold for TSX components and asks reviewers to flag "existing large files that grow substantially without a clear reason."
-
-The render-callback cluster is a clean extraction candidate — pure render-callback definitions tied only to `pane.id`, `activeSession`, and a handful of card-handler props. They form a cohesive unit with no other panel-state dependencies.
+**Severity:** Low - `src/state_accessors.rs:47-50`. The status guard `err.status == StatusCode::BAD_GATEWAY` is intentional and documented, but a future contributor doing `ApiError::not_found("...").with_kind(ApiErrorKind::RemoteSessionMissingFullTranscript)` would silently lose typed semantics. Round-15 carryover; partly mitigated by the docstring but the brittleness remains.
 
 **Current behavior:**
-- Single 3,311-line TSX file mixes panel orchestration, render-callback definitions, source/diff state, focus management, drag-drop wiring, and many other concerns.
-- This round's growth (+172 net lines) is the largest in recent rounds.
-- No tracked extraction plan.
+- Constructors that don't return BAD_GATEWAY accept a kind without warning.
+- The guard hides typed semantics by status.
 
 **Proposal:**
-- Pure code move (per CLAUDE.md): extract the four `useCallback`-stabilized render callbacks into `ui/src/SessionPaneView.render-callbacks.tsx` (or a hook like `useSessionRenderCallbacks`).
-- Defer to a dedicated split commit; do not couple with feature changes.
-- Keep the orchestration logic in `SessionPaneView.tsx`.
+- Drop the BAD_GATEWAY guard and rely on the typed kind alone.
+- Or move recoverability declaration onto the `ApiErrorKind` enum itself (`is_recoverable_visible_hydration_miss(self) -> bool`).
+- Or use a small constructor like `ApiError::recoverable_remote_hydration(kind, msg)` that fixes the status.
 
-## Switch outcomes (`restartResync`/`stateResync`/offline-preserve) lack focused unit coverage
+## `is_recoverable_visible_session_hydration_error` is shared between visible-pane and delta-replay paths
 
-**Severity:** Medium - `ui/src/app-live-state.ts:1306-1376`. The exhaustive switch over `AdoptFetchedSessionOutcome` has four outcomes (`adopted`, `restartResync`, `stateResync`, `stale`) with distinct downstream effects, plus the offline-preserve reorder around line 2003-2007. The `restartResync` no-extra-retry invariant is now covered, but the remaining branch outcomes are still not covered at a focused boundary.
-
-A future refactor could still swap side-effect order or retry behavior in these branches and pass the broad integration tests.
+**Severity:** Low - `src/state_accessors.rs:39-59` and `src/remote_routes.rs:980`. The predicate is shared between two semantically distinct callers. Round-15 carryover partly mitigated by docstring; the helper name still describes only one consumer. A future kind that's recoverable for one path but not the other will silently affect both.
 
 **Current behavior:**
-- `adoptFetchedSession` is a 124-line nested-conditional function with side-effects baked into the caller.
-- No unit test asserts each outcome's downstream effects in isolation.
-- The offline-preserve reorder and the ahead-by-mutation-stamp `stateResync` branch are still uncovered.
+- One predicate, two semantic uses.
+- Visible-pane path: cached summary fallback.
+- Delta-replay path: "no targeted repair, fall through to narrow delta apply".
 
 **Proposal:**
-- Extract the outcome decision into a pure helper (e.g. `classifyFetchedSessionAdoption(...): AdoptFetchedSessionOutcome`) so the caller becomes purely the side-effects branch and the classification is unit-testable without the surrounding hook closure.
-- Add focused tests asserting each outcome's downstream effects, particularly that offline-cancelled resync preserves `hydrationRestartResyncPendingRef.current = true` and that the ahead-by-mutation-stamp path requests a state resync.
+- Rename to `is_recoverable_remote_hydration_miss`.
+- Or add a per-call-site comment at `remote_routes.rs:980` naming the share.
+- Or split when a path-specific kind appears.
 
-## `adoptFetchedSession` 4-outcome state machine warrants extraction into a pure classifier
+## Typed `ApiErrorKind` recovery is one-hop only — undocumented in architecture.md
 
-**Severity:** Low - `ui/src/app-live-state.ts:1187-1217, 1264-1275`. `adoptFetchedSession` now returns four distinct outcomes from two decision sites (the early-return cluster around 1187-1217 and the later cluster around 1264-1275). The function relies on five distinct cross-checks (server-instance match, request-still-matches, response-matches, revision gate, ahead-direction) without an inline truth-table comment. This is the second consecutive round both clusters have grown.
-
-State-machine correctness is the load-bearing contract here. Embedding it in a 124-line nested-conditional function increases the chance of subtle regressions during the next lifecycle change.
+**Severity:** Low - `src/remote_ssh.rs:405-438` and `docs/architecture.md`. `decode_remote_json` reconstructs `ApiError` with `kind: None` for any non-success remote response. A chained-remote middle host that gets a `RemoteSessionMissingFullTranscript` from its upstream owner sees a generic `BAD_GATEWAY` with the message text — the typed contract degrades to message-text matching at chained hops.
 
 **Current behavior:**
-- Four-outcome state machine with side effects mixed into the caller.
-- No unit-testable classification helper.
-- Two decision sites that must stay in agreement on the truth table.
+- Typed `ApiErrorKind` is in-process-only at each hop.
+- In a 3-host chain, the middle proxy sees plain BAD_GATEWAY on top-of-stack errors.
+- Architecture.md does not document this constraint.
 
 **Proposal:**
-- Extract `classifyFetchedSessionAdoption(...): AdoptFetchedSessionOutcome` as a pure helper. The call site becomes purely the side-effects switch.
-- Add unit tests covering each outcome's classification independently of the hook closure.
-- This dovetails with the "switch outcomes lack focused unit coverage" entry above.
+- Add a paragraph in `docs/architecture.md` alongside `serverInstanceId` describing that error responses carry only `{ error: string }` and that the backend's typed `ApiErrorKind` is in-process-only metadata (so chained remote hops cannot recover types).
+- Or add `serde(default)` Deserialize support on a wire-side `kind` field for `ErrorResponse` if cross-hop recovery is desired.
+
+## `ApiErrorKind` enum doc string does not name the in-process-only contract
+
+**Severity:** Low - `src/wire.rs:88-100`. The enum doc says only "Represents the API error". The "in-process-only / not serialized" note is at the field level (lines 106-108). A future contributor scanning the enum first might add a `Serialize` derive and break the implicit assumption that remote-decoded `ApiError` always has `kind: None`.
+
+**Proposal:**
+- Move (or duplicate) the field-level note to the enum-level docstring.
+
+## `git_diff_document_enrichment_note` defensive arm cross-couples wire-error taxonomy
+
+**Severity:** Low - `src/git.rs:750-754`. The arm for the three `RemoteSession*`/`RemoteConnection*` kinds returning `None` cross-couples wire-error taxonomy across unrelated subsystems (Git diff Markdown enrichment vs remote session hydration). Adding new `ApiErrorKind` variants now requires considering the git-diff degrade list as well.
+
+**Current behavior:**
+- Defensive arm treats those kinds as "no enrichment note" even though the call graph for git-diff enrichment doesn't currently cross remote-proxy session hydration.
+- Tests pin the suppression at `src/tests/git.rs:541-549`.
+
+**Proposal:**
+- Either accept the defensive coupling and document it, or revert to a default arm that explicitly enumerates only kinds git-diff actually cares about.
+
+## Directory-level state hardening retains a TOCTOU window after symlink check
+
+**Severity:** Low - `src/persist.rs:146-149`. Round-15 carryover. `harden_local_state_directory_permissions` calls `reject_existing_state_directory_symlink` (which uses `fs::symlink_metadata`), then `harden_local_state_permissions(path, 0o700)` — which uses path-based `fs::set_permissions` and `fs::metadata`, both of which follow symlinks. An attacker able to replace the directory between the two calls would get the chmod redirected through the symlink. The matching file path now uses `O_NOFOLLOW + fchmod`, but the directory path has not been migrated.
+
+**Current behavior:**
+- File-level chmod is symlink-safe (O_NOFOLLOW + fchmod).
+- Directory-level chmod is not.
+- Mitigated by Phase-1 single-user threat model (only the user controlling `~/` could plant the symlink).
+
+**Proposal:**
+- Open the directory with `O_DIRECTORY | O_NOFOLLOW`, then `fchmod` on the resulting fd; or use `fchmodat(AT_FDCWD, path, mode, AT_SYMLINK_NOFOLLOW)`.
+
+## `restore_drained_explicit_tombstones` uses `Vec::contains` for dedup (O(n*m))
+
+**Severity:** Low - `src/state_inner.rs:377-383`. Round-15 carryover. Linear scan per id is fine for normal queue depth but is O(n*m) for large batches. Tombstones queue up only on persist failure restore, so the bound is small in practice.
+
+**Proposal:**
+- If queue depth ever grows, swap the linear scan for a `HashSet<&str>` membership check while preserving the `Vec<String>` queue order.
+
+## `requestActionRecoveryResyncRef` "preserve hydration restart intent across offline" lives in line ordering
+
+**Severity:** Low - `ui/src/app-live-state.ts:1861-1871`. The "preserve hydration restart intent across offline observations" invariant is enforced by the implicit fact that no write to `hydrationRestartResyncPendingRef.current` happens before the early-return at lines 1862-1867. The comment names the invariant, but a future contributor adding a "reset all pending refs" line at the top would silently break it without a test failing.
+
+**Proposal:**
+- Add a regression test that drives `requestActionRecoveryResyncRef` once while `navigator.onLine === false`, transitions online, asserts the resync runs with `allowUnknownServerInstance === true` (proof that the pending ref survived the offline call).
+
+## `requestActionRecoveryResyncRef` quietly inherits `rearmOnSuccess: undefined`
+
+**Severity:** Low - `ui/src/app-live-state.ts:1818-1840`. The action-recovery resync entry point omits both `rearmUntilLiveEventOnSuccess` (explicitly false) and `rearmOnSuccess` (implicit undefined). The contract is correct but `rearmOnSuccess`'s implicit-undefined could be silently changed by a future helper-side default change.
+
+**Proposal:**
+- Add a one-line comment naming the intent, or model `rearmOnSuccessMode: "off" | "no-progress" | "until-live-event"` so callers can't overlap concerns.
+
+## `MarkdownContent.test.tsx` module-scope mock is not reset between tests
+
+**Severity:** Low - `ui/src/MarkdownContent.test.tsx:35-45`. The mock of `./connection-retry` is established at module scope but `parseConnectionRetryNoticeMock.mock.calls.length` is not reset between tests. A "memo hit" assertion that uses `mock.calls.length` only works correctly with a per-test reset.
+
+**Proposal:**
+- Add `parseConnectionRetryNoticeMock.mockClear()` to the existing `beforeEach` block (alongside `mermaidInitializeMock.mockClear()`).
+
+## `app-live-state.test.ts` "retries only the stale session" uses unexplained 50ms timer advance
+
+**Severity:** Low - `ui/src/app-live-state.test.ts:626-651`. The 50ms timer advance is not derived from a named constant. If the production retry interval changes, this test silently keeps passing or fails in an unhelpful way.
+
+**Proposal:**
+- Pull the retry delay from the production module (`STALE_HYDRATION_RETRY_DELAY_MS` or similar) and use it explicitly. Add a one-line comment explaining what the timer advance is unblocking.
+
+## `AgentSessionPanel.test.tsx` new tests duplicate ~70 lines of harness setup
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:369-505`. The new "refreshes command/diff cards when only the renderer changes" tests replicate ~70 lines of harness setup each. Boilerplate increases drift risk.
+
+**Proposal:**
+- Extract a `renderAgentSessionPanelHarness` helper that takes only the props that vary (viewMode, message arrays, renderer overrides) and supplies the noop defaults internally.
+
+## `isStaleSameInstanceSnapshot` doc-comment does not name the `sessionMutationStamp` scrubbing
+
+**Severity:** Low - `ui/src/state-revision.ts:78-100`. The contract relies on `sessionMutationStamp` being globally monotonic per session, but `persisted_state.rs:206-209` scrubs it on save and `into_record` clears it on load — a backend restart resets the stamp sequence. The same-server-instance guard at the top mostly covers this, but the persistence interaction isn't named.
+
+**Proposal:**
+- Add a sentence to the doc-comment: "This relies on `sessionMutationStamp` being assigned monotonically by the running backend instance; persisted records intentionally clear the stamp on save and reload, so new instance ids reset the sequence."
+
+## `action-state-adoption.ts` header does not name the `state-revision.ts` invariant dependency
+
+**Severity:** Low - `ui/src/action-state-adoption.ts:1-7`. Module header reads "Split out of: ui/src/app-session-actions.ts" but doesn't mention the new dependency on `state-revision.ts:isStaleSameInstanceSnapshot`. A future reader who edits the classifier in isolation will miss the cross-module invariant captured in `isStaleSameInstanceSnapshot`'s doc.
+
+**Proposal:**
+- Add one line to the new module's header: "Relies on `state-revision.ts:isStaleSameInstanceSnapshot`'s monotonic-revision invariant for the same-server-instance staleness verdict."
+
+## `source-renderers.ts` same-body Mermaid trade-off has no regression test
+
+**Severity:** Low - `ui/src/source-renderers.ts:418-438`. The accepted trade-off (editing one of two identical fences shifts the ordinal of the unedited sibling and remounts its iframe) is documented in a comment but not pinned by a test. A future "stable-id" attempt might land without a coverage anchor to flip.
+
+**Proposal:**
+- Add a test asserting that editing one of two identical fences produces the documented ordinal flip, anchoring the trade-off so any future stability fix has a clear test to update.
+
+## `App.live-state.reconnect.test.tsx` does not pin the "latest assistant message stays hidden until another action" invariant
+
+**Severity:** Low - The closest coverage at lines 1505 and 1582 pins the polling-armed invariant but does not assert the visibility side. A regression that exposes the latest assistant message before SSE confirms could slip in.
+
+**Proposal:**
+- Add a test that dispatches a fallback `_sseFallback` snapshot containing only the user prompt (no assistant reply yet), confirms the assistant message is not shown, then either adopts a fresh SSE state event with the assistant text or simulates "another action" and asserts visibility.
+
+## Manual reconnect retry can stop polling before SSE recovery is proven
+
+**Severity:** Medium - `ui/src/app-live-state.ts:1854`. The manual backend reconnect action clears the current reconnect timer, then starts an immediate `/api/state` probe with `rearmUntilLiveEventOnSuccess: false`.
+
+An HTTP snapshot can prove the backend is reachable and repair visible state, but it does not prove the `EventSource` stream is open and delivering live events. If the manual retry adopts a fresh same-instance snapshot while SSE remains broken, reconnect fallback polling can stop before later assistant output has any live path back into the UI.
+
+**Current behavior:**
+- `requestBackendReconnectRef` clears the reconnect timeout and resets reconnect backoff.
+- The manual retry state resync opts out of live-event rearming.
+- `ui/src/backend-connection.test.tsx:1521` currently asserts that polling stops after a fresh `/api/state` response.
+
+**Proposal:**
+- Treat manual reconnect retry like timer-driven reconnect fallback: allow `/api/state` to repair state, but keep reconnect polling armed until a data-bearing SSE event confirms recovery.
+- Update the backend-connection regression to expect continued polling until live SSE data confirms the stream.
+
+## Production SQLite persistence is bypassed in the test build
+
+**Severity:** Medium - `src/app_boot.rs:229`. The runtime persistence changes now depend on SQLite schema setup, startup load, metadata writes, per-session row updates, tombstone cleanup, and cached delta persistence, but `#[cfg(test)]` still routes the background persist worker through the old full-state JSON fallback.
+
+Many production SQLite helpers in `src/persist.rs` are `#[cfg(not(test))]`, so existing persistence tests can pass while the real runtime SQLite write/load/delete behavior remains unexercised.
+
+**Current behavior:**
+- Test builds bypass `persist_delta_via_cache` and related SQLite write paths.
+- Production SQLite load/save helpers are mostly compiled out under `cargo test`.
+- Current tests cover retry bookkeeping and legacy JSON fixtures, but not the runtime SQLite persistence contract.
+
+**Proposal:**
+- Make the SQLite persistence path testable under `cargo test` with temp database files.
+- Add coverage for full snapshot save/load, delta upsert, metadata-only update, hidden/deleted session row removal, and startup load from SQLite.
+- Keep legacy JSON fixture tests separate from production runtime persistence tests.
+
+## SQLite symlink rejection is Unix-only
+
+**Severity:** Low - `src/persist.rs:207`. Unix builds now reject symlinked SQLite database and sidecar paths before opening SQLite, but the non-Unix `reject_existing_sqlite_state_file_symlinks` implementation is a no-op.
+
+Windows is a P0 platform. A pre-created `~/.termal/termal.sqlite` symlink, sidecar symlink, or `.termal` directory junction/symlink can redirect persisted session history before SQLite opens the database.
+
+**Current behavior:**
+- Unix preflight checks use `symlink_metadata` for the main database and known sidecars.
+- Non-Unix preflight returns `Ok(())`.
+- Windows relies on ACL inheritance but does not reject path redirection before SQLite open.
+
+**Proposal:**
+- Add Windows preflight rejection for the state directory, main database path, and known sidecar paths before opening SQLite.
+- Use `symlink_metadata` plus Windows reparse-point checks where needed.
+- Add Windows-gated tests for file symlink and directory junction cases.
+
+## `SessionPaneView.tsx` and `app-session-actions.ts` past architecture file-size thresholds
+
+**Severity:** Low - `ui/src/SessionPaneView.tsx` is now 3,160 lines and `ui/src/app-session-actions.ts` is 1,968 lines, both past the architecture rubric ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§9 thresholds (~2,000 for TSX components, ~1,500 for utility modules). The round-11 extractions of `connection-retry.ts`, `app-live-state-resync-options.ts`, `session-hydration-adoption.ts`, and `SessionPaneView.render-callbacks.tsx`, plus the later `action-state-adoption.ts` split, reduced these files but left them over their respective thresholds.
+
+The companion `app-live-state.ts` entry already exists; this captures the two related Phase-2 candidates that emerged after the round-11 splits.
+
+**Current behavior:**
+- `SessionPaneView.tsx` mixes pane orchestration with reconnect-card / waiting-indicator / retry-display orchestration.
+- `app-session-actions.ts` still mixes action handlers with optimistic-update and adoption-outcome side-effect wiring.
+- Both files now have natural extraction boundaries with their own existing direct unit-test coverage.
+
+**Proposal:**
+- Pure code move per CLAUDE.md, in dedicated split commits (one per file).
+- For `SessionPaneView.tsx`: candidate is the reconnect-card / waiting-indicator computation cluster.
+- For `app-session-actions.ts`: candidate is the optimistic-update + adoption-outcome side-effect cluster now that pure stale target evidence has moved out.
 
 ## `App.live-state.deltas.test.tsx` past 2,000-line review threshold
 
-**Severity:** Low - `ui/src/App.live-state.deltas.test.tsx`. File is now 3,435 lines and 18 `it` blocks after this round's cross-instance regression coverage, well past the architecture rubric §9 ~2,000-line threshold for TSX files. The header already lists three sibling files split out (`reconnect`, `visibility`, `watchdog`), establishing the per-cluster split pattern.
+**Severity:** Low - `ui/src/App.live-state.deltas.test.tsx`. File is now 3,435 lines and 18 `it` blocks after this round's cross-instance regression coverage, well past the architecture rubric ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§9 ~2,000-line threshold for TSX files. The header already lists three sibling files split out (`reconnect`, `visibility`, `watchdog`), establishing the per-cluster split pattern.
 
 The newest tests still cluster around hydration/restart races and cross-instance recovery, which is a coherent split boundary. Pure code move per CLAUDE.md.
 
@@ -197,100 +458,12 @@ The newest tests still cluster around hydration/restart races and cross-instance
 - Per-cluster grep tax growing.
 
 **Proposal:**
-- Pure code move: extract the 4–5 hydration-focused tests into `ui/src/App.live-state.hydration.test.tsx`, mirroring the sibling-split pattern.
+- Pure code move: extract the 4ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“5 hydration-focused tests into `ui/src/App.live-state.hydration.test.tsx`, mirroring the sibling-split pattern.
 - Defer to a dedicated split commit; do not couple with feature changes.
-
-## `default` switch arm with `void _exhaustive` is too forgiving
-
-**Severity:** Low - `ui/src/app-live-state.ts:1370-1375`. The `const _exhaustive: never = adoptOutcome` build-time exhaustiveness assert is the right tool, but the runtime fallback `void _exhaustive; shouldRetryHydration = true;` weakens the diagnostic value if some unexpected non-string sneaks in via JSON parsing, and a contributor who silenced the type error with a cast would silently get retry-on-everything semantics.
-
-**Current behavior:**
-- Type error caught at build time (good).
-- Runtime fallback silently retries on any unknown outcome.
-- A bypass via `as`-cast or runtime-only type drift would produce confusing behavior with no log.
-
-**Proposal:**
-- Replace with `assertNever(adoptOutcome)` (use the project's existing helper or add one to a shared util module).
-- Or `console.warn`-then-retry so unknown outcomes are diagnosable in dev tools.
-
-## `hydrationSessionMetadataIsAhead` lacks focused mutation-stamp coverage
-
-**Severity:** Low - `ui/src/app-live-state.ts:278-306`. The ahead-of-summary behavior is now covered end-to-end for the message-count path, but the helper's equal-count, newer-`sessionMutationStamp` branch is still only exercised indirectly.
-
-That branch is the fallback when counts are equal or unavailable, so a future refactor could break newer-stamp detection while the current count-driven integration tests still pass.
-
-**Current behavior:**
-- `hydrationSessionMetadataMatches` has direct unit coverage in `ui/src/app-live-state.test.ts`.
-- `hydrationSessionMetadataIsAhead` is still unexported and lacks focused coverage for equal counts plus newer mutation stamp.
-- The app-level ahead-of-summary integration test covers the count-ahead path, not the stamp-ahead path.
-
-**Proposal:**
-- Extract or export a small classifier/helper for hydration metadata ordering.
-- Add focused tests for equal counts plus newer stamp returning ahead, equal counts plus equal stamp not ahead, and missing-count fallback behavior.
-
-## `requestActionRecoveryResyncRef` offline-preserve reorder lacks inline note or test
-
-**Severity:** Low - `ui/src/app-live-state.ts:2002-2008`. The pre-change implementation cleared `hydrationRestartResyncPendingRef.current = false` unconditionally at the top of the closure. The post-change implementation moves that write past the `cancelled || !readNavigatorOnline()` early return, which is a deliberate semantic improvement: an offline observation no longer silently clears restart-resync intent. But the change is buried inside a comment-refactor block with no inline note explaining the order, and there is no test that drives `requestActionRecoveryResyncRef` while offline and asserts the flag survives.
-
-A future contributor cleaning up the closure, or moving the body around, can easily re-hoist the write to the top without realizing the order is load-bearing.
-
-**Current behavior:**
-- The flag-write order is the only thing preserving restart-resync intent across an offline observation.
-- No inline comment names the invariant.
-- No test asserts the flag survives an offline-cancelled resync.
-
-**Proposal:**
-- Add a one-line comment at the moved write naming the invariant ("preserve resync intent across offline observations so a temporary `navigator.onLine === false` does not silently clear `hydrationRestartResyncPendingRef`").
-- Or add a regression test that drives `requestActionRecoveryResyncRef` while `navigator.onLine === false`, then re-drives it once online, and asserts the resync runs both times.
-
-## `renderSessionMessageCard` deps cause SessionBody to re-render per streaming chunk
-
-**Severity:** Low - `ui/src/SessionPaneView.tsx:2299-2367`. The `useCallback` deps include `activeSession?.status` and `latestAssistantMessageId`, both of which change on every streaming chunk. Combined with the new comparator gate `(previous.viewMode !== "session" || previous.renderMessageCard === next.renderMessageCard)`, `SessionBody` no longer absorbs streaming-chunk parent rerenders the way it did under the old `useRenderCallback` + render-phase-ref bridge. Streaming now causes one extra `SessionBody` rerender per chunk in the active-session view.
-
-The downstream `useDeferredValue(deferredMessages)` still buffers, so the user-visible regression is bounded. But the prior architecture's stated rationale for the render-phase ref bridge ("keep streaming light") has shifted — the trade-off is real and not commented.
-
-**Current behavior:**
-- `renderSessionMessageCard` identity changes per streaming chunk.
-- `SessionBody` memo no longer absorbs those identity changes — it re-renders.
-- `useDeferredValue` buffers downstream so visible UX is bounded.
-- The architectural invariant "SessionBody does not re-render mid-stream" changed without a note.
-
-**Proposal:**
-- Either accept the trade-off and update the comparator comment to record it ("renderMessageCard identity tracks streaming flags by design; SessionBody re-renders per chunk in session view").
-- Or memoize `renderSessionMessageCard` more aggressively by splitting the streaming-flag computation into an inner callback closed over via ref.
-- Bias toward the comment — the simpler approach is architecturally preferable unless profiling shows real cost.
-
-## `renderSessionPromptSettings` deps include Codex-only fields, over-invalidating non-Codex sessions
-
-**Severity:** Low - `ui/src/SessionPaneView.tsx:2369`. The deps array includes `sessionSettingNotice`, `onArchiveCodexThread`, `onCompactCodexThread`, `onForkCodexThread`, `onRollbackCodexThread`, `onUnarchiveCodexThread` — all only consumed inside the `session.agent === "Codex"` branch. While a Claude/Cursor/Gemini session is active in prompt mode, any change to those Codex-only inputs still rebuilds the callback. Combined with the new comparator (`previous.viewMode !== "prompt" || ...`), that forces the prompt panel to re-render each time.
-
-The deps array is correct under the exhaustive-deps rule and TypeScript closure semantics, but the renderer body conflates four agent surfaces into one closure.
-
-**Current behavior:**
-- All Codex-specific dependencies invalidate `renderSessionPromptSettings` even for non-Codex active sessions.
-- Bounded UX impact (settings toasts are infrequent).
-- Re-renders the prompt pane unnecessarily.
-
-**Proposal:**
-- Either accept this (current behavior is bounded), or split the four agent-specific renderers into separate `useCallback`s and dispatch by agent at the call site so each renderer's deps narrow to the inputs it actually reads.
-
-## `SessionBody` comparator lacks commands/diffs renderer coverage
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx` comparator branches now account for renderer identity in `commands` and `diffs` view modes, but tests only cover the session-message renderer and prompt settings renderer.
-
-The comparator decides whether the body rerenders when render callbacks change. Without command and diff renderer-only tests, a future regression can leave those views stale while existing tests still pass.
-
-**Current behavior:**
-- Tests cover `renderMessageCard` and prompt settings identity paths.
-- `renderCommandCard` and `renderDiffCard` comparator branches have no direct rerender coverage.
-
-**Proposal:**
-- Add renderer-only rerender tests for `viewMode="commands"` and `viewMode="diffs"`.
-- Assert latest command/diff renderer output appears after the parent supplies a new renderer.
 
 ## `app-live-state.ts` past 1,500-line review threshold for TypeScript utility modules
 
-**Severity:** Low - `ui/src/app-live-state.ts`. File is now 2,474 lines after this round's `+38` net additions. The architecture rubric §9 sets a pragmatic ~1,500-line threshold for TypeScript utility modules. The hydration cluster (`hydrationRetainedMessagesMatch`, `SESSION_HYDRATION_RETRY_DELAYS_MS`, `SessionHydrationTarget`, `SessionHydrationRequestContext`) is now a clean extraction candidate — well-defined contract, existing direct unit-test coverage, no React-component dependency.
+**Severity:** Low - `ui/src/app-live-state.ts`. File is now 2,435 lines after this round. The architecture rubric ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§9 sets a pragmatic ~1,500-line threshold for TypeScript utility modules. The hydration adoption helpers have moved out, but the module still mixes retry scheduling, profiling, JSON peek helpers, and the main state machine.
 
 **Current behavior:**
 - Single module mixes hydration matching, retry scheduling, profiling, JSON peek helpers, and the main state machine.
@@ -300,22 +473,9 @@ The comparator decides whether the body rerenders when render callbacks change. 
 - Defer to a dedicated pure-code-move commit per CLAUDE.md.
 - Extract `hydration-retention.ts` (or `session-hydration.ts`) containing `hydrationRetainedMessagesMatch`, `SESSION_HYDRATION_RETRY_DELAYS_MS`, `SessionHydrationTarget`, `SessionHydrationRequestContext`, and the matching unit tests.
 
-## `useAppDragResize` test file covers 1 of 7 returned handlers
-
-**Severity:** Low - `ui/src/app-drag-resize.test.tsx`. This is the FIRST test file for the 560-line `useAppDragResize` hook, but provides limited coverage. The single test asserts BroadcastChannel stability across rerenders and one `drop-commit` message path. Most public surface is untested: `handleSplitResizeStart` (pointer events drive split-ratio updates), `handleTabDragStart`/`End`, `handleControlPanelLauncherDragStart`/`End`, and `handleTabDrop` placement variants.
-
-The test was specifically a regression test for cross-window drag-channel stability and is well-scoped to that, but the file's existence shouldn't be misread as comprehensive coverage.
-
-**Current behavior:**
-- `useAppDragResize` has one regression test for `BroadcastChannel` stability + `drop-commit`.
-- 6 of 7 returned handlers are untested.
-
-**Proposal:**
-- Add `it` blocks per handler covering the basic happy path: split resize via pointer events, tab drag start/end, control-panel launcher drag, and tab drop placement variants (same pane, different pane, last tab edge case).
-
 ## `AgentSessionPanel.test.tsx` past 5,000-line review threshold
 
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx`. File is now 5,659 lines (+511 this round), past the project's review threshold for test files. The added blocks cluster naturally by concern — composer memo coverage, scroll-following coverage, ResizeObserver fixtures — and would extract cleanly into siblings without behavioral change.
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx`. File is now 5,659 lines (+511 this round), past the project's review threshold for test files. The added blocks cluster naturally by concern ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â composer memo coverage, scroll-following coverage, ResizeObserver fixtures ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â and would extract cleanly into siblings without behavioral change.
 
 The adjacent `App.live-state.*.test.tsx` split (April 20) is the precedent for per-cluster `.test.tsx` files. Per `CLAUDE.md`, splits must be pure code moves and live in their own commit.
 
@@ -329,7 +489,7 @@ The adjacent `App.live-state.*.test.tsx` split (April 20) is the precedent for p
 
 ## `markdown-diff-change-section.tsx` clipboard/Range helpers should extract to a sibling module
 
-**Severity:** Low - `ui/src/panels/markdown-diff-change-section.tsx`. The file grew 724 → 860 lines this round (+180). Four new helpers — `setDropCaretFromPoint`, `getSelectionRangeInsideSection`, `rangeCoversNodeContents`, and `serializeSelectedMarkdown` — form a cohesive cluster (range/selection geometry + clipboard serialization) with no React-component dependency. Per CLAUDE.md, the project is "actively splitting" rather than growing the existing large files.
+**Severity:** Low - `ui/src/panels/markdown-diff-change-section.tsx`. The file grew 724 ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ 860 lines this round (+180). Four new helpers ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â `setDropCaretFromPoint`, `getSelectionRangeInsideSection`, `rangeCoversNodeContents`, and `serializeSelectedMarkdown` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â form a cohesive cluster (range/selection geometry + clipboard serialization) with no React-component dependency. Per CLAUDE.md, the project is "actively splitting" rather than growing the existing large files.
 
 The current size (~860 lines) is below the 2,000-line review threshold for TSX components, but the cluster is exactly the kind of natural extraction boundary the project's "pure code move" pattern was set up for. Current file header now has to describe both the per-section component and the clipboard plumbing, blurring its contract.
 
@@ -348,19 +508,19 @@ The current size (~860 lines) is below the 2,000-line review threshold for TSX c
 
 **Severity:** Low - `src/tests/remote.rs` is now 9,202 lines after this round's +471-line addition, well past the project's review-threshold for test files. The new replay-cache work clusters cohesively between lines ~2,810 and ~4,040 (the `RemoteDeltaReplayCache` shape helper, the `local_replay_test_remote` / `seed_loaded_remote_proxy_session` / `assert_delta_publishes_once_then_replay_skips` / `assert_remote_delta_replay_cache_shape` / `test_remote_delta_replay_key` helpers, and the `remote_delta_replay_*` tests).
 
-The growth is incremental across many rounds of replay-cache hardening, not a single landing — but extracting the cluster keeps the rest of the file's per-test density manageable. Per `CLAUDE.md`, splits must be pure code moves and live in their own commit.
+The growth is incremental across many rounds of replay-cache hardening, not a single landing ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â but extracting the cluster keeps the rest of the file's per-test density manageable. Per `CLAUDE.md`, splits must be pure code moves and live in their own commit.
 
 **Current behavior:**
 - Single `src/tests/remote.rs` mixes hydration tests, orchestrator-sync tests, replay-cache tests, and protocol-shape tests.
 - Per-cluster grep is harder than necessary; future replay-cache work continues to grow the file.
 
 **Proposal:**
-- Extract the replay-cache cluster (lines ~2,810–4,040) into `src/tests/remote_delta_replay.rs` as a pure code move — including the helpers and all `remote_delta_replay_*` tests.
+- Extract the replay-cache cluster (lines ~2,810ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“4,040) into `src/tests/remote_delta_replay.rs` as a pure code move ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â including the helpers and all `remote_delta_replay_*` tests.
 - Defer to a dedicated split commit; do not couple with feature changes.
 
 ## `SourcePanel.tsx` is growing along a separable axis
 
-**Severity:** Low - `ui/src/panels/SourcePanel.tsx` grew from ~803 to 1119 lines in this round (+316). It is approaching but has not crossed the ~2,000-line scrutiny threshold. The new responsibility (rendered-Markdown commit pipeline orchestration: collect → resolve ranges → check overlap → reduce edits → re-emit with EOL style) is meaningfully separable from the existing source-buffer/save/rebase/compare orchestration. It has its own state (`hasRenderedMarkdownDraftActive`, `renderedMarkdownCommittersRef`), pure helpers already split into `markdown-commit-ranges`/`markdown-diff-segments`, and a clean parent-callback interface.
+**Severity:** Low - `ui/src/panels/SourcePanel.tsx` grew from ~803 to 1119 lines in this round (+316). It is approaching but has not crossed the ~2,000-line scrutiny threshold. The new responsibility (rendered-Markdown commit pipeline orchestration: collect ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ resolve ranges ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ check overlap ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ reduce edits ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ re-emit with EOL style) is meaningfully separable from the existing source-buffer/save/rebase/compare orchestration. It has its own state (`hasRenderedMarkdownDraftActive`, `renderedMarkdownCommittersRef`), pure helpers already split into `markdown-commit-ranges`/`markdown-diff-segments`, and a clean parent-callback interface.
 
 **Current behavior:**
 - SourcePanel owns two distinct orchestration responsibilities in one component.
@@ -369,25 +529,9 @@ The growth is incremental across many rounds of replay-cache hardening, not a si
 - No action this commit. Consider extracting a `useRenderedMarkdownDrafts(fileStateRef, editorValueRef, setEditorValueState, ...)` hook in a follow-up, owning `renderedMarkdownCommittersRef`, `hasRenderedMarkdownDraftActive`, `commitRenderedMarkdownDrafts`, `handleRenderedMarkdownSectionCommits`, and `handleRenderedMarkdownSectionDraftChange`.
 - The hook would expose a small surface for SourcePanel to consume and keep the file under the scrutiny threshold.
 
-## Inconsistent `useCallback` discipline on `SourcePanel` handlers crossing the prop boundary
-
-**Severity:** Low - `ui/src/panels/SourcePanel.tsx`. `commitRenderedMarkdownDrafts`, `commitRenderedMarkdownSectionDraft`, `handleRenderedMarkdownSectionCommits`, `handleRenderedMarkdownSectionDraftChange`, `handleRenderedMarkdownReadOnlyMutation`, `handleSelectDocumentMode`, and `handleEditorChange` are plain function declarations recreated on every render. The sibling `registerRenderedMarkdownCommitter` is correctly wrapped in `useCallback` (line 305). All cross the prop boundary into `EditableMarkdownPreviewPane` / `EditableRenderedMarkdownSection`. Combined with `normalizeMarkdownDocumentLineEndings(editorValue)` being recomputed twice per render in JSX (lines 843-870, 891-906), the editable contentEditable subtree receives shifting prop identities on every parent render.
-
-This is the exact regression the React review checklist warns about — complex component trees with inline `components` props don't survive re-renders. `EditableRenderedMarkdownSection` does have its own internal `previousSegmentMarkdownRef`/`renderResetVersion` machinery to absorb this, but stable inputs help.
-
-**Current behavior:**
-- Inconsistent stabilization: one handler `useCallback`-wrapped, six others not.
-- `normalizedEditorValue` recomputed twice per render at JSX call sites.
-- Editable preview pane sees fresh prop identities on every parent render.
-
-**Proposal:**
-- Wrap the prop-crossing handlers in `useCallback` with the right deps.
-- Compute `normalizedEditorValue` once at the top via `useMemo([editorValue])` and reuse in both call sites.
-- Or document why identity stability is unnecessary if `EditableRenderedMarkdownSection` is robust to inline-handler thrash.
-
 ## `bottom_follow` virtualizer state machine has no synthetic-native-scroll test coverage
 
-**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:1610-1624` (production), no test. The new `bottom_follow` scroll-kind sets a 1.2s programmatic-bottom-follow window and re-classifies subsequent native scroll ticks as programmatic at lines 1467-1495. The new `App.scroll-behavior.test.tsx` asserts only that `scrollTo` is called with `top: 900, behavior: "smooth"` (the SessionPaneView side). The actual regression-prevention contract — that intermediate native scroll ticks during the smooth-scroll do NOT flip `hasUserScrollInteractionRef`, that `shouldKeepBottomAfterLayoutRef` survives, and that the cooldown re-arms each forward-progress tick — has zero direct coverage.
+**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:1610-1624` (production), no test. The new `bottom_follow` scroll-kind sets a 1.2s programmatic-bottom-follow window and re-classifies subsequent native scroll ticks as programmatic at lines 1467-1495. The new `App.scroll-behavior.test.tsx` asserts only that `scrollTo` is called with `top: 900, behavior: "smooth"` (the SessionPaneView side). The actual regression-prevention contract ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â that intermediate native scroll ticks during the smooth-scroll do NOT flip `hasUserScrollInteractionRef`, that `shouldKeepBottomAfterLayoutRef` survives, and that the cooldown re-arms each forward-progress tick ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â has zero direct coverage.
 
 **Current behavior:**
 - Production has the cooldown + re-classification logic in two cooperating branches (event handler + syncViewport).
@@ -418,49 +562,9 @@ This leaves the main producer path for heavy Markdown deferral unpinned even tho
 - Add an integration-style virtualized-list test with a heavy Markdown message.
 - Fire a wheel/scroll gesture, assert the marker is set and heavy content stays deferred, then advance timers and assert the marker clears and `termal:deferred-render-resume` fires.
 
-## Repeated `commit_locked` boilerplate at four early-exit paths in `hydrate_remote_session_target`
-
-**Severity:** Low - `src/remote_routes.rs:561-606`. The new `remote_state_applied` flag must be checked and `commit_locked` called before each of four early-exit paths. The same `if remote_state_applied { commit_locked(...).map_err(...)?; } return Err(...)` boilerplate is duplicated. A future maintainer adding a fifth early-exit could easily forget the conditional commit, reintroducing the watermark-race bug under a new condition.
-
-**Current behavior:**
-- The conditional commit-before-error is replicated four times in close proximity.
-- No helper or invariant comment near the function body documents that every error-return must commit broad state when applied.
-
-**Proposal:**
-- Extract a small helper closure (`bail`) that takes an error and conditionally commits before returning.
-- Or invert the flow so the broad-state apply runs after the can-this-target-survive checks, eliminating the need to commit-before-error.
-
-## Unloaded remote proxy hydration has no timeout/fallback
-
-**Severity:** Medium - `src/state_accessors.rs:151-181` performs a synchronous outbound HTTP fetch + possible remote `/api/state` resync when `GET /api/sessions/{id}` hydrates an unloaded remote proxy. The contract is now documented, but a slow or wedged remote still stalls every visible-pane hydration request and every reconnect resync; a remote that returns `messages_loaded: false` returns `bad_gateway` to the local client instead of degrading to the unloaded summary.
-
-**Current behavior:**
-- `get_session()` performs synchronous remote HTTP I/O in the unloaded-proxy branch.
-- The hydration call publishes a global SSE state event via `commit_locked`, fanning out to every connected client.
-- `bad_gateway` propagates to the caller when the remote returns metadata-only or refuses; no fallback to the local unloaded summary.
-
-**Proposal:**
-- Add a remote-fetch timeout that falls back to returning the local unloaded summary (`messagesLoaded: false`, `messageCount` from cache) instead of bubbling 502 to the browser.
-
-## `hydrate_remote_session_target` rejects upstream `messages_loaded: false`, breaking chained-remote topology
-
-**Severity:** Medium - `src/remote_routes.rs:444-462,558-561` returns `ApiError::bad_gateway("remote session response did not include a full transcript")` when an upstream remote responds with `messages_loaded: false`. On the delta path (`min_remote_revision.is_some()`), this propagates back through `hydrate_unloaded_remote_session_for_delta` as a fatal `anyhow::Error`, converting every same-session inbound delta into a hard error. In a chained-remote topology where the immediate upstream is itself proxying a third remote with an unloaded record, every session-scoped remote delta now becomes a hard error and triggers a fallback resync loop until the inner chain repairs itself.
-
-`hydrate_unloaded_remote_session_for_delta` also collapses the structured `ApiError` (with status code) into a flat `anyhow!("failed to hydrate remote session ...: {err.message}")`, discarding the `bad_gateway` vs `not_found` distinction that downstream recovery branches might need. This is a soft observability/extensibility cost on top of the chained-remote correctness issue.
-
-**Current behavior:**
-- `hydrate_remote_session_target` enforces strict `messages_loaded: true` regardless of caller context.
-- The wrapped `anyhow::Error` flows back through `apply_remote_delta_event` and triggers state resync.
-- `ApiError` status codes are lost before downstream consumers see them.
-
-**Proposal:**
-- Gate the strict `messages_loaded` rejection on `min_remote_revision.is_none()` so the GET path keeps strict-mode but the delta-fast-path tolerates the chained-summary case.
-- Return `Result<bool, ApiError>` from the helper (or wrap with `anyhow::Error::context(...)`) so the original error category is preserved.
-- Add a regression with a fake remote that returns `messages_loaded: false` to confirm the delta path falls through to normal apply rather than hard-erroring.
-
 ## Per-delta hydration HTTP fan-out has no in-flight deduplication
 
-**Severity:** Medium - `src/remote_routes.rs:505-534` adds `hydrate_unloaded_remote_session_for_delta` calls at the top of eight delta handlers (`MessageCreated`, `MessageUpdated`, `TextDelta`, `ThinkingDelta`, `CommandUpdate`, `ParallelAgentsUpdate`, plus two more). For a burst of N inbound deltas on a still-unloaded proxy, each call drops the lock, performs a synchronous HTTP fetch, and reacquires the lock — without any in-flight tracking. The first fetch flips `messages_loaded: true` and subsequent fetches short-circuit, but the in-flight ones still serialize on the remote registry and on the local async runtime.
+**Severity:** Medium - `src/remote_routes.rs:505-534` adds `hydrate_unloaded_remote_session_for_delta` calls at the top of eight delta handlers (`MessageCreated`, `MessageUpdated`, `TextDelta`, `ThinkingDelta`, `CommandUpdate`, `ParallelAgentsUpdate`, plus two more). For a burst of N inbound deltas on a still-unloaded proxy, each call drops the lock, performs a synchronous HTTP fetch, and reacquires the lock ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â without any in-flight tracking. The first fetch flips `messages_loaded: true` and subsequent fetches short-circuit, but the in-flight ones still serialize on the remote registry and on the local async runtime.
 
 A 100-delta burst on an unloaded proxy issues up to 100 HTTP fetches in sequence before the per-delta short-circuit kicks in. On chained-remote topologies where many proxies are unloaded after a summary `state` arrives, a small flurry of inbound activity can wedge the remote registry queue.
 
@@ -473,22 +577,6 @@ A 100-delta burst on an unloaded proxy issues up to 100 HTTP fetches in sequence
 - Track in-flight hydrations per `(remote_id, remote_session_id)` (e.g., `HashMap<_, Arc<Notify>>` or a per-session `AtomicBool` + waiter pattern).
 - Have parallel callers `await` the same future, falling through to the existing skip path on the first success.
 - Add a regression with concurrent same-session `MessageCreated` deltas that asserts only one HTTP fetch is issued.
-
-## `scheduleHydrationRetry` re-runs the entire hydration effect on every tick
-
-**Severity:** Medium - `ui/src/app-live-state.ts:647-670` arms a `setTimeout` whose callback fires `setHydrationRetryTick(...)`, a `useState` counter included in the visible-session hydration effect's deps. Each tick re-runs the whole effect and walks every visible session in `sessionIdsToHydrate`, even if only one session was retrying. With multiple sessions in pending-retry state, the cascading effect re-runs multiply network requests and CPU work under load.
-
-The early-out at the top of the effect (`hydratingSessionIdsRef.current.has(sessionId)`) only guards against parallel in-flight requests, not against re-evaluation of unrelated sessions.
-
-**Current behavior:**
-- `setHydrationRetryTick` is a global counter dep.
-- A retry for session A bumps the tick and re-evaluates session B's hydration too.
-- The retry timer cleanup lives in a separate `useEffect(() => () => cancelHydrationRetries(), [])` rather than the same effect.
-
-**Proposal:**
-- Replace the tick counter with a per-session `Set<string>` ref of pending-retry ids; the timer adds the id and triggers a targeted re-fetch through a stable `useCallback` rather than re-running the effect.
-- Or have the retry timer call into the fetch loop directly, bypassing the effect entirely.
-- Skip work in the effect for sessions not in the retry set.
 
 ## Metadata-first summaries make transcript search incomplete
 
@@ -536,26 +624,6 @@ data-minimization leak in `/api/state` and SSE `state` broadcasts.
 - Keep full queued-prompt content on targeted full-session responses where the
   active pane actually needs it.
 
-## App-level delta fixtures omit required `messageCount`
-
-**Severity:** Low - some tests still dispatch impossible delta payloads after the protocol made `messageCount` required.
-
-Several App-level delta tests construct `delta` events by hand and omit
-`messageCount`. Those fixtures no longer match the current `DeltaEvent` wire
-contract, so they can pass through behavior that production SSE cannot produce
-and miss metadata-first regressions.
-
-**Current behavior:**
-- Some `ui/src/App.live-state.deltas.test.tsx` fixtures dispatch current
-  protocol delta types without `messageCount`.
-- The tests are not forced through a typed helper that requires the full
-  current event shape.
-
-**Proposal:**
-- Introduce a typed test helper for `DeltaEvent` fixtures and require
-  `messageCount` on all session-scoped deltas.
-- Update hand-written fixtures to match the current SSE contract.
-
 ## Hydration retry loop can spam persistent failures
 
 **Severity:** Low - visible-session hydration retries clamp to the last retry delay and can continue indefinitely for persistent non-404 failures.
@@ -592,43 +660,6 @@ cases.
   `remote_deltas.rs`, and `remote_orchestrators.rs`.
 - Move shared fake-server and remote-session helpers into a small support
   module used by those test files.
-
-## New orchestrator summary-preservation test missing `.all()` shape assertion
-
-**Severity:** Medium - `src/tests/remote.rs:1505-1521` adds a test covering `OrchestratorsUpdated.sessions` summary preservation after a full `sessions` snapshot, but the assertion only `.find()`s one session by its `message_count == 2` and checks its individual fields. It does not assert that the `.all()` of the projected sessions match the summary-shape invariant (`messages == []`, `messages_loaded == false` when expected, all `message_count` values preserved from the incoming snapshot).
-
-A regression that silently left one session with a full transcript, or that swapped `messages_loaded` on an unrelated session in the batch, would pass the current `.find(|s| s.message_count == 2)` assertion. The test is meant to pin the "the whole republish is metadata-first" contract but only inspects one session.
-
-**Current behavior:**
-- Test finds one session by `message_count == 2` and asserts its shape.
-- No `.all()` assertion over the full snapshot's `sessions` vec.
-- No fixture coverage for multi-session snapshots with a mix of hydrated/unhydrated incoming records.
-
-**Proposal:**
-- Replace the `.find()` probe with `assert!(republished.iter().all(|s| s.messages.is_empty() && !s.messages_loaded))`, or add it alongside the existing assertion.
-- Expand the fixture to include at least two sessions with distinct `message_count` values so the `.all()` assertion covers more than one session shape.
-- Optional: parameterize over a hydrated-input + unhydrated-input mix to also pin the "republish projects metadata regardless of source hydration state" contract.
-
-## Reconnect fallback test no longer proves applied delta is visible
-
-**Severity:** Low - reconnect coverage can pass even if the session delta in the scenario is ignored.
-
-One backend connection test still describes an applied session delta, but the
-assertion that proved the delta changed the visible session state was removed.
-That leaves the reconnect/fallback path with weaker coverage for the same class
-of bug where transport recovery appears healthy while the transcript remains
-stale.
-
-**Current behavior:**
-- `ui/src/backend-connection.test.tsx` exercises the reconnect fallback flow.
-- The test no longer proves that the session delta updates the visible preview,
-  transcript, or store state while reconnect remains active.
-
-**Proposal:**
-- Restore an assertion against the visible preview, transcript text, or
-  session-store state after the delta is dispatched.
-- Keep the reconnect-state assertions so the test proves both facts: the UI is
-  still recovering and the live delta was applied.
 
 ## Session store publication can race ahead of React session state
 
@@ -689,7 +720,7 @@ through a broad module instead of a small boundary with a clear contract.
 
 **Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:666-667` computes the `preferImmediateHeavyRender` prop for `MeasuredPageBand` by reading `hasUserScrollInteractionRef.current` during render. Refs are not reactive, so the computed value only propagates when something else forces a re-render. Today that works because every scroll-event path that flips the ref to `true` also triggers `setViewport(...)` via `syncViewportFromScrollNode` within the same handler, which causes a re-render and re-reads the ref. But the coupling is implicit, undocumented, and brittle.
 
-Any future scroll path that flips `hasUserScrollInteractionRef.current = true` without triggering a React state update will leave memoized pages with the stale `preferImmediateHeavyRender={true}` value until a different render trigger arrives — at which point heavy cards that should have stayed deferred will activate, defeating the purpose of the cooldown gate.
+Any future scroll path that flips `hasUserScrollInteractionRef.current = true` without triggering a React state update will leave memoized pages with the stale `preferImmediateHeavyRender={true}` value until a different render trigger arrives ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â at which point heavy cards that should have stayed deferred will activate, defeating the purpose of the cooldown gate.
 
 **Current behavior:**
 - `preferImmediateHeavyRender` is computed each render from `hasUserScrollInteractionRef.current`.
@@ -715,10 +746,10 @@ Any future scroll path that flips `hasUserScrollInteractionRef.current = true` w
 
 ## `DeferredHeavyContent` near-viewport activation now deferred by one paint
 
-**Severity:** Low - `ui/src/message-cards.tsx:607-628` replaced `useLayoutEffect` with `useEffect` + a `requestAnimationFrame` before `setIsActivated(true)` for the near-viewport fast-activation branch. The previous sync layout-effect path activated heavy content that was already in-viewport before paint, avoiding a placeholder → content height jump. The new path defers activation by at least one paint, so on initial mount near the viewport the user may now see the placeholder for one frame before the heavy content replaces it. The deleted comment specifically warned about this risk for virtualized callers.
+**Severity:** Low - `ui/src/message-cards.tsx:607-628` replaced `useLayoutEffect` with `useEffect` + a `requestAnimationFrame` before `setIsActivated(true)` for the near-viewport fast-activation branch. The previous sync layout-effect path activated heavy content that was already in-viewport before paint, avoiding a placeholder ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ content height jump. The new path defers activation by at least one paint, so on initial mount near the viewport the user may now see the placeholder for one frame before the heavy content replaces it. The deleted comment specifically warned about this risk for virtualized callers.
 
 **Current behavior:**
-- `useEffect` + `requestAnimationFrame` defers activation by ≥1 paint even when the card is already near viewport on mount.
+- `useEffect` + `requestAnimationFrame` defers activation by ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥1 paint even when the card is already near viewport on mount.
 - The deferral was added as part of the `allowDeferredActivation` cooldown gate (to avoid layout thrash during active scrolls).
 - Near-viewport mount activation now produces a one-frame placeholder flicker in place of the previous zero-frame activation.
 
@@ -740,7 +771,7 @@ Any future scroll path that flips `hasUserScrollInteractionRef.current = true` w
 
 ## `prevIsActive`-in-render replaced with post-commit effect delays the first-activation measurement pass
 
-**Severity:** Low - `ui/src/panels/VirtualizedConversationMessageList.tsx:426-432` converted the `prevIsActive !== isActive` render-time derived-state update into a post-commit `useEffect`. Under the previous pattern, a session switching from `isActive: false → true` flipped `setIsMeasuringPostActivation(true)` during render, so the first frame rendered the measuring shell with the correct `preferImmediateHeavyRender` value. The new effect defers that flip to after commit — the first paint of the newly-active session briefly shows `isMeasuringPostActivation: false`, flipping to the measurement shell only on the next render.
+**Severity:** Low - `ui/src/panels/VirtualizedConversationMessageList.tsx:426-432` converted the `prevIsActive !== isActive` render-time derived-state update into a post-commit `useEffect`. Under the previous pattern, a session switching from `isActive: false ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ true` flipped `setIsMeasuringPostActivation(true)` during render, so the first frame rendered the measuring shell with the correct `preferImmediateHeavyRender` value. The new effect defers that flip to after commit ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â the first paint of the newly-active session briefly shows `isMeasuringPostActivation: false`, flipping to the measurement shell only on the next render.
 
 Usually invisible (the effect runs the same tick). Under slow devices this may cause a one-frame flicker on session activation.
 
@@ -782,61 +813,19 @@ A live Chrome profile against the current dev tab showed no runtime exceptions, 
 
 ## Composer drafts have three authoritative stores
 
-**Severity:** Medium - committed composer drafts are tracked in React state (`draftsBySessionId`), a mutable ref (`draftsBySessionIdRef`), and the new `useSyncExternalStore`-backed `session-store`, with a post-commit effect mirroring state → ref and imperative paths writing the ref before React commits. Under concurrent draft updates the deferred effect can overwrite a newer ref value with a stale committed one, which then propagates to the composer snapshot via `syncComposerDraftForSession`.
+**Severity:** Medium - committed composer drafts are tracked in React state (`draftsBySessionId`), a mutable ref (`draftsBySessionIdRef`), and the new `useSyncExternalStore`-backed `session-store`, with a post-commit effect mirroring state ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ref and imperative paths writing the ref before React commits. Under concurrent draft updates the deferred effect can overwrite a newer ref value with a stale committed one, which then propagates to the composer snapshot via `syncComposerDraftForSession`.
 
 `ui/src/session-store.ts` added a third source of truth for per-session drafts. Imperative handlers in `ui/src/app-session-actions.ts` (`handleDraftChange`, `sendPromptForSession`, queue-prompt flows) and `ui/src/app-workspace-actions.ts` write `draftsBySessionIdRef.current` synchronously before calling `setDraftsBySessionId`, so the store sync reads the fresh value. A separate effect in `ui/src/App.tsx` copies `draftsBySessionId` back into the ref after each commit. When two draft updates land in the same tick, the later-committed effect can briefly regress the ref to an older snapshot, and the store's composer-snapshot slice (`syncComposerDraftForSession`) can publish that stale draft to subscribers.
 
 **Current behavior:**
 - Three stores own the same data: React state, the ref, and the `session-store` slice.
-- Imperative paths write ref → store before React commits; the effect writes state → ref after commit.
+- Imperative paths write ref ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ store before React commits; the effect writes state ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ref after commit.
 - Under concurrent updates the effect can stomp a newer imperative write with a stale React-committed value.
 
 **Proposal:**
 - Pick one owner for the ref: either drop the post-commit effect and rely entirely on imperative writes, or remove the imperative ref mutations and let the store read through a ref that mirrors state exactly once per commit.
 - Document the invariant in the `session-store.ts` header so future changes do not reintroduce a third writer.
 - Add a regression test that drives two overlapping `handleDraftChange` calls in the same tick and asserts the store snapshot matches the last-written value.
-
-## Session removal pruned only on the snapshot-adoption path
-
-**Severity:** Low - `ui/src/session-store.ts` has no `removeSessionFromStore(...)` entry point, and the delta paths (`orchestratorsUpdated`, session-scoped deltas) only `upsertSessionSlice` for ids present in the delta. Today deltas cannot remove sessions, so this is latent — but the store has no defensive pruning and nothing in the file header documents which caller is responsible for eviction.
-
-`syncComposerSessionsStore` handles pruning as a side effect of diffing `sessions[]`, so a full snapshot adoption cleans up orphans; the delta paths never do. If a future delta shape implies a session has been removed (e.g. a dropped slot in `mergeOrchestratorDeltaSessions`), the orphan slice would linger in `sessionRecordsById`, `sessionSummariesById`, and `composerSessionsById` until the next full snapshot.
-
-**Current behavior:**
-- Only `syncComposerSessionsStore` prunes the store; delta-scoped upserts never do.
-- No documented contract in `session-store.ts` for which caller owns eviction.
-
-**Proposal:**
-- Add a `removeSessionFromStore(sessionId)` helper and wire it to the same places `setSessions` drops a session, or document the pruning contract in the `session-store.ts` header so future delta code knows to call `syncComposerSessionsStore` (or equivalent) when a session is removed.
-
-## Runtime-only session mutation stamps can leak into persisted sessions
-
-**Severity:** Low - `session_mutation_stamp` is now represented on the shared
-`Session` wire struct, but that same struct is embedded in persisted
-`PersistedSessionRecord` values.
-
-The intended ownership is that `SessionRecord::mutation_stamp` is process-local
-runtime metadata and `wire_session_from_record(...)` is the only outbound source
-for the frontend-facing `sessionMutationStamp`. Remote proxy localization can
-clone an inbound remote session payload into local `record.session`; if that
-payload includes a remote process stamp, persistence can serialize it as part
-of the local session. That does not break current behavior, but it blurs local
-vs. remote stamp ownership and makes durable state carry a meaningless
-process-local marker.
-
-**Current behavior:**
-- `Session` includes optional `session_mutation_stamp`.
-- `PersistedSessionRecord` persists a `Session` value directly.
-- Remote-localized sessions can arrive with a remote stamp unless every inbound
-  path scrubs it.
-
-**Proposal:**
-- Clear `session_mutation_stamp` before persistence and after localizing inbound
-  remote sessions.
-- Keep `AppState::wire_session_from_record(...)` as the only path that sets the
-  outbound stamp.
-- Add a backend serialization/localization regression that proves persisted
-  sessions do not contain `sessionMutationStamp`.
 
 ## Composer sizing double-resets on session switch
 
@@ -852,7 +841,7 @@ process-local marker.
 
 ## Duplicated `Session` projection types in `session-store.ts` and `session-slash-palette.ts`
 
-**Severity:** Low - `ComposerSessionSnapshot` (`ui/src/session-store.ts:36-83`) and `SlashPaletteSession` (`ui/src/panels/session-slash-palette.ts:51-65`) each re-pick overlapping-but-non-identical field sets from `Session`. Three `Session`-like shapes now exist (`Session`, `ComposerSessionSnapshot`, `SlashPaletteSession`) with no compile-time check that additions to `Session` reach both projections — a new agent setting added to `Session` could silently default to `undefined` in consumers that read through either projection.
+**Severity:** Low - `ComposerSessionSnapshot` (`ui/src/session-store.ts:36-83`) and `SlashPaletteSession` (`ui/src/panels/session-slash-palette.ts:51-65`) each re-pick overlapping-but-non-identical field sets from `Session`. Three `Session`-like shapes now exist (`Session`, `ComposerSessionSnapshot`, `SlashPaletteSession`) with no compile-time check that additions to `Session` reach both projections ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â a new agent setting added to `Session` could silently default to `undefined` in consumers that read through either projection.
 
 **Current behavior:**
 - Both projection types declare field lists by hand.
@@ -868,7 +857,7 @@ process-local marker.
 
 Two smaller concerns ride along:
 - The override's condition includes an `"approval"` status arm (`status === "active" || status === "approval"`) that is presently unreachable: `SessionPaneView` only sets `showWaitingIndicator=true` when `status === "active"` or (`!isSessionBusy && isSending`), and `isSessionBusy` is true for `"approval"`, so `showWaitingIndicator && status === "approval"` never holds. Harmless defensive check but misleading for readers inferring the truth table.
-- The resolution is not wrapped in `useMemo`, so it re-runs on every `SessionBody` re-render — once per streaming chunk. `findLastUserPrompt` scans from the tail, so it usually stops early, but sessions dominated by trailing tool/assistant output could scan deep.
+- The resolution is not wrapped in `useMemo`, so it re-runs on every `SessionBody` re-render ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â once per streaming chunk. `findLastUserPrompt` scans from the tail, so it usually stops early, but sessions dominated by trailing tool/assistant output could scan deep.
 
 **Current behavior:**
 - `SessionBody` (`AgentSessionPanel.tsx:399-404`) and `SessionPaneView` (`SessionPaneView.tsx:795-805`) both derive the waiting-indicator prompt by calling `findLastUserPrompt(activeSession)` on the same store record.
@@ -882,9 +871,9 @@ Two smaller concerns ride along:
 
 ## Conversation cards overlap for one frame during scroll through long messages
 
-**Severity:** Medium - `estimateConversationMessageHeight` in `ui/src/panels/conversation-virtualization.ts` produces an initial height for unmeasured cards using a per-line pixel heuristic with line-count caps (`Math.min(outputLineCount, 14)` for `command`, `Math.min(diffLineCount, 20)` for `diff`) and overall ceilings of 1400/1500/1600/1800/900 px. For heavy messages â€” review-tool output, build logs, large patches â€” the estimate is 20Ã—-40Ã— under the rendered height, so `layout.tops[index]` for cards below an under-priced neighbour places them inside the neighbour's rendered area. The user sees the cards painted on top of each other for one frame, until the `ResizeObserver` measurement lands and `setLayoutVersion` rebuilds the layout.
+**Severity:** Medium - `estimateConversationMessageHeight` in `ui/src/panels/conversation-virtualization.ts` produces an initial height for unmeasured cards using a per-line pixel heuristic with line-count caps (`Math.min(outputLineCount, 14)` for `command`, `Math.min(diffLineCount, 20)` for `diff`) and overall ceilings of 1400/1500/1600/1800/900 px. For heavy messages ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â review-tool output, build logs, large patches ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â the estimate is 20ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â-40ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â under the rendered height, so `layout.tops[index]` for cards below an under-priced neighbour places them inside the neighbour's rendered area. The user sees the cards painted on top of each other for one frame, until the `ResizeObserver` measurement lands and `setLayoutVersion` rebuilds the layout.
 
-An initial attempt to fix this by raising estimates to a single 40k px cap (and adding `visibility: hidden` per-card until measured) was reverted after it introduced two worse regressions: (1) per-card `visibility: hidden` combined with the wrapper's `is-measuring-post-activation` hide left the whole transcript empty for a frame whenever the virtualization window shifted before measurements landed; (2) raising the cap made the `getAdjustedVirtualizedScrollTopForHeightChange` shrink-adjustment huge (40k estimate â†’ 8k actual = âˆ’32k scrollTop jump), so slow wheel-scrolling through heavy transcripts caused visible scroll jumps of tens of thousands of pixels. The revert restores the one-frame overlap as the known limitation.
+An initial attempt to fix this by raising estimates to a single 40k px cap (and adding `visibility: hidden` per-card until measured) was reverted after it introduced two worse regressions: (1) per-card `visibility: hidden` combined with the wrapper's `is-measuring-post-activation` hide left the whole transcript empty for a frame whenever the virtualization window shifted before measurements landed; (2) raising the cap made the `getAdjustedVirtualizedScrollTopForHeightChange` shrink-adjustment huge (40k estimate ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ 8k actual = ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢32k scrollTop jump), so slow wheel-scrolling through heavy transcripts caused visible scroll jumps of tens of thousands of pixels. The revert restores the one-frame overlap as the known limitation.
 
 **Current behavior:**
 - Initial layout uses estimates that badly under-price long commands / diffs.
@@ -894,7 +883,7 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
 
 **Proposal:**
 - Proper fix likely needs off-screen pre-measurement (render the card in a hidden measure-only tree, read `getBoundingClientRect` height, then place in the layout) rather than a formula-based estimate. This is a bigger change than a single pure-function tweak.
-- Alternative: batch-measurement pass when the virtualization window shifts â€” hide the wrapper briefly, mount the newly-entering cards, wait for all their measurements, then reveal.
+- Alternative: batch-measurement pass when the virtualization window shifts ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â hide the wrapper briefly, mount the newly-entering cards, wait for all their measurements, then reveal.
 - Not: raise the estimator cap. Large overshoots trade one visible artifact for a worse one.
 
 
@@ -915,74 +904,11 @@ This is especially noticeable because the same diff tab already has change navig
 - Keep per-view scroll position stable when jumping or switching between Monaco and rendered Markdown diff views.
 - Add coverage that rendered Markdown diff mode focuses/scrolls to the next and previous changed section without leaving the rendered view.
 
-## Inline-zone id is line-number-dependent, reinitialises Mermaid diagrams on every edit above the fence
-
-**Severity:** Medium - `ui/src/source-renderers.ts::detectMarkdownRegions` builds each Mermaid fence region's id as `mermaid:${fence.startLine}:${fence.endLine}:${quickHash(fence.body)}`. `startLine` and `endLine` are 1-based ABSOLUTE line numbers in the source buffer, so inserting any line above the fence shifts both â€” and the id flips. The `MonacoCodeEditor` portal is keyed on the zone id (see `MonacoCodeEditor.tsx:~718-730`); when the id flips, the portal unmounts and remounts, which tears down the Mermaid iframe and reinitialises it from scratch. Every keystroke in the heading / paragraphs above a Mermaid fence triggers this reinitialisation, producing a visible flicker on slow machines and wasting GPU cycles on fast ones.
-
-The intent of the stable id was exactly the opposite â€” keep the diagram DOM alive across keystrokes outside the fence. A new test pinned the contract as it exists today (`SourcePanel.test.tsx::"inline-zone id stability" â†’ "changes the zone id when lines are inserted above the fence (latent stability gap)"`) so a future fix has a clear assertion to flip from `.not.toBe` to `.toBe`.
-
-**Current behavior:**
-- Id format: `mermaid:${startLine}:${endLine}:${hash(body)}`.
-- Inserting a line above the fence shifts `startLine` â†’ id changes â†’ portal remounts â†’ Mermaid reinitialises.
-- Typing inside the fence body changes the hash â†’ id changes â†’ portal remounts (correct â€” the diagram source changed).
-- Editing below the fence (or in-place edits above without line-count changes) preserves startLine/endLine/body â†’ id stable (correct).
-
-**Proposal:**
-- **Primary**: drop `startLine`/`endLine` from the id and use `mermaid:${hash(body)}` alone. This preserves id stability under line shifts. The id must stay globally unique per file (the portal-key dedupe via `new Set(inlineZones.map((zone) => zone.id))` in `MonacoCodeEditor.tsx::zone-sync effect` collapses collisions into one entry, so non-unique ids would lose zones), which means a tiebreaker is needed ONLY when two fences collide on body hash. Tiebreaker rule: within a file, take the ordinal position of this fence among all fences that share its body hash, in document order (i.e., `mermaid:0:${hash}` for the first fence with this body, `mermaid:1:${hash}` for the second, etc.). Collisions are rare in practice; when they do happen, reordering two identical-body fences remounts both â€” semantically a no-op because identical bodies render identical diagrams.
-- **Simpler but coarser alternative**: use `mermaid:${fenceOrdinal}:${hash}` where `fenceOrdinal` is the position among ALL Mermaid fences in the file (not just ones with the same body). This re-introduces a structural-remount problem the primary proposal avoids â€” inserting a new Mermaid fence BEFORE an existing one re-indexes every downstream fence and remounts them all. Listed for completeness; prefer the primary proposal.
-- Flip the assertion in the test from `.not.toBe(idsBeforeEdit)` to `.toBe(idsBeforeEdit)` when the fix lands. Update the describe-header comment too â€” drop the "latent stability gap" paragraph once case (c) passes as "id stable".
-
-## Retry notice liveness ignores session lifecycle and retry sequencing
-
-**Severity:** Medium - `ui/src/SessionPaneView.tsx:900-913` derives connection-retry notice liveness only from whether the message is the latest assistant-authored message.
-
-That is too coarse for the transcript and lifecycle model. If a session leaves the active turn without later assistant output, the retry notice still renders as live with a spinner and `aria-live="polite"`. If one retry notice is followed by another retry notice, the older attempt renders as "Connection recovered" while the newer attempt still renders as "Reconnecting", which presents contradictory connection state.
-
-**Current behavior:**
-- The latest assistant-authored message is treated as the only live retry notice.
-- Session status is not considered when deciding whether a retry notice is still live.
-- Later retry notices are treated the same as later non-retry assistant output, so older retry attempts look resolved while the retry is still in progress.
-
-**Proposal:**
-- Derive retry display state from both session lifecycle and subsequent assistant message type.
-- Keep the latest retry notice live only while the owning session is active or otherwise busy.
-- Treat older retry attempts as superseded while a later retry notice is still the newest assistant output, and mark retry notices resolved only after later non-retry assistant output exists.
-
-## Persist-failure tombstone recovery waits for unrelated mutations to retry
-
-**Severity:** Medium - the persist worker restores drained `removed_session_ids` after `persist_delta_via_cache` fails, but it does not schedule another persist attempt.
-
-If no later state mutation sends another `PersistRequest::Delta`, the restored tombstones remain only in memory. A shutdown before the next unrelated mutation can still leave orphan rows in SQLite, which is the failure mode the tombstone restore was intended to prevent.
-
-**Current behavior:**
-- On write error, the worker extends `inner.removed_session_ids` with the drained tombstones.
-- The worker logs the error and returns to `persist_rx.recv()`.
-- No retry signal or backoff loop is armed for the restored delta.
-
-**Proposal:**
-- Re-arm persistence on failure, preferably with a bounded/backoff retry path inside the persist worker.
-- Keep the watermark unchanged and recollect after restoring tombstones so changed sessions and deletes retry together.
-
-## `shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime` test flake
-
-**Severity:** Low - `tests::shared_codex::shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime` was observed failing intermittently during batched `cargo test --bin termal` runs. Passes when re-run in isolation. The two Gemini-auth siblings (`select_acp_auth_method_ignores_workspace_dotenv_credentials` and `gemini_dotenv_env_pairs_ignore_workspace_env_files`) were fixed by acquiring `TEST_HOME_ENV_MUTEX` and isolating HOME + Gemini/Google env vars; verified via 5 consecutive green `cargo test --bin termal` runs. The shared-codex test did not surface in those 5 runs, so either (a) it is much rarer than the Gemini one, (b) it was indirectly fixed by an unrelated change, or (c) it is still broken but the window is too narrow to hit.
-
-**Current behavior:**
-- Pass-in-isolation, fail-in-batch pattern when it surfaces.
-- Unlike the Gemini flakes, this test does not obviously share HOME-rooted fixtures â€” likely a temp-file path collision or a side effect of persist-thread teardown.
-- Has not surfaced in recent multi-run verification, so concrete reproduction is not yet captured.
-
-**Proposal:**
-- Reproduce via a regression harness that runs the test 20 times back-to-back under the full batch context; confirm the flake signature (temp-file collision vs env var vs persist-thread handle leak).
-- If the flake is temp-file path collision: switch to `tempfile::tempdir()` with unique per-test directories.
-- If env: add `TEST_HOME_ENV_MUTEX` acquisition and `ScopedEnvVar::remove` isolation to match the Gemini pattern.
-- Document the root cause in the fix commit message so the "why mutex / why tempdir" is visible at review time.
-
 ## Server restart without browser refresh can lose the last streamed message
 
 **Severity:** Medium - restarting the backend process while the browser tab is still open can make the most recent assistant message disappear from the UI, because the persist thread has a small window between "commit fires" and "row is durably in SQLite" during which an un-drained mutation is lost on kill.
 
-Persistence is intentionally background and best-effort: every `commit_persisted_delta_locked` (and similar delta-producing commit helpers) signals `PersistRequest::Delta` to the persist thread and returns. The thread then locks `inner`, builds the delta, and writes. If the backend process is killed (SIGKILL, laptop sleep wedge, crash, manual restart of the dev process) between the signal fire and the SQLite commit, the mutation is lost. Old pre-delta-persistence behavior had the same window â€” the persist channel carried a full-state clone â€” so this is not a regression introduced by the delta refactor, but the symptom is visible now because the reconnect adoption path applies the persisted state with `allowRevisionDowngrade: true`: the browser's in-memory copy of the just-streamed last message is replaced by the freshly loaded (older) backend state, making the message disappear from the UI.
+Persistence is intentionally background and best-effort: every `commit_persisted_delta_locked` (and similar delta-producing commit helpers) signals `PersistRequest::Delta` to the persist thread and returns. The thread then locks `inner`, builds the delta, and writes. If the backend process is killed (SIGKILL, laptop sleep wedge, crash, manual restart of the dev process) between the signal fire and the SQLite commit, the mutation is lost. Old pre-delta-persistence behavior had the same window ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â the persist channel carried a full-state clone ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â so this is not a regression introduced by the delta refactor, but the symptom is visible now because the reconnect adoption path applies the persisted state with `allowRevisionDowngrade: true`: the browser's in-memory copy of the just-streamed last message is replaced by the freshly loaded (older) backend state, making the message disappear from the UI.
 
 The message is not hidden; it is genuinely gone from SQLite. No amount of frontend re-rendering will bring it back.
 
@@ -1009,7 +935,7 @@ Before the broadcaster thread, `commit_locked` published state synchronously (`s
 - `publish_delta` is sync.
 - Client can observe delta N+1 before state N.
 - Extra `/api/state` resync fetches fire under sustained mutation bursts.
-- Correctness preserved (resync fixes the view), but behavior is chatty and pushes load onto `/api/state` â€” which is exactly the path we just made cheaper.
+- Correctness preserved (resync fixes the view), but behavior is chatty and pushes load onto `/api/state` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â which is exactly the path we just made cheaper.
 
 **Proposal:**
 - Route deltas through the same broadcaster thread so state and delta events for the same revision stream in order. Coalescing is fine because deltas are idempotent after a state snapshot.
@@ -1027,54 +953,15 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - The broadcaster drains and coalesces only after snapshots have already queued.
 - Full-state snapshots can accumulate during bursts even though older snapshots will be superseded.
 
-**Proposal:**
 - Replace the unbounded queue with a single-slot latest mailbox or bounded channel.
 - Drop or overwrite superseded snapshots before they can accumulate in memory.
 - Add a burst test that publishes multiple large snapshots while the broadcaster is delayed and asserts only the latest snapshot is retained.
 
-## SQLite persistence lacks file permission hardening and indefinite backup retention
+## Implementation Tasks
 
-**Severity:** Medium - session history including agent output, user prompts, and captured file contents is readable by other local users on default Unix systems, and a second sensitive copy is kept indefinitely at a predictable path.
-
-The new SQLite persistence path opens `~/.termal/termal.sqlite` via `rusqlite::Connection::open` without setting restrictive permissions; on Unix, the default `umask 0022` yields world-readable `0644`. The JSONâ†’SQLite migration renames the legacy file to `sessions.imported-<timestamp>.json` (same permissions) and never deletes or surfaces it, so the full pre-migration history persists at a predictable path with no garbage collection or user notice.
-
-**Current behavior:**
-- `rusqlite::Connection::open` creates the DB with the current umask (0644 by default on Unix).
-- `imported_json_backup_path` writes to a predictable directory alongside the DB.
-- No GC, no UI notification of the backup path, no explicit "delete imported backup" action.
-
-**Proposal:**
-- On Unix, call `fs::set_permissions(path, Permissions::from_mode(0o600))` on both the SQLite DB and the imported backup immediately after open/rename.
-- On Windows, document the reliance on `%USERPROFILE%\.termal\` ACL inheritance; optionally tighten via `SetNamedSecurityInfo`.
-- Either delete the imported backup after a successful cold start confirms the SQLite file is usable, or emit a one-shot UI notice with the backup path and an explicit delete affordance.
-
-## `persist_created_session` skips hidden Claude spare pool changes
-
-**Severity:** Medium - a crash after session creation but before a full snapshot loses changes to the hidden-spare pool that `create_session` may have triggered.
-
-`persist_created_session` in `#[cfg(not(test))]` writes only the created session's record plus metadata, with `replace_sessions=false`. `create_session` can also invoke `try_start_hidden_claude_spare` to replenish the hidden-spare pool, which adds new session records to `inner.sessions` outside the created-session record. Those new hidden records are not part of the `persist_created_session` call and will not reach SQLite until the next `persist_internal_locked` snapshot runs.
-
-**Current behavior:**
-- `persist_state_parts_to_sqlite(..., &[record], replace_sessions=false)` upserts only the created record.
-- Hidden Claude spares spawned by `try_start_hidden_claude_spare` live only in memory until a later full commit.
-- A crash in the window loses the spare pool; the pool can be respawned on demand so impact is bounded.
-
-**Proposal:**
-- Include all sessions whose in-memory state changed during the create (the created record plus any newly spawned hidden spares) in the `persist_created_session` call.
-- Or follow the delta-style write with a `persist_internal_locked` snapshot once the spare pool is settled.
-
-## Lazy hydration effect: missing retry guard and unreconciled replace
-
-**Severity:** Medium - the metadata-first hydration path still has two edge-case bugs around failed hydration and duplicate session materialization.
-
-Two distinct issues remain in and around the one-shot `fetchSession` hydration path:
-1. The async IIFE only guards against unmount. If the user switches away mid-fetch and the response's `session.id !== sessionId`, the code calls `requestActionRecoveryResyncRef.current()`. A transient server race can loop mismatch -> resync -> refetch -> mismatch.
-2. `adoptCreatedSessionResponse` (and `live-updates.ts`'s `sessionCreated` reducer) raw-replace an existing session without per-message identity preservation via `reconcileSession`. If SSE `sessionCreated` materializes the session before the API response lands (or vice versa), memoized `MessageCard` children see new identities and remount.
-
-**Current behavior:**
-- The hydration effect is correctly keyed only by `activeSession?.id` and `activeSession?.messagesLoaded`, but the mismatch branch still triggers action-recovery resync without a "tried once" marker.
-- Raw `[...previousSessions, created.session]` / `replaceSession(..., delta.session)` on the `existingIndex !== -1` branch.
-
-**Proposal:**
-- Add a `hydrationMismatchSessionIdsRef` (or count attempts) to avoid re-firing after one mismatch until an authoritative state event arrives.
-- Route the existing-session replace branch through `reconcileSession` (or a similar identity-preserving merge) so memoized children keep stable identity.
+- [ ] P2: Add production SQLite persistence coverage:
+  make the SQLite runtime persistence path available under `cargo test`, then cover temp-database full snapshot save/load, delta upsert, metadata-only update, hidden/deleted row removal, and startup load.
+- [ ] P2: Update manual reconnect recovery coverage:
+  change the backend-connection manual retry regression so a successful `/api/state` probe repairs state but reconnect polling continues until data-bearing SSE confirms recovery.
+- [ ] P2: Add Windows state-path redirection coverage:
+  cover SQLite main-file symlinks, sidecar symlinks, and `.termal` directory junction/symlink cases behind Windows-gated tests.

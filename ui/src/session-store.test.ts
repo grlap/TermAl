@@ -3,6 +3,7 @@ import {
   getComposerSessionSnapshotForTesting,
   getSessionRecordSnapshotForTesting,
   getSessionSummarySnapshotForTesting,
+  removeSessionFromStore,
   resetSessionStoreForTesting,
   syncComposerDraftForSession,
   syncComposerSessionsStore,
@@ -552,6 +553,31 @@ describe("session-store record snapshots", () => {
     expect(getComposerSessionSnapshotForTesting(firstSession.id)).not.toBeNull();
     expect(getSessionRecordSnapshotForTesting(firstSession.id)).not.toBeNull();
     expect(getSessionSummarySnapshotForTesting(firstSession.id)).not.toBeNull();
+    expect(getComposerSessionSnapshotForTesting(secondSession.id)).toBeNull();
+    expect(getSessionRecordSnapshotForTesting(secondSession.id)).toBeNull();
+    expect(getSessionSummarySnapshotForTesting(secondSession.id)).toBeNull();
+  });
+
+  it("removes one session from every store slice without a full snapshot", () => {
+    const firstSession = createSession();
+    const secondSession = createSession({
+      id: "session-2",
+      name: "Other session",
+    });
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [firstSession, secondSession],
+    });
+
+    removeSessionFromStore({ sessionId: secondSession.id });
+
+    expect(getComposerSessionSnapshotForTesting(firstSession.id)).not.toBeNull();
+    expect(getSessionRecordSnapshotForTesting(firstSession.id)).toBe(firstSession);
+    expect(getSessionSummarySnapshotForTesting(firstSession.id)?.name).toBe(
+      firstSession.name,
+    );
     expect(getComposerSessionSnapshotForTesting(secondSession.id)).toBeNull();
     expect(getSessionRecordSnapshotForTesting(secondSession.id)).toBeNull();
     expect(getSessionSummarySnapshotForTesting(secondSession.id)).toBeNull();

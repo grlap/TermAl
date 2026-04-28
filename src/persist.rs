@@ -3,8 +3,8 @@ SQLite-backed session state persistence.
 
 Owns the on-disk schema (`ensure_sqlite_state_schema`), connection lifecycle
 (`open_sqlite_state_connection`, `SqlitePersistConnectionCache`), load path
-(`load_state`, `load_state_from_sqlite`, `read_json_persisted_state`), and
-the per-transaction write helpers used by the background persist thread
+(`load_state`, `load_state_from_sqlite`), and the per-transaction write helpers
+used by the background persist thread
 (`persist_state_parts_via_connection`, `persist_delta_via_cache`,
 `persist_created_session`, `persist_state_from_persisted`, `persist_state`).
 
@@ -15,7 +15,7 @@ module, so no visibility changes are required.
 
 /// Resolves persistence path.
 fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
-    resolve_termal_data_dir(default_workdir).join("sessions.json")
+    resolve_termal_data_dir(default_workdir).join("termal.sqlite")
 }
 
 #[cfg(not(test))]
@@ -26,14 +26,24 @@ const SQLITE_LEGACY_STATE_KEY: &str = "persistedState";
 const SQLITE_METADATA_KEY: &str = "metadataState";
 #[cfg(not(test))]
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
-
-#[cfg(not(test))]
-fn sqlite_persistence_path_for_json_path(path: &FsPath) -> PathBuf {
-    path.with_file_name("termal.sqlite")
-}
+// Test-only legacy JSON loaders support fixture round trips and migration
+// regressions. Production `load_state` reads SQLite directly; this cap and
+// escape hatch are fixture-safety tools, not a runtime import guardrail.
+#[cfg(test)]
+const MAX_LEGACY_JSON_STATE_BYTES: u64 = 100 * 1024 * 1024;
+#[cfg(test)]
+const LEGACY_JSON_STATE_MAX_BYTES_ENV: &str = "TERMAL_LEGACY_STATE_MAX_BYTES";
+#[cfg(test)]
+const BYTES_PER_MIB: u64 = 1024 * 1024;
+#[cfg(test)]
+static LEGACY_JSON_STATE_MAX_BYTES_OVERRIDE_WARNED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(not(test))]
 fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
+    if let Some(parent) = path.parent() {
+        harden_local_state_directory_permissions(parent)?;
+    }
+    reject_existing_sqlite_state_file_symlinks(path)?;
     let connection = rusqlite::Connection::open(path)
         .with_context(|| format!("failed to open `{}`", path.display()))?;
     connection
@@ -49,16 +59,470 @@ fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
             PRAGMA synchronous = NORMAL;
             ",
         )
-        .with_context(|| format!("failed to configure SQLite pragmas for `{}`", path.display()))?;
+        .with_context(|| {
+            format!(
+                "failed to configure SQLite pragmas for `{}`",
+                path.display()
+            )
+        })?;
+    harden_sqlite_state_file_permissions(path)?;
     Ok(connection)
 }
 
-fn read_json_persisted_state(path: &FsPath) -> Result<PersistedState> {
+#[cfg(unix)]
+fn allow_insecure_state_permissions() -> bool {
+    std::env::var("TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS")
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
+#[cfg(unix)]
+fn permission_hardening_failure(path: &FsPath, detail: impl std::fmt::Display) -> Result<()> {
+    let message = format!(
+        "failed to restrict permissions on `{}`: {detail}",
+        path.display()
+    );
+    if allow_insecure_state_permissions() {
+        eprintln!("[termal] warning: {message}");
+        Ok(())
+    } else {
+        Err(anyhow!(message))
+    }
+}
+
+#[cfg(unix)]
+fn harden_local_state_permissions(path: &FsPath, mode: u32) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if let Err(err) = fs::set_permissions(path, fs::Permissions::from_mode(mode)) {
+        permission_hardening_failure(path, err)?;
+    }
+
+    let actual_mode = match fs::metadata(path) {
+        Ok(metadata) => metadata.permissions().mode() & 0o777,
+        Err(err) => return permission_hardening_failure(path, err),
+    };
+    if actual_mode & 0o077 != 0 {
+        permission_hardening_failure(
+            path,
+            format!("mode {actual_mode:o} still grants group or other access"),
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn harden_local_state_file_permissions(path: &FsPath) -> Result<()> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::fs::PermissionsExt;
+
+    let file = match fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(err) => return permission_hardening_failure(path, err),
+    };
+    if unsafe { libc::fchmod(file.as_raw_fd(), 0o600) } != 0 {
+        permission_hardening_failure(path, io::Error::last_os_error())?;
+    }
+
+    let actual_mode = match file.metadata() {
+        Ok(metadata) => metadata.permissions().mode() & 0o777,
+        Err(err) => return permission_hardening_failure(path, err),
+    };
+    if actual_mode & 0o077 != 0 {
+        permission_hardening_failure(
+            path,
+            format!("mode {actual_mode:o} still grants group or other access"),
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn harden_local_state_directory_permissions(path: &FsPath) -> Result<()> {
+    reject_existing_state_directory_symlink(path)?;
+    harden_local_state_permissions(path, 0o700)
+}
+
+#[cfg(all(not(test), not(unix)))]
+fn harden_local_state_directory_permissions(_path: &FsPath) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(all(not(test), unix))]
+fn create_local_state_directory(path: &FsPath) -> Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)
+        .with_context(|| format!("failed to create `{}`", path.display()))?;
+    harden_local_state_directory_permissions(path)?;
+    Ok(())
+}
+
+#[cfg(all(not(test), not(unix)))]
+fn create_local_state_directory(path: &FsPath) -> Result<()> {
+    fs::create_dir_all(path).with_context(|| format!("failed to create `{}`", path.display()))
+}
+
+#[cfg(unix)]
+fn harden_sqlite_state_file_permissions(path: &FsPath) -> Result<()> {
+    harden_existing_state_file_permissions(path)?;
+    harden_existing_state_file_permissions(&sqlite_sidecar_path(path, "-wal"))?;
+    harden_existing_state_file_permissions(&sqlite_sidecar_path(path, "-shm"))?;
+    harden_existing_state_file_permissions(&sqlite_sidecar_path(path, "-journal"))?;
+    Ok(())
+}
+
+#[cfg(not(test))]
+fn harden_persist_commit_files(path: &FsPath) -> Result<()> {
+    harden_sqlite_state_file_permissions(path).with_context(|| {
+        format!(
+            "committed persisted state to `{}` but failed to re-harden state files",
+            path.display()
+        )
+    })
+}
+
+#[cfg(all(not(test), not(unix)))]
+fn harden_sqlite_state_file_permissions(_path: &FsPath) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn reject_existing_sqlite_state_file_symlinks(path: &FsPath) -> Result<()> {
+    reject_existing_state_file_symlink(path)?;
+    reject_existing_state_file_symlink(&sqlite_sidecar_path(path, "-wal"))?;
+    reject_existing_state_file_symlink(&sqlite_sidecar_path(path, "-shm"))?;
+    reject_existing_state_file_symlink(&sqlite_sidecar_path(path, "-journal"))?;
+    Ok(())
+}
+
+#[cfg(all(not(test), not(unix)))]
+fn reject_existing_sqlite_state_file_symlinks(_path: &FsPath) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn reject_existing_state_file_symlink(path: &FsPath) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(anyhow!(
+            "refusing to follow symlinked state path `{}`",
+            path.display()
+        )),
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => permission_hardening_failure(path, err),
+    }
+}
+
+#[cfg(unix)]
+fn reject_existing_state_directory_symlink(path: &FsPath) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(anyhow!(
+            "refusing to use symlinked state directory `{}`",
+            path.display()
+        )),
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => permission_hardening_failure(path, err),
+    }
+}
+
+#[cfg(unix)]
+fn harden_existing_state_file_permissions(path: &FsPath) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            reject_existing_state_file_symlink(path)
+        }
+        Ok(metadata) if metadata.is_file() => harden_local_state_file_permissions(path),
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => permission_hardening_failure(path, err),
+    }
+}
+
+#[cfg(unix)]
+fn sqlite_sidecar_path(path: &FsPath, suffix: &str) -> PathBuf {
+    let mut sidecar = path.as_os_str().to_os_string();
+    sidecar.push(suffix);
+    PathBuf::from(sidecar)
+}
+
+#[cfg(all(test, unix))]
+mod state_permission_hardening_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::symlink;
+
+    static ENV_MUTEX: std::sync::LazyLock<std::sync::Mutex<()>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
+    fn temp_permission_root() -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "termal-state-permissions-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).expect("create temp permission root");
+        root
+    }
+
+    fn mode(path: &FsPath) -> u32 {
+        fs::metadata(path)
+            .expect("inspect mode")
+            .permissions()
+            .mode()
+            & 0o777
+    }
+
+    fn set_mode(path: &FsPath, mode: u32) {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode))
+            .expect("set broad test mode");
+    }
+
+    #[test]
+    fn state_file_hardening_sets_owner_only_file_mode() {
+        let root = temp_permission_root();
+        let file = root.join("termal.sqlite");
+        fs::write(&file, b"state").expect("write temp file");
+        set_mode(&file, 0o666);
+
+        harden_local_state_file_permissions(&file).expect("harden state file");
+
+        assert_eq!(mode(&file), 0o600);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn state_directory_hardening_sets_owner_only_directory_mode() {
+        let root = temp_permission_root();
+        let dir = root.join("state-dir");
+        fs::create_dir(&dir).expect("create temp dir");
+        set_mode(&dir, 0o777);
+
+        harden_local_state_directory_permissions(&dir).expect("harden state dir");
+
+        assert_eq!(mode(&dir), 0o700);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn state_directory_hardening_rejects_symlinked_directories() {
+        let root = temp_permission_root();
+        let target = root.join("outside-state-dir");
+        let link = root.join("state-dir-link");
+        fs::create_dir(&target).expect("create state directory target");
+        set_mode(&target, 0o777);
+        symlink(&target, &link).expect("create state directory symlink");
+
+        let error = harden_local_state_directory_permissions(&link)
+            .expect_err("symlinked state directory should be rejected");
+
+        assert!(format!("{error:#}").contains("symlinked state directory"));
+        assert_eq!(mode(&target), 0o777);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sqlite_state_hardening_covers_main_file_and_sidecars() {
+        let root = temp_permission_root();
+        let db = root.join("termal.sqlite");
+        let paths = [
+            db.clone(),
+            sqlite_sidecar_path(&db, "-wal"),
+            sqlite_sidecar_path(&db, "-shm"),
+            sqlite_sidecar_path(&db, "-journal"),
+        ];
+        for path in &paths {
+            fs::write(path, b"state").expect("write sqlite state file");
+            set_mode(path, 0o666);
+        }
+
+        harden_sqlite_state_file_permissions(&db).expect("harden sqlite state files");
+
+        for path in &paths {
+            assert_eq!(mode(path), 0o600, "{}", path.display());
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn existing_state_file_hardening_rejects_symlinks() {
+        let root = temp_permission_root();
+        let target = root.join("outside-target");
+        let link = root.join("termal.sqlite-wal");
+        fs::write(&target, b"target").expect("write symlink target");
+        set_mode(&target, 0o644);
+        symlink(&target, &link).expect("create state-file sidecar symlink");
+
+        let error = harden_existing_state_file_permissions(&link)
+            .expect_err("symlink sidecar should be rejected");
+
+        assert!(format!("{error:#}").contains("symlinked state path"));
+        assert_eq!(mode(&target), 0o644);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sqlite_state_hardening_rejects_symlinked_main_and_sidecar_paths() {
+        let root = temp_permission_root();
+        let main_target = root.join("outside-main");
+        let sidecar_target = root.join("outside-wal");
+        let db = root.join("termal.sqlite");
+        fs::write(&main_target, b"main").expect("write main target");
+        fs::write(&sidecar_target, b"wal").expect("write sidecar target");
+        set_mode(&main_target, 0o644);
+        set_mode(&sidecar_target, 0o644);
+        symlink(&main_target, &db).expect("create main symlink");
+
+        let main_error = harden_sqlite_state_file_permissions(&db)
+            .expect_err("symlinked main database should be rejected");
+        assert!(format!("{main_error:#}").contains("symlinked state path"));
+
+        fs::remove_file(&db).expect("remove main symlink");
+        fs::write(&db, b"state").expect("write real main database");
+        symlink(&sidecar_target, sqlite_sidecar_path(&db, "-wal"))
+            .expect("create sidecar symlink");
+
+        let sidecar_error = harden_sqlite_state_file_permissions(&db)
+            .expect_err("symlinked sidecar should be rejected");
+        assert!(format!("{sidecar_error:#}").contains("symlinked state path"));
+        assert_eq!(mode(&main_target), 0o644);
+        assert_eq!(mode(&sidecar_target), 0o644);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn insecure_state_permission_override_does_not_allow_symlinks() {
+        let _guard = ENV_MUTEX
+            .lock()
+            .expect("state permission env mutex poisoned");
+        let original = std::env::var_os("TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS");
+        unsafe {
+            std::env::set_var("TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS", "true");
+        }
+        let root = temp_permission_root();
+        let target = root.join("outside-target");
+        let link = root.join("termal.sqlite");
+        fs::write(&target, b"target").expect("write symlink target");
+        symlink(&target, &link).expect("create state-file symlink");
+
+        let error = reject_existing_sqlite_state_file_symlinks(&link)
+            .expect_err("symlink refusal should ignore insecure-permission override");
+
+        assert!(format!("{error:#}").contains("symlinked state path"));
+        let _ = fs::remove_dir_all(root);
+        unsafe {
+            if let Some(value) = original {
+                std::env::set_var("TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS", value);
+            } else {
+                std::env::remove_var("TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS");
+            }
+        }
+    }
+
+    #[test]
+    fn insecure_state_permission_override_converts_failure_to_warning() {
+        let _guard = ENV_MUTEX
+            .lock()
+            .expect("state permission env mutex poisoned");
+        let original = std::env::var_os("TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS");
+        unsafe {
+            std::env::remove_var("TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS");
+        }
+        let path = FsPath::new("/tmp/termal-permission-test");
+
+        assert!(permission_hardening_failure(path, "forced failure").is_err());
+
+        unsafe {
+            std::env::set_var("TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS", "true");
+        }
+        assert!(permission_hardening_failure(path, "forced failure").is_ok());
+
+        unsafe {
+            if let Some(value) = original {
+                std::env::set_var("TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS", value);
+            } else {
+                std::env::remove_var("TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+fn persisted_state_size_limit_label(max_bytes: u64) -> String {
+    if max_bytes % BYTES_PER_MIB == 0 {
+        format!("{} MiB", max_bytes / BYTES_PER_MIB)
+    } else {
+        format!("{max_bytes} bytes")
+    }
+}
+
+#[cfg(test)]
+fn parse_legacy_json_state_max_bytes_override(raw: &str) -> Result<u64> {
+    let trimmed = raw.trim();
+    let max_bytes = trimmed.parse::<u64>().with_context(|| {
+        format!("{LEGACY_JSON_STATE_MAX_BYTES_ENV} must be a positive integer byte count")
+    })?;
+    if max_bytes == 0 {
+        bail!("{LEGACY_JSON_STATE_MAX_BYTES_ENV} must be greater than 0");
+    }
+    Ok(max_bytes)
+}
+
+#[cfg(test)]
+fn legacy_json_state_max_bytes() -> Result<u64> {
+    match std::env::var(LEGACY_JSON_STATE_MAX_BYTES_ENV) {
+        Ok(value) => {
+            let max_bytes = parse_legacy_json_state_max_bytes_override(&value)?;
+            if !LEGACY_JSON_STATE_MAX_BYTES_OVERRIDE_WARNED.swap(true, Ordering::Relaxed) {
+                eprintln!(
+                    "[termal] legacy state max bytes overridden via {LEGACY_JSON_STATE_MAX_BYTES_ENV} = {max_bytes}; default is {}",
+                    persisted_state_size_limit_label(MAX_LEGACY_JSON_STATE_BYTES)
+                );
+            }
+            Ok(max_bytes)
+        }
+        Err(std::env::VarError::NotPresent) => Ok(MAX_LEGACY_JSON_STATE_BYTES),
+        Err(std::env::VarError::NotUnicode(_)) => bail!(
+            "{LEGACY_JSON_STATE_MAX_BYTES_ENV} must be valid Unicode containing a positive integer byte count"
+        ),
+    }
+}
+
+#[cfg(test)]
+fn read_json_persisted_state_with_limit(
+    path: &FsPath,
+    max_bytes: u64,
+) -> Result<PersistedState> {
+    let metadata =
+        fs::metadata(path).with_context(|| format!("failed to inspect `{}`", path.display()))?;
+    let actual_bytes = metadata.len();
+    if actual_bytes > max_bytes {
+        let state_path = path.display();
+        let max_bytes_label = persisted_state_size_limit_label(max_bytes);
+        bail!(
+            "persisted state `{state_path}` is too large ({actual_bytes} bytes, max {max_bytes_label}). To import this trusted legacy state once, set `{LEGACY_JSON_STATE_MAX_BYTES_ENV}` to a byte value of at least {actual_bytes} and restart TermAl; after a successful import the JSON file is migrated to SQLite and renamed."
+        );
+    }
+
     let raw = fs::read(path).with_context(|| format!("failed to read `{}`", path.display()))?;
     let encoded: Value = serde_json::from_slice(&raw)
         .with_context(|| format!("failed to parse `{}`", path.display()))?;
     serde_json::from_value(encoded)
         .with_context(|| format!("failed to deserialize state from `{}`", path.display()))
+}
+
+#[cfg(test)]
+fn read_json_persisted_state(path: &FsPath) -> Result<PersistedState> {
+    let max_bytes = legacy_json_state_max_bytes()?;
+    read_json_persisted_state_with_limit(path, max_bytes)
 }
 
 /// Loads state.
@@ -74,82 +538,13 @@ fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
     })?))
 }
 
-/// Loads state from SQLite in production, importing the legacy JSON file once.
+/// Loads state from SQLite in production.
 #[cfg(not(test))]
 fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
-    let sqlite_path = sqlite_persistence_path_for_json_path(path);
-    if sqlite_path.exists() {
-        return load_state_from_sqlite(&sqlite_path);
-    }
     if !path.exists() {
         return Ok(None);
     }
-
-    let persisted = read_json_persisted_state(path)?;
-    let inner = persisted.clone().into_inner().with_context(|| {
-        format!("failed to validate state from `{}`", path.display())
-    })?;
-    persist_persisted_state_to_sqlite(&sqlite_path, &persisted)?;
-
-    let backup_path = imported_json_backup_path(path)?;
-    if let Err(err) = fs::rename(path, &backup_path) {
-        if let Err(cleanup_err) = fs::remove_file(&sqlite_path) {
-            eprintln!(
-                "[termal] failed to remove incomplete SQLite import `{}` after rename failure: {cleanup_err}",
-                sqlite_path.display()
-            );
-        }
-        return Err(err).with_context(|| {
-            format!(
-                "failed to rename imported state `{}` to `{}`",
-                path.display(),
-                backup_path.display()
-            )
-        });
-    }
-
-    eprintln!(
-        "[termal] imported `{}` into `{}`; legacy backup renamed to `{}`",
-        path.display(),
-        sqlite_path.display(),
-        backup_path.display()
-    );
-    Ok(Some(inner))
-}
-
-#[cfg(not(test))]
-fn imported_json_backup_path(path: &FsPath) -> Result<PathBuf> {
-    let parent = path.parent().unwrap_or_else(|| FsPath::new(""));
-    let stem = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("sessions");
-    let extension = path
-        .extension()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("json");
-    let timestamp = Local::now().format("%Y-%m-%d-%H%M%S");
-
-    for attempt in 0..1000 {
-        let suffix = if attempt == 0 {
-            String::new()
-        } else {
-            format!("-{attempt}")
-        };
-        let candidate = parent.join(format!(
-            "{stem}.imported-{timestamp}{suffix}.{extension}"
-        ));
-        if !candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-
-    Err(anyhow!(
-        "failed to choose an unused imported backup path for `{}`",
-        path.display()
-    ))
+    load_state_from_sqlite(path)
 }
 
 #[cfg(not(test))]
@@ -188,6 +583,10 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
 fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
     let connection = open_sqlite_state_connection(path)?;
     ensure_sqlite_state_schema(&connection)?;
+    // `open_sqlite_state_connection` already hardens the fresh handle, but
+    // schema initialization can create or recreate SQLite sidecars, so the
+    // startup read path deliberately re-runs the full main/sidecar pass.
+    harden_sqlite_state_file_permissions(path)?;
     let session_records = load_session_records_from_sqlite(&connection, path)?;
     // The legacy lookup is only consulted when the primary key is
     // missing. `.or(...)` would eagerly run both queries (both sides
@@ -197,17 +596,16 @@ fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
     // but wasteful on the happy path where `SQLITE_METADATA_KEY` is
     // always present post-migration. Structure as `if let` chains so
     // the legacy query only runs when the primary returns `None`.
-    let encoded = if let Some(encoded) =
-        sqlite_app_state_value(&connection, SQLITE_METADATA_KEY, path)?
-    {
-        encoded
-    } else if let Some(encoded) =
-        sqlite_app_state_value(&connection, SQLITE_LEGACY_STATE_KEY, path)?
-    {
-        encoded
-    } else {
-        return Ok(None);
-    };
+    let encoded =
+        if let Some(encoded) = sqlite_app_state_value(&connection, SQLITE_METADATA_KEY, path)? {
+            encoded
+        } else if let Some(encoded) =
+            sqlite_app_state_value(&connection, SQLITE_LEGACY_STATE_KEY, path)?
+        {
+            encoded
+        } else {
+            return Ok(None);
+        };
     let mut persisted: PersistedState = serde_json::from_str(&encoded)
         .with_context(|| format!("failed to parse persisted state from `{}`", path.display()))?;
     if !session_records.is_empty() {
@@ -246,7 +644,12 @@ fn load_session_records_from_sqlite(
         .with_context(|| format!("failed to prepare session load from `{}`", path.display()))?;
     let rows = statement
         .query_map([], |row| row.get::<_, String>(0))
-        .with_context(|| format!("failed to query persisted sessions from `{}`", path.display()))?;
+        .with_context(|| {
+            format!(
+                "failed to query persisted sessions from `{}`",
+                path.display()
+            )
+        })?;
     let mut records = Vec::new();
     for row in rows {
         let encoded =
@@ -269,19 +672,21 @@ fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) 
 }
 
 #[cfg(not(test))]
-fn persist_created_session(path: &FsPath, inner: &StateInner, record: &SessionRecord) -> Result<()> {
-    let metadata = PersistedState::metadata_from_inner(inner);
-    let session = PersistedSessionRecord::from_record(record);
-    persist_state_parts_to_sqlite(
-        &sqlite_persistence_path_for_json_path(path),
-        &metadata,
-        std::slice::from_ref(&session),
-        false,
-    )
+fn persist_created_session(
+    path: &FsPath,
+    inner: &StateInner,
+    _record: &SessionRecord,
+) -> Result<()> {
+    let persisted = PersistedState::from_inner(inner);
+    persist_persisted_state_to_sqlite(path, &persisted)
 }
 
 #[cfg(test)]
-fn persist_created_session(path: &FsPath, inner: &StateInner, _record: &SessionRecord) -> Result<()> {
+fn persist_created_session(
+    path: &FsPath,
+    inner: &StateInner,
+    _record: &SessionRecord,
+) -> Result<()> {
     let persisted = PersistedState::from_inner(inner);
     persist_state_from_persisted(path, &persisted)
 }
@@ -294,8 +699,7 @@ fn persist_state_parts_to_sqlite(
     replace_sessions: bool,
 ) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create `{}`", parent.display()))?;
+        create_local_state_directory(parent)?;
     }
 
     let mut connection = open_sqlite_state_connection(path)?;
@@ -319,9 +723,12 @@ fn persist_state_parts_via_connection(
 ) -> Result<()> {
     let metadata_json =
         serde_json::to_string(metadata).context("failed to serialize persisted state metadata")?;
-    let tx = connection
-        .transaction()
-        .with_context(|| format!("failed to start SQLite transaction for `{}`", path.display()))?;
+    let tx = connection.transaction().with_context(|| {
+        format!(
+            "failed to start SQLite transaction for `{}`",
+            path.display()
+        )
+    })?;
     tx.execute(
         "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
@@ -344,6 +751,7 @@ fn persist_state_parts_via_connection(
     }
     tx.commit()
         .with_context(|| format!("failed to commit persisted state to `{}`", path.display()))?;
+    harden_sqlite_state_file_permissions(path)?;
     Ok(())
 }
 
@@ -375,17 +783,20 @@ impl SqlitePersistConnectionCache {
     fn connection_for(&mut self, path: &FsPath) -> Result<&mut rusqlite::Connection> {
         let matches_cache = self.path.as_deref() == Some(path);
         if !matches_cache {
-            // Path changed (or first open): drop any stale connection and
-            // open+validate fresh. Dropping the stale connection first
-            // lets rusqlite flush any pending state before we rebind.
-            self.connection = None;
-            self.path = None;
+            // Path changed (or first open): open+validate the replacement
+            // first so a transient failure does not speculatively discard a
+            // still-working cached connection.
             if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("failed to create `{}`", parent.display()))?;
+                create_local_state_directory(parent)?;
             }
             let connection = open_sqlite_state_connection(path)?;
             ensure_sqlite_state_schema(&connection)?;
+            // Deliberately repeat the open-time hardening after schema
+            // validation because SQLite may create sidecars between the two
+            // points; cached reuses skip this until the next successful commit.
+            harden_sqlite_state_file_permissions(path)?;
+            self.connection = None;
+            self.path = None;
             self.path = Some(path.to_path_buf());
             self.connection = Some(connection);
         }
@@ -466,14 +877,13 @@ fn persist_delta_via_cache_inner(
     path: &FsPath,
     delta: &PersistDelta,
 ) -> Result<()> {
-    let sqlite_path = sqlite_persistence_path_for_json_path(path);
     let metadata_json = serde_json::to_string(&delta.metadata)
         .context("failed to serialize persisted state metadata")?;
-    let connection = cache.connection_for(&sqlite_path)?;
+    let connection = cache.connection_for(path)?;
     let tx = connection.transaction().with_context(|| {
         format!(
             "failed to start SQLite transaction for `{}`",
-            sqlite_path.display()
+            path.display()
         )
     })?;
     tx.execute(
@@ -484,7 +894,7 @@ fn persist_delta_via_cache_inner(
     .with_context(|| {
         format!(
             "failed to write state metadata to `{}`",
-            sqlite_path.display()
+            path.display()
         )
     })?;
     for session_id in &delta.removed_session_ids {
@@ -496,13 +906,13 @@ fn persist_delta_via_cache_inner(
             format!(
                 "failed to remove session `{}` from `{}`",
                 session_id,
-                sqlite_path.display()
+                path.display()
             )
         })?;
     }
     for session in &delta.changed_sessions {
-        let session_json = serde_json::to_string(session)
-            .context("failed to serialize persisted session")?;
+        let session_json =
+            serde_json::to_string(session).context("failed to serialize persisted session")?;
         tx.execute(
             "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)
              ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json",
@@ -512,23 +922,24 @@ fn persist_delta_via_cache_inner(
             format!(
                 "failed to write persisted session `{}` to `{}`",
                 session.session.id,
-                sqlite_path.display()
+                path.display()
             )
         })?;
     }
     tx.commit().with_context(|| {
         format!(
             "failed to commit persisted state to `{}`",
-            sqlite_path.display()
+            path.display()
         )
     })?;
+    harden_persist_commit_files(path)?;
     Ok(())
 }
 
 /// Persists state from a pre-built `PersistedState` snapshot.
 #[cfg(not(test))]
 fn persist_state_from_persisted(path: &FsPath, persisted: &PersistedState) -> Result<()> {
-    persist_persisted_state_to_sqlite(&sqlite_persistence_path_for_json_path(path), persisted)
+    persist_persisted_state_to_sqlite(path, persisted)
 }
 
 #[cfg(test)]
@@ -550,4 +961,3 @@ fn persist_state(path: &FsPath, inner: &StateInner) -> Result<()> {
     let persisted = PersistedState::from_inner(inner);
     persist_state_from_persisted(path, &persisted)
 }
-

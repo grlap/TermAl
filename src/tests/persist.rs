@@ -664,6 +664,138 @@ fn persisted_state_requires_queued_prompt_source() {
     let _ = fs::remove_file(path);
 }
 
+#[test]
+fn persisted_state_omits_runtime_session_mutation_stamp_on_save() {
+    let path =
+        std::env::temp_dir().join(format!("termal-runtime-mutation-stamp-{}", Uuid::new_v4()));
+    let mut inner = StateInner::new();
+    let record = inner.create_session(
+        Agent::Claude,
+        Some("Stamped".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
+    );
+    let session_id = record.session.id.clone();
+    let index = inner
+        .find_session_index(&session_id)
+        .expect("session should exist");
+    inner.sessions[index].mutation_stamp = 99;
+    inner.sessions[index].session.session_mutation_stamp = Some(99);
+
+    persist_state(&path, &inner).expect("persisted state should be written");
+
+    let encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap())
+        .expect("persisted state should deserialize");
+    {
+        let persisted_session = encoded["sessions"][0]["session"]
+            .as_object()
+            .expect("persisted session should be an object");
+        assert!(
+            !persisted_session.contains_key("sessionMutationStamp"),
+            "runtime mutation stamps must not be serialized into persisted sessions"
+        );
+    }
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn persisted_state_clears_runtime_session_mutation_stamp_on_load() {
+    let path = std::env::temp_dir().join(format!(
+        "termal-runtime-mutation-stamp-load-{}",
+        Uuid::new_v4()
+    ));
+    let mut inner = StateInner::new();
+    inner.create_session(
+        Agent::Claude,
+        Some("Stamped".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
+    );
+    persist_state(&path, &inner).expect("persisted state should be written");
+
+    let mut encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap())
+        .expect("persisted state should deserialize");
+    encoded["sessions"][0]["session"]
+        .as_object_mut()
+        .expect("persisted session should be an object")
+        .insert("sessionMutationStamp".to_owned(), Value::from(99));
+    fs::write(&path, serde_json::to_vec(&encoded).unwrap()).expect("persisted state should update");
+
+    let loaded = load_state(&path)
+        .expect("persisted state should load")
+        .expect("persisted state should exist");
+    assert_eq!(loaded.sessions[0].session.session_mutation_stamp, None);
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn persisted_state_rejects_oversized_legacy_json_before_reading() {
+    let path =
+        std::env::temp_dir().join(format!("termal-oversized-legacy-state-{}", Uuid::new_v4()));
+    fs::write(&path, b"{}").expect("oversized state fixture should be written");
+
+    let err = match read_json_persisted_state_with_limit(&path, 1) {
+        Ok(_) => panic!("oversized persisted state should fail to load"),
+        Err(err) => err,
+    };
+    let err_text = format!("{err:#}");
+    assert!(
+        err_text.contains("is too large"),
+        "unexpected load_state error: {err_text}"
+    );
+    assert!(
+        err_text.contains("max 1 bytes"),
+        "error should include the byte cap: {err_text}"
+    );
+    assert!(
+        err_text.contains(LEGACY_JSON_STATE_MAX_BYTES_ENV),
+        "error should name the import-size override: {err_text}"
+    );
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn max_legacy_json_state_bytes_pin() {
+    assert_eq!(MAX_LEGACY_JSON_STATE_BYTES, 100 * 1024 * 1024);
+}
+
+#[test]
+fn legacy_json_state_max_bytes_override_parses_positive_byte_count() {
+    assert_eq!(
+        parse_legacy_json_state_max_bytes_override("209715200").expect("override should parse"),
+        200 * 1024 * 1024
+    );
+}
+
+#[test]
+fn legacy_json_state_max_bytes_override_rejects_zero() {
+    let err = parse_legacy_json_state_max_bytes_override("0")
+        .expect_err("zero-byte override should fail");
+    let err_text = format!("{err:#}");
+    assert!(
+        err_text.contains("must be greater than 0"),
+        "unexpected override error: {err_text}"
+    );
+}
+
+#[test]
+fn legacy_json_state_max_bytes_override_rejects_invalid_inputs() {
+    for raw in ["abc", "100MB", "", "   ", "-1"] {
+        let err = parse_legacy_json_state_max_bytes_override(raw)
+            .expect_err("invalid override should fail");
+        let err_text = format!("{err:#}");
+        assert!(
+            err_text.contains("must be a positive integer byte count"),
+            "unexpected override error for {raw:?}: {err_text}"
+        );
+    }
+}
+
 // Builds an `AppState` like `test_app_state` but with a LIVE
 // persist channel receiver so the caller can observe
 // `PersistRequest` signals. The default `test_app_state` drops
@@ -707,6 +839,150 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         inner: Arc::new(Mutex::new(StateInner::new())),
     };
     (state, persist_rx)
+}
+
+#[test]
+fn persist_worker_retry_state_doubles_and_resets_backoff() {
+    let mut retry_state = PersistWorkerRetryState::default();
+
+    let failure: Result<()> = Err(anyhow!("injected persist failure"));
+    retry_state.record_result(&failure);
+    assert!(retry_state.retry_after_failure);
+    assert_eq!(
+        retry_state.retry_delay,
+        PERSIST_RETRY_SEED_DELAY * 2,
+        "first failure should arm the first retry wait"
+    );
+
+    retry_state.record_result(&Ok(()));
+    assert!(!retry_state.retry_after_failure);
+    assert_eq!(
+        retry_state.retry_delay, PERSIST_RETRY_SEED_DELAY,
+        "successful retry should reset the next failure to the baseline backoff"
+    );
+}
+
+#[test]
+fn persist_worker_retry_wait_times_out_without_new_delta() {
+    let (_persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
+    let retry_state = PersistWorkerRetryState {
+        retry_after_failure: true,
+        retry_delay: Duration::from_millis(1),
+    };
+
+    assert!(
+        retry_state.wait_for_next_tick(&persist_rx),
+        "timeout while the channel is still connected should trigger a retry tick"
+    );
+}
+
+#[test]
+fn persist_worker_retry_wait_accepts_new_delta_during_backoff() {
+    let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
+    let retry_state = PersistWorkerRetryState {
+        retry_after_failure: true,
+        retry_delay: Duration::from_secs(30),
+    };
+    persist_tx
+        .send(PersistRequest::Delta)
+        .expect("test persist signal should send");
+
+    assert!(
+        retry_state.wait_for_next_tick(&persist_rx),
+        "new persist signals during backoff should wake the worker immediately"
+    );
+}
+
+#[test]
+fn persist_worker_retry_wait_observes_shutdown_during_backoff() {
+    let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
+    drop(persist_tx);
+    let retry_state = PersistWorkerRetryState {
+        retry_after_failure: true,
+        retry_delay: Duration::from_secs(30),
+    };
+
+    assert!(
+        !retry_state.wait_for_next_tick(&persist_rx),
+        "disconnected retry wait should stop the worker instead of spinning"
+    );
+}
+
+#[test]
+fn persist_delta_restore_requeues_only_drained_explicit_tombstones() {
+    let mut inner = StateInner::new();
+    let removed_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("removed".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let hidden_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("hidden".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let hidden_index = inner
+        .find_session_index(&hidden_id)
+        .expect("hidden session should exist");
+    inner
+        .session_mut_by_index(hidden_index)
+        .expect("hidden session should be mutable")
+        .hidden = true;
+    let removed_index = inner
+        .find_session_index(&removed_id)
+        .expect("removed session should exist");
+    inner.remove_session_at(removed_index);
+
+    let delta = inner.collect_persist_delta(0);
+
+    assert_eq!(delta.drained_explicit_tombstones, vec![removed_id.clone()]);
+    assert_eq!(
+        delta
+            .removed_session_ids
+            .iter()
+            .filter(|id| id.as_str() == removed_id.as_str())
+            .count(),
+        1
+    );
+    assert_eq!(
+        delta
+            .removed_session_ids
+            .iter()
+            .filter(|id| id.as_str() == hidden_id.as_str())
+            .count(),
+        1
+    );
+    assert!(inner.removed_session_ids.is_empty());
+
+    inner.restore_drained_explicit_tombstones(&delta.drained_explicit_tombstones);
+    inner.restore_drained_explicit_tombstones(&delta.drained_explicit_tombstones);
+    assert_eq!(inner.removed_session_ids, vec![removed_id.clone()]);
+
+    let retry_delta = inner.collect_persist_delta(0);
+
+    assert_eq!(
+        retry_delta.drained_explicit_tombstones,
+        vec![removed_id.clone()]
+    );
+    assert_eq!(
+        retry_delta
+            .removed_session_ids
+            .iter()
+            .filter(|id| id.as_str() == hidden_id.as_str())
+            .count(),
+        1,
+        "hidden-session deletes should be regenerated, not restored as explicit tombstones"
+    );
 }
 
 // Regression guard: `commit_session_created_locked` must route
