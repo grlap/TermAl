@@ -43,7 +43,7 @@ Also fixed in the current tree: action-state adoption now returns an explicit ou
 
 Also fixed in the current tree: reconnect fallback polling now has the converse replacement-instance test proving a data-bearing SSE `state` event after `EventSource.onopen` disarms subsequent polls, while bare `onopen` does not. `SessionPaneView` narrows retry-display map memoization to the classifier inputs (`activeSession?.messages` and `activeSession?.status`), and the duplicated exhaustive-switch helpers now use a shared `ui/src/exhaustive.ts` `assertNever`.
 
-Also fixed in the current tree: reconnect rearm-on-success keeps the original same-instance revision-parity guard for one-shot probes while timer-driven reconnect fallback requests carry an explicit "rearm until live event" option. The replacement-instance fake-timer tests use a timing margin around the rearmed backoff boundary to account for `settleAsyncUi`'s fake-timer drain. The remaining same-instance catch-up behavior is tracked below because `/api/state` can still masquerade as SSE recovery.
+Also fixed in the current tree: reconnect rearm-on-success keeps the original same-instance revision-parity guard for one-shot probes while timer-driven reconnect fallback requests carry an explicit "rearm until live event" option. The replacement-instance fake-timer tests use a timing margin around the rearmed backoff boundary to account for `settleAsyncUi`'s fake-timer drain. Later reconnect fixes split automatic same-instance progress from manual-retry live-stream proof, so `/api/state` catch-up no longer masquerades as SSE recovery.
 
 Also fixed in the current tree: action recovery options no longer inherit adoption-side `openSessionId`/`paneId`; only `recoveryOpenSessionId`/`recoveryPaneId` can set recovery navigation. Retry-display renderer invalidation now includes a retry-state signature so classification changes propagate without tying the renderer to every map rebuild. The defensive `"unmounted"` action outcome is documented as caller-equivalent to no-success, `app-session-actions.test.ts` covers the adopted branch reading from response sessions, and `ui/src/exhaustive.ts` has the required split-file provenance header.
 
@@ -137,29 +137,26 @@ Also fixed in the current tree: `AdoptActionStateOptions` now documents the adop
 
 Also fixed in the current tree: math fence ids still deliberately include line positions, but the source now documents why that asymmetry is acceptable compared with Mermaid iframe remounts.
 
-Also fixed in the current tree: same-instance reconnect fallback adoption no longer masquerades as live SSE recovery. Automatic reconnect probes stop self-rearming after a same-instance `/api/state` snapshot strictly advances the revision, which resets watchdog baselines without creating an endless polling loop. Manual reconnect retry has an explicit opt-in that keeps polling after same-instance snapshot progress until a data-bearing SSE event confirms the stream, and the backend-connection regression now pins that path. The non-backend preferences fallback regression now seeds the current-instance session before asserting the replacement snapshot was rejected. SQLite state-file symlink rejection now runs before SQLite opens/configures the database path, covers known sidecars, and cannot be downgraded by `TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS`.
+Also fixed in the current tree: same-instance reconnect fallback adoption no longer masquerades as live SSE recovery. Automatic reconnect probes stop self-rearming after a same-instance `/api/state` snapshot strictly advances the revision, which resets watchdog baselines without creating an endless polling loop. Manual reconnect retry has an explicit opt-in that keeps polling after same-instance snapshot progress until a data-bearing SSE event confirms the stream, and the backend-connection regression now pins that path. The non-backend preferences fallback regression now seeds the current-instance session before asserting the replacement snapshot was rejected. SQLite state-file symlink rejection now runs before SQLite opens/configures the database path, covers known sidecars, and cannot be downgraded by `TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS`; Windows builds now reject reparse-point state directories, database files, and sidecars before opening SQLite.
 
 Also fixed in the current tree: failed queued-prompt cancel fallback now has `useAppSessionActions` coverage proving the passive `adoptState` refresh, no action-recovery resync, and original error reporting. Deferred session-store pruning now has hook-level coverage for queued delta ids that disappear before the pending render frame flushes. Connection-retry display state now keeps a content-stable map identity and the renderer callback depends on the actual map instead of a signature proxy. The duplicate Mermaid body ordinal edge case is documented as an accepted trade-off. Recoverable visible-session hydration errors now document their visible-pane/delta-replay semantics and BAD_GATEWAY kind contract, fallback logging records both the recoverable cause and any secondary fallback failure, and `ApiErrorKind` is documented as in-process-only metadata. Persist retry waiting now matches `PersistRequest` explicitly, SQLite cache replacement validates the new connection before replacing the old one, post-commit hardening is a path-keyed helper, and Unix directory hardening rejects symlinked state directories. The app-live-state test harness no longer uses the synthetic `hydrationRun` prop. (Backend reconnect tests still hardcode many `400/799/1599/3199/4999/5000` literals and the offline-restart regression still bypasses the actual `online` event listener — both tracked separately below.)
 
 ## Active Repo Bugs
 
-## Watchdog test still fails — reconnect probe self-rearms after adopting a strictly-newer same-instance snapshot
+## Manual reconnect stale probe drops the live-SSE recovery contract
 
-**Severity:** High - `ui/src/app-live-state.ts:1741-1766`. `App.live-state.watchdog.test.tsx > "resets the watchdog drift baseline after a long reconnect resync completes"` still fails with `expected 4 to be 1`. After `dispatchError` arms a 400ms reconnect probe and the probe's fetch resolves with strictly-newer revision, the success branch executes `if (rearmOnSuccess && !reconnectRecoveryConfirmedSinceLastError && reconnectStateResyncTimeoutId === null) → scheduleReconnectStateResync()` because `reconnectRecoveryConfirmedSinceLastError` only flips inside data-bearing SSE handlers. In wake-gap scenarios where no fresh SSE data follows, the rearmed timer fires repeatedly. The test trace: probe #1 succeeds adopt → arms timer at 400ms; probe #2 throws (mock rejects) → rearmOnFailure schedules; #3 throws; #4 throws. Round-15 review summary erroneously stated this was fixed; round-16 verification confirms it remains red.
+**Severity:** Medium - `ui/src/app-live-state.ts:1742`. Manual reconnect retry opts into polling until a data-bearing SSE event proves the stream is healthy, but a stale same-instance `/api/state` response can reschedule the next reconnect probe without carrying that stronger option forward.
 
-The conflict: `rearmUntilLiveEventOnSuccess: true` correctly keeps reconnect-fallback tests polling until SSE confirms recovery, but the same flag causes the watchdog test (which never feeds an SSE data event) to see 4 fetches instead of 1 after the probe successfully adopts a newer-revision snapshot.
+If the next probe then adopts a newer same-instance snapshot, polling can stop before SSE recovery is proven. The snapshot repairs visible state, but it does not prove future assistant output has a live path back into the UI, so the latest response can still depend on another unrelated trigger.
 
 **Current behavior:**
-- Reconnect probe with `rearmUntilLiveEventOnSuccess: true` rearms after every successful adoption while no live SSE data arrives.
-- An adopted snapshot whose `state.revision > requestedRevision` does not flip `reconnectRecoveryConfirmedSinceLastError`.
-- A backend whose SSE has degraded but whose `/api/state` works is polled forever.
-- This is the same regression carrying since round 12.
+- Manual reconnect retry starts a recovery probe with `rearmAfterSameInstanceProgressUntilLiveEvent: true`.
+- The stale same-instance branch schedules the next reconnect poll with default options.
+- A later same-instance catch-up snapshot can stop polling before a data-bearing SSE event confirms recovery.
 
 **Proposal:**
-- Treat an adopted snapshot whose `state.revision > requestedRevision` (strictly advanced past the requested revision) as recovery confirmation: flip `reconnectRecoveryConfirmedSinceLastError = true` (or a narrower "snapshot recovery confirmed" flag) and stop the rearm.
-- Or split `rearmOnSuccess` from `rearmUntilLiveEventOnSuccess` so that without the latter, an adoption that advanced the revision disarms.
-- Either way, `shouldRearmAfterSuccess` should be false when the fetch advanced the revision.
-- Verify by re-running the full `App.live-state.*.test.tsx` suite (both the watchdog test and the three "keeps reconnect fallback polling armed" tests).
+- Pass `rearmAfterSameInstanceProgressUntilLiveEvent` through the stale same-instance `scheduleReconnectStateResync(...)` call.
+- Add a regression where manual retry receives a stale snapshot first, then a newer same-instance snapshot, and continues polling until live SSE data arrives.
 
 ## `useAppSessionActions` ref cluster has grown from 1 to 4 to feed the rejected-action classifier
 
@@ -378,25 +375,61 @@ The conflict: `rearmUntilLiveEventOnSuccess: true` correctly keeps reconnect-fal
 
 ## `App.live-state.reconnect.test.tsx` does not pin the "latest assistant message stays hidden until another action" invariant
 
-**Severity:** Low - The closest coverage at lines 1505 and 1582 pins the polling-armed invariant but does not assert the visibility side. A regression that exposes the latest assistant message before SSE confirms could slip in.
+**Severity:** Low - The closest coverage at lines 1505 and 1582 pins reconnect polling/disarm timing, but does not assert the visibility side. A regression that exposes the latest assistant message before SSE confirms could slip in.
 
 **Proposal:**
 - Add a test that dispatches a fallback `_sseFallback` snapshot containing only the user prompt (no assistant reply yet), confirms the assistant message is not shown, then either adopts a fresh SSE state event with the assistant text or simulates "another action" and asserts visibility.
 
-## Manual reconnect retry can stop polling before SSE recovery is proven
+## `applyDeltaToSessions` duplicates the "lookup first, metadata-only fallback when missing" pattern across five non-created delta types
 
-**Severity:** Medium - `ui/src/app-live-state.ts:1854`. The manual backend reconnect action clears the current reconnect timer, then starts an immediate `/api/state` probe with `rearmUntilLiveEventOnSuccess: false`.
-
-An HTTP snapshot can prove the backend is reachable and repair visible state, but it does not prove the `EventSource` stream is open and delivering live events. If the manual retry adopts a fresh same-instance snapshot while SSE remains broken, reconnect fallback polling can stop before later assistant output has any live path back into the UI.
+**Severity:** Low - `ui/src/live-updates.ts:329-599`. The reordered `messagesLoaded === false` branch (apply to in-memory message when present, fall back to metadata-only only when `messageIndex === -1`) is now repeated five times across `messageUpdated`, `textDelta`, `textReplace`, `commandUpdate`, and `parallelAgentsUpdate`. The previous code had the same shape duplicated five times in the wrong order; the new code is now the right order duplicated five times. A future sixth retained-non-created delta type will need to re-derive the same flow.
 
 **Current behavior:**
-- `requestBackendReconnectRef` clears the reconnect timeout and resets reconnect backoff.
-- The manual retry state resync opts out of live-event rearming.
-- `ui/src/backend-connection.test.tsx:1521` currently asserts that polling stops after a fresh `/api/state` response.
+- Each branch independently re-implements `findMessageIndex` -> `if (-1 && !messagesLoaded) metadata-only` -> `if (-1) needsResync` -> type-narrow -> apply.
+- The existing duplication is what let the fallback land in the wrong order originally; the next protocol addition has the same cliff.
 
 **Proposal:**
-- Treat manual reconnect retry like timer-driven reconnect fallback: allow `/api/state` to repair state, but keep reconnect polling armed until a data-bearing SSE event confirms recovery.
-- Update the backend-connection regression to expect continued polling until live SSE data confirms the stream.
+- Extract a `tryApplyMetadataOnlyFallbackForMissingTarget(session, sessionIndex, sessions, delta)` helper (or similar) that centralizes the missing-target/unhydrated decision so each delta type calls a single helper instead of inlining the same branch.
+- Defer to a dedicated pure-code-move commit per CLAUDE.md.
+
+## `scheduleReconnectStateResync` and Windows reparse-point preflight lack source-level documentation
+
+**Severity:** Low - `ui/src/app-live-state.ts:1534-1566`, `ui/src/app-live-state.ts:1779-1783`, and `src/persist.rs:225-242`. Three new shared/public-API surfaces with non-obvious contracts ship without nearby comments.
+
+**Current behavior:**
+- `scheduleReconnectStateResync({ rearmAfterSameInstanceProgressUntilLiveEvent })` has three call sites threading the same flag for slightly different reasons; the function-level intent ("manual-retry contract requires live-SSE proof, not snapshot adoption") is not written down.
+- The success-rearm conjunction `rearmAfterSameInstanceProgressUntilLiveEvent && shouldRearmUntilLiveEvent` reads as a redundant AND because `shouldRearmUntilLiveEvent` is itself partly derived from the same flag; the intent ("carry the manual-retry contract forward only while we're still polling for live SSE proof") is not explained inline.
+- `reject_existing_windows_state_path_redirection` rejects any reparse tag (junction, symlink, mount point) using a hand-rolled `FILE_ATTRIBUTE_REPARSE_POINT = 0x400` constant. The function lacks a comment documenting (a) the threat (path redirection of the SQLite state dir / db / sidecars), (b) why `0x400` is hard-coded inline rather than pulled from `windows-sys`, (c) why it is intentionally `not(test)`, (d) why the `TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS` override is correctly never consulted (no Windows permission-hardening pass exists for it to relax).
+
+**Proposal:**
+- Add a JSDoc to `scheduleReconnectStateResync` describing the option's semantics and cross-link to the manual-retry call site.
+- Add an inline comment at the success-rearm conjunction explaining "carry the manual-retry contract forward only while still in the until-live-event regime."
+- Add a doc-comment block on `reject_existing_windows_state_path_redirection` covering the four points above; cite the MSDN file-attribute reference for `0x400`.
+
+## Windows reparse-point preflight checks the parent dir from the file rejector instead of mirroring the Unix layout
+
+**Severity:** Low - `src/persist.rs:208-217`. On Unix, the parent-directory reparse-point check is owned by `harden_local_state_directory_permissions` -> `reject_existing_state_directory_symlink`, and `reject_existing_sqlite_state_file_symlinks` only handles the main file plus sidecars. On Windows the parent-directory check is stuffed into `reject_existing_sqlite_state_file_symlinks` (`if let Some(parent) = path.parent() { reject_existing_windows_state_path_redirection(parent)?; }`) because `harden_local_state_directory_permissions` is the existing `not(unix)` no-op.
+
+**Current behavior:**
+- Same conceptual check (parent-dir reparse-point/symlink) lives in two different functions across platforms.
+- Future readers chasing the "where is the parent guard?" thread land in different files depending on cfg.
+
+**Proposal:**
+- Add a Windows-specific `harden_local_state_directory_permissions` that calls `reject_existing_windows_state_path_redirection(path)` and returns `Ok(())`.
+- Drop the `path.parent()` block from the Windows `reject_existing_sqlite_state_file_symlinks` so it only handles the main file + sidecars (mirroring the Unix structure).
+- Keep the existing `not(unix), not(windows)` no-op as-is.
+
+## `live-updates.test.ts` "applies retained non-created deltas" bundles five delta types into one `it()` block
+
+**Severity:** Low - `ui/src/live-updates.test.ts:1655-1888`. The new "applies retained non-created deltas while the transcript is marked unhydrated" test covers `messageUpdated`, `textDelta`, `textReplace`, `commandUpdate`, and `parallelAgentsUpdate` serially within a single `it(...)`. If an early assertion fails, downstream cases never run and the failure trace doesn't pinpoint which delta type regressed.
+
+**Current behavior:**
+- Five distinct scenarios share one `it` block with sequential `expect` blocks.
+- The companion metadata-only-fallback test at lines 1890-1929 covers only `textDelta` for the missing-target path (already tracked as a P2 backlog item).
+
+**Proposal:**
+- Split into five `it(...)` blocks (one per delta type) or use `it.each(...)` with a table that mirrors the existing P2 missing-target task.
+- Pure mechanical change.
 
 ## Production SQLite persistence is bypassed in the test build
 
@@ -413,22 +446,6 @@ Many production SQLite helpers in `src/persist.rs` are `#[cfg(not(test))]`, so e
 - Make the SQLite persistence path testable under `cargo test` with temp database files.
 - Add coverage for full snapshot save/load, delta upsert, metadata-only update, hidden/deleted session row removal, and startup load from SQLite.
 - Keep legacy JSON fixture tests separate from production runtime persistence tests.
-
-## SQLite symlink rejection is Unix-only
-
-**Severity:** Low - `src/persist.rs:207`. Unix builds now reject symlinked SQLite database and sidecar paths before opening SQLite, but the non-Unix `reject_existing_sqlite_state_file_symlinks` implementation is a no-op.
-
-Windows is a P0 platform. A pre-created `~/.termal/termal.sqlite` symlink, sidecar symlink, or `.termal` directory junction/symlink can redirect persisted session history before SQLite opens the database.
-
-**Current behavior:**
-- Unix preflight checks use `symlink_metadata` for the main database and known sidecars.
-- Non-Unix preflight returns `Ok(())`.
-- Windows relies on ACL inheritance but does not reject path redirection before SQLite open.
-
-**Proposal:**
-- Add Windows preflight rejection for the state directory, main database path, and known sidecar paths before opening SQLite.
-- Use `symlink_metadata` plus Windows reparse-point checks where needed.
-- Add Windows-gated tests for file symlink and directory junction cases.
 
 ## `SessionPaneView.tsx` and `app-session-actions.ts` past architecture file-size thresholds
 
@@ -961,7 +978,9 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 - [ ] P2: Add production SQLite persistence coverage:
   make the SQLite runtime persistence path available under `cargo test`, then cover temp-database full snapshot save/load, delta upsert, metadata-only update, hidden/deleted row removal, and startup load.
-- [ ] P2: Update manual reconnect recovery coverage:
-  change the backend-connection manual retry regression so a successful `/api/state` probe repairs state but reconnect polling continues until data-bearing SSE confirms recovery.
 - [ ] P2: Add Windows state-path redirection coverage:
   cover SQLite main-file symlinks, sidecar symlinks, and `.termal` directory junction/symlink cases behind Windows-gated tests.
+- [ ] P2: Add unhydrated non-created delta fallback coverage:
+  table-drive missing-target metadata-only fallback tests for `messageUpdated`, `textReplace`, `commandUpdate`, and `parallelAgentsUpdate` to match the existing `textDelta` coverage.
+- [ ] P2: Add reconnect-rearm regression for `rearmAfterSameInstanceProgressUntilLiveEvent` plumbing:
+  cover (a) manual retry first sees a stale same-instance snapshot then a strictly-newer same-instance snapshot, asserting polling continues until a data-bearing SSE event arrives (pins the `app-live-state.ts:1742` stale-snapshot reschedule path); (b) manual retry hits a transient failure and on the next attempt adopts a newer same-instance snapshot, asserting polling still continues until SSE confirms (pins the `app-live-state.ts:1815` failure-rearm path).

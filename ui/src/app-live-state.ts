@@ -1534,7 +1534,11 @@ export function useAppLiveState(
       setBackendConnectionState("connected");
     }
 
-    function scheduleReconnectStateResync() {
+    function scheduleReconnectStateResync({
+      rearmAfterSameInstanceProgressUntilLiveEvent = false,
+    }: {
+      rearmAfterSameInstanceProgressUntilLiveEvent?: boolean;
+    } = {}) {
       // Preserve any reopen proof until a real EventSource.onerror starts a new
       // outage cycle. Otherwise a bad post-reopen event can arm fallback polling
       // and strand the client in "reconnecting" even when later events on the
@@ -1555,6 +1559,7 @@ export function useAppLiveState(
           allowAuthoritativeRollback: true,
           rearmOnSuccess: true,
           rearmUntilLiveEventOnSuccess: true,
+          rearmAfterSameInstanceProgressUntilLiveEvent,
           rearmOnFailure: true,
         });
       }, delayMs);
@@ -1771,7 +1776,11 @@ export function useAppLiveState(
                     latestStateRevisionRef.current === requestedRevision) ||
                   adoptedReplacementInstance;
                 if (shouldRearmAfterSuccess) {
-                  scheduleReconnectStateResync();
+                  scheduleReconnectStateResync({
+                    rearmAfterSameInstanceProgressUntilLiveEvent:
+                      rearmAfterSameInstanceProgressUntilLiveEvent &&
+                      shouldRearmUntilLiveEvent,
+                  });
                 }
               }
             } catch (error) {
@@ -1803,7 +1812,9 @@ export function useAppLiveState(
                   // Re-arm reconnect polling so a failed one-shot probe (e.g.
                   // manual retry) does not leave the client without any automatic
                   // recovery path until the next EventSource onerror fires.
-                  scheduleReconnectStateResync();
+                  scheduleReconnectStateResync({
+                    rearmAfterSameInstanceProgressUntilLiveEvent,
+                  });
                 }
               }
               break;

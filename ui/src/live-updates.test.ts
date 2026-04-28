@@ -1652,6 +1652,283 @@ describe("applyDeltaToSessions", () => {
     expect(result.sessions[0].sessionMutationStamp).toBe(777);
   });
 
+  it("applies retained non-created deltas while the transcript is marked unhydrated", () => {
+    const approvalResult = applyDeltaToSessions(
+      [
+        makeSession("session-a", {
+          messagesLoaded: false,
+          messageCount: 1,
+          messages: [
+            {
+              id: "approval-1",
+              type: "approval",
+              timestamp: "10:00",
+              author: "assistant",
+              title: "Run command?",
+              command: "cargo check",
+              detail: "Allow this command",
+              decision: "pending",
+            },
+          ],
+        }),
+      ],
+      {
+        type: "messageUpdated",
+        revision: 4,
+        sessionId: "session-a",
+        messageId: "approval-1",
+        messageIndex: 0,
+        messageCount: 1,
+        message: {
+          id: "approval-1",
+          type: "approval",
+          timestamp: "10:00",
+          author: "assistant",
+          title: "Run command?",
+          command: "cargo check",
+          detail: "Allow this command",
+          decision: "accepted",
+        },
+        preview: "Approved",
+        status: "active",
+        sessionMutationStamp: 201,
+      },
+    );
+    expect(approvalResult.kind).toBe("applied");
+    if (approvalResult.kind !== "applied") {
+      throw new Error("expected message update to apply");
+    }
+    expect(approvalResult.sessions[0].messagesLoaded).toBe(false);
+    expect(approvalResult.sessions[0].messages[0]).toMatchObject({
+      id: "approval-1",
+      type: "approval",
+      decision: "accepted",
+    });
+
+    const textDeltaResult = applyDeltaToSessions(
+      [
+        makeSession("session-a", {
+          messagesLoaded: false,
+          messageCount: 1,
+          messages: [
+            {
+              id: "message-1",
+              type: "text",
+              timestamp: "10:01",
+              author: "assistant",
+              text: "Streaming",
+            },
+          ],
+        }),
+      ],
+      {
+        type: "textDelta",
+        revision: 5,
+        sessionId: "session-a",
+        messageId: "message-1",
+        messageIndex: 0,
+        messageCount: 1,
+        delta: " answer",
+        preview: "Streaming answer",
+        sessionMutationStamp: 202,
+      },
+    );
+    expect(textDeltaResult.kind).toBe("applied");
+    if (textDeltaResult.kind !== "applied") {
+      throw new Error("expected text delta to apply");
+    }
+    expect(textDeltaResult.sessions[0].messagesLoaded).toBe(false);
+    expect(textDeltaResult.sessions[0].messages[0]).toMatchObject({
+      id: "message-1",
+      type: "text",
+      text: "Streaming answer",
+    });
+
+    const textReplaceResult = applyDeltaToSessions(
+      [
+        makeSession("session-a", {
+          messagesLoaded: false,
+          messageCount: 1,
+          messages: [
+            {
+              id: "message-1",
+              type: "text",
+              timestamp: "10:01",
+              author: "assistant",
+              text: "Draft answer",
+            },
+          ],
+        }),
+      ],
+      {
+        type: "textReplace",
+        revision: 6,
+        sessionId: "session-a",
+        messageId: "message-1",
+        messageIndex: 0,
+        messageCount: 1,
+        text: "Final answer",
+        preview: "Final answer",
+        sessionMutationStamp: 203,
+      },
+    );
+    expect(textReplaceResult.kind).toBe("applied");
+    if (textReplaceResult.kind !== "applied") {
+      throw new Error("expected text replace to apply");
+    }
+    expect(textReplaceResult.sessions[0].messagesLoaded).toBe(false);
+    expect(textReplaceResult.sessions[0].messages[0]).toMatchObject({
+      id: "message-1",
+      type: "text",
+      text: "Final answer",
+    });
+
+    const commandResult = applyDeltaToSessions(
+      [
+        makeSession("session-a", {
+          messagesLoaded: false,
+          messageCount: 1,
+          messages: [
+            {
+              id: "command-1",
+              type: "command",
+              timestamp: "10:02",
+              author: "assistant",
+              command: "pwd",
+              output: "",
+              status: "running",
+            },
+          ],
+        }),
+      ],
+      {
+        type: "commandUpdate",
+        revision: 7,
+        sessionId: "session-a",
+        messageId: "command-1",
+        messageIndex: 0,
+        messageCount: 1,
+        command: "pwd",
+        output: "/tmp",
+        status: "success",
+        preview: "/tmp",
+        sessionMutationStamp: 204,
+      },
+    );
+    expect(commandResult.kind).toBe("applied");
+    if (commandResult.kind !== "applied") {
+      throw new Error("expected command update to apply");
+    }
+    expect(commandResult.sessions[0].messagesLoaded).toBe(false);
+    expect(commandResult.sessions[0].messages[0]).toMatchObject({
+      id: "command-1",
+      type: "command",
+      output: "/tmp",
+      status: "success",
+    });
+
+    const parallelResult = applyDeltaToSessions(
+      [
+        makeSession("session-a", {
+          messagesLoaded: false,
+          messageCount: 1,
+          messages: [
+            {
+              id: "parallel-1",
+              type: "parallelAgents",
+              timestamp: "10:03",
+              author: "assistant",
+              agents: [
+                {
+                  id: "reviewer",
+                  title: "Reviewer",
+                  status: "initializing",
+                },
+              ],
+            },
+          ],
+        }),
+      ],
+      {
+        type: "parallelAgentsUpdate",
+        revision: 8,
+        sessionId: "session-a",
+        messageId: "parallel-1",
+        messageIndex: 0,
+        messageCount: 1,
+        agents: [
+          {
+            id: "reviewer",
+            title: "Reviewer",
+            status: "running",
+            detail: "Checking diffs",
+          },
+        ],
+        preview: "Running reviewer",
+        sessionMutationStamp: 205,
+      },
+    );
+    expect(parallelResult.kind).toBe("applied");
+    if (parallelResult.kind !== "applied") {
+      throw new Error("expected parallel-agents update to apply");
+    }
+    expect(parallelResult.sessions[0].messagesLoaded).toBe(false);
+    expect(parallelResult.sessions[0].messages[0]).toMatchObject({
+      id: "parallel-1",
+      type: "parallelAgents",
+      agents: [
+        {
+          id: "reviewer",
+          title: "Reviewer",
+          status: "running",
+          detail: "Checking diffs",
+        },
+      ],
+    });
+  });
+
+  it("keeps metadata-only fallback for unhydrated deltas whose target message is absent", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 1,
+        preview: "Previous",
+        messages: [
+          {
+            id: "message-previous",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Previous answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "textDelta",
+      revision: 9,
+      sessionId: "session-a",
+      messageId: "missing-message",
+      messageIndex: 1,
+      messageCount: 2,
+      delta: " unseen chunk",
+      preview: "Updated preview",
+      sessionMutationStamp: 206,
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected metadata-only delta to apply");
+    }
+    expect(result.sessions[0].messagesLoaded).toBe(false);
+    expect(result.sessions[0].messages).toEqual(sessions[0].messages);
+    expect(result.sessions[0].messageCount).toBe(2);
+    expect(result.sessions[0].preview).toBe("Updated preview");
+    expect(result.sessions[0].sessionMutationStamp).toBe(206);
+  });
+
   it("applies text deltas to an existing message", () => {
     const sessions = [
       makeSession("session-a", {

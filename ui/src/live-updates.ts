@@ -335,23 +335,22 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
 
-      if (session.messagesLoaded === false) {
-        return {
-          kind: "applied",
-          sessions: replaceSession(
-            sessions,
-            sessionIndex,
-            applyMetadataOnlySessionDelta(session, delta),
-          ),
-        };
-      }
-
       const messageIndex = findMessageIndex(
         session.messages,
         delta.messageId,
         delta.messageIndex,
       );
       if (messageIndex === -1) {
+        if (session.messagesLoaded === false) {
+          return {
+            kind: "applied",
+            sessions: replaceSession(
+              sessions,
+              sessionIndex,
+              applyMetadataOnlySessionDelta(session, delta),
+            ),
+          };
+        }
         return { kind: "needsResync" };
       }
 
@@ -380,28 +379,29 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
-      if (session.messagesLoaded === false) {
-        return {
-          kind: "applied",
-          sessions: replaceSession(
-            sessions,
-            sessionIndex,
-            applyMetadataOnlySessionDelta(session, delta),
-          ),
-        };
-      }
       const messageIndex = findMessageIndex(
         session.messages,
         delta.messageId,
         delta.messageIndex,
       );
       if (messageIndex === -1) {
+        if (session.messagesLoaded === false) {
+          return {
+            kind: "applied",
+            sessions: replaceSession(
+              sessions,
+              sessionIndex,
+              applyMetadataOnlySessionDelta(session, delta),
+            ),
+          };
+        }
         return { kind: "needsResync" };
       }
-
       const message = session.messages[messageIndex];
       if (!message || message.id !== delta.messageId) {
-        return { kind: "needsResync" };
+        return {
+          kind: "needsResync",
+        };
       }
       if (message.type !== "text") {
         return { kind: "needsResync" };
@@ -434,28 +434,29 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
-      if (session.messagesLoaded === false) {
-        return {
-          kind: "applied",
-          sessions: replaceSession(
-            sessions,
-            sessionIndex,
-            applyMetadataOnlySessionDelta(session, delta),
-          ),
-        };
-      }
       const messageIndex = findMessageIndex(
         session.messages,
         delta.messageId,
         delta.messageIndex,
       );
       if (messageIndex === -1) {
+        if (session.messagesLoaded === false) {
+          return {
+            kind: "applied",
+            sessions: replaceSession(
+              sessions,
+              sessionIndex,
+              applyMetadataOnlySessionDelta(session, delta),
+            ),
+          };
+        }
         return { kind: "needsResync" };
       }
-
       const message = session.messages[messageIndex];
       if (!message || message.id !== delta.messageId) {
-        return { kind: "needsResync" };
+        return {
+          kind: "needsResync",
+        };
       }
       if (message.type !== "text") {
         return { kind: "needsResync" };
@@ -488,28 +489,29 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
-      if (session.messagesLoaded === false) {
-        return {
-          kind: "applied",
-          sessions: replaceSession(
-            sessions,
-            sessionIndex,
-            applyMetadataOnlySessionDelta(session, delta),
-          ),
-        };
-      }
       const messageIndex = findMessageIndex(
         session.messages,
         delta.messageId,
         delta.messageIndex,
       );
       if (messageIndex === -1) {
+        if (session.messagesLoaded === false) {
+          return {
+            kind: "applied",
+            sessions: replaceSession(
+              sessions,
+              sessionIndex,
+              applyMetadataOnlySessionDelta(session, delta),
+            ),
+          };
+        }
         return { kind: "needsResync" };
       }
-
       const message = session.messages[messageIndex];
       if (!message || message.id !== delta.messageId) {
-        return { kind: "needsResync" };
+        return {
+          kind: "needsResync",
+        };
       }
       if (message.type !== "command") {
         return { kind: "needsResync" };
@@ -546,28 +548,29 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
-      if (session.messagesLoaded === false) {
-        return {
-          kind: "applied",
-          sessions: replaceSession(
-            sessions,
-            sessionIndex,
-            applyMetadataOnlySessionDelta(session, delta),
-          ),
-        };
-      }
       const messageIndex = findMessageIndex(
         session.messages,
         delta.messageId,
         delta.messageIndex,
       );
       if (messageIndex === -1) {
+        if (session.messagesLoaded === false) {
+          return {
+            kind: "applied",
+            sessions: replaceSession(
+              sessions,
+              sessionIndex,
+              applyMetadataOnlySessionDelta(session, delta),
+            ),
+          };
+        }
         return { kind: "needsResync" };
       }
-
       const message = session.messages[messageIndex];
       if (!message || message.id !== delta.messageId) {
-        return { kind: "needsResync" };
+        return {
+          kind: "needsResync",
+        };
       }
       if (message.type !== "parallelAgents") {
         return { kind: "needsResync" };

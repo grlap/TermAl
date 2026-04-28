@@ -204,9 +204,41 @@ fn reject_existing_sqlite_state_file_symlinks(path: &FsPath) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(not(test), not(unix)))]
+#[cfg(all(not(test), windows))]
+fn reject_existing_sqlite_state_file_symlinks(path: &FsPath) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        reject_existing_windows_state_path_redirection(parent)?;
+    }
+    reject_existing_windows_state_path_redirection(path)?;
+    reject_existing_windows_state_path_redirection(&sqlite_sidecar_path(path, "-wal"))?;
+    reject_existing_windows_state_path_redirection(&sqlite_sidecar_path(path, "-shm"))?;
+    reject_existing_windows_state_path_redirection(&sqlite_sidecar_path(path, "-journal"))?;
+    Ok(())
+}
+
+#[cfg(all(not(test), not(unix), not(windows)))]
 fn reject_existing_sqlite_state_file_symlinks(_path: &FsPath) -> Result<()> {
     Ok(())
+}
+
+#[cfg(all(not(test), windows))]
+fn reject_existing_windows_state_path_redirection(path: &FsPath) -> Result<()> {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 => {
+            Err(anyhow!(
+                "refusing to follow redirected state path `{}`",
+                path.display()
+            ))
+        }
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err)
+            .with_context(|| format!("failed to inspect state path `{}`", path.display())),
+    }
 }
 
 #[cfg(unix)]
@@ -248,7 +280,7 @@ fn harden_existing_state_file_permissions(path: &FsPath) -> Result<()> {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, all(not(test), windows)))]
 fn sqlite_sidecar_path(path: &FsPath, suffix: &str) -> PathBuf {
     let mut sidecar = path.as_os_str().to_os_string();
     sidecar.push(suffix);
