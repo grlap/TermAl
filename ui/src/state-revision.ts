@@ -20,10 +20,10 @@ export function shouldAdoptSnapshotRevision(
     lastSeenServerInstanceId?: string | null;
     /**
      * The `serverInstanceId` carried by the incoming snapshot. When
-     * both ids are non-empty and differ, the server has restarted only
-     * if the incoming id is new to this browser tab. Empty ids (from
-     * older servers or fallback payloads) are treated as "unknown" and
-     * cannot trigger the restart branch.
+     * both ids are non-empty and differ, the caller must also opt into
+     * accepting unknown ids via `allowUnknownServerInstance`. Empty ids (from
+     * older servers or fallback payloads) are treated as "unknown" and cannot
+     * trigger the restart branch.
      */
     nextServerInstanceId?: string | null;
     /**
@@ -32,13 +32,19 @@ export function shouldAdoptSnapshotRevision(
      * instances after a newer restart was already adopted.
      */
     seenServerInstanceIds?: ReadonlySet<string>;
+    /**
+     * Unknown mismatched instance ids are only trustworthy on explicit
+     * restart-recovery paths. Ordinary snapshots/actions must not infer
+     * "new backend" from an unseen id because a late old-process response can
+     * have an id this tab never adopted.
+     */
+    allowUnknownServerInstance?: boolean;
   },
 ): boolean {
-  // Server restart detection is authoritative only for unseen ids. If
-  // the id changed to a new instance, every monotonic assumption about
-  // the revision counter is invalid. If the changed id was already
-  // seen, it is a late response from an older instance and must not
-  // bypass the monotonic guard.
+  // A previously seen mismatched id is always a late old-process response.
+  // An unseen mismatched id is only accepted when the caller has independent
+  // restart evidence (SSE reconnect state, fallback/manual recovery, or a
+  // recovery probe requested after detecting a cross-instance response).
   if (
     isServerInstanceMismatch(
       options?.lastSeenServerInstanceId,
@@ -51,7 +57,7 @@ export function shouldAdoptSnapshotRevision(
     ) {
       return false;
     }
-    return true;
+    return options?.allowUnknownServerInstance === true;
   }
 
   if (!options?.force) {

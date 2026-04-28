@@ -539,6 +539,13 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
         &expected_preview,
         1,
         &message_id,
+        |message| match message {
+            Message::Approval {
+                decision: ApprovalDecision::AcceptedForSession,
+                ..
+            } => {}
+            _ => panic!("expected accepted-for-session approval message"),
+        },
     );
     match input_rx.recv_timeout(Duration::from_millis(50)) {
         Ok(ClaudeRuntimeCommand::SetPermissionMode(mode)) => {
@@ -634,13 +641,16 @@ fn assert_interaction_response_session_hydrated(
     expected_preview: &str,
     expected_message_count: u32,
     expected_message_id: &str,
+    assert_message: impl FnOnce(&Message),
 ) {
     assert_eq!(session.status, expected_status);
     assert_eq!(session.preview, expected_preview);
     assert!(session.messages_loaded);
     assert_eq!(session.message_count, expected_message_count);
     assert_eq!(session.messages.len(), expected_message_count as usize);
-    assert_eq!(session.messages[0].id(), expected_message_id);
+    let message = &session.messages[0];
+    assert_eq!(message.id(), expected_message_id);
+    assert_message(message);
 }
 
 fn assert_no_state_and_one_message_updated_delta(
@@ -774,6 +784,23 @@ async fn submit_codex_user_input_route_updates_message_and_publishes_message_upd
         &expected_preview,
         1,
         &message_id,
+        |message| match message {
+            Message::UserInputRequest {
+                state,
+                submitted_answers,
+                ..
+            } => {
+                assert_eq!(state, &InteractionRequestState::Submitted);
+                assert_eq!(
+                    submitted_answers.as_ref(),
+                    Some(&BTreeMap::from([(
+                        "choice".to_owned(),
+                        vec!["Yes".to_owned()],
+                    )]))
+                );
+            }
+            _ => panic!("expected submitted user input request message"),
+        },
     );
 
     match input_rx.recv_timeout(Duration::from_millis(50)) {
@@ -903,6 +930,22 @@ async fn submit_codex_mcp_elicitation_route_updates_message_and_publishes_messag
         &expected_preview,
         1,
         &message_id,
+        |message| match message {
+            Message::McpElicitationRequest {
+                state,
+                submitted_action,
+                submitted_content,
+                ..
+            } => {
+                assert_eq!(state, &InteractionRequestState::Submitted);
+                assert_eq!(
+                    submitted_action.as_ref(),
+                    Some(&McpElicitationAction::Decline)
+                );
+                assert!(submitted_content.is_none());
+            }
+            _ => panic!("expected submitted MCP elicitation request message"),
+        },
     );
 
     match input_rx.recv_timeout(Duration::from_millis(50)) {
@@ -1016,6 +1059,17 @@ async fn submit_codex_app_request_route_updates_message_and_publishes_message_up
         &expected_preview,
         1,
         &message_id,
+        |message| match message {
+            Message::CodexAppRequest {
+                state,
+                submitted_result,
+                ..
+            } => {
+                assert_eq!(state, &InteractionRequestState::Submitted);
+                assert_eq!(submitted_result.as_ref(), Some(&result));
+            }
+            _ => panic!("expected submitted Codex app request message"),
+        },
     );
 
     match input_rx.recv_timeout(Duration::from_millis(50)) {

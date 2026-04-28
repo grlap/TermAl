@@ -2489,6 +2489,108 @@ describe("App session lifecycle", () => {
     });
   });
 
+  it("recovers instead of directly adopting an unknown cross-instance create response", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const createSessionDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.createSession>>>();
+      const actionRecoveryDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => actionRecoveryDeferred.promise);
+      const createSessionSpy = vi
+        .spyOn(api, "createSession")
+        .mockImplementation(() => createSessionDeferred.promise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+
+        await act(async () => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", makeStateResponse({
+            revision: 5,
+            serverInstanceId: "current-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }));
+          await flushUiWork();
+        });
+
+        await openCreateSessionDialog();
+        await settleAsyncUi();
+        await submitButtonAndSettle(
+          screen.getByRole("button", { name: "Create session" }),
+        );
+
+        await waitFor(() => {
+          expect(createSessionSpy).toHaveBeenCalledTimes(1);
+        });
+
+        await act(async () => {
+          createSessionDeferred.resolve({
+            sessionId: "session-cross-instance",
+            revision: 4,
+            serverInstanceId: "unknown-old-instance",
+            session: makeSession("session-cross-instance", {
+              name: "Cross Instance Session",
+            }),
+          });
+          await flushUiWork();
+        });
+
+        expect(
+          screen.queryByText("Cross Instance Session"),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByLabelText("Message Cross Instance Session"),
+        ).not.toBeInTheDocument();
+
+        await waitFor(() => {
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+        });
+
+        await act(async () => {
+          actionRecoveryDeferred.resolve(makeStateResponse({
+            revision: 6,
+            serverInstanceId: "current-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }));
+          await flushUiWork();
+        });
+
+        expect(
+          screen.queryByText("Cross Instance Session"),
+        ).not.toBeInTheDocument();
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        createSessionSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("opens the created session after action-recovery resync adopts a stale create response", async () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;

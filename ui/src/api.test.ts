@@ -1265,6 +1265,37 @@ describe("fetchState", () => {
     }
   });
 
+  it("propagates SyntaxError for invalid non-HTML JSON success responses", async () => {
+    expect.assertions(5);
+    const text = vi.fn(async () => '{"revision":');
+    const json = vi.fn();
+    const clone = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({
+          "Content-Type": "application/json",
+        }),
+        json,
+        text,
+        clone,
+      } as unknown as Response),
+    );
+
+    try {
+      await fetchState();
+      throw new Error("Expected fetchState to reject");
+    } catch (error) {
+      expect(text).toHaveBeenCalledTimes(1);
+      expect(json).not.toHaveBeenCalled();
+      expect(clone).not.toHaveBeenCalled();
+      expect(error).toBeInstanceOf(SyntaxError);
+      expect(isBackendUnavailableError(error)).toBe(false);
+    }
+  });
+
   it("detects HTML fallbacks after more than 256 bytes of leading whitespace", async () => {
     expect.assertions(3);
     vi.stubGlobal(

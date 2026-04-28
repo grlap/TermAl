@@ -481,9 +481,10 @@ export default function App() {
   const orchestratorsRef = useRef(orchestrators);
   const latestStateRevisionRef = useRef<number | null>(null);
   // The `serverInstanceId` the client last adopted, plus every
-  // non-empty instance id this tab has already accepted. A different
-  // unseen id is a server restart; a different already-seen id is a
-  // late response from an old process and must not roll the UI back.
+  // non-empty instance id this tab has already accepted. Different ids are
+  // only accepted on explicit restart-recovery paths; a different
+  // already-seen id is a late response from an old process and must not roll
+  // the UI back.
   // Updated in lockstep with `latestStateRevisionRef` inside
   // `adoptState` / `adoptCreatedSessionResponse` / `adoptFetchedSession`.
   // The set is intentionally tab-lifetime scoped: even thousands of
@@ -498,7 +499,13 @@ export default function App() {
   // declared before the hook is called.
   const requestBackendReconnectRef = useRef<() => void>(() => {});
   const requestActionRecoveryResyncRef = useRef<
-    (options?: { openSessionId?: string; paneId?: string | null }) => void
+    (
+      options?: {
+        openSessionId?: string;
+        paneId?: string | null;
+        allowUnknownServerInstance?: boolean;
+      },
+    ) => void
   >(() => {});
   const paneShouldStickToBottomRef = useRef<
     Record<string, boolean | undefined>

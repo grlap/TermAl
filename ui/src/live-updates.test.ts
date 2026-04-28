@@ -608,10 +608,10 @@ describe("applyDeltaToSessions", () => {
       revision: 1,
       sessionId: "session-a",
       messageId: "message-1",
-      messageIndex: 0,
-      messageCount: 1,
+      messageIndex: 1,
+      messageCount: 2,
       message: {
-        id: "different-payload-id",
+        id: "message-1",
         type: "text",
         timestamp: "10:00",
         author: "assistant",
@@ -633,7 +633,7 @@ describe("applyDeltaToSessions", () => {
     expect(result.sessions[0].messages).toEqual([]);
     expect(result.sessions[0].status).toBe("active");
     expect(result.sessions[0].preview).toBe("Waiting for activity.");
-    expect(result.sessions[0].messageCount).toBe(1);
+    expect(result.sessions[0].messageCount).toBe(2);
     expect(result.sessions[0].sessionMutationStamp).toBe(101);
   });
 
@@ -745,6 +745,256 @@ describe("applyDeltaToSessions", () => {
     expect(result.sessions[0].sessionMutationStamp).toBe(101);
   });
 
+  it("requests a resync when an unhydrated retained transcript receives a mismatched created message id", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 1,
+        messages: [
+          {
+            id: "message-previous",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Previous answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: "message-new-prompt",
+      messageIndex: 1,
+      messageCount: 2,
+      message: {
+        id: "different-payload-id",
+        type: "text",
+        timestamp: "10:01",
+        author: "you",
+        text: "Latest prompt",
+      },
+      preview: "Latest prompt",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("requests a resync when an unhydrated retained transcript receives an invalid created message index", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 1,
+        messages: [
+          {
+            id: "message-previous",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Previous answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: "message-new-prompt",
+      messageIndex: -1,
+      messageCount: 2,
+      message: {
+        id: "message-new-prompt",
+        type: "text",
+        timestamp: "10:01",
+        author: "you",
+        text: "Latest prompt",
+      },
+      preview: "Latest prompt",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("requests a resync when an unhydrated retained transcript receives an invalid created message count", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 1,
+        messages: [
+          {
+            id: "message-previous",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Previous answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: "message-new-prompt",
+      messageIndex: 1,
+      messageCount: Number.NaN,
+      message: {
+        id: "message-new-prompt",
+        type: "text",
+        timestamp: "10:01",
+        author: "you",
+        text: "Latest prompt",
+      },
+      preview: "Latest prompt",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("requests a resync when a new created message does not advance the retained transcript count", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 1,
+        messages: [
+          {
+            id: "message-previous",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Previous answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: "message-new-prompt",
+      messageIndex: 1,
+      messageCount: 1,
+      message: {
+        id: "message-new-prompt",
+        type: "text",
+        timestamp: "10:01",
+        author: "you",
+        text: "Latest prompt",
+      },
+      preview: "Latest prompt",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("retains a contiguous created message without marking an incomplete transcript loaded", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 5,
+        messages: [
+          {
+            id: "message-previous",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Previous answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: "message-new-prompt",
+      messageIndex: 1,
+      messageCount: 5,
+      message: {
+        id: "message-new-prompt",
+        type: "text",
+        timestamp: "10:01",
+        author: "you",
+        text: "Latest prompt",
+      },
+      preview: "Latest prompt",
+      status: "active",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+    expect(result.sessions[0].messagesLoaded).toBe(false);
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
+      "message-previous",
+      "message-new-prompt",
+    ]);
+    expect(result.sessions[0].messageCount).toBe(5);
+  });
+
+  it("requests a resync when a created message regresses the retained transcript count", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 2,
+        messages: [
+          {
+            id: "message-previous",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Previous answer",
+          },
+          {
+            id: "message-new-prompt",
+            type: "text",
+            timestamp: "10:01",
+            author: "you",
+            text: "Latest prompt",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "message-new-prompt",
+      messageIndex: 1,
+      messageCount: 1,
+      message: {
+        id: "message-new-prompt",
+        type: "text",
+        timestamp: "10:01",
+        author: "you",
+        text: "Latest prompt",
+      },
+      preview: "Latest prompt",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
   it("does not duplicate a replayed prompt delta while retaining an unhydrated transcript", () => {
     const sessions = [
       makeSession("session-a", {
@@ -852,6 +1102,96 @@ describe("applyDeltaToSessions", () => {
       "message-1",
       "message-2",
     ]);
+  });
+
+  it("requests a resync when an unhydrated retained transcript receives a mismatched updated message id", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 1,
+        messages: [
+          {
+            id: "approval-1",
+            type: "approval",
+            timestamp: "10:00",
+            author: "assistant",
+            title: "Run command?",
+            command: "cargo check",
+            detail: "Allow this command",
+            decision: "pending",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageUpdated",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "approval-1",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "different-approval",
+        type: "approval",
+        timestamp: "10:00",
+        author: "assistant",
+        title: "Run command?",
+        command: "cargo check",
+        detail: "Allow this command",
+        decision: "accepted",
+      },
+      preview: "Approved",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
+  });
+
+  it("requests a resync when an unhydrated retained transcript receives an invalid updated message index", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 1,
+        messages: [
+          {
+            id: "approval-1",
+            type: "approval",
+            timestamp: "10:00",
+            author: "assistant",
+            title: "Run command?",
+            command: "cargo check",
+            detail: "Allow this command",
+            decision: "pending",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageUpdated",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "approval-1",
+      messageIndex: -1,
+      messageCount: 1,
+      message: {
+        id: "approval-1",
+        type: "approval",
+        timestamp: "10:00",
+        author: "assistant",
+        title: "Run command?",
+        command: "cargo check",
+        detail: "Allow this command",
+        decision: "accepted",
+      },
+      preview: "Approved",
+      status: "active",
+    };
+
+    expect(applyDeltaToSessions(sessions, delta)).toEqual({
+      kind: "needsResync",
+    });
   });
 
   it("applies whole-message updates for resolved interaction requests", () => {

@@ -5,36 +5,162 @@ cleanup notes, implementation task ledgers, and external limitations do not belo
 
 ## Active Repo Bugs
 
-## Cross-instance snapshots can still adopt unknown server instances
+## Recovery probes reject newer unknown replacement snapshots
 
-**Severity:** Medium - `ui/src/app-live-state.ts` now rejects targeted session hydration responses from a different backend instance, but full snapshot adoption paths can still accept an unseen mismatched `serverInstanceId`.
+**Severity:** Medium - explicit `/api/state` recovery can fail after a backend restart if the replacement server instance has already advanced beyond the requested revision.
 
-The targeted hydration path correctly treats an unknown cross-instance `/api/sessions/{id}` response as a restart boundary and requests recovery. The broader snapshot paths (`adoptState`, action/create responses, and any shared revision gate they use) still need the same policy. A late `/api/state` or action response from an old server process can otherwise pass the revision gate, roll client state backward, and replace the current UI with stale metadata.
-
-**Current behavior:**
-- Targeted session hydration detects unknown mismatched server instances and refuses direct adoption.
-- Other snapshot-producing paths can still accept an unseen mismatched `serverInstanceId`.
-- Restart recovery is therefore only partially enforced at the state-adoption boundary.
-
-**Proposal:**
-- Move the unknown-mismatched-server policy into the shared snapshot revision/adoption gate.
-- Apply it consistently to `adoptState`, `adoptCreatedSessionResponse`, and any other full-snapshot response path.
-- Add coverage proving a stale cross-instance full snapshot cannot downgrade or replace current client state.
-
-## Interaction-response tests do not assert submitted payload state
-
-**Severity:** Medium - `src/tests/review.rs` interaction-response coverage verifies that the hydrated session contains the expected message id, but not that the message's submitted payload/state changed to the expected answer/action/content/result.
-
-That leaves an assertion hole: a route could return a hydrated `StateResponse` with a stale or still-pending interaction message while publishing the correct delta and sending the correct runtime response. The test would pass even though the response body no longer proves the persisted/hydrated session state is correct.
+The cross-instance safety gate now correctly rejects unknown server-instance ids by default, but the recovery loop only opts into unknown-instance adoption when the fetched state is same-revision or older via the rollback branch. A restarted backend can legitimately return a newer snapshot, especially under active traffic. In that case the recovery probe rejects the authoritative replacement snapshot and waits for a later SSE event or another resync trigger.
 
 **Current behavior:**
-- Shared interaction-response assertion checks for the message id in the returned hydrated session.
-- It does not assert the exact submitted interaction payload or final message state.
-- Per-route tests can miss stale hydrated response bodies.
+- Reconnect, action-recovery, watchdog, or manual recovery can fetch `/api/state` after restart evidence exists.
+- Unknown replacement `serverInstanceId` values are allowed only for the same/lower-revision rollback path or when an explicit caller flag is already set.
+- A newer replacement snapshot is rejected even though the recovery probe is the trusted authoritative path.
 
 **Proposal:**
-- Extend the helper to accept a message predicate, or add per-test assertions on `session.messages[0]`.
-- Assert exact submitted answers, actions, content, and result state for each interaction route.
+- Treat explicit recovery probes as restart evidence regardless of revision direction while still rejecting already-seen mismatched server-instance ids.
+- Derive the unknown-instance allowance from the authoritative recovery decision, not only from the rollback-only branch.
+- Add coverage where `/api/state` returns a newer revision with an unknown replacement instance and the client adopts it.
+
+## Cross-instance full-state test only exercises stale-revision rejection
+
+**Severity:** Medium - the new full-state rejection test does not prove the unknown-server-instance guard because its fixture is already stale by revision.
+
+The test that should pin unknown cross-instance full-state rejection uses a lower revision than the current client state. It would pass even if the server-instance check were removed, because the ordinary stale-revision guard rejects the snapshot first. This leaves the load-bearing restart-safety rule under-tested for snapshots that otherwise pass monotonic revision checks.
+
+**Current behavior:**
+- The app-level unknown-instance snapshot test sends a lower revision than the current state.
+- The test passes through the stale-revision path instead of proving the server-instance mismatch path.
+- `state-revision.test.ts` does not pair the higher-revision unknown mismatch with a negative assertion in the same context.
+
+**Proposal:**
+- Change the app-level fixture to use a higher revision so only the unknown-instance guard can reject it.
+- Add a focused `state-revision.test.ts` case where a higher-revision unknown replacement is rejected without `allowUnknownServerInstance`.
+- Keep the positive authorized case so both directions of the flag are pinned.
+
+## Authorized unknown-instance recovery probes lack positive integration coverage
+
+**Severity:** Medium - the recovery path that is supposed to trust a replacement server instance can regress without a focused integration failure.
+
+The current tests prove that unknown cross-instance responses are rejected and that recovery is requested. They do not prove that the subsequent authoritative `/api/state` recovery snapshot from the replacement instance is adopted and can reopen the intended session. That is the exact path users depend on after backend restart races.
+
+**Current behavior:**
+- Cross-instance create-response tests assert rejection and recovery dispatch.
+- Recovery snapshots in those tests are empty or same-instance enough that adoption success is not visible.
+- A regression that drops `allowUnknownServerInstance` propagation in the recovery loop can still pass the existing rejection-side assertions.
+
+**Proposal:**
+- Add an integration test where the client starts on one `serverInstanceId`, recovery fetches `/api/state` from a replacement instance, and the replacement state is adopted.
+- Resolve action-recovery fixtures with a non-empty session and assert the recovered session is visible or opened in the requested pane.
+- Include both same/lower-revision and newer-revision replacement cases if the production fix distinguishes them.
+
+## `AdoptCreatedSessionOutcome` `"recovering"` doc comment is now stale
+
+**Severity:** Medium - `ui/src/app-live-state.ts` `AdoptCreatedSessionOutcome` typedef and adjacent doc comment. The `"recovering"` variant doc still describes only "wire-contract violation (`session.id !== sessionId`)". After the cross-instance fix in this round, the same outcome is also returned for unknown cross-instance create responses (see the new `isUnknownCrossInstanceCreateResponse` branch at line ~1064). Both call sites (`handleCreateSession`, `handleForkCodexThread`) treat all non-`"adopted"` outcomes the same, so the immediate behavior is correct — but a future caller that wants to distinguish the two failure modes (e.g., to surface a different toast) will misread the contract.
+
+**Current behavior:**
+- The `"recovering"` outcome doc only mentions wire-contract violation.
+- The cross-instance recovery branch is the realistic path for backend-restart races — a backend restart between create-request and create-response is not rare.
+- Future call-site authors may infer that `"recovering"` is rare/unexpected and write code that tolerates only the wire-contract violation case.
+
+**Proposal:**
+- Extend the doc to add: `"recovering"` is also returned when an unknown cross-instance create response is detected and `requestActionRecoveryResyncRef` is dispatched with `allowUnknownServerInstance: true`. Callers MUST NOT open a workspace pane in either case.
+- Optionally split into two outcome variants (e.g., `"recoveringWireMismatch"` and `"recoveringCrossInstance"`) if call sites grow to need different handling.
+
+## `handleForkCodexThread` fires settings notice for unmaterialized session id on cross-instance recovery
+
+**Severity:** Medium - `ui/src/app-session-actions.ts:1603-1632`. `handleCreateSession` (line 668) gates the `setSessionSettingNotices` / `handleRefreshSessionModelOptions` follow-up work on `canUseCreatedSession` (false for `"recovering"` and for un-openable `"stale"`). `handleForkCodexThread` calls `setSessionSettingNotices` unconditionally on lines 1627-1632 — keyed by `created.sessionId`, an id that may not exist in the recovered snapshot and was never inserted into `sessionsRef`.
+
+The asymmetry is pre-existing under the old wire-contract-violation case for `"recovering"`, but the new cross-instance branch makes this path materially more reachable: a single backend restart during a fork can trigger it.
+
+**Current behavior:**
+- `handleCreateSession` and `handleForkCodexThread` handle the `"recovering"` outcome from `adoptCreatedSessionResponse` differently.
+- `handleForkCodexThread` sets a notice keyed by a session id that may never materialize.
+- The notice would briefly point at a non-existent session record after a cross-instance recovery.
+
+**Proposal:**
+- Mirror the `canUseCreatedSession` gate in `handleForkCodexThread` and skip notice-setting on `"recovering"` (and `"stale"` without `canOpenStaleCreatedSession`).
+- Or extract a shared helper that handles the three-way outcome consistently across both call sites.
+
+## Cross-instance create-response recovery integration test pins only the rejection half
+
+**Severity:** Low - `ui/src/App.session-lifecycle.test.tsx:2492-2592`. The new test "recovers instead of directly adopting an unknown cross-instance create response" asserts (a) the cross-instance session is NOT visible after the create response resolves and (b) `fetchState` is called for recovery. Both are correct rejection-side assertions. But both the cross-instance create response and the recovery snapshot have `sessions: []`, so the final negative assertion ("Cross Instance Session" not in document) passes regardless of whether the recovery snapshot was actually adopted, or whether it errored mid-adoption.
+
+The whole point of the new `allowUnknownServerInstance` flag is "trust the recovery probe to adopt a new id when we have evidence." That contract is currently unpinned by integration tests; only `state-revision.test.ts` covers the underlying primitive.
+
+**Current behavior:**
+- Test verifies recovery is *triggered* but not *completed* with usable post-state.
+- Recovery snapshot is empty, so a buggy recovery adoption that errored silently would still pass.
+- Sibling test "opens the created session after action-recovery resync adopts a stale create response" (lines 2692-2694) shows the established pattern for verifying recovery success.
+
+**Proposal:**
+- Resolve `actionRecoveryDeferred` with a non-empty session payload (e.g., `sessions: [makeSession("session-after-recovery", { name: "Recovery Session" })]`).
+- Assert `screen.findByLabelText("Message Recovery Session")` after recovery resolves.
+
+## Protocol-drift recovery does not opt into `allowUnknownServerInstance`
+
+**Severity:** Low - `ui/src/app-live-state.ts:1054-1062`. The wire-contract violation case (`created.session.id !== created.sessionId`) calls `requestActionRecoveryResyncRef.current()` with no args, so `allowUnknownServerInstance` defaults to `false`. If a backend restart and a wire-contract violation coincide (rare), the recovery probe will reject the new-instance snapshot. The new cross-instance branch at line 1064-1078 explicitly handles the realistic restart case; this older sibling does not.
+
+**Current behavior:**
+- Two "recovering" branches in `adoptCreatedSessionResponse` thread different recovery permissions.
+- The protocol-drift branch silently no-ops on a coinciding cross-instance restart.
+- Both branches signal "we already know something is off about this response", so the trust treatment should be consistent.
+
+**Proposal:**
+- Pass `allowUnknownServerInstance: true` in the protocol-drift recovery path so both branches converge on the same post-failure recovery contract.
+
+## `persistAppPreferences` fallback `adoptState` silently no-ops on cross-instance after restart
+
+**Severity:** Low - `ui/src/App.tsx:~1230`. `adoptState(state)` is called after `fetchState()` in the `persistAppPreferences` catch block. After this round, an SSE-tracked instance change between the failed `updateAppSettings` and this fallback `fetchState` will reject the snapshot (no `allowUnknownServerInstance` flag), leaving the preferences UI desynced from the actual backend until the next regular SSE state event arrives.
+
+Pre-fix the call would have silently accepted the new instance (the bug being fixed). Default-deny is still the safer baseline, but the silent no-op here is a small UX regression for the "user changed prefs while backend restarted" race.
+
+**Current behavior:**
+- `persistAppPreferences` catch path calls `adoptState(state)` directly without recovery routing.
+- A cross-instance fallback response is silently rejected.
+- The preferences UI desyncs from the backend until SSE delivers a fresh state.
+
+**Proposal:**
+- Route this fallback through `requestStateResync({ allowAuthoritativeRollback: true })` so the recovery probe owns the trust decision.
+- Or pass `allowUnknownServerInstance: true` if the fallback should always trust the post-restart backend.
+
+## State-resync option bag is spread across 10+ parallel module-scoped refs
+
+**Severity:** Low - `ui/src/app-live-state.ts:625-634`. Every new resync option requires four edits: declare ref, reset on cleanup, consume + clear at top of `startStateResyncLoop`, set in `requestStateResync`. The `allowUnknownServerInstance` addition followed this pattern correctly, joining `stateResyncAllowAuthoritativeRollbackRef`, `stateResyncPreserveReconnectFallbackRef`, `stateResyncPreserveWatchdogCooldownRef`, `stateResyncRearmOnSuccessRef`, and several others. The per-option ref count keeps growing.
+
+A single `pendingResyncOptionsRef: useRef<RequestStateResyncOptions | null>(null)` (with coalescing logic that ORs flags and overwrites session/pane on subsequent calls) would centralize the bookkeeping and turn the four-edit cost into a one-edit cost. A missing edit at any of the four sites currently surfaces only at code-review time; a struct-based pending bag would make missing one a TypeScript error.
+
+**Current behavior:**
+- Per-option ref count is now 10 (`stateResync*Ref` cluster).
+- Every new option requires four parallel edits.
+- The pattern is correct but easy to break under future maintenance.
+
+**Proposal:**
+- Defer to a dedicated cleanup commit per CLAUDE.md.
+- Replace the parallel refs with `pendingResyncOptionsRef: useRef<PendingResyncState | null>(null)` carrying the combined option set.
+- Add a small reducer that ORs flag fields and overwrites session/pane targets on subsequent calls.
+
+## `state-revision.test.ts` `allowUnknownServerInstance` paired negative test missing
+
+**Severity:** Note - `ui/src/state-revision.test.ts:160-173`. The renamed test "authorized restart signal wins over the explicit allowRevisionDowngrade: false gate" combines `allowRevisionDowngrade: false` with `allowUnknownServerInstance: true` and asserts `true`. A regression that ignored `allowUnknownServerInstance` and instead used `force` to bypass the rule would still pass.
+
+**Current behavior:**
+- Single positive assertion locks the "flag set → adoption allowed" direction.
+- No paired negative test locks "flag NOT set → adoption rejected" in the same context.
+
+**Proposal:**
+- Add a one-line companion: same inputs WITHOUT `allowUnknownServerInstance` should return `false`.
+- Pin both directions of the boolean to make the flag's role unambiguous.
+
+## Recovery-probe `paneId`/`openSessionId` propagation untested
+
+**Severity:** Note - `ui/src/app-live-state.ts:1071-1077` passes `openSessionId` and `paneId` into `requestActionRecoveryResyncRef` so the recovery probe can re-open the right pane after the authoritative snapshot lands. No test asserts they survive into `pendingRecoveryOpenSessionIdRef` — a regression that swallowed the openSessionId would not be caught.
+
+**Current behavior:**
+- The cross-instance recovery branch threads `openSessionId` and `paneId` through.
+- No integration test verifies the values survive the recovery round-trip.
+
+**Proposal:**
+- Optional follow-up — variant where the recovery snapshot includes the original session id and the test asserts it gets auto-opened on the active pane.
 
 ## `SessionPaneView.tsx` past 2,000-line review threshold for TSX components
 
@@ -52,80 +178,20 @@ The render-callback cluster is a clean extraction candidate — pure render-call
 - Defer to a dedicated split commit; do not couple with feature changes.
 - Keep the orchestration logic in `SessionPaneView.tsx`.
 
-## `request<T>` invalid-JSON-with-application/json-content-type path is not directly tested
-
-**Severity:** Medium - `ui/src/api.test.ts`. The new simplified `request<T>` flow at `ui/src/api.ts:403-425` propagates a raw `SyntaxError` for the case: response carries `Content-Type: application/json`, body is NOT HTML (so `looksLikeHtmlResponse` returns false), body is invalid JSON (so `JSON.parse(raw)` throws). The pre-simplification suite explicitly mocked `json: () => { throw new SyntaxError(...) }`; that branch is now exercised only by HTML-shaped invalid JSON, leaving the "looks like JSON garbage but isn't HTML" path silent.
-
-A future regression that accidentally double-reads the body (consuming the stream and producing an empty `raw`) or mis-handles JSON parse errors would not be caught by the new test suite.
-
-**Current behavior:**
-- HTML-shaped invalid JSON path is tested.
-- Truncated or invalid non-HTML JSON path is NOT tested.
-- A `SyntaxError` from `JSON.parse(raw)` propagates raw to consumers — `isBackendUnavailableError(e)` returns `false`, no `ApiRequestError` shape.
-
-**Proposal:**
-- Add a test that returns `Content-Type: application/json` with a body like `'{"foo":'` (truncated, non-HTML) and asserts the resulting error shape.
-- Decide whether the contract is (a) `SyntaxError` propagates as-is (current behavior), or (b) wrap `JSON.parse(raw)` in try/catch and throw `new ApiRequestError("request-failed", "The TermAl backend returned an unparseable JSON response.", ...)` for consistent error-shape with the rest of `api.ts`.
-
-## "Keeps a newly created prompt visible while active session hydration is pending" test does not pin its load-bearing regression
-
-**Severity:** High - `ui/src/App.live-state.deltas.test.tsx:1131-1140`. The new integration test resolves the deferred hydration via `sessionFetch.resolve(...)` and `flushUiWork()` but never re-asserts that the prompt bubble survives the late hydration response. The deferred `hydratedSession` fixture already contains `promptMessage` in its `messages` array, so even if `adoptFetchedSession` wrongly clobbered the in-flight delta state, the prompt would still render after hydration and the test would still pass.
-
-This is precisely the regression class the test purports to cover (round-13 callout: "late hydration overwriting the in-flight delta"). The sister test at line 610 ("does not let stale hydration clobber an in-flight text delta") gets this right by re-asserting `Hello world` survives the deferred hydration.
-
-**Current behavior:**
-- The deferred `hydratedSession` already contains `promptMessage`.
-- The trailing `act(...) { sessionFetch.resolve(...); await flushUiWork(); }` block has no follow-up assertion.
-- Both "in-flight delta survives" and "in-flight delta clobbered" code paths produce identical visible state.
-
-**Proposal:**
-- Change the deferred `hydratedSession` so its `messages` array does NOT contain `promptMessage` (only `message-previous`). Re-assert the prompt bubble is still rendered after `sessionFetch.resolve(...)` and `flushUiWork()`. Only the in-flight retention path can keep it visible; an erroneous adoption would visibly remove it.
-- Or assert `sessionsRef`/store-snapshot identity to prove the prompt was retained across the hydration adoption.
-
-## Switch refactor in hydration effect silently changes `restartResync` retry semantics
-
-**Severity:** Medium - `ui/src/app-live-state.ts:1358-1362`. The `if/else → switch` refactor moved `shouldRetryHydration = true` into the `restartResync` arm. Previously this case returned without setting the retry flag — the action-recovery `/api/state` probe was the single recovery path. The retry timer now fires after `SESSION_HYDRATION_RETRY_DELAYS_MS[0] = 50ms` while the action-recovery probe is still in flight, doubling request volume and weakening the previous "after `restartResync`, wait for state-event-driven re-hydration" invariant.
-
-The change is a behavior delta buried in what otherwise looks like a refactor. Three reviewers flagged it independently. There is no inline comment explaining the rationale and no test pinning the new behavior.
-
-**Current behavior:**
-- `restartResync` triggers BOTH `requestActionRecoveryResyncRef.current()` AND a hydration retry timer.
-- The retry timer fires at `SESSION_HYDRATION_RETRY_DELAYS_MS[0] = 50ms`, frequently before the resync probe completes.
-- Risk of duplicate `/api/sessions/{id}` fetches per cross-instance hydration mismatch.
-- No comment or test pins the new dual-path recovery.
-
-**Proposal:**
-- Either (a) drop `shouldRetryHydration = true` from the `restartResync` arm so action-recovery resync remains the single recovery path, restoring the previous semantics; or (b) keep the new behavior but add an inline comment explaining why retry-on-top-of-resync is desirable AND extend an existing `restartResync` integration test to assert the additional retry fires.
-
 ## Switch outcomes (`restartResync`/`stateResync`/offline-preserve) lack focused unit coverage
 
-**Severity:** Medium - `ui/src/app-live-state.ts:1306-1376`. The new exhaustive switch over `AdoptFetchedSessionOutcome` has four outcomes (`adopted`, `restartResync`, `stateResync`, `stale`) with distinct downstream effects, plus the offline-preserve reorder around line 2003-2007. Two behaviors changed in this round — `restartResync` now also sets `shouldRetryHydration = true`, and the new `stateResync` path — but neither is unit-tested at the function boundary. Only the `stateResync` outcome is exercised end-to-end; `restartResync`'s additional retry and offline-preserve are not.
+**Severity:** Medium - `ui/src/app-live-state.ts:1306-1376`. The exhaustive switch over `AdoptFetchedSessionOutcome` has four outcomes (`adopted`, `restartResync`, `stateResync`, `stale`) with distinct downstream effects, plus the offline-preserve reorder around line 2003-2007. The `restartResync` no-extra-retry invariant is now covered, but the remaining branch outcomes are still not covered at a focused boundary.
 
-A future refactor could swap the order of `requestActionRecoveryResyncRef.current()` and `shouldRetryHydration` in either branch and still pass.
+A future refactor could still swap side-effect order or retry behavior in these branches and pass the broad integration tests.
 
 **Current behavior:**
 - `adoptFetchedSession` is a 124-line nested-conditional function with side-effects baked into the caller.
 - No unit test asserts each outcome's downstream effects in isolation.
-- `restartResync`'s new retry behavior, the offline-preserve reorder, and the ahead-by-mutation-stamp `stateResync` branch are all uncovered.
+- The offline-preserve reorder and the ahead-by-mutation-stamp `stateResync` branch are still uncovered.
 
 **Proposal:**
 - Extract the outcome decision into a pure helper (e.g. `classifyFetchedSessionAdoption(...): AdoptFetchedSessionOutcome`) so the caller becomes purely the side-effects branch and the classification is unit-testable without the surrounding hook closure.
-- Add a focused test that asserts each outcome's downstream effects, particularly that `restartResync` triggers BOTH the resync request AND the retry, and that offline-cancelled resync preserves `hydrationRestartResyncPendingRef.current = true`.
-
-## Asymmetric malformed-delta handling between unhydrated and hydrated branches
-
-**Severity:** Low - `ui/src/live-updates.ts:225-247`. In the `messagesLoaded === false` branch, when `applyMessageCreatedDeltaToRetainedTranscript` returns `null` due to a protocol-shape violation (`delta.message.id !== delta.messageId` or invalid `messageIndex`), the code silently falls through to `applyMetadataOnlySessionDelta`. The `messagesLoaded === true` branch returns `needsResync` for the same shape violations.
-
-This means the same malformed payload yields different recovery depending on hydration state. The hydrated branch escalates correctly; the unhydrated branch tolerates it.
-
-**Current behavior:**
-- Same shape violation produces `applied` (metadata-only) on `messagesLoaded === false` but `needsResync` on `messagesLoaded === true`.
-- Helper signals all three null reasons (id-mismatch, invalid-index, gap) with the same return value.
-- Caller has no way to distinguish "legitimate gap, fall through to metadata-only" from "malformed payload, escalate to resync".
-
-**Proposal:**
-- Validate `delta.message.id === delta.messageId && isValidMessageIndex(delta.messageIndex)` upfront in the `messageCreated` case (before the `messagesLoaded === false` branch) and short-circuit to `needsResync` for both branches.
-- The retain helper would then only return `null` for the gap case, which is the legitimate metadata-only fallback.
+- Add focused tests asserting each outcome's downstream effects, particularly that offline-cancelled resync preserves `hydrationRestartResyncPendingRef.current = true` and that the ahead-by-mutation-stamp path requests a state resync.
 
 ## `adoptFetchedSession` 4-outcome state machine warrants extraction into a pure classifier
 
@@ -145,33 +211,18 @@ State-machine correctness is the load-bearing contract here. Embedding it in a 1
 
 ## `App.live-state.deltas.test.tsx` past 2,000-line review threshold
 
-**Severity:** Low - `ui/src/App.live-state.deltas.test.tsx`. File is now 3,237 lines and 17 `it` blocks after this round's +316 line addition, well past the architecture rubric §9 ~2,000-line threshold for TSX files. The header already lists three sibling files split out (`reconnect`, `visibility`, `watchdog`), establishing the per-cluster split pattern.
+**Severity:** Low - `ui/src/App.live-state.deltas.test.tsx`. File is now 3,435 lines and 18 `it` blocks after this round's cross-instance regression coverage, well past the architecture rubric §9 ~2,000-line threshold for TSX files. The header already lists three sibling files split out (`reconnect`, `visibility`, `watchdog`), establishing the per-cluster split pattern.
 
-Both new tests cluster around hydration races (deferred fetch + late-arriving delta + ahead-of-summary metadata), which is a coherent split boundary. Pure code move per CLAUDE.md.
+The newest tests still cluster around hydration/restart races and cross-instance recovery, which is a coherent split boundary. Pure code move per CLAUDE.md.
 
 **Current behavior:**
 - Single test file mixes hydration races, watchdog resync, ignored deltas, orchestrator-only deltas, scroll/render coalescing, and resync-after-mismatch flows.
-- 17 `it` blocks; the last two added 316 lines together.
+- 18 `it` blocks; the newest coverage adds another cross-instance state-adoption scenario.
 - Per-cluster grep tax growing.
 
 **Proposal:**
 - Pure code move: extract the 4–5 hydration-focused tests into `ui/src/App.live-state.hydration.test.tsx`, mirroring the sibling-split pattern.
 - Defer to a dedicated split commit; do not couple with feature changes.
-
-## Hydration test mock conflates state-generation with session-fetch-count
-
-**Severity:** Low - `ui/src/App.live-state.deltas.test.tsx:1193-1216`. The `/api/state` mock returns `oldSummary` when `sessionFetchCount === 0` and `newSummary` otherwise, implicitly assuming the implementation order: a session fetch happens before the resync `/api/state` fetch. If the implementation legitimately reorders these (e.g. probe state before retrying hydration on `stateResync`), the test would silently change semantics — the second `/api/state` would return `oldSummary` again, defeating the test's purpose.
-
-The test is correct for the current implementation but tightly coupled to its fetch-ordering.
-
-**Current behavior:**
-- State-snapshot freshness is a function of session-fetch count.
-- Test assumes session fetch precedes resync fetch.
-- A legitimate reorder would break the test in a non-obvious way.
-
-**Proposal:**
-- Replace the count-coupled mock with a step counter / explicit phase variable that the test increments when the server-side summary should advance.
-- Decouple "what stage is the test at" from "which endpoint was called".
 
 ## `default` switch arm with `void _exhaustive` is too forgiving
 
@@ -186,52 +237,20 @@ The test is correct for the current implementation but tightly coupled to its fe
 - Replace with `assertNever(adoptOutcome)` (use the project's existing helper or add one to a shared util module).
 - Or `console.warn`-then-retry so unknown outcomes are diagnosable in dev tools.
 
-## `applyMessageCreatedDeltaToRetainedTranscript` tolerates a regressing `delta.messageCount`
+## `hydrationSessionMetadataIsAhead` lacks focused mutation-stamp coverage
 
-**Severity:** Low - `ui/src/live-updates.ts:158-180`. The helper computes `messagesLoaded: updatedMessages.length >= delta.messageCount ? true : session.messagesLoaded` and unconditionally writes `messageCount: delta.messageCount`. If a buggy upstream sends `delta.messageCount < session.messageCount` (a regressing count), the unhydrated summary's longer retained transcript would satisfy `length >= delta.messageCount` and flip `messagesLoaded` to `true` based on the regressed count. The helper would also overwrite `messageCount` with the smaller value.
+**Severity:** Low - `ui/src/app-live-state.ts:278-306`. The ahead-of-summary behavior is now covered end-to-end for the message-count path, but the helper's equal-count, newer-`sessionMutationStamp` branch is still only exercised indirectly.
 
-The current wire contract requires `messageCount` to be monotonically non-decreasing for `messageCreated`, so this is latent. But the helper now sits on the only delta-driven `messagesLoaded` flip path, and a future bug elsewhere — or a chained-remote topology — could exploit this asymmetry.
-
-**Current behavior:**
-- The hydration flip ignores whether the response actually argues a longer transcript than the current summary.
-- The unconditional `messageCount: delta.messageCount` write accepts regressing counts.
-- A regressing `messageCount` is not validated upstream by this helper.
-
-**Proposal:**
-- Guard the flip with `delta.messageCount >= session.messageCount` so a regression returns `null` and falls through to the metadata-only path.
-- Or validate `delta.messageCount` shape at the wire boundary so this helper does not need to defend against it.
-
-## `applyMessageCreatedDeltaToRetainedTranscript` and `hydrationSessionMetadataIsAhead` lack direct unit-test coverage
-
-**Severity:** Low - `ui/src/live-updates.ts:141-186` and `ui/src/app-live-state.ts:278-306`. Both helpers are unexported. Round 14 added unit tests covering the gap branch and the replay/dedup case via `applyDeltaToSessions`, but several branches remain unobserved in isolation: id-mismatch (`delta.message.id !== delta.messageId`) and invalid `messageIndex` (`!isValidMessageIndex`) returning `null`, and `hydrationSessionMetadataIsAhead`'s ahead-by-mutation-stamp branch (which only fires when counts are equal/null and stamps differ).
-
-The id-mismatch and invalid-`messageIndex` branches are particularly worth pinning under a `messagesLoaded: false` session WITH retained messages — those branches must return `null` so the call site falls through to `applyMetadataOnlySessionDelta`. The existing "updates metadata for unhydrated summaries without forcing a state resync" test covers id-mismatch when `messages: []` (no retained transcript), but not the retained-transcript variant introduced by the new helper. The sibling `hydrationSessionMetadataMatches` is exported and has direct unit-test coverage (`ui/src/app-live-state.test.ts`); the ahead-detection sibling does not.
+That branch is the fallback when counts are equal or unavailable, so a future refactor could break newer-stamp detection while the current count-driven integration tests still pass.
 
 **Current behavior:**
-- Helpers are unexported; tests reach them only through `applyDeltaToSessions` and the `useAppLiveState` hook.
-- Round 14 closed the gap and dedup branches; id-mismatch and invalid-index branches remain unobserved.
-- The ahead-by-mutation-stamp branch in `hydrationSessionMetadataIsAhead` is not directly tested.
+- `hydrationSessionMetadataMatches` has direct unit coverage in `ui/src/app-live-state.test.ts`.
+- `hydrationSessionMetadataIsAhead` is still unexported and lacks focused coverage for equal counts plus newer mutation stamp.
+- The app-level ahead-of-summary integration test covers the count-ahead path, not the stamp-ahead path.
 
 **Proposal:**
-- Export both helpers and add focused unit tests covering: (a) id-mismatch returns `null`, (b) invalid `messageIndex` returns `null`, (c) ahead-by-mutation-stamp without count change returns `true`, (d) equal counts + equal stamps returns `false`.
-- Add two retained-transcript variant tests at the `applyDeltaToSessions` level: (a) `messagesLoaded: false` + retained 1-message transcript + delta with `delta.messageId !== delta.message.id`, assert metadata-only update and existing message untouched; (b) same setup with `messageIndex: -1`, same assertion.
-- Mirror the test shape used for `hydrationSessionMetadataMatches`.
-
-## Hydration ahead-of-summary integration test does not pin "first hydration not applied"
-
-**Severity:** Low - `ui/src/App.live-state.deltas.test.tsx:1027-1106`. The new test asserts that a `/api/state` resync fires after the first hydration AND that a second hydration completes, then asserts "Ahead transcript" appears. A buggy implementation that erroneously adopted the first hydration response (then later re-hydrated harmlessly) would still pass — the visible final state is identical to the correct path.
-
-The test's stated contract is "requests state resync when session hydration is ahead of the announced summary", but the assertion sequence proves only that resync was eventually requested and that the final transcript is visible, not that the first hydration response was deferred.
-
-**Current behavior:**
-- Test asserts `sessionFetchCount >= 1`, then `stateFetchCountAfterHydration >= 1`, then `sessionFetchCount >= 2`, then "Ahead transcript" visible.
-- No assertion proves the first hydration response was NOT applied.
-- The pinned regression contract is therefore looser than the test name suggests.
-
-**Proposal:**
-- Between the first and second `waitFor` blocks, add an assertion that "Ahead transcript" is NOT yet visible (the first hydration must be deferred until state catches up).
-- Or query the session-store snapshot directly and assert `messages.length === 0` after the first hydration response, before resync completes.
-- Update the test name and any inline comment to match the strengthened contract.
+- Extract or export a small classifier/helper for hydration metadata ordering.
+- Add focused tests for equal counts plus newer stamp returning ahead, equal counts plus equal stamp not ahead, and missing-count fallback behavior.
 
 ## `requestActionRecoveryResyncRef` offline-preserve reorder lacks inline note or test
 
@@ -560,6 +579,22 @@ and miss metadata-first regressions.
 - Introduce a typed test helper for `DeltaEvent` fixtures and require
   `messageCount` on all session-scoped deltas.
 - Update hand-written fixtures to match the current SSE contract.
+
+## `messageUpdated` count validation lacks direct regression tests
+
+**Severity:** Low - invalid or regressing `messageCount` values on `messageUpdated` deltas can regress without a focused test failure.
+
+The reducer has protocol-violation logic for `messageUpdated` count metadata, but current coverage mostly exercises other delta shapes and fixture validity. Since `messageCount` now participates in hydration and resync decisions, invalid counts should be pinned directly.
+
+**Current behavior:**
+- `messageUpdatedDeltaHasProtocolViolation` rejects invalid and regressing counts in production code.
+- Tests do not directly cover `messageCount: Number.NaN` on a `messageUpdated` delta.
+- Tests do not directly cover a lower-than-retained or lower-than-hydrated `messageCount` producing `needsResync`.
+
+**Proposal:**
+- Add `live-updates.test.ts` coverage for `messageUpdated` with `messageCount: Number.NaN` returning `needsResync`.
+- Add coverage for a `messageUpdated` count regression below retained/hydrated state returning `needsResync`.
+- Prefer typed delta fixture helpers so future tests cannot omit required count metadata accidentally.
 
 ## Hydration retry loop can spam persistent failures
 

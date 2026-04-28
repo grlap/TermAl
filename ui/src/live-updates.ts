@@ -81,6 +81,10 @@ type MessageCreatedDelta = Extract<
   SessionDeltaEvent,
   { type: "messageCreated" }
 >;
+type MessageUpdatedDelta = Extract<
+  SessionDeltaEvent,
+  { type: "messageUpdated" }
+>;
 
 export type DeltaApplyResult =
   | { kind: "applied"; sessions: Session[] }
@@ -95,6 +99,10 @@ function resolveSessionMutationStamp(
 
 function isValidMessageIndex(messageIndex: number) {
   return Number.isSafeInteger(messageIndex) && messageIndex >= 0;
+}
+
+function isValidMessageCount(messageCount: number) {
+  return Number.isSafeInteger(messageCount) && messageCount >= 0;
 }
 
 function applyMetadataOnlySessionDelta(
@@ -138,17 +146,64 @@ function applyMetadataOnlySessionDelta(
   }
 }
 
+// Protocol-shape violations must trigger a full resync before the
+// unhydrated metadata-only fallback runs: invalid ids/indexes, invalid or
+// regressing counts, and new messages whose count does not advance are all
+// inconsistent with a monotonic transcript.
+function messageCreatedDeltaHasProtocolViolation(
+  session: Session,
+  delta: MessageCreatedDelta,
+) {
+  if (
+    delta.message.id !== delta.messageId ||
+    !isValidMessageIndex(delta.messageIndex) ||
+    !isValidMessageCount(delta.messageCount)
+  ) {
+    return true;
+  }
+
+  const knownMessageCount = Math.max(
+    session.messageCount ?? 0,
+    session.messages.length,
+  );
+  if (delta.messageCount < knownMessageCount) {
+    return true;
+  }
+
+  const existingMessageIndex = findMessageIndex(
+    session.messages,
+    delta.messageId,
+    delta.messageIndex,
+  );
+  return (
+    existingMessageIndex === -1 &&
+    delta.messageCount <= session.messages.length
+  );
+}
+
+function messageUpdatedDeltaHasProtocolViolation(
+  session: Session,
+  delta: MessageUpdatedDelta,
+) {
+  if (
+    delta.message.id !== delta.messageId ||
+    !isValidMessageIndex(delta.messageIndex) ||
+    !isValidMessageCount(delta.messageCount)
+  ) {
+    return true;
+  }
+
+  const knownMessageCount = Math.max(
+    session.messageCount ?? 0,
+    session.messages.length,
+  );
+  return delta.messageCount < knownMessageCount;
+}
+
 function applyMessageCreatedDeltaToRetainedTranscript(
   session: Session,
   delta: MessageCreatedDelta,
 ): Session | null {
-  if (
-    delta.message.id !== delta.messageId ||
-    !isValidMessageIndex(delta.messageIndex)
-  ) {
-    return null;
-  }
-
   const updatedMessages = session.messages.slice();
   const existingMessageIndex = findMessageIndex(
     updatedMessages,
@@ -172,7 +227,9 @@ function applyMessageCreatedDeltaToRetainedTranscript(
     ...session,
     messages: updatedMessages,
     messagesLoaded:
-      updatedMessages.length >= delta.messageCount ? true : session.messagesLoaded,
+      updatedMessages.length === delta.messageCount
+        ? true
+        : session.messagesLoaded,
     messageCount: delta.messageCount,
     pendingPrompts,
     preview: delta.preview,
@@ -222,6 +279,10 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
+      if (messageCreatedDeltaHasProtocolViolation(session, delta)) {
+        return { kind: "needsResync" };
+      }
+
       if (session.messagesLoaded === false) {
         const retainedTranscriptUpdate =
           applyMessageCreatedDeltaToRetainedTranscript(session, delta);
@@ -245,16 +306,13 @@ export function applyDeltaToSessions(
           ),
         };
       }
-      if (
-        delta.message.id !== delta.messageId ||
-        !isValidMessageIndex(delta.messageIndex)
-      ) {
-        return { kind: "needsResync" };
-      }
 
       const retainedTranscriptUpdate =
         applyMessageCreatedDeltaToRetainedTranscript(session, delta);
-      if (!retainedTranscriptUpdate) {
+      if (
+        !retainedTranscriptUpdate ||
+        retainedTranscriptUpdate.messages.length !== delta.messageCount
+      ) {
         return { kind: "needsResync" };
       }
 
@@ -273,6 +331,10 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
+      if (messageUpdatedDeltaHasProtocolViolation(session, delta)) {
+        return { kind: "needsResync" };
+      }
+
       if (session.messagesLoaded === false) {
         return {
           kind: "applied",
@@ -282,12 +344,6 @@ export function applyDeltaToSessions(
             applyMetadataOnlySessionDelta(session, delta),
           ),
         };
-      }
-      if (
-        delta.message.id !== delta.messageId ||
-        !isValidMessageIndex(delta.messageIndex)
-      ) {
-        return { kind: "needsResync" };
       }
 
       const messageIndex = findMessageIndex(

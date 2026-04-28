@@ -173,7 +173,11 @@ type UseAppSessionActionsParams = {
     options?: { message?: string },
   ) => void;
   requestActionRecoveryResync: (
-    options?: { openSessionId?: string; paneId?: string | null },
+    options?: {
+      openSessionId?: string;
+      paneId?: string | null;
+      allowUnknownServerInstance?: boolean;
+    },
   ) => void;
 };
 

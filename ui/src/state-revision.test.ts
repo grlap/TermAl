@@ -89,14 +89,24 @@ describe("state revision helpers", () => {
       expect(isServerInstanceMismatch("", "")).toBe(false);
     });
 
-    it("accepts a revision downgrade when the server instance id changed", () => {
+    it("rejects an unknown mismatched instance unless explicitly allowed", () => {
       // Simulates: server restarted, revision rewound from 237 to 213.
-      // Without the restart signal this would be rejected as stale;
-      // with the id mismatch it's accepted unconditionally.
+      // The id mismatch alone is not enough because a late old-process
+      // response can carry an id this tab never adopted.
       expect(
         shouldAdoptSnapshotRevision(237, 213, {
           lastSeenServerInstanceId: "uuid-before-restart",
           nextServerInstanceId: "uuid-after-restart",
+        }),
+      ).toBe(false);
+    });
+
+    it("accepts an explicitly authorized unknown replacement instance", () => {
+      expect(
+        shouldAdoptSnapshotRevision(237, 213, {
+          lastSeenServerInstanceId: "uuid-before-restart",
+          nextServerInstanceId: "uuid-after-restart",
+          allowUnknownServerInstance: true,
         }),
       ).toBe(true);
     });
@@ -116,14 +126,14 @@ describe("state revision helpers", () => {
       ).toBe(false);
     });
 
-    it("accepts a revision downgrade for an unseen replacement instance", () => {
+    it("rejects an unseen replacement instance without restart evidence", () => {
       expect(
         shouldAdoptSnapshotRevision(237, 213, {
           lastSeenServerInstanceId: "uuid-before-restart",
           nextServerInstanceId: "uuid-after-restart",
           seenServerInstanceIds: new Set(["uuid-before-restart"]),
         }),
-      ).toBe(true);
+      ).toBe(false);
     });
 
     it("still rejects a stale revision on the same server instance", () => {
@@ -147,7 +157,7 @@ describe("state revision helpers", () => {
       ).toBe(false);
     });
 
-    it("restart signal wins over the explicit allowRevisionDowngrade: false gate", () => {
+    it("authorized restart signal wins over the explicit allowRevisionDowngrade: false gate", () => {
       // Safety-net poll used to pass { force: true, allowRevisionDowngrade: true }
       // unconditionally; after the unification it passes no options,
       // but the restart branch must still fire on genuine restarts.
@@ -157,6 +167,7 @@ describe("state revision helpers", () => {
           allowRevisionDowngrade: false,
           lastSeenServerInstanceId: "uuid-before",
           nextServerInstanceId: "uuid-after",
+          allowUnknownServerInstance: true,
         }),
       ).toBe(true);
     });

@@ -171,6 +171,7 @@ export type AdoptStateOptions = {
   /** Allow adopting a snapshot with a lower revision than the current one.
    *  Only used for backend restart rollbacks where the revision counter resets. */
   allowRevisionDowngrade?: boolean;
+  allowUnknownServerInstance?: boolean;
   disableMutationStampFastPath?: boolean;
   openSessionId?: string;
   paneId?: string | null;
@@ -184,6 +185,7 @@ export type AdoptSessionsOptions = {
 
 export type RequestStateResyncOptions = {
   allowAuthoritativeRollback?: boolean;
+  allowUnknownServerInstance?: boolean;
   preserveReconnectFallback?: boolean;
   preserveWatchdogCooldown?: boolean;
   rearmOnSuccess?: boolean;
@@ -484,7 +486,13 @@ export type UseAppLiveStateParams = {
    * reconnect state. Reset to a no-op on cleanup.
    */
   requestActionRecoveryResyncRef: MutableRefObject<
-    (options?: { openSessionId?: string; paneId?: string | null }) => void
+    (
+      options?: {
+        openSessionId?: string;
+        paneId?: string | null;
+        allowUnknownServerInstance?: boolean;
+      },
+    ) => void
   >;
   activeSession: Session | null;
   visibleSessionHydrationTargets: readonly SessionHydrationTarget[];
@@ -618,6 +626,7 @@ export function useAppLiveState(
   const stateResyncInFlightRef = useRef(false);
   const stateResyncPendingRef = useRef(false);
   const stateResyncAllowAuthoritativeRollbackRef = useRef(false);
+  const stateResyncAllowUnknownServerInstanceRef = useRef(false);
   const stateResyncPreserveReconnectFallbackRef = useRef(false);
   const stateResyncPreserveWatchdogCooldownRef = useRef(false);
   const stateResyncRearmOnSuccessRef = useRef(false);
@@ -1052,20 +1061,26 @@ export function useAppLiveState(
       return "recovering";
     }
 
-    // Route the session write through the same revision-gate that
-    // governs `adoptState`, BUT pass the response's `serverInstanceId`
-    // so a server-restart-driven revision rewind is accepted. This is
-    // the unified fix for:
-    //   - "Prompt sent during SSE reconnect window is invisible until
-    //     safety-net poll" — after a restart, the POST response's
-    //     instance id differs from `lastSeenServerInstanceIdRef` and
-    //     the gate accepts the lower revision, so the user's prompt
-    //     shows up immediately.
-    //   - "adoptCreatedSessionResponse session write is not
-    //     revision-gated" — a stale POST response (race between SSE
-    //     delta and POST resolution on the same server instance) is
-    //     now rejected instead of unconditionally overwriting
-    //     `sessionsRef`.
+    const isUnknownCrossInstanceCreateResponse =
+      isServerInstanceMismatch(
+        lastSeenServerInstanceIdRef.current,
+        created.serverInstanceId,
+      ) &&
+      !!created.serverInstanceId &&
+      !seenServerInstanceIdsRef.current.has(created.serverInstanceId);
+    if (isUnknownCrossInstanceCreateResponse) {
+      requestActionRecoveryResyncRef.current({
+        openSessionId: options?.openSessionId ?? created.sessionId,
+        paneId: options?.paneId ?? null,
+        allowUnknownServerInstance: true,
+      });
+      return "recovering";
+    }
+
+    // Route the session write through the same revision-gate that governs
+    // `adoptState`. Same-instance stale POST responses are rejected instead of
+    // unconditionally overwriting `sessionsRef`; unknown cross-instance
+    // responses above go through `/api/state` recovery before any UI adoption.
     if (
       !shouldAdoptSnapshotRevision(
         latestStateRevisionRef.current,
@@ -1358,7 +1373,8 @@ export function useAppLiveState(
             case "restartResync":
               hydrationRestartResyncPendingRef.current = true;
               requestActionRecoveryResyncRef.current();
-              shouldRetryHydration = true;
+              // The recovery state probe is the authoritative path after a
+              // backend restart. Do not stack a session retry on top of it.
               break;
             case "stateResync":
               requestActionRecoveryResyncRef.current();
@@ -1435,19 +1451,24 @@ export function useAppLiveState(
     const fullStateServerInstanceChanged =
       !!nextState.serverInstanceId &&
       nextState.serverInstanceId !== lastFullStateServerInstanceIdRef.current;
+    const allowUnknownServerInstance =
+      options?.allowUnknownServerInstance === true;
+    const allowServerInstanceChange =
+      fullStateServerInstanceChanged && allowUnknownServerInstance;
     if (
       !shouldAdoptSnapshotRevision(
         latestStateRevisionRef.current,
         nextState.revision,
         {
           ...options,
-          force: options?.force === true || fullStateServerInstanceChanged,
+          force: options?.force === true || allowServerInstanceChange,
           allowRevisionDowngrade:
             options?.allowRevisionDowngrade === true ||
-            fullStateServerInstanceChanged,
+            allowServerInstanceChange,
           lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
           nextServerInstanceId: nextState.serverInstanceId,
           seenServerInstanceIds: seenServerInstanceIdsRef.current,
+          allowUnknownServerInstance,
         },
       )
     ) {
@@ -1591,6 +1612,7 @@ export function useAppLiveState(
     stateResyncInFlightRef.current = false;
     stateResyncPendingRef.current = false;
     stateResyncAllowAuthoritativeRollbackRef.current = false;
+    stateResyncAllowUnknownServerInstanceRef.current = false;
     stateResyncPreserveReconnectFallbackRef.current = false;
     stateResyncPreserveWatchdogCooldownRef.current = false;
     stateResyncRearmOnSuccessRef.current = false;
@@ -1793,6 +1815,9 @@ export function useAppLiveState(
             const allowAuthoritativeRollback =
               stateResyncAllowAuthoritativeRollbackRef.current;
             stateResyncAllowAuthoritativeRollbackRef.current = false;
+            const allowUnknownServerInstance =
+              stateResyncAllowUnknownServerInstanceRef.current;
+            stateResyncAllowUnknownServerInstanceRef.current = false;
             const preserveReconnectFallback =
               stateResyncPreserveReconnectFallbackRef.current;
             stateResyncPreserveReconnectFallbackRef.current = false;
@@ -1826,10 +1851,8 @@ export function useAppLiveState(
                 requestedRevision !== null &&
                 latestStateRevisionRef.current === requestedRevision &&
                 state.revision <= requestedRevision;
-              const shouldForceRollback =
-                shouldForceAuthoritativeSnapshot &&
-                !!state.serverInstanceId &&
-                state.serverInstanceId !== lastSeenServerInstanceIdRef.current;
+              const shouldAllowUnknownServerInstance =
+                allowUnknownServerInstance || shouldForceAuthoritativeSnapshot;
 
               const adopted = adoptState(state, {
                 // A reconnect fallback snapshot is authoritative if no newer SSE state landed
@@ -1839,6 +1862,7 @@ export function useAppLiveState(
                 // to replace any buffered or non-session SSE view once the fetch resolves.
                 force: shouldForceAuthoritativeSnapshot,
                 allowRevisionDowngrade: shouldForceAuthoritativeSnapshot,
+                allowUnknownServerInstance: shouldAllowUnknownServerInstance,
                 openSessionId,
                 paneId,
               });
@@ -1963,6 +1987,9 @@ export function useAppLiveState(
       if (options?.allowAuthoritativeRollback) {
         stateResyncAllowAuthoritativeRollbackRef.current = true;
       }
+      if (options?.allowUnknownServerInstance) {
+        stateResyncAllowUnknownServerInstanceRef.current = true;
+      }
       if (options?.preserveReconnectFallback) {
         stateResyncPreserveReconnectFallbackRef.current = true;
       }
@@ -2004,6 +2031,9 @@ export function useAppLiveState(
       if (cancelled || !readNavigatorOnline()) {
         return;
       }
+      const allowUnknownServerInstance =
+        options?.allowUnknownServerInstance === true ||
+        hydrationRestartResyncPendingRef.current;
       hydrationRestartResyncPendingRef.current = false;
 
       // Action-error recovery is a plain one-shot `/api/state` probe. Unlike
@@ -2020,6 +2050,7 @@ export function useAppLiveState(
       }
       requestStateResync({
         allowAuthoritativeRollback: latestStateRevisionRef.current !== null,
+        allowUnknownServerInstance,
         openSessionId: options?.openSessionId,
         paneId: options?.paneId,
       });
@@ -2151,9 +2182,6 @@ export function useAppLiveState(
           payload,
           "_sseFallback",
         );
-        const rawFullStateServerInstanceChanged =
-          !!rawServerInstanceId &&
-          rawServerInstanceId !== lastFullStateServerInstanceIdRef.current;
         profiler?.mark("peek");
         if (
           rawRevision !== null &&
@@ -2162,15 +2190,12 @@ export function useAppLiveState(
             latestStateRevisionRef.current,
             rawRevision,
             {
-              force:
-                forceAdoptNextStateEventRef.current ||
-                rawFullStateServerInstanceChanged,
-              allowRevisionDowngrade:
-                forceAdoptNextStateEventRef.current ||
-                rawFullStateServerInstanceChanged,
+              force: forceAdoptNextStateEventRef.current,
+              allowRevisionDowngrade: forceAdoptNextStateEventRef.current,
               lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
               nextServerInstanceId: rawServerInstanceId,
               seenServerInstanceIds: seenServerInstanceIdsRef.current,
+              allowUnknownServerInstance: forceAdoptNextStateEventRef.current,
             },
           )
         ) {
@@ -2209,6 +2234,7 @@ export function useAppLiveState(
         const adopted = adoptState(state, {
           force,
           allowRevisionDowngrade: force,
+          allowUnknownServerInstance: force,
         });
         profiler?.mark("adoptState");
         profiledAdopted = adopted;

@@ -727,7 +727,7 @@ describe("App live state - delta-gap core", () => {
           ).toBe(true);
         });
 
-        await dispatchStateEvent(
+        await dispatchOpenedStateEvent(
           eventSource,
           makeStateResponse({
             revision: 2,
@@ -1010,11 +1010,11 @@ describe("App live state - delta-gap core", () => {
       const hydratedSession = makeSession("session-1", {
         ...initialSession,
         status: "active",
-        preview: "Latest prompt from user",
+        preview: "Stale hydration without prompt",
         messagesLoaded: true,
-        messageCount: 2,
-        sessionMutationStamp: 11,
-        messages: [...initialSession.messages, promptMessage],
+        messageCount: 1,
+        sessionMutationStamp: 10,
+        messages: initialSession.messages,
       });
       const sessionFetch = createDeferred<Response>();
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -1126,6 +1126,9 @@ describe("App live state - delta-gap core", () => {
             .map((element) => element.closest(".message-card"))
             .find((element) => element?.classList.contains("bubble-you"));
           expect(promptBubble).toBeTruthy();
+          expect(promptBubble?.classList.contains("pending-prompt-card")).toBe(
+            false,
+          );
         });
 
         await act(async () => {
@@ -1137,6 +1140,18 @@ describe("App live state - delta-gap core", () => {
             }),
           );
           await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          const promptBubble = screen
+            .getAllByText(promptMessage.text)
+            .map((element) => element.closest(".message-card"))
+            .find((element) => element?.classList.contains("bubble-you"));
+          expect(promptBubble).toBeTruthy();
+          expect(promptBubble?.classList.contains("pending-prompt-card")).toBe(
+            false,
+          );
         });
       } finally {
         scrollIntoViewSpy.mockRestore();
@@ -1155,6 +1170,11 @@ describe("App live state - delta-gap core", () => {
       let stateFetchCount = 0;
       let stateFetchCountAfterHydration = 0;
       let sessionFetchCount = 0;
+      const firstHydration = createDeferred<Response>();
+      const stateResync = createDeferred<Response>();
+      const secondHydration = createDeferred<Response>();
+      const aheadSummaryPreview = "Ahead summary preview";
+      const aheadTranscriptText = "Hydrated ahead transcript";
       const oldSummary = makeSession("session-1", {
         name: "Codex Session",
         status: "active",
@@ -1166,7 +1186,7 @@ describe("App live state - delta-gap core", () => {
       });
       const newSummary = makeSession("session-1", {
         ...oldSummary,
-        preview: "Ahead transcript",
+        preview: aheadSummaryPreview,
         messageCount: 2,
         sessionMutationStamp: 11,
       });
@@ -1186,7 +1206,7 @@ describe("App live state - delta-gap core", () => {
             type: "text",
             timestamp: "10:02",
             author: "assistant",
-            text: "Ahead transcript",
+            text: aheadTranscriptText,
           },
         ],
       });
@@ -1196,24 +1216,23 @@ describe("App live state - delta-gap core", () => {
           stateFetchCount += 1;
           if (sessionFetchCount > 0) {
             stateFetchCountAfterHydration += 1;
+            return stateResync.promise;
           }
           return jsonResponse(
             makeStateResponse({
-              revision: sessionFetchCount === 0 ? 1 : 2,
+              revision: 1,
               projects: [],
               orchestrators: [],
               workspaces: [],
-              sessions: [sessionFetchCount === 0 ? oldSummary : newSummary],
+              sessions: [oldSummary],
             }),
           );
         }
         if (requestUrl.pathname === "/api/sessions/session-1") {
           sessionFetchCount += 1;
-          return jsonResponse({
-            revision: 2,
-            serverInstanceId: "test-instance",
-            session: hydratedSession,
-          });
+          return sessionFetchCount === 1
+            ? firstHydration.promise
+            : secondHydration.promise;
         }
         if (requestUrl.pathname === "/api/git/status") {
           return jsonResponse({
@@ -1267,15 +1286,59 @@ describe("App live state - delta-gap core", () => {
         await waitFor(() => {
           expect(sessionFetchCount).toBeGreaterThanOrEqual(1);
         });
+        await act(async () => {
+          firstHydration.resolve(
+            jsonResponse({
+              revision: 2,
+              serverInstanceId: "test-instance",
+              session: hydratedSession,
+            }),
+          );
+          await flushUiWork();
+        });
         await waitFor(() => {
           expect(stateFetchCountAfterHydration).toBeGreaterThanOrEqual(1);
+        });
+        expect(
+          screen
+            .queryAllByText(aheadTranscriptText)
+            .some((element) => element.closest(".message-card")),
+        ).toBe(false);
+
+        await act(async () => {
+          stateResync.resolve(
+            jsonResponse(
+              makeStateResponse({
+                revision: 2,
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [newSummary],
+              }),
+            ),
+          );
+          await flushUiWork();
         });
         await waitFor(() => {
           expect(sessionFetchCount).toBeGreaterThanOrEqual(2);
         });
-        expect(
-          screen.getAllByText("Ahead transcript").length,
-        ).toBeGreaterThan(0);
+        await act(async () => {
+          secondHydration.resolve(
+            jsonResponse({
+              revision: 2,
+              serverInstanceId: "test-instance",
+              session: hydratedSession,
+            }),
+          );
+          await flushUiWork();
+        });
+        await waitFor(() => {
+          const messageCard = screen
+            .getAllByText(aheadTranscriptText)
+            .map((element) => element.closest(".message-card"))
+            .find((element) => element?.classList.contains("bubble-assistant"));
+          expect(messageCard).toBeTruthy();
+        });
       } finally {
         scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);
@@ -1407,7 +1470,7 @@ describe("App live state - delta-gap core", () => {
           ).toBe(true);
         });
 
-        await dispatchStateEvent(
+        await dispatchOpenedStateEvent(
           eventSource,
           makeStateResponse({
             revision: 1,
@@ -1467,6 +1530,106 @@ describe("App live state - delta-gap core", () => {
     });
   });
 
+  it("rejects an unknown cross-instance full state snapshot without restart evidence", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const currentSession = makeSession("session-current", {
+        name: "Current Session",
+        status: "idle",
+        preview: "Current instance preview",
+      });
+      const staleSession = makeSession("session-stale", {
+        name: "Stale Session",
+        status: "idle",
+        preview: "Unknown old instance preview",
+      });
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/tmp",
+            upstream: "origin/main",
+            workdir: "/tmp",
+          });
+        }
+        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+            return jsonResponse({ ok: true });
+          }
+
+          return new Response("", { status: 404 });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 5,
+            serverInstanceId: "current-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [currentSession],
+          }),
+        );
+        await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        expect(
+          within(sessionList).getByText("Current instance preview"),
+        ).toBeInTheDocument();
+
+        await dispatchStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 4,
+            serverInstanceId: "unknown-old-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [staleSession],
+          }),
+        );
+        await settleAsyncUi();
+
+        expect(
+          within(sessionList).getByText("Current instance preview"),
+        ).toBeInTheDocument();
+        expect(
+          within(sessionList).queryByText("Unknown old instance preview"),
+        ).not.toBeInTheDocument();
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("resyncs instead of adopting an unknown mismatched session hydration response", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
@@ -1498,52 +1661,33 @@ describe("App live state - delta-gap core", () => {
           },
         ],
       });
-      let sessionHydrationFetchSeen = false;
+      const firstHydration = createDeferred<Response>();
+      const stateResync = createDeferred<Response>();
+      let sessionHydrationFetchCount = 0;
       let stateFetchCountAfterSessionHydration = 0;
       const fetchMock = vi.fn(
         async (input: RequestInfo | URL, init?: RequestInit) => {
           const requestUrl = new URL(String(input), "http://localhost");
           if (requestUrl.pathname === "/api/state") {
-            const isHydrationResync = sessionHydrationFetchSeen;
+            const isHydrationResync = sessionHydrationFetchCount > 0;
             if (isHydrationResync) {
               stateFetchCountAfterSessionHydration += 1;
+              return stateResync.promise;
             }
             return jsonResponse(
               makeStateResponse({
-                revision: isHydrationResync ? 6 : 5,
+                revision: 5,
                 serverInstanceId: "current-instance",
                 projects: [],
                 orchestrators: [],
                 workspaces: [],
-                sessions: isHydrationResync
-                  ? [currentFullSession]
-                  : [currentSummary],
+                sessions: [currentSummary],
               }),
             );
           }
           if (requestUrl.pathname === "/api/sessions/session-1") {
-            sessionHydrationFetchSeen = true;
-            return jsonResponse({
-              revision: 4,
-              serverInstanceId: "unknown-old-instance",
-              session: makeSession("session-1", {
-                name: "Codex Session",
-                status: "active",
-                preview: "Unknown old transcript",
-                messagesLoaded: true,
-                messageCount: 1,
-                sessionMutationStamp: 20,
-                messages: [
-                  {
-                    id: "message-unknown-old",
-                    type: "text",
-                    timestamp: "10:01",
-                    author: "assistant",
-                    text: "Unknown old transcript",
-                  },
-                ],
-              }),
-            });
+            sessionHydrationFetchCount += 1;
+            return firstHydration.promise;
           }
           if (requestUrl.pathname === "/api/git/status") {
             return jsonResponse({
@@ -1628,7 +1772,61 @@ describe("App live state - delta-gap core", () => {
         );
 
         await waitFor(() => {
-          expect(sessionHydrationFetchSeen).toBe(true);
+          expect(sessionHydrationFetchCount).toBe(1);
+        });
+        const setTimeoutSpy = vi.spyOn(window, "setTimeout");
+        setTimeoutSpy.mockClear();
+
+        await act(async () => {
+          firstHydration.resolve(
+            jsonResponse({
+              revision: 4,
+              serverInstanceId: "unknown-old-instance",
+              session: makeSession("session-1", {
+                name: "Codex Session",
+                status: "active",
+                preview: "Unknown old transcript",
+                messagesLoaded: true,
+                messageCount: 1,
+                sessionMutationStamp: 20,
+                messages: [
+                  {
+                    id: "message-unknown-old",
+                    type: "text",
+                    timestamp: "10:01",
+                    author: "assistant",
+                    text: "Unknown old transcript",
+                  },
+                ],
+              }),
+            }),
+          );
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+        expect(stateFetchCountAfterSessionHydration).toBeGreaterThanOrEqual(1);
+        expect(
+          setTimeoutSpy.mock.calls.some(([, delay]) => delay === 50),
+        ).toBe(false);
+        setTimeoutSpy.mockRestore();
+        expect(sessionHydrationFetchCount).toBe(1);
+
+        await act(async () => {
+          stateResync.resolve(
+            jsonResponse(
+              makeStateResponse({
+                revision: 6,
+                serverInstanceId: "current-instance",
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [currentFullSession],
+              }),
+            ),
+          );
+          await flushUiWork();
+        });
+        await waitFor(() => {
           expect(stateFetchCountAfterSessionHydration).toBeGreaterThanOrEqual(1);
         });
         await waitFor(() => {
