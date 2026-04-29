@@ -39,6 +39,7 @@ import {
 } from "./api";
 import type { AdoptStateOptions, UseAppLiveStateReturn } from "./app-live-state";
 import { startActivePromptPoll } from "./active-prompt-poll";
+import { isServerInstanceMismatch } from "./state-revision";
 import {
   getErrorMessage,
   releaseDraftAttachments,
@@ -893,6 +894,33 @@ export function useAppSessionActions(
           (candidate) =>
             candidate.id === sessionId && candidate.status === "active",
         );
+        if (
+          !adopted &&
+          isServerInstanceMismatch(
+            lastSeenServerInstanceIdRef.current,
+            state.serverInstanceId,
+          )
+        ) {
+          // The send response was rejected by `adoptState` AND it carried a
+          // different `serverInstanceId` from the last one this tab saw —
+          // that's the "backend restarted between the EventSource opening
+          // and this POST returning" case. Without this nudge the only
+          // recovery path is the 30 s `startStaleSendResponseRecoveryPoll`
+          // interval below, during which the sidebar/canvas tooltip
+          // (`session.preview`) stays on the PREVIOUS prompt and the new
+          // prompt's metadata is invisible. `requestActionRecoveryResync`
+          // with `allowUnknownServerInstance: true` fires an immediate
+          // `/api/state` probe; the probe response is a fresh observation
+          // of the new server instance, so adoption can flip the local view
+          // to the new state within a single round trip. The
+          // mismatched-instance gate keeps stale-same-instance rejections
+          // (e.g. SSE already advanced past this response's revision)
+          // routed through the existing 30 s safety-net poll, which is
+          // intentionally slow there because the tab is otherwise healthy.
+          // See bugs.md "Send-after-restart leaves session preview tooltip
+          // stale for 30 s".
+          requestActionRecoveryResync({ allowUnknownServerInstance: true });
+        }
         if (!adopted || responseKeepsSessionActive) {
           startStaleSendResponseRecoveryPoll(sessionId);
         }

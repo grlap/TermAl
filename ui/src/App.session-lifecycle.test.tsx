@@ -485,6 +485,150 @@ describe("App session lifecycle", () => {
     });
   });
 
+  it("immediately probes /api/state when a send response carries an unseen serverInstanceId", async () => {
+    // The user restarts the backend while keeping the browser tab open, then
+    // sends a prompt. The POST returns a response with the NEW server's
+    // `serverInstanceId`. `adoptState` rejects it (an unseen mismatched
+    // instance is conservatively dropped, not silently accepted), and
+    // without an immediate `/api/state` probe the only recovery path is
+    // the 30 s `startStaleSendResponseRecoveryPoll` interval — during which
+    // the sidebar tooltip (`session.preview`) stays on the PREVIOUS prompt
+    // and the new prompt's metadata is invisible. The fix fires
+    // `requestActionRecoveryResync({ allowUnknownServerInstance: true })`
+    // immediately when the rejected response was from a different instance,
+    // so adoption flips within a single round trip. See bugs.md
+    // "Send-after-restart leaves session preview tooltip stale for 30 s".
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalFetch = globalThis.fetch;
+      const project = {
+        id: "project-termal",
+        name: "TermAl",
+        rootPath: "/projects/termal",
+      };
+      const session = makeSession("session-1", {
+        name: "Session 1",
+        projectId: project.id,
+        workdir: project.rootPath,
+      });
+      const initialState = makeStateResponse({
+        revision: 5,
+        serverInstanceId: "current-instance",
+        projects: [project],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [session],
+      });
+      // After the restart, /api/state observed by `requestActionRecoveryResync`
+      // also returns the new instance — the POST response is corroborated.
+      const recoveredState = makeStateResponse({
+        revision: 1,
+        serverInstanceId: "replacement-instance",
+        projects: [project],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Session 1",
+            projectId: project.id,
+            workdir: project.rootPath,
+            status: "active",
+            preview: "Restart-spanning prompt",
+            messages: [
+              {
+                id: "message-1",
+                timestamp: "2026-04-19T10:00:00Z",
+                author: "you",
+                type: "text",
+                text: "Restart-spanning prompt",
+              },
+            ],
+          }),
+        ],
+      });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse(recoveredState);
+          }
+          if (
+            requestUrl.pathname === "/api/sessions/session-1/messages" &&
+            (init?.method ?? "GET").toUpperCase() === "POST"
+          ) {
+            // The POST goes to the new server, which returns its fresh
+            // (lower-revision) state with the new instance id.
+            return jsonResponse(recoveredState);
+          }
+
+          throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+        },
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(eventSource, initialState);
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        const sessionRowLabel =
+          await within(sessionList).findByText("Session 1");
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+
+        await clickAndSettle(sessionRowButton);
+        const composer = await screen.findByLabelText("Message Session 1");
+        await act(async () => {
+          fireEvent.change(composer, {
+            target: { value: "Restart-spanning prompt" },
+          });
+        });
+        await settleAsyncUi();
+
+        fetchMock.mockClear();
+        await clickAndSettle(screen.getByRole("button", { name: "Send" }));
+        await settleAsyncUi();
+
+        // Two fetches expected: the POST itself, AND an immediate /api/state
+        // probe driven by the unseen-instance recovery path. Without the
+        // fix, only the POST would be made within the test window — the
+        // /api/state probe wouldn't fire for 30 s.
+        const stateProbeCalls = fetchMock.mock.calls.filter(
+          ([input]) =>
+            new URL(String(input), "http://localhost").pathname ===
+            "/api/state",
+        );
+        expect(stateProbeCalls.length).toBeGreaterThanOrEqual(1);
+        // The recovered state's new prompt is visible.
+        await waitFor(() => {
+          expect(
+            screen.getAllByText("Restart-spanning prompt").length,
+          ).toBeGreaterThan(0);
+        });
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("cancels the active-prompt poll once live updates resume for that session", async () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
