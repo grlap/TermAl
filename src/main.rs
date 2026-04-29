@@ -112,9 +112,40 @@ async fn run_server() -> Result<()> {
     println!("default cwd: {cwd}");
     println!("ui proxy target: /api");
 
+    // Compose the graceful-shutdown future:
+    //   1. Wait for Ctrl+C / SIGTERM.
+    //   2. Notify all live SSE handlers to break out of their stream loops.
+    //
+    // Step 2 is mandatory: the SSE handler in `api_sse.rs::state_events`
+    // holds `broadcast::Receiver` clones for the state/delta/file event
+    // channels, and its loop only exits on `RecvError::Closed`. The
+    // matching `Sender` halves live on `AppState`, and we deliberately
+    // keep the `shutdown_state` clone alive for the post-serve persist
+    // drain — so without an explicit notify, `with_graceful_shutdown`
+    // would block forever waiting for SSE streams that never finish.
+    // See bugs.md "Graceful shutdown blocks forever waiting for SSE
+    // streams to drain".
+    let shutdown_state_for_signal = shutdown_state.clone();
+    let graceful_shutdown_future = async move {
+        shutdown_signal().await;
+        shutdown_state_for_signal.shutdown_notify.notify_waiters();
+    };
     let result = axum::serve(listener, app)
+        .with_graceful_shutdown(graceful_shutdown_future)
         .await
         .context("backend server failed");
+
+    // Graceful-shutdown drain: block until the background persist thread
+    // has written every queued mutation to SQLite. Without this the
+    // window between "commit_locked fires" and "row durably in SQLite"
+    // can drop the last streamed message on a Ctrl+C / SIGTERM, which
+    // makes the assistant's last reply disappear from the UI on the
+    // next reconnect (the reconnect snapshot has it missing). See
+    // bugs.md "Server restart without browser refresh can lose the
+    // last streamed message". Hard kills (SIGKILL, power loss) still
+    // race the same window — graceful shutdown only covers the
+    // user-initiated restart path.
+    shutdown_state.shutdown_persist_blocking();
 
     // Drop the AppState (which contains reqwest::blocking::Client) on a
     // regular thread so its internal Tokio runtime isn't dropped inside our
@@ -125,6 +156,33 @@ async fn run_server() -> Result<()> {
         .expect("shutdown cleanup thread panicked");
 
     result
+}
+
+/// Resolves on the first Ctrl+C or SIGTERM. Used as the
+/// `with_graceful_shutdown` future for `axum::serve` so the HTTP
+/// server stops accepting new connections and waits for in-flight
+/// requests to finish before the persist drain runs.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        if let Ok(mut signal) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            signal.recv().await;
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
 }
 
 /// Builds the application router.

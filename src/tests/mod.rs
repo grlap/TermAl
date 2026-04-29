@@ -557,6 +557,11 @@ fn test_app_state() -> AppState {
         file_events: broadcast::channel(16).0,
         file_events_revision: Arc::new(AtomicU64::new(0)),
         persist_tx: mpsc::channel().0,
+        // Tests skip the real persist worker; the test constructor owns no
+        // background thread to join, so the handle stays `None` and
+        // `shutdown_persist_blocking` is a no-op.
+        persist_thread_handle: Arc::new(Mutex::new(None)),
+        shutdown_notify: Arc::new(tokio::sync::Notify::new()),
         state_broadcast_tx: mpsc::channel().0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),

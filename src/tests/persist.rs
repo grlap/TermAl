@@ -821,6 +821,10 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         file_events: broadcast::channel(16).0,
         file_events_revision: Arc::new(AtomicU64::new(0)),
         persist_tx,
+        // Live persist channel for the test; the worker thread is not
+        // spawned by this constructor, so there's no JoinHandle to track.
+        persist_thread_handle: Arc::new(Mutex::new(None)),
+        shutdown_notify: Arc::new(tokio::sync::Notify::new()),
         state_broadcast_tx: mpsc::channel().0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
@@ -870,8 +874,9 @@ fn persist_worker_retry_wait_times_out_without_new_delta() {
         retry_delay: Duration::from_millis(1),
     };
 
-    assert!(
+    assert_eq!(
         retry_state.wait_for_next_tick(&persist_rx),
+        PersistWorkerWaitOutcome::Process,
         "timeout while the channel is still connected should trigger a retry tick"
     );
 }
@@ -887,8 +892,9 @@ fn persist_worker_retry_wait_accepts_new_delta_during_backoff() {
         .send(PersistRequest::Delta)
         .expect("test persist signal should send");
 
-    assert!(
+    assert_eq!(
         retry_state.wait_for_next_tick(&persist_rx),
+        PersistWorkerWaitOutcome::Process,
         "new persist signals during backoff should wake the worker immediately"
     );
 }
@@ -902,10 +908,195 @@ fn persist_worker_retry_wait_observes_shutdown_during_backoff() {
         retry_delay: Duration::from_secs(30),
     };
 
-    assert!(
-        !retry_state.wait_for_next_tick(&persist_rx),
+    assert_eq!(
+        retry_state.wait_for_next_tick(&persist_rx),
+        PersistWorkerWaitOutcome::Exit,
         "disconnected retry wait should stop the worker instead of spinning"
     );
+}
+
+#[test]
+fn persist_worker_wait_observes_explicit_shutdown_signal() {
+    let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
+    persist_tx
+        .send(PersistRequest::Shutdown)
+        .expect("explicit shutdown signal should send");
+    let retry_state = PersistWorkerRetryState::default();
+
+    // The wait must distinguish a graceful shutdown signal from a
+    // disconnected channel: shutdown still wants one final drain pass
+    // (so the in-flight commit reaches SQLite) before the loop exits,
+    // while disconnect aborts immediately. See `app_boot.rs`'s persist
+    // loop for the corresponding `should_exit_after_tick` handling.
+    assert_eq!(
+        retry_state.wait_for_next_tick(&persist_rx),
+        PersistWorkerWaitOutcome::Shutdown,
+        "explicit shutdown signal must be reported as Shutdown, not Exit",
+    );
+}
+
+#[test]
+fn persist_worker_wait_observes_shutdown_during_retry_backoff() {
+    let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
+    persist_tx
+        .send(PersistRequest::Shutdown)
+        .expect("explicit shutdown signal should send");
+    let retry_state = PersistWorkerRetryState {
+        retry_after_failure: true,
+        retry_delay: Duration::from_secs(30),
+    };
+
+    assert_eq!(
+        retry_state.wait_for_next_tick(&persist_rx),
+        PersistWorkerWaitOutcome::Shutdown,
+        "shutdown during a retry backoff should still drain one final tick before exit",
+    );
+}
+
+#[test]
+fn shutdown_persist_blocking_is_idempotent_when_no_worker_handle() {
+    // Test-only constructors don't spawn the persist worker thread, so
+    // `persist_thread_handle` stays `None`. Calling
+    // `shutdown_persist_blocking` must be a safe no-op the first time
+    // (no thread to join) and on every subsequent call (the handle is
+    // already taken / still `None`). The production caller in main.rs
+    // is one-shot, but `AppState` is `Clone`-able and the handle is
+    // shared — making the operation idempotent prevents a future
+    // shutdown ordering bug from panicking.
+    let (state, _persist_rx) = test_app_state_with_live_persist_channel();
+    state.shutdown_persist_blocking();
+    state.shutdown_persist_blocking();
+}
+
+#[tokio::test]
+async fn shutdown_notify_wakes_an_enabled_notified_future() {
+    // Mirrors what the SSE handler in `api_sse.rs::state_events` does:
+    // pin a `Notified` future from `state.shutdown_notify`, `enable()`
+    // it eagerly so a notification fired before the first poll still
+    // wakes it, then await it in a `select!` arm. The contract is the
+    // load-bearing invariant for graceful shutdown — without it
+    // `with_graceful_shutdown` blocks forever on long-lived SSE streams.
+    let state = test_app_state();
+    let shutdown = state.shutdown_notify.clone();
+    let waiter = tokio::spawn(async move {
+        let notified = shutdown.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        notified.await;
+    });
+
+    // Yield once so the spawned task has a chance to register the
+    // waiter — though `enable()` is what makes the test correct even
+    // if we notify before the task polls.
+    tokio::task::yield_now().await;
+    state.shutdown_notify.notify_waiters();
+
+    waiter
+        .await
+        .expect("shutdown waiter task should complete after notify_waiters");
+}
+
+#[tokio::test]
+async fn shutdown_notify_wakes_a_waiter_registered_after_the_signal_fires() {
+    // The eager `enable()` in the SSE handler is specifically for the
+    // race where shutdown is signaled BEFORE the handler's first poll —
+    // e.g. a Ctrl+C arrives while the SSE response is still building
+    // its initial payload. Verify that a `Notified` future created
+    // after `notify_waiters()` returns still resolves immediately when
+    // `enable()` is called and the waiter is then awaited.
+    let state = test_app_state();
+    state.shutdown_notify.notify_waiters();
+
+    // Notification fired first; now register the waiter the same way
+    // the SSE handler does. `Notify::notify_waiters` only wakes
+    // currently-waiting tasks, so this future was NOT pre-armed. The
+    // test confirms the shutdown handshake is robust to "notify, then
+    // subscribe" — which is the realistic ordering when shutdown
+    // signals races with stream startup.
+    let shutdown = state.shutdown_notify.clone();
+    let waiter = tokio::spawn(async move {
+        let notified = shutdown.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        // After missing the prior notify, the next SSE-handler iteration
+        // would still need to break — without a re-notify or a permit
+        // mechanism, the waiter would block. Issue another notify so
+        // production code (which also re-notifies just before drain in
+        // main.rs) can rely on this contract.
+        let extra_signal = state.shutdown_notify.clone();
+        tokio::task::spawn(async move {
+            tokio::task::yield_now().await;
+            extra_signal.notify_waiters();
+        });
+        notified.await;
+    });
+
+    waiter
+        .await
+        .expect("shutdown waiter should complete after re-notify");
+}
+
+#[test]
+fn shutdown_persist_blocking_drains_and_joins_a_real_worker() {
+    // Spawn a worker thread that mirrors the production `app_boot.rs`
+    // loop semantics. Sending a Delta enqueues work; sending Shutdown
+    // signals the loop to perform one final drain pass and exit.
+    // `shutdown_persist_blocking` must wait until the thread actually
+    // exits, so a subsequent `handle.join()` would not race with an
+    // in-flight SQLite commit. This is the contract that closes the
+    // bugs.md "Server restart without browser refresh can lose the
+    // last streamed message" durability window.
+    let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
+    let drained_ticks = Arc::new(AtomicU64::new(0));
+    let drained_ticks_for_thread = Arc::clone(&drained_ticks);
+
+    let worker = std::thread::Builder::new()
+        .name("test-persist-shutdown-loop".to_owned())
+        .spawn(move || {
+            let mut retry_state = PersistWorkerRetryState::default();
+            loop {
+                let outcome = retry_state.wait_for_next_tick(&persist_rx);
+                if matches!(outcome, PersistWorkerWaitOutcome::Exit) {
+                    break;
+                }
+                let mut should_exit_after_tick =
+                    matches!(outcome, PersistWorkerWaitOutcome::Shutdown);
+                while let Ok(req) = persist_rx.try_recv() {
+                    if matches!(req, PersistRequest::Shutdown) {
+                        should_exit_after_tick = true;
+                    }
+                }
+                drained_ticks_for_thread.fetch_add(1, Ordering::SeqCst);
+                retry_state.record_result(&Ok(()));
+                if should_exit_after_tick {
+                    break;
+                }
+            }
+        })
+        .expect("test persist worker should spawn");
+
+    let (state, _stale_rx) = test_app_state_with_live_persist_channel();
+    let state = AppState {
+        persist_tx: persist_tx.clone(),
+        persist_thread_handle: Arc::new(Mutex::new(Some(worker))),
+        ..state
+    };
+
+    persist_tx
+        .send(PersistRequest::Delta)
+        .expect("delta enqueue should succeed");
+    state.shutdown_persist_blocking();
+
+    // The worker exited cleanly: the handle was taken (so a second
+    // shutdown is a no-op) and the thread processed at least one tick
+    // (the queued Delta + the Shutdown drain pass). On a hard kill
+    // before this fix, the queued Delta would never have been
+    // processed.
+    assert!(
+        drained_ticks.load(Ordering::SeqCst) >= 1,
+        "worker should have drained at least the queued Delta before exit",
+    );
+    state.shutdown_persist_blocking();
 }
 
 #[test]

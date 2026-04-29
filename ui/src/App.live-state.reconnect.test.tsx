@@ -2445,6 +2445,231 @@ describe("App live state — reconnect", () => {
     }
   });
 
+  it("adopts a Lagged-recovery state snapshot at the same revision when the backend signals lagged", async () => {
+    // Scenario: SSE delta channel fell past broadcast capacity, so the backend
+    // emits a `lagged` marker followed by a recovery state snapshot. The
+    // recovery snapshot may carry the same revision the client already saw
+    // (the client read some events from the burst before falling behind).
+    // Without the `lagged` marker arming force-adopt, the client would treat
+    // the recovery snapshot as a redundant catch-up and silently drop it,
+    // leaving the latest assistant message hidden until the user takes
+    // another action. See bugs.md "SSE Lagged-recovery snapshot can be
+    // silently ignored".
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        throw new Error("backend should not be probed in this scenario");
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const scrollIntoViewSpy = stubScrollIntoView();
+
+    try {
+      await renderApp();
+
+      const eventSource = latestEventSource();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "test",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+
+      await clickAndSettle(
+        await screen.findByRole("button", { name: "Sessions" }),
+      );
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+
+      const sessionRowLabel =
+        await within(sessionList).findByText("Codex Session");
+      const sessionRowButton = sessionRowLabel.closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+
+      await clickAndSettle(sessionRowButton);
+      await waitFor(() => {
+        expect(screen.getAllByText("test").length).toBeGreaterThan(0);
+      });
+      expect(screen.queryByText("Lagged recovery body.")).not.toBeInTheDocument();
+
+      // No reconnect — the SSE stream stays open. The backend emits the
+      // `lagged` marker (because the delta channel overflowed) and immediately
+      // follows with a recovery snapshot at the same revision the client
+      // already adopted.
+      act(() => {
+        eventSource.dispatchNamedEvent("lagged", "");
+        eventSource.dispatchNamedEvent("state", {
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "idle",
+              preview: "Lagged recovery body.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Lagged recovery body.",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+
+      // The recovery snapshot was force-adopted: the new assistant message
+      // body is visible without any /api/state probe and without a reconnect
+      // open. Without the lagged-marker fix, this assertion would fail
+      // because the same-revision snapshot would be rejected as redundant.
+      await waitFor(() => {
+        expect(
+          screen.getAllByText("Lagged recovery body.").length,
+        ).toBeGreaterThan(0);
+      });
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
+      ).toBe(false);
+    } finally {
+      scrollIntoViewSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("recreates the EventSource when the browser closes it permanently after a non-200 response", async () => {
+    // Scenario: the dev-mode Vite proxy returns 502 during the brief
+    // backend-restart gap, OR the browser otherwise marks the EventSource
+    // permanently CLOSED (readyState === 2). The WHATWG spec prohibits
+    // auto-reconnect after a non-200 response, so the EventSource is dead
+    // and the user has to hard-refresh — unless the client detects the
+    // CLOSED state and constructs a fresh EventSource itself. See bugs.md
+    // "Browser auto-reconnect gives up after a non-200 SSE response and
+    // the client gets stuck".
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        // Simulate the dev-server gap: every /api/state probe also fails
+        // until the backend is back. The reconnect-fallback timer would
+        // therefore not be the recovery path here — only EventSource
+        // recreation can succeed once the new backend is up.
+        throw new Error("backend unavailable during restart");
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    EventSourceMock.instances = [];
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const scrollIntoViewSpy = stubScrollIntoView();
+
+    try {
+      await renderApp();
+      const initialEventSource = latestEventSource();
+
+      act(() => {
+        initialEventSource.dispatchOpen();
+        initialEventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "idle",
+              preview: "Original preview.",
+              messages: [],
+            }),
+          ],
+        });
+      });
+
+      // Mark the EventSource as permanently closed (mirrors the browser
+      // behavior after a non-200 reconnect attempt) and dispatch the
+      // matching error.
+      initialEventSource.readyState = 2;
+      act(() => {
+        initialEventSource.dispatchError();
+      });
+
+      // The recovery timer fires after a short backoff and re-runs the
+      // transport effect, which constructs a fresh EventSource. Without
+      // this fix, the EventSourceMock count would stay at 1 forever and
+      // the user would have to hard-refresh.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(750);
+      });
+
+      expect(EventSourceMock.instances.length).toBeGreaterThanOrEqual(2);
+      const recoveredEventSource =
+        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+      expect(recoveredEventSource).not.toBe(initialEventSource);
+    } finally {
+      vi.useRealTimers();
+      scrollIntoViewSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("keeps omitted adoptState slices unchanged", () => {
     const preservedCodex = {
       notices: [

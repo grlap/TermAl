@@ -530,6 +530,22 @@ export function useAppLiveState(
 
   const [workspaceFilesChangedEvent, setWorkspaceFilesChangedEvent] =
     useState<WorkspaceFilesChangedEvent | null>(null);
+  // Bumped from inside the SSE useEffect's `onerror` handler when the
+  // browser has permanently closed the EventSource (`readyState === CLOSED`).
+  // The browser only auto-reconnects after a 200-ending-normally response or
+  // a network error — non-200 status codes (the dev-mode Vite proxy returns
+  // 502 during the backend-restart gap, and some browsers also close on
+  // unexpected stream ends) leave the EventSource dead. Bumping this epoch
+  // re-runs the transport effect, which closes the dead EventSource via the
+  // cleanup function and then constructs a fresh one in the effect body.
+  // Without this, after a backend restart the user has to hard-refresh to
+  // re-establish the live stream — see bugs.md "Browser auto-reconnect
+  // gives up after a non-200 SSE response and the client gets stuck".
+  const [sseEpoch, setSseEpoch] = useState(0);
+  const sseRecoveryAttemptRef = useRef(0);
+  const sseRecoveryTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
+    null,
+  );
   const workspaceFilesChangedEventBufferRef =
     useRef<WorkspaceFilesChangedEvent | null>(null);
   const workspaceFilesChangedEventFlushTimeoutRef = useRef<number | null>(null);
@@ -1447,6 +1463,7 @@ export function useAppLiveState(
     // Invariant: producers set this only when sawReconnectOpenSinceLastError
     // is true, and onerror clears both flags together for the next outage.
     let pendingBadLiveEventRecovery = false;
+    let allowReconnectRecoveryWithoutExplicitOpen = false;
     let nextReconnectStateResyncDelayMs = RECONNECT_STATE_RESYNC_DELAY_MS;
     let liveSessionResumeWatchdogIntervalId: ReturnType<
       typeof window.setInterval
@@ -1493,6 +1510,35 @@ export function useAppLiveState(
       nextReconnectStateResyncDelayMs = RECONNECT_STATE_RESYNC_DELAY_MS;
     }
 
+    /**
+     * Schedules a fresh EventSource via `setSseEpoch`, with exponential
+     * backoff (500 ms → 5 s cap). Idempotent — does nothing if a recovery
+     * timer is already pending. Called from two paths:
+     *   1. `onerror` when `readyState === 2` (CLOSED): the browser has
+     *      permanently given up on the current socket.
+     *   2. The periodic `handleSseHealthWatchdogTick` below: the socket has
+     *      been non-OPEN for too long, e.g. a stuck CONNECTING state where
+     *      `onerror` somehow stopped firing.
+     * `onopen` resets `sseRecoveryAttemptRef` and clears any pending timer
+     * so a healthy connection always starts the next failure cycle at the
+     * lowest backoff.
+     */
+    function scheduleSseEventSourceRecovery() {
+      if (sseRecoveryTimerRef.current !== null) {
+        return;
+      }
+      const attempt = sseRecoveryAttemptRef.current;
+      sseRecoveryAttemptRef.current = attempt + 1;
+      const delayMs = Math.min(500 * 2 ** attempt, 5000);
+      sseRecoveryTimerRef.current = window.setTimeout(() => {
+        sseRecoveryTimerRef.current = null;
+        if (cancelled) {
+          return;
+        }
+        setSseEpoch((current) => current + 1);
+      }, delayMs);
+    }
+
     function consumeReconnectStateResyncDelayMs() {
       const delayMs = nextReconnectStateResyncDelayMs;
       nextReconnectStateResyncDelayMs = Math.min(
@@ -1526,10 +1572,12 @@ export function useAppLiveState(
       }, delayMs);
     }
 
-    function clearReconnectStateResyncTimeoutAfterConfirmedReopen() {
+    function clearReconnectStateResyncTimeoutAfterConfirmedReopen({
+      allowWithoutConfirmedOpen = false,
+    }: { allowWithoutConfirmedOpen?: boolean } = {}) {
       // Call only from data-bearing SSE handlers. A bare EventSource `onopen`
       // means the socket handshook, not that fresh state is flowing again.
-      if (!sawReconnectOpenSinceLastError) {
+      if (!sawReconnectOpenSinceLastError && !allowWithoutConfirmedOpen) {
         return;
       }
 
@@ -1538,14 +1586,30 @@ export function useAppLiveState(
       resetReconnectStateResyncBackoff();
     }
 
-    function confirmReconnectRecoveryFromLiveEvent() {
-      if (!sawReconnectOpenSinceLastError) {
+    function confirmReconnectRecoveryFromLiveEvent({
+      allowWithoutConfirmedOpen = false,
+    }: { allowWithoutConfirmedOpen?: boolean } = {}) {
+      const canConfirmWithoutOpen =
+        allowWithoutConfirmedOpen &&
+        allowReconnectRecoveryWithoutExplicitOpen;
+      if (!sawReconnectOpenSinceLastError && !canConfirmWithoutOpen) {
         return;
       }
 
-      clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+      clearReconnectStateResyncTimeoutAfterConfirmedReopen({
+        allowWithoutConfirmedOpen: canConfirmWithoutOpen,
+      });
       pendingBadLiveEventRecovery = false;
+      allowReconnectRecoveryWithoutExplicitOpen = false;
       setBackendConnectionState("connected");
+    }
+
+    function confirmReconnectRecoveryFromDeltaEvent() {
+      const allowWithoutConfirmedOpen =
+        allowReconnectRecoveryWithoutExplicitOpen;
+      confirmReconnectRecoveryFromLiveEvent({
+        allowWithoutConfirmedOpen,
+      });
     }
 
     /**
@@ -1714,6 +1778,15 @@ export function useAppLiveState(
                 shouldTrustAuthoritativeReplacementInstance &&
                 requestedRevision !== null &&
                 state.revision <= requestedRevision;
+              const isNotNewerAutomaticReconnectSnapshot =
+                shouldConsiderAuthoritativeSnapshot &&
+                !receivedReplacementInstance &&
+                requestedRevision !== null &&
+                state.revision <= requestedRevision &&
+                (preserveReconnectFallback ||
+                  (rearmOnSuccess &&
+                    rearmUntilLiveEventOnSuccess &&
+                    !rearmAfterSameInstanceProgressUntilLiveEvent));
               const shouldTrustWatchdogSnapshot =
                 shouldConsiderAuthoritativeSnapshot &&
                 preserveWatchdogCooldown &&
@@ -1730,6 +1803,7 @@ export function useAppLiveState(
                 shouldConsiderAuthoritativeSnapshot &&
                 (isEqualRevisionSnapshot ||
                   isNotNewerReplacementSnapshot ||
+                  isNotNewerAutomaticReconnectSnapshot ||
                   shouldTrustWatchdogSnapshot);
               const shouldAllowUnknownServerInstance =
                 allowUnknownServerInstance ||
@@ -1737,9 +1811,9 @@ export function useAppLiveState(
 
               const adopted = adoptState(state, {
                 // A reconnect fallback snapshot is authoritative if no newer
-                // SSE state landed while it was in flight. Downgrades are only
-                // force-adopted for a confirmed replacement instance; lower
-                // same-instance snapshots stay stale and keep polling.
+                // SSE state landed while it was in flight. Same-instance
+                // downgrades stay limited to automatic reconnect/fallback and
+                // watchdog probes; manual retry still waits for catch-up.
                 force: shouldForceAuthoritativeSnapshot,
                 allowRevisionDowngrade: shouldForceAuthoritativeSnapshot,
                 allowUnknownServerInstance: shouldAllowUnknownServerInstance,
@@ -1808,6 +1882,16 @@ export function useAppLiveState(
                   !adoptedReplacementInstance &&
                   requestedRevision !== null &&
                   state.revision > requestedRevision;
+                if (
+                  adoptedSameInstanceProgress &&
+                  rearmAfterSameInstanceProgressUntilLiveEvent
+                ) {
+                  // Manual retry keeps polling until live SSE proves recovery.
+                  // In real EventSource delivery, a data event implies an open
+                  // socket; tests may omit `onopen`, so a later data frame can
+                  // satisfy this specific manual-retry contract.
+                  allowReconnectRecoveryWithoutExplicitOpen = true;
+                }
                 // Timer-driven reconnect fallbacks keep probing until a live
                 // EventSource data frame proves the SSE stream is healthy
                 // again unless a same-instance snapshot already made forward
@@ -1926,6 +2010,7 @@ export function useAppLiveState(
       sawReconnectOpenSinceLastError = false;
       reconnectRecoveryConfirmedSinceLastError = false;
       pendingBadLiveEventRecovery = false;
+      allowReconnectRecoveryWithoutExplicitOpen = false;
       clearInitialStateResyncRetryTimeout();
       clearReconnectStateResyncTimeout();
       resetReconnectStateResyncBackoff();
@@ -2205,6 +2290,7 @@ export function useAppLiveState(
           if (sawReconnectOpenSinceLastError) {
             pendingBadLiveEventRecovery = true;
             reconnectRecoveryConfirmedSinceLastError = false;
+            allowReconnectRecoveryWithoutExplicitOpen = false;
             setBackendConnectionState("reconnecting");
             if (reconnectStateResyncTimeoutId === null) {
               scheduleReconnectStateResync();
@@ -2257,8 +2343,7 @@ export function useAppLiveState(
             !pendingBadLiveEventRecovery ||
             ignoredDeltaConfirmsBadLiveEventRecovery
           ) {
-            confirmReconnectRecoveryFromLiveEvent();
-            clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+            confirmReconnectRecoveryFromDeltaEvent();
           }
           setBackendConnectionIssueDetail(null);
           clearRecoveredBackendRequestError();
@@ -2281,12 +2366,19 @@ export function useAppLiveState(
           // rearmOnFailure so a failed resync re-arms polling instead of
           // stalling recovery.
           requestStateResync({ rearmOnFailure: true });
+          // Force per-session re-hydration as well so the affected session's
+          // full transcript is re-fetched even if the /api/state summary's
+          // reconcile decides the session looks fresh enough to keep
+          // `messagesLoaded: true`. `hydratingSessionIdsRef` deduplicates so
+          // a no-op when hydration is already in flight or queued.
+          if ("sessionId" in delta && typeof delta.sessionId === "string") {
+            startSessionHydration(delta.sessionId);
+          }
           return;
         }
 
         if (delta.type === "codexUpdated") {
-          confirmReconnectRecoveryFromLiveEvent();
-          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+          confirmReconnectRecoveryFromDeltaEvent();
           latestStateRevisionRef.current = delta.revision;
           codexStateRef.current = delta.codex;
           scheduleCodexStateRender();
@@ -2299,8 +2391,7 @@ export function useAppLiveState(
           // Global orchestrator updates prove the SSE stream is healthy enough to
           // clear reconnect fallback state. When the delta also carries session
           // snapshots, treat those specific ids as live data for watchdog baselines.
-          confirmReconnectRecoveryFromLiveEvent();
-          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
+          confirmReconnectRecoveryFromDeltaEvent();
           const appliedAt = Date.now();
           if (delta.sessions?.length) {
             const deltaSessionIds = delta.sessions.map((session) => session.id);
@@ -2333,10 +2424,12 @@ export function useAppLiveState(
         // Non-session deltas such as codexUpdated/orchestratorsUpdated are handled above; the
         // session reducer only accepts deltas that carry a concrete sessionId.
         const result = applyDeltaToSessions(sessionsRef.current, delta);
-        if (result.kind === "applied") {
-          confirmReconnectRecoveryFromLiveEvent();
+        if (
+          result.kind === "applied" ||
+          result.kind === "appliedNeedsResync"
+        ) {
+          confirmReconnectRecoveryFromDeltaEvent();
           const appliedAt = Date.now();
-          clearReconnectStateResyncTimeoutAfterConfirmedReopen();
           // Every session-scoped delta proves liveness for that session, including
           // any future delta shape that revives it back to "active".
           cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
@@ -2353,17 +2446,49 @@ export function useAppLiveState(
           scheduleSessionRender();
           setBackendConnectionIssueDetail(null);
           clearRecoveredBackendRequestError();
+          if (result.kind === "appliedNeedsResync") {
+            // Metadata-only fallback fired for an unhydrated session whose target
+            // message is not in the retained transcript. The metadata patch keeps
+            // the sidebar fresh, but the message body itself only arrives via
+            // an authoritative state fetch — schedule one so a stuck/queued
+            // hydration cannot leave the user staring at a stale transcript.
+            requestStateResync({ rearmOnFailure: true });
+            // Force per-session re-hydration too: `/api/state` returns only the
+            // metadata-first summary, and `applyMetadataOnlySessionDelta`
+            // already advanced the local mutation stamp to match what the
+            // delta carried. If the backend's stamp didn't move past that, the
+            // summary's `reconcileSummarySession` would not flip
+            // `messagesLoaded` back to false and the hydration effect would
+            // not re-fire. Calling `startSessionHydration` directly fetches
+            // the full transcript via `/api/sessions/{id}` so the missing
+            // message body actually appears. See bugs.md "Stuck assistant
+            // reply visible only after refresh".
+            startSessionHydration(delta.sessionId);
+          }
           return;
         }
 
-        // Unrecognized delta type — resync to get an authoritative snapshot.
+        // Reducer rejected the delta as out-of-sync (missing target on a
+        // hydrated session, type/id mismatch, count regression, …). Schedule
+        // the authoritative state resync as before AND force a per-session
+        // re-hydration: the `/api/state` summary alone may not flip
+        // `messagesLoaded` back to false (mutation stamps can match even
+        // though the local transcript is missing a message), so without the
+        // direct hydration the user can stay stuck on a stale transcript
+        // until they refresh. Same reasoning as the appliedNeedsResync
+        // branch above. See bugs.md "Stuck assistant reply visible only
+        // after refresh".
         requestStateResync({ rearmOnFailure: true });
+        if ("sessionId" in delta && typeof delta.sessionId === "string") {
+          startSessionHydration(delta.sessionId);
+        }
       } catch {
         // Parse or reducer failure — restore reconnecting state so the retry
         // affordance stays available, and re-arm polling.
         if (sawReconnectOpenSinceLastError) {
           pendingBadLiveEventRecovery = true;
           reconnectRecoveryConfirmedSinceLastError = false;
+          allowReconnectRecoveryWithoutExplicitOpen = false;
           setBackendConnectionState("reconnecting");
           if (reconnectStateResyncTimeoutId === null) {
             scheduleReconnectStateResync();
@@ -2396,8 +2521,24 @@ export function useAppLiveState(
       }
     }
 
+    function handleLaggedEvent() {
+      if (cancelled) {
+        return;
+      }
+      // The backend emits this when an SSE broadcast receiver fell past the
+      // channel capacity and dropped events. A recovery state snapshot follows
+      // immediately, but its revision may equal `latestStateRevisionRef.current`
+      // (the client read some events from the burst before falling behind), so
+      // the gate in `handleStateEvent` would otherwise reject it as a redundant
+      // catch-up. Arm force-adopt so the next state event is taken regardless
+      // of revision parity. See bugs.md "SSE Lagged-recovery snapshot can be
+      // silently ignored".
+      forceAdoptNextStateEventRef.current = true;
+    }
+
     eventSource.addEventListener("state", handleStateEvent as EventListener);
     eventSource.addEventListener("delta", handleDeltaEvent as EventListener);
+    eventSource.addEventListener("lagged", handleLaggedEvent as EventListener);
     eventSource.addEventListener(
       "workspaceFilesChanged",
       handleWorkspaceFilesChangedEvent as EventListener,
@@ -2406,6 +2547,14 @@ export function useAppLiveState(
       if (!cancelled) {
         resetWorkspaceFilesChangedEventGate();
         sawReconnectOpenSinceLastError = true;
+        // Reset the post-CLOSED recovery counter and clear any pending
+        // recovery timer — the live stream is healthy again, so the next
+        // failure cycle should start fresh at the lowest backoff.
+        sseRecoveryAttemptRef.current = 0;
+        if (sseRecoveryTimerRef.current !== null) {
+          window.clearTimeout(sseRecoveryTimerRef.current);
+          sseRecoveryTimerRef.current = null;
+        }
         if (latestStateRevisionRef.current !== null) {
           // A restarted backend can reconnect with the same persisted revision but a
           // more complete authoritative snapshot than the client currently has.
@@ -2425,6 +2574,7 @@ export function useAppLiveState(
       sawReconnectOpenSinceLastError = false;
       reconnectRecoveryConfirmedSinceLastError = false;
       pendingBadLiveEventRecovery = false;
+      allowReconnectRecoveryWithoutExplicitOpen = false;
       const isOnline = readNavigatorOnline();
       const hasHydratedState = latestStateRevisionRef.current !== null;
       setBackendConnectionState(
@@ -2434,6 +2584,30 @@ export function useAppLiveState(
             : "connecting"
           : "offline",
       );
+
+      // EventSource permanently closed (`readyState === CLOSED`, numeric
+      // value 2 per the WHATWG spec)? The browser is done with this socket
+      // and will not auto-reconnect. This is what happens when the dev-mode
+      // Vite proxy returns 502 during the brief backend-restart gap, and is
+      // also seen with some browsers on certain clean stream ends. Schedule
+      // a fresh EventSource via `setSseEpoch` re-running this effect, with
+      // backoff to avoid hammering the proxy. See bugs.md "Browser
+      // auto-reconnect gives up after a non-200 SSE response and the client
+      // gets stuck".
+      //
+      // Numeric `2` instead of `EventSource.CLOSED`: tests stub the global
+      // `EventSource` with `EventSourceMock`, so `EventSource.CLOSED` is
+      // `undefined` in the test environment and `undefined === undefined`
+      // would falsely trigger this branch. Guarding on `typeof === "number"`
+      // additionally makes the check inert until the mock opts in by
+      // declaring a numeric `readyState`.
+      const readyState = (eventSource as { readyState?: unknown }).readyState;
+      const eventSourceClosed =
+        typeof readyState === "number" && readyState === 2;
+      if (eventSourceClosed && isOnline) {
+        scheduleSseEventSourceRecovery();
+      }
+
       if (!isOnline) {
         clearInitialStateResyncRetryTimeout();
         clearReconnectStateResyncTimeout();
@@ -2466,6 +2640,51 @@ export function useAppLiveState(
       handleLiveSessionResumeWatchdogTick,
       LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,
     );
+
+    // Defense in depth: even though `onerror` schedules recovery for the
+    // common cases (browser-emitted error events on each failed retry),
+    // some networks / browsers can leave the EventSource stuck in
+    // `readyState === CONNECTING` (0) without firing `onerror` for long
+    // stretches. The periodic watchdog notices "we've been non-OPEN for
+    // too long" and forces an EventSource recreation through the same
+    // backoff path the `readyState === CLOSED` branch uses. Threshold of
+    // 15 s leaves room for normal browser auto-reconnect cycles (default
+    // 3 s × a few retries) before the watchdog escalates. See bugs.md
+    // "Browser auto-reconnect gives up after a non-200 SSE response and
+    // the client gets stuck".
+    let sseStaleSinceMs: number | null = null;
+    const sseHealthWatchdogIntervalId = window.setInterval(() => {
+      if (cancelled) {
+        return;
+      }
+      if (!readNavigatorOnline()) {
+        sseStaleSinceMs = null;
+        return;
+      }
+
+      const readyState = (eventSource as { readyState?: unknown }).readyState;
+      const isOpen = typeof readyState === "number" && readyState === 1;
+      if (isOpen) {
+        sseStaleSinceMs = null;
+        return;
+      }
+      if (typeof readyState !== "number") {
+        // The mock used in tests leaves `readyState` undefined unless a
+        // test explicitly opts in. Treat that as "watchdog inert" so
+        // existing test scenarios are not perturbed.
+        return;
+      }
+
+      const now = Date.now();
+      if (sseStaleSinceMs === null) {
+        sseStaleSinceMs = now;
+        return;
+      }
+      if (now - sseStaleSinceMs >= 15000) {
+        sseStaleSinceMs = null;
+        scheduleSseEventSourceRecovery();
+      }
+    }, 5000);
 
     function handleWindowBlur() {
       markResumeResyncIfNeeded();
@@ -2517,6 +2736,7 @@ export function useAppLiveState(
       if (liveSessionResumeWatchdogIntervalId !== null) {
         window.clearInterval(liveSessionResumeWatchdogIntervalId);
       }
+      window.clearInterval(sseHealthWatchdogIntervalId);
       window.removeEventListener("blur", handleWindowBlur);
       window.removeEventListener("focus", handleWindowFocus);
       window.removeEventListener("pagehide", handlePageHide);
@@ -2531,13 +2751,29 @@ export function useAppLiveState(
         handleDeltaEvent as EventListener,
       );
       eventSource.removeEventListener(
+        "lagged",
+        handleLaggedEvent as EventListener,
+      );
+      eventSource.removeEventListener(
         "workspaceFilesChanged",
         handleWorkspaceFilesChangedEvent as EventListener,
       );
       eventSource.close();
+      // The recovery timer fires `setSseEpoch` to re-run this effect; if the
+      // effect is being cleaned up for any other reason (component unmount,
+      // explicit re-mount via state change), drop the pending bump so we
+      // don't churn after teardown.
+      if (sseRecoveryTimerRef.current !== null) {
+        window.clearTimeout(sseRecoveryTimerRef.current);
+        sseRecoveryTimerRef.current = null;
+      }
     };
+    // `sseEpoch` re-runs the effect to recreate a permanently-CLOSED
+    // EventSource (see the `onerror` handler). All other deps are read via
+    // refs by design — the effect installs every closure-captured handler
+    // on mount and resets them on cleanup.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sseEpoch]);
 
   return {
     adoptState,

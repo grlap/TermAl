@@ -150,6 +150,56 @@ impl AppState {
         Ok(())
     }
 
+    /// Drains any pending persist work and joins the background persist
+    /// thread. Intended to run as the last step of a graceful shutdown
+    /// (after `axum::serve` returns) so the very last `commit_locked` /
+    /// `commit_persisted_delta_locked` reaches SQLite before the
+    /// process exits — closing the durability window described in
+    /// bugs.md "Server restart without browser refresh can lose the
+    /// last streamed message".
+    ///
+    /// Idempotent: subsequent calls are a no-op once the handle has
+    /// been taken. Safe to call from `AppState` clones — the handle is
+    /// shared via `Arc<Mutex<Option<_>>>`. Test-only constructors that
+    /// don't spawn the worker store `None`; this method then has no
+    /// thread to wait on and returns immediately.
+    ///
+    /// Sends `PersistRequest::Shutdown` and joins the thread. The
+    /// worker's loop drains every queued `Delta` (including any
+    /// commits queued between the shutdown signal and the worker's
+    /// next iteration) and runs one final `collect_persist_delta` /
+    /// `persist_delta_via_cache` pass before exiting. Errors from the
+    /// final write are logged via the worker's existing eprintln path.
+    ///
+    /// Note: callers that still hold an `AppState` clone must avoid
+    /// further `commit_locked` calls after invoking this — the persist
+    /// channel is not closed (other clones may still send `Delta`),
+    /// but the worker has exited so nothing drains those signals. In
+    /// practice this method runs after `axum::serve` has stopped
+    /// accepting new requests and `with_graceful_shutdown` has waited
+    /// for in-flight handlers to finish, so no commits are in flight.
+    fn shutdown_persist_blocking(&self) {
+        let handle = {
+            let mut guard = self
+                .persist_thread_handle
+                .lock()
+                .expect("persist thread handle mutex poisoned");
+            guard.take()
+        };
+        let Some(handle) = handle else {
+            return;
+        };
+        // Best-effort: if the channel is already disconnected (worker
+        // panicked or exited early) there is nothing to drain — the
+        // join below still waits for the OS thread to fully exit.
+        let _ = self.persist_tx.send(PersistRequest::Shutdown);
+        if let Err(err) = handle.join() {
+            eprintln!(
+                "[termal] persist worker join failed during graceful shutdown: {err:?}"
+            );
+        }
+    }
+
     // Delta-producing changes advance the revision without publishing a full snapshot; the delta event
     // carries the new revision instead. Persisting the full state on every streamed chunk makes
     // long responses increasingly slow, so durable persistence is deferred until the next

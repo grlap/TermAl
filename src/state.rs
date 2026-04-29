@@ -33,14 +33,19 @@ mutex.
 /// `PersistRequest` therefore carries only the wake signal; the full
 /// `PersistedState` snapshot that earlier versions cloned under the
 /// state mutex is no longer needed.
-///
-/// Kept as a unit-only enum (rather than `()`) so a future reset /
-/// restore flow can add variants without touching every call site.
 enum PersistRequest {
     /// Incremental persist: the thread looks up the current
     /// `last_mutation_stamp` and writes only the sessions that
     /// advanced past the thread's own watermark.
     Delta,
+    /// Graceful-shutdown signal: the persist worker performs one final
+    /// drain-and-write tick (so any pending mutation reaches SQLite),
+    /// then exits its loop. The matching `JoinHandle` lives on
+    /// `AppState::persist_thread_handle` and `AppState::shutdown_persist_blocking`
+    /// is the documented shutdown entry point — see also bugs.md
+    /// "Server restart without browser refresh can lose the last
+    /// streamed message" for the durability contract this closes.
+    Shutdown,
 }
 
 const REMOTE_DELTA_REPLAY_CACHE_LIMIT: usize = 2048;
@@ -247,6 +252,27 @@ struct AppState {
     /// dedicated thread serializes it to JSON and writes the file so the
     /// state mutex is never held during I/O.
     persist_tx: mpsc::Sender<PersistRequest>,
+    /// Handle to the background persist thread. Wrapped in
+    /// `Arc<Mutex<Option<_>>>` so that:
+    ///   - `AppState` stays `Clone` (the handle is shared, not duplicated),
+    ///   - exactly one shutdown caller can `take()` the handle and join,
+    ///   - subsequent shutdown calls are a safe no-op.
+    /// Populated by `AppState::new_with_paths` after spawning the thread.
+    /// `None` for test-only constructors that don't spawn the thread —
+    /// `shutdown_persist_blocking` then has nothing to wait on.
+    persist_thread_handle: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
+    /// Graceful-shutdown signal for long-lived SSE streams. Triggered by
+    /// `main.rs::shutdown_signal` (Ctrl+C / SIGTERM) before the
+    /// `axum::serve` graceful-shutdown future resolves; the SSE handler
+    /// pins a `Notified` future on this and `enable()`s it before its
+    /// first poll, so notifications fired before the future is awaited
+    /// still wake it. Without this, `with_graceful_shutdown` would block
+    /// forever waiting for SSE streams to finish — the broadcast
+    /// receivers in `state_events` only return `Closed` when the last
+    /// `AppState` clone drops, but `shutdown_state` keeps a clone alive
+    /// for the post-serve persist drain. See bugs.md "Graceful shutdown
+    /// blocks forever waiting for SSE streams to drain".
+    shutdown_notify: Arc<tokio::sync::Notify>,
     /// Background SSE state-broadcast channel. `publish_snapshot` sends a
     /// pre-built `StateResponse` through this channel; a dedicated thread
     /// serializes it to JSON and forwards the payload to `state_events`,

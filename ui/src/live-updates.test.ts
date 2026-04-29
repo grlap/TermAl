@@ -3,6 +3,7 @@ import {
   applyDeltaToSessions,
   pruneLiveTransportActivitySessions,
   sessionHasPotentiallyStaleTransport,
+  type SessionDeltaEvent,
 } from "./live-updates";
 import type {
   CodexAppRequestMessage,
@@ -186,7 +187,12 @@ describe("session transport helpers", () => {
     ).toBe(false);
   });
 
-  it("does not treat a newer user-authored turn as having current-turn assistant activity", () => {
+  it("treats a user prompt awaiting an assistant response as in-turn activity", () => {
+    // A pending user prompt at the turn boundary is exactly the scenario
+    // where the SSE delta carrying the assistant's first chunk could be
+    // dropped silently — we want the watchdog to fire and resync rather
+    // than leaving the user staring at "thinking" forever. See bugs.md
+    // "Watchdog ignored user-prompt turn boundaries…".
     const session = makeSession("session-1", {
       status: "active",
       messages: [
@@ -220,7 +226,34 @@ describe("session transport helpers", () => {
         0,
         LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
       ),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it("treats a single pending user prompt with no prior assistant activity as in-turn activity", () => {
+    // First-prompt-on-a-fresh-session scenario: the user just sent the very
+    // first message in the session. If the assistant's first chunk delta is
+    // lost, the watchdog must still fire after the staleness threshold so
+    // the session can recover without the user re-sending or refreshing.
+    const session = makeSession("session-1", {
+      status: "active",
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "First prompt with no reply yet",
+        },
+      ],
+    });
+
+    expect(
+      sessionHasPotentiallyStaleTransport(
+        session,
+        0,
+        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
+      ),
+    ).toBe(true);
   });
 
   it("treats assistant output after the latest user turn as current-turn activity", () => {
@@ -1937,7 +1970,7 @@ describe("applyDeltaToSessions", () => {
     });
   });
 
-  it("keeps metadata-only fallback for unhydrated deltas whose target message is absent", () => {
+  it("returns appliedNeedsResync with a metadata-only patch when an unhydrated delta's target message is absent", () => {
     const sessions = [
       makeSession("session-a", {
         messagesLoaded: false,
@@ -1968,9 +2001,14 @@ describe("applyDeltaToSessions", () => {
 
     const result = applyDeltaToSessions(sessions, delta);
 
-    expect(result.kind).toBe("applied");
-    if (result.kind !== "applied") {
-      throw new Error("expected metadata-only delta to apply");
+    // The metadata patch alone keeps the sidebar fresh, but the message body
+    // is missing from the retained transcript. The reducer signals
+    // `appliedNeedsResync` so the caller schedules an authoritative state
+    // refetch — without it, a wedged hydration leaves the latest message
+    // body invisible until the user takes another action.
+    expect(result.kind).toBe("appliedNeedsResync");
+    if (result.kind !== "appliedNeedsResync") {
+      throw new Error("expected metadata-only delta to apply with resync nudge");
     }
     expect(result.sessions[0].messagesLoaded).toBe(false);
     expect(result.sessions[0].messages).toEqual(sessions[0].messages);
@@ -1978,6 +2016,149 @@ describe("applyDeltaToSessions", () => {
     expect(result.sessions[0].preview).toBe("Updated preview");
     expect(result.sessions[0].sessionMutationStamp).toBe(206);
   });
+
+  it.each([
+    {
+      label: "messageUpdated",
+      makeMessage: () => ({
+        id: "approval-1",
+        type: "approval" as const,
+        timestamp: "10:00",
+        author: "assistant" as const,
+        title: "Run command?",
+        command: "cargo check",
+        detail: "Allow this command",
+        decision: "pending" as const,
+      }),
+      makeDelta: (): SessionDeltaEvent => ({
+        type: "messageUpdated",
+        revision: 4,
+        sessionId: "session-a",
+        messageId: "missing-approval",
+        messageIndex: 1,
+        messageCount: 2,
+        message: {
+          id: "missing-approval",
+          type: "approval",
+          timestamp: "10:01",
+          author: "assistant",
+          title: "Run command?",
+          command: "ls",
+          detail: "Allow listing",
+          decision: "accepted",
+        },
+        preview: "Updated preview",
+        status: "active",
+        sessionMutationStamp: 301,
+      }),
+    },
+    {
+      label: "textReplace",
+      makeMessage: () => ({
+        id: "message-previous",
+        type: "text" as const,
+        timestamp: "10:00",
+        author: "assistant" as const,
+        text: "Previous answer",
+      }),
+      makeDelta: (): SessionDeltaEvent => ({
+        type: "textReplace",
+        revision: 6,
+        sessionId: "session-a",
+        messageId: "missing-message",
+        messageIndex: 1,
+        messageCount: 2,
+        text: "New answer",
+        preview: "Updated preview",
+        sessionMutationStamp: 302,
+      }),
+    },
+    {
+      label: "commandUpdate",
+      makeMessage: () => ({
+        id: "command-previous",
+        type: "command" as const,
+        timestamp: "10:02",
+        author: "assistant" as const,
+        command: "ls",
+        output: "",
+        status: "running" as const,
+      }),
+      makeDelta: (): SessionDeltaEvent => ({
+        type: "commandUpdate",
+        revision: 7,
+        sessionId: "session-a",
+        messageId: "missing-command",
+        messageIndex: 1,
+        messageCount: 2,
+        command: "pwd",
+        output: "/tmp",
+        status: "success",
+        preview: "Updated preview",
+        sessionMutationStamp: 303,
+      }),
+    },
+    {
+      label: "parallelAgentsUpdate",
+      makeMessage: () => ({
+        id: "parallel-previous",
+        type: "parallelAgents" as const,
+        timestamp: "10:03",
+        author: "assistant" as const,
+        agents: [
+          {
+            id: "reviewer",
+            title: "Reviewer",
+            status: "initializing" as const,
+          },
+        ],
+      }),
+      makeDelta: (): SessionDeltaEvent => ({
+        type: "parallelAgentsUpdate",
+        revision: 8,
+        sessionId: "session-a",
+        messageId: "missing-parallel",
+        messageIndex: 1,
+        messageCount: 2,
+        agents: [
+          {
+            id: "reviewer",
+            title: "Reviewer",
+            status: "running",
+            detail: "Checking",
+          },
+        ],
+        preview: "Updated preview",
+        sessionMutationStamp: 304,
+      }),
+    },
+  ])(
+    "returns appliedNeedsResync for missing-target $label on an unhydrated session",
+    ({ makeMessage, makeDelta }) => {
+      const message = makeMessage();
+      const sessions = [
+        makeSession("session-a", {
+          messagesLoaded: false,
+          messageCount: 1,
+          preview: "Previous",
+          messages: [message],
+        }),
+      ];
+
+      const result = applyDeltaToSessions(sessions, makeDelta());
+
+      expect(result.kind).toBe("appliedNeedsResync");
+      if (result.kind !== "appliedNeedsResync") {
+        throw new Error(
+          "expected unhydrated missing-target delta to apply with resync nudge",
+        );
+      }
+      expect(result.sessions[0].messagesLoaded).toBe(false);
+      expect(result.sessions[0].messages).toEqual([message]);
+      expect(result.sessions[0].messageCount).toBe(2);
+      expect(result.sessions[0].preview).toBe("Updated preview");
+    },
+  );
 
   it("applies text deltas to an existing message", () => {
     const sessions = [

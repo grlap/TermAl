@@ -51,18 +51,38 @@ impl Default for PersistWorkerRetryState {
     }
 }
 
+/// Outcome of a persist-worker wait. Distinguishes:
+/// - a normal tick (process pending work and continue),
+/// - a shutdown tick (process pending work one last time so the very last
+///   commit reaches SQLite, then exit — see bugs.md "Server restart
+///   without browser refresh can lose the last streamed message"),
+/// - a clean exit (channel disconnected, nothing to do).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PersistWorkerWaitOutcome {
+    Process,
+    Shutdown,
+    Exit,
+}
+
 impl PersistWorkerRetryState {
-    fn wait_for_next_tick(&self, persist_rx: &mpsc::Receiver<PersistRequest>) -> bool {
+    fn wait_for_next_tick(
+        &self,
+        persist_rx: &mpsc::Receiver<PersistRequest>,
+    ) -> PersistWorkerWaitOutcome {
         if self.retry_after_failure {
             match persist_rx.recv_timeout(self.retry_delay) {
-                Ok(PersistRequest::Delta) => true,
-                Err(mpsc::RecvTimeoutError::Timeout) => true,
-                Err(mpsc::RecvTimeoutError::Disconnected) => false,
+                Ok(PersistRequest::Delta) => PersistWorkerWaitOutcome::Process,
+                Ok(PersistRequest::Shutdown) => PersistWorkerWaitOutcome::Shutdown,
+                // Synthetic retry tick: the previous attempt failed and the
+                // backoff window expired with no new signal, so try again.
+                Err(mpsc::RecvTimeoutError::Timeout) => PersistWorkerWaitOutcome::Process,
+                Err(mpsc::RecvTimeoutError::Disconnected) => PersistWorkerWaitOutcome::Exit,
             }
         } else {
             match persist_rx.recv() {
-                Ok(PersistRequest::Delta) => true,
-                Err(_) => false,
+                Ok(PersistRequest::Delta) => PersistWorkerWaitOutcome::Process,
+                Ok(PersistRequest::Shutdown) => PersistWorkerWaitOutcome::Shutdown,
+                Err(_) => PersistWorkerWaitOutcome::Exit,
             }
         }
     }
@@ -157,7 +177,7 @@ impl AppState {
         // every queued write — previously every persist opened a fresh
         // connection and re-ran `ensure_sqlite_state_schema`, which
         // writes `schema_version` on every call.
-        std::thread::Builder::new()
+        let persist_thread_handle = std::thread::Builder::new()
             .name("termal-persist".to_owned())
             .spawn(move || {
                 #[cfg(not(test))]
@@ -166,15 +186,26 @@ impl AppState {
                 let mut watermark: u64 = 0;
                 let mut retry_state = PersistWorkerRetryState::default();
                 loop {
-                    if !retry_state.wait_for_next_tick(&persist_rx) {
+                    let outcome = retry_state.wait_for_next_tick(&persist_rx);
+                    if matches!(outcome, PersistWorkerWaitOutcome::Exit) {
                         break;
                     }
+                    let mut should_exit_after_tick =
+                        matches!(outcome, PersistWorkerWaitOutcome::Shutdown);
                     // Drain any queued signals — the delta collection
                     // below captures everything that has changed since
                     // the last tick regardless of how many Delta
                     // signals queued up, so extra signals are pure
-                    // duplicates.
-                    while persist_rx.try_recv().is_ok() {}
+                    // duplicates. A `Shutdown` request mixed in with
+                    // queued deltas still flips the exit-after-tick
+                    // flag so the very last delta reaches SQLite before
+                    // we exit. See bugs.md "Server restart without
+                    // browser refresh can lose the last streamed message".
+                    while let Ok(req) = persist_rx.try_recv() {
+                        if matches!(req, PersistRequest::Shutdown) {
+                            should_exit_after_tick = true;
+                        }
+                    }
 
                     #[cfg(not(test))]
                     let result: Result<()> = (|| {
@@ -240,6 +271,9 @@ impl AppState {
                         eprintln!("[termal] background persist failed: {err:#}");
                     }
                     retry_state.record_result(&result);
+                    if should_exit_after_tick {
+                        break;
+                    }
                 }
             })
             .expect("failed to spawn persist thread");
@@ -295,6 +329,8 @@ impl AppState {
             file_events: broadcast::channel(256).0,
             file_events_revision: Arc::new(AtomicU64::new(0)),
             persist_tx,
+            persist_thread_handle: Arc::new(Mutex::new(Some(persist_thread_handle))),
+            shutdown_notify: Arc::new(tokio::sync::Notify::new()),
             state_broadcast_tx,
             shared_codex_runtime: Arc::new(Mutex::new(None)),
             agent_readiness_cache,

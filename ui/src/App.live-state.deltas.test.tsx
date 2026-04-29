@@ -3316,7 +3316,12 @@ describe("App live state - delta-gap core", () => {
     }
   });
 
-  it("does not watchdog-resync a quiet active session before any assistant output arrives", async () => {
+  it("watchdog-resyncs a quiet active session even before any assistant output arrives", async () => {
+    // The user sent a prompt and the session went active, but the assistant's
+    // first SSE delta never arrived. Without watchdog recovery the user is
+    // stuck staring at "Waiting for the next chunk of output..." forever.
+    // Once the staleness window elapses, the watchdog must resync — see
+    // bugs.md "Watchdog ignored user-prompt turn boundaries…".
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
@@ -3417,16 +3422,23 @@ describe("App live state - delta-gap core", () => {
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
-      // 2 full stale windows: the watchdog should still stay quiet without current-turn output.
+      // After one stale window the watchdog should fire even though no
+      // assistant chunks have arrived yet — the user prompt at the turn
+      // boundary counts as in-turn activity that's gone silent for too long.
       await advanceTimers(
-        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS * 2 + 2000,
+        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 1000,
       );
       await settleAsyncUi();
 
-      expect(stateFetchCallCount()).toBe(0);
+      expect(stateFetchCallCount()).toBeGreaterThanOrEqual(1);
+      // The recovery snapshot the watchdog fetched shows the assistant reply
+      // that the lost SSE chunk would have streamed in, so the recovered
+      // text becomes visible (the "waiting" affordance only disappears once
+      // the session transitions to idle, which it does in the recovery
+      // snapshot).
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
-      ).toBeInTheDocument();
+        screen.getAllByText("Quiet turn finished.").length,
+      ).toBeGreaterThan(0);
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -3437,5 +3449,185 @@ describe("App live state - delta-gap core", () => {
     }
   });
 
+  it("force re-hydrates the session when a delta arrives whose target is missing on a hydrated transcript", async () => {
+    // Scenario: a hydrated session ends a turn but the SSE deltas that
+    // would have streamed in the assistant reply were dropped. The next
+    // delta references an unknown messageId. The reducer returns
+    // `needsResync`, the caller schedules `/api/state`, and ALSO calls
+    // `startSessionHydration` directly so the per-session full-transcript
+    // fetch happens regardless of whether the metadata-first summary
+    // would flip `messagesLoaded` back to false. Without the explicit
+    // hydration trigger the user can stay on a stale transcript until they
+    // refresh the page. See bugs.md "Stuck assistant reply visible only
+    // after refresh".
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const initialSession = makeSession("session-1", {
+      name: "Codex Session",
+      status: "active",
+      preview: "First message",
+      messagesLoaded: true,
+      messageCount: 1,
+      sessionMutationStamp: 11,
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "First message",
+        },
+      ],
+    });
+    const recoveredSession = makeSession("session-1", {
+      ...initialSession,
+      status: "idle",
+      preview: "Recovered assistant reply.",
+      messagesLoaded: true,
+      messageCount: 2,
+      sessionMutationStamp: 12,
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "First message",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Recovered assistant reply.",
+        },
+      ],
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const requestUrl = new URL(String(input), "http://localhost");
+      if (requestUrl.pathname === "/api/state") {
+        return jsonResponse(
+          makeStateResponse({
+            revision: 5,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            // Summary stamp matches the local stamp the metadata-only
+            // patch would have settled on, so reconcileSummarySession
+            // would NOT downgrade messagesLoaded — proving the explicit
+            // hydration trigger is what surfaces the missing message
+            // body.
+            sessions: [
+              makeSession("session-1", {
+                ...initialSession,
+                status: "idle",
+                preview: "Recovered assistant reply.",
+                messageCount: 2,
+                sessionMutationStamp: 12,
+                messagesLoaded: true,
+              }),
+            ],
+          }),
+        );
+      }
+      if (requestUrl.pathname === "/api/sessions/session-1") {
+        return jsonResponse({
+          revision: 5,
+          serverInstanceId: "test-instance",
+          session: recoveredSession,
+        });
+      }
+      if (requestUrl.pathname === "/api/git/status") {
+        return jsonResponse({
+          ahead: 0,
+          behind: 0,
+          branch: "main",
+          files: [],
+          isClean: true,
+          repoRoot: "/tmp",
+          upstream: "origin/main",
+          workdir: "/tmp",
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const scrollIntoViewSpy = stubScrollIntoView();
+    try {
+      await renderApp();
+      const eventSource = latestEventSource();
+      await dispatchOpenedStateEvent(
+        eventSource,
+        makeStateResponse({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [initialSession],
+        }),
+      );
+      await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+      const sessionRowButton =
+        within(sessionList).getByText("Codex Session").closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+      await clickAndSettle(sessionRowButton);
+      expect(screen.getAllByText("First message").length).toBeGreaterThan(0);
+      fetchMock.mockClear();
+
+      // Dispatch a textDelta whose target message is unknown to the local
+      // hydrated transcript. The reducer returns needsResync.
+      await act(async () => {
+        eventSource.dispatchNamedEvent("delta", {
+          type: "textDelta",
+          revision: 2,
+          sessionId: "session-1",
+          messageId: "message-assistant-1",
+          messageIndex: 1,
+          messageCount: 2,
+          delta: " reply.",
+          preview: "Recovered assistant reply.",
+          sessionMutationStamp: 12,
+        });
+        await flushUiWork();
+      });
+      await settleAsyncUi();
+
+      // Both /api/state AND /api/sessions/session-1 should be fetched —
+      // the latter is the per-session re-hydration that this regression
+      // pins. Without the direct hydration trigger, only /api/state would
+      // fire and the missing message would never appear.
+      expect(
+        fetchMock.mock.calls.some(
+          ([input]) =>
+            new URL(String(input), "http://localhost").pathname ===
+            "/api/sessions/session-1",
+        ),
+      ).toBe(true);
+      expect(
+        screen.getAllByText("Recovered assistant reply.").length,
+      ).toBeGreaterThan(0);
+    } finally {
+      scrollIntoViewSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
 
 });

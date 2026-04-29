@@ -37,6 +37,17 @@ export class EventSourceMock {
 
   onopen: ((event: Event) => void) | null = null;
 
+  /**
+   * Mirrors the real `EventSource.readyState` (CONNECTING=0, OPEN=1,
+   * CLOSED=2). Most tests don't need to set this — leave it `undefined` and
+   * the production `onerror` handler treats it as "browser is auto-reconnecting"
+   * and won't trigger the manual EventSource-recreation path. Tests that
+   * specifically exercise the recreation path (e.g., simulating a Vite proxy
+   * 502 during a backend restart) should set `readyState = 2` before calling
+   * `dispatchError()`.
+   */
+  readyState?: number;
+
   private listeners = new Map<
     string,
     Set<(event: MessageEvent<string>) => void>

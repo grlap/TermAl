@@ -463,7 +463,13 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     }
   });
 
-  it("does not watchdog-resync when queued follow-ups exist but the current turn has no assistant output yet", async () => {
+  it("watchdog-resyncs when queued follow-ups exist and the current turn has not produced assistant output yet", async () => {
+    // Same shape as the previous test (queued follow-up behind an active
+    // turn) except the current turn's first assistant chunk hasn't arrived
+    // yet. Once the staleness window elapses, the watchdog must still fire
+    // — a stuck "Waiting for the next chunk..." with a queued follow-up
+    // behind it is exactly the wedge users reported needing to refresh out
+    // of. See bugs.md "Watchdog ignored user-prompt turn boundaries…".
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
@@ -471,7 +477,58 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-02T09:00:00.000Z"));
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      throw new Error(`Unexpected fetch: ${String(input)}`);
+      const url = String(input);
+      if (url === "/api/state") {
+        return jsonResponse({
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "Current prompt",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "Earlier prompt",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Earlier answer.",
+                },
+                {
+                  id: "message-user-2",
+                  type: "text",
+                  timestamp: "10:02",
+                  author: "you",
+                  text: "Current prompt",
+                },
+                {
+                  id: "message-assistant-2",
+                  type: "text",
+                  timestamp: "10:03",
+                  author: "assistant",
+                  text: "Recovered chunk after silence.",
+                },
+              ],
+              pendingPrompts: [
+                {
+                  id: "pending-prompt-1",
+                  timestamp: "10:04",
+                  text: "Queued follow-up",
+                },
+              ],
+            }),
+          ],
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal(
@@ -483,6 +540,9 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       ResizeObserverMock as unknown as typeof ResizeObserver,
     );
     const scrollIntoViewSpy = stubScrollIntoView();
+    const stateFetchCallCount = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
     setDocumentVisibilityState("visible");
     try {
       await renderApp();
@@ -554,16 +614,17 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
-      // 2 full stale windows: the watchdog should still stay quiet without current-turn output.
       await advanceTimers(
-        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS * 2 + 2000,
+        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 1000,
       );
       await settleAsyncUi();
 
-      expect(fetchMock).not.toHaveBeenCalled();
+      expect(stateFetchCallCount()).toBeGreaterThanOrEqual(1);
+      // Recovery snapshot adopted — assistant chunk visible, queued
+      // follow-up still present.
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
-      ).toBeInTheDocument();
+        screen.getAllByText("Recovered chunk after silence.").length,
+      ).toBeGreaterThan(0);
       expect(
         screen.getByRole("button", { name: "Cancel queued prompt" }),
       ).toBeInTheDocument();

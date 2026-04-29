@@ -27,19 +27,24 @@ function isResolvedInteractionTurnBoundary(message: Message) {
   }
 }
 
-function hasAssistantActivitySinceCurrentTurnBoundary(session: Session) {
-  // Resolved interaction cards are assistant-authored, but they hand control back
-  // to the user until newer assistant output arrives.
+function hasInTurnActivitySinceTurnBoundary(session: Session) {
+  // Walks backward from the latest message looking for evidence that an
+  // agent turn is currently in progress. We return true on either:
+  //   - an assistant-authored message (the agent has spoken in this turn), or
+  //   - a user-authored message (the user kicked off a turn that is still
+  //     waiting for the assistant — silence past the staleness threshold here
+  //     is exactly the "I sent a prompt and nothing came back" wedge we want
+  //     the watchdog to recover from).
+  // Resolved interaction cards (approval decided, user-input answered, …) are
+  // assistant-authored but they hand control back to the user until newer
+  // assistant output arrives, so they end the walk with no in-turn activity.
   for (let index = session.messages.length - 1; index >= 0; index -= 1) {
     const message = session.messages[index];
     if (isResolvedInteractionTurnBoundary(message)) {
       return false;
     }
-    if (message.author === "assistant") {
+    if (message.author === "assistant" || message.author === "you") {
       return true;
-    }
-    if (message.author === "you") {
-      return false;
     }
   }
 
@@ -53,7 +58,7 @@ export function sessionHasPotentiallyStaleTransport(
 ) {
   return (
     session.status === "active" &&
-    hasAssistantActivitySinceCurrentTurnBoundary(session) &&
+    hasInTurnActivitySinceTurnBoundary(session) &&
     lastLiveTransportActivityAt !== undefined &&
     now - lastLiveTransportActivityAt >=
       LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS
@@ -73,7 +78,7 @@ export function pruneLiveTransportActivitySessions(
   }
 }
 
-type SessionDeltaEvent = Exclude<
+export type SessionDeltaEvent = Exclude<
   DeltaEvent,
   { type: "codexUpdated" } | { type: "orchestratorsUpdated" }
 >;
@@ -88,6 +93,17 @@ type MessageUpdatedDelta = Extract<
 
 export type DeltaApplyResult =
   | { kind: "applied"; sessions: Session[] }
+  // Same shape as "applied" but signals that the metadata patch alone is not
+  // enough — the caller must also schedule an authoritative state resync. Used
+  // when the unhydrated metadata-only fallback fires for a delta whose target
+  // message is missing from the retained transcript: the metadata patch keeps
+  // `messageCount`/`preview`/`status` fresh in the sidebar, but the message
+  // body itself only arrives via targeted hydration. Without an explicit
+  // resync nudge the session can stay stuck on a stale transcript if its
+  // hydration is queued behind another retry or wedged on a mismatch — see
+  // `docs/bugs.md`'s "Unhydrated session + missing-target delta silently
+  // absorbs into metadata-only" entry.
+  | { kind: "appliedNeedsResync"; sessions: Session[] }
   | { kind: "needsResync" };
 
 function resolveSessionMutationStamp(
@@ -354,7 +370,7 @@ export function applyDeltaToSessions(
       if (messageIndex === -1) {
         if (session.messagesLoaded === false) {
           return {
-            kind: "applied",
+            kind: "appliedNeedsResync",
             sessions: replaceSession(
               sessions,
               sessionIndex,
@@ -398,7 +414,7 @@ export function applyDeltaToSessions(
       if (messageIndex === -1) {
         if (session.messagesLoaded === false) {
           return {
-            kind: "applied",
+            kind: "appliedNeedsResync",
             sessions: replaceSession(
               sessions,
               sessionIndex,
@@ -453,7 +469,7 @@ export function applyDeltaToSessions(
       if (messageIndex === -1) {
         if (session.messagesLoaded === false) {
           return {
-            kind: "applied",
+            kind: "appliedNeedsResync",
             sessions: replaceSession(
               sessions,
               sessionIndex,
@@ -508,7 +524,7 @@ export function applyDeltaToSessions(
       if (messageIndex === -1) {
         if (session.messagesLoaded === false) {
           return {
-            kind: "applied",
+            kind: "appliedNeedsResync",
             sessions: replaceSession(
               sessions,
               sessionIndex,
@@ -567,7 +583,7 @@ export function applyDeltaToSessions(
       if (messageIndex === -1) {
         if (session.messagesLoaded === false) {
           return {
-            kind: "applied",
+            kind: "appliedNeedsResync",
             sessions: replaceSession(
               sessions,
               sessionIndex,

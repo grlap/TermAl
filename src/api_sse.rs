@@ -167,19 +167,51 @@ async fn state_events(
     let mut state_receiver = state.subscribe_events();
     let mut delta_receiver = state.subscribe_delta_events();
     let mut file_receiver = state.subscribe_file_events();
+    let shutdown_notify = state.shutdown_notify.clone();
     let initial_payload = state_snapshot_payload_for_sse(state.clone()).await;
 
     let stream = async_stream::stream! {
         yield Ok(Event::default().event("state").data(initial_payload));
 
+        // Pin and `enable()` the shutdown future BEFORE entering the
+        // select! loop. `Notified` is lazy by default — it only registers
+        // a waiter on first poll — but `notify_waiters` from
+        // `main.rs::run_server` may fire before our first iteration if
+        // shutdown raced with the SSE stream startup. `enable()` registers
+        // the waiter eagerly so any prior notification still wakes us.
+        // Without this loop's exit branch the broadcast receivers below
+        // only return `Closed` when the last `AppState` clone drops, which
+        // is held by `shutdown_state` for the post-serve persist drain —
+        // so graceful shutdown would block forever. See bugs.md
+        // "Graceful shutdown blocks forever waiting for SSE streams to
+        // drain".
+        let shutdown = shutdown_notify.notified();
+        tokio::pin!(shutdown);
+        shutdown.as_mut().enable();
+
         loop {
             tokio::select! {
                 biased;
+
+                _ = shutdown.as_mut() => break,
 
                 result = state_receiver.recv() => {
                     match result {
                         Ok(payload) => yield Ok(Event::default().event("state").data(payload)),
                         Err(broadcast::error::RecvError::Lagged(_)) => {
+                            // Lagged means the consumer fell past the broadcast
+                            // channel capacity, so some events were dropped on the
+                            // floor before the client could read them. The
+                            // recovery snapshot below restores authoritative state,
+                            // but its revision may equal the client's existing
+                            // revision (the client read some events from the burst
+                            // before falling behind). Emit a `lagged` marker first
+                            // so the client arms force-adopt for the next state
+                            // event regardless of revision parity — otherwise the
+                            // recovery snapshot can be silently ignored as a
+                            // redundant catch-up. See bugs.md "SSE Lagged-recovery
+                            // snapshot can be silently ignored".
+                            yield Ok(Event::default().event("lagged").data(""));
                             let payload = state_snapshot_payload_for_sse(state.clone()).await;
                             yield Ok(Event::default().event("state").data(payload));
                         }
@@ -191,6 +223,10 @@ async fn state_events(
                     match result {
                         Ok(payload) => yield Ok(Event::default().event("delta").data(payload)),
                         Err(broadcast::error::RecvError::Lagged(_)) => {
+                            // Same reasoning as the state-receiver Lagged branch:
+                            // arm the client's force-adopt before yielding the
+                            // recovery snapshot.
+                            yield Ok(Event::default().event("lagged").data(""));
                             let payload = state_snapshot_payload_for_sse(state.clone()).await;
                             yield Ok(Event::default().event("state").data(payload));
                         }

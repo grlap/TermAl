@@ -396,7 +396,11 @@ Work:
   - `ui/src/session-find.ts:~128` — search index.
   - `ui/src/session-store.ts` — `resolvePromptHistory` (composer Up-arrow
     recall), `buildComposerSessionSnapshot`.
-  - `ui/src/live-updates.ts` — `hasAssistantActivitySinceCurrentTurnBoundary`.
+  - `ui/src/live-updates.ts` — `hasInTurnActivitySinceTurnBoundary` (renamed
+    from `hasAssistantActivitySinceCurrentTurnBoundary`; the predicate now
+    also returns true for user-authored boundaries so the resume watchdog
+    fires when a user prompt is awaiting an assistant response — see
+    `bugs.md` "Watchdog ignored user-prompt turn boundaries").
   - `ui/src/SessionPaneView.tsx` — `commandMessages`, `diffMessages`
     projections.
   - `ui/src/panels/AgentSessionPanel.tsx` and
@@ -567,8 +571,12 @@ Work:
     `recentPromptHistory` on `StateSessionSummary` or trigger hydration on
     composer focus. Default: trigger hydration on composer focus so the
     summary stays cheap.
-  - `ui/src/live-updates.ts::hasAssistantActivitySinceCurrentTurnBoundary` —
-    this is a pre-send staleness check; only relevant when the session is
+  - `ui/src/live-updates.ts::hasInTurnActivitySinceTurnBoundary` (renamed
+    from `hasAssistantActivitySinceCurrentTurnBoundary`) — this is a
+    pre-send staleness check used by the resume watchdog. The predicate
+    now returns true for both assistant- and user-authored messages at
+    the turn boundary so a session whose first assistant chunk delta got
+    dropped is still recoverable; only relevant when the session is
     hydrated, gate accordingly.
   - `ui/src/SessionPaneView.tsx` `commandMessages` / `diffMessages` — these
     projections must return `[]` for summary-only sessions and show a loading
