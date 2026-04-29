@@ -643,6 +643,106 @@ describe("DiffPanel", () => {
     expect(screen.queryByRole("button", { name: "Before" })).not.toBeInTheDocument();
   });
 
+  it("navigates between rendered Markdown change blocks via prev/next controls and a counter", async () => {
+    // Bug ledger: "Rendered Markdown diff view cannot jump between
+    // changes" — the regular Monaco file diff has prev/next change
+    // navigation; the rendered Markdown view did not. The new prev/
+    // next controls are wired through `computeMarkdownDiffChangeBlocks`
+    // so navigation stops match the visible change blocks 1:1, and
+    // each block carries `data-markdown-diff-change-index="N"` so the
+    // scroll handler can find it. Two changed line replacements (line
+    // 2: "Base document" → "Staged document"; line 4: "Committed
+    // text." → "Ready to commit.") produce two change blocks.
+    fetchFileMock.mockResolvedValue({
+      content: "Shared intro.\n# Staged document\nShared middle.\nReady to commit.\nShared outro.\n",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,5 +1,5 @@",
+            " Shared intro.",
+            "-# Base document",
+            "+# Staged document",
+            " Shared middle.",
+            "-Committed text.",
+            "+Ready to commit.",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "Shared intro.\n# Base document\nShared middle.\nCommitted text.\nShared outro.\n",
+              source: "head",
+            },
+            after: {
+              content: "Shared intro.\n# Staged document\nShared middle.\nReady to commit.\nShared outro.\n",
+              source: "index",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-change-nav"
+          filePath="/repo/README.md"
+          gitSectionId="staged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    // Both change blocks rendered with the data-attribute so the
+    // navigation scroll-into-view handler can target them.
+    const blocks = await waitFor(() => {
+      const matches = document.querySelectorAll<HTMLElement>(
+        "[data-markdown-diff-change-index]",
+      );
+      expect(matches.length).toBe(2);
+      return matches;
+    });
+    expect(blocks[0]?.getAttribute("data-markdown-diff-change-index")).toBe("0");
+    expect(blocks[1]?.getAttribute("data-markdown-diff-change-index")).toBe("1");
+
+    // Counter starts at "Change 1 of 2".
+    expect(screen.getByText("Change 1 of 2")).toBeInTheDocument();
+
+    // Stub scrollIntoView so the test environment can record nav
+    // intent without depending on a real layout.
+    const scrollIntoViewMock = vi.fn();
+    blocks.forEach((block) => {
+      block.scrollIntoView = scrollIntoViewMock;
+    });
+
+    // Next: 1 → 2, second block scrolled into view.
+    await clickAndSettle(screen.getByRole("button", { name: "Next change" }));
+    expect(screen.getByText("Change 2 of 2")).toBeInTheDocument();
+    expect(scrollIntoViewMock).toHaveBeenLastCalledWith({ block: "center" });
+
+    // Next at the end wraps to 1, first block scrolled into view.
+    await clickAndSettle(screen.getByRole("button", { name: "Next change" }));
+    expect(screen.getByText("Change 1 of 2")).toBeInTheDocument();
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(2);
+
+    // Previous: 1 → wraps to 2.
+    await clickAndSettle(screen.getByRole("button", { name: "Previous change" }));
+    expect(screen.getByText("Change 2 of 2")).toBeInTheDocument();
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(3);
+
+    // Previous: 2 → 1.
+    await clickAndSettle(screen.getByRole("button", { name: "Previous change" }));
+    expect(screen.getByText("Change 1 of 2")).toBeInTheDocument();
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(4);
+  });
+
   it("preserves scroll offsets when switching between file and rendered Markdown diff views", async () => {
     fetchFileMock.mockResolvedValue({
       content: "# Worktree document\n\nThis is not staged.\n",

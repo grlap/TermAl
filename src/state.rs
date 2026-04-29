@@ -261,15 +261,15 @@ struct AppState {
     /// `None` for test-only constructors that don't spawn the thread —
     /// `shutdown_persist_blocking` then has nothing to wait on.
     persist_thread_handle: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
-    /// `true` while the background persist worker is alive and draining
-    /// `PersistRequest::Delta` signals; flipped to `false` by
-    /// `shutdown_persist_blocking` BEFORE sending `PersistRequest::Shutdown`.
+    /// `true` while the background persist worker may still be alive and able
+    /// to drain `PersistRequest::Delta` signals; flipped to `false` by
+    /// `shutdown_persist_blocking` only AFTER the worker thread has joined.
     /// Read by `commit_delta_locked` (and any other path that stamps a
     /// mutation without sending its own persist signal) to switch from
-    /// the async-worker path to a synchronous full-state JSON write — the
-    /// worker is not coming back to drain it, so the alternative is
-    /// permanent in-memory loss when an agent runtime thread or remote
-    /// bridge commits after the HTTP server has shut down.
+    /// the async-worker path to a synchronous full-state JSON write. Once the
+    /// flag is false, the worker is demonstrably gone and cannot race the
+    /// synchronous fallback with its final drain/write; no future worker drain
+    /// can persist a mutation stamped after that point.
     /// See bugs.md "Persist shutdown drain can run before background
     /// mutation sources are quiesced".
     persist_worker_alive: Arc<std::sync::atomic::AtomicBool>,

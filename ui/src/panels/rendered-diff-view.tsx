@@ -17,19 +17,28 @@
 //     structured preview is available.
 //   - `RenderedDiffView` — read-only renderer preview for non-
 //     Markdown diff targets (Phase 4 of
-//     `docs/features/source-renderers.md`). Composes each
-//     detected renderable region into a synthetic Markdown
-//     fragment (same strategy as
-//     `./source-renderer-preview`'s `RendererPreviewPane`) and
-//     routes through `MarkdownContent` so the existing safe
-//     Mermaid / KaTeX wiring handles the actual rendering. Shows
-//     a "Patch-only rendering" disclaimer when the backend didn't
-//     supply a full document.
-//   - `composeRenderedDiffMarkdown` — per-region synthetic-
-//     Markdown assembler used by `RenderedDiffView`. Each region
-//     gets a **Lines N–M** header followed by a fenced body:
+//     `docs/features/source-renderers.md`). Renders each detected
+//     renderable region in its own `<section data-rendered-diff
+//     -region-index="N">` wrapper with a `**Lines N–M**` header,
+//     and routes the per-region body through `MarkdownContent` so
+//     the existing safe Mermaid / KaTeX wiring handles the actual
+//     rendering. The per-region split exposes the regions as
+//     scroll targets for prev/next change navigation. Shows a
+//     "Patch-only rendering" disclaimer when the backend didn't
+//     supply a full document. Footer carries prev/next change
+//     navigation buttons + a "Region X of Y" counter, mirroring
+//     the Monaco diff-editor and the rendered-Markdown diff view.
+//   - `composeRenderedDiffRegionMarkdown` — per-region synthetic-
+//     Markdown assembler. The `**Lines N–M**` header is now
+//     emitted by the wrapper element (so navigation can scroll to
+//     it via DOM); this helper returns just the fenced body:
 //     ```` ```mermaid ```` for mermaid, `$$…$$` for math, the raw
 //     body for markdown regions.
+//   - `composeRenderedDiffMarkdown` — legacy whole-document
+//     assembler retained for tests and any external callers; now
+//     a thin `composeRenderedDiffRegionMarkdown` wrapper that
+//     prepends the `**Lines N–M**` header inline. The
+//     `RenderedDiffView` itself does not call this any more.
 //
 // What this file does NOT own:
 //   - The Markdown diff view itself (`MarkdownDiffView`), the
@@ -54,13 +63,14 @@
 // disclaimer copy, same **Lines N–M** header + fenced body
 // format.
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GitDiffDocumentContent } from "../api";
 import { MarkdownContent } from "../message-cards";
 import type { MonacoAppearance } from "../monaco";
 import type { SourceRenderableRegion } from "../source-renderers";
 import type { DiffMessage } from "../types";
 import type { buildDiffPreviewModel } from "../diff-preview";
+import { DiffNavArrow } from "./DiffPanelIcons";
 import type {
   MarkdownDiffPreviewModel,
   MarkdownDocumentCompleteness,
@@ -140,10 +150,66 @@ export function RenderedDiffView({
   regions: SourceRenderableRegion[];
   workspaceRoot: string | null;
 }) {
-  const syntheticMarkdown = useMemo(
-    () => composeRenderedDiffMarkdown(regions),
-    [regions],
-  );
+  const regionCount = regions.length;
+  const [currentRegionIndex, setCurrentRegionIndex] = useState(0);
+  // Clamp the index when the region set shrinks (e.g., the user
+  // edited the upstream source so a region is gone). Falls back to 0
+  // when there are no regions; the counter UI handles the empty case
+  // via `regionCount === 0`.
+  useEffect(() => {
+    setCurrentRegionIndex((current) => {
+      if (regionCount === 0) {
+        return 0;
+      }
+      if (current >= regionCount) {
+        return regionCount - 1;
+      }
+      return current;
+    });
+  }, [regionCount]);
+  const goToPreviousRegion = useCallback(() => {
+    setCurrentRegionIndex((current) =>
+      current <= 0 ? Math.max(regionCount - 1, 0) : current - 1,
+    );
+  }, [regionCount]);
+  const goToNextRegion = useCallback(() => {
+    setCurrentRegionIndex((current) =>
+      current >= regionCount - 1 ? 0 : current + 1,
+    );
+  }, [regionCount]);
+  // Scroll the active region into view when the index advances via
+  // prev/next. Initial mount intentionally skips the scroll so the
+  // parent's restored scroll position survives — the user has not
+  // pressed a navigation button yet. Mirrors the
+  // `MarkdownDiffView` scroll-into-view contract.
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const lastScrolledIndexRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (regionCount === 0) {
+      lastScrolledIndexRef.current = null;
+      return;
+    }
+    if (lastScrolledIndexRef.current === currentRegionIndex) {
+      return;
+    }
+    if (lastScrolledIndexRef.current === null) {
+      lastScrolledIndexRef.current = currentRegionIndex;
+      return;
+    }
+    const container = scrollContainerRef.current;
+    if (!container) {
+      return;
+    }
+    const target = container.querySelector<HTMLElement>(
+      `[data-rendered-diff-region-index="${currentRegionIndex}"]`,
+    );
+    if (!target) {
+      return;
+    }
+    target.scrollIntoView({ block: "center" });
+    lastScrolledIndexRef.current = currentRegionIndex;
+  }, [currentRegionIndex, regionCount]);
+
   return (
     <div
       className="diff-rendered-view"
@@ -157,16 +223,91 @@ export function RenderedDiffView({
           review.
         </p>
       ) : null}
-      <MarkdownContent
-        appearance={appearance}
-        documentPath={documentPath}
-        markdown={syntheticMarkdown}
-        workspaceRoot={workspaceRoot}
-      />
+      <div className="diff-rendered-view-scroll" ref={scrollContainerRef}>
+        {regions.map((region, index) => (
+          <section
+            className="diff-rendered-region"
+            data-rendered-diff-region-index={index}
+            key={region.id}
+          >
+            <div className="diff-rendered-region-header">
+              <strong>{`Lines ${region.sourceStartLine}–${region.sourceEndLine}`}</strong>
+            </div>
+            <MarkdownContent
+              appearance={appearance}
+              documentPath={documentPath}
+              markdown={composeRenderedDiffRegionMarkdown(region)}
+              workspaceRoot={workspaceRoot}
+            />
+          </section>
+        ))}
+      </div>
+      <footer
+        className="source-editor-statusbar diff-preview-statusbar"
+        aria-label="Rendered diff status"
+      >
+        <div className="source-editor-statusbar-group">
+          <div className="diff-preview-change-nav" aria-label="Change navigation">
+            <button
+              className="diff-preview-nav-button"
+              type="button"
+              onClick={goToPreviousRegion}
+              disabled={regionCount === 0}
+              aria-label="Previous region"
+              title="Previous region"
+            >
+              <DiffNavArrow direction="up" />
+            </button>
+            <button
+              className="diff-preview-nav-button"
+              type="button"
+              onClick={goToNextRegion}
+              disabled={regionCount === 0}
+              aria-label="Next region"
+              title="Next region"
+            >
+              <DiffNavArrow direction="down" />
+            </button>
+          </div>
+          <span className="source-editor-statusbar-item source-editor-statusbar-state">
+            {regionCount === 0
+              ? "No rendered regions"
+              : `Region ${currentRegionIndex + 1} of ${regionCount}`}
+          </span>
+        </div>
+        <div className="source-editor-statusbar-group source-editor-statusbar-group-meta">
+          <span className="source-editor-statusbar-item">
+            {isCompleteDocument ? "Full document" : "Patch preview"}
+          </span>
+        </div>
+      </footer>
     </div>
   );
 }
 
+/**
+ * Per-region synthetic Markdown body. The `**Lines N–M**` header is
+ * NOT included here — `RenderedDiffView` emits the header in JSX so
+ * the section wrapper can carry the data-attribute used by the
+ * change-navigation scroll handler.
+ */
+export function composeRenderedDiffRegionMarkdown(
+  region: SourceRenderableRegion,
+): string {
+  if (region.renderer === "mermaid") {
+    return `\`\`\`mermaid\n${region.displayText.replace(/\s+$/, "")}\n\`\`\``;
+  }
+  if (region.renderer === "math") {
+    return `$$\n${region.displayText.replace(/\s+$/, "")}\n$$`;
+  }
+  return region.displayText;
+}
+
+/**
+ * Whole-document synthetic Markdown assembler. Retained for tests
+ * and any external callers; the `RenderedDiffView` itself now
+ * renders per-region wrappers and does NOT use this helper.
+ */
 export function composeRenderedDiffMarkdown(
   regions: SourceRenderableRegion[],
 ): string {
@@ -176,13 +317,8 @@ export function composeRenderedDiffMarkdown(
   return regions
     .map((region) => {
       const header = `**Lines ${region.sourceStartLine}–${region.sourceEndLine}**`;
-      if (region.renderer === "mermaid") {
-        return `${header}\n\n\`\`\`mermaid\n${region.displayText.replace(/\s+$/, "")}\n\`\`\``;
-      }
-      if (region.renderer === "math") {
-        return `${header}\n\n$$\n${region.displayText.replace(/\s+$/, "")}\n$$`;
-      }
-      return `${header}\n\n${region.displayText}`;
+      const body = composeRenderedDiffRegionMarkdown(region);
+      return `${header}\n\n${body}`;
     })
     .join("\n\n");
 }

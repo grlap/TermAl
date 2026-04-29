@@ -1324,6 +1324,120 @@ describe("MarkdownContent", () => {
     }
   });
 
+  // Streaming-aware partial-block deferral. The four progressive
+  // states a streaming pipe-table passes through (header alone,
+  // header + separator, header + separator + partial body row,
+  // settled with trailing blank line) must each render a stable
+  // shape — either the in-flight `<pre class="markdown-streaming-
+  // fragment">` placeholder, or a full `<table>` once settled.
+  // Without the deferral the user observed visibly-broken
+  // intermediate shapes (raw `| ... |` text, table rows with
+  // mismatched cell counts) flickering on every textDelta.
+  describe("isStreaming partial-table deferral", () => {
+    it("renders the header alone as a streaming placeholder, not as a table", () => {
+      const markdown = "| Col A | Col B |";
+      const { container } = render(
+        <MarkdownContent isStreaming markdown={markdown} />,
+      );
+      expect(container.querySelector(".markdown-table-scroll")).toBeNull();
+      const fragment = container.querySelector(".markdown-streaming-fragment");
+      expect(fragment).not.toBeNull();
+      expect(fragment?.textContent).toBe(markdown);
+    });
+
+    it("defers header + complete separator (no body row yet) to the placeholder", () => {
+      const markdown = "| Col A | Col B |\n| --- | --- |";
+      const { container } = render(
+        <MarkdownContent isStreaming markdown={markdown} />,
+      );
+      expect(container.querySelector(".markdown-table-scroll")).toBeNull();
+      expect(
+        container.querySelector(".markdown-streaming-fragment")?.textContent,
+      ).toBe(markdown);
+    });
+
+    it("defers header + separator + partial body row to the placeholder", () => {
+      const markdown = "| Col A | Col B |\n| --- | --- |\n| 42 |";
+      const { container } = render(
+        <MarkdownContent isStreaming markdown={markdown} />,
+      );
+      expect(container.querySelector(".markdown-table-scroll")).toBeNull();
+      expect(
+        container.querySelector(".markdown-streaming-fragment")?.textContent,
+      ).toBe(markdown);
+    });
+
+    it("snaps to a full <table> once a trailing blank line settles the block", () => {
+      const markdown = "| Col A | Col B |\n| --- | --- |\n| 1 | 2 |\n";
+      const { container } = render(
+        <MarkdownContent isStreaming markdown={markdown} />,
+      );
+      const tableScroll = container.querySelector(".markdown-table-scroll");
+      expect(tableScroll).not.toBeNull();
+      expect(tableScroll?.querySelector("table")).not.toBeNull();
+      expect(
+        container.querySelector(".markdown-streaming-fragment"),
+      ).toBeNull();
+    });
+
+    it("renders the settled prefix as Markdown alongside a deferred trailing partial table", () => {
+      // Realistic mid-stream shape: a paragraph has settled, then a
+      // table starts streaming. The paragraph must render through
+      // the full Markdown pipeline; only the partial table goes
+      // into the streaming-fragment placeholder.
+      const markdown =
+        "Here is the result:\n\n| Col A | Col B |\n| --- | --- |\n| 1 |";
+      const { container } = render(
+        <MarkdownContent isStreaming markdown={markdown} />,
+      );
+
+      // Paragraph rendered as Markdown
+      expect(
+        container.querySelector(".markdown-copy")?.querySelector("p")
+          ?.textContent,
+      ).toBe("Here is the result:");
+
+      // Table NOT rendered as a real <table>
+      expect(container.querySelector(".markdown-table-scroll")).toBeNull();
+
+      // Partial table held in the placeholder
+      expect(
+        container.querySelector(".markdown-streaming-fragment")?.textContent,
+      ).toBe("| Col A | Col B |\n| --- | --- |\n| 1 |");
+    });
+
+    it("does not defer settled callers that omit isStreaming", () => {
+      // Default behavior is unchanged: a static (non-streaming)
+      // markdown payload that ends mid-table — e.g., a stored
+      // history message that happens to lack a trailing blank
+      // line — still goes through the full pipeline. This
+      // preserves the existing rendering for source-renderer
+      // previews, diff views, and settled history bubbles.
+      const markdown = "| Col A | Col B |\n| --- | --- |\n| 1 | 2 |";
+      const { container } = render(<MarkdownContent markdown={markdown} />);
+      expect(
+        container.querySelector(".markdown-streaming-fragment"),
+      ).toBeNull();
+      expect(container.querySelector(".markdown-table-scroll")).not.toBeNull();
+    });
+
+    it("defers an unclosed fenced code block during streaming", () => {
+      const markdown = "Intro.\n\n```js\nconsole.log(";
+      const { container } = render(
+        <MarkdownContent isStreaming markdown={markdown} />,
+      );
+      // The intro paragraph still renders.
+      expect(
+        container.querySelector(".markdown-copy")?.querySelector("p")
+          ?.textContent,
+      ).toBe("Intro.");
+      // The unclosed fence is held as plain text in the placeholder.
+      expect(
+        container.querySelector(".markdown-streaming-fragment")?.textContent,
+      ).toBe("```js\nconsole.log(");
+    });
+  });
+
   it("opens local file links through the source callback", () => {
     const onOpenSourceLink = vi.fn();
 

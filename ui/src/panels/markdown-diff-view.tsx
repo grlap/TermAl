@@ -52,7 +52,9 @@
 
 import {
   useCallback,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent,
   type ReactNode,
@@ -62,10 +64,15 @@ import type { buildDiffPreviewModel } from "../diff-preview";
 import type { MarkdownFileLinkTarget } from "../message-cards";
 import type { MonacoAppearance } from "../monaco";
 import { formatMarkdownSideSource } from "./diff-panel-helpers";
+import { DiffNavArrow } from "./DiffPanelIcons";
 import {
   EditableRenderedMarkdownSection,
   RenderedMarkdownChangeSection,
 } from "./markdown-diff-change-section";
+import {
+  computeMarkdownDiffChangeBlocks,
+  type MarkdownDiffChangeBlock,
+} from "./markdown-diff-change-index";
 import {
   getMarkdownCaretNavigationDirection,
   redirectCaretOutOfRemovedMarkdownSection,
@@ -137,6 +144,41 @@ export function MarkdownDiffView({
     builtSegments,
     stableSegmentIdentityKey,
   );
+  // Change blocks mirror the renderer's grouping rules so prev/next
+  // navigation visits the same blocks the user sees. Memoised on the
+  // stable `segments` array so block identity matches the renderer's
+  // React keys.
+  const changeBlocks = useMemo(
+    () => computeMarkdownDiffChangeBlocks(segments),
+    [segments],
+  );
+  const changeCount = changeBlocks.length;
+  const [currentChangeIndex, setCurrentChangeIndex] = useState(0);
+  // Clamp the current index when the segment set shrinks (e.g., the
+  // user committed a section so a previously-changed block is now
+  // unchanged). Falls back to 0 when there are no changes; the
+  // counter UI handles the empty case via `changeCount === 0`.
+  useEffect(() => {
+    setCurrentChangeIndex((current) => {
+      if (changeCount === 0) {
+        return 0;
+      }
+      if (current >= changeCount) {
+        return changeCount - 1;
+      }
+      return current;
+    });
+  }, [changeCount]);
+  const goToPreviousChange = useCallback(() => {
+    setCurrentChangeIndex((current) =>
+      current <= 0 ? Math.max(changeCount - 1, 0) : current - 1,
+    );
+  }, [changeCount]);
+  const goToNextChange = useCallback(() => {
+    setCurrentChangeIndex((current) =>
+      current >= changeCount - 1 ? 0 : current + 1,
+    );
+  }, [changeCount]);
   // Previous implementations here froze `segments` and the source content
   // they were computed from while any section was editing, in order to keep
   // the focused editor mounted across keystrokes. The freeze had two silent
@@ -167,6 +209,41 @@ export function MarkdownDiffView({
   const gitSectionLabel =
     gitSectionId === "staged" ? "Staged" : gitSectionId === "unstaged" ? "Unstaged" : null;
   const [readOnlyResetVersion, setReadOnlyResetVersion] = useState(0);
+  // Scroll the active change-block into view whenever the index
+  // advances via prev/next. We re-run on `changeCount` too so a fresh
+  // block list (e.g., after a commit reduced the change count) still
+  // scrolls the now-current block into view. Using `scrollIntoView`
+  // with `block: "center"` keeps the block visible without yanking
+  // the scroll past in-flight edits in adjacent sections. Initial
+  // mount intentionally skips the scroll: the user has not pressed
+  // a navigation button yet and the panel should respect whatever
+  // scroll position the parent restored.
+  const lastScrolledChangeIndexRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (changeCount === 0) {
+      lastScrolledChangeIndexRef.current = null;
+      return;
+    }
+    if (lastScrolledChangeIndexRef.current === currentChangeIndex) {
+      return;
+    }
+    if (lastScrolledChangeIndexRef.current === null) {
+      lastScrolledChangeIndexRef.current = currentChangeIndex;
+      return;
+    }
+    const scrollContainer = scrollRef.current;
+    if (!scrollContainer) {
+      return;
+    }
+    const target = scrollContainer.querySelector<HTMLElement>(
+      `[data-markdown-diff-change-index="${currentChangeIndex}"]`,
+    );
+    if (!target) {
+      return;
+    }
+    target.scrollIntoView({ block: "center" });
+    lastScrolledChangeIndexRef.current = currentChangeIndex;
+  }, [changeCount, currentChangeIndex, scrollRef]);
 
   return (
     <div className="source-editor-shell source-editor-shell-with-statusbar markdown-diff-shell">
@@ -194,6 +271,7 @@ export function MarkdownDiffView({
         allowReadOnlyCaret={!canEdit && gitSectionId === "staged"}
         appearance={appearance}
         canEdit={canEdit}
+        changeBlocks={changeBlocks}
         completeness={markdownPreview.after.completeness}
         documentPath={documentPath}
         key={readOnlyResetVersion}
@@ -212,6 +290,33 @@ export function MarkdownDiffView({
       />
       <footer className="source-editor-statusbar diff-preview-statusbar" aria-label="Markdown diff status">
         <div className="source-editor-statusbar-group">
+          <div className="diff-preview-change-nav" aria-label="Change navigation">
+            <button
+              className="diff-preview-nav-button"
+              type="button"
+              onClick={goToPreviousChange}
+              disabled={changeCount === 0}
+              aria-label="Previous change"
+              title="Previous change"
+            >
+              <DiffNavArrow direction="up" />
+            </button>
+            <button
+              className="diff-preview-nav-button"
+              type="button"
+              onClick={goToNextChange}
+              disabled={changeCount === 0}
+              aria-label="Next change"
+              title="Next change"
+            >
+              <DiffNavArrow direction="down" />
+            </button>
+          </div>
+          <span className="source-editor-statusbar-item source-editor-statusbar-state">
+            {changeCount === 0
+              ? "No changes"
+              : `Change ${currentChangeIndex + 1} of ${changeCount}`}
+          </span>
           <span className="source-editor-statusbar-item source-editor-statusbar-state">
             {canEdit
               ? "Rendered Markdown edits update the file buffer"
@@ -233,6 +338,7 @@ function MarkdownDiffDocument({
   allowReadOnlyCaret,
   appearance,
   canEdit,
+  changeBlocks,
   completeness,
   documentPath,
   note,
@@ -251,6 +357,7 @@ function MarkdownDiffDocument({
   allowReadOnlyCaret: boolean;
   appearance: MonacoAppearance;
   canEdit: boolean;
+  changeBlocks: MarkdownDiffChangeBlock[];
   completeness: MarkdownDocumentCompleteness;
   documentPath: string | null;
   note: string | null;
@@ -304,6 +411,7 @@ function MarkdownDiffDocument({
             allowReadOnlyCaret,
             appearance,
             canEdit,
+            changeBlocks,
             documentPath,
             onCommitRenderedMarkdownDrafts,
             onCommitRenderedMarkdownSectionDraft,
@@ -326,6 +434,7 @@ function renderMarkdownDiffSegments({
   allowReadOnlyCaret,
   appearance,
   canEdit,
+  changeBlocks,
   documentPath,
   onCommitRenderedMarkdownDrafts,
   onCommitRenderedMarkdownSectionDraft,
@@ -341,6 +450,7 @@ function renderMarkdownDiffSegments({
   allowReadOnlyCaret: boolean;
   appearance: MonacoAppearance;
   canEdit: boolean;
+  changeBlocks: MarkdownDiffChangeBlock[];
   documentPath: string | null;
   onCommitRenderedMarkdownDrafts: () => boolean;
   onCommitRenderedMarkdownSectionDraft: (commit: RenderedMarkdownSectionCommit) => boolean;
@@ -353,6 +463,15 @@ function renderMarkdownDiffSegments({
   sourceContent: string;
   workspaceRoot: string | null;
 }) {
+  // Map block id → index for `data-markdown-diff-change-index` so the
+  // navigation prev/next handlers can scroll the right block into
+  // view. The block ids match `computeMarkdownDiffChangeBlocks`'s
+  // output (segment ids joined by `:`), which is also the React `key`
+  // of each `<section className="markdown-diff-change-block">`.
+  const changeBlockIndexById = new Map<string, number>();
+  changeBlocks.forEach((block, index) => {
+    changeBlockIndexById.set(block.id, index);
+  });
   const rendered: ReactNode[] = [];
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
@@ -406,8 +525,14 @@ function renderMarkdownDiffSegments({
       index += 1;
     }
 
+    const changeBlockId = changedSegments.map((changed) => changed.id).join(":");
+    const changeBlockIndex = changeBlockIndexById.get(changeBlockId);
     rendered.push(
-      <section className="markdown-diff-change-block" key={changedSegments.map((changed) => changed.id).join(":")}>
+      <section
+        className="markdown-diff-change-block"
+        data-markdown-diff-change-index={changeBlockIndex ?? undefined}
+        key={changeBlockId}
+      >
         {changedSegments.map((changedSegment) => {
           const tone = changedSegment.kind === "removed" ? "removed" : "added";
           return (

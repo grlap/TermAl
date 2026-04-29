@@ -117,6 +117,7 @@ import {
   measureTextBlock,
   resolveDeferredRenderRoot,
 } from "./deferred-render";
+import { splitStreamingMarkdownForRendering } from "./markdown-streaming-split";
 import type { MonacoAppearance } from "./monaco";
 
 const HEAVY_CODE_CHARACTER_THRESHOLD = 1400;
@@ -315,6 +316,7 @@ export const MessageCard = memo(
               ) : shouldRenderStreamingMarkdown ? (
                 <MarkdownContent
                   appearance={appearance}
+                  isStreaming
                   markdown={message.text}
                   onOpenSourceLink={onOpenSourceLink}
                   searchQuery={searchQuery}
@@ -3320,6 +3322,7 @@ function createMarkdownTextNode(value: string): MarkdownAstNode {
 export function MarkdownContent({
   appearance = "dark",
   documentPath = null,
+  isStreaming = false,
   markdown,
   onOpenSourceLink,
   preserveMermaidSource = false,
@@ -3332,6 +3335,20 @@ export function MarkdownContent({
 }: {
   appearance?: MonacoAppearance;
   documentPath?: string | null;
+  /**
+   * When `true`, an in-flight trailing block (unclosed fenced code
+   * block, unclosed `$$` math display block, or pipe-table that has
+   * not yet been terminated by a blank line) is rendered as plain
+   * text in a `<pre class="markdown-streaming-fragment">` until it
+   * settles, instead of being passed through `react-markdown` and
+   * flickering through visibly-broken intermediate shapes (raw
+   * `| ... |` text, table rows with mismatched cell counts,
+   * runaway code blocks). Defaults to `false` so settled callers
+   * (history, source-renderer previews, diff views) get the
+   * existing pipeline unchanged. See
+   * `ui/src/markdown-streaming-split.ts` for the cut policy.
+   */
+  isStreaming?: boolean;
   markdown: string;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   preserveMermaidSource?: boolean;
@@ -3342,6 +3359,13 @@ export function MarkdownContent({
   startLineNumber?: number | null;
   workspaceRoot?: string | null;
 }) {
+  const { settled: settledMarkdown, pending: pendingMarkdown } = useMemo(
+    () =>
+      isStreaming
+        ? splitStreamingMarkdownForRendering(markdown)
+        : { settled: markdown, pending: "" },
+    [isStreaming, markdown],
+  );
   // Keep callback in a ref so the memoized ReactMarkdown output stays stable
   // even when the parent re-renders with a new function reference.  Without
   // this, every re-render regenerates the entire markdown DOM tree, which
@@ -3354,9 +3378,13 @@ export function MarkdownContent({
   const hasOpenSourceLink = onOpenSourceLink != null;
   const normalizedStartLineNumber =
     normalizeMarkdownStartLineNumber(startLineNumber);
+  // Mermaid / math budgets count only the SETTLED prefix so an
+  // in-flight unclosed fence or `$$` block (which lives in
+  // `pendingMarkdown` and renders as plain text in the streaming
+  // fragment below) does not count against the per-document caps.
   const mermaidDiagramCount = useMemo(
-    () => (renderMermaidDiagrams ? countMermaidFences(markdown) : 0),
-    [markdown, renderMermaidDiagrams],
+    () => (renderMermaidDiagrams ? countMermaidFences(settledMarkdown) : 0),
+    [settledMarkdown, renderMermaidDiagrams],
   );
   const hasTooManyMermaidDiagrams =
     mermaidDiagramCount > MAX_MERMAID_DIAGRAMS_PER_DOCUMENT;
@@ -3368,8 +3396,8 @@ export function MarkdownContent({
   // renders), but its output is replaced by the source-display
   // fallback in the custom `math`/`inlineMath` renderer below.
   const mathExpressionCount = useMemo(
-    () => countMathExpressions(markdown),
-    [markdown],
+    () => countMathExpressions(settledMarkdown),
+    [settledMarkdown],
   );
   const hasTooManyMathExpressions =
     mathExpressionCount > MAX_MATH_EXPRESSIONS_PER_DOCUMENT;
@@ -3444,10 +3472,12 @@ export function MarkdownContent({
     // would tear down + rebuild the observer on every unrelated
     // appearance or source-link-handler change — O(markers)
     // teardown + re-observe per context change with no benefit.
-    // `markdown` and `normalizedStartLineNumber` stay because they
-    // DO change the set of `[data-markdown-line-start]` elements
-    // the body scans.
-  }, [markdown, normalizedStartLineNumber, showLineNumbers]);
+    // `settledMarkdown` and `normalizedStartLineNumber` stay
+    // because they DO change the set of
+    // `[data-markdown-line-start]` elements the body scans. The
+    // streaming-pending fragment carries no such markers (it is
+    // raw text in a `<pre>`), so it is correctly excluded.
+  }, [settledMarkdown, normalizedStartLineNumber, showLineNumbers]);
 
   const rendered = useMemo(() => {
     const highlightChildren = (children: ReactNode) =>
@@ -3970,7 +4000,7 @@ export function MarkdownContent({
         rehypePlugins={[[rehypeKatex, MARKDOWN_REHYPE_KATEX_OPTIONS]]}
         remarkPlugins={MARKDOWN_REMARK_PLUGINS}
       >
-        {markdown}
+        {settledMarkdown}
       </ReactMarkdown>
     );
   }, [
@@ -3978,7 +4008,7 @@ export function MarkdownContent({
     appearance,
     hasTooManyMathExpressions,
     hasTooManyMermaidDiagrams,
-    markdown,
+    settledMarkdown,
     mermaidDiagramCount,
     normalizedStartLineNumber,
     preserveMermaidSource,
@@ -4022,6 +4052,19 @@ export function MarkdownContent({
         ref={markdownRootRef}
       >
         {rendered}
+        {pendingMarkdown.length > 0 ? (
+          // In-flight trailing block (unclosed fenced code, unclosed
+          // `$$` math display, partial pipe-table). Rendered as plain
+          // text so streaming chunks don't briefly appear as
+          // raw-`| ... |` text, runaway code blocks, or tables with
+          // mismatched cell counts. Snaps to the canonical render
+          // once the block closes (a blank line for tables, the
+          // matching closing fence for code/math) and the next
+          // textDelta fires the memoized re-split.
+          <pre className="markdown-streaming-fragment" aria-busy="true">
+            {pendingMarkdown}
+          </pre>
+        ) : null}
       </div>
     </div>
   );

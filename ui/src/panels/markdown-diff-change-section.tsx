@@ -67,6 +67,10 @@
 //     `./markdown-diff-caret-navigation`.
 //   - Segment normalisation (`normalizeEditedMarkdownSection`) —
 //     lives in `./markdown-diff-segments`.
+//   - Pointer / clipboard geometry helpers (`setDropCaretFromPoint`,
+//     `getSelectionRangeInsideSection`, `rangeCoversNodeContents`,
+//     `serializeSelectedMarkdown`) — pure DOM/Range utilities live
+//     in `./markdown-diff-clipboard-pointer`.
 //
 // Split out of `ui/src/panels/DiffPanel.tsx`. Same class names,
 // same keyboard bindings, same data-attribute surface, same
@@ -102,6 +106,11 @@ import {
 } from "./markdown-diff-caret-navigation";
 import type { RenderedMarkdownSectionCommit } from "./markdown-commit-ranges";
 import {
+  getSelectionRangeInsideSection,
+  serializeSelectedMarkdown,
+  setDropCaretFromPoint,
+} from "./markdown-diff-clipboard-pointer";
+import {
   insertSanitizedMarkdownPaste,
   serializeEditableMarkdownSection,
 } from "./markdown-diff-edit-pipeline";
@@ -111,80 +120,6 @@ import {
 } from "./markdown-diff-segments";
 
 type MarkdownDiffSaveHandler = () => Promise<void> | void;
-
-type DocumentWithCaretRangeFromPoint = Document & {
-  caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
-  caretRangeFromPoint?: (x: number, y: number) => Range | null;
-};
-
-function setDropCaretFromPoint(section: HTMLElement, clientX: number, clientY: number) {
-  const ownerDocument = section.ownerDocument as DocumentWithCaretRangeFromPoint;
-  let range: Range | null = null;
-  const caretPosition = ownerDocument.caretPositionFromPoint?.(clientX, clientY);
-  if (caretPosition) {
-    range = ownerDocument.createRange();
-    range.setStart(caretPosition.offsetNode, caretPosition.offset);
-    range.collapse(true);
-  } else {
-    range = ownerDocument.caretRangeFromPoint?.(clientX, clientY) ?? null;
-  }
-  if (!range) {
-    return;
-  }
-
-  const startContainer = range.startContainer;
-  if (startContainer !== section && !section.contains(startContainer)) {
-    return;
-  }
-
-  const selection = ownerDocument.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
-}
-
-function getSelectionRangeInsideSection(section: HTMLElement) {
-  const selection = section.ownerDocument.getSelection();
-  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-    return null;
-  }
-
-  const range = selection.getRangeAt(0);
-  const containsNode = (node: Node) => node === section || section.contains(node);
-  if (!containsNode(range.startContainer) || !containsNode(range.endContainer)) {
-    return null;
-  }
-
-  return range;
-}
-
-function rangeCoversNodeContents(range: Range, node: HTMLElement) {
-  const fullRange = node.ownerDocument.createRange();
-  fullRange.selectNodeContents(node);
-  return (
-    range.compareBoundaryPoints(Range.START_TO_START, fullRange) <= 0 &&
-    range.compareBoundaryPoints(Range.END_TO_END, fullRange) >= 0
-  );
-}
-
-function serializeSelectedMarkdown(
-  range: Range,
-  fallbackMarkdown: string,
-  fallbackScope: HTMLElement,
-) {
-  const ownerDocument = range.commonAncestorContainer.ownerDocument ?? document;
-  const container = ownerDocument.createElement("div");
-  container.append(range.cloneContents());
-  const markdown = serializeEditableMarkdownSection(container);
-  if (markdown.trim().length > 0) {
-    return markdown;
-  }
-
-  const markdownRoot =
-    fallbackScope.querySelector<HTMLElement>(".markdown-copy") ?? fallbackScope;
-  return rangeCoversNodeContents(range, markdownRoot)
-    ? fallbackMarkdown
-    : range.toString();
-}
 
 export function RenderedMarkdownChangeSection({
   allowReadOnlyCaret,

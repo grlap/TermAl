@@ -7216,6 +7216,31 @@ textarea {
   overflow-x: auto;
 }
 
+/*
+ * Streaming-pending placeholder. Rendered by `MarkdownContent` when
+ * `isStreaming` is set and the trailing portion of the payload
+ * contains an unclosed fenced code block, unclosed `$$` math display
+ * block, or pipe-table that has not been terminated by a blank line.
+ * Styled like a code block (monospace, muted background) but without
+ * the heavy "code card" chrome — visually communicates "in flight,
+ * not the final shape" while staying calm. Snaps to the canonical
+ * render once the block settles. See
+ * `ui/src/markdown-streaming-split.ts` for the cut policy.
+ */
+.markdown-streaming-fragment {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--code-block-bg, var(--surface-2, #1f1f23));
+  color: var(--code-block-fg, var(--text-muted, inherit));
+  border-radius: 0.4rem;
+  font-family: var(--code-font);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  opacity: 0.75;
+}
+
 .markdown-table-scroll > table,
 .markdown-copy table {
   width: max-content;
