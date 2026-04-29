@@ -680,6 +680,24 @@ describe("resolveAdoptStateSessionOptions", () => {
         .disableMutationStampFastPath,
     ).toBe(false);
   });
+
+  it("forces messages unloaded on a server instance change", () => {
+    // The persisted-on-disk session record clears `sessionMutationStamp`
+    // on save/load, so a coincidentally-matching `messageCount` would
+    // otherwise leave the active pane stuck on stale streaming content
+    // after a backend restart. Adoption-side opt-in keeps this confined
+    // to the restart path; ordinary live-update reconciles must not
+    // force re-hydration of every session.
+    expect(
+      resolveAdoptStateSessionOptions(undefined, true).forceMessagesUnloaded,
+    ).toBe(true);
+  });
+
+  it("does not force messages unloaded without a server instance change", () => {
+    expect(
+      resolveAdoptStateSessionOptions(undefined, false).forceMessagesUnloaded,
+    ).toBe(false);
+  });
 });
 
 describe("classifyFetchedSessionAdoption", () => {

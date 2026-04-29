@@ -160,6 +160,23 @@ async fn state_snapshot_payload_for_sse(state: AppState) -> String {
     })
 }
 
+/// Awaits a transition of the shutdown signal to `true`. Returns
+/// immediately if the receiver's current value is already `true`, even
+/// if `send(true)` was called before the receiver was constructed —
+/// this is the sticky property the `tokio::sync::watch` choice provides
+/// over `Notify`. See bugs.md "One-shot SSE shutdown notification can
+/// be missed before waiter registration".
+async fn wait_for_shutdown_signal(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    if *rx.borrow_and_update() {
+        return;
+    }
+    while rx.changed().await.is_ok() {
+        if *rx.borrow_and_update() {
+            return;
+        }
+    }
+}
+
 /// Streams state and delta events over SSE.
 async fn state_events(
     State(state): State<AppState>,
@@ -167,33 +184,40 @@ async fn state_events(
     let mut state_receiver = state.subscribe_events();
     let mut delta_receiver = state.subscribe_delta_events();
     let mut file_receiver = state.subscribe_file_events();
-    let shutdown_notify = state.shutdown_notify.clone();
+    let mut shutdown_rx = state.subscribe_shutdown_signal();
+    // Sticky pre-check: if shutdown was already triggered before this
+    // request even began handler setup, refuse to yield the initial state
+    // and exit immediately. This is the case `Notify::notify_waiters`
+    // could not handle: a notification fired before the waiter registered
+    // simply vanishes, so an `/api/events` connection accepted in the
+    // window between Ctrl+C and graceful-shutdown completion would loop
+    // forever. With `watch`, the `true` value is durable.
+    let already_shutting_down = *shutdown_rx.borrow_and_update();
     let initial_payload = state_snapshot_payload_for_sse(state.clone()).await;
 
     let stream = async_stream::stream! {
+        if already_shutting_down {
+            return;
+        }
         yield Ok(Event::default().event("state").data(initial_payload));
 
-        // Pin and `enable()` the shutdown future BEFORE entering the
-        // select! loop. `Notified` is lazy by default — it only registers
-        // a waiter on first poll — but `notify_waiters` from
-        // `main.rs::run_server` may fire before our first iteration if
-        // shutdown raced with the SSE stream startup. `enable()` registers
-        // the waiter eagerly so any prior notification still wakes us.
-        // Without this loop's exit branch the broadcast receivers below
-        // only return `Closed` when the last `AppState` clone drops, which
-        // is held by `shutdown_state` for the post-serve persist drain —
-        // so graceful shutdown would block forever. See bugs.md
-        // "Graceful shutdown blocks forever waiting for SSE streams to
-        // drain".
-        let shutdown = shutdown_notify.notified();
-        tokio::pin!(shutdown);
-        shutdown.as_mut().enable();
+        // Re-check after the initial yield: shutdown may have flipped
+        // during snapshot serialization. Without this loop's exit branch
+        // the broadcast receivers below only return `Closed` when the
+        // last `AppState` clone drops, which is held by `shutdown_state`
+        // for the post-serve persist drain — so graceful shutdown would
+        // block forever. See bugs.md "Graceful shutdown blocks forever
+        // waiting for SSE streams to drain" and "One-shot SSE shutdown
+        // notification can be missed before waiter registration".
+        if *shutdown_rx.borrow_and_update() {
+            return;
+        }
 
         loop {
             tokio::select! {
                 biased;
 
-                _ = shutdown.as_mut() => break,
+                _ = wait_for_shutdown_signal(&mut shutdown_rx) => break,
 
                 result = state_receiver.recv() => {
                     match result {
@@ -211,7 +235,15 @@ async fn state_events(
                             // recovery snapshot can be silently ignored as a
                             // redundant catch-up. See bugs.md "SSE Lagged-recovery
                             // snapshot can be silently ignored".
-                            yield Ok(Event::default().event("lagged").data(""));
+                            //
+                            // The `"1"` payload is intentional: empty `data` can
+                            // be skipped by browsers because the WHATWG
+                            // EventSource spec requires a non-empty `data:`
+                            // line per dispatched event. Clients must NOT parse
+                            // this body — it is reserved as a control marker.
+                            // See bugs.md "Empty-data `lagged` SSE marker may
+                            // not dispatch in browsers".
+                            yield Ok(Event::default().event("lagged").data("1"));
                             let payload = state_snapshot_payload_for_sse(state.clone()).await;
                             yield Ok(Event::default().event("state").data(payload));
                         }
@@ -224,9 +256,10 @@ async fn state_events(
                         Ok(payload) => yield Ok(Event::default().event("delta").data(payload)),
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             // Same reasoning as the state-receiver Lagged branch:
-                            // arm the client's force-adopt before yielding the
-                            // recovery snapshot.
-                            yield Ok(Event::default().event("lagged").data(""));
+                            // emit a non-empty `lagged` marker (so browsers
+                            // actually dispatch it) before yielding the recovery
+                            // snapshot.
+                            yield Ok(Event::default().event("lagged").data("1"));
                             let payload = state_snapshot_payload_for_sse(state.clone()).await;
                             yield Ok(Event::default().event("state").data(payload));
                         }

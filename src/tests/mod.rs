@@ -561,7 +561,13 @@ fn test_app_state() -> AppState {
         // background thread to join, so the handle stays `None` and
         // `shutdown_persist_blocking` is a no-op.
         persist_thread_handle: Arc::new(Mutex::new(None)),
-        shutdown_notify: Arc::new(tokio::sync::Notify::new()),
+        // Test constructors don't spawn the persist worker — keep
+        // `alive=true` so the production-shaped fallback (when
+        // `persist_tx.send` succeeds, async path; otherwise sync) drives
+        // tests just like before. Production tests that exercise the
+        // shutdown path explicitly flip this to `false`.
+        persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
         state_broadcast_tx: mpsc::channel().0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),

@@ -437,6 +437,65 @@ describe("reconcileSessions", () => {
     expect(merged[0].messages).toEqual([]);
   });
 
+  it("forces messagesLoaded=false on summary sessions when forceMessagesUnloaded is set", () => {
+    // Backend-restart scenario: persisted sessions intentionally clear
+    // `sessionMutationStamp` on save/load, so the post-restart summary
+    // arrives with `sessionMutationStamp: undefined`. The local transcript
+    // may be a stale streaming partial whose message count happens to
+    // match the server's authoritative count (e.g., the assistant chunk
+    // streamed locally but the final completion was persisted then lost
+    // from the SSE channel during shutdown). Without an explicit signal,
+    // the reconcile would keep `messagesLoaded: true` against the local
+    // count and the visible-session hydration effect would not re-fetch,
+    // leaving the user staring at stale content until hard refresh.
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: true,
+        preview: "Streaming partial",
+        messageCount: 2,
+        sessionMutationStamp: 42,
+        messages: [
+          {
+            id: "message-user",
+            type: "text",
+            timestamp: "10:00",
+            author: "you",
+            text: "Hello",
+          },
+          {
+            id: "message-assistant",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Hello, I'll he", // partial streaming chunk
+          },
+        ],
+      }),
+    ];
+
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        preview: "Streaming partial",
+        messageCount: 2,
+        // Persisted session loaded from SQLite has no sessionMutationStamp.
+        sessionMutationStamp: undefined,
+        messages: [],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next, {
+      forceMessagesUnloaded: true,
+    });
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0].messagesLoaded).toBe(false);
+    // Retain previous messages so the pane has something to show until
+    // hydration completes; only the flag flips so the hydration effect
+    // re-fires.
+    expect(merged[0].messages).toBe(previous[0].messages);
+  });
+
   it("reuses unchanged messages when only the streaming tail message changed", () => {
     const previous = [
       makeSession("session-a", {

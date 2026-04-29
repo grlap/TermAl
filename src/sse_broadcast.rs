@@ -171,13 +171,16 @@ impl AppState {
     /// `persist_delta_via_cache` pass before exiting. Errors from the
     /// final write are logged via the worker's existing eprintln path.
     ///
-    /// Note: callers that still hold an `AppState` clone must avoid
-    /// further `commit_locked` calls after invoking this — the persist
-    /// channel is not closed (other clones may still send `Delta`),
-    /// but the worker has exited so nothing drains those signals. In
-    /// practice this method runs after `axum::serve` has stopped
-    /// accepting new requests and `with_graceful_shutdown` has waited
-    /// for in-flight handlers to finish, so no commits are in flight.
+    /// `commit_delta_locked` calls AFTER this method returns are safe:
+    /// the alive flag is flipped to `false` only after `handle.join()`
+    /// completes, so the synchronous fallback path is never racing the
+    /// worker's still-in-progress final drain. `commit_locked` and
+    /// `commit_persisted_delta_locked` already infer fallback from
+    /// `persist_tx.send` failure when the worker has exited and the
+    /// channel becomes disconnected after the last sender drops; that
+    /// inference can lag while other `AppState` clones still hold senders,
+    /// so callers that need strict durability for those variants should
+    /// quiesce their producers before invoking this method.
     fn shutdown_persist_blocking(&self) {
         let handle = {
             let mut guard = self
@@ -187,17 +190,41 @@ impl AppState {
             guard.take()
         };
         let Some(handle) = handle else {
+            // Idempotent: a previous call already took the handle. The
+            // alive flag was flipped during that prior call after its
+            // `handle.join()` returned, so it is already `false`. Re-
+            // store defensively in case a future caller sets it to
+            // `true` for some reason; otherwise this is a no-op.
+            self.persist_worker_alive
+                .store(false, std::sync::atomic::Ordering::Release);
             return;
         };
-        // Best-effort: if the channel is already disconnected (worker
-        // panicked or exited early) there is nothing to drain — the
-        // join below still waits for the OS thread to fully exit.
+        // Best-effort signal: if the channel is already disconnected
+        // (worker panicked or exited early) there is nothing to drain
+        // — the join below still waits for the OS thread to fully exit.
+        // Important: we do NOT flip `persist_worker_alive` to `false`
+        // here. Any concurrent `commit_delta_locked` call on another
+        // `AppState` clone observing `alive == false` would synchronously
+        // write a full-state snapshot in parallel with the worker's
+        // still-running final drain — racing two writers on the same
+        // file. The flag is flipped AFTER `handle.join()` returns, so
+        // the synchronous fallback only fires when the worker is
+        // guaranteed not to drain anything. See bugs.md "Post-shutdown
+        // persistence writes are not durably ordered" for the failure
+        // mode this ordering closes.
         let _ = self.persist_tx.send(PersistRequest::Shutdown);
         if let Err(err) = handle.join() {
             eprintln!(
                 "[termal] persist worker join failed during graceful shutdown: {err:?}"
             );
         }
+        // Worker has now exited (join returned). Any subsequent
+        // `commit_delta_locked` call sees `alive == false` and takes the
+        // synchronous fallback path; the Release-store pairs with the
+        // Acquire-load in `commit_delta_locked` so the ordering is
+        // guaranteed across threads.
+        self.persist_worker_alive
+            .store(false, std::sync::atomic::Ordering::Release);
     }
 
     // Delta-producing changes advance the revision without publishing a full snapshot; the delta event
@@ -215,6 +242,36 @@ impl AppState {
     /// `turn_lifecycle.rs` where full snapshots would be overkill.
     fn commit_delta_locked(&self, inner: &mut StateInner) -> Result<u64> {
         inner.revision += 1;
+        // Post-shutdown durability: this commit shape doesn't send its own
+        // `PersistRequest::Delta`. Normally the next persist-triggering
+        // commit (via `commit_locked` / `commit_persisted_delta_locked`)
+        // wakes the worker, which then drains everything past its
+        // watermark — including the mutation_stamps this commit just
+        // bumped. After `shutdown_persist_blocking` has run, the worker
+        // is gone, so no future signal will drain this. Fall back to a
+        // synchronous full-state JSON write on the same path the
+        // disconnected-channel test fallback uses.
+        //
+        // Acquire-load: paired with the Release-store in
+        // `shutdown_persist_blocking`, which flips the flag AFTER
+        // `handle.join()` returns. Observing `alive == false` therefore
+        // means the worker thread has demonstrably exited, so the
+        // synchronous write below cannot race the worker's final drain.
+        // (Earlier rounds flipped the flag BEFORE the join, which left a
+        // window where a concurrent fallback writer and the worker's
+        // final drain raced on the same persistence path; see bugs.md
+        // "Post-shutdown persistence writes are not durably ordered".)
+        // Note: this fallback runs synchronous file I/O while holding
+        // `&mut StateInner`. That is acceptable post-shutdown because no
+        // concurrent producers should still be running by the time the
+        // worker has joined.
+        if !self
+            .persist_worker_alive
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            let persisted = PersistedState::from_inner(inner);
+            persist_state_from_persisted(&self.persistence_path, &persisted)?;
+        }
         Ok(inner.revision)
     }
 
@@ -259,6 +316,35 @@ impl AppState {
     /// workspace file watcher in `workspace_watch.rs`.
     fn subscribe_file_events(&self) -> broadcast::Receiver<String> {
         self.file_events.subscribe()
+    }
+
+    /// Returns a fresh `tokio::sync::watch::Receiver` for the shutdown
+    /// signal. Sticky: if `send(true)` already ran before this call, the
+    /// returned receiver's `borrow_and_update()` immediately reads `true`,
+    /// so SSE handlers accepted in the brief window between Ctrl+C and
+    /// graceful-shutdown completion observe the signal regardless of
+    /// timing. Used by `api_sse.rs::state_events` and the production
+    /// graceful-shutdown plumbing in `main.rs::run_server`.
+    fn subscribe_shutdown_signal(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.shutdown_signal_tx.subscribe()
+    }
+
+    /// Triggers graceful shutdown: SSE handlers that currently hold a
+    /// receiver for this signal will exit their `tokio::select!` loops on
+    /// the next iteration, and any handler started after this call will
+    /// see the sticky `true` value during its initial `borrow_and_update()`
+    /// pre-check. Idempotent — repeated calls just re-store `true`.
+    ///
+    /// `send_replace` rather than `send`: the latter returns an error and
+    /// **does not update the value** when there are zero live receivers,
+    /// which would defeat the sticky contract — a `trigger` call made
+    /// before any SSE handler subscribes would silently fail and a later
+    /// subscriber would see `false`. `send_replace` updates the value
+    /// regardless of receiver count, which is the documented "sticky
+    /// single-producer broadcast" pattern. See bugs.md "One-shot SSE
+    /// shutdown notification can be missed before waiter registration".
+    fn trigger_shutdown_signal(&self) {
+        self.shutdown_signal_tx.send_replace(true);
     }
 
     /// Serializes a `DeltaEvent` to JSON and fans it out on the

@@ -21,6 +21,21 @@ import type {
 
 type ReconcileSessionsOptions = {
   disableMutationStampFastPath?: boolean;
+  /**
+   * Force `messagesLoaded` to `false` on summary sessions even when the
+   * local transcript already has at least `messageCount` retained
+   * messages. Set this on backend-restart adoption: persisted sessions
+   * have their `sessionMutationStamp` intentionally cleared on save/load
+   * (see `state-revision.ts::isStaleSameInstanceSnapshot`), so the
+   * summary-session reconcile cannot otherwise prove the local transcript
+   * matches the server's authoritative content. Without this flag a
+   * coincidentally-matching `messageCount` would keep `messagesLoaded:
+   * true` and the visible-session hydration effect would not re-fire,
+   * leaving the active pane stuck on stale streaming content (e.g., a
+   * partial assistant chunk that the server has since finalized) until
+   * the user hard-refreshes the tab.
+   */
+  forceMessagesUnloaded?: boolean;
 };
 
 export function reconcileSessions(
@@ -130,6 +145,7 @@ function reconcileSummarySession(
 ): Session {
   if (
     !options?.disableMutationStampFastPath &&
+    !options?.forceMessagesUnloaded &&
     previous.sessionMutationStamp !== null &&
     previous.sessionMutationStamp !== undefined &&
     previous.sessionMutationStamp === next.sessionMutationStamp
@@ -148,7 +164,13 @@ function reconcileSummarySession(
     previousMutationStamp !== null &&
     nextMutationStamp !== null &&
     nextMutationStamp !== previousMutationStamp;
+  // After a backend restart the server's persisted `sessionMutationStamp`
+  // is `null`, so `hasDifferentKnownSummaryMutation` cannot detect that
+  // the new server may have advanced the transcript. The caller signals
+  // restart adoption via `forceMessagesUnloaded`; in that case we cannot
+  // trust the local transcript and must re-hydrate.
   const messagesLoaded =
+    options?.forceMessagesUnloaded !== true &&
     !hasDifferentKnownSummaryMutation &&
     hasCompleteMessages &&
     (previous.messagesLoaded === true || previous.messages.length > 0);

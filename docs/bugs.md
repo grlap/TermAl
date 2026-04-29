@@ -184,85 +184,159 @@ Also updated in the current tree: `docs/architecture.md`'s SSE Event Stream sect
 
 Also fixed in the current tree: send-after-restart now updates the session preview tooltip and transcript within a single round trip instead of waiting for the 30 s `startStaleSendResponseRecoveryPoll` interval. When the user restarts the backend with the browser tab open and then sends a prompt, the POST response carries the new server's `serverInstanceId`, and `adoptState` (correctly) refuses to silently accept an unseen mismatched instance — so the local view stayed on the previous prompt's preview until the next safety-net poll fired half a minute later. `handleSend` now detects the rejection-by-instance-mismatch case via `isServerInstanceMismatch(lastSeen, response.serverInstanceId)` and fires `requestActionRecoveryResync({ allowUnknownServerInstance: true })` immediately, mirroring the pattern `adoptCreatedSessionResponse` already uses for cross-instance create responses. Stale same-instance rejections (e.g. SSE already advanced past this response's revision) still route through the existing 30 s poll because the tab is otherwise healthy. New `App.session-lifecycle.test.tsx` regression covers the restart-then-send case end-to-end.
 
+Also fixed in the current tree (Bug #4 / `lagged` marker dispatch): both `RecvError::Lagged` branches in `src/api_sse.rs::state_events` now emit `Event::default().event("lagged").data("1")` instead of `.data("")`. The WHATWG EventSource spec lets browsers coalesce or skip frames without a `data:` line, so the empty-payload marker could silently fail to dispatch — leaving the same-revision recovery snapshot back in its original silently-ignored state. Clients are explicitly forbidden from parsing the byte; it's reserved as a control marker. The frontend regression at `App.live-state.reconnect.test.tsx` was updated to dispatch `data: "1"` to match the production wire shape, and `docs/architecture.md`'s SSE-events section now documents the `event: lagged\ndata:1\n\n` wire format and the rationale.
+
+Also fixed in the current tree (Bug #1 / sticky SSE shutdown signal): the SSE shutdown path no longer relies on `tokio::sync::Notify::notify_waiters()`, which is one-shot and silently loses notifications fired before a waiter registers. Replaced by `tokio::sync::watch::channel(false)` exposed through new `subscribe_shutdown_signal` / `trigger_shutdown_signal` helpers on `AppState`. `state_events` calls `borrow_and_update()` BEFORE yielding the initial state and again before entering its `select!` loop; the new helper `wait_for_shutdown_signal` polls `changed()` with a `borrow_and_update()` re-check on each wake. `trigger_shutdown_signal` uses `send_replace(true)` instead of `send(true)` so the value is recorded even when there are zero live receivers — a `send` against an empty receiver set silently errors and would defeat the sticky contract. Two new `tokio::test` regressions in `src/tests/persist.rs` pin both subscriber-orderings (before-trigger AND after-trigger) end-to-end, both wrapped in `tokio::time::timeout(1s, …)` so a regression to a non-sticky implementation fails loudly instead of self-healing via an in-test re-notify.
+
+Also fixed in the current tree (Bug #3 / graceful-shutdown durability regression): added a real integration test (`graceful_shutdown_drain_persists_final_mutation_across_reload` in `src/tests/persist.rs`) that drives the production-shaped path end-to-end — `AppState::new_with_paths` → real worker thread → `commit_locked` via `create_test_project` + `create_test_project_session` → `shutdown_persist_blocking` → reload via fresh `AppState::new_with_paths`. Without the graceful drain, the test fails because the just-committed session never reaches disk; with it, the reborn `AppState`'s `find_session_index` returns `Some(_)` for the durably persisted session id. The previous fake-loop test stays as a fast-path unit cover but is no longer the only thing pinning durability.
+
+Also fixed in the current tree (Bug #2 / post-shutdown background mutations): `commit_delta_locked` now falls back to a synchronous full-state JSON write when the persist worker has exited. New `persist_worker_alive: Arc<AtomicBool>` field on `AppState` is flipped to `false` by `shutdown_persist_blocking` BEFORE the `PersistRequest::Shutdown` signal fires (Acquire/Release ordering pairs the load with the flip), so any agent runtime / remote SSE bridge / orchestrator-resumer commit that lands after `axum::serve`'s graceful shutdown completes goes straight to disk via the same fallback path the disconnected-channel test fixture already uses. `commit_locked`, `commit_persisted_delta_locked`, and `commit_session_created_locked` already had analogous fallbacks via `persist_internal_locked`'s `persist_tx.send` error branch — `commit_delta_locked` was the gap because it doesn't send its own persist signal (it relies on the worker draining future commits). New `commit_delta_locked_after_shutdown_falls_back_to_synchronous_persist` regression in `src/tests/persist.rs` proves a session preview mutated via `commit_delta_locked` AFTER `shutdown_persist_blocking` survives a reload.
+
+Also fixed in the current tree (canonical restart-roundtrip tripwire test): a new `App.live-state.restart-roundtrip.test.tsx` file owns one cross-layer integration test — "renders the streamed assistant reply through a full restart recovery chain without hard refresh" — that simulates the entire user-reported scenario in a single deterministic flow: pre-restart hydrated session with streaming partial assistant text → SSE re-open from replacement instance → `forceMessagesUnloaded` re-arms hydration → `/api/sessions/{id}` adopts the canonical transcript with the complete assistant reply → late `_sseFallback` reconnect probe at lower revision → `isEqualRevisionAutomaticReconnectSnapshot` guard rejects rollback. The test was confirmed to fail on the unfixed `forceMessagesUnloaded: false` (hydration never re-fires, pane stuck on streaming partial) AND on the unfixed `state.revision <= requestedRevision` clause (rollback hides assistant reply). The header comment names every fix point exercised by the scenario; a developer touching `app-live-state.ts`, `app-session-actions.ts`, `session-reconcile.ts`, `session-hydration-adoption.ts`, `live-updates.ts`, `state-revision.ts`, `api_sse.rs`, `sse_broadcast.rs`, `state.rs`, or `app_boot.rs` has a single tripwire to verify the cross-layer composition stays intact even when per-fix unit tests pass. The bug class produced 9+ distinct fixes across recent rounds; this single test catches the integration-shape regressions that no per-unit test could.
+
+Also fixed in the current tree (same-instance reconnect lower-rev rollback): the SSE-error reconnect fallback `/api/state` probe (`scheduleReconnectStateResync`) no longer force-adopts a same-instance response whose `state.revision` is strictly lower than the request's `requestedRevision`. Same-server-instance revisions are monotonic — a lower response must be a stale snapshot from before the SSE deltas advanced local state, not a "newer" repair. The user-visible failure mode this closes: after a backend restart the user sends a new prompt, the assistant message streams in over SSE deltas, and the earlier-armed reconnect resync (whose 400ms timer captured `requestedRevision = 5` while local was at 5) finally returns at `state.revision = 4` because of request/response queuing — without the guard, force-adoption rolled local back to revision 4, the assistant message disappeared, no further deltas arrived, and the user had to hard-refresh. The fix renames `isNotNewerAutomaticReconnectSnapshot` → `isEqualRevisionAutomaticReconnectSnapshot` and tightens the comparison from `<=` to `===` (equal-revision adoption is still handled, replacement-instance rollback is still handled by `isNotNewerReplacementSnapshot`). New `App.live-state.reconnect.test.tsx` regression: "rejects a lower same-instance reconnect /api/state snapshot instead of rolling local state backward" — confirmed to fail on the unfixed `<=` and pass on the fixed `===`. Existing "restarts the resync loop from finally when a reconnect fallback queues behind a failing pre-reopen resync" test was updated from a deliberately-low revision-1 fixture to revision-2 (equal to the SSE state) so it pins the correct adoption path through `isEqualRevisionSnapshot` instead of the now-removed lower-revision branch.
+
+Also fixed in the current tree (active-session staleness across restart): replacement-instance state adoption now forces `messagesLoaded: false` on summary-session reconciliation, so the visible-session hydration effect re-fires `GET /api/sessions/{id}` and the active pane is repainted with the server's authoritative transcript instead of staying stuck on the pre-restart streaming partial. Persisted sessions intentionally clear `sessionMutationStamp` on save/load (see `state-revision.ts::isStaleSameInstanceSnapshot`), so the post-restart summary arrives with no stamp signal; without an explicit "force re-hydration" hint, a coincidentally-matching `messageCount` would let `reconcileSummarySession` keep `messagesLoaded: true` against the local count and the hydration `useEffect` (which depends on `activeSession?.messagesLoaded`) would never re-fire. The fix threads a new `forceMessagesUnloaded` option through `AdoptSessionsOptions` → `reconcileSessions` → `reconcileSummarySession`, set by `resolveAdoptStateSessionOptions` whenever `serverInstanceChanged` is true. Three new regressions land alongside: (a) `session-reconcile.test.ts` proves the option flips `messagesLoaded` to `false` while retaining the previous `messages` array (so the pane has something to show until hydration completes); (b) `app-live-state.test.ts` proves `resolveAdoptStateSessionOptions` sets `forceMessagesUnloaded: true` exactly when `serverInstanceChanged` is true; (c) `App.live-state.reconnect.test.tsx` is an end-to-end App-level test that opens a session, drives an `_sseFallback` replacement-instance state event, and asserts `api.fetchSession("session-1")` is called — without the fix, the active pane stayed on the streaming partial until hard refresh.
+
+Also fixed in the current tree (bookkeeping cleanup of the `lagged` SSE doc gap): the previously active "`lagged` SSE event not documented in architecture or plan docs" Medium entry is removed because the round-7 docs update already closed it. `docs/architecture.md`'s SSE Event Stream section enumerates all four event types (`state`, `delta`, `workspaceFilesChanged`, `lagged`) with the empty-`data` convention, the `event: lagged\ndata:1\n\n` wire format, the forwarding policy for the new marker, and dedicated subsections for the graceful-shutdown contract and the client-side EventSource recovery loop. `docs/metadata-first-state-plan.md` already references the renamed `hasInTurnActivitySinceTurnBoundary` predicate with the broadened "user-prompt counts as in-turn activity" semantics. The active ledger no longer carries a stale doc-coverage entry for either change.
+
+Also fixed in the current tree (bookkeeping cleanup of the `lagged` listener leak entry): the previously active "`lagged` SSE event listener leaks if the cleanup path stops calling `eventSource.close()`" Medium entry is removed. `useAppLiveState`'s SSE transport effect cleanup now calls `removeEventListener("lagged", handleLaggedEvent as EventListener)` alongside the existing `state` / `delta` / `workspaceFilesChanged` listener removals, so a future regression that drops or reorders the implicit `eventSource.close()` teardown cannot leave the `lagged` handler attached and re-firing on the dead `EventSource`.
+
+Also fixed in the current tree (bookkeeping cleanup of the `appliedNeedsResync` integration gap): the previously active "`appliedNeedsResync` end-to-end integration path has no targeted regression" Medium entry is closed by a new `App.live-state.deltas.test.tsx` case — "applies metadata patch immediately and hydrates when an unhydrated session receives a missing-target delta". The test deliberately leaves the unhydrated `messagesLoaded: false` session unopened (so the visible-session hydration effect cannot pre-fire and mask the handler-triggered path), dispatches a `textDelta` whose `messageId` is absent from the retained transcript, and then asserts both halves of the contract: (a) the sidebar `.session-preview` div's `title` attribute reflects the delta payload (proving the metadata patch landed synchronously via the `appliedNeedsResync` branch — not the OUTER session-row button's `agent / workdir` title), and (b) `/api/sessions/session-1` was fetched (proving `startSessionHydration(delta.sessionId)` ran alongside the resync nudge). The existing "force re-hydrates the session when a delta arrives whose target is missing on a hydrated transcript" test still pins the hydrated `needsResync` path, so both branches are now covered end-to-end.
+
 ## Active Repo Bugs
 
-## One-shot SSE shutdown notification can be missed before waiter registration
+## Post-shutdown persistence writes are not durably ordered
 
-**Severity:** High - `src/api_sse.rs:174-188` and `src/tests/persist.rs:1000`. The SSE shutdown path uses `tokio::sync::Notify::notify_waiters()`, but that notification is not sticky. The current stream yields/builds the initial state before the shutdown waiter is definitely registered, so an `/api/events` request accepted just before Ctrl+C/SIGTERM can miss the only shutdown signal.
+**Severity:** High - late background commits can still be lost or rolled back during graceful shutdown.
 
-The current "pre-notify" test does not prove the production contract either: it sends a second `notify_waiters()` from inside the waiter, so the test can pass even when a waiter registered after the original shutdown signal would otherwise hang.
-
-**Current behavior:**
-- `run_server` calls `shutdown_notify.notify_waiters()` after `shutdown_signal()` resolves.
-- `state_events` registers/enables the `Notified` future only after initial state setup and the first stream yield path.
-- `shutdown_notify_wakes_a_waiter_registered_after_the_signal_fires` self-heals by sending another notification.
-
-**Proposal:**
-- Replace the one-shot `Notify` contract with a sticky shutdown primitive such as `CancellationToken`, `watch`, or `AtomicBool + Notify`.
-- Check the shutdown state before and after initial snapshot creation and inside the stream loop.
-- Rewrite the pre-notify regression without an in-test re-notify; wrap the await in a timeout and assert the real sticky contract.
-
-## Persist shutdown drain can run before background mutation sources are quiesced
-
-**Severity:** High - `src/sse_broadcast.rs:181`. The new drain joins the persist worker after HTTP server shutdown, but background agent runtime threads, remote event bridges, or other non-HTTP workers can still hold `AppState` clones and commit after the final persist collection.
-
-If a streaming `commit_delta_locked` or remote bridge commit lands after the persist worker has collected its final delta and exited, no worker remains to drain that signal. The restart durability window is narrower but not closed for commits produced outside the HTTP request lifecycle.
+The current shutdown path flips `persist_worker_alive` before the persist worker has completed its final drain/write. A late `commit_delta_locked` can then synchronously write a newer full-state snapshot while the worker is still able to commit an older collected delta afterward. Other commit paths (`commit_locked` / `commit_persisted_delta_locked`) still infer fallback from `persist_tx.send(...)` failure, but the receiver can remain alive during shutdown even when no later drain is guaranteed.
 
 **Current behavior:**
-- Axum graceful shutdown waits for HTTP handlers, not all agent runtime or remote bridge mutation producers.
-- `shutdown_persist_blocking()` sends `PersistRequest::Shutdown`, joins the worker, and leaves the persist channel otherwise usable by existing clones.
-- Later commits can enqueue `Delta` onto a channel with no worker left to consume it.
+- `shutdown_persist_blocking()` marks the worker unavailable before the worker has joined.
+- `commit_delta_locked` can perform synchronous fallback writes concurrently with the worker's final write.
+- Other commit paths can enqueue successfully during shutdown and return without durable confirmation.
 
 **Proposal:**
-- Add a coordinated shutdown phase: stop accepting new work, interrupt or quiesce active runtimes/remote bridges, wait for callbacks to settle, then send `PersistRequest::Shutdown`.
-- Alternatively, make post-shutdown commit paths detect the stopped worker and fall back to synchronous persistence for final mutations.
-- Add a regression that simulates a background commit racing after HTTP shutdown and proves it reaches disk before process exit.
+- Route all commit variants through one explicit shutdown state instead of relying on channel-disconnect inference.
+- Serialize post-shutdown fallback writes with the worker's final drain/write, or quiesce all background mutation producers before sending `PersistRequest::Shutdown`.
+- Add a regression that races a late background commit with shutdown and proves the final persisted state is the latest `StateInner`.
 
-## Graceful-shutdown durability regression does not reload persisted state
+## Send-after-restart live-stream recovery is not proven by the regression
 
-**Severity:** High - `src/tests/persist.rs:971`. The new shutdown regression uses a copied fake worker loop and counts ticks. It does not exercise `AppState::new_with_paths`, the real background persist worker, the stored `JoinHandle`, `collect_persist_delta`, SQLite writes, or reload behavior.
+**Severity:** High - the current test can pass even if recreated SSE streams do not apply assistant deltas.
 
-The fixed user bug is "last streamed message disappears after graceful restart". A test that only proves the fake loop runs one extra tick would still pass if the production worker failed to write the final delta or a restarted `AppState` still missed the last message.
+The send-after-restart regression proves snapshot recovery and construction of a newer `EventSource`, but it does not dispatch a post-restart assistant delta on that new source. A regression where the transport is recreated but live assistant chunks are ignored would still pass while the user-facing symptom remains.
 
 **Current behavior:**
-- Unit tests cover `PersistWorkerWaitOutcome` and a copied worker-loop shape.
-- No test creates a real state, commits a final mutation, calls `shutdown_persist_blocking()`, reloads from the same persistence path, and asserts the final transcript/revision is durable.
+- The test observes the new `EventSource` instance.
+- It does not prove assistant deltas from that instance update the active transcript or preview.
 
 **Proposal:**
-- Add a temp-persistence integration test using `AppState::new_with_paths`.
-- Mutate a session through the normal commit path, call `shutdown_persist_blocking()`, then reload via `load_state` or a fresh `AppState`.
-- Assert the final message and revision survive reload.
+- After capturing the newest `EventSource`, dispatch a post-restart assistant delta/state on it.
+- Assert the assistant reply appears in the active transcript and preview.
 
-## Empty-data `lagged` SSE marker may not dispatch in browsers
+## Cross-instance non-send action recovery does not force SSE recreation
 
-**Severity:** High - `src/api_sse.rs:195, 210`. The new Lagged recovery marker is emitted as `Event::default().event("lagged").data("")` in both broadcast `RecvError::Lagged` branches. Browser `EventSource` dispatch relies on a delivered event frame with data; an empty payload can be serialized without a usable `data:` field and skipped by real clients.
+**Severity:** High - approval/input-style actions can recover metadata after restart while live assistant deltas stay on a dead stream.
 
-This makes the recovery fix fragile: frontend tests manually dispatch a `lagged` event, but production browsers may never call `handleLaggedEvent`, so the following same-revision recovery snapshot can still be rejected as redundant.
+`submitApproval`, `submitUserInput`, `submitMcpElicitation`, and `submitCodexAppRequest` route state responses through `adoptActionState()`. When one of those actions returns from a restarted backend, the mismatched snapshot can schedule authoritative `/api/state` recovery, but unlike `handleSend` it does not also force the `EventSource` to recreate. Actions that resume assistant streaming can therefore update snapshot metadata while the live response remains connected to the old backend stream.
 
 **Current behavior:**
-- State-receiver Lagged recovery yields `event: lagged` with empty data, then `event: state`.
-- Delta-receiver Lagged recovery does the same.
-- Frontend tests prove the handler behavior only after a synthetic `lagged` event is delivered.
+- Non-send action responses can detect a replacement server instance and request state recovery.
+- The same path does not force SSE recreation, so follow-up assistant deltas may remain invisible until a later reconnect or hard refresh.
 
 **Proposal:**
-- Emit a non-empty marker payload, such as `.data("1")` or `{}`, in both Lagged branches.
-- Add backend or SSE serialization coverage proving the wire frame contains `event: lagged` and a non-empty `data:` line immediately before the recovery `state`.
+- When `adoptActionState()` rejects a state response due to server-instance mismatch and schedules recovery, also call `forceSseReconnect()`.
+- Add restart coverage for approval/input recovery that dispatches live assistant deltas through the recreated `EventSource`.
 
-## Same-instance reconnect recovery can force-adopt lower revision snapshots
+## Restart-roundtrip test does not prove the active transcript was replaced
 
-**Severity:** Medium - `ui/src/app-live-state.ts:1736-1744`. Automatic same-instance reconnect/fallback recovery now treats snapshots with `state.revision <= requestedRevision` as force-adoptable. Same-server-instance revisions are expected to be monotonic; lower revisions should only be trusted when there is explicit restart or replacement-instance evidence.
+**Severity:** High - the canonical restart regression can pass by matching preview metadata instead of the visible assistant bubble.
 
-Accepting a lower same-instance `/api/state` snapshot can roll the client backward after a newer SSE/action adoption already advanced local state, potentially re-hiding fresh transcript or sidebar updates.
+The canonical restart-roundtrip regression asserts the final assistant text with page-wide `getAllByText(...)`. That text can already be present in session preview metadata, so the test can pass without proving the authoritative hydrated transcript replaced the stale partial in the active conversation pane.
 
 **Current behavior:**
-- `isNotNewerAutomaticReconnectSnapshot` accepts lower-or-equal revisions for same-instance reconnect/fallback probes.
-- `shouldForceAuthoritativeSnapshot` can then force adoption of that lower same-instance snapshot.
-- Replacement-instance and watchdog recovery intentionally have broader rollback semantics, but ordinary same-instance reconnect does not need the lower-revision case.
+- The test proves hydration is requested and some copy of the final assistant text exists on the page.
+- It does not scope the assertion to the active transcript body or prove the stale streaming partial disappeared.
 
 **Proposal:**
-- Restrict same-instance reconnect repair to `state.revision === requestedRevision`.
-- Keep lower-revision adoption limited to confirmed replacement-instance/restart paths or another explicit rollback signal.
-- Add a reconnect fallback regression where a lower same-instance `/api/state` response is ignored while a later equal/fresh response still repairs the intended case.
+- Scope assertions to the active session transcript or assistant bubble.
+- Assert the stale exact partial text is gone after hydration and remains gone after the late fallback probe.
+
+## Watchdog recovery can still force-adopt lower same-instance revisions
+
+**Severity:** Medium - same-instance watchdog snapshots can still roll the UI backward.
+
+The reconnect fallback path now rejects strictly lower same-instance snapshots, but the watchdog path still trusts `state.revision <= requestedRevision`. A stale watchdog `/api/state` response from the same server instance can therefore re-hide freshly streamed assistant content through the same rollback class the reconnect fix removed.
+
+**Current behavior:**
+- Automatic reconnect snapshots require equal same-instance revision before force-adoption.
+- Watchdog snapshots can still force-adopt lower same-instance revisions.
+
+**Proposal:**
+- Apply the same monotonic same-instance rule to watchdog snapshots.
+- Allow lower/equal rollback only when replacement-instance evidence exists; otherwise require equality or forward progress.
+
+## Lagged SSE wire format lacks backend route-level coverage
+
+**Severity:** Medium - the browser-facing `event: lagged` serialization can regress without a backend test catching it.
+
+The prior production bug was that an empty-data SSE control frame may not dispatch in browsers. Frontend tests that manually dispatch `lagged` with `data: "1"` do not prove the backend route actually serializes `event: lagged` with a non-empty `data:` line before the recovery `state`.
+
+**Current behavior:**
+- Frontend tests synthesize the `lagged` event.
+- Backend tests do not assert the raw `/api/events` wire frame contains `event: lagged` and `data: 1`.
+
+**Proposal:**
+- Add route-level `/api/events` coverage that forces receiver lag.
+- Assert the raw SSE frame emits `event: lagged`, a non-empty `data: 1` line, and then the recovery `state`.
+
+## SSE recreation control plane is split between `sseEpoch` state and `pendingSseRecreateOnInstanceChangeRef`
+
+**Severity:** Medium - two coordination mechanisms for one concern, increases regression risk and reduces debuggability.
+
+`forceSseReconnect()` sets `pendingSseRecreateOnInstanceChangeRef.current = true` synchronously and the consume happens inside `adoptState` only when `fullStateServerInstanceChanged` is true. This adds a second control plane for SSE reconnection alongside the existing `sseEpoch` state, with the ref-vs-state ordering being load-bearing (synchronous `setSseEpoch` would tear down the in-flight probe). The pattern is documented inline, but ref state is not visible in React DevTools or in any state diff, so a subsequent maintainer reading the SSE transport effect cannot see the gate that determines whether the effect re-runs. The Round 8 comment in the doc-block notes this exact split-plane pattern was reverted before for the same reason. There is also no clear-on-no-instance-change reset path: if `forceSseReconnect()` fires but the recovery probe response comes back as same-instance (false alarm), the flag stays armed and could fire on a much later legitimate restart.
+
+**Current behavior:**
+- `forceSseReconnect()` mutates a ref invisible to DevTools.
+- The flag is consumed only inside the `fullStateServerInstanceChanged` branch of `adoptState`.
+- A successful recovery probe with no instance change leaves the flag armed indefinitely.
+- The flag-on-adopt ordering relative to `setSseEpoch` is not pinned by a load-bearing test (current tests assert the recreate happens but not the ordering).
+
+**Proposal:**
+- Lift the gate into a state-driven shape (e.g., a single `sseReconnectReason` state with `instanceChangeAfterAdopt` as one of its values), so the SSE reconnection trigger is visible in React DevTools.
+- Or add a load-bearing test that fails if the consume-on-adopt ordering is reversed.
+- Either way, clear `pendingSseRecreateOnInstanceChangeRef` on any `adoptState` success that does not change the instance, so a false-alarm `forceSseReconnect()` cannot fire on a later legitimate restart.
+
+## `shutdown_persist_blocking` doc comment contradicts the post-shutdown commit fallback
+
+**Severity:** Low - the source-level contract documentation no longer matches the runtime contract.
+
+`shutdown_persist_blocking`'s doc comment in `src/sse_broadcast.rs:181-217` says callers MUST avoid further `commit_locked` calls after invoking the method because "the persist channel is not closed... but the worker has exited so nothing drains those signals". The fix this round added a synchronous fallback in `commit_delta_locked` that explicitly handles late commits (the `persist_worker_alive` AtomicBool gate), so `commit_delta_locked` is now safe to call after `shutdown_persist_blocking`. The comment still warns against the very pattern the code now supports, and the bugs.md preamble describes the post-shutdown commit fallback as the new contract.
+
+**Current behavior:**
+- The doc comment warns callers to avoid `commit_locked` after `shutdown_persist_blocking`.
+- The runtime supports `commit_delta_locked` calls via synchronous full-state fallback.
+- `commit_locked` and `commit_persisted_delta_locked` already handle the post-shutdown case via `persist_internal_locked`'s `persist_tx.send` error branch.
+
+**Proposal:**
+- Update the doc comment to reflect the new contract: `commit_delta_locked` calls after `shutdown_persist_blocking` use a synchronous full-state fallback; `commit_locked` and `commit_persisted_delta_locked` still infer fallback from `persist_tx.send` failure.
+- Note the architectural trade-off: the synchronous fallback path runs file I/O while holding `&mut StateInner`, so callers that hit it during shutdown will block the executor briefly. This is acceptable post-shutdown because no concurrent producers should still be running.
+
+## Sticky shutdown tests bypass `/api/events` stream wiring
+
+**Severity:** Medium - helper-level tests can pass while the production SSE handler still hangs during shutdown.
+
+The new tests validate the sticky `watch` shutdown helper directly, but they do not exercise `state_events` or the `/api/events` route using that signal. A future regression in the stream's pre-loop checks or select wiring could keep long-lived SSE connections open and block graceful shutdown while the helper tests still pass.
+
+**Current behavior:**
+- Tests cover the shutdown signal helper before/after registration.
+- They do not hold or open `/api/events` streams and assert termination through the route handler.
+
+**Proposal:**
+- Add route-level SSE shutdown tests for shutdown-before-connect and shutdown-after-initial-state.
+- Wrap both in timeouts so missed shutdown delivery fails loudly.
 
 ## Remote SSE bridge ignores `lagged` recovery markers
 
@@ -310,46 +384,6 @@ A transient SQLite lock, disk hiccup, or I/O error during graceful shutdown can 
 - On shutdown, exit only after a successful final persist.
 - Or use a bounded retry/timeout policy and return/log a shutdown failure outcome that clearly says durability was not confirmed.
 - Add a test covering `Err` followed by `Ok` after `PersistRequest::Shutdown`.
-
-## `lagged` SSE event not documented in architecture or plan docs
-
-**Severity:** Medium - `docs/architecture.md` (SSE Event Stream section, around line 239-247) and `docs/metadata-first-state-plan.md:399, 570`. The new `lagged` SSE event added in this round is documented only in inline comments and the bugs.md preamble. The architecture doc still enumerates `state`, `delta`, and `workspaceFilesChanged` as the SSE event types; `metadata-first-state-plan.md` still references the renamed predicate `hasAssistantActivitySinceCurrentTurnBoundary` and describes pre-rename semantics ("only relevant when the session is hydrated, gate accordingly") that no longer match.
-
-The wire format, marker payload convention, and same-revision force-adopt contract are non-obvious cross-layer invariants that future maintainers and remote-bridge implementers need a documented reference for.
-
-**Current behavior:**
-- `architecture.md` SSE list covers three event types; the new fourth (`lagged`) is not mentioned.
-- `metadata-first-state-plan.md` references the pre-rename predicate name and pre-broadening semantics.
-- Remote-proxy bridges (`src/remote_sync.rs`, `src/remote_*`) currently forward `state` and `delta`; how they should propagate or consume `lagged` is not written down.
-
-**Proposal:**
-- Add a fourth bullet in the SSE Event Stream section of `architecture.md` describing the `lagged` marker, its non-empty marker payload, the "force-adopt the next same-revision state event" client contract, and the remote-proxy forwarding decision.
-- Update both `metadata-first-state-plan.md` references to use `hasInTurnActivitySinceTurnBoundary` and reflect the broadened "user prompt counts as in-turn activity" semantics.
-
-## `lagged` SSE event listener leaks if the cleanup path stops calling `eventSource.close()`
-
-**Severity:** Medium - `ui/src/app-live-state.ts:2496` (cleanup function). Three SSE listeners (`state`, `delta`, `workspaceFilesChanged`) are explicitly removed via `eventSource.removeEventListener(...)` in the cleanup; the new `lagged` listener was added without a matching cleanup line. The practical leak is bounded today because `eventSource.close()` follows on the same path and closing an `EventSource` releases its listeners — but the asymmetry is a footgun for any future refactor that swaps `close()` for a recycle-without-close path.
-
-**Current behavior:**
-- `state` / `delta` / `workspaceFilesChanged` listeners removed in cleanup.
-- `lagged` listener relies on `eventSource.close()` for cleanup.
-- The listener-removal block no longer audits as "all listeners are explicitly removed" by inspection.
-
-**Proposal:**
-- Add `eventSource.removeEventListener("lagged", handleLaggedEvent as EventListener);` alongside the existing three.
-
-## `appliedNeedsResync` end-to-end integration path has no targeted regression
-
-**Severity:** Medium - `ui/src/App.live-state.deltas.test.tsx`. The recent "force re-hydrates the session when a delta arrives whose target is missing on a hydrated transcript" test pins the plain `needsResync` branch (hydrated session, missing target) end-to-end, but the new `appliedNeedsResync` branch (unhydrated session, missing target) is covered only at the reducer level in `live-updates.test.ts`. The integration path that distinguishes `appliedNeedsResync` — metadata patch lands AND `/api/state` resync fires AND `/api/sessions/{id}` hydration fires — has no test.
-
-A regression where the SSE delta handler accidentally treats `appliedNeedsResync` like `applied` (skipping the hydration trigger) or like `needsResync` (skipping the metadata patch render) would slip through the unit-level coverage.
-
-**Current behavior:**
-- Reducer-level coverage in `live-updates.test.ts` asserts the return shape across all five non-created delta types.
-- No component-level test asserts the metadata-patch-immediate-render + resync + hydration triple.
-
-**Proposal:**
-- Add a sibling test in `App.live-state.deltas.test.tsx` that uses an `messagesLoaded: false` session, dispatches a missing-target delta (e.g. `textDelta`), and asserts: (1) sidebar `messageCount`/`preview`/`status` updated immediately from the metadata patch (without waiting for hydration), (2) `/api/sessions/session-1` was fetched, (3) the recovered message body becomes visible after hydration resolves.
 
 ## Triplicate `requestStateResync + startSessionHydration` recovery pattern in delta handler
 
@@ -1118,31 +1152,67 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - Drop or overwrite superseded snapshots before they can accumulate in memory.
 - Add a burst test that publishes multiple large snapshots while the broadcaster is delayed and asserts only the latest snapshot is retained.
 
+## Reload persistence regression leaves a restarted worker alive during cleanup
+
+**Severity:** Low - the reload test can produce noisy or flaky cleanup because the reloaded state's worker is not shut down.
+
+The graceful-shutdown reload regression creates a fresh `AppState::new_with_paths` to verify persisted state, but then drops it without shutting down its persist worker before temp directories are removed. That worker can still enqueue boot-time persist work and log failed writes after the test deletes its temporary persistence path, which is especially fragile on Windows.
+
+**Current behavior:**
+- The test reloads state through a new `AppState`.
+- The reloaded state's persist worker is not explicitly drained before temp cleanup.
+
+**Proposal:**
+- Call `restarted.shutdown_persist_blocking()` after dropping any held inner-state guards and before removing temp directories.
+- Keep the test's durable-reload assertion intact while making cleanup deterministic.
+
+## Generated Vitest cache file is modified under `node_modules`
+
+**Severity:** Note - local test-runner cache churn can be accidentally staged.
+
+The unstaged diff includes `node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json`, which is generated local Vitest state. If staged, it would add machine-specific noise unrelated to the product change.
+
+**Current behavior:**
+- A generated Vitest cache file is modified in the worktree.
+- The file is not part of the application behavior under review.
+
+**Proposal:**
+- Leave the file unstaged or revert the generated cache change before committing.
+- Consider ignoring the cache path if it is not intentionally tracked.
+
 ## Implementation Tasks
 
 - [ ] P2: Add production SQLite persistence coverage:
   make the SQLite runtime persistence path available under `cargo test`, then cover temp-database full snapshot save/load, delta upsert, metadata-only update, hidden/deleted row removal, and startup load.
 - [ ] P2: Add Windows state-path redirection coverage:
   cover SQLite main-file symlinks, sidecar symlinks, and `.termal` directory junction/symlink cases behind Windows-gated tests.
-- [ ] P2: Add graceful-shutdown persistence reload coverage:
-  create a real `AppState::new_with_paths` on a temp persistence path, commit a final session/message mutation, call `shutdown_persist_blocking()`, reload state, and assert the final transcript/revision is durable.
+- [ ] P2: Add post-shutdown persistence ordering coverage:
+  race a late background commit against `shutdown_persist_blocking()` and prove the final persisted state reflects the latest `StateInner`, not an older worker-drained delta.
 - [ ] P2: Add graceful-shutdown open-SSE coverage:
-  hold `/api/events` open, trigger the shutdown signal path, and assert long-lived SSE streams exit so the persist drain is reached.
+  cover both shutdown-before-connect and shutdown-after-initial-state through `/api/events`, and assert the stream exits within a timeout so the persist drain is reached.
 - [ ] P2: Add shutdown persist failure retry coverage:
   force the final shutdown persist attempt to fail once and then succeed, and assert the worker does not exit before the successful write.
 - [ ] P2: Add no-worker shutdown idempotence assertions:
   assert `shutdown_persist_blocking()` leaves `persist_thread_handle` as `None` and does not send a `PersistRequest::Shutdown` when no worker handle exists.
-- [ ] P2: Add Rust SSE Lagged unit test:
-  add a `tokio::test` that overflows the broadcast channel capacity to force `RecvError::Lagged` in both the state-receiver and delta-receiver branches of `state_events`, asserts the next two yielded events are `event=lagged` with non-empty `data:` then `event=state`, and pins the wire-side ordering invariant the frontend regression assumes today.
-- [ ] P2: Add `appliedNeedsResync` App-level integration coverage:
-  cover an unhydrated missing-target delta that applies the metadata patch immediately, schedules `/api/state`, fetches `/api/sessions/{id}`, and renders the recovered transcript body.
+- [ ] P2: Add route-level Lagged SSE wire-format coverage:
+  force `RecvError::Lagged` through `/api/events` and assert the raw frame emits `event: lagged`, non-empty `data: 1`, then the recovery `state`.
+- [ ] P2: Add send-after-restart live-stream recovery coverage:
+  after the test captures the recreated `EventSource`, dispatch a post-restart assistant delta/state on that source and assert the assistant reply renders in the active transcript/preview.
+- [ ] P2: Add non-send action restart live-stream recovery coverage:
+  submit an approval/input-style action after backend restart, force the recovery path, then dispatch assistant deltas on the recreated `EventSource` and assert they render in the active transcript/preview.
+- [ ] P2: Add active-session rehydration adoption coverage:
+  after replacement-instance rehydration fetches the session, scope assertions to the active transcript/assistant bubble and assert the recovered body renders while the stale streaming partial is gone.
 - [ ] P2: Add remote `lagged` SSE bridge regression:
   feed `dispatch_remote_event` / the remote stream processor a `lagged` marker followed by a same-revision recovery `state`, and assert the remote snapshot is honored instead of ignored by revision gates.
 - [ ] P2: Add reconnect force-adoption monotonicity regressions:
-  prove lower same-instance `/api/state` reconnect snapshots are rejected, and a Lagged marker only force-adopts the following state while the client is still at the marker baseline.
+  prove lower same-instance `/api/state` watchdog snapshots are rejected, reconnect snapshots stay rejected, and a Lagged marker only force-adopts the following state while the client is still at the marker baseline.
 - [ ] P2: Add failed manual retry reconnect-rearm regression:
   cover manual retry hitting a transient failure, then the next scheduled attempt adopting a newer same-instance snapshot while polling still continues until SSE confirms.
 - [ ] P2 workspace-file bad-live-event recovery regression:
   dispatch a bad reopened SSE payload followed by `workspaceFilesChanged`, and assert reconnecting state plus fallback polling remain active.
 - [ ] P2 watchdog wake-gap stop-after-progress regression:
   trigger watchdog wake-gap recovery, adopt same-instance `/api/state` progress, and assert no additional reconnect polling occurs before a later live event.
+- [ ] P2: Add `forceSseReconnect` unit-level regression:
+  drive `handleSend` with a server-instance-mismatched response in `app-session-actions.test.ts` and assert both `params.requestActionRecoveryResync` and `params.forceSseReconnect` are called. The mock prop already exists in `makeSessionActionsParams` but no triggering test exercises it; the existing app-level `EventSourceMock.instances.length >= 2` assertion proves composition end-to-end but a unit test would catch a future refactor that drops the `forceSseReconnect()` call.
+- [ ] P2: Tighten `graceful_shutdown_drain_persists_final_mutation_across_reload` against worker timing:
+  the current single-commit-then-shutdown shape can pass even without the graceful-drain fix if the worker happens to drain the Delta before Shutdown arrives. Commit many sessions in rapid succession (e.g. 50) before calling `shutdown_persist_blocking()` so at least one is guaranteed in-flight, and assert all of them are reloadable from the fresh `AppState::new_with_paths`.

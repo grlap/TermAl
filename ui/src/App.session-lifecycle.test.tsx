@@ -620,6 +620,90 @@ describe("App session lifecycle", () => {
             screen.getAllByText("Restart-spanning prompt").length,
           ).toBeGreaterThan(0);
         });
+        // The EventSource is recreated as part of the same recovery
+        // flow so future streaming chunks (the assistant's reply) have
+        // a live connection to the new backend — without this, the
+        // user would see their prompt land but the assistant response
+        // would silently fail to stream until they hard-refreshed.
+        // `forceSseReconnect` set the pending-flag and `adoptState`'s
+        // success path with `fullStateServerInstanceChanged` consumed
+        // it, so a fresh `EventSourceMock` instance was constructed.
+        expect(EventSourceMock.instances.length).toBeGreaterThanOrEqual(2);
+        const newestEventSource =
+          EventSourceMock.instances[EventSourceMock.instances.length - 1];
+        expect(newestEventSource).not.toBe(eventSource);
+
+        // Live-stream proof: dispatch a post-restart assistant delta on
+        // the recreated EventSource and assert it lands in the active
+        // transcript. Without this, the regression would still pass on
+        // a future change that recreates the EventSource correctly but
+        // leaves it stuck (e.g., listeners not re-attached, force-adopt
+        // arming dropped on `onopen`, delta application broken on the
+        // new transport). See bugs.md "Send-after-restart live-stream
+        // recovery is not proven by the regression".
+        await act(async () => {
+          newestEventSource.dispatchOpen();
+          newestEventSource.dispatchNamedEvent("state", {
+            revision: 2,
+            serverInstanceId: "replacement-instance",
+            projects: [project],
+            sessions: [
+              makeSession("session-1", {
+                name: "Session 1",
+                projectId: project.id,
+                workdir: project.rootPath,
+                status: "active",
+                preview: "Restart-spanning prompt",
+                messageCount: 1,
+                sessionMutationStamp: 1,
+                messages: [
+                  {
+                    id: "message-1",
+                    timestamp: "2026-04-19T10:00:00Z",
+                    author: "you",
+                    type: "text",
+                    text: "Restart-spanning prompt",
+                  },
+                ],
+              }),
+            ],
+          });
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        await act(async () => {
+          newestEventSource.dispatchNamedEvent("delta", {
+            type: "messageCreated",
+            revision: 3,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 1,
+            messageCount: 2,
+            message: {
+              id: "message-assistant-1",
+              timestamp: "2026-04-19T10:00:01Z",
+              author: "assistant",
+              type: "text",
+              text: "Recovered through the new EventSource.",
+            },
+            preview: "Recovered through the new EventSource.",
+            status: "active",
+            sessionMutationStamp: 2,
+          });
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        // The assistant reply streamed through the new transport must
+        // appear in the visible transcript. This is the user-facing
+        // contract: the response renders without Ctrl+Shift+R.
+        await waitFor(() => {
+          expect(
+            screen.getAllByText("Recovered through the new EventSource.")
+              .length,
+          ).toBeGreaterThan(0);
+        });
       } finally {
         scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);

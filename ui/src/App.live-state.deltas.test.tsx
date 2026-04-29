@@ -3630,4 +3630,210 @@ describe("App live state - delta-gap core", () => {
     }
   });
 
+  it("applies metadata patch immediately and hydrates when an unhydrated session receives a missing-target delta", async () => {
+    // Sibling regression for the "force re-hydrates" test above. That test
+    // covers the HYDRATED case (`messagesLoaded === true`) which goes
+    // through the reducer's `needsResync` branch. THIS test covers the
+    // UNHYDRATED case (`messagesLoaded === false`) which goes through the
+    // distinct `appliedNeedsResync` branch — the reducer returns the
+    // metadata patch (preview/messageCount/status updates) AND the caller
+    // schedules `requestStateResync` AND triggers `startSessionHydration`.
+    // Closes the bugs.md "appliedNeedsResync end-to-end integration path
+    // has no targeted regression" gap; without this test, a regression
+    // that swapped `appliedNeedsResync` handling for plain `applied`
+    // (skipping the hydration trigger) or `needsResync` (skipping the
+    // metadata patch) would slip through unit-only coverage.
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    // Unhydrated initial session: only the user prompt is in retained
+    // transcript memory, but `messageCount` reflects what the backend has
+    // already created (the assistant reply that hasn't been hydrated).
+    const initialSession = makeSession("session-1", {
+      name: "Codex Session",
+      status: "active",
+      preview: "First message",
+      messagesLoaded: false,
+      messageCount: 1,
+      sessionMutationStamp: 11,
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "First message",
+        },
+      ],
+    });
+    const recoveredSession = makeSession("session-1", {
+      ...initialSession,
+      status: "idle",
+      preview: "Recovered assistant chunk.",
+      messagesLoaded: true,
+      messageCount: 2,
+      sessionMutationStamp: 12,
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "First message",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Recovered assistant chunk.",
+        },
+      ],
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const requestUrl = new URL(String(input), "http://localhost");
+      if (requestUrl.pathname === "/api/state") {
+        return jsonResponse(
+          makeStateResponse({
+            revision: 5,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                ...initialSession,
+                status: "idle",
+                preview: "Recovered assistant chunk.",
+                messageCount: 2,
+                sessionMutationStamp: 12,
+                messagesLoaded: false,
+              }),
+            ],
+          }),
+        );
+      }
+      if (requestUrl.pathname === "/api/sessions/session-1") {
+        return jsonResponse({
+          revision: 5,
+          serverInstanceId: "test-instance",
+          session: recoveredSession,
+        });
+      }
+      if (requestUrl.pathname === "/api/git/status") {
+        return jsonResponse({
+          ahead: 0,
+          behind: 0,
+          branch: "main",
+          files: [],
+          isClean: true,
+          repoRoot: "/tmp",
+          upstream: "origin/main",
+          workdir: "/tmp",
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const scrollIntoViewSpy = stubScrollIntoView();
+    try {
+      await renderApp();
+      const eventSource = latestEventSource();
+      await dispatchOpenedStateEvent(
+        eventSource,
+        makeStateResponse({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [initialSession],
+        }),
+      );
+      await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+      const sessionRowButton =
+        within(sessionList).getByText("Codex Session").closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+      // INTENTIONALLY do NOT click the session row open. The
+      // visible-session hydration effect (`useEffect` keyed on
+      // `visibleSessionHydrationTargets`) already triggers hydration for
+      // any unhydrated session that becomes the active pane — that would
+      // mask the explicit hydration trigger this test is trying to pin.
+      // Leaving the session in the sidebar (not active, not in any pane)
+      // means the only path to `/api/sessions/session-1` is the
+      // handler's `startSessionHydration` call from the
+      // `appliedNeedsResync` branch.
+      fetchMock.mockClear();
+
+      // Dispatch a textDelta whose target message is unknown to the
+      // unhydrated retained transcript. The reducer returns
+      // `appliedNeedsResync`: the metadata patch applies (preview /
+      // messageCount / status updates immediately) AND the caller fires
+      // /api/state resync + per-session hydration so the missing message
+      // body eventually appears.
+      await act(async () => {
+        eventSource.dispatchNamedEvent("delta", {
+          type: "textDelta",
+          revision: 2,
+          sessionId: "session-1",
+          messageId: "message-assistant-1",
+          messageIndex: 1,
+          messageCount: 2,
+          delta: " chunk.",
+          preview: "Recovered assistant chunk.",
+          sessionMutationStamp: 12,
+        });
+        await flushUiWork();
+      });
+      await settleAsyncUi();
+
+      // The metadata patch landed immediately: the sidebar's
+      // `.session-preview` tooltip (`title` on the inner preview div in
+      // `AppControlSurface.tsx`) reflects the delta's `preview` field
+      // even though the assistant message body hasn't been hydrated
+      // yet. Without `appliedNeedsResync`, the reducer would have
+      // returned plain `needsResync` and the metadata patch would have
+      // been dropped — the sidebar would still show the OLD preview.
+      const sessionRow = within(sessionList)
+        .getByText("Codex Session")
+        .closest("button");
+      const previewDiv = sessionRow?.querySelector(".session-preview");
+      expect(previewDiv?.getAttribute("title")).toBe(
+        "Recovered assistant chunk.",
+      );
+
+      // The targeted hydration fetch fires — distinguishing this branch
+      // from a plain `applied` reducer return that would skip hydration.
+      // The session is NOT the active pane, so the only way
+      // `/api/sessions/session-1` could have been fetched is the
+      // handler's explicit `startSessionHydration` call from the
+      // `appliedNeedsResync` branch.
+      expect(
+        fetchMock.mock.calls.some(
+          ([input]) =>
+            new URL(String(input), "http://localhost").pathname ===
+            "/api/sessions/session-1",
+        ),
+      ).toBe(true);
+    } finally {
+      scrollIntoViewSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
 });

@@ -600,9 +600,12 @@ describe("App live state — reconnect", () => {
         if (stateRequestCount === 2) {
           return Promise.resolve(
             jsonResponse({
-              // Intentionally below SSE revision 2: allowAuthoritativeRollback
-              // permits rollback when no newer SSE state arrived mid-fetch.
-              revision: 1,
+              // Equal to the SSE revision: same-instance reconnect/fallback
+              // recovery only force-adopts at exactly `requestedRevision` (see
+              // `isEqualRevisionAutomaticReconnectSnapshot`). A lower revision
+              // here would be rejected as a backwards rollback because
+              // same-server-instance revisions are monotonic.
+              revision: 2,
               projects: [],
               sessions: [
                 makeSession("session-1", {
@@ -758,6 +761,93 @@ describe("App live state — reconnect", () => {
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+  });
+
+  it("rejects a lower same-instance reconnect /api/state snapshot instead of rolling local state backward", async () => {
+    // Closes bugs.md "Same-instance reconnect recovery can force-adopt lower
+    // revision snapshots". Same-server-instance revisions are monotonic, so a
+    // lower `state.revision` than `requestedRevision` cannot be authoritative
+    // without explicit replacement-instance evidence. Without this guard, the
+    // earlier-scheduled reconnect /api/state could roll the active pane back
+    // past streamed assistant content that already arrived via SSE deltas,
+    // making the latest message disappear with no further deltas to re-add it.
+    await withSuppressedActWarnings(async () => {
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
+      makeStateResponse({
+        revision: 4,
+        serverInstanceId: "current-instance",
+        projects: [],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Rolled-back Session",
+            preview: "Stale preview",
+            status: "idle",
+          }),
+        ],
+      }),
+    );
+
+    try {
+      await withFallbackStateHarness(async ({ eventSource, sessionList }) => {
+        let fakeTimersActive = false;
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 5,
+            serverInstanceId: "current-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Newer Session",
+                preview: "Fresh preview",
+                status: "active",
+              }),
+            ],
+          }),
+        );
+        await within(sessionList).findByText("Newer Session");
+
+        vi.useFakeTimers();
+        fakeTimersActive = true;
+        try {
+          // SSE error queues `scheduleReconnectStateResync`. The reconnect
+          // timer captures `requestedRevision = 5` and
+          // `requestedServerInstanceId = current-instance` at fire time.
+          act(() => {
+            eventSource.dispatchError();
+          });
+          await advanceTimers(RECONNECT_STATE_RESYNC_DELAY_MS);
+          await settleAsyncUi();
+
+          // The fetch resolves with a SAME-INSTANCE LOWER revision. Local
+          // `latestStateRevisionRef.current` is still 5 (no SSE state event
+          // arrived since the error), so `shouldConsiderAuthoritativeSnapshot`
+          // is true. With the fix the lower revision is NOT force-adopted;
+          // pre-fix code would have rolled local state back to revision 4.
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+          expect(
+            within(sessionList).getByText("Newer Session"),
+          ).toBeInTheDocument();
+          expect(
+            within(sessionList).queryByText("Rolled-back Session"),
+          ).not.toBeInTheDocument();
+        } finally {
+          if (fakeTimersActive) {
+            vi.useRealTimers();
+          }
+        }
+      });
+    } finally {
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
+      fetchStateSpy.mockRestore();
+    }
+    });
   });
 
   it("retains rollback permission when a plain resync queues after a stronger reconnect resync", async () => {
@@ -1499,6 +1589,152 @@ describe("App live state — reconnect", () => {
       } finally {
         fetchStateSpy.mockRestore();
       }
+    });
+  });
+
+  it("re-hydrates the active session after a replacement-instance fallback adoption clears its messagesLoaded flag", async () => {
+    // Backend-restart durability scenario: the user has a hydrated active
+    // session (`messagesLoaded: true`) whose latest assistant message is
+    // a partial streaming chunk (`"Hello, I'll he..."`). The backend
+    // restarts; the persist worker drained the final completion to
+    // SQLite, but `sessionMutationStamp` is intentionally cleared on
+    // save/load (see `state-revision.ts::isStaleSameInstanceSnapshot`),
+    // so the post-restart summary arrives with no stamp signal. Without
+    // `forceMessagesUnloaded` on instance-change adoption, a coincident
+    // matching `messageCount` would keep the flag at `true` and the
+    // visible-session hydration effect would never re-fire — leaving
+    // the user staring at the streaming partial until hard-refresh.
+    await withSuppressedActWarnings(async () => {
+    const initialSession = makeSession("session-1", {
+      name: "Active Session",
+      preview: "Hello, I'll he",
+      messagesLoaded: true,
+      messageCount: 2,
+      sessionMutationStamp: 42,
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Hi",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Hello, I'll he",
+        },
+      ],
+    });
+    const recoveredSession = makeSession("session-1", {
+      name: "Active Session",
+      preview: "Hello, I'll help you with that.",
+      messagesLoaded: true,
+      messageCount: 2,
+      // Replacement instance has its own stamp counter starting fresh.
+      sessionMutationStamp: 1,
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Hi",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Hello, I'll help you with that.",
+        },
+      ],
+    });
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
+      makeStateResponse({
+        revision: 6,
+        serverInstanceId: "replacement-instance",
+        projects: [],
+        orchestrators: [],
+        workspaces: [],
+        // Persisted session loaded from SQLite has no
+        // `sessionMutationStamp` (intentionally cleared on save/load),
+        // and `messageCount` happens to match the local count because
+        // the streamed partial and the persisted final both count as
+        // one assistant message at index 1.
+        sessions: [
+          makeSession("session-1", {
+            name: "Active Session",
+            preview: "Hello, I'll help you with that.",
+            messagesLoaded: false,
+            messageCount: 2,
+            sessionMutationStamp: undefined,
+            messages: [],
+          }),
+        ],
+      }),
+    );
+    const fetchSessionSpy = vi
+      .spyOn(api, "fetchSession")
+      .mockResolvedValue({
+        revision: 6,
+        serverInstanceId: "replacement-instance",
+        session: recoveredSession,
+      });
+
+    try {
+      await withFallbackStateHarness(async ({ eventSource, sessionList }) => {
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 5,
+            serverInstanceId: "current-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [initialSession],
+          }),
+        );
+        await within(sessionList).findByText("Active Session");
+
+        // Open the session pane so the visible-session hydration effect
+        // is armed for the active session id.
+        const sessionRowButton = within(sessionList)
+          .getByText("Active Session")
+          .closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+        await clickAndSettle(sessionRowButton);
+
+        fetchSessionSpy.mockClear();
+
+        // Trigger reconnect fallback adoption against the replacement
+        // instance via an `_sseFallback` state event.
+        await dispatchStateEvent(eventSource, {
+          _sseFallback: true,
+          revision: 6,
+          serverInstanceId: "replacement-instance",
+          projects: [],
+          sessions: [],
+        });
+        await settleAsyncUi();
+
+        expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+        // The visible-session hydration effect must re-fire after
+        // replacement-instance adoption: `forceMessagesUnloaded` flips
+        // `messagesLoaded: false` on the summary, and the active-session
+        // useEffect calls `startSessionHydration("session-1")`. Without
+        // the fix, the flag stays at `true` and `fetchSession` is never
+        // called, leaving the partial streaming text on screen forever.
+        expect(fetchSessionSpy).toHaveBeenCalledWith("session-1");
+      });
+    } finally {
+      fetchStateSpy.mockRestore();
+      fetchSessionSpy.mockRestore();
+    }
     });
   });
 
@@ -2533,7 +2769,12 @@ describe("App live state — reconnect", () => {
       // follows with a recovery snapshot at the same revision the client
       // already adopted.
       act(() => {
-        eventSource.dispatchNamedEvent("lagged", "");
+        // Match the production wire shape: the backend sends `data:1` (a
+        // single-byte payload) so the browser's EventSource actually
+        // dispatches the frame; empty `data` is allowed by the spec to be
+        // skipped. Clients must not parse the payload — the byte is just
+        // there to satisfy the dispatch requirement.
+        eventSource.dispatchNamedEvent("lagged", "1");
         eventSource.dispatchNamedEvent("state", {
           revision: 2,
           projects: [],

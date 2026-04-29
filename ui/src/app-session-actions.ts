@@ -178,6 +178,26 @@ type UseAppSessionActionsParams = {
     paneId?: string | null;
     allowUnknownServerInstance?: boolean;
   }) => void;
+  /**
+   * Forces the SSE transport effect to re-run, closing the current
+   * `EventSource` (which may still be pointing at a now-exited backend
+   * via a stale Vite-proxy connection) and constructing a fresh one.
+   *
+   * The targeted use case is "send-after-restart": when `handleSend`
+   * detects via `isServerInstanceMismatch` that the POST response came
+   * from a different backend instance than the tab last saw, the
+   * `requestActionRecoveryResync` call repairs the state metadata, but
+   * any future streaming chunks (assistant response text deltas) still
+   * need a live EventSource on the new backend. Without this callback
+   * the user has to hard-refresh to see the streamed response — exactly
+   * the symptom in bugs.md "Send-after-restart leaves session preview
+   * tooltip stale for 30 s" extended to the live-stream side.
+   *
+   * Idempotent and cheap; the live-state hook already has retry-backoff
+   * on the EventSource recreation path. Safe to call alongside
+   * `requestActionRecoveryResync`.
+   */
+  forceSseReconnect: () => void;
 };
 
 type HandleNewSessionArgs = {
@@ -357,6 +377,7 @@ export function useAppSessionActions(
     applyControlPanelLayout,
     reportRequestError,
     requestActionRecoveryResync,
+    forceSseReconnect,
   } = params;
 
   function stopStaleSendResponseRecoveryPoll() {
@@ -417,6 +438,26 @@ export function useAppSessionActions(
       recoveryOptions.paneId = recoveryPaneId ?? null;
     }
     requestActionRecoveryResync(recoveryOptions);
+    // Cross-instance action recovery (approval / user-input / MCP /
+    // Codex app-request, plus settings updates and project actions
+    // routed through this helper) needs the EventSource recreated for
+    // the same reason `handleSend` does: a backend that returned a new
+    // `serverInstanceId` is a backend that the existing SSE connection
+    // is no longer talking to. Without `forceSseReconnect()`, the
+    // `/api/state` probe above repairs the snapshot metadata but live
+    // assistant deltas keep arriving on the stale stream (or no stream
+    // at all if the proxy returned 502 during the restart gap), and the
+    // user has to hard-refresh to see them. Mirrors the `handleSend`
+    // mismatch branch; see bugs.md "Cross-instance non-send action
+    // recovery does not force SSE recreation".
+    if (
+      isServerInstanceMismatch(
+        lastSeenServerInstanceIdRef.current,
+        state.serverInstanceId,
+      )
+    ) {
+      forceSseReconnect();
+    }
     return "deferred";
   }
 
@@ -904,22 +945,37 @@ export function useAppSessionActions(
           // The send response was rejected by `adoptState` AND it carried a
           // different `serverInstanceId` from the last one this tab saw —
           // that's the "backend restarted between the EventSource opening
-          // and this POST returning" case. Without this nudge the only
-          // recovery path is the 30 s `startStaleSendResponseRecoveryPoll`
-          // interval below, during which the sidebar/canvas tooltip
-          // (`session.preview`) stays on the PREVIOUS prompt and the new
-          // prompt's metadata is invisible. `requestActionRecoveryResync`
-          // with `allowUnknownServerInstance: true` fires an immediate
-          // `/api/state` probe; the probe response is a fresh observation
-          // of the new server instance, so adoption can flip the local view
-          // to the new state within a single round trip. The
-          // mismatched-instance gate keeps stale-same-instance rejections
-          // (e.g. SSE already advanced past this response's revision)
-          // routed through the existing 30 s safety-net poll, which is
-          // intentionally slow there because the tab is otherwise healthy.
-          // See bugs.md "Send-after-restart leaves session preview tooltip
-          // stale for 30 s".
+          // and this POST returning" case. Two things must happen for the
+          // user to see streaming chunks of the assistant's response on
+          // the new backend without a hard refresh:
+          //
+          // 1. State metadata (preview, message count, status) needs to
+          //    reflect the new instance. `requestActionRecoveryResync`
+          //    fires an immediate `/api/state` probe with
+          //    `allowUnknownServerInstance: true`; the probe response is
+          //    a fresh observation of the new instance, so adoption flips
+          //    the local view to the new state within a single round trip.
+          //
+          // 2. The `EventSource` needs to be on the NEW backend, not stuck
+          //    on a Vite-proxy / browser cached connection to the old one.
+          //    `forceSseReconnect` re-runs the transport effect: the dead
+          //    socket is closed via cleanup and a fresh `EventSource` is
+          //    constructed against the new backend. Without this, future
+          //    streaming chunks (text deltas of the assistant's reply)
+          //    never reach the tab — the user has to hard-refresh to see
+          //    the response, exactly the symptom that motivated this fix.
+          //    Codex/Idle tabs in the same browser that have no active
+          //    streaming are unaffected because their state is fully
+          //    captured in the `/api/state` probe.
+          //
+          // Stale same-instance rejections (e.g. SSE already advanced past
+          // this response's revision) still route through the existing 30 s
+          // safety-net poll because the tab is otherwise healthy and forcing
+          // an EventSource recreate would be wasteful. See bugs.md
+          // "Send-after-restart leaves session preview tooltip stale for
+          // 30 s".
           requestActionRecoveryResync({ allowUnknownServerInstance: true });
+          forceSseReconnect();
         }
         if (!adopted || responseKeepsSessionActive) {
           startStaleSendResponseRecoveryPoll(sessionId);

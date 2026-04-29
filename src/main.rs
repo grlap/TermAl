@@ -128,7 +128,11 @@ async fn run_server() -> Result<()> {
     let shutdown_state_for_signal = shutdown_state.clone();
     let graceful_shutdown_future = async move {
         shutdown_signal().await;
-        shutdown_state_for_signal.shutdown_notify.notify_waiters();
+        // Sticky `watch`-based signal: SSE handlers subscribed before this
+        // point see the value flip via `changed()`, and handlers that begin
+        // setup AFTER this point observe the `true` value on their initial
+        // `borrow_and_update()` pre-check — see api_sse.rs::state_events.
+        shutdown_state_for_signal.trigger_shutdown_signal();
     };
     let result = axum::serve(listener, app)
         .with_graceful_shutdown(graceful_shutdown_future)

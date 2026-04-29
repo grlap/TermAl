@@ -762,6 +762,7 @@ export default function App() {
     hydratedSessionIdsRef,
     hydratingSessionIdsRef,
     forceAdoptNextStateEventRef,
+    forceSseReconnect,
     workspaceFilesChangedEvent,
     workspaceFilesChangedEventBufferRef,
     workspaceFilesChangedEventFlushTimeoutRef,
@@ -918,6 +919,7 @@ export default function App() {
     reportRequestError,
     requestActionRecoveryResync: (options) =>
       requestActionRecoveryResyncRef.current(options),
+    forceSseReconnect,
   });
   const {
     isSettingsOpen,

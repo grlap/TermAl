@@ -824,7 +824,8 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         // Live persist channel for the test; the worker thread is not
         // spawned by this constructor, so there's no JoinHandle to track.
         persist_thread_handle: Arc::new(Mutex::new(None)),
-        shutdown_notify: Arc::new(tokio::sync::Notify::new()),
+        persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
         state_broadcast_tx: mpsc::channel().0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
@@ -969,71 +970,98 @@ fn shutdown_persist_blocking_is_idempotent_when_no_worker_handle() {
 }
 
 #[tokio::test]
-async fn shutdown_notify_wakes_an_enabled_notified_future() {
-    // Mirrors what the SSE handler in `api_sse.rs::state_events` does:
-    // pin a `Notified` future from `state.shutdown_notify`, `enable()`
-    // it eagerly so a notification fired before the first poll still
-    // wakes it, then await it in a `select!` arm. The contract is the
-    // load-bearing invariant for graceful shutdown — without it
-    // `with_graceful_shutdown` blocks forever on long-lived SSE streams.
+async fn shutdown_signal_wakes_a_subscriber_registered_before_the_signal() {
+    // Standard ordering: subscribe first, trigger second. The subscriber's
+    // first `borrow_and_update()` reads the initial `false`, then it awaits
+    // `changed()` which fires when production calls `trigger_shutdown_signal`.
+    // This is the load-bearing invariant for graceful shutdown — without
+    // it `with_graceful_shutdown` blocks forever on long-lived SSE streams.
     let state = test_app_state();
-    let shutdown = state.shutdown_notify.clone();
+    let mut shutdown_rx = state.subscribe_shutdown_signal();
     let waiter = tokio::spawn(async move {
-        let notified = shutdown.notified();
-        tokio::pin!(notified);
-        notified.as_mut().enable();
-        notified.await;
+        // Mirror the production helper in `api_sse.rs::wait_for_shutdown_signal`:
+        // returns immediately on the sticky-true case, otherwise loops until
+        // the value flips.
+        if *shutdown_rx.borrow_and_update() {
+            return;
+        }
+        while shutdown_rx.changed().await.is_ok() {
+            if *shutdown_rx.borrow_and_update() {
+                return;
+            }
+        }
     });
 
-    // Yield once so the spawned task has a chance to register the
-    // waiter — though `enable()` is what makes the test correct even
-    // if we notify before the task polls.
+    // Yield once so the spawned task has a chance to enter `changed().await`.
     tokio::task::yield_now().await;
-    state.shutdown_notify.notify_waiters();
+    state.trigger_shutdown_signal();
 
-    waiter
+    tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
         .await
-        .expect("shutdown waiter task should complete after notify_waiters");
+        .expect("shutdown waiter must complete within the timeout")
+        .expect("shutdown waiter task should not panic");
 }
 
 #[tokio::test]
-async fn shutdown_notify_wakes_a_waiter_registered_after_the_signal_fires() {
-    // The eager `enable()` in the SSE handler is specifically for the
-    // race where shutdown is signaled BEFORE the handler's first poll —
-    // e.g. a Ctrl+C arrives while the SSE response is still building
-    // its initial payload. Verify that a `Notified` future created
-    // after `notify_waiters()` returns still resolves immediately when
-    // `enable()` is called and the waiter is then awaited.
+async fn shutdown_signal_wakes_a_subscriber_registered_after_the_signal() {
+    // The race that motivated switching from `Notify` to `watch`: an
+    // `/api/events` request that begins handler setup AFTER Ctrl+C has
+    // already fired must still observe the shutdown signal — otherwise
+    // its loop runs forever and graceful shutdown blocks.
+    //
+    // Critically, this test uses NO in-test re-notify: it triggers
+    // shutdown first, subscribes second, and the waiter is expected to
+    // exit purely on the sticky `true` value the subscriber sees during
+    // its initial `borrow_and_update()` pre-check. A `Notify`-based
+    // implementation would HANG here because `notify_waiters` only wakes
+    // currently-waiting tasks, and the `tokio::time::timeout` below
+    // would fire and fail the test. See bugs.md "One-shot SSE shutdown
+    // notification can be missed before waiter registration".
     let state = test_app_state();
-    state.shutdown_notify.notify_waiters();
+    state.trigger_shutdown_signal();
 
-    // Notification fired first; now register the waiter the same way
-    // the SSE handler does. `Notify::notify_waiters` only wakes
-    // currently-waiting tasks, so this future was NOT pre-armed. The
-    // test confirms the shutdown handshake is robust to "notify, then
-    // subscribe" — which is the realistic ordering when shutdown
-    // signals races with stream startup.
-    let shutdown = state.shutdown_notify.clone();
+    let mut shutdown_rx = state.subscribe_shutdown_signal();
     let waiter = tokio::spawn(async move {
-        let notified = shutdown.notified();
-        tokio::pin!(notified);
-        notified.as_mut().enable();
-        // After missing the prior notify, the next SSE-handler iteration
-        // would still need to break — without a re-notify or a permit
-        // mechanism, the waiter would block. Issue another notify so
-        // production code (which also re-notifies just before drain in
-        // main.rs) can rely on this contract.
-        let extra_signal = state.shutdown_notify.clone();
-        tokio::task::spawn(async move {
-            tokio::task::yield_now().await;
-            extra_signal.notify_waiters();
-        });
-        notified.await;
+        if *shutdown_rx.borrow_and_update() {
+            return;
+        }
+        while shutdown_rx.changed().await.is_ok() {
+            if *shutdown_rx.borrow_and_update() {
+                return;
+            }
+        }
     });
 
-    waiter
+    tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
         .await
-        .expect("shutdown waiter should complete after re-notify");
+        .expect(
+            "shutdown waiter must complete within the timeout — the watch \
+             channel's sticky semantics require the late subscriber to see \
+             the prior trigger immediately",
+        )
+        .expect("shutdown waiter task should not panic");
+}
+
+#[tokio::test]
+async fn shutdown_signal_is_idempotent_and_durable() {
+    // Repeated `trigger_shutdown_signal()` calls are safe (no-op after the
+    // first). Subscribers registered at any time after the first trigger
+    // see the sticky `true` value. This is what lets the production
+    // graceful-shutdown future call `trigger_shutdown_signal()` exactly
+    // once without coordinating with the unknown number of `/api/events`
+    // streams that may be concurrently subscribing.
+    let state = test_app_state();
+    state.trigger_shutdown_signal();
+    state.trigger_shutdown_signal();
+    state.trigger_shutdown_signal();
+
+    for _ in 0..3 {
+        let mut rx = state.subscribe_shutdown_signal();
+        assert!(
+            *rx.borrow_and_update(),
+            "every late subscriber must see the sticky shutdown value",
+        );
+    }
 }
 
 #[test]
@@ -1097,6 +1125,196 @@ fn shutdown_persist_blocking_drains_and_joins_a_real_worker() {
         "worker should have drained at least the queued Delta before exit",
     );
     state.shutdown_persist_blocking();
+}
+
+#[test]
+fn commit_delta_locked_after_shutdown_falls_back_to_synchronous_persist() {
+    // Regression for the bug ledger entry "Persist shutdown drain can run
+    // before background mutation sources are quiesced". The HTTP server's
+    // graceful-shutdown phase only waits for in-flight HTTP handlers, but
+    // background agent runtime threads, remote SSE bridges, and the
+    // orchestrator transition resumer can still hold `AppState` clones
+    // and call `commit_delta_locked` AFTER `shutdown_persist_blocking`
+    // has drained and exited the worker. `commit_delta_locked` doesn't
+    // send its own `PersistRequest::Delta`; under normal operation the
+    // worker drains the bumped mutation_stamps on a subsequent persist
+    // signal, but post-shutdown there is no worker. Without this
+    // synchronous fallback, those final mutations are kept only in
+    // memory and lost when the process exits.
+    let unique_suffix = Uuid::new_v4();
+    let project_root = std::env::temp_dir()
+        .join(format!("termal-post-shutdown-commit-root-{unique_suffix}"));
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    let state_root = std::env::temp_dir()
+        .join(format!("termal-post-shutdown-commit-state-{unique_suffix}"));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let persistence_path = state_root.join("sessions.json");
+    let orchestrator_templates_path = state_root.join("orchestrators.json");
+
+    let durable_session_id;
+    {
+        let state = AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            orchestrator_templates_path.clone(),
+        )
+        .expect("initial state should boot");
+
+        let project_id =
+            create_test_project(&state, &project_root, "Post-Shutdown Commit Regression");
+        durable_session_id =
+            create_test_project_session(&state, Agent::Claude, &project_id, &project_root);
+
+        // Run the production graceful-shutdown drain. After this returns
+        // the worker is gone; subsequent commits cannot wake it.
+        state.shutdown_persist_blocking();
+
+        // Simulate a background mutation source (agent runtime / remote
+        // bridge / orchestrator resumer) committing AFTER the persist
+        // worker has exited. Bump the session's mutation_stamp via the
+        // standard mutator path so the commit looks production-shaped,
+        // then route through `commit_delta_locked` — exactly the pattern
+        // a Claude/Codex stdio thread uses for streaming text chunks.
+        // Without the post-shutdown synchronous fallback, the bumped
+        // stamp would be queued for a worker that never returns, and
+        // the in-memory mutation would be lost on the next reload.
+        let post_shutdown_revision = {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let session_index = inner
+                .find_session_index(&durable_session_id)
+                .expect("session committed pre-shutdown should exist");
+            // `session_mut_by_index` stamps the session's mutation_stamp
+            // and is what real runtime threads would use.
+            inner
+                .session_mut_by_index(session_index)
+                .expect("session_mut_by_index should return the existing session")
+                .session
+                .preview = "post-shutdown delta".to_owned();
+            state
+                .commit_delta_locked(&mut inner)
+                .expect("commit_delta_locked must succeed even after persist shutdown")
+        };
+        assert!(
+            post_shutdown_revision >= 1,
+            "commit_delta_locked must continue to bump the revision after shutdown",
+        );
+    }
+
+    // Reload from the same path and verify the post-shutdown delta is
+    // durable. The synchronous fallback writes the full state, so the
+    // session's preview should be the post-shutdown value.
+    let restarted = AppState::new_with_paths(
+        project_root.to_string_lossy().into_owned(),
+        persistence_path.clone(),
+        orchestrator_templates_path.clone(),
+    )
+    .expect("restarted state should boot from the persisted file");
+
+    let reloaded_inner = restarted.inner.lock().expect("state mutex poisoned");
+    let session_index = reloaded_inner
+        .find_session_index(&durable_session_id)
+        .expect("session must reload");
+    let preview = reloaded_inner.sessions[session_index]
+        .session
+        .preview
+        .clone();
+    drop(reloaded_inner);
+    drop(restarted);
+
+    assert_eq!(
+        preview, "post-shutdown delta",
+        "the mutation that landed after `shutdown_persist_blocking` must reach disk via the \
+         synchronous fallback path; otherwise the bug ledger entry \"Persist shutdown drain \
+         can run before background mutation sources are quiesced\" remains open",
+    );
+
+    let _ = fs::remove_dir_all(&state_root);
+    let _ = fs::remove_dir_all(&project_root);
+}
+
+#[test]
+fn graceful_shutdown_drain_persists_final_mutation_across_reload() {
+    // End-to-end durability regression for the bug ledger entry "Server
+    // restart without browser refresh can lose the last streamed message"
+    // and the follow-up gap "Graceful-shutdown durability regression does
+    // not reload persisted state". This test exercises the REAL
+    // production-shaped path: `AppState::new_with_paths` spawns the actual
+    // background persist thread, `commit_locked` triggers a real
+    // `PersistRequest::Delta` signal, `shutdown_persist_blocking` runs the
+    // production drain-and-join, and a fresh `AppState::new_with_paths`
+    // against the same persistence path verifies the mutation survived.
+    //
+    // Without this test, the prior unit-level coverage of `wait_for_next_tick`
+    // and the fake-loop integration test could pass even if the real worker
+    // failed to write the final delta or a restarted `AppState` silently
+    // dropped the last record.
+    let unique_suffix = Uuid::new_v4();
+    let project_root =
+        std::env::temp_dir().join(format!("termal-graceful-shutdown-root-{unique_suffix}"));
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    let state_root =
+        std::env::temp_dir().join(format!("termal-graceful-shutdown-state-{unique_suffix}"));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let persistence_path = state_root.join("sessions.json");
+    let orchestrator_templates_path = state_root.join("orchestrators.json");
+
+    let durable_session_id;
+    {
+        let state = AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            orchestrator_templates_path.clone(),
+        )
+        .expect("initial state should boot");
+
+        // Commit a session through the production path. `commit_locked`
+        // bumps the revision and signals `PersistRequest::Delta` to the
+        // background worker, which the test-build worker drains and writes
+        // via `persist_state_from_persisted` (the JSON fallback that runs
+        // under `#[cfg(test)]`).
+        durable_session_id = create_test_project_session(
+            &state,
+            Agent::Claude,
+            &create_test_project(&state, &project_root, "Graceful Shutdown Durability"),
+            &project_root,
+        );
+
+        // The commit's `Delta` signal may or may not have been processed
+        // by the worker before this point — that's the durability window
+        // the graceful drain closes. `shutdown_persist_blocking` sends
+        // `PersistRequest::Shutdown` and joins; the worker's loop drains
+        // every queued Delta + the Shutdown signal, runs one final tick
+        // that captures `durable_session_id`, and only then exits. After
+        // the join returns, the JSON file on disk MUST contain the
+        // session.
+        state.shutdown_persist_blocking();
+    }
+
+    // Reload from the same path. The reborn `AppState` must observe the
+    // session that the prior process committed just before shutdown.
+    let restarted = AppState::new_with_paths(
+        project_root.to_string_lossy().into_owned(),
+        persistence_path.clone(),
+        orchestrator_templates_path.clone(),
+    )
+    .expect("restarted state should boot from the persisted file");
+
+    let reloaded_inner = restarted.inner.lock().expect("state mutex poisoned");
+    let session_index = reloaded_inner.find_session_index(&durable_session_id);
+    assert!(
+        session_index.is_some(),
+        "the session committed just before graceful shutdown must be reloadable from the \
+         persistence file — without `shutdown_persist_blocking`'s final drain, the \
+         `PersistRequest::Delta` queued by `commit_locked` would be lost when the worker \
+         exited and the next process boot would never see this session",
+    );
+    drop(reloaded_inner);
+    drop(restarted);
+
+    // Best-effort cleanup; tests that fail mid-flight intentionally leave
+    // the temp files in place for postmortem inspection.
+    let _ = fs::remove_dir_all(&state_root);
+    let _ = fs::remove_dir_all(&project_root);
 }
 
 #[test]

@@ -261,18 +261,39 @@ struct AppState {
     /// `None` for test-only constructors that don't spawn the thread —
     /// `shutdown_persist_blocking` then has nothing to wait on.
     persist_thread_handle: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
+    /// `true` while the background persist worker is alive and draining
+    /// `PersistRequest::Delta` signals; flipped to `false` by
+    /// `shutdown_persist_blocking` BEFORE sending `PersistRequest::Shutdown`.
+    /// Read by `commit_delta_locked` (and any other path that stamps a
+    /// mutation without sending its own persist signal) to switch from
+    /// the async-worker path to a synchronous full-state JSON write — the
+    /// worker is not coming back to drain it, so the alternative is
+    /// permanent in-memory loss when an agent runtime thread or remote
+    /// bridge commits after the HTTP server has shut down.
+    /// See bugs.md "Persist shutdown drain can run before background
+    /// mutation sources are quiesced".
+    persist_worker_alive: Arc<std::sync::atomic::AtomicBool>,
     /// Graceful-shutdown signal for long-lived SSE streams. Triggered by
     /// `main.rs::shutdown_signal` (Ctrl+C / SIGTERM) before the
-    /// `axum::serve` graceful-shutdown future resolves; the SSE handler
-    /// pins a `Notified` future on this and `enable()`s it before its
-    /// first poll, so notifications fired before the future is awaited
-    /// still wake it. Without this, `with_graceful_shutdown` would block
-    /// forever waiting for SSE streams to finish — the broadcast
-    /// receivers in `state_events` only return `Closed` when the last
-    /// `AppState` clone drops, but `shutdown_state` keeps a clone alive
-    /// for the post-serve persist drain. See bugs.md "Graceful shutdown
-    /// blocks forever waiting for SSE streams to drain".
-    shutdown_notify: Arc<tokio::sync::Notify>,
+    /// `axum::serve` graceful-shutdown future resolves; SSE handlers
+    /// `subscribe()` and exit their `tokio::select!` loops when the
+    /// channel value flips to `true`. Without this, `with_graceful_shutdown`
+    /// would block forever waiting for SSE streams to finish — the
+    /// broadcast receivers in `state_events` only return `Closed` when the
+    /// last `AppState` clone drops, but `shutdown_state` keeps a clone
+    /// alive for the post-serve persist drain.
+    ///
+    /// Uses `tokio::sync::watch` rather than `tokio::sync::Notify` because
+    /// `Notify::notify_waiters()` is *not* sticky: a waiter that subscribes
+    /// after the notification fires never wakes. With `watch`, the value
+    /// `true` is durable — a receiver constructed *after* `send(true)` can
+    /// `borrow_and_update()` and see it immediately, so `/api/events`
+    /// connections accepted just before Ctrl+C are guaranteed to observe
+    /// the shutdown signal regardless of registration ordering. See
+    /// bugs.md "One-shot SSE shutdown notification can be missed before
+    /// waiter registration" / "Graceful shutdown blocks forever waiting
+    /// for SSE streams to drain".
+    shutdown_signal_tx: Arc<tokio::sync::watch::Sender<bool>>,
     /// Background SSE state-broadcast channel. `publish_snapshot` sends a
     /// pre-built `StateResponse` through this channel; a dedicated thread
     /// serializes it to JSON and forwards the payload to `state_events`,

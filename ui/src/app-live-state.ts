@@ -194,6 +194,7 @@ export type AdoptSessionsOptions = {
   openSessionId?: string;
   paneId?: string | null;
   disableMutationStampFastPath?: boolean;
+  forceMessagesUnloaded?: boolean;
 };
 
 export type SessionHydrationTarget = {
@@ -209,6 +210,15 @@ export function resolveAdoptStateSessionOptions(
     ...options,
     disableMutationStampFastPath:
       serverInstanceChanged || options?.disableMutationStampFastPath === true,
+    // A server-instance change is the canonical "we just observed a
+    // backend restart" signal. Persisted sessions arrive with a cleared
+    // `sessionMutationStamp`, so the summary reconcile cannot otherwise
+    // tell whether the local transcript matches the server's
+    // authoritative content. Forcing `messagesLoaded: false` re-arms the
+    // visible-session hydration effect so /api/sessions/{id} repaints
+    // the active pane instead of leaving stale streaming content
+    // visible until the user hard-refreshes.
+    forceMessagesUnloaded: serverInstanceChanged,
   };
 }
 
@@ -425,6 +435,8 @@ export type UseAppLiveStateReturn = {
   hydratedSessionIdsRef: MutableRefObject<Set<string>>;
   hydratingSessionIdsRef: MutableRefObject<Set<string>>;
   forceAdoptNextStateEventRef: MutableRefObject<boolean>;
+  /** See `forceSseReconnect` definition in the hook body for full semantics. */
+  forceSseReconnect: () => void;
   workspaceFilesChangedEvent: WorkspaceFilesChangedEvent | null;
   workspaceFilesChangedEventBufferRef: MutableRefObject<WorkspaceFilesChangedEvent | null>;
   workspaceFilesChangedEventFlushTimeoutRef: MutableRefObject<number | null>;
@@ -546,6 +558,16 @@ export function useAppLiveState(
   const sseRecoveryTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
     null,
   );
+  // Set by `forceSseReconnect` (e.g. from `handleSend` after detecting a
+  // server-restart mid-request). Consumed by the next successful
+  // `adoptState` call that ALSO observes a `fullStateServerInstanceChanged`
+  // flip — the conjunction confirms (a) recovery completed and (b) the
+  // backend actually changed, so it's worth tearing down the EventSource.
+  // Setting `setSseEpoch` synchronously inside `forceSseReconnect` would
+  // race with an in-flight `/api/state` probe scheduled by the same
+  // caller — the effect cleanup sets `cancelled = true` and the probe's
+  // await callback bails before the recovered state is applied.
+  const pendingSseRecreateOnInstanceChangeRef = useRef(false);
   const workspaceFilesChangedEventBufferRef =
     useRef<WorkspaceFilesChangedEvent | null>(null);
   const workspaceFilesChangedEventFlushTimeoutRef = useRef<number | null>(null);
@@ -802,6 +824,7 @@ export function useAppLiveState(
     );
     const mergedSessions = reconcileSessions(previousSessions, nextSessions, {
       disableMutationStampFastPath: options?.disableMutationStampFastPath,
+      forceMessagesUnloaded: options?.forceMessagesUnloaded,
     });
     const changedSessions = mergedSessions.filter(
       (session) => previousSessionsById.get(session.id) !== session,
@@ -1340,6 +1363,19 @@ export function useAppLiveState(
     if (fullStateServerInstanceChanged) {
       hydratingSessionIdsRef.current.clear();
       hydratedSessionIdsRef.current.clear();
+      // Caller-requested EventSource recreation on instance change. See
+      // `forceSseReconnect` for the full context. The flag is set
+      // synchronously by `handleSend` BEFORE the recovery probe is in
+      // flight; consuming it here — strictly AFTER `adoptState` has
+      // committed the recovered state — avoids the race where a
+      // synchronous `setSseEpoch` would tear down the effect mid-probe
+      // and drop the recovered response. The `setSseEpoch` will queue a
+      // re-render whose effect cleanup runs ONLY after the in-progress
+      // adoption is fully reflected in React state.
+      if (pendingSseRecreateOnInstanceChangeRef.current) {
+        pendingSseRecreateOnInstanceChangeRef.current = false;
+        setSseEpoch((current) => current + 1);
+      }
     }
     hydrationMismatchSessionIdsRef.current.clear();
     const currentCodexState = codexStateRef.current;
@@ -1778,15 +1814,52 @@ export function useAppLiveState(
                 shouldTrustAuthoritativeReplacementInstance &&
                 requestedRevision !== null &&
                 state.revision <= requestedRevision;
-              const isNotNewerAutomaticReconnectSnapshot =
+              // Same-instance reconnect/fallback recovery is intentionally
+              // restricted to equal-revision force-adopts. Same-server-instance
+              // revisions are monotonic, so a lower `state.revision` than
+              // `requestedRevision` cannot be authoritative without explicit
+              // restart or replacement-instance evidence. Allowing
+              // `state.revision <= requestedRevision` here previously could
+              // roll the client backward after a newer SSE delta sequence
+              // already advanced local state — for example: SSE recreates
+              // after a backend restart, deltas stream the assistant reply,
+              // local advances; the earlier-scheduled reconnect /api/state
+              // probe finally returns at a revision strictly less than
+              // current, force-adoption rolls back, and the just-rendered
+              // assistant message disappears with no further deltas to
+              // re-add it. Equal-revision adoption is still handled by
+              // `isEqualRevisionSnapshot`; replacement-instance rollback is
+              // still handled by `isNotNewerReplacementSnapshot`. See bugs.md
+              // "Same-instance reconnect recovery can force-adopt lower
+              // revision snapshots".
+              const isEqualRevisionAutomaticReconnectSnapshot =
                 shouldConsiderAuthoritativeSnapshot &&
                 !receivedReplacementInstance &&
                 requestedRevision !== null &&
-                state.revision <= requestedRevision &&
+                state.revision === requestedRevision &&
                 (preserveReconnectFallback ||
                   (rearmOnSuccess &&
                     rearmUntilLiveEventOnSuccess &&
                     !rearmAfterSameInstanceProgressUntilLiveEvent));
+              // The watchdog branch deliberately retains `<=` (rather than
+              // mirroring the reconnect path's `===`) because the watchdog
+              // only fires after stale-live-transport detection. A
+              // legitimate use case is when orchestrator-only deltas
+              // advance the global revision counter without updating
+              // session content (orchestrator deltas update `latestState
+              // RevisionRef` but do not refresh active-session messages or
+              // baselines for sessions absent from `delta.sessions`). The
+              // watchdog fetches /api/state to recover the canonical
+              // session content; that response carries the SESSION's
+              // revision (lower than the orchestrator-bumped local
+              // counter) and force-adopting it is the recovery mechanism.
+              // The L197 hazard the reconnect path closed (a stale fetch
+              // queued behind newer SSE assistant deltas) does NOT apply
+              // here because session deltas update watchdog baselines via
+              // `markLiveSessionResumeWatchdogBaseline`, so the watchdog
+              // would not even fire while session-content deltas are
+              // recent. See bugs.md "Watchdog recovery still allows lower
+              // same-instance revisions for orchestrator-noise recovery".
               const shouldTrustWatchdogSnapshot =
                 shouldConsiderAuthoritativeSnapshot &&
                 preserveWatchdogCooldown &&
@@ -1803,7 +1876,7 @@ export function useAppLiveState(
                 shouldConsiderAuthoritativeSnapshot &&
                 (isEqualRevisionSnapshot ||
                   isNotNewerReplacementSnapshot ||
-                  isNotNewerAutomaticReconnectSnapshot ||
+                  isEqualRevisionAutomaticReconnectSnapshot ||
                   shouldTrustWatchdogSnapshot);
               const shouldAllowUnknownServerInstance =
                 allowUnknownServerInstance ||
@@ -2775,6 +2848,29 @@ export function useAppLiveState(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sseEpoch]);
 
+  /**
+   * Marks an EventSource recreation as pending — it fires the next time
+   * `adoptState` succeeds with a `fullStateServerInstanceChanged` flip.
+   * Used by `useAppSessionActions::handleSend` after detecting the
+   * server-restarted-mid-request case: the immediate
+   * `requestActionRecoveryResync` probe will adopt the new state in
+   * the same closure that handleSend kicked off, and the recreate fires
+   * AFTER that adoption — not synchronously alongside it. Synchronous
+   * `setSseEpoch` would tear down the transport effect mid-probe (the
+   * cleanup sets `cancelled = true` and the probe's await callback
+   * bails before the recovered state is applied).
+   *
+   * The flag-on-adopt design keeps the existing "after replacement-
+   * instance fallback adoption, polling MUST continue" tests green
+   * because they don't go through `forceSseReconnect`. Round 8's
+   * blanket EventSource recreation in `adoptState` was reverted for
+   * exactly that reason; this version re-introduces the recreate but
+   * gated on an explicit caller request.
+   */
+  function forceSseReconnect() {
+    pendingSseRecreateOnInstanceChangeRef.current = true;
+  }
+
   return {
     adoptState,
     adoptCreatedSessionResponse,
@@ -2783,6 +2879,7 @@ export function useAppLiveState(
     hydratedSessionIdsRef,
     hydratingSessionIdsRef,
     forceAdoptNextStateEventRef,
+    forceSseReconnect,
     workspaceFilesChangedEvent,
     workspaceFilesChangedEventBufferRef,
     workspaceFilesChangedEventFlushTimeoutRef,

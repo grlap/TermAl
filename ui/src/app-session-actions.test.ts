@@ -131,6 +131,7 @@ function makeSessionActionsParams(
     applyControlPanelLayout: (workspace) => workspace,
     reportRequestError: vi.fn(),
     requestActionRecoveryResync: vi.fn(),
+    forceSseReconnect: vi.fn(),
     ...overrides,
   };
 }
@@ -205,6 +206,42 @@ describe("useAppSessionActions", () => {
       paneId: null,
       allowUnknownServerInstance: true,
     });
+    // Cross-instance recovery must also recreate the EventSource so live
+    // assistant deltas land on the new backend instead of the dead
+    // pre-restart connection. Mirrors the `handleSend` mismatch branch;
+    // see bugs.md "Cross-instance non-send action recovery does not
+    // force SSE recreation".
+    expect(params.forceSseReconnect).toHaveBeenCalled();
+  });
+
+  it("does not force an SSE recreate when same-instance action recovery rejects without server-instance change", async () => {
+    // Stale same-instance rejection (the response carries the same
+    // server instance the tab already adopted but lacks target
+    // evidence): action recovery resync still fires to reconcile
+    // metadata, but the EventSource is presumed healthy because the
+    // backend did NOT restart. Forcing a recreate here would tear down
+    // a live stream during routine same-instance staleness.
+    const state = {
+      ...makeStateResponse(4),
+      sessions: [makeSession("session-1", { sessionMutationStamp: 2 })],
+    };
+    vi.spyOn(api, "renameSession").mockResolvedValue(state);
+    const params = makeSessionActionsParams();
+    params.refs.sessionsRef.current = [
+      makeSession("session-1", { sessionMutationStamp: 1 }),
+    ];
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleRenameSession("session-1", "Renamed"),
+    ).resolves.toBe(false);
+
+    expect(params.requestActionRecoveryResync).toHaveBeenCalledWith({
+      openSessionId: "session-1",
+      paneId: null,
+      allowUnknownServerInstance: true,
+    });
+    expect(params.forceSseReconnect).not.toHaveBeenCalled();
   });
 
   it("threads the originating pane into session-scoped action recovery", async () => {

@@ -96,6 +96,55 @@ describe("MessageCard", () => {
     expect(container.querySelector(".plain-text-copy")).toBeNull();
   });
 
+  it("keeps incremental streaming bug-count markdown as a list", () => {
+    const baseMessage: TextMessage = {
+      id: "message-streaming-bug-count",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: "Active bug in `docs/bugs.md`:\n\n- High",
+    };
+
+    const { container, rerender } = render(
+      <MessageCard
+        message={baseMessage}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        preferStreamingPlainTextRender
+      />,
+    );
+
+    rerender(
+      <MessageCard
+        message={{
+          ...baseMessage,
+          text: [
+            "Active bug in `docs/bugs.md`:",
+            "",
+            "- High: 2",
+            "- Medium: 24",
+            "- Low: 35",
+            "- Note: 2",
+            "- Total: 63",
+          ].join("\n"),
+        }}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        preferStreamingPlainTextRender
+      />,
+    );
+
+    expect(container.querySelector(".plain-text-copy")).toBeNull();
+    expect(screen.getByText("docs/bugs.md").tagName).toBe("CODE");
+    expect(screen.getByRole("list")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(5);
+    expect(screen.getByText("High: 2")).toBeInTheDocument();
+    expect(screen.getByText("Medium: 24")).toBeInTheDocument();
+    expect(screen.getByText("Low: 35")).toBeInTheDocument();
+    expect(screen.getByText("Note: 2")).toBeInTheDocument();
+    expect(screen.getByText("Total: 63")).toBeInTheDocument();
+  });
+
   it("uses a plain-text shell for active streaming assistant prose without markdown", () => {
     const message: TextMessage = {
       id: "message-streaming-plain",
