@@ -11,6 +11,11 @@ unstaged Git semantics while giving the user a readable document-shaped editor.
 This document is the product contract for the rendered Markdown file viewer and the rendered
 Markdown diff editor. Bugs and small implementation follow-ups live in [`docs/bugs.md`](../bugs.md).
 
+The streaming-aware rendering used by live assistant message bubbles is documented separately in
+[`./streaming-markdown.md`](./streaming-markdown.md). The viewer and diff-editor flows here always
+pass settled Markdown through `MarkdownContent` (`isStreaming` defaults to `false`), so the
+streaming-fragment placeholder never appears in those surfaces.
+
 ## Problem
 
 TermAl can edit files and inspect diffs, but Markdown is still treated mostly as source text outside

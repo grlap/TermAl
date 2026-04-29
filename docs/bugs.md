@@ -313,20 +313,20 @@ The rendered diff view now maps every renderable region to its own `MarkdownCont
 - Compute aggregate Mermaid/math counts before mapping regions and apply a document-level fallback when the aggregate exceeds the cap.
 - Or pass a shared render-budget context/override into each region-level `MarkdownContent`.
 
-## Streaming table/math deferral is bypassed by the production assistant-message gate
+## Streaming table/math/tilde-fence deferral is bypassed by the production assistant-message gate
 
-**Severity:** Medium - the new streaming splitter can pass direct `MarkdownContent` tests while the real active assistant-message path still uses plain-text rendering for table-only or math-only streams.
+**Severity:** Medium - the new streaming splitter can pass direct `MarkdownContent` tests while the real active assistant-message path still uses plain-text rendering for table-only, math-only, or tilde-fenced streams.
 
-`MessageCard` only passes `isStreaming` to `MarkdownContent` when `hasRenderableStreamingMarkdown()` returns true. That detector recognizes headings, lists, blockquotes, backtick fences, inline code, emphasis, and links, but it does not recognize pipe-table starts or standalone `$$` math blocks - two of the splitter's advertised deferral cases. Assistant output such as `Here is the table:\n\n| A | B |` or a standalone display-math stream therefore stays on `StreamingAssistantTextShell` and never reaches the pending-fragment placeholder until some other Markdown construct happens to trigger the gate.
+`MessageCard` only passes `isStreaming` to `MarkdownContent` when `hasRenderableStreamingMarkdown()` returns true. That detector recognizes headings, lists, blockquotes, backtick fences, inline code, emphasis, and links, but it does not recognize pipe-table starts, standalone `$$` math blocks, or tilde fences - all splitter-supported deferral cases. Assistant output such as `Here is the table:\n\n| A | B |`, a standalone display-math stream, or a `~~~js` fence therefore stays on `StreamingAssistantTextShell` and never reaches the pending-fragment placeholder until some other Markdown construct happens to trigger the gate.
 
 **Current behavior:**
 - `MarkdownContent` supports streaming split/placeholder rendering.
 - `MessageCard` with active assistant text only reaches that path for constructs recognized by `hasRenderableStreamingMarkdown()`.
-- Pipe-table and standalone `$$` math streams are missed by that gate.
+- Pipe-table, standalone `$$` math, and tilde-fence streams are missed by that gate.
 
 **Proposal:**
 - Centralize the streaming-structure detector with `markdown-streaming-split.ts`, or expand `hasRenderableStreamingMarkdown()` to include pipe tables, standalone `$$`, and tilde fences.
-- Add production-path `MessageCard` regressions for active streaming pipe tables and math blocks.
+- Add production-path `MessageCard` regressions for active streaming pipe tables, math blocks, and tilde fences.
 
 ## Streaming fence splitter does not enforce CommonMark closing-fence rules
 

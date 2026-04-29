@@ -267,6 +267,36 @@ export const MessageCard = memo(
           message.author === "you"
             ? promptCommandMetaLabel(message.text, message.expandedText)
             : null;
+        // Three possible render paths for an assistant message text:
+        //
+        //   1. Plain `<p>` shell (`StreamingAssistantTextShell`) —
+        //      cheapest. Used for streaming assistant text that has
+        //      not yet shown any Markdown structure. Survives
+        //      `textDelta` chunks with no DOM rebuild.
+        //   2. `<MarkdownContent isStreaming />` — full pipeline
+        //      with partial-block deferral. Used when the streaming
+        //      message has accrued Markdown structure that benefits
+        //      visibly from GFM rendering. The splitter routes any
+        //      in-flight trailing pipe-table / fence / `$$` block
+        //      through `<pre class="markdown-streaming-fragment">`
+        //      until it settles. See
+        //      `docs/features/streaming-markdown.md`.
+        //   3. `<DeferredMarkdownContent />` (which wraps
+        //      `<MarkdownContent isStreaming={false} />`) — full
+        //      pipeline with no deferral, plus the deferred-render
+        //      cooldown gate. Used for settled history bubbles, and
+        //      for assistant messages whose host opted out of the
+        //      streaming fast path or that currently have an active
+        //      search query (which forces full-fidelity rendering so
+        //      the highlighted matches are correct).
+        //
+        // Non-assistant messages (user, system) skip this branch
+        // entirely and render as plain text (see the `:` arm of the
+        // outer ternary further below).
+        //
+        // The fast-path gate itself comes from the host
+        // (`preferStreamingPlainTextRender`); per-message structure
+        // detection is `hasRenderableStreamingMarkdown`.
         const shouldUseStreamingAssistantFastPath =
           preferStreamingPlainTextRender &&
           message.author === "assistant" &&
@@ -499,10 +529,51 @@ function promptCommandMetaLabel(text: string, expandedText?: string | null) {
   return expandedText && text.trim().startsWith("/") ? "Command" : null;
 }
 
+/**
+ * Cheapest possible render path for streaming assistant replies that
+ * have not yet shown any sign of Markdown structure. A bare `<p>`
+ * survives `textDelta` chunks with no DOM rebuild, no GFM/Mermaid/
+ * KaTeX work, and no streaming-split cost. Once `MessageCard`
+ * detects Markdown structure (see `hasRenderableStreamingMarkdown`)
+ * it switches to `<MarkdownContent isStreaming />`, which does the
+ * partial-block deferral described in
+ * `docs/features/streaming-markdown.md`.
+ */
 function StreamingAssistantTextShell({ text }: { text: string }) {
   return <p className="plain-text-copy">{text}</p>;
 }
 
+/**
+ * Decides whether a streaming assistant message has accrued enough
+ * Markdown structure to be worth routing through `MarkdownContent`
+ * (with `isStreaming` set, so partial blocks defer cleanly to the
+ * `markdown-streaming-fragment` placeholder). Returns `false` for
+ * messages that still look like plain prose, in which case
+ * `StreamingAssistantTextShell` is the fast path.
+ *
+ * Detected constructs (the pragmatic subset that benefits visibly
+ * from full GFM rendering even mid-stream):
+ *   - Headings (`# ` … `###### `)
+ *   - Lists (unordered: `-`/`*`/`+`; ordered: `1.`)
+ *   - Blockquotes (`> `)
+ *   - Fenced code blocks (` ``` `) — opener alone is enough; the
+ *     streaming splitter handles the unclosed-fence case.
+ *   - Inline code spans (`` `…` ``)
+ *   - Bold (`**…**`, `__…__`)
+ *   - Markdown links (`[text](url)`)
+ *
+ * **Known limitation:** the gate does NOT recognise pipe-tables
+ * (`| Col |`) or standalone `$$` math openers. A stream that begins
+ * with a bare table or display-math block stays on
+ * `StreamingAssistantTextShell` until some other Markdown construct
+ * lands on the same message, at which point it flips. Tracked in
+ * `docs/bugs.md` as "Streaming table/math deferral is bypassed by
+ * the production assistant-message gate". Expanding this regex set
+ * to include `(^|\n)\s*\|` and `(^|\n)\s*\$\$\s*$` would close the
+ * gap; the trade-off is a minor false-positive rate for prose that
+ * happens to contain pipes mid-line (the splitter itself handles
+ * those correctly via its blank-line reset rule).
+ */
 function hasRenderableStreamingMarkdown(text: string) {
   return (
     /(^|\n)\s{0,3}#{1,6}\s+\S/.test(text) ||
@@ -3359,6 +3430,20 @@ export function MarkdownContent({
   startLineNumber?: number | null;
   workspaceRoot?: string | null;
 }) {
+  // Streaming-aware split. When `isStreaming` is `true`, the
+  // splitter walks `markdown` and returns a `settled` prefix safe
+  // to pass through `react-markdown` and a `pending` suffix that
+  // contains an in-flight trailing pipe-table / fence / `$$` block
+  // (rendered as plain text below). When `isStreaming` is `false`
+  // (the default for every settled caller — history bubbles, source
+  // previews, diff viewers), the splitter is bypassed entirely:
+  // `settled === markdown` and `pending === ""` so the existing
+  // pipeline runs unchanged with no measurable cost. Memoised on
+  // `[isStreaming, markdown]` so settled callers preserve referential
+  // identity of `settledMarkdown` across re-renders, keeping
+  // downstream memos (mermaid count, math count, ReactMarkdown tree)
+  // cache-stable. See `ui/src/markdown-streaming-split.ts` and
+  // `docs/features/streaming-markdown.md`.
   const { settled: settledMarkdown, pending: pendingMarkdown } = useMemo(
     () =>
       isStreaming
