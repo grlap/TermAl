@@ -6,6 +6,69 @@ items live in the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Virtualized search pin state uses inconsistent identity and release semantics
+
+**Severity:** Medium - search navigation can keep the virtualized window pinned to the wrong range after manual scroll, query changes, or returning to a prior result.
+
+`ui/src/panels/VirtualizedConversationMessageList.tsx:893` suppresses search-pinned mounting with `releasedConversationSearchPinKey`, which is keyed by message id plus query text. The later "already pinned" guard at `ui/src/panels/VirtualizedConversationMessageList.tsx:1705` still tracks only `activeConversationSearchMessageId`. Those two identities can diverge after a user scroll releases an active search pin, then the query changes while the active message stays the same, or search navigation leaves and later returns to the same result.
+
+**Current behavior:**
+- Released search pins are tracked by message id plus query.
+- Completed search pins are tracked only by message id.
+- Returning to the same result can leave the pin released or skipped even though the current search selection should be mounted and scrolled coherently.
+
+**Proposal:**
+- Use one full search pin key consistently for released and already-pinned state.
+- Clear or re-arm released pin state when the active search selection changes.
+- Add regressions for query changes with the same active message and result A -> result B -> result A navigation.
+
+## Conversation marker feature brief proposes revisionless SSE deltas
+
+**Severity:** Low - the exploratory marker contract would not fit the current SSE delta revision gate if implemented as written.
+
+`docs/features/conversation-markers.md:285-287` proposes `markerCreated`, `markerUpdated`, and `markerDeleted` delta shapes without a `revision` field, while the same brief says marker mutations increment the global revision and publish SSE updates. TermAl's current delta protocol expects every delta to carry the exact next revision so clients can apply normal ordering and gap detection.
+
+**Current behavior:**
+- Marker mutations are documented as revisioned SSE updates.
+- The proposed marker delta variants omit `revision`.
+- The brief does not say marker changes should publish full `state` events instead.
+
+**Proposal:**
+- Add `revision: number` to every marker delta variant.
+- Or explicitly model marker mutations as full `state` events instead of delta events.
+
+## `searchPinnedMountedPageRange` was demoted from `useMemo` to an IIFE — fresh reference every render
+
+**Severity:** Medium - the conversation-search-pin polish demoted a memoized range to an unmemoized IIFE that returns a fresh `{ startIndex, endIndex }` object every render. The reference flip cascades through the imperative-handle effect, tearing down and re-creating the handle every render while a search match is pinned.
+
+`ui/src/panels/VirtualizedConversationMessageList.tsx:889`. The new conversation-search-pin release machinery requires the gate at line ~893 to consult both the active and released pin keys (`releasedConversationSearchPinKey === activeConversationSearchPinKey`), and the prior `useMemo` was inlined into an IIFE during that change. `renderedMountedPageRange` (`useMemo` at line 913) takes `searchPinnedMountedPageRange` as a dep — because the IIFE produces a fresh reference every render, the memo dep check fails every time. That ripples into `buildLayoutSnapshot` (line 1300, deps include `renderedMountedPageRange`) and the imperative-handle `useLayoutEffect` (line 1348), which now recreates the handle on every render. The cleanup at lines 1391-1395 means the ref blinks `null → handle` per render. Worsens the prior-round Low ("imperative-handle effect re-runs on every layout change") into per-render churn for any consumer holding the handle.
+
+**Current behavior:**
+- `searchPinnedMountedPageRange` is an IIFE returning a fresh object literal every render while pinning is active.
+- `renderedMountedPageRange` re-memoizes on every render due to the changing reference.
+- `buildLayoutSnapshot` re-creates on every render.
+- The imperative-handle `useLayoutEffect` runs cleanup + re-assigns the ref on every render.
+- The handle ref blinks `null → handle` every render observable to anyone subscribing by identity.
+
+**Proposal:**
+- Restore `useMemo` for `searchPinnedMountedPageRange` and add the two new state identifiers to the dep list (`releasedConversationSearchPinKey`, `activeConversationSearchPinKey`). Same shape as `workingMountedPageRange` immediately above. One-line cleanup that recovers prior caching behavior.
+- Optionally: store the inputs to the imperative handle in latest-value refs and build a single stable handle once on mount, reading through the refs — defends against future churn from other deps.
+
+## `releasedConversationSearchPinKey` is set on user scroll but never cleared
+
+**Severity:** Medium - the new pin/release state machine has no rearm path; once the user scrolls away from a search match, returning to the same `${messageId}\n${query}` pair leaves the mount-band pin permanently disengaged for that key.
+
+`ui/src/panels/VirtualizedConversationMessageList.tsx:447-475, 893`. `releaseConversationSearchPinForUserScroll` writes `setReleasedConversationSearchPinKey(activeConversationSearchPinKey)` so the gate at line ~893 (`releasedConversationSearchPinKey === activeConversationSearchPinKey`) refuses to re-engage the search-pin mount band. Nothing clears the released key when the user navigates away to a different active match and later cycles back to the original. The pin layout-effect at line 1694 still writes the scroll position once per `lastPinnedConversationSearchIdRef` change, but the mount-band reservation that keeps the target row paged in does not fire. On long transcripts where the active-target page is far outside the working mount band, a re-clicked previous match can land on an unmounted slot.
+
+**Current behavior:**
+- `releasedConversationSearchPinKey` is set on user scroll and never cleared.
+- A previously-released match cannot rearm its mount-band pin even when the user explicitly navigates back to it.
+- Scroll write still occurs (separate `lastPinnedConversationSearchIdRef` gate), but the target row may not be mounted.
+
+**Proposal:**
+- Clear `releasedConversationSearchPinKey` on either: (a) `activeConversationSearchMessageId` transitions through `null` (and on session change), or (b) whenever `activeConversationSearchPinKey` flips to a different value than the released one — treating "released" as "released for the contiguous run of this exact selection" rather than a permanent gate.
+- Add a regression that scrolls away from match A, navigates through other matches, then returns to A and asserts the mount band re-engages.
+
 ## Markdown diff change-block grouping rules duplicated between renderer and index builder
 
 **Severity:** Medium - the change-navigation index walker copies the renderer's grouping rules; future drift between the two will silently desynchronize navigation stops from rendered blocks.
@@ -110,24 +173,6 @@ The new adoption rule is intended to fix the user-visible bug where the latest a
 - Split "snapshot refreshed UI" from "transport recovered" in the reconnect state machine.
 - Keep reconnect polling armed until `confirmReconnectRecoveryFromLiveEvent()` runs from a data-bearing SSE event, unless a cause-specific recovery path intentionally documents a different contract.
 - Add a regression that adopts same-instance `/api/state` progress through the timer-driven reconnect path, keeps SSE unopened/unconfirmed, advances timers, and asserts another fallback poll is scheduled.
-
-## `process_remote_event_stream_reader` docstring promises buffer reuse but EOF dispatch path doesn't clear
-
-**Severity:** Low - dormant today; would silently corrupt parsing for any future caller written against the documented contract.
-
-`src/remote_sync.rs:885-887` introduces a docstring on the new `process_remote_event_stream_reader` helper that says: "The mutable buffers are caller-owned scratch state so tests can drive partial streams and keep the same lagged-recovery state across parser invocations." The blank-line dispatch branch at lines 907-908 clears `event_name` / `data_lines` after dispatch, but the new EOF dispatch branch at lines 925-933 does not. Today the only production caller (`process_remote_event_stream` at 869) creates fresh buffers per invocation, so the bug is dormant. A future caller that follows the docstring's "drive partial streams across invocations" contract — including the new tests as inspiration — would observe residual frame state from a prior EOF-terminated frame glue onto the next stream's first frame.
-
-The most obvious failure mode: an EOF terminates a `lagged` frame (one of the new tests' scenarios), `event_name = "lagged"` and `data_lines = []` remain in the buffers; the next stream begins with a `data:` line for a new state event that the parser appends to the residual `data_lines`, then dispatches with `event_name = "lagged"` instead of the empty event_name expected from the start of a fresh stream. The lagged dispatcher arms recovery instead of applying the state event.
-
-**Current behavior:**
-- The new docstring documents a cross-invocation buffer-reuse contract.
-- The blank-line dispatch branch clears buffers post-dispatch (lines 907-908).
-- The new EOF dispatch branch does not (lines 925-933).
-- Today's only production caller is unaffected because it uses fresh buffers per call.
-
-**Proposal:**
-- Mirror the blank-line branch's `event_name.clear()` / `data_lines.clear()` after the EOF dispatch so the helper actually honors the documented contract. Lower-risk and matches the rest of the function's pattern.
-- Or tighten the docstring to: "scratch buffers are owned by the caller; the parser leaves any partial trailing frame in the buffers on return so callers must clear before resuming a logically distinct stream." Documents the actual behavior but pushes the burden onto callers.
 
 ## Remote hydration in-flight cleanup can race with the RAII guard
 
@@ -551,39 +596,6 @@ The growth is incremental across many rounds of replay-cache hardening, not a si
 - No action this commit. Consider extracting a `useRenderedMarkdownDrafts(fileStateRef, editorValueRef, setEditorValueState, ...)` hook in a follow-up, owning `renderedMarkdownCommittersRef`, `hasRenderedMarkdownDraftActive`, `commitRenderedMarkdownDrafts`, `handleRenderedMarkdownSectionCommits`, and `handleRenderedMarkdownSectionDraftChange`.
 - The hook would expose a small surface for SourcePanel to consume and keep the file under the scrutiny threshold.
 
-## `bottom_follow` virtualizer state machine has no synthetic-native-scroll test coverage
-
-**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:1610-1624` (production), no test. The new `bottom_follow` scroll-kind sets a 1.2s programmatic-bottom-follow window and re-classifies subsequent native scroll ticks as programmatic at lines 1467-1495. The new `App.scroll-behavior.test.tsx` asserts only that `scrollTo` is called with `top: 900, behavior: "smooth"` (the SessionPaneView side). The actual regression-prevention contract — that intermediate native scroll ticks during the smooth-scroll do NOT flip `hasUserScrollInteractionRef`, that `shouldKeepBottomAfterLayoutRef` survives, and that the cooldown re-arms each forward-progress tick — has zero direct coverage.
-
-**Current behavior:**
-- Production has the cooldown + re-classification logic in two cooperating branches (event handler + syncViewport).
-- Tests only check the dispatcher side.
-- The pinned prompt-send path does not assert that the dispatched programmatic scroll detail is `scrollKind: "bottom_follow"`.
-- A regression dropping the `pendingProgrammaticBottomFollowUntilRef` re-arm would still pass the new test.
-
-**Proposal:**
-- Add a test that fires synthetic native `scroll` events with `scrollTop` advancing toward the bottom after a `bottom_follow` write and asserts:
-  - `hasUserScrollInteractionRef` is not set (e.g., no "New response" indicator emerges on the next assistant delta).
-  - `shouldKeepBottomAfterLayoutRef` survives across the smooth-scroll ticks.
-  - A user-initiated wheel/keyboard event during the window cancels the programmatic-bottom-follow marker.
-  - The early-exit `if (isScrollContainerNearBottom(node))` branch at 1492-1495 is exercised separately.
-- Add a pinned prompt-send regression that asserts both smooth scroll and `scrollKind: "bottom_follow"` dispatch.
-
-## Deferred-render suspension/resume producer path lacks coverage
-
-**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx` owns the scroll-driven deferred-render suspension path, but current tests only manually set `data-deferred-render-suspended` on `.message-stack`. They do not prove the virtualized list sets the marker during user scroll, clears it after the cooldown, or dispatches `termal:deferred-render-resume`.
-
-This leaves the main producer path for heavy Markdown deferral unpinned even though it directly affects scroll smoothness during active sessions.
-
-**Current behavior:**
-- Tests cover consumer behavior when the suspension marker already exists.
-- No test exercises scroll wiring through `suspendDeferredRenderActivation()`.
-- No test asserts the resume event fires after the cooldown.
-
-**Proposal:**
-- Add an integration-style virtualized-list test with a heavy Markdown message.
-- Fire a wheel/scroll gesture, assert the marker is set and heavy content stays deferred, then advance timers and assert the marker clears and `termal:deferred-render-resume` fires.
-
 ## Metadata-first summaries make transcript search incomplete
 
 **Severity:** Medium - search can silently miss transcript matches for sessions that have only metadata summaries loaded.
@@ -721,21 +733,6 @@ through a broad module instead of a small boundary with a clear contract.
   short contract comment.
 - Consider extracting the heavy Markdown/code rendering path separately so
   virtualization policy and content rendering can evolve independently.
-
-## `preferImmediateHeavyRender` is computed from a non-reactive ref during render
-
-**Severity:** Medium - `ui/src/panels/VirtualizedConversationMessageList.tsx:666-667` computes the `preferImmediateHeavyRender` prop for `MeasuredPageBand` by reading `hasUserScrollInteractionRef.current` during render. Refs are not reactive, so the computed value only propagates when something else forces a re-render. Today that works because every scroll-event path that flips the ref to `true` also triggers `setViewport(...)` via `syncViewportFromScrollNode` within the same handler, which causes a re-render and re-reads the ref. But the coupling is implicit, undocumented, and brittle.
-
-Any future scroll path that flips `hasUserScrollInteractionRef.current = true` without triggering a React state update will leave memoized pages with the stale `preferImmediateHeavyRender={true}` value until a different render trigger arrives — at which point heavy cards that should have stayed deferred will activate, defeating the purpose of the cooldown gate.
-
-**Current behavior:**
-- `preferImmediateHeavyRender` is computed each render from `hasUserScrollInteractionRef.current`.
-- The ref is mutated in two handlers that also call `syncViewportFromScrollNode`, which updates `viewport` state and forces a re-render.
-- If a future contributor adds a third setter without a matching state update, memoized pages will stay on a stale value.
-
-**Proposal:**
-- Promote `hasUserScrollInteraction` to component state (or state+ref pair), so every mutation triggers a re-render automatically.
-- Alternatively, expose a helper like `setHasUserScrollInteraction(true)` that both writes the ref and calls a dedicated state-setter, and use that everywhere. Add a comment at the two existing setter sites naming the invariant.
 
 ## `CodexUpdated` delta carries a full subsystem snapshot despite the "delta" name
 
@@ -961,6 +958,30 @@ The graceful-shutdown reload regression creates a fresh `AppState::new_with_path
 
 ## Implementation Tasks
 
+- [ ] P2: Cover wheel/touch/keyboard release of conversation-search pin in `VirtualizedConversationMessageList.test.tsx`:
+  the existing test-5 "rebuilds the rendered window after manual scroll starts from an active search result" only fires `fireEvent.scroll(...)` — the native-scroll branch. Two of the three `releaseConversationSearchPinForUserScroll` call sites (the wheel/touch/keyboard path through `markUserScroll` and the `explicitScrollSource === "user"` branch in `syncProgrammaticScrollWrite`) are not covered. Add a `fireEvent.wheel(harness.scrollNode, { deltaY: -48 })` (or `fireEvent.keyDown(... { key: "PageUp" })`) variant that asserts the same release.
+- [ ] P2: Stabilize `releaseConversationSearchPinForUserScroll` callback identity in `VirtualizedConversationMessageList.tsx`:
+  the callback depends on `activeConversationSearchPinKey`, so it re-creates whenever the active match changes. The native-scroll/wheel/touch/keydown/mousedown listener `useLayoutEffect` lists this callback in its dep array, detaching and re-attaching ~8 listeners on every match navigation. Read `activeConversationSearchPinKey` from a ref inside the callback so its identity is stable, then drop the dep from the listener-effect array.
+- [ ] P2: Add a contract comment block above `releaseConversationSearchPinForUserScroll` in `VirtualizedConversationMessageList.tsx:447-475`:
+  the pin/release/rearm semantics + the `${messageId}\n${query}` keying scheme are subtle. Add a 4-6 line comment block describing the state machine (Pinned → User scroll → Released → Active key change → Repinned), and a one-liner above the IIFE in `searchPinnedMountedPageRange` cross-referencing it.
+- [ ] P2: Document or harden the `${messageId}\n${query}` pin-key separator in `VirtualizedConversationMessageList.tsx:396-399`:
+  if a message id ever contained a newline, key collisions are possible. Either document the invariant inline ("ids never contain newlines") or encode at least one component (e.g. `JSON.stringify`).
+- [ ] P2: Export `VirtualizedRange` from `VirtualizedConversationMessageList.tsx:160`:
+  the exported `VirtualizedConversationLayoutSnapshot` references it via `visiblePageRange`, but the type itself isn't exported. External consumers can't import the type by name; they have to derive via `Pick`/indexed access. One-line `export type VirtualizedRange` (or inline the shape into the snapshot type).
+- [ ] P2: Add `removeAllRanges()` to the outside-section `setDropCaretFromPoint` test in `markdown-diff-clipboard-pointer.test.ts:111-147`:
+  tests 1 and 2 drain selection in `finally`; test 3 only clears at the top of `try`. If the production code regresses and accepts an outside-section range, the assertion fails AND leaves selection state for the next test. Add `document.getSelection()?.removeAllRanges();` to the `finally` block.
+- [ ] P2: Add contract comments to the five exported `VirtualizedConversationMessageListHandle*` types in `VirtualizedConversationMessageList.tsx:95-138`:
+  `VirtualizedConversationJumpOptions`, `VirtualizedConversationLayoutMessage`, `VirtualizedConversationLayoutSnapshot`, `VirtualizedConversationMessageListHandle`, `VirtualizedConversationMessageListHandleRef`. Document: snapshot identity changes on every scroll (snapshot, not subscription); `estimatedTopPx` is page-relative-to-document and combines page tops with intra-page offsets, not measured per-message; `measuredPageHeightPx` is per-page (not per-message) and null for unmeasured pages; `jumpToMessageId/Index` returns `false` when `isActive === false` or the scroll node isn't mounted (callers must hydrate first). 3-6 short lines.
+- [ ] P2: Cross-link `conversation-markers.md` and `conversation-overview-map.md` both ways:
+  per CLAUDE.md "cross-link them both ways". Currently only one direction is partially linked. Add a "Related Features" line in each brief pointing to the other.
+- [ ] P2: Add virtualizer search-pin identity regression coverage:
+  release an active search pin with user scroll, then cover same-message query changes and result A -> result B -> result A navigation so the mounted range and scroll position stay coherent.
+- [ ] P2: Add virtualizer search-pin user scroll-write release coverage:
+  start from an active search result, dispatch `notifyMessageStackScrollWrite(..., { scrollKind: "page_jump", scrollSource: "user" })`, and assert the destination window renders instead of staying pinned to the search result.
+- [ ] P2: Add zero-geometry active search target fallback coverage:
+  mount the active search target with `height: 0` and `top === node.top`, then assert the virtualizer uses `activeConversationSearchScrollTop` rather than bad mounted geometry.
+- [ ] P2: Add virtualizer handle unmount cleanup coverage:
+  unmount the virtualized-list harness after handle creation and assert `virtualizerHandleRef.current === null` so overview/marker navigation cannot call into a detached list.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
 - [ ] P2: Add equal-revision gap repair snapshot adoption coverage:
@@ -1007,17 +1028,3 @@ The graceful-shutdown reload regression creates a fresh `AppState::new_with_path
   the new `App.live-state.reconnect.test.tsx` test exercises the revision-gap branch (the `messageCreated` delta omits `sessionMutationStamp` so it falls into the resync fallback). Add `sessionMutationStamp` so the delta routes through the matched-stamp fast-path that the surrounding `handleDeltaEvent` comment is most concerned about, OR rename the test to clarify it covers the revision-gap branch specifically and add a sibling test for the textDelta fast-path.
 - [ ] P2: Split the bad-live-event + workspaceFilesChanged test into isolated arrange-act-assert phases:
   `ui/src/backend-connection.test.tsx:1225-1261` co-fires the stale `delta` and the `workspaceFilesChanged` event in one `act()`. The assertion `countStateFetches() === hydratedStateFetchCount` is satisfied if either side skips confirmation, so the test cannot pinpoint which side regressed. Dispatch `workspaceFilesChanged` alone first and assert no fetch fired; then add the stale delta separately and re-assert.
-- [ ] P2: Pin closer-with-info-string non-close in `markdown-streaming-split.test.ts`:
-  add a fixture like `"\`\`\`\`md\n\`\`\`\` info\nstill inside"` and assert `pending === text` (whole input). This guards the new `fenceMatch[2].trim() === ""` precondition; without it, a regression that drops the trim check would not be caught.
-- [ ] P2: Cover `setDropCaretFromPoint` in `markdown-diff-clipboard-pointer.test.ts`:
-  the new file covers `getSelectionRangeInsideSection` and `serializeSelectedMarkdown` but not the third public helper (drag-drop caret geometry). Monkey-patch `document.caretPositionFromPoint` / `caretRangeFromPoint` and assert the caret lands inside the section (and is rejected when the point falls outside).
-- [ ] P2: Add temp-file cleanup to remaining remote lagged-recovery tests:
-  `remote_lagged_marker_force_applies_next_same_revision_state_snapshot` (extended in the round 2 polish), `remote_lagged_marker_does_not_force_apply_after_intervening_delta_progress`, and `remote_lagged_marker_force_applies_same_revision_fallback_resync_snapshot` should append `let _ = fs::remove_file(state.persistence_path.as_path());` before returning. Adjacent siblings (`remote_event_stream_parser_dispatches_bare_lagged_at_eof` at 9572, `remote_lagged_marker_clears_on_empty_data_bearing_frame` at 9663) and ~80 other tests in the file follow this convention; the drift between adjacent tests in the same module makes the right pattern invisible.
-- [ ] P2: Replace `setTimeout(resolve, 0)` macrotask flush with `waitFor(...)` in `app-session-actions.test.ts:262`:
-  the prior brittle `await Promise.resolve()` was polished to `await new Promise<void>(resolve => setTimeout(resolve, 0))`, which is one macrotask tick. Today this is enough to drain the inner `void (async () => { ... })()` IIFE in `handleSend`, but if the chain ever grows another `await` the test would silently flake. Replace with `await waitFor(() => expect(params.forceSseReconnect).toHaveBeenCalled())`, which adapts automatically.
-- [ ] P2: Pin closer-with-info-string non-close in `markdown-streaming-split.test.ts` (matching length, info string only):
-  the existing "does not close a four-backtick fence with a shorter backtick fence" test rejects via the `length >= opener` rule, not the info-string rule. Add a same-length closer with a non-empty info string (e.g. `` "```\\nbody\\n``` info\\nstill inside" ``) and assert `pending === text` to pin the `fenceMatch[2].trim() === ""` branch directly.
-- [ ] P2: Extend the fence-closer doc-comment in `markdown-streaming-split.ts:82-84` to name all three CommonMark rules:
-  the comment block names "same marker character" and "length >= opener" but omits the info-string-on-closer prohibition the code enforces at line 102. Tweak to "same marker character, length >= opener, and no info string on the closer line" so a future edit doesn't silently weaken the third rule.
-- [ ] P2: Add an inline note about lagged-flag consume ordering in `remote_sync.rs:976-994`:
-  the `state` arm consumes `recovery.force_next_state_after_lagged` via `mem::take` BEFORE the empty-data early return. The new `remote_lagged_marker_clears_on_empty_data_bearing_frame` test pins this observable behavior, but the function body has no comment explaining why the ordering is deliberate. A future "hoist the empty-data check above the consume" refactor would silently break the contract. Add a short comment naming the invariant.

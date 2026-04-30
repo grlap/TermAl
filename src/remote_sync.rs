@@ -930,6 +930,8 @@ fn process_remote_event_stream_reader<R: BufRead>(
             data_lines,
             recovery,
         )?;
+        event_name.clear();
+        data_lines.clear();
     }
     Ok(())
 }
@@ -974,6 +976,10 @@ fn dispatch_remote_event_with_recovery(
             recovery.force_next_state_after_lagged = true;
         }
         "state" => {
+            // Consume the lagged marker before checking for an empty state body.
+            // An intervening empty `state` frame is still a frame boundary and
+            // must not leave the one-shot force-adopt marker armed for a later
+            // same-revision snapshot.
             let force_lagged_recovery_state = if std::mem::take(
                 &mut recovery.force_next_state_after_lagged,
             ) {

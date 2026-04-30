@@ -1,3 +1,4 @@
+import { waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
@@ -259,16 +260,20 @@ describe("useAppSessionActions", () => {
     const actions = useAppSessionActions(params);
 
     expect(actions.handleSend("session-1", "hello")).toBe(true);
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
 
-    expect(sendMessageSpy).toHaveBeenCalledWith("session-1", "hello", [], null);
-    expect(params.adoptState).toHaveBeenCalledWith(restartedState);
-    expect(params.requestActionRecoveryResync).toHaveBeenCalledWith({
-      allowUnknownServerInstance: true,
+    await waitFor(() => {
+      expect(sendMessageSpy).toHaveBeenCalledWith(
+        "session-1",
+        "hello",
+        [],
+        null,
+      );
+      expect(params.adoptState).toHaveBeenCalledWith(restartedState);
+      expect(params.requestActionRecoveryResync).toHaveBeenCalledWith({
+        allowUnknownServerInstance: true,
+      });
+      expect(params.forceSseReconnect).toHaveBeenCalledTimes(1);
     });
-    expect(params.forceSseReconnect).toHaveBeenCalledTimes(1);
     params.refs.activePromptPollCancelRef.current?.();
   });
 

@@ -9486,6 +9486,7 @@ fn remote_lagged_marker_force_applies_next_same_revision_state_snapshot() {
             .iter()
             .any(|session| session.preview == "Unexpected second same-revision preview")
     );
+    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 #[test]
@@ -9533,6 +9534,10 @@ fn remote_event_stream_parser_dispatches_bare_lagged_at_eof() {
         &mut recovery,
     )
     .expect("EOF-terminated bare lagged frame should dispatch");
+    assert!(
+        event_name.is_empty() && data_lines.is_empty(),
+        "EOF dispatch should clear parser scratch buffers for reuse"
+    );
 
     let mut repaired_state = sample_remote_orchestrator_state(
         "remote-project-1",
@@ -9568,6 +9573,59 @@ fn remote_event_stream_parser_dispatches_bare_lagged_at_eof() {
             .sessions
             .iter()
             .any(|session| session.preview == "Initial EOF remote preview")
+    );
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_event_stream_parser_clears_buffers_after_eof_state_dispatch() {
+    let state = test_app_state();
+    let remote = local_replay_test_remote();
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    remote_state.sessions[0].preview = "EOF state preview".to_owned();
+    remote_state.sessions[0].messages = vec![remote_text_message("message-1", "EOF state body")];
+    remote_state.sessions[0].message_count = 1;
+    let mut payload_value =
+        serde_json::to_value(&remote_state).expect("state payload should encode");
+    payload_value["_sseFallback"] = serde_json::Value::Bool(false);
+    let payload = serde_json::to_string(&payload_value).expect("state payload should encode");
+    let mut event_name = String::new();
+    let mut data_lines = Vec::new();
+    let mut recovery = RemoteEventStreamRecovery::default();
+
+    process_remote_event_stream_reader(
+        &state,
+        "ssh-lab",
+        std::io::Cursor::new(format!("event: state\ndata: {payload}\n")),
+        &mut event_name,
+        &mut data_lines,
+        &mut recovery,
+    )
+    .expect("EOF-terminated state frame should dispatch");
+
+    assert!(
+        event_name.is_empty() && data_lines.is_empty(),
+        "EOF state dispatch should clear parser scratch buffers for reuse"
+    );
+    let snapshot = state.full_snapshot();
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "EOF state preview")
     );
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
@@ -9768,6 +9826,7 @@ fn remote_lagged_marker_does_not_force_apply_after_intervening_delta_progress() 
             .iter()
             .any(|session| session.preview == "Stale lagged recovery preview")
     );
+    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 #[test]
@@ -9873,6 +9932,7 @@ fn remote_lagged_marker_force_applies_same_revision_fallback_resync_snapshot() {
             .iter()
             .any(|session| session.preview == "Initial remote preview")
     );
+    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 // Pins the per-session in-flight guard for remote delta transcript repair.

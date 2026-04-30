@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   getSelectionRangeInsideSection,
   serializeSelectedMarkdown,
+  setDropCaretFromPoint,
 } from "./markdown-diff-clipboard-pointer";
 
 function replaceBodyWith(markup: string) {
@@ -15,6 +16,136 @@ function replaceBodyWith(markup: string) {
 }
 
 describe("markdown-diff-clipboard-pointer", () => {
+  it("sets the drop caret from a point inside the section", () => {
+    const section = replaceBodyWith(`
+      <section data-section>
+        <div class="markdown-copy"><p>Inside text</p></div>
+      </section>
+    `);
+    const text = section.querySelector("p")?.firstChild;
+    if (!text) {
+      throw new Error("inside text missing");
+    }
+    const documentWithCaret = document as unknown as {
+      caretPositionFromPoint?: unknown;
+    };
+    const originalCaretPositionFromPoint =
+      documentWithCaret.caretPositionFromPoint;
+    const caretPositionFromPoint = vi.fn(() => ({
+      offsetNode: text,
+      offset: 3,
+    }));
+    documentWithCaret.caretPositionFromPoint = caretPositionFromPoint;
+
+    try {
+      setDropCaretFromPoint(section, 10, 20);
+
+      expect(caretPositionFromPoint).toHaveBeenCalledWith(10, 20);
+      const selection = document.getSelection();
+      expect(selection?.rangeCount).toBe(1);
+      const range = selection?.getRangeAt(0);
+      expect(range?.startContainer).toBe(text);
+      expect(range?.startOffset).toBe(3);
+      expect(range?.collapsed).toBe(true);
+    } finally {
+      if (originalCaretPositionFromPoint === undefined) {
+        delete documentWithCaret.caretPositionFromPoint;
+      } else {
+        documentWithCaret.caretPositionFromPoint =
+          originalCaretPositionFromPoint;
+      }
+      document.getSelection()?.removeAllRanges();
+    }
+  });
+
+  it("sets the drop caret with the legacy caretRangeFromPoint fallback", () => {
+    const section = replaceBodyWith(`
+      <section data-section>
+        <div class="markdown-copy"><p>Inside text</p></div>
+      </section>
+    `);
+    const text = section.querySelector("p")?.firstChild;
+    if (!text) {
+      throw new Error("inside text missing");
+    }
+    const range = document.createRange();
+    range.setStart(text, 4);
+    range.collapse(true);
+    const documentWithCaret = document as unknown as {
+      caretPositionFromPoint?: unknown;
+      caretRangeFromPoint?: unknown;
+    };
+    const originalCaretPositionFromPoint =
+      documentWithCaret.caretPositionFromPoint;
+    const originalCaretRangeFromPoint = documentWithCaret.caretRangeFromPoint;
+    delete documentWithCaret.caretPositionFromPoint;
+    const caretRangeFromPoint = vi.fn(() => range);
+    documentWithCaret.caretRangeFromPoint = caretRangeFromPoint;
+
+    try {
+      setDropCaretFromPoint(section, 11, 21);
+
+      expect(caretRangeFromPoint).toHaveBeenCalledWith(11, 21);
+      const selection = document.getSelection();
+      expect(selection?.rangeCount).toBe(1);
+      const selectedRange = selection?.getRangeAt(0);
+      expect(selectedRange?.startContainer).toBe(text);
+      expect(selectedRange?.startOffset).toBe(4);
+      expect(selectedRange?.collapsed).toBe(true);
+    } finally {
+      if (originalCaretPositionFromPoint === undefined) {
+        delete documentWithCaret.caretPositionFromPoint;
+      } else {
+        documentWithCaret.caretPositionFromPoint =
+          originalCaretPositionFromPoint;
+      }
+      if (originalCaretRangeFromPoint === undefined) {
+        delete documentWithCaret.caretRangeFromPoint;
+      } else {
+        documentWithCaret.caretRangeFromPoint = originalCaretRangeFromPoint;
+      }
+      document.getSelection()?.removeAllRanges();
+    }
+  });
+
+  it("rejects a drop caret point outside the section", () => {
+    const section = replaceBodyWith(`
+      <section data-section>
+        <div class="markdown-copy"><p>Inside text</p></div>
+      </section>
+      <p data-outside>Outside text</p>
+    `);
+    const outsideText = document.querySelector("[data-outside]")?.firstChild;
+    if (!outsideText) {
+      throw new Error("outside text missing");
+    }
+    const documentWithCaret = document as unknown as {
+      caretPositionFromPoint?: unknown;
+    };
+    const originalCaretPositionFromPoint =
+      documentWithCaret.caretPositionFromPoint;
+    document.getSelection()?.removeAllRanges();
+    const caretPositionFromPoint = vi.fn(() => ({
+      offsetNode: outsideText,
+      offset: 0,
+    }));
+    documentWithCaret.caretPositionFromPoint = caretPositionFromPoint;
+
+    try {
+      setDropCaretFromPoint(section, 10, 20);
+
+      expect(caretPositionFromPoint).toHaveBeenCalledWith(10, 20);
+      expect(document.getSelection()?.rangeCount).toBe(0);
+    } finally {
+      if (originalCaretPositionFromPoint === undefined) {
+        delete documentWithCaret.caretPositionFromPoint;
+      } else {
+        documentWithCaret.caretPositionFromPoint =
+          originalCaretPositionFromPoint;
+      }
+    }
+  });
+
   it("rejects missing, collapsed, and out-of-section selections", () => {
     const section = replaceBodyWith(`
       <section data-section>

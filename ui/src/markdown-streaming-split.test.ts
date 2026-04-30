@@ -171,6 +171,14 @@ describe("splitStreamingMarkdownForRendering", () => {
       });
     });
 
+    it("does not close a fence when the closer has an info string", () => {
+      const text = "```\nbody\n``` info\nstill inside";
+      expect(splitStreamingMarkdownForRendering(text)).toEqual({
+        settled: "",
+        pending: text,
+      });
+    });
+
     it("does not close a backtick fence with a tilde fence", () => {
       const text = "```\n~~~\nstill inside";
       expect(splitStreamingMarkdownForRendering(text)).toEqual({

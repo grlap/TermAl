@@ -1,0 +1,440 @@
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import type { RefObject } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import {
+  VirtualizedConversationMessageList,
+  type VirtualizedConversationMessageListHandleRef,
+} from "./VirtualizedConversationMessageList";
+import {
+  VIRTUALIZED_MESSAGE_GAP_PX,
+  buildVirtualizedMessageLayout,
+  estimateConversationMessageHeight,
+} from "./conversation-virtualization";
+import {
+  DEFERRED_RENDER_RESUME_EVENT,
+  DEFERRED_RENDER_SUSPENDED_ATTRIBUTE,
+} from "../deferred-render";
+import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
+import type { Message } from "../types";
+
+function makeTextMessages(count: number): Message[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `message-${index + 1}`,
+    type: "text",
+    timestamp: `10:${String(index).padStart(2, "0")}`,
+    author: index % 2 === 0 ? "you" : "assistant",
+    text: `Message ${index + 1}`,
+  }));
+}
+
+function makeDomRect({
+  top = 0,
+  height = 0,
+  width = 100,
+}: {
+  top?: number;
+  height?: number;
+  width?: number;
+}) {
+  return {
+    bottom: top + height,
+    height,
+    left: 0,
+    right: width,
+    top,
+    width,
+    x: 0,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+type VirtualizedHarnessOptions = {
+  clientHeight?: number;
+  clientWidth?: number;
+  initialScrollTop?: number;
+  messages: Message[];
+  renderMessageCard?: (
+    message: Message,
+    preferImmediateHeavyRender: boolean,
+  ) => JSX.Element;
+  conversationSearchQuery?: string;
+  conversationSearchMatchedItemKeys?: ReadonlySet<string>;
+  conversationSearchActiveItemKey?: string | null;
+  scrollHeight?: () => number;
+  slotHeight?: (message: Message) => number;
+  virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
+};
+
+function renderVirtualizedHarness({
+  clientHeight = 500,
+  clientWidth = 1000,
+  initialScrollTop = 0,
+  messages,
+  renderMessageCard = (message) => (
+    <article className="message-card">{message.id}</article>
+  ),
+  conversationSearchQuery = "",
+  conversationSearchMatchedItemKeys = new Set(),
+  conversationSearchActiveItemKey = null,
+  scrollHeight,
+  slotHeight = () => 80,
+  virtualizerHandleRef,
+}: VirtualizedHarnessOptions) {
+  const OriginalResizeObserver = window.ResizeObserver;
+  const originalRequestAnimationFrame = window.requestAnimationFrame;
+  const originalCancelAnimationFrame = window.cancelAnimationFrame;
+  const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+  const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
+  let nextFrameId = 1;
+  let scrollTop = initialScrollTop;
+  const scrollWrites: number[] = [];
+  const estimatedLayout = buildVirtualizedMessageLayout(
+    messages.map((message) =>
+      estimateConversationMessageHeight(message, {
+        availableWidthPx: clientWidth,
+      }),
+    ),
+  );
+  const resolvedScrollHeight =
+    scrollHeight ?? (() => estimatedLayout.totalHeight);
+
+  class ResizeObserverMock {
+    constructor(private readonly callback: ResizeObserverCallback) {}
+    observe(target: Element) {
+      resizeCallbacks.set(target, this.callback);
+    }
+    disconnect() {}
+  }
+
+  const scrollNode = document.createElement("div");
+  Object.defineProperty(scrollNode, "clientHeight", {
+    configurable: true,
+    get: () => clientHeight,
+  });
+  Object.defineProperty(scrollNode, "clientWidth", {
+    configurable: true,
+    get: () => clientWidth,
+  });
+  Object.defineProperty(scrollNode, "scrollHeight", {
+    configurable: true,
+    get: resolvedScrollHeight,
+  });
+  Object.defineProperty(scrollNode, "scrollTop", {
+    configurable: true,
+    get: () => scrollTop,
+    set: (nextValue: number) => {
+      scrollTop = nextValue;
+      scrollWrites.push(nextValue);
+    },
+  });
+
+  window.ResizeObserver =
+    ResizeObserverMock as unknown as typeof ResizeObserver;
+  window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+    const frameId = nextFrameId;
+    nextFrameId += 1;
+    queueMicrotask(() => callback(performance.now()));
+    return frameId;
+  }) as typeof requestAnimationFrame;
+  window.cancelAnimationFrame =
+    vi.fn() as unknown as typeof cancelAnimationFrame;
+  Element.prototype.getBoundingClientRect =
+    function getBoundingClientRectMock() {
+      const element = this as HTMLElement;
+      if (element === scrollNode) {
+        return makeDomRect({ height: clientHeight, width: clientWidth });
+      }
+      if (element.classList.contains("virtualized-message-slot")) {
+        const messageIndex = messages.findIndex(
+          (candidate) => candidate.id === element.dataset.messageId,
+        );
+        const message = messageIndex >= 0 ? messages[messageIndex] : undefined;
+        const height = message ? slotHeight(message) : 80;
+        return makeDomRect({
+          top:
+            messageIndex >= 0
+              ? messageIndex * (height + VIRTUALIZED_MESSAGE_GAP_PX) - scrollTop
+              : 0,
+          height,
+        });
+      }
+      return makeDomRect({ height: clientHeight, width: clientWidth });
+    };
+
+  const restore = () => {
+    window.ResizeObserver = OriginalResizeObserver;
+    window.requestAnimationFrame = originalRequestAnimationFrame;
+    window.cancelAnimationFrame = originalCancelAnimationFrame;
+    Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+  };
+
+  const result = render(
+    <VirtualizedConversationMessageList
+      isActive
+      renderMessageCard={renderMessageCard}
+      sessionId="session-a"
+      messages={messages}
+      scrollContainerRef={
+        {
+          current: scrollNode,
+        } as RefObject<HTMLElement | null>
+      }
+      onApprovalDecision={() => {}}
+      onUserInputSubmit={() => {}}
+      onMcpElicitationSubmit={() => {}}
+      onCodexAppRequestSubmit={() => {}}
+      conversationSearchQuery={conversationSearchQuery}
+      conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
+      conversationSearchActiveItemKey={conversationSearchActiveItemKey}
+      virtualizerHandleRef={virtualizerHandleRef}
+    />,
+  );
+
+  return {
+    ...result,
+    estimatedLayout,
+    get scrollTop() {
+      return scrollTop;
+    },
+    resizeCallbacks,
+    restore,
+    scrollNode,
+    scrollWrites,
+    setScrollTop(nextValue: number) {
+      scrollTop = nextValue;
+    },
+  };
+}
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+describe("VirtualizedConversationMessageList foundation", () => {
+  it("exposes a layout snapshot and explicit jump helpers", async () => {
+    const messages = makeTextMessages(48);
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      messages,
+      virtualizerHandleRef,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(virtualizerHandleRef.current).not.toBeNull();
+      });
+
+      const initialSnapshot = virtualizerHandleRef.current!.getLayoutSnapshot();
+      expect(initialSnapshot.sessionId).toBe("session-a");
+      expect(initialSnapshot.messageCount).toBe(messages.length);
+      expect(initialSnapshot.messages[0]).toMatchObject({
+        messageId: "message-1",
+        messageIndex: 0,
+        pageIndex: 0,
+      });
+      expect(
+        initialSnapshot.messages[initialSnapshot.messages.length - 1],
+      ).toMatchObject({
+        messageId: "message-48",
+        messageIndex: 47,
+      });
+
+      act(() => {
+        expect(
+          virtualizerHandleRef.current!.jumpToMessageIndex(0, {
+            align: "start",
+            flush: true,
+          }),
+        ).toBe(true);
+      });
+
+      expect(harness.scrollTop).toBe(0);
+      expect(screen.getByText("message-1")).toBeInTheDocument();
+
+      act(() => {
+        expect(
+          virtualizerHandleRef.current!.jumpToMessageId("message-32", {
+            align: "center",
+            flush: true,
+          }),
+        ).toBe(true);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("message-32")).toBeInTheDocument();
+      });
+      expect(harness.scrollTop).toBeGreaterThan(0);
+      expect(virtualizerHandleRef.current!.jumpToMessageIndex(-1)).toBe(false);
+      expect(virtualizerHandleRef.current!.jumpToMessageId("missing-message")).toBe(
+        false,
+      );
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("updates the heavy-render preference immediately when direct scroll input starts", async () => {
+    const messages = makeTextMessages(4);
+    const preferImmediateValues: boolean[] = [];
+    const harness = renderVirtualizedHarness({
+      messages,
+      renderMessageCard: (message, preferImmediateHeavyRender) => {
+        preferImmediateValues.push(preferImmediateHeavyRender);
+        return <article className="message-card">{message.id}</article>;
+      },
+    });
+
+    try {
+      await waitFor(() => {
+        expect(preferImmediateValues[preferImmediateValues.length - 1]).toBe(
+          true,
+        );
+      });
+
+      act(() => {
+        fireEvent.wheel(harness.scrollNode, { deltaY: 48 });
+      });
+
+      await waitFor(() => {
+        expect(preferImmediateValues[preferImmediateValues.length - 1]).toBe(
+          false,
+        );
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("suspends and resumes deferred rendering from the production scroll-input path", async () => {
+    vi.useFakeTimers();
+    const resumeListener = vi.fn();
+    const harness = renderVirtualizedHarness({
+      messages: makeTextMessages(4),
+    });
+    harness.scrollNode.addEventListener(
+      DEFERRED_RENDER_RESUME_EVENT,
+      resumeListener,
+    );
+
+    try {
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      act(() => {
+        fireEvent.wheel(harness.scrollNode, { deltaY: 48 });
+      });
+
+      expect(
+        harness.scrollNode.getAttribute(DEFERRED_RENDER_SUSPENDED_ATTRIBUTE),
+      ).toBe("true");
+
+      act(() => {
+        vi.advanceTimersByTime(10);
+      });
+
+      expect(
+        harness.scrollNode.getAttribute(DEFERRED_RENDER_SUSPENDED_ATTRIBUTE),
+      ).toBeNull();
+      expect(resumeListener).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.scrollNode.removeEventListener(
+        DEFERRED_RENDER_RESUME_EVENT,
+        resumeListener,
+      );
+      harness.restore();
+    }
+  });
+
+  it("keeps bottom-follow native smooth-scroll ticks out of user-scroll cooldown", async () => {
+    let measuredSlotHeight = 180;
+    const messages = makeTextMessages(3);
+    const harness = renderVirtualizedHarness({
+      clientHeight: 100,
+      initialScrollTop: 400,
+      messages,
+      scrollHeight: () => 500 + (measuredSlotHeight - 180),
+      slotHeight: () => measuredSlotHeight,
+    });
+
+    try {
+      const slot = await waitFor(() => {
+        const candidate = harness.container.querySelector(
+          ".virtualized-message-slot",
+        );
+        expect(candidate).not.toBeNull();
+        expect(harness.resizeCallbacks.has(candidate!)).toBe(true);
+        return candidate!;
+      });
+
+      act(() => {
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "bottom_follow",
+        });
+      });
+
+      act(() => {
+        harness.setScrollTop(410);
+        fireEvent.scroll(harness.scrollNode);
+        harness.setScrollTop(420);
+        fireEvent.scroll(harness.scrollNode);
+      });
+
+      harness.scrollWrites.length = 0;
+      measuredSlotHeight = 260;
+      await act(async () => {
+        harness.resizeCallbacks.get(slot)?.(
+          [] as unknown as ResizeObserverEntry[],
+          {} as ResizeObserver,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(harness.scrollWrites).toContain(480);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("rebuilds the rendered window after manual scroll starts from an active search result", async () => {
+    const messages = makeTextMessages(160);
+    const matchedKeys = new Set(messages.map((message) => `message:${message.id}`));
+    const harness = renderVirtualizedHarness({
+      messages,
+      conversationSearchQuery: "Message",
+      conversationSearchMatchedItemKeys: matchedKeys,
+      conversationSearchActiveItemKey: "message:message-140",
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-140")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+
+      act(() => {
+        harness.setScrollTop(0);
+        fireEvent.scroll(harness.scrollNode);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("message-1")).toBeInTheDocument();
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+});

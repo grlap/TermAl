@@ -92,6 +92,51 @@ export type RenderMessageCard = (
   onCodexAppRequestSubmit: BoundCodexAppRequestSubmitHandler,
 ) => JSX.Element | null;
 
+export type VirtualizedConversationJumpOptions = {
+  align?: "start" | "center" | "end";
+  flush?: boolean;
+};
+
+export type VirtualizedConversationLayoutMessage = {
+  messageId: string;
+  messageIndex: number;
+  pageIndex: number;
+  type: Message["type"];
+  author: Message["author"];
+  estimatedTopPx: number;
+  estimatedHeightPx: number;
+  measuredPageHeightPx: number | null;
+};
+
+export type VirtualizedConversationLayoutSnapshot = {
+  sessionId: string;
+  messageCount: number;
+  estimatedTotalHeightPx: number;
+  viewportTopPx: number;
+  viewportHeightPx: number;
+  viewportWidthPx: number;
+  isActive: boolean;
+  visiblePageRange: VirtualizedRange;
+  mountedPageRange: VirtualizedRange;
+  messages: VirtualizedConversationLayoutMessage[];
+};
+
+export type VirtualizedConversationMessageListHandle = {
+  getLayoutSnapshot: () => VirtualizedConversationLayoutSnapshot;
+  jumpToMessageId: (
+    messageId: string,
+    options?: VirtualizedConversationJumpOptions,
+  ) => boolean;
+  jumpToMessageIndex: (
+    messageIndex: number,
+    options?: VirtualizedConversationJumpOptions,
+  ) => boolean;
+};
+
+export type VirtualizedConversationMessageListHandleRef = {
+  current: VirtualizedConversationMessageListHandle | null;
+};
+
 const VIRTUALIZED_MESSAGES_PER_PAGE = 8;
 const ACTIVE_MOUNTED_RESERVE_ABOVE_VIEWPORTS = 3;
 const ACTIVE_MOUNTED_RESERVE_BELOW_VIEWPORTS = 3;
@@ -322,6 +367,7 @@ export function VirtualizedConversationMessageList({
   conversationSearchMatchedItemKeys = EMPTY_MATCHED_ITEM_KEYS,
   conversationSearchActiveItemKey = null,
   onConversationSearchItemMount = () => {},
+  virtualizerHandleRef,
   onApprovalDecision,
   onUserInputSubmit,
   onMcpElicitationSubmit,
@@ -336,6 +382,7 @@ export function VirtualizedConversationMessageList({
   conversationSearchMatchedItemKeys?: ReadonlySet<string>;
   conversationSearchActiveItemKey?: string | null;
   onConversationSearchItemMount?: (itemKey: string, node: HTMLElement | null) => void;
+  virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
   onUserInputSubmit: UserInputSubmitHandler;
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
@@ -345,6 +392,10 @@ export function VirtualizedConversationMessageList({
   const activeConversationSearchMessageId =
     conversationSearchActiveItemKey?.startsWith("message:")
       ? conversationSearchActiveItemKey.slice("message:".length)
+      : null;
+  const activeConversationSearchPinKey =
+    hasConversationSearch && activeConversationSearchMessageId !== null
+      ? `${activeConversationSearchMessageId}\n${conversationSearchQuery.trim()}`
       : null;
 
   const pageHeightsRef = useRef<Record<string, number>>({});
@@ -393,6 +444,10 @@ export function VirtualizedConversationMessageList({
   const [layoutVersion, setLayoutVersion] = useState(0);
   const [scrollIdleVersion, setScrollIdleVersion] = useState(0);
   const [bottomBoundarySeekVersion, setBottomBoundarySeekVersion] = useState(0);
+  const [releasedConversationSearchPinKey, setReleasedConversationSearchPinKey] = useState<
+    string | null
+  >(null);
+  const [hasUserScrollInteraction, setHasUserScrollInteractionState] = useState(false);
   const [isMeasuringPostActivation, setIsMeasuringPostActivation] = useState(
     () => isActive && messages.length > 0,
   );
@@ -402,6 +457,22 @@ export function VirtualizedConversationMessageList({
   ] = useState(false);
   const [bottomBoundaryRevealToken, setBottomBoundaryRevealToken] = useState(0);
   const previousIsActiveRef = useRef(isActive);
+
+  const setHasUserScrollInteraction = useCallback((nextValue: boolean) => {
+    hasUserScrollInteractionRef.current = nextValue;
+    setHasUserScrollInteractionState((current) =>
+      current === nextValue ? current : nextValue,
+    );
+  }, []);
+  const releaseConversationSearchPinForUserScroll = useCallback(() => {
+    if (activeConversationSearchPinKey === null) {
+      return;
+    }
+
+    setReleasedConversationSearchPinKey((current) =>
+      current === activeConversationSearchPinKey ? current : activeConversationSearchPinKey,
+    );
+  }, [activeConversationSearchPinKey]);
 
   const syncViewportFromScrollNode = useCallback((node: HTMLElement) => {
     const nextState = {
@@ -815,10 +886,11 @@ export function VirtualizedConversationMessageList({
   const activeMountedBufferBelowPxRef = useRef(activeMountedBufferBelowPx);
   activeMountedBufferBelowPxRef.current = activeMountedBufferBelowPx;
 
-  const searchPinnedMountedPageRange = useMemo(() => {
+  const searchPinnedMountedPageRange = (() => {
     if (
       !isActive ||
       !hasConversationSearch ||
+      releasedConversationSearchPinKey === activeConversationSearchPinKey ||
       activeConversationSearchScrollTop === null ||
       pages.length === 0
     ) {
@@ -837,17 +909,7 @@ export function VirtualizedConversationMessageList({
       startIndex: baseRange.startIndex,
       endIndex: Math.min(baseRange.endIndex + ACTIVE_MOUNTED_EXTRA_PAGES_BELOW, pages.length),
     };
-  }, [
-    activeConversationSearchScrollTop,
-    activeMountedBufferAbovePx,
-    activeMountedBufferBelowPx,
-    hasConversationSearch,
-    isActive,
-    pageHeights,
-    pageLayout.tops,
-    pages.length,
-    viewportHeight,
-  ]);
+  })();
   const renderedMountedPageRange = useMemo(() => {
     return searchPinnedMountedPageRange ?? mountedPageRange;
   }, [mountedPageRange, searchPinnedMountedPageRange]);
@@ -869,7 +931,7 @@ export function VirtualizedConversationMessageList({
   const preferImmediateHeavyRender =
     !isMeasuringPostActivation &&
     !isActivatingWithMessages &&
-    !hasUserScrollInteractionRef.current;
+    !hasUserScrollInteraction;
   // Always allow deferred-heavy activation in the React context. The actual
   // suspension during fast scroll is driven by the DOM-attribute mechanism
   // (`data-deferred-render-suspended` + DEFERRED_RENDER_RESUME_EVENT) inside
@@ -1116,6 +1178,231 @@ export function VirtualizedConversationMessageList({
       expandRangeToRenderedPageEdges,
     ],
   );
+
+  const resolveScrollTopForMessageLocation = useCallback(
+    (
+      location: MessageLocation,
+      options: VirtualizedConversationJumpOptions = {},
+    ) => {
+      const page = pages[location.pageIndex];
+      if (!page) {
+        return null;
+      }
+
+      const node = scrollContainerRef.current;
+      const mountedSlot = findMountedMessageSlotById(
+        renderedListRef.current,
+        location.message.id,
+      );
+      let messageTop: number;
+      let messageHeight: number;
+      if (node && mountedSlot) {
+        const nodeRect = node.getBoundingClientRect();
+        const slotRect = mountedSlot.getBoundingClientRect();
+        messageTop = node.scrollTop + (slotRect.top - nodeRect.top);
+        messageHeight =
+          slotRect.height > 0
+            ? slotRect.height
+            : estimateMessageHeight(location.message);
+      } else {
+        messageTop =
+          (pageLayout.tops[location.pageIndex] ?? 0) +
+          estimateMessageOffsetWithinPage(
+            page,
+            location.pageLocalIndex,
+            estimateMessageHeight,
+          );
+        messageHeight = estimateMessageHeight(location.message);
+      }
+
+      const align = options.align ?? "center";
+      const rawScrollTop =
+        align === "start"
+          ? messageTop
+          : align === "end"
+            ? messageTop - Math.max(viewportHeight - messageHeight, 0)
+            : messageTop - Math.max((viewportHeight - messageHeight) / 2, 0);
+      return clampVirtualizedViewportScrollTop({
+        scrollTop: rawScrollTop,
+        viewportHeight,
+        totalHeight: pageLayout.totalHeight,
+      });
+    },
+    [
+      estimateMessageHeight,
+      pageLayout.totalHeight,
+      pageLayout.tops,
+      pages,
+      scrollContainerRef,
+      viewportHeight,
+    ],
+  );
+
+  const jumpToMessageLocation = useCallback(
+    (
+      location: MessageLocation,
+      options: VirtualizedConversationJumpOptions = {},
+    ) => {
+      if (!isActive) {
+        return false;
+      }
+
+      const node = scrollContainerRef.current;
+      if (!node) {
+        return false;
+      }
+
+      const nextScrollTop = resolveScrollTopForMessageLocation(location, options);
+      if (nextScrollTop === null) {
+        return false;
+      }
+
+      pendingProgrammaticBottomFollowUntilRef.current = Number.NEGATIVE_INFINITY;
+      pendingProgrammaticScrollTopRef.current = nextScrollTop;
+      pendingAggressiveIdleCompactionRef.current = true;
+      pendingMountedPrependRestoreRef.current = null;
+      skipNextMountedPrependRestoreRef.current = false;
+      clearPendingDeferredLayoutTimer();
+      clearPendingIdleCompactionTimer();
+      pendingDeferredLayoutAnchorRef.current = null;
+      lastUserScrollKindRef.current = null;
+      lastUserScrollInputTimeRef.current = Number.NEGATIVE_INFINITY;
+      setHasUserScrollInteraction(false);
+
+      const bottomTarget = Math.max(node.scrollHeight - node.clientHeight, 0);
+      const targetNearBottom = bottomTarget - nextScrollTop < 72;
+      shouldKeepBottomAfterLayoutRef.current = targetNearBottom;
+      isDetachedFromBottomRef.current = !targetNearBottom;
+
+      const nextMountedRange = buildWorkingMountedRangeForScrollTop(
+        nextScrollTop,
+        node.clientHeight,
+      );
+      if (!rangesEqual(mountedPageRangeRef.current, nextMountedRange)) {
+        applyMountedPageRange(nextMountedRange, { flush: options.flush });
+      }
+      writeScrollTopAndSyncViewport(node, nextScrollTop);
+      return true;
+    },
+    [
+      applyMountedPageRange,
+      buildWorkingMountedRangeForScrollTop,
+      clearPendingDeferredLayoutTimer,
+      clearPendingIdleCompactionTimer,
+      isActive,
+      resolveScrollTopForMessageLocation,
+      scrollContainerRef,
+      setHasUserScrollInteraction,
+      writeScrollTopAndSyncViewport,
+    ],
+  );
+
+  const buildLayoutSnapshot = useCallback((): VirtualizedConversationLayoutSnapshot => {
+    const snapshotMessages: VirtualizedConversationLayoutMessage[] = [];
+    pages.forEach((page) => {
+      let offsetWithinPage = 0;
+      page.messages.forEach((message, pageLocalIndex) => {
+        const estimatedHeight = estimateMessageHeight(message);
+        snapshotMessages.push({
+          messageId: message.id,
+          messageIndex: page.startIndex + pageLocalIndex,
+          pageIndex: page.pageIndex,
+          type: message.type,
+          author: message.author,
+          estimatedTopPx:
+            (pageLayout.tops[page.pageIndex] ?? 0) + offsetWithinPage,
+          estimatedHeightPx: estimatedHeight,
+          measuredPageHeightPx: pageHeightsRef.current[page.key] ?? null,
+        });
+        offsetWithinPage += estimatedHeight + VIRTUALIZED_MESSAGE_GAP_PX;
+      });
+    });
+
+    return {
+      sessionId,
+      messageCount: messages.length,
+      estimatedTotalHeightPx: pageLayout.totalHeight,
+      viewportTopPx: viewportScrollTop,
+      viewportHeightPx: viewportHeight,
+      viewportWidthPx: viewportWidth,
+      isActive,
+      visiblePageRange,
+      mountedPageRange: renderedMountedPageRange,
+      messages: snapshotMessages,
+    };
+  }, [
+    estimateMessageHeight,
+    isActive,
+    messages.length,
+    pageLayout.totalHeight,
+    pageLayout.tops,
+    pages,
+    renderedMountedPageRange,
+    sessionId,
+    viewportHeight,
+    viewportScrollTop,
+    viewportWidth,
+    visiblePageRange,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!virtualizerHandleRef) {
+      return undefined;
+    }
+
+    const handle: VirtualizedConversationMessageListHandle = {
+      getLayoutSnapshot: buildLayoutSnapshot,
+      jumpToMessageId: (messageId, options) => {
+        const location = messageLocationById.get(messageId);
+        return location ? jumpToMessageLocation(location, options) : false;
+      },
+      jumpToMessageIndex: (messageIndex, options) => {
+        if (
+          !Number.isInteger(messageIndex) ||
+          messageIndex < 0 ||
+          messageIndex >= messages.length
+        ) {
+          return false;
+        }
+
+        const pageIndex = Math.floor(messageIndex / VIRTUALIZED_MESSAGES_PER_PAGE);
+        const page = pages[pageIndex];
+        if (!page || messageIndex < page.startIndex || messageIndex >= page.endIndex) {
+          return false;
+        }
+
+        const pageLocalIndex = messageIndex - page.startIndex;
+        const message = page.messages[pageLocalIndex];
+        if (!message) {
+          return false;
+        }
+
+        return jumpToMessageLocation(
+          {
+            message,
+            messageIndex,
+            pageIndex,
+            pageLocalIndex,
+          },
+          options,
+        );
+      },
+    };
+    virtualizerHandleRef.current = handle;
+    return () => {
+      if (virtualizerHandleRef.current === handle) {
+        virtualizerHandleRef.current = null;
+      }
+    };
+  }, [
+    buildLayoutSnapshot,
+    jumpToMessageLocation,
+    messageLocationById,
+    messages.length,
+    pages,
+    virtualizerHandleRef,
+  ]);
+
   useEffect(() => {
     return () => {
       clearPendingDeferredLayoutTimer();
@@ -1444,15 +1731,18 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
-    const nextScrollTop = Math.max(
-      node.scrollTop +
-        (mountedTargetSlot.getBoundingClientRect().top - node.getBoundingClientRect().top) -
-        Math.max(
-          (viewportHeight - mountedTargetSlot.getBoundingClientRect().height) / 2,
+    const nodeRect = node.getBoundingClientRect();
+    const targetRect = mountedTargetSlot.getBoundingClientRect();
+    const hasMountedTargetGeometry =
+      targetRect.height > 0 || Math.abs(targetRect.top - nodeRect.top) >= 1;
+    const nextScrollTop = hasMountedTargetGeometry
+      ? Math.max(
+          node.scrollTop +
+            (targetRect.top - nodeRect.top) -
+            Math.max((viewportHeight - targetRect.height) / 2, 0),
           0,
-        ),
-      0,
-    );
+        )
+      : activeConversationSearchScrollTop;
 
     const nextMountedRange = buildWorkingMountedRangeForScrollTop(nextScrollTop, node.clientHeight);
     if (!rangesEqual(mountedPageRangeRef.current, nextMountedRange)) {
@@ -1691,7 +1981,7 @@ export function VirtualizedConversationMessageList({
       lastNativeScrollTopRef.current = node.scrollTop;
       shouldKeepBottomAfterLayoutRef.current = true;
       isDetachedFromBottomRef.current = false;
-      hasUserScrollInteractionRef.current = false;
+      setHasUserScrollInteraction(false);
       lastUserScrollKindRef.current = null;
       lastUserScrollInputTimeRef.current = Number.NEGATIVE_INFINITY;
     };
@@ -1730,7 +2020,8 @@ export function VirtualizedConversationMessageList({
               node.clientHeight,
             );
           }
-          hasUserScrollInteractionRef.current = true;
+          releaseConversationSearchPinForUserScroll();
+          setHasUserScrollInteraction(true);
           lastUserScrollInputTimeRef.current = performance.now();
           scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
           // Scrollbar-thumb drag and touch-inertia scrolls have no preceding
@@ -1801,6 +2092,7 @@ export function VirtualizedConversationMessageList({
       }
       pendingProgrammaticBottomFollowUntilRef.current =
         Number.NEGATIVE_INFINITY;
+      releaseConversationSearchPinForUserScroll();
       if (isMeasuringPostActivation) {
         cancelPostActivationBottomRestore();
       }
@@ -1839,7 +2131,7 @@ export function VirtualizedConversationMessageList({
         : isPageJumpKeyboardNavigation
           ? "page_jump"
           : "incremental";
-      hasUserScrollInteractionRef.current = true;
+      setHasUserScrollInteraction(true);
       lastUserScrollInputTimeRef.current = performance.now();
       scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
       const prewarmDeltaY = wheelDeltaY ?? touchDeltaY;
@@ -1866,7 +2158,7 @@ export function VirtualizedConversationMessageList({
         lastNativeScrollTopRef.current = node.scrollTop;
         shouldKeepBottomAfterLayoutRef.current = true;
         isDetachedFromBottomRef.current = false;
-        hasUserScrollInteractionRef.current = false;
+        setHasUserScrollInteraction(false);
         lastUserScrollKindRef.current = null;
         lastUserScrollInputTimeRef.current = Number.NEGATIVE_INFINITY;
         pendingAggressiveIdleCompactionRef.current = true;
@@ -1909,7 +2201,7 @@ export function VirtualizedConversationMessageList({
       if (isNearBottomAfterWrite) {
         shouldKeepBottomAfterLayoutRef.current = true;
         isDetachedFromBottomRef.current = false;
-        hasUserScrollInteractionRef.current = false;
+        setHasUserScrollInteraction(false);
         lastUserScrollKindRef.current = null;
         lastUserScrollInputTimeRef.current = Number.NEGATIVE_INFINITY;
         clearPendingIdleCompactionTimer();
@@ -1934,6 +2226,9 @@ export function VirtualizedConversationMessageList({
           ? null
           : resolvedScrollKind;
         if (!isNearBottomAfterWrite) {
+          if (explicitScrollSource === "user") {
+            releaseConversationSearchPinForUserScroll();
+          }
           lastUserScrollInputTimeRef.current = scrollWriteTime;
           scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
         }
@@ -2011,10 +2306,12 @@ export function VirtualizedConversationMessageList({
     isMeasuringPostActivation,
     mountBottomBoundary,
     prewarmMountedRangeForUpwardWheel,
+    releaseConversationSearchPinForUserScroll,
     reconcileMountedRangeForNativeScroll,
     scheduleBottomBoundaryReveal,
     scheduleProgrammaticViewportSync,
     scheduleIdleMountedRangeCompaction,
+    setHasUserScrollInteraction,
     suspendDeferredRenderActivation,
     scrollContainerRef,
     sessionId,

@@ -80,8 +80,8 @@ export function splitStreamingMarkdownForRendering(
     const trimmed = line.trim();
 
     // Fenced code blocks (``` or ~~~). Track the opener so only
-    // CommonMark-compatible closers with the same marker character
-    // and enough length can close it.
+    // CommonMark-compatible closers with the same marker character,
+    // enough length, and no info string can close it.
     if (!inMath) {
       const fenceMatch = trimmed.match(/^(`{3,}|~{3,})(.*)$/);
       if (fenceMatch) {
