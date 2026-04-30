@@ -165,7 +165,10 @@ import {
 import {
   workspaceFilesChangedEventChangeForPath,
 } from "./workspace-file-events";
-import { useSessionRenderCallbacks } from "./SessionPaneView.render-callbacks";
+import {
+  streamingAssistantTextMessageIdForSession,
+  useSessionRenderCallbacks,
+} from "./SessionPaneView.render-callbacks";
 
 const SESSION_PAGE_JUMP_VIEWPORT_FACTOR = 0.45;
 
@@ -848,9 +851,10 @@ export function SessionPaneView({
         : visibleMessages[visibleMessages.length - 1]?.author,
     [activeSession, pane.viewMode, visibleMessages],
   );
-  // Newest assistant message id drives streaming-render preference. Retry
-  // notice liveness uses the fuller map below so repeated retry notices and
-  // inactive sessions do not present contradictory connection states.
+  // Newest assistant message id drives retry-notice liveness. Streaming render
+  // preference is narrower: only the active turn's last transcript item can be
+  // streaming text, so a previous completed table does not switch render modes
+  // while the next prompt is waiting for its first assistant chunk.
   const latestAssistantMessageId = useMemo(() => {
     const sessionMessages = activeSession?.messages ?? [];
     for (let index = sessionMessages.length - 1; index >= 0; index -= 1) {
@@ -861,6 +865,10 @@ export function SessionPaneView({
     }
     return null;
   }, [activeSession?.messages]);
+  const streamingAssistantTextMessageId = useMemo(
+    () => streamingAssistantTextMessageIdForSession(activeSession),
+    [activeSession],
+  );
   const nextConnectionRetryDisplayStateByMessageId = useMemo(
     () => buildConnectionRetryDisplayStateByMessageId(activeSession),
     [activeSession?.messages, activeSession?.status],
@@ -2310,6 +2318,7 @@ export function SessionPaneView({
     getConnectionRetryDisplayState,
     isRefreshingModelOptions,
     latestAssistantMessageId,
+    streamingAssistantTextMessageId,
     modelOptionsError,
     onArchiveCodexThread,
     onCompactCodexThread,

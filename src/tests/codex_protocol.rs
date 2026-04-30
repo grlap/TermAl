@@ -602,6 +602,31 @@ fn repl_codex_streamed_agent_message_replaces_divergent_completed_text() {
     assert!(repl_state.turn_completed);
     assert!(repl_state.current_turn_id.is_none());
 }
+
+// Pins that final `item/completed` text is authoritative even when it is a
+// suffix of a corrupted streamed draft. The streaming delta helper can
+// temporarily append ambiguous chunks verbatim; the completed payload must
+// replace that draft with the canonical final body, not treat the final text
+// as an already-seen tail and leave the corrupt prefix in place.
+#[test]
+fn completed_codex_text_replaces_corrupted_stream_when_final_is_suffix() {
+    let mut existing = "corrupted prefix\nCanonical final answer.".to_owned();
+
+    match next_completed_codex_text_update(&mut existing, "Canonical final answer.") {
+        CompletedTextUpdate::Replace(text) => {
+            assert_eq!(text, "Canonical final answer.");
+        }
+        CompletedTextUpdate::Append(text) => {
+            panic!("expected replace, got append of {text:?}");
+        }
+        CompletedTextUpdate::NoChange => {
+            panic!("expected replace, got no change");
+        }
+    }
+
+    assert_eq!(existing, "Canonical final answer.");
+}
+
 // pins that when the `item/completed` text exactly equals the streamed
 // delta ("Hello from REPL." both times), the handler emits nothing new
 // and the transcript keeps a single copy. exercises
@@ -940,16 +965,17 @@ fn codex_app_server_file_change_item_records_create_and_edit_diffs() {
     );
 }
 
-// pins the four branches of `next_codex_delta_suffix`: initial chunk
-// seeds the buffer, a cumulative extension yields only the new suffix,
-// an exact repeat yields `None`, and an overlapping chunk whose prefix
-// matches the buffer tail yields only the non-overlapping tail.
-// guards against Codex's habit of sometimes sending cumulative deltas
-// ("Try" then "Try these") and sometimes sending overlapping windows
-// (" these plain" after "Try these") causing either duplicated tokens
-// or dropped text in the streamed transcript.
+// Pins the three unambiguous branches of `next_codex_delta_suffix`:
+// initial chunk seeds the buffer, a cumulative extension (incoming
+// starts_with existing) yields only the new suffix, and an exact
+// repeat yields `None`. The fourth historical branch — overlap
+// fallback for partial-suffix retransmissions — was removed because
+// it caused streamed-transcript corruption against any repetitive
+// agent output (Markdown pipe-tables, fenced code, prose with
+// repeated row prefixes); see the function-level comment in
+// `codex_text_stream.rs::next_codex_delta_suffix` for the rationale.
 #[test]
-fn codex_delta_suffix_deduplicates_cumulative_and_overlapping_chunks() {
+fn codex_delta_suffix_deduplicates_cumulative_chunks() {
     let mut text = String::new();
 
     assert_eq!(
@@ -966,25 +992,46 @@ fn codex_delta_suffix_deduplicates_cumulative_and_overlapping_chunks() {
 
     assert_eq!(next_codex_delta_suffix(&mut text, "Try these"), None);
     assert_eq!(text, "Try these");
+}
+
+// Pins that a partial-suffix delta — one where `incoming` shares a
+// prefix with the existing tail but does NOT start with the full
+// `existing` — is appended verbatim instead of being deduped against
+// a guessed overlap. This is a deliberate trade-off: a true
+// retransmission window (e.g., the agent re-sending " these" before
+// " plain" after a reconnect) duplicates during streaming, but
+// `next_completed_codex_text_update` reconciles the streamed text
+// against the canonical `agentMessage` text once the turn settles.
+// Duplication is a strictly less-bad failure mode than dropping new
+// characters and breaking Markdown rendering. See
+// `codex_text_stream.rs::next_codex_delta_suffix`.
+#[test]
+fn codex_delta_suffix_appends_partial_suffix_chunks_verbatim() {
+    let mut text = String::from("Try these");
 
     assert_eq!(
         next_codex_delta_suffix(&mut text, " these plain"),
-        Some(" plain".to_owned())
+        Some(" these plain".to_owned()),
+        "partial-suffix delta must be appended verbatim, not partially deduped against a guessed overlap",
     );
-    assert_eq!(text, "Try these plain");
+    assert_eq!(
+        text, "Try these these plain",
+        "duplication during streaming is the documented trade-off; `next_completed_codex_text_update` reconciles at turn end",
+    );
 
+    // Exact-suffix repeat (case 3) is still deduped — `existing.ends_with(incoming)`
+    // is unambiguous (the new chunk is wholly contained as the tail of
+    // the existing buffer).
     assert_eq!(next_codex_delta_suffix(&mut text, " plain"), None);
-    assert_eq!(text, "Try these plain");
+    assert_eq!(text, "Try these these plain");
 }
 
-// pins that `next_codex_delta_suffix` respects UTF-8 char boundaries
-// when computing overlap: a 3-byte smart quote (U+2018) that straddles
-// the boundary between an existing buffer and an incoming overlapping
-// chunk must be detected as one overlapping codepoint, not three
-// independent bytes. exercises `next_codex_delta_suffix` via
-// `longest_codex_delta_overlap`'s `is_char_boundary` check. guards
-// against a panic from slicing mid-codepoint when Codex streams text
-// that contains apostrophes, em-dashes, or emoji.
+// Pins that `next_codex_delta_suffix` does not panic on multi-byte
+// UTF-8 boundaries. A 3-byte smart quote (U+2018) appearing at the
+// chunk boundary must be appended cleanly (no slicing mid-codepoint).
+// The dedup no longer attempts overlap detection, so the second chunk
+// is appended verbatim — duplicated leading bytes are reconciled at
+// `agentMessage` time.
 #[test]
 fn codex_delta_suffix_handles_multibyte_utf8_characters() {
     let mut text = String::new();
@@ -996,10 +1043,115 @@ fn codex_delta_suffix_handles_multibyte_utf8_characters() {
     );
     assert_eq!(text, "I\u{2018}m");
 
-    // Overlapping chunk that shares the multi-byte char boundary
+    // Partial-suffix chunk that shares a multi-byte codepoint boundary
+    // with the existing buffer's tail. Appended verbatim (with
+    // duplication) rather than overlap-deduped.
     assert_eq!(
         next_codex_delta_suffix(&mut text, "\u{2018}m here"),
-        Some(" here".to_owned())
+        Some("\u{2018}m here".to_owned())
     );
-    assert_eq!(text, "I\u{2018}m here");
+    assert_eq!(text, "I\u{2018}m\u{2018}m here");
+}
+
+// Regression for the streaming Markdown-table corruption case. Older
+// overlap-detection code would silently strip the leading `c` here
+// (it matched the trailing `c` of `existing`) and emit only `def`,
+// producing a corrupted `abcdef` instead of the intended `abccdef`.
+// Markdown tables tripped the same pattern at every row boundary
+// because rows both start and end with `|`. The current contract
+// appends ambiguous partial-suffix chunks verbatim and relies on the
+// final completed text to reconcile any temporary duplication.
+#[test]
+fn codex_delta_suffix_does_not_strip_short_coincidental_prefix_overlap() {
+    let mut text = String::from("abc");
+    let suffix = next_codex_delta_suffix(&mut text, "cdef");
+
+    assert_eq!(
+        suffix,
+        Some("cdef".to_owned()),
+        "an incremental delta whose first character coincidentally matches the existing tail must not be classified as a retransmission",
+    );
+    assert_eq!(
+        text, "abccdef",
+        "accumulated text must include the full `cdef` suffix; the leading `c` is new content, not a re-send",
+    );
+}
+
+// Pipe-table boundary regression. Streams `| Header |\n|` followed by
+// `|---|---:|`: the second chunk does not start with the existing
+// buffer (case 2 fails) and the existing does not end with the
+// incoming (case 3 fails), so the new contract appends verbatim
+// instead of guessing at an overlap. The result preserves every `|`
+// from both chunks, which is what GFM needs to recognise the table.
+#[test]
+fn codex_delta_suffix_preserves_double_pipe_across_table_row_chunk_boundary() {
+    let mut text = String::new();
+
+    next_codex_delta_suffix(&mut text, "| Header |\n|");
+    assert_eq!(text, "| Header |\n|");
+
+    next_codex_delta_suffix(&mut text, "|---|---:|");
+    assert_eq!(
+        text, "| Header |\n||---|---:|",
+        "the leading `|` of the separator row must survive the chunk boundary; verbatim append guarantees no `|` is dropped",
+    );
+}
+
+// End-to-end streaming-Markdown-table scenario. Codex sends a
+// realistic 4-row table in incremental chunks where each chunk
+// starts where the previous left off. The chunking pattern produces
+// several `|`/`|` and `\n`/`\n`-style coincidental boundaries that
+// would have been mis-deduped before the fix. After the fix the
+// reassembled text must be identical to the source.
+#[test]
+fn codex_delta_suffix_assembles_streaming_markdown_table_without_corruption() {
+    // Source text: a complete GFM table (header + separator + 3 body
+    // rows + trailing blank line so GFM commits the table).
+    let source = "\
+| Group | Files | Lines | Size |
+|---|---:|---:|---:|
+| Code | 107 | 87,395 | 5.52 MiB |
+| Backend | 280 | 173,265 | 5.52 MiB |
+| Docs | 42 | 1,042 | 0.5 MiB |
+
+";
+
+    // Plausible incremental chunking. Boundaries land:
+    //   - mid-header (so the next chunk starts with ` `, no overlap),
+    //   - end of header row at `|` (next chunk starts with `\n`,
+    //     no overlap),
+    //   - end of separator row at `|` (next chunk starts with `\n`,
+    //     no overlap),
+    //   - mid-body-cell (boundary between `Backend` and ` |`),
+    //   - end of last body row right after `|` (next chunk starts
+    //     with `\n`, no overlap),
+    //   - the trailing blank line.
+    //
+    // Two of these boundaries used to trigger the 1-byte coincidental
+    // overlap bug (existing ending `|`, incoming starting with `\n` —
+    // those are different bytes so they wouldn't have, but earlier
+    // iterations of this test exercised a wider class of patterns).
+    // The chunking below additionally splits a body row mid-cell so
+    // we cover the "end of one cell" → "start of next cell" boundary
+    // as well.
+    let chunks = [
+        "| Group | Files",
+        " | Lines | Size |",
+        "\n|---|---:|---:|---:|",
+        "\n| Code | 107 | 87,395 | 5.52 MiB |",
+        "\n| Backend",
+        " | 280 | 173,265 | 5.52 MiB |",
+        "\n| Docs | 42 | 1,042 | 0.5 MiB |",
+        "\n\n",
+    ];
+
+    let mut text = String::new();
+    for chunk in chunks {
+        next_codex_delta_suffix(&mut text, chunk);
+    }
+
+    assert_eq!(
+        text, source,
+        "streaming a Markdown table through the dedup must preserve every `|` and newline so GFM can still recognise it as a table",
+    );
 }

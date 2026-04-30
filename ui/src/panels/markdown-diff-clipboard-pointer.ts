@@ -17,7 +17,7 @@
 //     element. Returns `null` for collapsed selections, no selection,
 //     or selections that escape the section's subtree (the latter is
 //     why we do not just call `selection.getRangeAt(0)`).
-//   - `rangeCoversNodeContents` — returns `true` iff the range fully
+//   - Internal helper `rangeCoversNodeContents` — returns `true` iff the range fully
 //     covers the contents of the given node (inclusive boundary
 //     comparisons). Used as a "select all the section's body" probe
 //     so `serializeSelectedMarkdown` below can fall back to the
@@ -112,7 +112,7 @@ export function getSelectionRangeInsideSection(section: HTMLElement) {
   return range;
 }
 
-export function rangeCoversNodeContents(range: Range, node: HTMLElement) {
+function rangeCoversNodeContents(range: Range, node: HTMLElement) {
   const fullRange = node.ownerDocument.createRange();
   fullRange.selectNodeContents(node);
   return (

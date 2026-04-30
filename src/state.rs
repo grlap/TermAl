@@ -270,8 +270,8 @@ struct AppState {
     /// flag is false, the worker is demonstrably gone and cannot race the
     /// synchronous fallback with its final drain/write; no future worker drain
     /// can persist a mutation stamped after that point.
-    /// See bugs.md "Persist shutdown drain can run before background
-    /// mutation sources are quiesced".
+    /// See bugs.md "Post-shutdown persistence writes still leave a
+    /// post-collection-pre-join window".
     persist_worker_alive: Arc<std::sync::atomic::AtomicBool>,
     /// Graceful-shutdown signal for long-lived SSE streams. Triggered by
     /// `main.rs::shutdown_signal` (Ctrl+C / SIGTERM) before the

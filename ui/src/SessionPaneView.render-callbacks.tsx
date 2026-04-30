@@ -21,10 +21,35 @@ import type { ConnectionRetryDisplayState } from "./connection-retry";
 import type {
   CommandMessage,
   DiffMessage,
+  Message,
   Session,
   SessionSettingsField,
   SessionSettingsValue,
 } from "./types";
+
+export function streamingAssistantTextMessageIdForSession(
+  session: Session | null,
+) {
+  if (session?.status !== "active") {
+    return null;
+  }
+  const latestMessage = session.messages[session.messages.length - 1];
+  if (
+    latestMessage &&
+    latestMessage.author === "assistant" &&
+    latestMessage.type === "text"
+  ) {
+    return latestMessage.id;
+  }
+  return null;
+}
+
+export function shouldPreferStreamingAssistantTextRender(
+  message: Message,
+  streamingAssistantTextMessageId: string | null,
+) {
+  return message.id === streamingAssistantTextMessageId;
+}
 
 type UseSessionRenderCallbacksParams = {
   activeSession: Session | null;
@@ -35,6 +60,7 @@ type UseSessionRenderCallbacksParams = {
   ) => ConnectionRetryDisplayState | undefined;
   isRefreshingModelOptions: boolean;
   latestAssistantMessageId: string | null;
+  streamingAssistantTextMessageId: string | null;
   modelOptionsError: string | null;
   onArchiveCodexThread: (sessionId: string) => void;
   onCompactCodexThread: (sessionId: string) => void;
@@ -70,6 +96,7 @@ export function useSessionRenderCallbacks({
   getConnectionRetryDisplayState,
   isRefreshingModelOptions,
   latestAssistantMessageId,
+  streamingAssistantTextMessageId,
   modelOptionsError,
   onArchiveCodexThread,
   onCompactCodexThread,
@@ -159,8 +186,10 @@ export function useSessionRenderCallbacks({
             : "match"
         }
         preferStreamingPlainTextRender={
-          activeSession?.status === "active" &&
-          message.id === latestAssistantMessageId
+          shouldPreferStreamingAssistantTextRender(
+            message,
+            streamingAssistantTextMessageId,
+          )
         }
         isLatestAssistantMessage={message.id === latestAssistantMessageId}
         connectionRetryDisplayState={getConnectionRetryDisplayState(message.id)}
@@ -176,6 +205,7 @@ export function useSessionRenderCallbacks({
       editorAppearance,
       getConnectionRetryDisplayState,
       latestAssistantMessageId,
+      streamingAssistantTextMessageId,
       onOpenDiffPreviewTab,
       onOpenSourceTab,
       paneId,

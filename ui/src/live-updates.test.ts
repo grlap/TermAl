@@ -2,6 +2,7 @@ import {
   LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
   applyDeltaToSessions,
   pruneLiveTransportActivitySessions,
+  sessionDeltaAdvancesCurrentMutationStamp,
   sessionHasPotentiallyStaleTransport,
   type SessionDeltaEvent,
 } from "./live-updates";
@@ -27,6 +28,67 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
     ...overrides,
   };
 }
+
+describe("sessionDeltaAdvancesCurrentMutationStamp", () => {
+  const textDelta: SessionDeltaEvent = {
+    type: "textDelta",
+    revision: 4,
+    sessionId: "session-1",
+    messageId: "message-1",
+    messageIndex: 0,
+    messageCount: 1,
+    delta: "ocused",
+    sessionMutationStamp: 11,
+  };
+
+  it("accepts a delta whose session mutation stamp advances the local session", () => {
+    expect(
+      sessionDeltaAdvancesCurrentMutationStamp(
+        [makeSession("session-1", { sessionMutationStamp: 10 })],
+        textDelta,
+      ),
+    ).toBe(true);
+    expect(
+      sessionDeltaAdvancesCurrentMutationStamp(
+        [makeSession("session-1", { sessionMutationStamp: 9 })],
+        textDelta,
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts a stamped delta when the retained session has no known stamp", () => {
+    expect(
+      sessionDeltaAdvancesCurrentMutationStamp(
+        [makeSession("session-1", { sessionMutationStamp: null })],
+        textDelta,
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects missing or stale session mutation stamps", () => {
+    expect(
+      sessionDeltaAdvancesCurrentMutationStamp(
+        [makeSession("session-1", { sessionMutationStamp: 10 })],
+        { ...textDelta, sessionMutationStamp: null },
+      ),
+    ).toBe(false);
+    expect(
+      sessionDeltaAdvancesCurrentMutationStamp(
+        [makeSession("session-1", { sessionMutationStamp: 11 })],
+        textDelta,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects advancing stamps for unknown sessions", () => {
+    expect(
+      sessionDeltaAdvancesCurrentMutationStamp(
+        [makeSession("session-2", { sessionMutationStamp: 10 })],
+        textDelta,
+      ),
+    ).toBe(false);
+  });
+});
 
 const resolvedInteractionBoundaryCases: {
   label: string;

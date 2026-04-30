@@ -581,6 +581,87 @@ describe("hydration adoption side effects", () => {
     expect(fetchState).not.toHaveBeenCalled();
   });
 
+  it("does not retry when a fully-loaded hydration response is stale due to local SSE skew", async () => {
+    // Regression for the runaway `/api/sessions/{id}` retry loop
+    // observed during active streaming Codex turns. The response
+    // carries `messagesLoaded: true` (the backend has the full
+    // transcript), but the local view has already advanced past
+    // the response's revision / message_count / mutation_stamp
+    // because SSE deltas arrived during the round-trip. The
+    // classifier returns "stale" — the response is older than
+    // local state, so adopting would be a downgrade. Retrying is
+    // futile (the SSE stream is faster than REST, every retry
+    // races and loses the same way), so the retry timer must NOT
+    // arm. See bugs.md "Hydration retry loop can spam persistent
+    // failures" and the inline comment on the `case "stale":` arm
+    // in `useAppLiveState`.
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    // Local view: target session is hydrated (messagesLoaded = true)
+    // with up-to-date metadata (messageCount = 5, mutation stamp 5).
+    const targetSession = makeSession({
+      id: "session-target",
+      messagesLoaded: true,
+      messageCount: 5,
+      sessionMutationStamp: 5,
+    });
+    // The active session is a DIFFERENT session so the hydration
+    // useEffect doesn't claim `session-target`'s `messagesLoaded`
+    // value from `activeSession` (which would short-circuit and
+    // skip the visibleSessionHydrationTargets entry below).
+    const activeSession = makeSession({
+      id: "session-active",
+      messagesLoaded: true,
+      messageCount: 0,
+      sessionMutationStamp: 1,
+    });
+    // Response: fully loaded (`messagesLoaded: true`) but lagging
+    // local — `revision: 3` < `latestStateRevisionRef: 5`,
+    // `messageCount: 3` < `currentSession.messageCount: 5`. Models
+    // the streaming-skew race: SSE deltas advanced local past this
+    // response during the round-trip. Classifier returns "stale"
+    // via the revision-downgrade rejection.
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockResolvedValue({
+        revision: 3,
+        serverInstanceId: "server-a",
+        session: makeSession({
+          id: "session-target",
+          messagesLoaded: true,
+          messageCount: 3,
+          sessionMutationStamp: 3,
+        }),
+      });
+    const params = makeLiveStateParams(activeSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [activeSession, targetSession];
+
+    renderLiveStateHarness(params, () => {}, () => [
+      { id: "session-target", messagesLoaded: false },
+    ]);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+    expect(fetchSession).toHaveBeenCalledWith("session-target");
+
+    // Advance well past every retry-delay tier
+    // (50 / 250 / 1000 / 3000 ms) to prove no retry is scheduled.
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+  });
+
   it("retries only the stale session instead of rerunning every visible hydration target", async () => {
     vi.useFakeTimers();
     vi.stubGlobal(
@@ -779,6 +860,91 @@ describe("classifyFetchedSessionAdoption", () => {
         seenServerInstanceIds: new Set(["server-a"]),
       }),
     ).toBe("stateResync");
+  });
+
+  it("adopts a loaded response when retained text diverged but metadata still matches", () => {
+    expect(
+      classifyFetchedSessionAdoption({
+        responseSession: makeSession({
+          messages: [message],
+          messagesLoaded: true,
+          messageCount: 1,
+          sessionMutationStamp: 2,
+        }),
+        responseRevision: 6,
+        responseServerInstanceId: "server-a",
+        requestContext: makeHydrationRequestContext({
+          revision: 6,
+          sessionMutationStamp: 2,
+        }),
+        currentSession: makeSession({
+          messages: [{ ...message, text: "Corrupted live stream" }],
+          messagesLoaded: true,
+          messageCount: 1,
+          sessionMutationStamp: 2,
+        }),
+        currentRevision: 6,
+        currentServerInstanceId: "server-a",
+        seenServerInstanceIds: new Set(["server-a"]),
+      }),
+    ).toBe("adopted");
+  });
+
+  it("rejects divergent same-metadata hydration after a newer live revision", () => {
+    expect(
+      classifyFetchedSessionAdoption({
+        responseSession: makeSession({
+          messages: [message],
+          messagesLoaded: true,
+          messageCount: 1,
+          sessionMutationStamp: 2,
+        }),
+        responseRevision: 7,
+        responseServerInstanceId: "server-a",
+        requestContext: makeHydrationRequestContext({
+          revision: 6,
+          sessionMutationStamp: 2,
+        }),
+        currentSession: makeSession({
+          messages: [{ ...message, text: "Newer live stream" }],
+          messagesLoaded: true,
+          messageCount: 1,
+          sessionMutationStamp: 2,
+        }),
+        currentRevision: 7,
+        currentServerInstanceId: "server-a",
+        seenServerInstanceIds: new Set(["server-a"]),
+      }),
+    ).toBe("stale");
+  });
+
+  it("allows explicit text-repair hydration after an unrelated newer live revision", () => {
+    expect(
+      classifyFetchedSessionAdoption({
+        responseSession: makeSession({
+          messages: [message],
+          messagesLoaded: true,
+          messageCount: 1,
+          sessionMutationStamp: 2,
+        }),
+        responseRevision: 7,
+        responseServerInstanceId: "server-a",
+        requestContext: makeHydrationRequestContext({
+          allowDivergentTextRepairAfterNewerRevision: true,
+          revision: 6,
+          sessionMutationStamp: 2,
+        }),
+        currentSession: makeSession({
+          messages: [{ ...message, text: "Corrupted gapped live stream" }],
+          messagesLoaded: true,
+          messageCount: 1,
+          sessionMutationStamp: 2,
+        }),
+        currentRevision: 7,
+        currentServerInstanceId: "server-a",
+        seenServerInstanceIds: new Set(["server-a"]),
+      }),
+    ).toBe("adopted");
   });
 
   it("rejects stale lower-revision responses once the session is loaded", () => {

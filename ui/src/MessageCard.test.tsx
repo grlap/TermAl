@@ -145,6 +145,103 @@ describe("MessageCard", () => {
     expect(screen.getByText("Total: 63")).toBeInTheDocument();
   });
 
+  it("routes tilde-fenced streaming assistant text through the pending markdown placeholder", () => {
+    const message: TextMessage = {
+      id: "message-streaming-tilde-fence",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: "~~~ts\nconst answer = 42;",
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        preferStreamingPlainTextRender
+      />,
+    );
+
+    const pendingFragment = container.querySelector(
+      ".markdown-streaming-fragment",
+    );
+    expect(pendingFragment).not.toBeNull();
+    expect(pendingFragment).toHaveTextContent("~~~ts");
+    expect(pendingFragment).toHaveTextContent("const answer = 42;");
+    expect(container.querySelector(".plain-text-copy")).toBeNull();
+  });
+
+  it("routes active streaming pipe tables through the pending markdown placeholder", () => {
+    const message: TextMessage = {
+      id: "message-streaming-table",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: [
+        "Tracked Project Total",
+        "",
+        "| Group | Files | Lines | Size |",
+        "| --- | ---: | ---: | ---: |",
+        "| Backend | 107 | 87,395 | 3.19 MiB |",
+      ].join("\n"),
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        preferStreamingPlainTextRender
+      />,
+    );
+
+    expect(container.querySelector(".plain-text-copy")).toBeNull();
+    expect(container.querySelector(".markdown-table-scroll")).toBeNull();
+    expect(
+      container.querySelector(".markdown-copy")?.querySelector("p")
+        ?.textContent,
+    ).toBe("Tracked Project Total");
+    expect(
+      container.querySelector(".markdown-streaming-fragment")?.textContent,
+    ).toBe(
+      [
+        "| Group | Files | Lines | Size |",
+        "| --- | ---: | ---: | ---: |",
+        "| Backend | 107 | 87,395 | 3.19 MiB |",
+      ].join("\n"),
+    );
+  });
+
+  it("routes active streaming standalone display math through the pending markdown placeholder", () => {
+    const message: TextMessage = {
+      id: "message-streaming-display-math",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: "Equation:\n\n$$\n\\sum_{i=1}^n i",
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        preferStreamingPlainTextRender
+      />,
+    );
+
+    expect(container.querySelector(".plain-text-copy")).toBeNull();
+    expect(container.querySelector(".math.math-display")).toBeNull();
+    expect(
+      container.querySelector(".markdown-copy")?.querySelector("p")
+        ?.textContent,
+    ).toBe("Equation:");
+    expect(
+      container.querySelector(".markdown-streaming-fragment")?.textContent,
+    ).toBe("$$\n\\sum_{i=1}^n i");
+  });
+
   it("uses a plain-text shell for active streaming assistant prose without markdown", () => {
     const message: TextMessage = {
       id: "message-streaming-plain",

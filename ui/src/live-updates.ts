@@ -113,6 +113,36 @@ function resolveSessionMutationStamp(
   return sessionMutationStamp ?? session.sessionMutationStamp ?? null;
 }
 
+export function sessionDeltaAdvancesCurrentMutationStamp(
+  sessions: readonly Session[],
+  delta: SessionDeltaEvent,
+) {
+  if (!("sessionMutationStamp" in delta)) {
+    return false;
+  }
+
+  const nextStamp = delta.sessionMutationStamp;
+  if (typeof nextStamp !== "number" || !Number.isSafeInteger(nextStamp)) {
+    return false;
+  }
+
+  const session = sessions.find((entry) => entry.id === delta.sessionId);
+  if (!session) {
+    return false;
+  }
+
+  const currentStamp = session?.sessionMutationStamp;
+  if (currentStamp === null || currentStamp === undefined) {
+    return true;
+  }
+
+  return (
+    typeof currentStamp === "number" &&
+    Number.isSafeInteger(currentStamp) &&
+    nextStamp > currentStamp
+  );
+}
+
 function isValidMessageIndex(messageIndex: number) {
   return Number.isSafeInteger(messageIndex) && messageIndex >= 0;
 }

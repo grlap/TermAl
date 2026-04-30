@@ -9,15 +9,22 @@
 // file perform the dedup and finalize pipeline:
 //
 // - `next_codex_delta_suffix` — given the accumulated text so far
-//   and an incoming delta, return only the portion that is new (the
-//   non-overlapping suffix), using `longest_codex_delta_overlap`
-//   to find the longest prefix-of-incoming that matches a
-//   suffix-of-existing at UTF-8 char boundaries.
+//   and an incoming delta, return only the portion that is new.
+//   Handles three unambiguous cases (exact-duplicate, cumulative
+//   `incoming.starts_with(existing)`, suffix-of-existing
+//   `existing.ends_with(incoming)`) and falls back to verbatim append
+//   for everything else. See the function-level comment for why
+//   partial-overlap detection is intentionally NOT applied — earlier
+//   versions of this file included a `longest_codex_delta_overlap`
+//   heuristic that proved unsound for repetitive content (Markdown
+//   tables in particular) and is reconciled by the canonical
+//   `agentMessage` event below instead.
 // - `next_completed_codex_text_update` — runs at `agentMessage`
 //   completion time: reconciles the final text against what we
 //   already streamed, returning `NoChange` / `Append(suffix)` /
 //   `Replace(full)` so the recorder performs the minimum work to
-//   land on the canonical value.
+//   land on the canonical value. This is the cleanup that absorbs
+//   any duplication produced by the verbatim-append fallback above.
 // - `record_codex_agent_message_delta` — wraps the dedup into a
 //   recorder append, finalizing any prior streaming text when the
 //   item id changes.
@@ -233,7 +240,7 @@ enum CompletedTextUpdate {
 
 /// Reconciles the final `incoming` agent-message text against whatever
 /// was already streamed in `existing`: returns `NoChange` when the
-/// text is already fully seen, `Append` when the incoming value only
+/// text is already exactly seen, `Append` when the incoming value only
 /// adds a suffix, and `Replace` when the text diverged and must be
 /// rewritten in full.
 fn next_completed_codex_text_update(existing: &mut String, incoming: &str) -> CompletedTextUpdate {
@@ -263,10 +270,6 @@ fn next_completed_codex_text_update(existing: &mut String, incoming: &str) -> Co
         };
     }
 
-    if existing.ends_with(incoming) {
-        return CompletedTextUpdate::NoChange;
-    }
-
     existing.clear();
     existing.push_str(incoming);
     CompletedTextUpdate::Replace(incoming.to_owned())
@@ -274,9 +277,50 @@ fn next_completed_codex_text_update(existing: &mut String, incoming: &str) -> Co
 
 /// Dedups a streaming delta: returns the portion of `incoming` not
 /// already present in `existing`, advancing `existing` by the new
-/// content. Handles exact-duplicate chunks, suffix-of-existing chunks,
-/// and partial-overlap chunks (so retransmitted prefixes do not
-/// duplicate on the wire).
+/// content.
+///
+/// Three unambiguous cases are handled exactly:
+///   1. `incoming == existing` — pure exact retransmission.
+///   2. `incoming.starts_with(existing)` — cumulative delta (the
+///      agent re-sent the whole message-to-date with new bytes
+///      appended). The agent-intent here is unambiguous: every byte
+///      beyond `existing.len()` is new content.
+///   3. `existing.ends_with(incoming)` — `incoming` is wholly a
+///      suffix of what we already have (a small re-send of the tail).
+///
+/// All other shapes — including chunks that share a prefix with
+/// `existing`'s suffix without `incoming.starts_with(existing)` — are
+/// **appended verbatim**, even though that means a true partial-
+/// overlap retransmission will duplicate the overlap region during
+/// streaming. The reasoning:
+///
+///   - Without protocol-level metadata (sequence numbers, byte
+///     offsets), we cannot reliably distinguish "agent re-sent the
+///     last N bytes" from "agent's new chunk happens to start with
+///     bytes coincidentally matching the existing tail". An overlap-
+///     length heuristic is fundamentally unsound: repetitive content
+///     (Markdown tables with `|`-bounded rows, fenced code blocks
+///     with repeated indent prefixes, prose with repeated words like
+///     `Backend prod` on consecutive rows) consistently produces
+///     long coincidental matches that look identical to retransmissions.
+///   - When the agent emits the final `agentMessage` event,
+///     `next_completed_codex_text_update` reconciles streamed state
+///     against the canonical text. Streamed duplication produced by
+///     this function is wiped out and replaced (the divergence falls
+///     through to the `Replace` branch) once the turn settles, and
+///     reload-from-storage shows the canonical text.
+///   - Duplication during streaming is a strictly less-bad failure
+///     mode than dropping new characters: the user sees a few bytes
+///     repeated, then a clean re-render at turn end. Dropped bytes
+///     break GFM table recognition, fenced-code block boundaries,
+///     and visibly corrupt the assistant's output for the entire
+///     streaming window.
+///
+/// Earlier iterations of this function included a fourth branch that
+/// applied `longest_codex_delta_overlap` to detect partial-overlap
+/// retransmissions. That branch was the dominant source of streamed-
+/// transcript corruption when the agent emitted Markdown tables and
+/// other repetitive content, and is intentionally NOT reinstated.
 fn next_codex_delta_suffix(existing: &mut String, incoming: &str) -> Option<String> {
     if incoming.is_empty() {
         return None;
@@ -308,26 +352,8 @@ fn next_codex_delta_suffix(existing: &mut String, incoming: &str) -> Option<Stri
         return None;
     }
 
-    let overlap = longest_codex_delta_overlap(existing, incoming);
-    let suffix = incoming[overlap..].to_owned();
-    existing.push_str(&suffix);
-    if suffix.is_empty() {
-        None
-    } else {
-        Some(suffix)
-    }
-}
-
-/// Finds the longest prefix of `incoming` that matches a suffix of
-/// `existing`, walking down from the largest possible overlap at char
-/// boundaries for UTF-8 safety.
-fn longest_codex_delta_overlap(existing: &str, incoming: &str) -> usize {
-    let max_overlap = existing.len().min(incoming.len());
-    for overlap in (1..=max_overlap).rev() {
-        if incoming.is_char_boundary(overlap) && existing.ends_with(&incoming[..overlap]) {
-            return overlap;
-        }
-    }
-
-    0
+    // Verbatim append. See the function-level comment above for why
+    // partial-overlap detection is intentionally NOT applied here.
+    existing.push_str(incoming);
+    Some(incoming.to_owned())
 }

@@ -34,11 +34,6 @@
 //     it via DOM); this helper returns just the fenced body:
 //     ```` ```mermaid ```` for mermaid, `$$…$$` for math, the raw
 //     body for markdown regions.
-//   - `composeRenderedDiffMarkdown` — legacy whole-document
-//     assembler retained for tests and any external callers; now
-//     a thin `composeRenderedDiffRegionMarkdown` wrapper that
-//     prepends the `**Lines N–M**` header inline. The
-//     `RenderedDiffView` itself does not call this any more.
 //
 // What this file does NOT own:
 //   - The Markdown diff view itself (`MarkdownDiffView`), the
@@ -47,16 +42,7 @@
 //   - The source-panel preview cluster
 //     (`RendererPreviewPane` / `composeRendererPreviewMarkdown`
 //     / `describeRenderableKinds`) — lives in
-//     `./source-renderer-preview.tsx`. The two sibling helpers
-//     (`composeRenderedDiffMarkdown` here vs.
-//     `composeRendererPreviewMarkdown` there) are currently
-//     near-identical: both produce the same `**Lines N-M**`
-//     header followed by a fenced body and join regions with
-//     `"\n\n"`. They were extracted as distinct consumers
-//     because the source-panel and diff-panel preview chrome
-//     differ (preview-pane vs. full diff shell with a Patch-only
-//     disclaimer), and consolidating into a shared helper is a
-//     future cleanup pass, not a pure code move.
+//     `./source-renderer-preview.tsx`.
 //
 // Split out of `ui/src/panels/DiffPanel.tsx`. Same completeness
 // strings ("full" / "patch"), same "Patch-only rendering"
@@ -269,7 +255,11 @@ export function RenderedDiffView({
               <DiffNavArrow direction="down" />
             </button>
           </div>
-          <span className="source-editor-statusbar-item source-editor-statusbar-state">
+          <span
+            className="source-editor-statusbar-item source-editor-statusbar-state"
+            aria-live="polite"
+            aria-atomic="true"
+          >
             {regionCount === 0
               ? "No rendered regions"
               : `Region ${currentRegionIndex + 1} of ${regionCount}`}
@@ -301,24 +291,4 @@ export function composeRenderedDiffRegionMarkdown(
     return `$$\n${region.displayText.replace(/\s+$/, "")}\n$$`;
   }
   return region.displayText;
-}
-
-/**
- * Whole-document synthetic Markdown assembler. Retained for tests
- * and any external callers; the `RenderedDiffView` itself now
- * renders per-region wrappers and does NOT use this helper.
- */
-export function composeRenderedDiffMarkdown(
-  regions: SourceRenderableRegion[],
-): string {
-  if (regions.length === 0) {
-    return "";
-  }
-  return regions
-    .map((region) => {
-      const header = `**Lines ${region.sourceStartLine}–${region.sourceEndLine}**`;
-      const body = composeRenderedDiffRegionMarkdown(region);
-      return `${header}\n\n${body}`;
-    })
-    .join("\n\n");
 }

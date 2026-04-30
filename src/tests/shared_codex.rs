@@ -2544,8 +2544,136 @@ fn shared_codex_app_server_agent_message_completed_after_turn_completed_is_recor
     ));
 }
 
+// Pins that a streamed-text correction delivered after turn/completed keeps the
+// original assistant bubble instead of requiring browser refresh to load the
+// canonical persisted transcript.
+#[test]
+fn shared_codex_late_final_agent_message_replaces_streamed_text_after_turn_completed() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-late-final-replaces-stream");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-finished"
+            }
+        }
+    });
+    let corrupted_delta = json!({
+        "method": "codex/event/agent_message_content_delta",
+        "params": {
+            "conversationId": "conversation-123",
+            "id": "turn-finished",
+            "msg": {
+                "delta": "| Group || Lines Size ||---|---|---|---| Backend | 107 |,395 | 3.19 Mi |",
+                "item_id": "msg-final",
+                "thread_id": "conversation-123",
+                "turn_id": "turn-finished",
+                "type": "agent_message_content_delta"
+            }
+        }
+    });
+    let turn_completed = json!({
+        "method": "turn/completed",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": {
+                "id": "turn-finished",
+                "error": null
+            }
+        }
+    });
+    let canonical_final = "\
+| Group | Files | Lines | Size |
+|---|---:|---:|---:|
+| Backend | 107 | 87,395 | 3.19 MiB |
+";
+    let late_final_message = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "conversationId": "conversation-123",
+            "id": "turn-finished",
+            "msg": {
+                "message": canonical_final,
+                "phase": "final_answer",
+                "type": "agent_message"
+            }
+        }
+    });
+
+    for message in [
+        &turn_started,
+        &corrupted_delta,
+        &turn_completed,
+        &late_final_message,
+    ] {
+        handle_shared_codex_app_server_message(
+            message,
+            &state,
+            &runtime.runtime_id,
+            &pending_requests,
+            &runtime.sessions,
+            &runtime.thread_sessions,
+            &mpsc::channel::<CodexRuntimeCommand>().0,
+        )
+        .unwrap();
+    }
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. }) if text == canonical_final.trim()
+    ));
+}
+
 // Pins that a non-agentMessage item/completed (here commandExecution)
-// arriving after turn/completed is ignored — only final agent messages
+// arriving after turn/completed is ignored -- only final agent messages
 // earn the grace-period window, not side-channel items.
 // Guards against late command-execution output polluting a completed turn.
 #[test]

@@ -2,7 +2,6 @@ import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   RenderedDiffView,
-  composeRenderedDiffMarkdown,
   composeRenderedDiffRegionMarkdown,
 } from "./rendered-diff-view";
 import type { SourceRenderableRegion } from "../source-renderers";
@@ -93,7 +92,10 @@ describe("RenderedDiffView", () => {
       />,
     );
 
-    expect(screen.getByText("Region 1 of 3")).toBeInTheDocument();
+    const regionCounter = screen.getByText("Region 1 of 3");
+    expect(regionCounter).toBeInTheDocument();
+    expect(regionCounter).toHaveAttribute("aria-live", "polite");
+    expect(regionCounter).toHaveAttribute("aria-atomic", "true");
 
     // Stub scrollIntoView so the test can record nav intent without a
     // real layout. Apply to every region so wrap-around still works.
@@ -198,33 +200,5 @@ describe("composeRenderedDiffRegionMarkdown", () => {
     expect(composeRenderedDiffRegionMarkdown(region)).toBe(
       "## Heading\n\nBody.",
     );
-  });
-});
-
-describe("composeRenderedDiffMarkdown (legacy whole-document assembler)", () => {
-  it("emits the `**Lines N–M**` header before each region's body", () => {
-    const result = composeRenderedDiffMarkdown([
-      makeRegion({
-        renderer: "mermaid",
-        sourceStartLine: 5,
-        sourceEndLine: 9,
-        displayText: "flowchart TD",
-      }),
-      makeRegion({
-        id: "region-2",
-        renderer: "markdown",
-        sourceStartLine: 12,
-        sourceEndLine: 14,
-        displayText: "## Heading",
-      }),
-    ]);
-    expect(result).toContain("**Lines 5–9**");
-    expect(result).toContain("**Lines 12–14**");
-    expect(result).toContain("```mermaid");
-    expect(result).toContain("## Heading");
-  });
-
-  it("returns an empty string for an empty region list", () => {
-    expect(composeRenderedDiffMarkdown([])).toBe("");
   });
 });

@@ -2824,15 +2824,12 @@ describe("App live state — reconnect", () => {
     }
   });
 
-  it("recreates the EventSource when the browser closes it permanently after a non-200 response", async () => {
+  it("recreates the EventSource after an error when the browser does not reopen quickly", async () => {
     // Scenario: the dev-mode Vite proxy returns 502 during the brief
-    // backend-restart gap, OR the browser otherwise marks the EventSource
-    // permanently CLOSED (readyState === 2). The WHATWG spec prohibits
-    // auto-reconnect after a non-200 response, so the EventSource is dead
-    // and the user has to hard-refresh — unless the client detects the
-    // CLOSED state and constructs a fresh EventSource itself. See bugs.md
-    // "Browser auto-reconnect gives up after a non-200 SSE response and
-    // the client gets stuck".
+    // backend-restart gap, or the browser leaves EventSource in CONNECTING
+    // without reliably reopening. The user has to hard-refresh unless the
+    // client schedules its own EventSource recreation and cancels it only if
+    // `onopen` fires before the short backoff elapses.
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
@@ -2882,20 +2879,19 @@ describe("App live state — reconnect", () => {
         });
       });
 
-      // Mark the EventSource as permanently closed (mirrors the browser
-      // behavior after a non-200 reconnect attempt) and dispatch the
-      // matching error.
-      initialEventSource.readyState = 2;
+      // Keep the EventSource in CONNECTING. This used to wait for the 15s
+      // health watchdog instead of recreating promptly from the error path.
+      initialEventSource.readyState = 0;
       act(() => {
         initialEventSource.dispatchError();
       });
 
-      // The recovery timer fires after a short backoff and re-runs the
-      // transport effect, which constructs a fresh EventSource. Without
-      // this fix, the EventSourceMock count would stay at 1 forever and
-      // the user would have to hard-refresh.
+      // The shortened health watchdog notices the stream stayed non-OPEN and
+      // re-runs the transport effect, which constructs a fresh EventSource.
+      // Without this fix, the user waits through the old long watchdog window
+      // and can conclude the browser needs a hard refresh.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(750);
+        await vi.advanceTimersByTimeAsync(11000);
       });
 
       expect(EventSourceMock.instances.length).toBeGreaterThanOrEqual(2);

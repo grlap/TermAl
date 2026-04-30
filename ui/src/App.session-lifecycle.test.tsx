@@ -700,9 +700,9 @@ describe("App session lifecycle", () => {
         // contract: the response renders without Ctrl+Shift+R.
         await waitFor(() => {
           expect(
-            screen.getAllByText("Recovered through the new EventSource.")
-              .length,
-          ).toBeGreaterThan(0);
+            document.querySelector(".message-card.bubble-assistant")
+              ?.textContent,
+          ).toContain("Recovered through the new EventSource.");
         });
       } finally {
         scrollIntoViewSpy.mockRestore();

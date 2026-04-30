@@ -279,6 +279,29 @@ describe("App live state - delta-gap core", () => {
     vi.unstubAllGlobals();
   });
 
+  async function openSessionByName(name: string) {
+    await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+    const sessionList = document.querySelector(".session-list");
+    if (!(sessionList instanceof HTMLDivElement)) {
+      throw new Error("Session list not found");
+    }
+    const sessionRowButton =
+      within(sessionList).getByText(name).closest("button");
+    if (!sessionRowButton) {
+      throw new Error("Session row button not found");
+    }
+    await clickAndSettle(sessionRowButton);
+  }
+
+  function expectRenderedMarkdownTableContains(expectedCells: string[]) {
+    const table = document.querySelector(".markdown-table-scroll table");
+    expect(table).not.toBeNull();
+    const tableText = table?.textContent ?? "";
+    for (const cell of expectedCells) {
+      expect(tableText).toContain(cell);
+    }
+  }
+
   it("coalesces live session delta renders through one animation frame", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
@@ -770,6 +793,559 @@ describe("App live state - delta-gap core", () => {
         await settleAsyncUi();
 
         expect(screen.getAllByText("Hello world").length).toBeGreaterThan(0);
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("applies an advancing session text delta across an unrelated global revision gap", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const initialSession = makeSession("session-1", {
+        name: "Codex Session",
+        status: "active",
+        preview: "Source-F",
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 10,
+        messages: [
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Source-F",
+          },
+        ],
+      });
+      const repairedSession = makeSession("session-1", {
+        ...initialSession,
+        preview: "Source-Focused",
+        sessionMutationStamp: 12,
+        messages: [
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Source-Focused",
+          },
+        ],
+      });
+      const stateResync = createDeferred<Response>();
+      const sessionHydration = createDeferred<Response>();
+      let stateRequestCount = 0;
+      let sessionHydrationRequestCount = 0;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          stateRequestCount += 1;
+          if (stateRequestCount === 1) {
+            return jsonResponse(
+              makeStateResponse({
+                revision: 1,
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [initialSession],
+              }),
+            );
+          }
+          return stateResync.promise;
+        }
+        if (requestUrl.pathname === "/api/sessions/session-1") {
+          sessionHydrationRequestCount += 1;
+          return sessionHydration.promise;
+        }
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/tmp",
+            upstream: "origin/main",
+            workdir: "/tmp",
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [initialSession],
+          }),
+        );
+        await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        const sessionRowButton =
+          within(sessionList).getByText("Codex Session").closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+        await clickAndSettle(sessionRowButton);
+        expect(screen.getAllByText("Source-F").length).toBeGreaterThan(0);
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "codexUpdated",
+            revision: 2,
+            codex: { notices: [] },
+          });
+          eventSource.dispatchNamedEvent("delta", {
+            type: "textDelta",
+            revision: 4,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 0,
+            messageCount: 1,
+            delta: "ocused",
+            preview: "Source-Focused",
+            sessionMutationStamp: 12,
+          });
+          await flushUiWork();
+        });
+
+        expect(screen.getAllByText("Source-Focused").length).toBeGreaterThan(0);
+        await waitFor(() => {
+          expect(sessionHydrationRequestCount).toBe(1);
+        });
+
+        await act(async () => {
+          stateResync.resolve(
+            jsonResponse(
+              makeStateResponse({
+                revision: 4,
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [repairedSession],
+              }),
+            ),
+          );
+          sessionHydration.resolve(
+            jsonResponse({
+              revision: 4,
+              serverInstanceId: "test-instance",
+              session: repairedSession,
+            }),
+          );
+          await flushUiWork();
+        });
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("keeps streamed markdown table chunks intact across repeated revision gaps", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const tableStart = [
+        "Tracked Project Total",
+        "",
+        "| Group | Files | Lines | Size |",
+      ].join("\n");
+      const separatorAndBackend =
+        "\n| --- | ---: | ---: | ---: |\n| Backend | 107 | 87,395 | 3.19 MiB |";
+      const frontend =
+        "\n| Frontend | 280 | 173,265 | 5.52 MiB |";
+      const total =
+        "\n| Total | 452 | 278,043 | 9.55 MiB |\n\n";
+      const finalTable = `${tableStart}${separatorAndBackend}${frontend}${total}`;
+      const initialSession = makeSession("session-1", {
+        name: "Codex Session",
+        status: "active",
+        preview: "Tracked Project Total",
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 20,
+        messages: [
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: tableStart,
+          },
+        ],
+      });
+      const finalSession = makeSession("session-1", {
+        ...initialSession,
+        preview: "Tracked Project Total",
+        sessionMutationStamp: 26,
+        messages: [
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: finalTable,
+          },
+        ],
+      });
+      const stateResync = createDeferred<Response>();
+      const sessionHydration = createDeferred<Response>();
+      let stateRequestCount = 0;
+      let sessionHydrationRequestCount = 0;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          stateRequestCount += 1;
+          if (stateRequestCount === 1) {
+            return jsonResponse(
+              makeStateResponse({
+                revision: 1,
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [initialSession],
+              }),
+            );
+          }
+          return stateResync.promise;
+        }
+        if (requestUrl.pathname === "/api/sessions/session-1") {
+          sessionHydrationRequestCount += 1;
+          return sessionHydration.promise;
+        }
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/tmp",
+            upstream: "origin/main",
+            workdir: "/tmp",
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [initialSession],
+          }),
+        );
+        await openSessionByName("Codex Session");
+        expect(screen.getAllByText("Tracked Project Total").length).toBeGreaterThan(
+          0,
+        );
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "codexUpdated",
+            revision: 2,
+            codex: { notices: [] },
+          });
+          eventSource.dispatchNamedEvent("delta", {
+            type: "textDelta",
+            revision: 4,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 0,
+            messageCount: 1,
+            delta: separatorAndBackend,
+            preview: "Tracked Project Total",
+            sessionMutationStamp: 22,
+          });
+          eventSource.dispatchNamedEvent("delta", {
+            type: "codexUpdated",
+            revision: 5,
+            codex: { notices: [] },
+          });
+          eventSource.dispatchNamedEvent("delta", {
+            type: "textDelta",
+            revision: 7,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 0,
+            messageCount: 1,
+            delta: frontend,
+            preview: "Tracked Project Total",
+            sessionMutationStamp: 24,
+          });
+          eventSource.dispatchNamedEvent("delta", {
+            type: "codexUpdated",
+            revision: 8,
+            codex: { notices: [] },
+          });
+          eventSource.dispatchNamedEvent("delta", {
+            type: "textDelta",
+            revision: 10,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 0,
+            messageCount: 1,
+            delta: total,
+            preview: "Tracked Project Total",
+            sessionMutationStamp: 26,
+          });
+          await flushUiWork();
+        });
+
+        await waitFor(() => {
+          expectRenderedMarkdownTableContains([
+            "Backend",
+            "107",
+            "87,395",
+            "3.19 MiB",
+            "Frontend",
+            "280",
+            "173,265",
+            "5.52 MiB",
+            "Total",
+            "452",
+            "278,043",
+            "9.55 MiB",
+          ]);
+        });
+        await waitFor(() => {
+          expect(sessionHydrationRequestCount).toBe(1);
+        });
+
+        await act(async () => {
+          stateResync.resolve(
+            jsonResponse(
+              makeStateResponse({
+                revision: 10,
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [finalSession],
+              }),
+            ),
+          );
+          sessionHydration.resolve(
+            jsonResponse({
+              revision: 10,
+              serverInstanceId: "test-instance",
+              session: finalSession,
+            }),
+          );
+          await flushUiWork();
+        });
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("replaces a corrupted streaming markdown table with final authoritative text across a revision gap", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const finalTable = [
+        "Tracked Project Total",
+        "",
+        "| Group | Files | Lines | Size |",
+        "| --- | ---: | ---: | ---: |",
+        "| Backend | 107 | 87,395 | 3.19 MiB |",
+        "| Frontend | 280 | 173,265 | 5.52 MiB |",
+        "| Total | 452 | 278,043 | 9.55 MiB |",
+        "",
+      ].join("\n");
+      const corruptedTable =
+        "Tracked Project Total\n\n| Group Files | Lines | Size ||---|---:|---:|---:|| Backend107 | 87,395 | 3.19B |";
+      const initialSession = makeSession("session-1", {
+        name: "Codex Session",
+        status: "active",
+        preview: "Tracked Project Total",
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 30,
+        messages: [
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: corruptedTable,
+          },
+        ],
+      });
+      const finalSession = makeSession("session-1", {
+        ...initialSession,
+        sessionMutationStamp: 32,
+        messages: [
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: finalTable,
+          },
+        ],
+      });
+      const stateResync = createDeferred<Response>();
+      let stateRequestCount = 0;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          stateRequestCount += 1;
+          if (stateRequestCount === 1) {
+            return jsonResponse(
+              makeStateResponse({
+                revision: 1,
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [initialSession],
+              }),
+            );
+          }
+          return stateResync.promise;
+        }
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/tmp",
+            upstream: "origin/main",
+            workdir: "/tmp",
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [initialSession],
+          }),
+        );
+        await openSessionByName("Codex Session");
+        expect(document.body.textContent).toContain("Backend107");
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "codexUpdated",
+            revision: 2,
+            codex: { notices: [] },
+          });
+          eventSource.dispatchNamedEvent("delta", {
+            type: "textReplace",
+            revision: 4,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 0,
+            messageCount: 1,
+            text: finalTable,
+            preview: "Tracked Project Total",
+            sessionMutationStamp: 32,
+          });
+          await flushUiWork();
+        });
+
+        await waitFor(() => {
+          expectRenderedMarkdownTableContains([
+            "Backend",
+            "107",
+            "87,395",
+            "3.19 MiB",
+            "Frontend",
+            "280",
+            "173,265",
+            "5.52 MiB",
+            "Total",
+            "452",
+            "278,043",
+            "9.55 MiB",
+          ]);
+        });
+        expect(document.body.textContent).not.toContain("3.19B");
+
+        await act(async () => {
+          stateResync.resolve(
+            jsonResponse(
+              makeStateResponse({
+                revision: 4,
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [finalSession],
+              }),
+            ),
+          );
+          await flushUiWork();
+        });
       } finally {
         scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);

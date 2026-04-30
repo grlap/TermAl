@@ -312,7 +312,12 @@ fn handle_shared_codex_app_server_notification(
             *turn_started = false;
             *pending_turn_start_request_id = None;
             flush_pending_codex_subagent_results(turn_state, recorder)?;
-            recorder.finish_streaming_text()?;
+            // Keep the streaming text message id alive through the completed-turn
+            // grace window. Codex can emit the canonical final agent message after
+            // turn/completed; if the streamed chunks were deduped incorrectly or
+            // otherwise diverged, that late final must replace the existing bubble
+            // in place rather than appending a second message. The cleanup worker
+            // or the next turn/started event clears this recorder state.
             state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
             if let Some(completed_turn_id) = completed_turn_id.as_deref() {
                 schedule_shared_codex_completed_turn_cleanup(

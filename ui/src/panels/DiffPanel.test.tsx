@@ -712,8 +712,12 @@ describe("DiffPanel", () => {
     expect(blocks[0]?.getAttribute("data-markdown-diff-change-index")).toBe("0");
     expect(blocks[1]?.getAttribute("data-markdown-diff-change-index")).toBe("1");
 
-    // Counter starts at "Change 1 of 2".
-    expect(screen.getByText("Change 1 of 2")).toBeInTheDocument();
+    // Counter starts at "Change 1 of 2" and is exposed as a polite
+    // live region so assistive tech announces navigation updates.
+    const changeCounter = screen.getByText("Change 1 of 2");
+    expect(changeCounter).toBeInTheDocument();
+    expect(changeCounter).toHaveAttribute("aria-live", "polite");
+    expect(changeCounter).toHaveAttribute("aria-atomic", "true");
 
     // Stub scrollIntoView so the test environment can record nav
     // intent without depending on a real layout.

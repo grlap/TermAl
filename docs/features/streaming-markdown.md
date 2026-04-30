@@ -123,7 +123,9 @@ detects:
 - Headings (`# ` … `###### `)
 - Lists (unordered, ordered)
 - Blockquotes
-- Fenced code blocks
+- Fenced code blocks (backtick and tilde fences)
+- Pipe-table rows (`| Col |`)
+- Standalone display-math openers (`$$`)
 - Inline code spans
 - Bold (`**...**`, `__...__`)
 - Markdown links (`[text](url)`)
@@ -132,14 +134,11 @@ If any of these match, the path switches to
 `<MarkdownContent isStreaming />`. Otherwise it stays on the plain
 `<p>` shell, which has the lowest possible streaming cost.
 
-**Known limitation:** the current gate does not recognize pipe-table
-starts (`| Col |`) or standalone `$$` math openers as renderable
-Markdown structure. A stream that begins with a bare table or a math
-block stays on the plain-text shell until some other Markdown
-construct (heading, list, code span, …) lands on the same message,
-at which point it flips. Tracked in
-[`docs/bugs.md`](../bugs.md) as "Streaming table/math deferral is
-bypassed by the production assistant-message gate".
+The session pane only enables this fast path for the active turn's last
+transcript item when that item is assistant text. Older assistant messages
+stay on the settled Markdown path while a later user prompt, approval card,
+or tool request is active, so completed tables do not briefly fall back to
+streaming placeholders during the next turn.
 
 ## Test Coverage
 
@@ -161,6 +160,11 @@ bypassed by the production assistant-message gate".
   paragraph + partial table renders both halves; settled callers
   without `isStreaming` are unchanged; unclosed fenced code blocks
   defer too.
+- `ui/src/MessageCard.test.tsx` â€” production-path active assistant
+  tests for the streaming gate: tilde fences, pipe tables, and
+  standalone display math all route through `<MarkdownContent
+  isStreaming />` and reach the pending-fragment path instead of
+  the plain-text shell.
 
 ## Files
 
@@ -172,6 +176,7 @@ bypassed by the production assistant-message gate".
   (`hasRenderableStreamingMarkdown`,
   `StreamingAssistantTextShell`).
 - `ui/src/MarkdownContent.test.tsx` — integration tests.
+- `ui/src/MessageCard.test.tsx` — production-path gate tests.
 - `ui/src/styles.css` — `.markdown-streaming-fragment` styling.
 
 ## Related

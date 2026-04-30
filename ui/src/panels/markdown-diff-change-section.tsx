@@ -68,9 +68,9 @@
 //   - Segment normalisation (`normalizeEditedMarkdownSection`) —
 //     lives in `./markdown-diff-segments`.
 //   - Pointer / clipboard geometry helpers (`setDropCaretFromPoint`,
-//     `getSelectionRangeInsideSection`, `rangeCoversNodeContents`,
-//     `serializeSelectedMarkdown`) — pure DOM/Range utilities live
-//     in `./markdown-diff-clipboard-pointer`.
+//     `getSelectionRangeInsideSection`, `serializeSelectedMarkdown`)
+//     — pure DOM/Range utilities live in
+//     `./markdown-diff-clipboard-pointer`.
 //
 // Split out of `ui/src/panels/DiffPanel.tsx`. Same class names,
 // same keyboard bindings, same data-attribute surface, same

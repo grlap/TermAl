@@ -79,7 +79,9 @@ import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
   LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,
   pruneLiveTransportActivitySessions,
+  sessionDeltaAdvancesCurrentMutationStamp,
   sessionHasPotentiallyStaleTransport,
+  type SessionDeltaEvent,
 } from "./live-updates";
 import {
   areRemoteConfigsEqual,
@@ -189,6 +191,10 @@ export type AdoptStateOptions = {
   openSessionId?: string;
   paneId?: string | null;
 };
+
+function isSessionDeltaEvent(delta: DeltaEvent): delta is SessionDeltaEvent {
+  return "sessionId" in delta && typeof delta.sessionId === "string";
+}
 
 export type AdoptSessionsOptions = {
   openSessionId?: string;
@@ -532,6 +538,9 @@ export function useAppLiveState(
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
   const hydratedSessionIdsRef = useRef<Set<string>>(new Set());
   const hydrationMismatchSessionIdsRef = useRef<Set<string>>(new Set());
+  const queuedTextRepairHydrationSessionIdsRef = useRef<Set<string>>(
+    new Set(),
+  );
   const lastFullStateServerInstanceIdRef = useRef<string | null>(
     lastSeenServerInstanceIdRef.current,
   );
@@ -973,6 +982,11 @@ export function useAppLiveState(
           availableSessionIds.has(sessionId),
         ),
       );
+      queuedTextRepairHydrationSessionIdsRef.current = new Set(
+        [...queuedTextRepairHydrationSessionIdsRef.current].filter(
+          (sessionId) => availableSessionIds.has(sessionId),
+        ),
+      );
       for (const sessionId of hydrationRetryTimersRef.current.keys()) {
         if (!availableSessionIds.has(sessionId)) {
           clearHydrationRetry(sessionId);
@@ -1114,6 +1128,7 @@ export function useAppLiveState(
 
   function captureHydrationRequestContext(
     sessionId: string,
+    options?: { allowDivergentTextRepairAfterNewerRevision?: boolean },
   ): SessionHydrationRequestContext | null {
     const session = sessionsRef.current.find((entry) => entry.id === sessionId);
     if (!session) {
@@ -1121,6 +1136,8 @@ export function useAppLiveState(
     }
 
     return {
+      allowDivergentTextRepairAfterNewerRevision:
+        options?.allowDivergentTextRepairAfterNewerRevision === true,
       messageCount: getHydrationMessageCount(session),
       revision: latestStateRevisionRef.current,
       serverInstanceId: lastSeenServerInstanceIdRef.current,
@@ -1181,13 +1198,19 @@ export function useAppLiveState(
     return "adopted";
   }
 
-  function startSessionHydration(sessionId: string) {
+  function startSessionHydration(
+    sessionId: string,
+    options?: { allowDivergentTextRepairAfterNewerRevision?: boolean },
+  ) {
     if (hydratingSessionIdsRef.current.has(sessionId)) {
+      if (options?.allowDivergentTextRepairAfterNewerRevision === true) {
+        queuedTextRepairHydrationSessionIdsRef.current.add(sessionId);
+      }
       return;
     }
 
     hydratingSessionIdsRef.current.add(sessionId);
-    const requestContext = captureHydrationRequestContext(sessionId);
+    const requestContext = captureHydrationRequestContext(sessionId, options);
     if (!requestContext) {
       hydratingSessionIdsRef.current.delete(sessionId);
       return;
@@ -1229,9 +1252,59 @@ export function useAppLiveState(
             requestActionRecoveryResyncRef.current();
             shouldRetryHydration = true;
             break;
-          case "stale":
-            shouldRetryHydration = true;
+          case "stale": {
+            // The classifier returns `"stale"` for several distinct
+            // reasons (see `classifyFetchedSessionAdoption`):
+            //   (a) the response is metadata-only
+            //       (`responseSession.messagesLoaded !== true`) —
+            //       the backend has not hydrated the full transcript
+            //       yet (typical for unloaded remote-proxy sessions
+            //       awaiting upstream fetch). Retrying is useful:
+            //       the backend will eventually load and the next
+            //       fetch will adopt.
+            //   (b) the response is fully loaded but local is also
+            //       fully loaded AND has advanced past the response
+            //       (revision / message_count / mutation_stamp
+            //       skew). SSE deltas arrived during the
+            //       `/api/sessions/{id}` round-trip and bumped local
+            //       state past what the response captured. Retrying
+            //       is FUTILE: the SSE stream is faster than the
+            //       REST round-trip, so the next fetch will race the
+            //       same way and lose again, producing an infinite
+            //       refetch loop during any active streaming turn
+            //       whose delta cadence is faster than the round-
+            //       trip (observed in practice: hundreds of MB of
+            //       `/api/sessions/{id}` traffic during a single
+            //       Codex table-printing turn). Local state is at
+            //       least as recent as the response anyway —
+            //       nothing to gain.
+            //   (c) local is summary-only (`messagesLoaded === false`)
+            //       and the response IS fully loaded but the
+            //       classifier rejected adoption (e.g., concurrent
+            //       delta bumped local metadata past the response's
+            //       snapshot, so `requestStillMatches` /
+            //       `responseMatches` failed). Retrying IS useful:
+            //       the next fetch should land the canonical
+            //       transcript that the metadata-only delta could
+            //       not provide.
+            //
+            // Skip retry only for case (b): both local AND response
+            // hydrated. Cases (a) and (c) keep the existing retry
+            // behaviour. See bugs.md "Hydration retry loop can spam
+            // persistent failures".
+            const localSession = sessionsRef.current.find(
+              (entry) => entry.id === sessionId,
+            );
+            const localFullyHydrated = localSession?.messagesLoaded === true;
+            const responseFullyHydrated =
+              response.session.messagesLoaded === true;
+            if (localFullyHydrated && responseFullyHydrated) {
+              clearHydrationRetry(sessionId);
+            } else {
+              shouldRetryHydration = true;
+            }
             break;
+          }
           default: {
             const _exhaustive: never = adoptOutcome;
             void _exhaustive;
@@ -1262,6 +1335,15 @@ export function useAppLiveState(
         shouldRetryHydration = true;
       } finally {
         hydratingSessionIdsRef.current.delete(sessionId);
+        if (
+          queuedTextRepairHydrationSessionIdsRef.current.delete(sessionId) &&
+          isMountedRef.current
+        ) {
+          startSessionHydration(sessionId, {
+            allowDivergentTextRepairAfterNewerRevision: true,
+          });
+          return;
+        }
         if (shouldRetryHydration) {
           scheduleHydrationRetry(sessionId);
         }
@@ -1363,6 +1445,7 @@ export function useAppLiveState(
     if (fullStateServerInstanceChanged) {
       hydratingSessionIdsRef.current.clear();
       hydratedSessionIdsRef.current.clear();
+      queuedTextRepairHydrationSessionIdsRef.current.clear();
       // Caller-requested EventSource recreation on instance change. See
       // `forceSseReconnect` for the full context. The flag is set
       // synchronously by `handleSend` BEFORE the recovery probe is in
@@ -1841,6 +1924,11 @@ export function useAppLiveState(
                   (rearmOnSuccess &&
                     rearmUntilLiveEventOnSuccess &&
                     !rearmAfterSameInstanceProgressUntilLiveEvent));
+              // This is currently subsumed by `isEqualRevisionSnapshot`
+              // below because both require equal same-instance revisions.
+              // Keep the named alias so the reconnect fallback's
+              // stricter `===` contract remains visible next to the
+              // watchdog branch that intentionally retains `<=`.
               // The watchdog branch deliberately retains `<=` (rather than
               // mirroring the reconnect path's `===`) because the watchdog
               // only fires after stale-live-transport detection. A
@@ -2423,7 +2511,7 @@ export function useAppLiveState(
           return;
         }
         if (revisionAction === "resync") {
-          if ("sessionId" in delta && typeof delta.sessionId === "string") {
+          if (isSessionDeltaEvent(delta)) {
             cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
           } else if (
             delta.type === "orchestratorsUpdated" &&
@@ -2432,6 +2520,52 @@ export function useAppLiveState(
             cancelStaleSendResponseRecoveryPollForSessions(
               delta.sessions.map((session) => session.id),
             );
+          }
+          if (
+            isSessionDeltaEvent(delta) &&
+            sessionDeltaAdvancesCurrentMutationStamp(
+              sessionsRef.current,
+              delta,
+            )
+          ) {
+            const result = applyDeltaToSessions(sessionsRef.current, delta);
+            if (
+              result.kind === "applied" ||
+              result.kind === "appliedNeedsResync"
+            ) {
+              const appliedAt = Date.now();
+              markLiveTransportActivity([delta.sessionId], appliedAt);
+              markLiveSessionResumeWatchdogBaseline(
+                [delta.sessionId],
+                appliedAt,
+              );
+              latestStateRevisionRef.current = delta.revision;
+              sessionsRef.current = result.sessions;
+              const updatedSession =
+                result.sessions.find(
+                  (session) => session.id === delta.sessionId,
+                ) ?? null;
+              if (updatedSession) {
+                queueSessionSliceForRender(updatedSession.id);
+              }
+              scheduleSessionRender();
+              setBackendConnectionIssueDetail(null);
+              clearRecoveredBackendRequestError();
+              requestStateResync({
+                allowAuthoritativeRollback: true,
+                rearmOnFailure: true,
+              });
+              if (
+                result.kind === "appliedNeedsResync" ||
+                delta.type === "textDelta"
+              ) {
+                startSessionHydration(delta.sessionId, {
+                  allowDivergentTextRepairAfterNewerRevision:
+                    delta.type === "textDelta",
+                });
+              }
+              return;
+            }
           }
           // A revision gap means we missed events but the stream IS working.
           // Do NOT confirm recovery yet — if the follow-up /api/state fetch
@@ -2444,7 +2578,7 @@ export function useAppLiveState(
           // reconcile decides the session looks fresh enough to keep
           // `messagesLoaded: true`. `hydratingSessionIdsRef` deduplicates so
           // a no-op when hydration is already in flight or queued.
-          if ("sessionId" in delta && typeof delta.sessionId === "string") {
+          if (isSessionDeltaEvent(delta)) {
             startSessionHydration(delta.sessionId);
           }
           return;
@@ -2664,16 +2798,9 @@ export function useAppLiveState(
       // Vite proxy returns 502 during the brief backend-restart gap, and is
       // also seen with some browsers on certain clean stream ends. Schedule
       // a fresh EventSource via `setSseEpoch` re-running this effect, with
-      // backoff to avoid hammering the proxy. See bugs.md "Browser
-      // auto-reconnect gives up after a non-200 SSE response and the client
-      // gets stuck".
-      //
-      // Numeric `2` instead of `EventSource.CLOSED`: tests stub the global
-      // `EventSource` with `EventSourceMock`, so `EventSource.CLOSED` is
-      // `undefined` in the test environment and `undefined === undefined`
-      // would falsely trigger this branch. Guarding on `typeof === "number"`
-      // additionally makes the check inert until the mock opts in by
-      // declaring a numeric `readyState`.
+      // backoff to avoid hammering the proxy. Numeric `2` instead of
+      // `EventSource.CLOSED`: tests stub the global `EventSource` with
+      // `EventSourceMock`, so `EventSource.CLOSED` is `undefined`.
       const readyState = (eventSource as { readyState?: unknown }).readyState;
       const eventSourceClosed =
         typeof readyState === "number" && readyState === 2;
@@ -2721,8 +2848,8 @@ export function useAppLiveState(
     // stretches. The periodic watchdog notices "we've been non-OPEN for
     // too long" and forces an EventSource recreation through the same
     // backoff path the `readyState === CLOSED` branch uses. Threshold of
-    // 15 s leaves room for normal browser auto-reconnect cycles (default
-    // 3 s × a few retries) before the watchdog escalates. See bugs.md
+    // 5 s leaves room for one normal browser auto-reconnect attempt while
+    // avoiding the "stale until hard refresh" feel during local restarts. See bugs.md
     // "Browser auto-reconnect gives up after a non-200 SSE response and
     // the client gets stuck".
     let sseStaleSinceMs: number | null = null;
@@ -2753,7 +2880,7 @@ export function useAppLiveState(
         sseStaleSinceMs = now;
         return;
       }
-      if (now - sseStaleSinceMs >= 15000) {
+      if (now - sseStaleSinceMs >= 5000) {
         sseStaleSinceMs = null;
         scheduleSseEventSourceRecovery();
       }

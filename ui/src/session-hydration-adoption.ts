@@ -14,6 +14,7 @@ import {
 import type { Session } from "./types";
 
 export type SessionHydrationRequestContext = {
+  allowDivergentTextRepairAfterNewerRevision?: boolean;
   messageCount: number | null;
   revision: number | null;
   serverInstanceId: string | null;
@@ -139,21 +140,6 @@ function hydrationRequestStillMatchesSession(
   );
 }
 
-function hydrationResponseMatchesSession(
-  responseSession: Session,
-  currentSession: Session,
-) {
-  if (!hydrationSessionMetadataMatches(responseSession, currentSession)) {
-    return false;
-  }
-
-  if (!hydrationRetainedMessagesMatch(responseSession, currentSession)) {
-    return false;
-  }
-
-  return true;
-}
-
 function isStaleHydrationFromSupersededInstance(
   requestContext: SessionHydrationRequestContext,
   responseServerInstanceId: string,
@@ -216,10 +202,17 @@ export function classifyFetchedSessionAdoption({
     requestContext,
     currentSession,
   );
-  const responseMatches = hydrationResponseMatchesSession(
+  const requestRevisionStillCurrent =
+    requestContext.revision === null ||
+    currentRevision === null ||
+    requestContext.revision === currentRevision;
+  const responseMetadataMatches = hydrationSessionMetadataMatches(
     responseSession,
     currentSession,
   );
+  const responseMatches =
+    responseMetadataMatches &&
+    hydrationRetainedMessagesMatch(responseSession, currentSession);
   if (
     requestStillMatches &&
     !responseMatches &&
@@ -239,14 +232,11 @@ export function classifyFetchedSessionAdoption({
   // The downgrade allowance below is intentionally narrower than
   // "metadata-only": the request and response must still match the current
   // summary, otherwise a delayed full-session response can clobber newer
-  // delta metadata and mark stale text as loaded.
-  // Mismatched session-hydration responses are not authoritative enough to
-  // prove whether the responding instance is newer or a late old process, so
-  // they trigger a full /api/state resync above instead of being adopted
-  // directly. For same-instance hydration, preserve the existing nuance: on
-  // a genuine first hydration (no local messages yet) we accept even a lower
-  // revision, but once the session has hydrated messages we refuse to clobber
-  // them with an older snapshot.
+  // delta metadata and mark stale text as loaded. Same-metadata full-session
+  // responses may still replace divergent retained messages below; that is
+  // the recovery path for live text streams whose deltas were applied with a
+  // revision gap and left the retained transcript inconsistent with the
+  // server's canonical transcript.
   if (
     !shouldAdoptSnapshotRevision(currentRevision, responseRevision, {
       lastSeenServerInstanceId: currentServerInstanceId,
@@ -260,6 +250,15 @@ export function classifyFetchedSessionAdoption({
   }
 
   if (!requestStillMatches || !responseMatches) {
+    if (
+      requestStillMatches &&
+      (requestRevisionStillCurrent ||
+        requestContext.allowDivergentTextRepairAfterNewerRevision === true) &&
+      responseMetadataMatches &&
+      responseSession.messagesLoaded === true
+    ) {
+      return "adopted";
+    }
     if (
       requestStillMatches &&
       hydrationSessionMetadataIsAhead(responseSession, currentSession)

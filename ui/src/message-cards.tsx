@@ -556,23 +556,13 @@ function StreamingAssistantTextShell({ text }: { text: string }) {
  *   - Headings (`# ` … `###### `)
  *   - Lists (unordered: `-`/`*`/`+`; ordered: `1.`)
  *   - Blockquotes (`> `)
- *   - Fenced code blocks (` ``` `) — opener alone is enough; the
+ *   - Fenced code blocks (` ``` ` / `~~~`) — opener alone is enough; the
  *     streaming splitter handles the unclosed-fence case.
+ *   - Pipe-table rows (`| Col |`)
+ *   - Standalone display-math openers (`$$`)
  *   - Inline code spans (`` `…` ``)
  *   - Bold (`**…**`, `__…__`)
  *   - Markdown links (`[text](url)`)
- *
- * **Known limitation:** the gate does NOT recognise pipe-tables
- * (`| Col |`) or standalone `$$` math openers. A stream that begins
- * with a bare table or display-math block stays on
- * `StreamingAssistantTextShell` until some other Markdown construct
- * lands on the same message, at which point it flips. Tracked in
- * `docs/bugs.md` as "Streaming table/math deferral is bypassed by
- * the production assistant-message gate". Expanding this regex set
- * to include `(^|\n)\s*\|` and `(^|\n)\s*\$\$\s*$` would close the
- * gap; the trade-off is a minor false-positive rate for prose that
- * happens to contain pipes mid-line (the splitter itself handles
- * those correctly via its blank-line reset rule).
  */
 function hasRenderableStreamingMarkdown(text: string) {
   return (
@@ -580,7 +570,9 @@ function hasRenderableStreamingMarkdown(text: string) {
     /(^|\n)\s*[-*+]\s+\S/.test(text) ||
     /(^|\n)\s*\d+\.\s+\S/.test(text) ||
     /(^|\n)\s{0,3}>\s+\S/.test(text) ||
-    /(^|\n)\s*```/.test(text) ||
+    /(^|\n)\s*(```|~~~)/.test(text) ||
+    /(^|\n)\s*\|[^\n]*\|/.test(text) ||
+    /(^|\n)\s*\$\$\s*(?=\n|$)/.test(text) ||
     /`[^`\n]+`/.test(text) ||
     /\*\*[^*\n][\s\S]*?\*\*/.test(text) ||
     /__[^_\n][\s\S]*?__/.test(text) ||

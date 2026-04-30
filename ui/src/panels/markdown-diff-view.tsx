@@ -312,7 +312,11 @@ export function MarkdownDiffView({
               <DiffNavArrow direction="down" />
             </button>
           </div>
-          <span className="source-editor-statusbar-item source-editor-statusbar-state">
+          <span
+            className="source-editor-statusbar-item source-editor-statusbar-state"
+            aria-live="polite"
+            aria-atomic="true"
+          >
             {changeCount === 0
               ? "No changes"
               : `Change ${currentChangeIndex + 1} of ${changeCount}`}

@@ -227,6 +227,89 @@ describe("workspace storage", () => {
     );
   });
 
+  it("round-trips a workspace that contains an empty pane", () => {
+    // `splitPane` of a single-tab pane creates an empty sibling
+    // (`createPane(null, lastSessionViewMode)` → `tabs: []`,
+    // `activeTabId: null`). The validator must accept that shape so
+    // the layout survives a `persistWorkspaceLayout` →
+    // `getStoredWorkspaceLayout` round-trip; without this case any
+    // future tightening of `isWorkspacePane` that requires a non-
+    // empty `tabs` array would silently invalidate every stored
+    // layout that contains a fresh split.
+    const layout: StoredWorkspaceLayout = {
+      controlPanelSide: "left",
+      workspace: {
+        root: {
+          id: "split-1",
+          type: "split",
+          direction: "row",
+          ratio: 0.5,
+          first: { type: "pane", paneId: "pane-control" },
+          second: {
+            id: "split-2",
+            type: "split",
+            direction: "row",
+            ratio: 0.5,
+            first: { type: "pane", paneId: "pane-session" },
+            second: { type: "pane", paneId: "pane-empty" },
+          },
+        },
+        panes: [
+          {
+            id: "pane-control",
+            tabs: [
+              {
+                id: "tab-control",
+                kind: "controlPanel",
+                originSessionId: null,
+              },
+            ],
+            activeTabId: "tab-control",
+            activeSessionId: null,
+            viewMode: "controlPanel",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+          {
+            id: "pane-session",
+            tabs: [
+              {
+                id: "tab-session",
+                kind: "session",
+                sessionId: "session-1",
+              },
+            ],
+            activeTabId: "tab-session",
+            activeSessionId: "session-1",
+            viewMode: "session",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+          {
+            // The empty pane — what splitPane creates when called
+            // on a single-tab pane.
+            id: "pane-empty",
+            tabs: [],
+            activeTabId: null,
+            activeSessionId: null,
+            viewMode: "session",
+            lastSessionViewMode: "session",
+            sourcePath: null,
+          },
+        ],
+        activePaneId: "pane-empty",
+      },
+    };
+
+    persistWorkspaceLayout(workspaceViewId, layout);
+    const restored = getStoredWorkspaceLayout(workspaceViewId);
+
+    expect(restored).not.toBeNull();
+    expect(restored).toEqual(layout);
+    expect(restored?.workspace.panes).toHaveLength(3);
+    expect(restored?.workspace.panes[2]?.tabs).toEqual([]);
+  });
+
   it("removes a stored workspace layout by workspace id", () => {
     const layout: StoredWorkspaceLayout = {
       controlPanelSide: "left",
