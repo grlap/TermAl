@@ -224,11 +224,20 @@ export function classifyFetchedSessionAdoption({
   const responseIsNotOlderThanRequest =
     requestContext.revision === null ||
     responseRevision >= requestContext.revision;
+  // See the text-repair sibling below before changing this branch: both
+  // downgrade allowances share request/revision guards but intentionally
+  // differ on transcript-match and loaded-state requirements.
   const canAdoptLowerRevisionHydration =
     currentSession.messagesLoaded !== true &&
     responseIsNotOlderThanRequest &&
     requestStillMatches &&
     responseMatches;
+  // Text repair is the sibling downgrade path for an already-loaded
+  // transcript whose live deltas diverged from the server transcript. It
+  // deliberately does not require retained messages to match, but still
+  // requires matching metadata and an explicitly flagged repair request so a
+  // normal delayed hydration cannot overwrite newer text. See also the normal
+  // lower-revision hydration branch above; they should stay visibly paired.
   const canAdoptLowerRevisionTextRepairHydration =
     requestContext.allowDivergentTextRepairAfterNewerRevision === true &&
     responseIsNotOlderThanRequest &&

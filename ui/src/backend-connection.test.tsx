@@ -99,6 +99,14 @@ class EventSourceMock {
     }
   }
 
+  dispatchNamedEvent(type: string, data: unknown) {
+    const event = new MessageEvent<string>(type, {
+      data: JSON.stringify(data),
+    });
+    for (const listener of this.listeners[type] ?? []) {
+      listener(event);
+    }
+  }
 }
 
 class ResizeObserverMock {
@@ -1213,6 +1221,44 @@ describe("Backend connection state", () => {
       expect(
         screen.getByLabelText("Control panel backend reconnecting"),
       ).toBeInTheDocument();
+
+      act(() => {
+        eventSource.dispatchDelta({
+          type: "messageCreated",
+          revision: 0,
+          sessionId: "session-1",
+          messageId: "stale-message",
+          messageIndex: 0,
+          messageCount: 1,
+          message: {
+            id: "stale-message",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Stale ignored delta.",
+          },
+          preview: "Stale ignored delta.",
+          status: "active",
+        });
+        eventSource.dispatchNamedEvent("workspaceFilesChanged", {
+          revision: 2,
+          changes: [
+            {
+              path: "/tmp/src/main.rs",
+              kind: "modified",
+              rootPath: "/tmp",
+              sessionId: "session-1",
+            },
+          ],
+        });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+      expect(countStateFetches()).toBe(hydratedStateFetchCount);
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_PRE_DEADLINE_FROM_ARM_MS);

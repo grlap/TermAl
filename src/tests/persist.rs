@@ -965,9 +965,41 @@ fn shutdown_persist_blocking_is_idempotent_when_no_worker_handle() {
     // is one-shot, but `AppState` is `Clone`-able and the handle is
     // shared — making the operation idempotent prevents a future
     // shutdown ordering bug from panicking.
-    let (state, _persist_rx) = test_app_state_with_live_persist_channel();
+    let (state, persist_rx) = test_app_state_with_live_persist_channel();
     state.shutdown_persist_blocking();
+    assert!(
+        state
+            .persist_thread_handle
+            .lock()
+            .expect("persist handle mutex poisoned")
+            .is_none(),
+        "no-worker shutdown should leave the join handle absent",
+    );
+    assert!(
+        !state.persist_worker_alive.load(Ordering::Acquire),
+        "no-worker shutdown should publish the stopped worker state",
+    );
+    assert!(
+        matches!(persist_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "no-worker shutdown should not enqueue a shutdown request",
+    );
     state.shutdown_persist_blocking();
+    assert!(
+        state
+            .persist_thread_handle
+            .lock()
+            .expect("persist handle mutex poisoned")
+            .is_none(),
+        "second no-worker shutdown should remain idempotent",
+    );
+    assert!(
+        !state.persist_worker_alive.load(Ordering::Acquire),
+        "second no-worker shutdown should keep the worker stopped",
+    );
+    assert!(
+        matches!(persist_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "second no-worker shutdown should not enqueue a shutdown request",
+    );
 }
 
 #[tokio::test]

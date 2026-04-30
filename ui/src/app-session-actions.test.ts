@@ -244,6 +244,34 @@ describe("useAppSessionActions", () => {
     expect(params.forceSseReconnect).not.toHaveBeenCalled();
   });
 
+  it("forces SSE reconnect when send response is rejected after server restart", async () => {
+    const restartedState = {
+      ...makeStateResponse(6),
+      serverInstanceId: "server-b",
+      sessions: [makeSession("session-1", { status: "active" })],
+    };
+    const sendMessageSpy = vi
+      .spyOn(api, "sendMessage")
+      .mockResolvedValue(restartedState);
+    const params = makeSessionActionsParams({
+      adoptState: vi.fn(() => false),
+    });
+    const actions = useAppSessionActions(params);
+
+    expect(actions.handleSend("session-1", "hello")).toBe(true);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    expect(sendMessageSpy).toHaveBeenCalledWith("session-1", "hello", [], null);
+    expect(params.adoptState).toHaveBeenCalledWith(restartedState);
+    expect(params.requestActionRecoveryResync).toHaveBeenCalledWith({
+      allowUnknownServerInstance: true,
+    });
+    expect(params.forceSseReconnect).toHaveBeenCalledTimes(1);
+    params.refs.activePromptPollCancelRef.current?.();
+  });
+
   it("threads the originating pane into session-scoped action recovery", async () => {
     const state = {
       ...makeStateResponse(6),

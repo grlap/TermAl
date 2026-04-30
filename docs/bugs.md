@@ -50,22 +50,6 @@ The rendered diff view now maps every renderable region to its own `MarkdownCont
 - Compute aggregate Mermaid/math counts before mapping regions and apply a document-level fallback when the aggregate exceeds the cap.
 - Or pass a shared render-budget context/override into each region-level `MarkdownContent`.
 
-## Streaming fence splitter does not enforce CommonMark closing-fence rules
-
-**Severity:** Medium - unclosed fences can be treated as settled when their body contains a shorter or different fence marker.
-
-`splitStreamingMarkdownForRendering()` currently toggles fence state on any line that starts with at least three backticks or tildes. CommonMark requires a closing fence to use the same character as the opener and to be at least as long as the opener. An open four-backtick fence containing a triple-backtick line, or a backtick fence containing a `~~~` line, can be incorrectly considered closed. The settled prefix can then be handed to `react-markdown` even though the real Markdown fence is still open.
-
-**Current behavior:**
-- The splitter tracks only `inFence` and the opening line index.
-- It does not remember the opener character or opener length.
-- Any backtick/tilde fence marker toggles the fence state while inside a fence.
-
-**Proposal:**
-- Store the opener marker character and length.
-- Close only on the same marker character with length greater than or equal to the opener length.
-- Add edge-case tests for four-backtick fences containing triple backticks and backtick fences containing tildes.
-
 ## Post-shutdown persistence writes still leave a post-collection-pre-join window
 
 **Severity:** Medium - round-13 closed the dual-writer file race, but a narrow gap remains between the worker's final `collect_persist_delta` and `handle.join()` returning.
@@ -111,18 +95,39 @@ The new adoption rule is intended to fix the user-visible bug where the latest a
 **Proposal:**
 - Add a `useAppLiveState` or `App.live-state.reconnect` regression where text-repair hydration is requested, a newer unrelated live event advances `latestStateRevisionRef`, the session response resolves at the original request revision, and the active transcript updates without any extra user action.
 
-## "Rejects a lower same-instance reconnect" test does not pin polling continuation
+## Timer-driven reconnect fallback can stop after `/api/state` progress before SSE proves recovery
 
-**Severity:** Low - the new L197 regression asserts the rollback is rejected but stops there; a regression that incorrectly clears the polling loop after rejection would still pass.
+**Severity:** Medium - a fallback snapshot can refresh visible UI while the live EventSource transport is still unhealthy.
 
-`App.live-state.reconnect.test.tsx`'s new "rejects a lower same-instance reconnect /api/state snapshot" test verifies one `fetchState` call and that the rolled-back text isn't visible. It does not advance timers further to confirm reconnect-fallback polling stays armed until SSE reopens. The companion test "keeps reconnect fallback polling armed after replacement-instance fallback adoption until SSE reopens" covers polling continuation for the replacement-instance case but not for the rejected-stale-same-instance case.
+`ui/src/app-live-state.ts:2068` disables `rearmUntilLiveEventOnSuccess` when a same-instance `/api/state` response makes forward revision progress, unless the recovery path is the manual-retry variant. A successful `/api/state` fetch proves that polling can reach the backend and can repair visible state, but it does not prove the SSE stream has reopened or can deliver later assistant deltas. If the transport remains broken, a later live message can stay hidden until another reconnect/error/user action restarts recovery.
 
 **Current behavior:**
-- The test asserts one `fetchState` call and absence of rolled-back text.
-- No timer advancement after the rejection, so polling-continuation is unverified.
+- Timer-driven reconnect fallback asks to keep polling until live-event proof.
+- Same-instance `/api/state` forward progress disables that live-proof rearm path for non-manual recovery.
+- UI state can look refreshed while the EventSource transport is still unconfirmed.
 
 **Proposal:**
-- After asserting the rejection, call `await advanceTimers(RECONNECT_STATE_RESYNC_DELAY_MS)` and assert `fetchStateSpy` fires a second time (proves the loop stayed armed despite the rejection).
+- Split "snapshot refreshed UI" from "transport recovered" in the reconnect state machine.
+- Keep reconnect polling armed until `confirmReconnectRecoveryFromLiveEvent()` runs from a data-bearing SSE event, unless a cause-specific recovery path intentionally documents a different contract.
+- Add a regression that adopts same-instance `/api/state` progress through the timer-driven reconnect path, keeps SSE unopened/unconfirmed, advances timers, and asserts another fallback poll is scheduled.
+
+## `process_remote_event_stream_reader` docstring promises buffer reuse but EOF dispatch path doesn't clear
+
+**Severity:** Low - dormant today; would silently corrupt parsing for any future caller written against the documented contract.
+
+`src/remote_sync.rs:885-887` introduces a docstring on the new `process_remote_event_stream_reader` helper that says: "The mutable buffers are caller-owned scratch state so tests can drive partial streams and keep the same lagged-recovery state across parser invocations." The blank-line dispatch branch at lines 907-908 clears `event_name` / `data_lines` after dispatch, but the new EOF dispatch branch at lines 925-933 does not. Today the only production caller (`process_remote_event_stream` at 869) creates fresh buffers per invocation, so the bug is dormant. A future caller that follows the docstring's "drive partial streams across invocations" contract — including the new tests as inspiration — would observe residual frame state from a prior EOF-terminated frame glue onto the next stream's first frame.
+
+The most obvious failure mode: an EOF terminates a `lagged` frame (one of the new tests' scenarios), `event_name = "lagged"` and `data_lines = []` remain in the buffers; the next stream begins with a `data:` line for a new state event that the parser appends to the residual `data_lines`, then dispatches with `event_name = "lagged"` instead of the empty event_name expected from the start of a fresh stream. The lagged dispatcher arms recovery instead of applying the state event.
+
+**Current behavior:**
+- The new docstring documents a cross-invocation buffer-reuse contract.
+- The blank-line dispatch branch clears buffers post-dispatch (lines 907-908).
+- The new EOF dispatch branch does not (lines 925-933).
+- Today's only production caller is unaffected because it uses fresh buffers per call.
+
+**Proposal:**
+- Mirror the blank-line branch's `event_name.clear()` / `data_lines.clear()` after the EOF dispatch so the helper actually honors the documented contract. Lower-risk and matches the rest of the function's pattern.
+- Or tighten the docstring to: "scratch buffers are owned by the caller; the parser leaves any partial trailing frame in the buffers on return so callers must clear before resuming a logically distinct stream." Documents the actual behavior but pushes the burden onto callers.
 
 ## Remote hydration in-flight cleanup can race with the RAII guard
 
@@ -168,18 +173,6 @@ The test pins the duplicate branch, but it would not catch a regression where th
 - Add coverage for a successful hydration path that asserts the guard is removed afterward.
 - Add a burst/concurrent same-session delta case that asserts only one remote session fetch is issued.
 
-## `includeUndeferredMessageTail` exported solely for testing widens the panel module's public surface
-
-**Severity:** Note - `AgentSessionPanel.tsx` is a panel module, not a utility module; an exported helper looks importable from sibling panels even though it is conceptually private to this one.
-
-`ui/src/panels/AgentSessionPanel.tsx:111` was changed from a module-private `function` to an `export function` solely so the test file can import it. Per CLAUDE.md the project is actively splitting panels smaller; future readers may import the helper from another panel without realising it was meant to be internal.
-
-**Current behavior:**
-- Helper is exported with no marker indicating its test-only intent.
-
-**Proposal:**
-- Add `/** @internal */` JSDoc tag (cheapest), OR move the function and its tests to a sibling module (`agent-session-conversation-tail.ts` + `.test.ts`) per the CLAUDE.md split convention.
-
 ## `apply_remote_state_if_newer_locked` `force: bool` parameter is unnamed at call sites
 
 **Severity:** Low - seven call sites pass `false` and one passes `true`; readers cannot tell what `force` means without consulting the function signature.
@@ -194,64 +187,6 @@ The test pins the duplicate branch, but it would not catch a regression where th
 **Proposal:**
 - Replace `force: bool` with a typed `enum SnapshotApplyMode { GateBySnapshotRevision, ForceApplyAfterLagged }` (or similar). All existing call sites become `SnapshotApplyMode::GateBySnapshotRevision`; the lagged-recovery site reads `SnapshotApplyMode::ForceApplyAfterLagged` and self-documents.
 - Optional: also push the bypass-gate into a tiny inline comment at the lagged-recovery site naming the upstream invariant (`api_sse.rs::state_events` yields `state` immediately after `lagged` within one `tokio::select!` arm).
-
-## Remote SSE bridge `dispatch_remote_event_with_recovery` returns early on empty `data:` before inspecting `event_name`
-
-**Severity:** Low - latent bug that defeats the `data: 1` defensive byte if the upstream protocol ever changes.
-
-`dispatch_remote_event_with_recovery` returns when `data_lines.is_empty()` BEFORE inspecting `event_name`. Today the upstream contract guarantees `lagged` always carries `data: 1` (documented in `docs/architecture.md:246` and pinned at `src/api_sse.rs:246`), so this is currently dormant. But the `data: 1` byte exists *because* of browser SSE-spec quirks — defending it once and then silently breaking it elsewhere is the kind of coupling that bites silently. If a future backend change drops the byte, the remote bridge silently stops arming `force_next_state_after_lagged`, and the symptom is a missed Lagged repair on the chained-remote path with no log.
-
-**Current behavior:**
-- Empty `data:` causes early-return regardless of `event_name`.
-- A bare `event: lagged\n\n` (no `data:` line) would slip past arming `recovery.force_next_state_after_lagged`.
-- No log or assertion fires when this happens.
-
-**Proposal:**
-- Move the `data_lines.is_empty()` guard inside the `match` arms that actually need a payload (`state`, `delta`), so an empty-data `lagged` would still arm recovery.
-- Or assert/log when `lagged` arrives with empty data so a regression is loud rather than silent.
-
-## `classifyFetchedSessionAdoption` two parallel low-revision branches lack a shared rationale comment
-
-**Severity:** Low - `canAdoptLowerRevisionHydration` and the new `canAdoptLowerRevisionTextRepairHydration` look almost identical but diverge on two preconditions; a "unify the duplication" refactor would silently change the behaviour of one of them.
-
-`session-hydration-adoption.ts:232-237` adds `canAdoptLowerRevisionTextRepairHydration` parallel to the existing `canAdoptLowerRevisionHydration`. Both share `responseIsNotOlderThanRequest && requestStillMatches`, but the new branch (a) drops the `currentSession.messagesLoaded !== true` gate (text-repair intentionally accepts on a fully-loaded local) and (b) uses `responseMetadataMatches` instead of `responseMatches` (the response transcript can differ from local because text-repair is the corruption-recovery path that trusts the server's transcript). The header comment block above the original branch describes its rationale; it does not explain the two text-repair-specific preconditions.
-
-**Current behavior:**
-- Both branches are well-tested in isolation.
-- The header comment only describes the original `canAdoptLowerRevisionHydration` rationale.
-- A future reader doing a "unify the duplication" refactor could collapse the two into one and silently change one branch's preconditions.
-
-**Proposal:**
-- Extend the comment block above the two branches to describe both: text-repair hydration is a corruption-recovery path that intentionally trusts the server's transcript over local divergent text deltas, so it accepts even when local is fully loaded and even when `hydrationRetainedMessagesMatch` would reject.
-
-## Watchdog recovery still allows lower same-instance revisions for orchestrator-noise recovery
-
-**Severity:** Note - the watchdog path keeps `state.revision <= requestedRevision` deliberately, after architecture-review pushback that proposed mirroring the L197 reconnect tightening was rejected for breaking legitimate recovery cases.
-
-The reconnect fallback path was tightened to require `state.revision === requestedRevision` for same-instance force-adoption (closes a real rollback hazard where a late `/api/state` response queued behind newer SSE assistant deltas could roll local state back past the streamed reply). A round-12 review proposed applying the same `===` clamp to the watchdog branch. Two existing tests proved this would regress legitimate recovery: `App.live-state.deltas.test.tsx` "watchdog-resyncs when only orchestrator deltas arrive during stale live transport", and `App.session-lifecycle.test.tsx` "resyncs on the first wake-gap tick for a newly created active session before any SSE arrives". The L197 hazard does NOT apply through the watchdog path because session-scoped deltas update `lastLiveSessionResumeWatchdogTickAtBySessionId` baselines via `markLiveSessionResumeWatchdogBaseline`, so the watchdog cannot fire while session-content deltas are still recent. The watchdog only fires after stale-transport detection (no recent activity for `LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS`), at which point a lower-revision /api/state response is the canonical recovery mechanism, not a stale rollback.
-
-**Current behavior:**
-- Reconnect snapshots require equal same-instance revision before force-adoption (`isEqualRevisionAutomaticReconnectSnapshot`).
-- Watchdog snapshots retain `state.revision <= requestedRevision` for orchestrator-revision-noise recovery.
-- The watchdog branch carries an inline comment explaining the asymmetry.
-
-**Proposal:**
-- Keep the watchdog branch at `<=`; the `===` clamp would break the orchestrator-noise recovery path that drives the two existing regressions named above.
-- Optional follow-up: refactor the watchdog to trigger per-session hydration (`/api/sessions/{id}`) instead of `/api/state`, so the global revision counter is never rolled back. That removes the asymmetry without breaking recovery; it is a larger refactor than the L197 fix justified.
-
-## Lagged SSE wire format lacks backend route-level coverage
-
-**Severity:** Medium - the browser-facing `event: lagged` serialization can regress without a backend test catching it.
-
-The prior production bug was that an empty-data SSE control frame may not dispatch in browsers. Frontend tests that manually dispatch `lagged` with `data: "1"` do not prove the backend route actually serializes `event: lagged` with a non-empty `data:` line before the recovery `state`.
-
-**Current behavior:**
-- Frontend tests synthesize the `lagged` event.
-- Backend tests do not assert the raw `/api/events` wire frame contains `event: lagged` and `data: 1`.
-
-**Proposal:**
-- Add route-level `/api/events` coverage that forces receiver lag.
-- Assert the raw SSE frame emits `event: lagged`, a non-empty `data: 1` line, and then the recovery `state`.
 
 ## SSE recreation control plane is split between `sseEpoch` state and `pendingSseRecreateOnInstanceChangeRef`
 
@@ -346,21 +281,6 @@ A future fourth recovery branch would need to update three sites; collapsing int
 - Add a per-session cooldown timestamp ("don't re-hydrate the same session within Nms of the last completed hydration unless the new delta carries a revision strictly greater than the one that started the previous hydration").
 - Or document the burst as intentional given the local-only deployment cost; add a comment naming the trade-off so future reviewers don't keep flagging it.
 
-## No-worker persist shutdown idempotence test has no assertion
-
-**Severity:** Low - `src/tests/persist.rs:956`. The `shutdown_persist_blocking_is_idempotent_when_no_worker_handle` regression currently calls the method twice but asserts nothing. It proves only that the method does not panic in the test shape.
-
-If a future refactor accidentally sends `PersistRequest::Shutdown` on a no-worker test channel or mutates the handle unexpectedly, this test would still pass.
-
-**Current behavior:**
-- The test exercises the no-worker branch twice.
-- It does not assert the handle remains `None`.
-- It does not assert no shutdown signal was sent to the test receiver.
-
-**Proposal:**
-- Assert `persist_thread_handle` remains `None` after both calls.
-- If the test owns a receiver, assert no `PersistRequest::Shutdown` was produced.
-
 ## Watchdog-inversion tests don't assert the "Waiting for the next chunk of output…" affordance state
 
 **Severity:** Low - `ui/src/App.live-state.deltas.test.tsx:3439` and `ui/src/App.live-state.watchdog.test.tsx:625`. The two recent inverted tests assert that the recovered text becomes visible, but say nothing about the "Waiting for the next chunk of output…" affordance. After the recovery snapshot adopts (the deltas test's snapshot has `status: "idle"`, the watchdog test's stays `status: "active"`), the affordance state is the most user-visible signal of whether recovery actually replaced the wedged UI vs just rendered the recovered text somewhere on the page.
@@ -368,13 +288,6 @@ If a future refactor accidentally sends `PersistRequest::Shutdown` on a no-worke
 **Proposal:**
 - In `deltas.test.tsx`: add `expect(screen.queryByText("Waiting for the next chunk of output...")).not.toBeInTheDocument();` after the assertion that the recovered chunk is visible (recovery snapshot is idle, affordance should disappear).
 - In `watchdog.test.tsx`: add an assertion clarifying expected affordance state for the still-active recovery (the assistant chunk now sits at the boundary, so the affordance should NOT be present).
-
-## Stale-ignored-delta negative case not pinned for `pendingBadLiveEventRecovery` branching
-
-**Severity:** Low - `ui/src/backend-connection.test.tsx`. The new "applied delta clears recovery" test pins the apply-branch reset of `pendingBadLiveEventRecovery`, but the parallel stale-ignored-delta negative case (where a delta with `revision < latestStateRevisionRef.current` after a bad-state payload does NOT clear recovery) is implicit — covered only by the absence of a fetch count change in the existing tests.
-
-**Proposal:**
-- Add a regression where the dispatched delta has `revision < latestStateRevisionRef.current` (stale ignored delta) after a bad-state payload, asserting polling continues.
 
 ## Rendered Markdown diff navigation does not scroll when there is exactly one change
 
@@ -424,20 +337,6 @@ If a future refactor accidentally sends `PersistRequest::Shutdown` on a no-worke
 
 
 
-
-## Workspace file hints have no bad-live-event recovery coverage
-
-**Severity:** Low - `ui/src/app-live-state.ts:2366`. `workspaceFilesChanged` events intentionally do not confirm recovery while `pendingBadLiveEventRecovery` is active, but no direct test pins that non-authoritative file-change hints keep reconnect polling alive.
-
-A workspace file-change hint proves the SSE connection can deliver some event type, but it does not prove state or delta delivery recovered after a malformed reopened-SSE payload. Without coverage, a future cleanup could accidentally restore the old confirmation behavior and clear reconnecting before state/delta events are healthy again.
-
-**Current behavior:**
-- Bad reopened state/delta payloads set `pendingBadLiveEventRecovery`.
-- `workspaceFilesChanged` skips `confirmReconnectRecoveryFromLiveEvent` while that flag is active.
-- Tests cover data-bearing state/delta confirmation paths, but not this non-authoritative event type.
-
-**Proposal:**
-- Add a regression that dispatches a bad reopened SSE payload, then a `workspaceFilesChanged` event, and asserts reconnecting state plus fallback polling remain active until a state/delta event confirms recovery.
 
 ## `app-live-state.ts` reconnect state machine continues to grow
 
@@ -1060,20 +959,6 @@ The graceful-shutdown reload regression creates a fresh `AppState::new_with_path
 - Call `restarted.shutdown_persist_blocking()` after dropping any held inner-state guards and before removing temp directories.
 - Keep the test's durable-reload assertion intact while making cleanup deterministic.
 
-## Generated Vitest cache file is modified under `node_modules`
-
-**Severity:** Note - local test-runner cache churn can be accidentally staged.
-
-The unstaged diff includes `node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json`, which is generated local Vitest state. If staged, it would add machine-specific noise unrelated to the product change.
-
-**Current behavior:**
-- A generated Vitest cache file is modified in the worktree.
-- The file is not part of the application behavior under review.
-
-**Proposal:**
-- Leave the file unstaged or revert the generated cache change before committing.
-- Consider ignoring the cache path if it is not intentionally tracked.
-
 ## Implementation Tasks
 
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
@@ -1092,10 +977,6 @@ The unstaged diff includes `node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95
   cover both shutdown-before-connect and shutdown-after-initial-state through `/api/events`, and assert the stream exits within a timeout so the persist drain is reached.
 - [ ] P2: Add shutdown persist failure retry coverage:
   force the final shutdown persist attempt to fail once and then succeed, and assert the worker does not exit before the successful write.
-- [ ] P2: Add no-worker shutdown idempotence assertions:
-  assert `shutdown_persist_blocking()` leaves `persist_thread_handle` as `None` and does not send a `PersistRequest::Shutdown` when no worker handle exists.
-- [ ] P2: Add route-level Lagged SSE wire-format coverage:
-  force `RecvError::Lagged` through `/api/events` and assert the raw frame emits `event: lagged`, non-empty `data: 1`, then the recovery `state`.
 - [ ] P2: Add non-send action restart live-stream delta-on-recreated-stream coverage:
   the round-13 fix proves `forceSseReconnect()` is called on cross-instance `adoptActionState` recovery, but does not dispatch live deltas through the recreated EventSource. Submit an approval/input-style action after backend restart, then dispatch assistant deltas on the new `EventSourceMock` and assert they render in the active transcript bubble.
 - [ ] P2: Add live text-repair hydration rendering regression:
@@ -1108,31 +989,35 @@ The unstaged diff includes `node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95
   drive bursty same-session remote deltas through the production hydration path, assert only one remote session fetch is issued, and assert the in-flight guard is cleared after successful hydration.
 - [ ] P2: Add failed manual retry reconnect-rearm regression:
   cover manual retry hitting a transient failure, then the next scheduled attempt adopting a newer same-instance snapshot while polling still continues until SSE confirms.
-- [ ] P2 workspace-file bad-live-event recovery regression:
-  dispatch a bad reopened SSE payload followed by `workspaceFilesChanged`, and assert reconnecting state plus fallback polling remain active.
+- [ ] P2: Add timer-driven reconnect same-instance-progress live-proof regression:
+  trigger the non-manual reconnect fallback path, adopt a same-instance `/api/state` snapshot with forward progress while SSE remains unopened/unconfirmed, advance timers, and assert fallback polling continues until a data-bearing live event confirms recovery.
 - [ ] P2 watchdog wake-gap stop-after-progress regression:
   trigger watchdog wake-gap recovery, adopt same-instance `/api/state` progress, and assert no additional reconnect polling occurs before a later live event.
-- [ ] P2: Add `forceSseReconnect` unit-level regression:
-  drive `handleSend` with a server-instance-mismatched response in `app-session-actions.test.ts` and assert both `params.requestActionRecoveryResync` and `params.forceSseReconnect` are called. The mock prop already exists in `makeSessionActionsParams` but no triggering test exercises it; the existing app-level `EventSourceMock.instances.length >= 2` assertion proves composition end-to-end but a unit test would catch a future refactor that drops the `forceSseReconnect()` call.
 - [ ] P2: Tighten `graceful_shutdown_drain_persists_final_mutation_across_reload` against worker timing:
   the current single-commit-then-shutdown shape can pass even without the graceful-drain fix if the worker happens to drain the Delta before Shutdown arrives. Commit many sessions in rapid succession (e.g. 50) before calling `shutdown_persist_blocking()` so at least one is guaranteed in-flight, and assert all of them are reloadable from the fresh `AppState::new_with_paths`.
-- [ ] P2: Add reconnect-fallback polling-continuation assertion to `rejects a lower same-instance reconnect`:
-  after asserting the lower-revision rejection, advance fake timers by `RECONNECT_STATE_RESYNC_DELAY_MS` and verify `fetchStateSpy` fires a second time. Without this, a regression that rejects rollback AND incorrectly clears the polling loop would still pass.
-- [ ] P2: Add direct unit tests for the moved `markdown-diff-clipboard-pointer.ts` helpers:
-  the new module's header explicitly markets the helpers as testable now that they have no React/component-tree dependencies, but no `markdown-diff-clipboard-pointer.test.ts` exists. Cover (a) `serializeSelectedMarkdown`'s three fallbacks (round-trip wins; covers-whole-body fallback via the internal `rangeCoversNodeContents` path; `range.toString()` final fallback when round-trip yields empty); (b) `getSelectionRangeInsideSection`'s rejection of collapsed / no-selection / out-of-section ranges.
 - [ ] P2: Cover the index clamp-on-shrink branch in `MarkdownDiffView` and `RenderedDiffView`:
   re-render the parent with a smaller `regions`/`segments` array while `currentChangeIndex`/`currentRegionIndex` points past the new end and assert the counter snaps to "Change/Region 1 of N" while prev/next still wrap correctly. Today the existing prev/next tests only exercise wrap-around at full length; the `current >= changeCount/regionCount` clamp branch in the `useEffect` is unexercised.
 - [ ] P2: Make `DiffPanel.test.tsx` `scrollIntoView` mocking remount-resilient:
   the existing test pins `scrollIntoView` on the two block nodes captured via `waitFor`. A future change that remounts the `<section>` between clicks (e.g., a `key` churn) would silently stop firing the mock. Apply the mock via `Element.prototype.scrollIntoView = vi.fn()` in `beforeEach` (or re-query before each click) so any node — re-mounted or not — hits the same fn.
-- [ ] P2: Pin additional boundary edges in the `markdown-streaming-split` round-trip invariant:
-  add `"Hello\n"`, `"\n"`, `"\n\n"`, and `"$$\nx"` to the round-trip array. Add a math-display parity case "settles `$$...$$` followed by partial prose" matching the table/fence suite's existing closed-block-then-partial-prose case.
-- [ ] P2: Add CommonMark fence edge-case splitter coverage:
-  cover a four-backtick opener containing triple backticks and a backtick fence containing `~~~`, then pin that only matching character/length closers settle the fence.
 - [ ] P2: Add rendered diff render-budget coverage:
   create many Mermaid/math rendered regions and assert the preview applies the same document-level caps as a single `MarkdownContent` document.
 - [ ] P2: Add single-target rendered diff navigation coverage:
   assert prev/next scrolls the only Markdown diff change and the only rendered diff region even though the selected index does not change.
-- [ ] P2: Pin "consumed exactly once" semantics for `RemoteEventStreamRecovery.force_next_state_after_lagged`:
-  the new `remote_lagged_marker_force_applies_next_same_revision_state_snapshot` test pins force-application of the immediate recovery `state`, but does not pin that the flag is consumed exactly once. Dispatch a third `state` event at the same revision after the recovery one with a distinct preview and assert it is NOT applied (proves `std::mem::take(&mut recovery.force_next_state_after_lagged)` cleared the flag).
 - [ ] P2: Route the new lagged-recovery reconnect test through the textDelta fast-path it documents:
   the new `App.live-state.reconnect.test.tsx` test exercises the revision-gap branch (the `messageCreated` delta omits `sessionMutationStamp` so it falls into the resync fallback). Add `sessionMutationStamp` so the delta routes through the matched-stamp fast-path that the surrounding `handleDeltaEvent` comment is most concerned about, OR rename the test to clarify it covers the revision-gap branch specifically and add a sibling test for the textDelta fast-path.
+- [ ] P2: Split the bad-live-event + workspaceFilesChanged test into isolated arrange-act-assert phases:
+  `ui/src/backend-connection.test.tsx:1225-1261` co-fires the stale `delta` and the `workspaceFilesChanged` event in one `act()`. The assertion `countStateFetches() === hydratedStateFetchCount` is satisfied if either side skips confirmation, so the test cannot pinpoint which side regressed. Dispatch `workspaceFilesChanged` alone first and assert no fetch fired; then add the stale delta separately and re-assert.
+- [ ] P2: Pin closer-with-info-string non-close in `markdown-streaming-split.test.ts`:
+  add a fixture like `"\`\`\`\`md\n\`\`\`\` info\nstill inside"` and assert `pending === text` (whole input). This guards the new `fenceMatch[2].trim() === ""` precondition; without it, a regression that drops the trim check would not be caught.
+- [ ] P2: Cover `setDropCaretFromPoint` in `markdown-diff-clipboard-pointer.test.ts`:
+  the new file covers `getSelectionRangeInsideSection` and `serializeSelectedMarkdown` but not the third public helper (drag-drop caret geometry). Monkey-patch `document.caretPositionFromPoint` / `caretRangeFromPoint` and assert the caret lands inside the section (and is rejected when the point falls outside).
+- [ ] P2: Add temp-file cleanup to remaining remote lagged-recovery tests:
+  `remote_lagged_marker_force_applies_next_same_revision_state_snapshot` (extended in the round 2 polish), `remote_lagged_marker_does_not_force_apply_after_intervening_delta_progress`, and `remote_lagged_marker_force_applies_same_revision_fallback_resync_snapshot` should append `let _ = fs::remove_file(state.persistence_path.as_path());` before returning. Adjacent siblings (`remote_event_stream_parser_dispatches_bare_lagged_at_eof` at 9572, `remote_lagged_marker_clears_on_empty_data_bearing_frame` at 9663) and ~80 other tests in the file follow this convention; the drift between adjacent tests in the same module makes the right pattern invisible.
+- [ ] P2: Replace `setTimeout(resolve, 0)` macrotask flush with `waitFor(...)` in `app-session-actions.test.ts:262`:
+  the prior brittle `await Promise.resolve()` was polished to `await new Promise<void>(resolve => setTimeout(resolve, 0))`, which is one macrotask tick. Today this is enough to drain the inner `void (async () => { ... })()` IIFE in `handleSend`, but if the chain ever grows another `await` the test would silently flake. Replace with `await waitFor(() => expect(params.forceSseReconnect).toHaveBeenCalled())`, which adapts automatically.
+- [ ] P2: Pin closer-with-info-string non-close in `markdown-streaming-split.test.ts` (matching length, info string only):
+  the existing "does not close a four-backtick fence with a shorter backtick fence" test rejects via the `length >= opener` rule, not the info-string rule. Add a same-length closer with a non-empty info string (e.g. `` "```\\nbody\\n``` info\\nstill inside" ``) and assert `pending === text` to pin the `fenceMatch[2].trim() === ""` branch directly.
+- [ ] P2: Extend the fence-closer doc-comment in `markdown-streaming-split.ts:82-84` to name all three CommonMark rules:
+  the comment block names "same marker character" and "length >= opener" but omits the info-string-on-closer prohibition the code enforces at line 102. Tweak to "same marker character, length >= opener, and no info string on the closer line" so a future edit doesn't silently weaken the third rule.
+- [ ] P2: Add an inline note about lagged-flag consume ordering in `remote_sync.rs:976-994`:
+  the `state` arm consumes `recovery.force_next_state_after_lagged` via `mem::take` BEFORE the empty-data early return. The new `remote_lagged_marker_clears_on_empty_data_bearing_frame` test pins this observable behavior, but the function body has no comment explaining why the ordering is deliberate. A future "hoist the empty-data check above the consume" refactor would silently break the contract. Add a short comment naming the invariant.

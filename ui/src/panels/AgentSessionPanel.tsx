@@ -108,6 +108,7 @@ const EMPTY_COMPOSER_ATTACHMENTS: readonly {
 }[] = [];
 const EMPTY_COMPOSER_PROMPT_HISTORY: readonly string[] = [];
 
+/** @internal Exported for focused regression tests; not a cross-panel API. */
 export function includeUndeferredMessageTail(
   deferredMessages: Message[],
   currentMessages: Message[],

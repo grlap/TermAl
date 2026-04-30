@@ -835,6 +835,13 @@ describe("App live state — reconnect", () => {
           expect(
             within(sessionList).queryByText("Rolled-back Session"),
           ).not.toBeInTheDocument();
+
+          await advanceTimers(RECONNECT_STATE_RESYNC_DELAY_MS * 2);
+          await settleAsyncUi();
+          expect(fetchStateSpy).toHaveBeenCalledTimes(2);
+          expect(
+            within(sessionList).getByText("Newer Session"),
+          ).toBeInTheDocument();
         } finally {
           if (fakeTimersActive) {
             vi.useRealTimers();

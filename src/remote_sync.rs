@@ -868,10 +868,31 @@ fn process_remote_event_stream(
     remote_id: &str,
     response: BlockingHttpResponse,
 ) -> Result<()> {
+    let reader = BufReader::new(response);
     let mut event_name = String::new();
     let mut data_lines = Vec::new();
     let mut recovery = RemoteEventStreamRecovery::default();
-    let reader = BufReader::new(response);
+    process_remote_event_stream_reader(
+        state,
+        remote_id,
+        reader,
+        &mut event_name,
+        &mut data_lines,
+        &mut recovery,
+    )
+}
+
+/// Parses a remote SSE byte stream from any `BufRead`. The mutable buffers are
+/// caller-owned scratch state so tests can drive partial streams and keep the
+/// same lagged-recovery state across parser invocations.
+fn process_remote_event_stream_reader<R: BufRead>(
+    state: &AppState,
+    remote_id: &str,
+    reader: R,
+    event_name: &mut String,
+    data_lines: &mut Vec<String>,
+    recovery: &mut RemoteEventStreamRecovery,
+) -> Result<()> {
     for line in reader.lines() {
         let line =
             line.with_context(|| format!("failed to read SSE line for remote `{remote_id}`"))?;
@@ -879,9 +900,9 @@ fn process_remote_event_stream(
             dispatch_remote_event_with_recovery(
                 state,
                 remote_id,
-                &event_name,
-                &data_lines,
-                &mut recovery,
+                event_name,
+                data_lines,
+                recovery,
             )?;
             event_name.clear();
             data_lines.clear();
@@ -891,20 +912,23 @@ fn process_remote_event_stream(
             continue;
         }
         if let Some(value) = line.strip_prefix("event:") {
-            event_name = value.trim().to_owned();
+            *event_name = value.trim().to_owned();
             continue;
         }
         if let Some(value) = line.strip_prefix("data:") {
             data_lines.push(value.trim_start().to_owned());
         }
     }
-    if !data_lines.is_empty() {
+    // EOF can terminate a frame without the blank-line dispatcher above. A
+    // control-only frame such as `event: lagged\n` has no data lines but still
+    // must arm recovery; data-bearing arms decide whether an empty body is valid.
+    if !event_name.is_empty() || !data_lines.is_empty() {
         dispatch_remote_event_with_recovery(
             state,
             remote_id,
-            &event_name,
-            &data_lines,
-            &mut recovery,
+            event_name,
+            data_lines,
+            recovery,
         )?;
     }
     Ok(())
@@ -935,10 +959,8 @@ fn dispatch_remote_event_with_recovery(
     data_lines: &[String],
     recovery: &mut RemoteEventStreamRecovery,
 ) -> Result<()> {
-    if data_lines.is_empty() {
-        return Ok(());
-    }
-    let payload = data_lines.join("\n");
+    // Data-bearing events self-guard against empty bodies below. Control-only
+    // events like `lagged` intentionally dispatch from the event name alone.
     match event_name {
         "lagged" => {
             recovery.lagged_recovery_baseline_revision = {
@@ -952,8 +974,6 @@ fn dispatch_remote_event_with_recovery(
             recovery.force_next_state_after_lagged = true;
         }
         "state" => {
-            let remote_payload: StateEventPayload = serde_json::from_str(&payload)
-                .with_context(|| format!("failed to decode remote state event `{remote_id}`"))?;
             let force_lagged_recovery_state = if std::mem::take(
                 &mut recovery.force_next_state_after_lagged,
             ) {
@@ -969,6 +989,12 @@ fn dispatch_remote_event_with_recovery(
             } else {
                 false
             };
+            if data_lines.is_empty() {
+                return Ok(());
+            }
+            let payload = data_lines.join("\n");
+            let remote_payload: StateEventPayload = serde_json::from_str(&payload)
+                .with_context(|| format!("failed to decode remote state event `{remote_id}`"))?;
             if remote_payload.sse_fallback {
                 if state.should_skip_remote_sse_fallback_resync(
                     remote_id,
@@ -996,6 +1022,10 @@ fn dispatch_remote_event_with_recovery(
         }
         "delta" => {
             recovery.force_next_state_after_lagged = false;
+            if data_lines.is_empty() {
+                return Ok(());
+            }
+            let payload = data_lines.join("\n");
             let delta: DeltaEvent = serde_json::from_str(&payload)
                 .with_context(|| format!("failed to decode remote delta event `{remote_id}`"))?;
             if let Err(err) = state.apply_remote_delta_event(remote_id, delta) {

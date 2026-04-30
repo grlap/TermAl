@@ -154,6 +154,30 @@ describe("splitStreamingMarkdownForRendering", () => {
         pending: text,
       });
     });
+
+    it("does not close a four-backtick fence with a shorter backtick fence", () => {
+      const text = "````md\n```js\nstill inside";
+      expect(splitStreamingMarkdownForRendering(text)).toEqual({
+        settled: "",
+        pending: text,
+      });
+    });
+
+    it("settles a four-backtick fence only when the closer is long enough", () => {
+      const text = "````md\n```js\nstill inside\n````\n";
+      expect(splitStreamingMarkdownForRendering(text)).toEqual({
+        settled: text,
+        pending: "",
+      });
+    });
+
+    it("does not close a backtick fence with a tilde fence", () => {
+      const text = "```\n~~~\nstill inside";
+      expect(splitStreamingMarkdownForRendering(text)).toEqual({
+        settled: "",
+        pending: text,
+      });
+    });
   });
 
   describe("math display blocks", () => {
@@ -167,6 +191,14 @@ describe("splitStreamingMarkdownForRendering", () => {
 
     it("settles a closed `$$` block", () => {
       const text = "$$\nx^2 + y^2 = z^2\n$$\n";
+      expect(splitStreamingMarkdownForRendering(text)).toEqual({
+        settled: text,
+        pending: "",
+      });
+    });
+
+    it("settles a closed `$$` block followed by partial prose", () => {
+      const text = "$$\nx^2 + y^2 = z^2\n$$\npartial pr";
       expect(splitStreamingMarkdownForRendering(text)).toEqual({
         settled: text,
         pending: "",
@@ -217,8 +249,12 @@ describe("splitStreamingMarkdownForRendering", () => {
       const inputs = [
         "",
         "Hello",
+        "Hello\n",
+        "\n",
+        "\n\n",
         "Hello\n\n| A | B |",
         "```js\nconsole.log()",
+        "$$\nx",
         "Para 1.\n\nPara 2.\n\n| X |\n",
         // Edge: leading blank line then a partial table — verifies
         // the boundary newline is preserved.

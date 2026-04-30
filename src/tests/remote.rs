@@ -9433,14 +9433,8 @@ fn remote_lagged_marker_force_applies_next_same_revision_state_snapshot() {
     let repaired_data_lines =
         vec![serde_json::to_string(&repaired_state).expect("state payload should encode")];
 
-    dispatch_remote_event_with_recovery(
-        &state,
-        "ssh-lab",
-        "lagged",
-        &["1".to_owned()],
-        &mut recovery,
-    )
-    .expect("lagged marker should arm recovery");
+    dispatch_remote_event_with_recovery(&state, "ssh-lab", "lagged", &[], &mut recovery)
+        .expect("bare lagged marker should arm recovery");
     dispatch_remote_event_with_recovery(
         &state,
         "ssh-lab",
@@ -9449,6 +9443,29 @@ fn remote_lagged_marker_force_applies_next_same_revision_state_snapshot() {
         &mut recovery,
     )
     .expect("same-revision lagged recovery state should apply");
+
+    let mut repeated_same_revision_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    repeated_same_revision_state.sessions[0].preview =
+        "Unexpected second same-revision preview".to_owned();
+    repeated_same_revision_state.sessions[0].messages =
+        vec![remote_text_message("message-1", "Unexpected repeated body")];
+    repeated_same_revision_state.sessions[0].message_count = 1;
+    let repeated_same_revision_data_lines = vec![
+        serde_json::to_string(&repeated_same_revision_state).expect("state payload should encode"),
+    ];
+    dispatch_remote_event_with_recovery(
+        &state,
+        "ssh-lab",
+        "state",
+        &repeated_same_revision_data_lines,
+        &mut recovery,
+    )
+    .expect("repeated same-revision state should be ignored after marker consumption");
 
     let snapshot = state.full_snapshot();
     assert!(
@@ -9463,6 +9480,188 @@ fn remote_lagged_marker_force_applies_next_same_revision_state_snapshot() {
             .iter()
             .any(|session| session.preview == "Initial remote preview")
     );
+    assert!(
+        !snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "Unexpected second same-revision preview")
+    );
+}
+
+#[test]
+fn remote_event_stream_parser_dispatches_bare_lagged_at_eof() {
+    let state = test_app_state();
+    let remote = local_replay_test_remote();
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut initial_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    initial_state.sessions[0].preview = "Initial EOF remote preview".to_owned();
+    initial_state.sessions[0].messages = vec![remote_text_message("message-1", "Initial EOF body")];
+    initial_state.sessions[0].message_count = 1;
+    let initial_data_lines =
+        vec![serde_json::to_string(&initial_state).expect("state payload should encode")];
+    let mut recovery = RemoteEventStreamRecovery::default();
+
+    dispatch_remote_event_with_recovery(
+        &state,
+        "ssh-lab",
+        "state",
+        &initial_data_lines,
+        &mut recovery,
+    )
+    .expect("initial remote state should apply");
+
+    let mut event_name = String::new();
+    let mut data_lines = Vec::new();
+    process_remote_event_stream_reader(
+        &state,
+        "ssh-lab",
+        std::io::Cursor::new("event: lagged\n"),
+        &mut event_name,
+        &mut data_lines,
+        &mut recovery,
+    )
+    .expect("EOF-terminated bare lagged frame should dispatch");
+
+    let mut repaired_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    repaired_state.sessions[0].preview = "EOF lagged repaired preview".to_owned();
+    repaired_state.sessions[0].messages =
+        vec![remote_text_message("message-1", "EOF lagged repaired body")];
+    repaired_state.sessions[0].message_count = 1;
+    let repaired_data_lines =
+        vec![serde_json::to_string(&repaired_state).expect("state payload should encode")];
+
+    dispatch_remote_event_with_recovery(
+        &state,
+        "ssh-lab",
+        "state",
+        &repaired_data_lines,
+        &mut recovery,
+    )
+    .expect("same-revision EOF lagged recovery state should apply");
+
+    let snapshot = state.full_snapshot();
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "EOF lagged repaired preview")
+    );
+    assert!(
+        !snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "Initial EOF remote preview")
+    );
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_lagged_marker_clears_on_empty_data_bearing_frame() {
+    for empty_event_name in ["state", "delta"] {
+        let state = test_app_state();
+        let remote = local_replay_test_remote();
+        create_test_remote_project(
+            &state,
+            &remote,
+            "/remote/repo",
+            "Remote Project",
+            "remote-project-1",
+        );
+
+        let mut initial_state = sample_remote_orchestrator_state(
+            "remote-project-1",
+            "/remote/repo",
+            2,
+            OrchestratorInstanceStatus::Running,
+        );
+        initial_state.sessions[0].preview = format!("Initial empty {empty_event_name} preview");
+        initial_state.sessions[0].messages = vec![remote_text_message(
+            "message-1",
+            &format!("Initial empty {empty_event_name} body"),
+        )];
+        initial_state.sessions[0].message_count = 1;
+        let initial_data_lines =
+            vec![serde_json::to_string(&initial_state).expect("state payload should encode")];
+        let mut recovery = RemoteEventStreamRecovery::default();
+
+        dispatch_remote_event_with_recovery(
+            &state,
+            "ssh-lab",
+            "state",
+            &initial_data_lines,
+            &mut recovery,
+        )
+        .expect("initial remote state should apply");
+        dispatch_remote_event_with_recovery(&state, "ssh-lab", "lagged", &[], &mut recovery)
+            .expect("bare lagged marker should arm recovery");
+        dispatch_remote_event_with_recovery(
+            &state,
+            "ssh-lab",
+            empty_event_name,
+            &[],
+            &mut recovery,
+        )
+        .expect("empty data-bearing frame should clear stale lagged recovery");
+
+        let mut repaired_state = sample_remote_orchestrator_state(
+            "remote-project-1",
+            "/remote/repo",
+            2,
+            OrchestratorInstanceStatus::Running,
+        );
+        repaired_state.sessions[0].preview =
+            format!("Unexpected empty {empty_event_name} repaired preview");
+        repaired_state.sessions[0].messages = vec![remote_text_message(
+            "message-1",
+            &format!("Unexpected empty {empty_event_name} repaired body"),
+        )];
+        repaired_state.sessions[0].message_count = 1;
+        let repaired_data_lines =
+            vec![serde_json::to_string(&repaired_state).expect("state payload should encode")];
+
+        dispatch_remote_event_with_recovery(
+            &state,
+            "ssh-lab",
+            "state",
+            &repaired_data_lines,
+            &mut recovery,
+        )
+        .expect("same-revision state after intervening empty frame should be handled");
+
+        let snapshot = state.full_snapshot();
+        assert!(
+            snapshot
+                .sessions
+                .iter()
+                .any(|session| session.preview
+                    == format!("Initial empty {empty_event_name} preview")),
+            "initial state should remain after empty {empty_event_name} frame"
+        );
+        assert!(
+            !snapshot.sessions.iter().any(|session| {
+                session.preview == format!("Unexpected empty {empty_event_name} repaired preview")
+            }),
+            "same-revision state after empty {empty_event_name} frame must not force-apply"
+        );
+        let _ = fs::remove_file(state.persistence_path.as_path());
+    }
 }
 
 #[test]

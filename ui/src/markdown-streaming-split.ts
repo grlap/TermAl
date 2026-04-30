@@ -69,6 +69,8 @@ export function splitStreamingMarkdownForRendering(
   const lines = markdown.split("\n");
   let inFence = false;
   let fenceOpenLineIndex = -1;
+  let fenceMarkerChar: "`" | "~" | null = null;
+  let fenceMarkerLength = 0;
   let inMath = false;
   let mathOpenLineIndex = -1;
   let tableStartLineIndex = -1;
@@ -77,21 +79,32 @@ export function splitStreamingMarkdownForRendering(
     const line = lines[i];
     const trimmed = line.trim();
 
-    // Fenced code blocks (``` or ~~~). We toggle on any matching
-    // marker — CommonMark forbids nesting same-marker fences inside
-    // a fence body, so a second occurrence is always a close.
+    // Fenced code blocks (``` or ~~~). Track the opener so only
+    // CommonMark-compatible closers with the same marker character
+    // and enough length can close it.
     if (!inMath) {
-      if (/^(`{3,}|~{3,})/.test(trimmed)) {
+      const fenceMatch = trimmed.match(/^(`{3,}|~{3,})(.*)$/);
+      if (fenceMatch) {
+        const marker = fenceMatch[1];
+        const markerChar = marker.startsWith("`") ? "`" : "~";
         if (!inFence) {
           inFence = true;
           fenceOpenLineIndex = i;
+          fenceMarkerChar = markerChar;
+          fenceMarkerLength = marker.length;
           // Opening a fence cancels any in-flight table tracking;
           // the table didn't actually exist (its lines were
           // re-interpreted as something else).
           tableStartLineIndex = -1;
-        } else {
+        } else if (
+          markerChar === fenceMarkerChar &&
+          marker.length >= fenceMarkerLength &&
+          fenceMatch[2].trim() === ""
+        ) {
           inFence = false;
           fenceOpenLineIndex = -1;
+          fenceMarkerChar = null;
+          fenceMarkerLength = 0;
         }
         continue;
       }

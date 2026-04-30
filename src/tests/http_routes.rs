@@ -512,6 +512,61 @@ async fn state_events_route_streams_initial_state_and_live_deltas() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Pins `GET /api/events` lagged recovery wire format. Browsers can skip
+// empty-data EventSource frames, so the backend must serialize the control
+// marker with a non-empty reserved body before the recovery `state` frame.
+#[tokio::test]
+async fn state_events_route_emits_non_empty_lagged_marker_before_recovery_state() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let app = app_router(state.clone());
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+
+    let initial_event = next_sse_event(&mut body).await;
+    let (initial_name, _) = parse_sse_event(&initial_event);
+    assert_eq!(initial_name, "state");
+
+    // `test_app_state()` uses a 16-slot broadcast channel; 64 sends is safely
+    // past that capacity even if the route drains a few frames while we loop.
+    for _ in 0..64 {
+        let payload =
+            serde_json::to_string(&state.summary_snapshot()).expect("state should serialize");
+        state
+            .state_events
+            .send(payload)
+            .expect("route receiver should still be subscribed");
+    }
+
+    let lagged_event = next_sse_event(&mut body).await;
+    assert!(lagged_event.contains("event: lagged"));
+    assert!(
+        lagged_event
+            .lines()
+            .any(|line| line.trim_end_matches('\r') == "data: 1"),
+        "lagged marker must carry a non-empty reserved payload: {lagged_event:?}"
+    );
+    let (lagged_name, lagged_data) = parse_sse_event(&lagged_event);
+    assert_eq!(lagged_name, "lagged");
+    assert_eq!(lagged_data, "1");
+
+    let recovery_event = next_sse_event(&mut body).await;
+    let (recovery_name, recovery_data) = parse_sse_event(&recovery_event);
+    assert_eq!(recovery_name, "state");
+    let recovery_state: StateResponse =
+        serde_json::from_str(&recovery_data).expect("recovery state payload should parse");
+    assert_eq!(recovery_state.revision, state.summary_snapshot().revision);
+}
+
 // Pins `GET /api/events` + `PUT/DELETE /api/workspaces/{id}` — asserts
 // every workspace-layout mutation (create, update, delete) republishes
 // a fresh `state` SSE frame whose `workspaces` summaries reflect the
