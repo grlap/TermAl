@@ -229,6 +229,12 @@ export function classifyFetchedSessionAdoption({
     responseIsNotOlderThanRequest &&
     requestStillMatches &&
     responseMatches;
+  const canAdoptLowerRevisionTextRepairHydration =
+    requestContext.allowDivergentTextRepairAfterNewerRevision === true &&
+    responseIsNotOlderThanRequest &&
+    requestStillMatches &&
+    responseMetadataMatches &&
+    responseSession.messagesLoaded === true;
   // The downgrade allowance below is intentionally narrower than
   // "metadata-only": the request and response must still match the current
   // summary, otherwise a delayed full-session response can clobber newer
@@ -243,7 +249,9 @@ export function classifyFetchedSessionAdoption({
       nextServerInstanceId: responseServerInstanceId,
       seenServerInstanceIds,
       force: true,
-      allowRevisionDowngrade: canAdoptLowerRevisionHydration,
+      allowRevisionDowngrade:
+        canAdoptLowerRevisionHydration ||
+        canAdoptLowerRevisionTextRepairHydration,
     })
   ) {
     return "stale";

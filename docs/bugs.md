@@ -82,33 +82,34 @@ Round 13 moved the `persist_worker_alive` flip from BEFORE the Shutdown signal t
 - Add a regression that races a late `commit_delta_locked` with the worker's final collection and proves the final persisted state is the latest `StateInner`.
 - Add an explicit `persist_worker_alive` Acquire check to `persist_internal_locked` so all four commit variants share one shutdown contract.
 
-## `architecture.md` "Graceful shutdown contract" still describes the pre-round-12 `Notify` mechanism
+## Duplicate remote delta hydrations fall through to unloaded-transcript delta application
 
-**Severity:** Medium - documented protocol contract no longer matches the implementation; future remote-bridge or replacement-handler implementers will read the wrong invariant.
+**Severity:** Medium - duplicate in-flight hydration callers receive `Ok(false)`, which every delta handler treats as "no repair happened; continue applying the delta".
 
-The "Graceful shutdown contract" subsection in `docs/architecture.md` says `with_graceful_shutdown` first calls `state.shutdown_notify.notify_waiters()` and that every live `/api/events` stream's "pinned `Notified` future resolves and breaks the handler's `tokio::select!` loop". Round 12 replaced `Notify` with `tokio::sync::watch::channel(false)`, exposed `subscribe_shutdown_signal` / `trigger_shutdown_signal` helpers, and `state_events` now uses `borrow_and_update()` plus `wait_for_shutdown_signal` polling `changed()` with re-checks. The same architecture.md edit pass updated the `lagged` event description but missed the shutdown contract paragraph.
-
-**Current behavior:**
-- The architecture doc describes a `Notify`-based pinned-future mechanism that no longer exists.
-- The actual implementation uses `tokio::sync::watch::Sender<bool>` with `send_replace(true)` for sticky-broadcast semantics.
-- The "sticky" property (a subscriber registered AFTER the trigger still observes `true`) is the load-bearing protocol invariant that `Notify` did NOT have; the doc still describes the broken non-sticky mechanism.
-
-**Proposal:**
-- Replace the contract paragraph with the watch-channel description: `trigger_shutdown_signal()` calls `send_replace(true)`; `state_events` performs dual `borrow_and_update()` checks (pre-yield and inside the select loop); subscribers registered between Ctrl+C and graceful-shutdown completion still observe the sticky `true` value.
-
-## `markLiveSessionResumeWatchdogBaseline` lacks invariant cross-link to the watchdog `<=` rationale
-
-**Severity:** Medium - the load-bearing guarantee for the reconnect (`===`) vs watchdog (`<=`) asymmetry lives entirely in a comment in `app-live-state.ts`; a refactor narrowing the baseline-update set could silently invalidate the asymmetry's safety reasoning.
-
-The watchdog `<=` retention rests on a non-obvious cross-module invariant: every session-content delta MUST update `markLiveSessionResumeWatchdogBaseline`, so that the watchdog cannot fire while session-content deltas are recent. The inline comment at `app-live-state.ts:1844-1869` documents this excellently for that one site. There is no source-level cross-link from `markLiveSessionResumeWatchdogBaseline`'s definition back to this asymmetry — a future refactor that narrows the baseline-update set (e.g., excluding orchestrator metadata changes) would silently invalidate the reasoning.
+The in-flight map suppresses duplicate `/api/sessions/{id}` fetches, but it does not coordinate the waiting delta handlers. For a summary-only remote proxy, a concurrent text delta or replacement can still run against missing messages and trigger a broad `/api/state` resync; a message-created delta can partially mutate an unloaded transcript before the first full hydration finishes.
 
 **Current behavior:**
-- The asymmetry rationale is documented inline in the consumer.
-- The producer (`markLiveSessionResumeWatchdogBaseline`) has no doc explaining what depends on its calling discipline.
+- The first delta for an unloaded remote session starts full-session hydration.
+- A duplicate delta for the same remote/session sees the in-flight key and returns `Ok(false)`.
+- Callers continue into the narrow delta path as if no hydration was needed.
 
 **Proposal:**
-- Add a short doc comment on `markLiveSessionResumeWatchdogBaseline` naming the invariant: "any session-content delta MUST update this baseline; the watchdog branch in `adoptState`'s reconnect/fallback handler relies on this to keep the `<=` rollback semantics safe (see `isEqualRevisionAutomaticReconnectSnapshot` for the asymmetry rationale)."
-- Optional: add a short subsection to `docs/architecture.md` describing both gates and the rationale for the asymmetry (already requested in the watchdog Note entry below).
+- Return a distinct outcome such as `HydrationInFlight`, or have duplicates wait/queue behind the first hydration.
+- After the first hydration completes, re-check the session transcript watermark before applying queued or retried deltas.
+- Add burst/concurrent same-session delta coverage proving only one remote fetch occurs and duplicate deltas do not mutate unloaded transcripts.
+
+## Text-repair hydration lacks live rendering regression coverage
+
+**Severity:** Medium - the lower-revision text-repair adoption path is covered only by a classifier unit test.
+
+The new adoption rule is intended to fix the user-visible bug where the latest assistant message stays hidden until an unrelated focus, scroll, or prompt rerender. The current coverage proves the pure classifier returns `adopted`, but it does not prove the live hook requests the flagged hydration, adopts the lower-revision session response after an unrelated newer live revision, flushes the session slice, and renders the repaired text immediately.
+
+**Current behavior:**
+- `classifyFetchedSessionAdoption` has a unit test for divergent text repair after a newer revision.
+- No hook or app-level regression drives `/api/sessions/{id}` through the live-state path and asserts immediate transcript rendering.
+
+**Proposal:**
+- Add a `useAppLiveState` or `App.live-state.reconnect` regression where text-repair hydration is requested, a newer unrelated live event advances `latestStateRevisionRef`, the session response resolves at the original request revision, and the active transcript updates without any extra user action.
 
 ## "Rejects a lower same-instance reconnect" test does not pin polling continuation
 
@@ -123,18 +124,105 @@ The watchdog `<=` retention rests on a non-obvious cross-module invariant: every
 **Proposal:**
 - After asserting the rejection, call `await advanceTimers(RECONNECT_STATE_RESYNC_DELAY_MS)` and assert `fetchStateSpy` fires a second time (proves the loop stayed armed despite the rejection).
 
-## Watchdog/reconnect asymmetry not documented in `docs/architecture.md`
+## Remote hydration in-flight cleanup can race with the RAII guard
 
-**Severity:** Low - the bugs.md "Watchdog recovery still allows lower same-instance revisions" entry's proposal said to document the asymmetry in architecture.md; the round-12 doc edit only updated the `lagged` event format.
+**Severity:** Low - clearing `remote_delta_hydrations_in_flight` by key can remove or later invalidate a newer in-flight hydration for the same remote/session.
 
-The reconnect path requires `state.revision === requestedRevision` for same-instance force-adoption (closed L197). The watchdog path keeps `state.revision <= requestedRevision` for orchestrator-revision-noise recovery (because the watchdog cannot fire while session-content deltas are recent). Both inline comments document the rationale, but a reviewer reading `docs/architecture.md` alone has no signal that the asymmetry is a deliberate choice — they are likely to re-flag it.
+The remote hydration guard removes its `(remote_id, session_id)` key on drop. `clear_remote_applied_revision` can also remove keys for a remote while an older hydration guard is still alive. If a later hydration inserts the same key after that cleanup, the older guard can drop afterward and remove the newer marker, allowing duplicate hydrations despite the guard.
 
 **Current behavior:**
-- Inline comments in `app-live-state.ts` document the asymmetry.
-- `docs/architecture.md` has no description of either gate.
+- In-flight hydration entries are keyed only by `(remote_id, session_id)`.
+- Remote continuity cleanup can remove a live key while the guard that owns it is still alive.
+- A stale guard drop cannot distinguish its own entry from a newer entry with the same key.
 
 **Proposal:**
-- Add a short subsection to `architecture.md` (e.g., under the SSE Event Stream section or a new "Live-state reconnection and watchdog recovery" topic) describing both gates and the rationale for the asymmetry: reconnect probes can race new SSE assistant deltas (so `===` is required to prevent rollback past streamed content), while watchdog probes only fire after stale-transport detection (so `<=` is safe AND load-bearing for orchestrator-revision-noise recovery).
+- Store a unique token or generation per in-flight entry and remove only when the token still matches.
+- Or avoid clearing live in-flight markers during remote continuity reset; let the owning guard retire its own marker.
+- Add cleanup tests covering overlapping guards and per-remote cleanup.
+
+## Lagged force-adopt marker clearing on EventSource reconnect lacks coverage
+
+**Severity:** Low - the frontend now clears an armed lagged recovery marker on EventSource error/reconnect, but no test pins that boundary.
+
+The new baseline guard covers same-stream stale recovery after a newer delta, but a separate hazard is an old `lagged` marker surviving across a closed EventSource into a new stream. The implementation clears the marker on reconnect/error cleanup, yet no regression proves a stale lower/same-instance state on the new stream cannot be force-adopted.
+
+**Current behavior:**
+- `clearForceAdoptNextStateEvent` runs during EventSource error/reconnect cleanup.
+- Existing lagged tests do not cross an EventSource boundary.
+
+**Proposal:**
+- Add a reconnect test that dispatches `lagged`, triggers `error`, opens a new EventSource, and sends a lower/same-instance state that must not be force-adopted.
+
+## Remote hydration dedupe coverage bypasses the production burst path
+
+**Severity:** Low - the current duplicate-hydration test manually seeds the in-flight map instead of driving real bursty remote deltas.
+
+The test pins the duplicate branch, but it would not catch a regression where the first real hydration leaks the guard, where a successful hydration does not clear the marker, or where multiple actual same-session delta handlers still issue duplicate remote session fetches.
+
+**Current behavior:**
+- The test inserts an in-flight key directly.
+- It does not prove the first production hydration inserts and clears the guard.
+- It does not prove bursty same-session deltas issue only one remote session fetch.
+
+**Proposal:**
+- Add coverage for a successful hydration path that asserts the guard is removed afterward.
+- Add a burst/concurrent same-session delta case that asserts only one remote session fetch is issued.
+
+## `includeUndeferredMessageTail` exported solely for testing widens the panel module's public surface
+
+**Severity:** Note - `AgentSessionPanel.tsx` is a panel module, not a utility module; an exported helper looks importable from sibling panels even though it is conceptually private to this one.
+
+`ui/src/panels/AgentSessionPanel.tsx:111` was changed from a module-private `function` to an `export function` solely so the test file can import it. Per CLAUDE.md the project is actively splitting panels smaller; future readers may import the helper from another panel without realising it was meant to be internal.
+
+**Current behavior:**
+- Helper is exported with no marker indicating its test-only intent.
+
+**Proposal:**
+- Add `/** @internal */` JSDoc tag (cheapest), OR move the function and its tests to a sibling module (`agent-session-conversation-tail.ts` + `.test.ts`) per the CLAUDE.md split convention.
+
+## `apply_remote_state_if_newer_locked` `force: bool` parameter is unnamed at call sites
+
+**Severity:** Low - seven call sites pass `false` and one passes `true`; readers cannot tell what `force` means without consulting the function signature.
+
+`apply_remote_state_if_newer_locked` was extended with a `force: bool` parameter so that `apply_remote_lagged_recovery_state_snapshot` can bypass the same-revision replay gate. The parameter is correct, but the convention scales poorly: a future caller that copies a neighbouring `false` from any of the seven existing sites will inherit the gated behaviour without realising the parameter exists, and a future maintainer who needs the bypass at a different site will have to re-derive what the boolean means.
+
+**Current behavior:**
+- `apply_remote_state_if_newer_locked(&mut inner, remote_id, &remote_state, None, false)` appears at seven call sites.
+- One new call site passes `true` for lagged-recovery force-apply.
+- The doc-comment on the function explains the parameter, but the call sites do not self-document.
+
+**Proposal:**
+- Replace `force: bool` with a typed `enum SnapshotApplyMode { GateBySnapshotRevision, ForceApplyAfterLagged }` (or similar). All existing call sites become `SnapshotApplyMode::GateBySnapshotRevision`; the lagged-recovery site reads `SnapshotApplyMode::ForceApplyAfterLagged` and self-documents.
+- Optional: also push the bypass-gate into a tiny inline comment at the lagged-recovery site naming the upstream invariant (`api_sse.rs::state_events` yields `state` immediately after `lagged` within one `tokio::select!` arm).
+
+## Remote SSE bridge `dispatch_remote_event_with_recovery` returns early on empty `data:` before inspecting `event_name`
+
+**Severity:** Low - latent bug that defeats the `data: 1` defensive byte if the upstream protocol ever changes.
+
+`dispatch_remote_event_with_recovery` returns when `data_lines.is_empty()` BEFORE inspecting `event_name`. Today the upstream contract guarantees `lagged` always carries `data: 1` (documented in `docs/architecture.md:246` and pinned at `src/api_sse.rs:246`), so this is currently dormant. But the `data: 1` byte exists *because* of browser SSE-spec quirks — defending it once and then silently breaking it elsewhere is the kind of coupling that bites silently. If a future backend change drops the byte, the remote bridge silently stops arming `force_next_state_after_lagged`, and the symptom is a missed Lagged repair on the chained-remote path with no log.
+
+**Current behavior:**
+- Empty `data:` causes early-return regardless of `event_name`.
+- A bare `event: lagged\n\n` (no `data:` line) would slip past arming `recovery.force_next_state_after_lagged`.
+- No log or assertion fires when this happens.
+
+**Proposal:**
+- Move the `data_lines.is_empty()` guard inside the `match` arms that actually need a payload (`state`, `delta`), so an empty-data `lagged` would still arm recovery.
+- Or assert/log when `lagged` arrives with empty data so a regression is loud rather than silent.
+
+## `classifyFetchedSessionAdoption` two parallel low-revision branches lack a shared rationale comment
+
+**Severity:** Low - `canAdoptLowerRevisionHydration` and the new `canAdoptLowerRevisionTextRepairHydration` look almost identical but diverge on two preconditions; a "unify the duplication" refactor would silently change the behaviour of one of them.
+
+`session-hydration-adoption.ts:232-237` adds `canAdoptLowerRevisionTextRepairHydration` parallel to the existing `canAdoptLowerRevisionHydration`. Both share `responseIsNotOlderThanRequest && requestStillMatches`, but the new branch (a) drops the `currentSession.messagesLoaded !== true` gate (text-repair intentionally accepts on a fully-loaded local) and (b) uses `responseMetadataMatches` instead of `responseMatches` (the response transcript can differ from local because text-repair is the corruption-recovery path that trusts the server's transcript). The header comment block above the original branch describes its rationale; it does not explain the two text-repair-specific preconditions.
+
+**Current behavior:**
+- Both branches are well-tested in isolation.
+- The header comment only describes the original `canAdoptLowerRevisionHydration` rationale.
+- A future reader doing a "unify the duplication" refactor could collapse the two into one and silently change one branch's preconditions.
+
+**Proposal:**
+- Extend the comment block above the two branches to describe both: text-repair hydration is a corruption-recovery path that intentionally trusts the server's transcript over local divergent text deltas, so it accepts even when local is fully loaded and even when `hydrationRetainedMessagesMatch` would reject.
 
 ## Watchdog recovery still allows lower same-instance revisions for orchestrator-noise recovery
 
@@ -150,7 +238,6 @@ The reconnect fallback path was tightened to require `state.revision === request
 **Proposal:**
 - Keep the watchdog branch at `<=`; the `===` clamp would break the orchestrator-noise recovery path that drives the two existing regressions named above.
 - Optional follow-up: refactor the watchdog to trigger per-session hydration (`/api/sessions/{id}`) instead of `/api/state`, so the global revision counter is never rolled back. That removes the asymmetry without breaking recovery; it is a larger refactor than the L197 fix justified.
-- Document the asymmetry as accepted in `docs/architecture.md` so future reviewers don't re-flag it.
 
 ## Lagged SSE wire format lacks backend route-level coverage
 
@@ -196,22 +283,6 @@ The new tests validate the sticky `watch` shutdown helper directly, but they do 
 **Proposal:**
 - Add route-level SSE shutdown tests for shutdown-before-connect and shutdown-after-initial-state.
 - Wrap both in timeouts so missed shutdown delivery fails loudly.
-
-## Remote SSE bridge ignores `lagged` recovery markers
-
-**Severity:** Medium - `src/remote_sync.rs:889-930`. `/api/events` is also consumed by the remote SSE bridge, but `dispatch_remote_event` currently handles only `state` and `delta`. Once the browser-visible `lagged` marker is fixed, remote streams still will not use it to force the following same-revision recovery snapshot.
-
-That leaves remote clients exposed to the same Lagged recovery hole the browser path is trying to close: the remote bridge can ignore the marker, process the recovery `state` through existing revision gates, and discard a snapshot whose revision matches what it already recorded.
-
-**Current behavior:**
-- `process_remote_event_stream` parses arbitrary SSE event names.
-- `dispatch_remote_event` ignores unknown names, including `lagged`.
-- Remote fallback handling exists for `state` payloads with `_sseFallback`, but there is no one-shot marker for native Lagged recovery snapshots.
-
-**Proposal:**
-- Teach the remote event processor to treat `lagged` as a marker for the next `state` event from the same stream.
-- Either force-apply that next remote state snapshot when it is same-revision, or trigger a force-capable `resync_remote_state_snapshot`.
-- Add a remote SSE test that sends `lagged` followed by same-revision `state` and proves the recovery path is honored.
 
 ## Shutdown signal registration errors can look like real shutdown
 
@@ -261,23 +332,6 @@ A future fourth recovery branch would need to update three sites; collapsing int
 **Proposal:**
 - Extract a helper that yields the marker + recovery snapshot. The `async_stream::stream!` macro doesn't compose cleanly with helpers that themselves yield, so consider a named local closure or document the invariant explicitly.
 - Or, accept the duplication and add cross-referencing comments naming both branches.
-
-## `lagged` force-adopt arming is not scoped to the recovery baseline
-
-**Severity:** Medium - `ui/src/app-live-state.ts:2479-2492` (`handleLaggedEvent`) and the state adoption call around `ui/src/app-live-state.ts:2158-2163`. The contract from the backend is "the next state event on this stream is the recovery snapshot to force-adopt", but the frontend stores only an unscoped boolean. If local state advances after the marker but before the recovery snapshot arrives, or if the stream reconnects before the marker is consumed, the next state event can be force-adopted with revision downgrade enabled even though it is no longer the intended same-baseline repair.
-
-Lagged recovery only needs to bypass same-revision rejection for the recovery snapshot current at the time lag was detected. It should not give an unrelated later snapshot permission to roll the client backward.
-
-**Current behavior:**
-- `handleLaggedEvent` sets `forceAdoptNextStateEventRef.current = true` unconditionally.
-- The flag is consumed by the very next `state` event the client receives, regardless of whether local revision advanced in between.
-- The forced state adoption path also enables `allowRevisionDowngrade`.
-- The flag can survive a reconnect boundary until the next `state` event consumes it.
-
-**Proposal:**
-- Store the local revision when `lagged` is received and only force the next state if the client is still at that baseline.
-- Prefer same-revision bypass for Lagged recovery instead of allowing lower same-instance revision adoption.
-- Clear any unconsumed Lagged force-adopt marker on `eventSource.onerror`, or otherwise scope it to the current stream.
 
 ## Per-session hydration burst has no cooldown beyond in-flight deduplication
 
@@ -630,22 +684,6 @@ This leaves the main producer path for heavy Markdown deferral unpinned even tho
 **Proposal:**
 - Add an integration-style virtualized-list test with a heavy Markdown message.
 - Fire a wheel/scroll gesture, assert the marker is set and heavy content stays deferred, then advance timers and assert the marker clears and `termal:deferred-render-resume` fires.
-
-## Per-delta hydration HTTP fan-out has no in-flight deduplication
-
-**Severity:** Medium - `src/remote_routes.rs:505-534` adds `hydrate_unloaded_remote_session_for_delta` calls at the top of eight delta handlers (`MessageCreated`, `MessageUpdated`, `TextDelta`, `ThinkingDelta`, `CommandUpdate`, `ParallelAgentsUpdate`, plus two more). For a burst of N inbound deltas on a still-unloaded proxy, each call drops the lock, performs a synchronous HTTP fetch, and reacquires the lock — without any in-flight tracking. The first fetch flips `messages_loaded: true` and subsequent fetches short-circuit, but the in-flight ones still serialize on the remote registry and on the local async runtime.
-
-A 100-delta burst on an unloaded proxy issues up to 100 HTTP fetches in sequence before the per-delta short-circuit kicks in. On chained-remote topologies where many proxies are unloaded after a summary `state` arrives, a small flurry of inbound activity can wedge the remote registry queue.
-
-**Current behavior:**
-- Eight delta handlers call `hydrate_unloaded_remote_session_for_delta` without coordination.
-- Each call independently sees `messages_loaded: false`, drops the lock, fetches, and reacquires.
-- The first fetch wins; subsequent fetches still serialize.
-
-**Proposal:**
-- Track in-flight hydrations per `(remote_id, remote_session_id)` (e.g., `HashMap<_, Arc<Notify>>` or a per-session `AtomicBool` + waiter pattern).
-- Have parallel callers `await` the same future, falling through to the existing skip path on the first success.
-- Add a regression with concurrent same-session `MessageCreated` deltas that asserts only one HTTP fetch is issued.
 
 ## Metadata-first summaries make transcript search incomplete
 
@@ -1060,10 +1098,14 @@ The unstaged diff includes `node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95
   force `RecvError::Lagged` through `/api/events` and assert the raw frame emits `event: lagged`, non-empty `data: 1`, then the recovery `state`.
 - [ ] P2: Add non-send action restart live-stream delta-on-recreated-stream coverage:
   the round-13 fix proves `forceSseReconnect()` is called on cross-instance `adoptActionState` recovery, but does not dispatch live deltas through the recreated EventSource. Submit an approval/input-style action after backend restart, then dispatch assistant deltas on the new `EventSourceMock` and assert they render in the active transcript bubble.
-- [ ] P2: Add remote `lagged` SSE bridge regression:
-  feed `dispatch_remote_event` / the remote stream processor a `lagged` marker followed by a same-revision recovery `state`, and assert the remote snapshot is honored instead of ignored by revision gates.
-- [ ] P2: Add reconnect force-adoption monotonicity regressions:
-  prove lower same-instance `/api/state` watchdog snapshots are rejected, reconnect snapshots stay rejected, and a Lagged marker only force-adopts the following state while the client is still at the marker baseline.
+- [ ] P2: Add live text-repair hydration rendering regression:
+  drive the live-state hook or app through text-repair hydration after an unrelated newer live revision and assert the active transcript renders the repaired assistant text without scroll, focus, or another prompt.
+- [ ] P2: Add AgentSessionPanel deferred-tail component regressions:
+  cover switching from a non-empty deferred transcript to an empty current session, and same-id updated assistant text through the rendered component path (`useDeferredValue`, pending-prompt filtering, and the virtualized list), not only the exported helper.
+- [ ] P2: Add lagged-marker EventSource reconnect-boundary regression:
+  dispatch `lagged`, trigger EventSource error/reconnect, then send a lower/same-instance state on the new stream and assert the old marker cannot force-adopt it.
+- [ ] P2: Add remote hydration dedupe production-path coverage:
+  drive bursty same-session remote deltas through the production hydration path, assert only one remote session fetch is issued, and assert the in-flight guard is cleared after successful hydration.
 - [ ] P2: Add failed manual retry reconnect-rearm regression:
   cover manual retry hitting a transient failure, then the next scheduled attempt adopting a newer same-instance snapshot while polling still continues until SSE confirms.
 - [ ] P2 workspace-file bad-live-event recovery regression:
@@ -1090,3 +1132,7 @@ The unstaged diff includes `node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95
   create many Mermaid/math rendered regions and assert the preview applies the same document-level caps as a single `MarkdownContent` document.
 - [ ] P2: Add single-target rendered diff navigation coverage:
   assert prev/next scrolls the only Markdown diff change and the only rendered diff region even though the selected index does not change.
+- [ ] P2: Pin "consumed exactly once" semantics for `RemoteEventStreamRecovery.force_next_state_after_lagged`:
+  the new `remote_lagged_marker_force_applies_next_same_revision_state_snapshot` test pins force-application of the immediate recovery `state`, but does not pin that the flag is consumed exactly once. Dispatch a third `state` event at the same revision after the recovery one with a distinct preview and assert it is NOT applied (proves `std::mem::take(&mut recovery.force_next_state_after_lagged)` cleared the flag).
+- [ ] P2: Route the new lagged-recovery reconnect test through the textDelta fast-path it documents:
+  the new `App.live-state.reconnect.test.tsx` test exercises the revision-gap branch (the `messageCreated` delta omits `sessionMutationStamp` so it falls into the resync fallback). Add `sessionMutationStamp` so the delta routes through the matched-stamp fast-path that the surrounding `handleDeltaEvent` comment is most concerned about, OR rename the test to clarify it covers the revision-gap branch specifically and add a sibling test for the textDelta fast-path.

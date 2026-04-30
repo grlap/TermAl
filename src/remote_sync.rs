@@ -285,14 +285,26 @@ fn sync_remote_state_inner(
 /// Broad-snapshot callers should always use this; focused
 /// per-session applies from the forced-resync path
 /// (`resync_remote_state_snapshot` → 404 retry) bypass the gate and
-/// call `sync_remote_state_inner` directly.
+/// call `sync_remote_state_inner` directly. The remote SSE bridge passes
+/// `force = true` only for the state frame immediately following a remote
+/// `lagged` marker, matching the browser-side recovery contract.
 fn apply_remote_state_if_newer_locked(
     inner: &mut StateInner,
     remote_id: &str,
     remote_state: &StateResponse,
     focus_remote_session_id: Option<&str>,
+    force: bool,
 ) -> bool {
-    if inner.should_skip_remote_applied_snapshot_revision(remote_id, remote_state.revision) {
+    if force
+        && inner
+            .remote_applied_revisions
+            .get(remote_id)
+            .is_some_and(|latest_revision| *latest_revision > remote_state.revision)
+    {
+        return false;
+    }
+    if !force && inner.should_skip_remote_applied_snapshot_revision(remote_id, remote_state.revision)
+    {
         return false;
     }
     sync_remote_state_inner(inner, remote_id, remote_state, focus_remote_session_id);
@@ -858,12 +870,19 @@ fn process_remote_event_stream(
 ) -> Result<()> {
     let mut event_name = String::new();
     let mut data_lines = Vec::new();
+    let mut recovery = RemoteEventStreamRecovery::default();
     let reader = BufReader::new(response);
     for line in reader.lines() {
         let line =
             line.with_context(|| format!("failed to read SSE line for remote `{remote_id}`"))?;
         if line.is_empty() {
-            dispatch_remote_event(state, remote_id, &event_name, &data_lines)?;
+            dispatch_remote_event_with_recovery(
+                state,
+                remote_id,
+                &event_name,
+                &data_lines,
+                &mut recovery,
+            )?;
             event_name.clear();
             data_lines.clear();
             continue;
@@ -880,26 +899,76 @@ fn process_remote_event_stream(
         }
     }
     if !data_lines.is_empty() {
-        dispatch_remote_event(state, remote_id, &event_name, &data_lines)?;
+        dispatch_remote_event_with_recovery(
+            state,
+            remote_id,
+            &event_name,
+            &data_lines,
+            &mut recovery,
+        )?;
     }
     Ok(())
 }
 
+#[derive(Default)]
+struct RemoteEventStreamRecovery {
+    force_next_state_after_lagged: bool,
+    lagged_recovery_baseline_revision: u64,
+}
+
 /// Dispatches remote event.
+#[cfg(test)]
 fn dispatch_remote_event(
     state: &AppState,
     remote_id: &str,
     event_name: &str,
     data_lines: &[String],
 ) -> Result<()> {
+    let mut recovery = RemoteEventStreamRecovery::default();
+    dispatch_remote_event_with_recovery(state, remote_id, event_name, data_lines, &mut recovery)
+}
+
+fn dispatch_remote_event_with_recovery(
+    state: &AppState,
+    remote_id: &str,
+    event_name: &str,
+    data_lines: &[String],
+    recovery: &mut RemoteEventStreamRecovery,
+) -> Result<()> {
     if data_lines.is_empty() {
         return Ok(());
     }
     let payload = data_lines.join("\n");
     match event_name {
+        "lagged" => {
+            recovery.lagged_recovery_baseline_revision = {
+                let inner = state.inner.lock().expect("state mutex poisoned");
+                inner
+                    .remote_applied_revisions
+                    .get(remote_id)
+                    .copied()
+                    .unwrap_or_default()
+            };
+            recovery.force_next_state_after_lagged = true;
+        }
         "state" => {
             let remote_payload: StateEventPayload = serde_json::from_str(&payload)
                 .with_context(|| format!("failed to decode remote state event `{remote_id}`"))?;
+            let force_lagged_recovery_state = if std::mem::take(
+                &mut recovery.force_next_state_after_lagged,
+            ) {
+                let current_remote_revision = {
+                    let inner = state.inner.lock().expect("state mutex poisoned");
+                    inner
+                        .remote_applied_revisions
+                        .get(remote_id)
+                        .copied()
+                        .unwrap_or_default()
+                };
+                current_remote_revision == recovery.lagged_recovery_baseline_revision
+            } else {
+                false
+            };
             if remote_payload.sse_fallback {
                 if state.should_skip_remote_sse_fallback_resync(
                     remote_id,
@@ -911,20 +980,27 @@ fn dispatch_remote_event(
                     "remote event warning> received fallback SSE state payload from `{remote_id}` at revision {}; forcing full state resync",
                     remote_payload.state.revision
                 );
-                resync_remote_state_snapshot(state, remote_id)?;
+                resync_remote_state_snapshot(state, remote_id, force_lagged_recovery_state)?;
                 state.note_remote_sse_fallback_resync(remote_id, remote_payload.state.revision);
                 return Ok(());
             }
-            state
-                .apply_remote_state_snapshot(remote_id, remote_payload.state)
-                .map_err(|err| anyhow!(err.message))?;
+            if force_lagged_recovery_state {
+                state
+                    .apply_remote_lagged_recovery_state_snapshot(remote_id, remote_payload.state)
+                    .map_err(|err| anyhow!(err.message))?;
+            } else {
+                state
+                    .apply_remote_state_snapshot(remote_id, remote_payload.state)
+                    .map_err(|err| anyhow!(err.message))?;
+            }
         }
         "delta" => {
+            recovery.force_next_state_after_lagged = false;
             let delta: DeltaEvent = serde_json::from_str(&payload)
                 .with_context(|| format!("failed to decode remote delta event `{remote_id}`"))?;
             if let Err(err) = state.apply_remote_delta_event(remote_id, delta) {
                 eprintln!("remote delta apply failed for `{remote_id}`: {err:#}");
-                resync_remote_state_snapshot(state, remote_id)?;
+                resync_remote_state_snapshot(state, remote_id, false)?;
             }
         }
         _ => {}
@@ -932,7 +1008,11 @@ fn dispatch_remote_event(
     Ok(())
 }
 
-fn resync_remote_state_snapshot(state: &AppState, remote_id: &str) -> Result<()> {
+fn resync_remote_state_snapshot(
+    state: &AppState,
+    remote_id: &str,
+    force_lagged_recovery_state: bool,
+) -> Result<()> {
     let remote = state
         .lookup_remote_config(remote_id)
         .map_err(|err| anyhow!(err.message))?;
@@ -940,8 +1020,14 @@ fn resync_remote_state_snapshot(state: &AppState, remote_id: &str) -> Result<()>
         .remote_registry
         .request_json(&remote, Method::GET, "/api/state", &[], None)
         .map_err(|err| anyhow!(err.message))?;
-    state
-        .apply_remote_state_snapshot(remote_id, full_state)
-        .map_err(|err| anyhow!(err.message))?;
+    if force_lagged_recovery_state {
+        state
+            .apply_remote_lagged_recovery_state_snapshot(remote_id, full_state)
+            .map_err(|err| anyhow!(err.message))?;
+    } else {
+        state
+            .apply_remote_state_snapshot(remote_id, full_state)
+            .map_err(|err| anyhow!(err.message))?;
+    }
     Ok(())
 }

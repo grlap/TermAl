@@ -56,6 +56,20 @@ struct RemoteDeltaHydrationExpectation {
     session_mutation_stamp: Option<u64>,
 }
 
+struct RemoteDeltaHydrationInFlightGuard {
+    in_flight: Arc<Mutex<HashSet<(String, String)>>>,
+    key: (String, String),
+}
+
+impl Drop for RemoteDeltaHydrationInFlightGuard {
+    fn drop(&mut self) {
+        self.in_flight
+            .lock()
+            .expect("remote delta hydration mutex poisoned")
+            .remove(&self.key);
+    }
+}
+
 const REMOTE_SESSION_RESPONSE_MISSING_FULL_TRANSCRIPT: &str =
     "remote session response did not include a full transcript";
 
@@ -420,6 +434,7 @@ impl AppState {
             &target.remote.id,
             &remote_state,
             Some(&target.remote_session_id),
+            false,
         ) {
             return Ok(());
         }
@@ -794,6 +809,7 @@ impl AppState {
                     &target.remote.id,
                     remote_state,
                     None,
+                    false,
                 ) {
                     remote_state_applied = true;
                     note_remote_applied_state_snapshot_revision(
@@ -966,6 +982,21 @@ impl AppState {
             }
         };
 
+        let hydration_key = (remote_id.to_owned(), remote_session_id.to_owned());
+        let _hydration_guard = {
+            let mut in_flight = self
+                .remote_delta_hydrations_in_flight
+                .lock()
+                .expect("remote delta hydration mutex poisoned");
+            if !in_flight.insert(hydration_key.clone()) {
+                return Ok(false);
+            }
+            RemoteDeltaHydrationInFlightGuard {
+                in_flight: self.remote_delta_hydrations_in_flight.clone(),
+                key: hydration_key,
+            }
+        };
+
         let hydration_result = self.hydrate_remote_session_target(
             &target,
             Some(remote_revision),
@@ -1037,7 +1068,13 @@ impl AppState {
             None,
         )?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        if apply_remote_state_if_newer_locked(&mut inner, &target.remote.id, &remote_state, None)
+        if apply_remote_state_if_newer_locked(
+            &mut inner,
+            &target.remote.id,
+            &remote_state,
+            None,
+            false,
+        )
         {
             note_remote_applied_state_snapshot_revision(
                 &mut inner,
@@ -1069,8 +1106,25 @@ impl AppState {
         remote_id: &str,
         remote_state: StateResponse,
     ) -> Result<(), ApiError> {
+        self.apply_remote_state_snapshot_with_force(remote_id, remote_state, false)
+    }
+
+    fn apply_remote_lagged_recovery_state_snapshot(
+        &self,
+        remote_id: &str,
+        remote_state: StateResponse,
+    ) -> Result<(), ApiError> {
+        self.apply_remote_state_snapshot_with_force(remote_id, remote_state, true)
+    }
+
+    fn apply_remote_state_snapshot_with_force(
+        &self,
+        remote_id: &str,
+        remote_state: StateResponse,
+        force: bool,
+    ) -> Result<(), ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        if !apply_remote_state_if_newer_locked(&mut inner, remote_id, &remote_state, None) {
+        if !apply_remote_state_if_newer_locked(&mut inner, remote_id, &remote_state, None, force) {
             return Ok(());
         }
         note_remote_applied_state_snapshot_revision(&mut inner, remote_id, &remote_state);

@@ -482,6 +482,10 @@ impl AppState {
             .lock()
             .expect("remote delta replay cache mutex poisoned")
             .remove_remote(remote_id);
+        self.remote_delta_hydrations_in_flight
+            .lock()
+            .expect("remote delta hydration mutex poisoned")
+            .retain(|(in_flight_remote_id, _)| in_flight_remote_id != remote_id);
     }
 
     /// Clears remote fallback resync tracking when event-stream continuity is

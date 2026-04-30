@@ -1859,6 +1859,50 @@ fn spawn_remote_session_response_server(
     spawn_remote_session_and_state_response_server(response, None)
 }
 
+fn spawn_remote_state_response_server(
+    response: StateResponse,
+) -> (u16, Arc<Mutex<Vec<String>>>, std::thread::JoinHandle<()>) {
+    let response_body = serde_json::to_string(&response).expect("state response should encode");
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let requests_for_server = requests.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_test_connection(&listener, "remote state test listener");
+            let request = read_test_http_request(&mut stream);
+            requests_for_server
+                .lock()
+                .expect("requests mutex poisoned")
+                .push(request.request_line.clone());
+
+            if request.request_line.starts_with("GET /api/health ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    r#"{"ok":true}"#,
+                );
+                continue;
+            }
+
+            if request.request_line.starts_with("GET /api/state ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    &response_body,
+                );
+                continue;
+            }
+
+            panic!("unexpected request: {}", request.request_line);
+        }
+    });
+
+    (port, requests, server)
+}
+
 fn spawn_remote_session_and_state_response_server(
     response: SessionResponse,
     state_response: Option<StateResponse>,
@@ -5136,6 +5180,14 @@ fn clear_remote_applied_revision_preserves_other_remote_replay_keys() {
         inner.note_remote_applied_revision("ssh-lab-a", 11);
         inner.note_remote_applied_revision("ssh-lab-b", 10);
     }
+    {
+        let mut in_flight = state
+            .remote_delta_hydrations_in_flight
+            .lock()
+            .expect("remote delta hydration mutex poisoned");
+        in_flight.insert(("ssh-lab-a".to_owned(), "remote-session-a".to_owned()));
+        in_flight.insert(("ssh-lab-b".to_owned(), "remote-session-b".to_owned()));
+    }
 
     state.clear_remote_applied_revision("ssh-lab-a");
 
@@ -5162,6 +5214,20 @@ fn clear_remote_applied_revision_preserves_other_remote_replay_keys() {
             .lock()
             .expect("remote delta replay cache mutex poisoned");
         assert_remote_delta_replay_cache_shape(&cache, 1);
+    }
+    {
+        let in_flight = state
+            .remote_delta_hydrations_in_flight
+            .lock()
+            .expect("remote delta hydration mutex poisoned");
+        assert!(
+            !in_flight.contains(&("ssh-lab-a".to_owned(), "remote-session-a".to_owned())),
+            "clearing remote A should remove its in-flight hydration markers"
+        );
+        assert!(
+            in_flight.contains(&("ssh-lab-b".to_owned(), "remote-session-b".to_owned())),
+            "clearing remote A must preserve remote B's in-flight hydration markers"
+        );
     }
 
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -9314,6 +9380,359 @@ fn remote_state_event_applies_non_fallback_empty_snapshot_payload() {
     drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins remote SSE `lagged` handling. A remote backend emits `lagged` followed
+// immediately by a recovery `state` snapshot after its broadcast receiver drops
+// frames. That recovery can have the same revision as a state snapshot the
+// bridge already applied; the marker must therefore bypass the same-revision
+// snapshot gate exactly once.
+#[test]
+fn remote_lagged_marker_force_applies_next_same_revision_state_snapshot() {
+    let state = test_app_state();
+    let mut recovery = RemoteEventStreamRecovery::default();
+    let remote = local_replay_test_remote();
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut initial_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    initial_state.sessions[0].preview = "Initial remote preview".to_owned();
+    initial_state.sessions[0].messages = vec![remote_text_message("message-1", "Initial body")];
+    initial_state.sessions[0].message_count = 1;
+    let initial_data_lines =
+        vec![serde_json::to_string(&initial_state).expect("state payload should encode")];
+
+    dispatch_remote_event_with_recovery(
+        &state,
+        "ssh-lab",
+        "state",
+        &initial_data_lines,
+        &mut recovery,
+    )
+    .expect("initial remote state should apply");
+
+    let mut repaired_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    repaired_state.sessions[0].preview = "Lagged repaired preview".to_owned();
+    repaired_state.sessions[0].messages =
+        vec![remote_text_message("message-1", "Lagged repaired body")];
+    let repaired_data_lines =
+        vec![serde_json::to_string(&repaired_state).expect("state payload should encode")];
+
+    dispatch_remote_event_with_recovery(
+        &state,
+        "ssh-lab",
+        "lagged",
+        &["1".to_owned()],
+        &mut recovery,
+    )
+    .expect("lagged marker should arm recovery");
+    dispatch_remote_event_with_recovery(
+        &state,
+        "ssh-lab",
+        "state",
+        &repaired_data_lines,
+        &mut recovery,
+    )
+    .expect("same-revision lagged recovery state should apply");
+
+    let snapshot = state.full_snapshot();
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "Lagged repaired preview")
+    );
+    assert!(
+        !snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "Initial remote preview")
+    );
+}
+
+#[test]
+fn remote_lagged_marker_does_not_force_apply_after_intervening_delta_progress() {
+    let state = test_app_state();
+    let mut recovery = RemoteEventStreamRecovery::default();
+    let remote = local_replay_test_remote();
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut initial_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    initial_state.sessions[0].preview = "Initial remote preview".to_owned();
+    initial_state.sessions[0].messages = vec![remote_text_message("message-1", "Initial body")];
+    initial_state.sessions[0].messages_loaded = true;
+    initial_state.sessions[0].message_count = 1;
+    let initial_data_lines =
+        vec![serde_json::to_string(&initial_state).expect("state payload should encode")];
+
+    dispatch_remote_event_with_recovery(
+        &state,
+        "ssh-lab",
+        "state",
+        &initial_data_lines,
+        &mut recovery,
+    )
+    .expect("initial remote state should apply");
+
+    dispatch_remote_event_with_recovery(
+        &state,
+        "ssh-lab",
+        "lagged",
+        &["1".to_owned()],
+        &mut recovery,
+    )
+    .expect("lagged marker should arm recovery");
+
+    let newer_delta = DeltaEvent::MessageUpdated {
+        revision: 3,
+        session_id: "remote-session-1".to_owned(),
+        message_id: "message-1".to_owned(),
+        message_index: 0,
+        message_count: 1,
+        message: remote_text_message("message-1", "Newer delta body"),
+        preview: "Newer delta preview".to_owned(),
+        status: SessionStatus::Active,
+        session_mutation_stamp: Some(12),
+    };
+    let newer_delta_data_lines =
+        vec![serde_json::to_string(&newer_delta).expect("delta payload should encode")];
+    dispatch_remote_event_with_recovery(
+        &state,
+        "ssh-lab",
+        "delta",
+        &newer_delta_data_lines,
+        &mut recovery,
+    )
+    .expect("newer remote delta should apply");
+
+    let mut stale_recovery = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    stale_recovery.sessions[0].preview = "Stale lagged recovery preview".to_owned();
+    stale_recovery.sessions[0].messages = vec![remote_text_message(
+        "message-1",
+        "Stale lagged recovery body",
+    )];
+    stale_recovery.sessions[0].messages_loaded = true;
+    stale_recovery.sessions[0].message_count = 1;
+    let stale_recovery_data_lines =
+        vec![serde_json::to_string(&stale_recovery).expect("state payload should encode")];
+
+    dispatch_remote_event_with_recovery(
+        &state,
+        "ssh-lab",
+        "state",
+        &stale_recovery_data_lines,
+        &mut recovery,
+    )
+    .expect("stale lagged recovery state should be ignored");
+
+    let snapshot = state.full_snapshot();
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "Newer delta preview")
+    );
+    assert!(
+        !snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "Stale lagged recovery preview")
+    );
+}
+
+#[test]
+fn remote_lagged_marker_force_applies_same_revision_fallback_resync_snapshot() {
+    let state = test_app_state();
+    let mut recovery = RemoteEventStreamRecovery::default();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut initial_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    initial_state.sessions[0].preview = "Initial remote preview".to_owned();
+    initial_state.sessions[0].messages = vec![remote_text_message("message-1", "Initial body")];
+    initial_state.sessions[0].messages_loaded = true;
+    initial_state.sessions[0].message_count = 1;
+    let initial_data_lines =
+        vec![serde_json::to_string(&initial_state).expect("state payload should encode")];
+
+    dispatch_remote_event_with_recovery(
+        &state,
+        "ssh-lab",
+        "state",
+        &initial_data_lines,
+        &mut recovery,
+    )
+    .expect("initial remote state should apply");
+
+    let mut repaired_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    repaired_state.sessions[0].preview = "Fallback repaired preview".to_owned();
+    repaired_state.sessions[0].messages =
+        vec![remote_text_message("message-1", "Fallback repaired body")];
+    repaired_state.sessions[0].messages_loaded = true;
+    repaired_state.sessions[0].message_count = 1;
+    let (port, requests, server) = spawn_remote_state_response_server(repaired_state);
+    insert_test_remote_connection(&state, &remote, port);
+
+    let mut fallback_marker = empty_state_events_response();
+    fallback_marker.revision = 2;
+    let mut fallback_value =
+        serde_json::to_value(&fallback_marker).expect("fallback marker should encode");
+    fallback_value["_sseFallback"] = serde_json::Value::Bool(true);
+    let fallback_data_lines = vec![fallback_value.to_string()];
+
+    dispatch_remote_event_with_recovery(
+        &state,
+        "ssh-lab",
+        "lagged",
+        &["1".to_owned()],
+        &mut recovery,
+    )
+    .expect("lagged marker should arm recovery");
+    dispatch_remote_event_with_recovery(
+        &state,
+        "ssh-lab",
+        "state",
+        &fallback_data_lines,
+        &mut recovery,
+    )
+    .expect("fallback lagged recovery should resync");
+
+    let request_lines = requests.lock().expect("requests mutex poisoned").clone();
+    assert!(
+        request_lines
+            .iter()
+            .any(|line| line.starts_with("GET /api/state ")),
+        "expected remote state fallback fetch, saw {request_lines:?}"
+    );
+    join_test_server(server);
+
+    let snapshot = state.full_snapshot();
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "Fallback repaired preview")
+    );
+    assert!(
+        !snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "Initial remote preview")
+    );
+}
+
+// Pins the per-session in-flight guard for remote delta transcript repair.
+// When several deltas arrive for the same unloaded remote proxy, only the
+// first one should perform the blocking `/api/sessions/{id}` hydration.
+#[test]
+fn remote_delta_hydration_skips_duplicate_in_flight_same_session_fetch() {
+    let state = test_app_state();
+    let remote = local_replay_test_remote();
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let mut remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    make_remote_session_summary_only(&mut remote_session, 2);
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        upsert_remote_proxy_session_record(
+            &mut inner,
+            &remote.id,
+            &remote_session,
+            Some(local_project_id),
+        );
+        state
+            .commit_locked(&mut inner)
+            .expect("remote summary should persist");
+    }
+
+    state
+        .remote_delta_hydrations_in_flight
+        .lock()
+        .expect("remote delta hydration mutex poisoned")
+        .insert((remote.id.clone(), remote_session.id.clone()));
+
+    let repaired = state
+        .hydrate_unloaded_remote_session_for_delta(&remote.id, &remote_session.id, 2, 2, None)
+        .expect("duplicate in-flight hydration should not fail");
+
+    assert!(!repaired);
+    assert!(
+        state
+            .remote_delta_hydrations_in_flight
+            .lock()
+            .expect("remote delta hydration mutex poisoned")
+            .contains(&(remote.id, remote_session.id))
+    );
 }
 
 // Pins that proxying PUT /api/reviews/{id} to a remote carries the

@@ -833,6 +833,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         remote_registry: test_remote_registry(),
         remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
         remote_delta_replay_cache: Arc::new(Mutex::new(RemoteDeltaReplayCache::default())),
+        remote_delta_hydrations_in_flight: Arc::new(Mutex::new(HashSet::new())),
         terminal_local_command_semaphore: Arc::new(tokio::sync::Semaphore::new(
             TERMINAL_LOCAL_COMMAND_CONCURRENCY_LIMIT,
         )),
@@ -1142,11 +1143,11 @@ fn commit_delta_locked_after_shutdown_falls_back_to_synchronous_persist() {
     // synchronous fallback, those final mutations are kept only in
     // memory and lost when the process exits.
     let unique_suffix = Uuid::new_v4();
-    let project_root = std::env::temp_dir()
-        .join(format!("termal-post-shutdown-commit-root-{unique_suffix}"));
+    let project_root =
+        std::env::temp_dir().join(format!("termal-post-shutdown-commit-root-{unique_suffix}"));
     fs::create_dir_all(&project_root).expect("project root should exist");
-    let state_root = std::env::temp_dir()
-        .join(format!("termal-post-shutdown-commit-state-{unique_suffix}"));
+    let state_root =
+        std::env::temp_dir().join(format!("termal-post-shutdown-commit-state-{unique_suffix}"));
     fs::create_dir_all(&state_root).expect("state root should exist");
     let persistence_path = state_root.join("sessions.json");
     let orchestrator_templates_path = state_root.join("orchestrators.json");

@@ -108,27 +108,45 @@ const EMPTY_COMPOSER_ATTACHMENTS: readonly {
 }[] = [];
 const EMPTY_COMPOSER_PROMPT_HISTORY: readonly string[] = [];
 
-function includeUndeferredMessageTail(
+export function includeUndeferredMessageTail(
   deferredMessages: Message[],
   currentMessages: Message[],
 ) {
-  if (deferredMessages === currentMessages || currentMessages.length === 0) {
+  if (deferredMessages === currentMessages) {
     return deferredMessages;
+  }
+  if (currentMessages.length === 0) {
+    return currentMessages;
   }
   if (deferredMessages.length === 0) {
     return currentMessages;
   }
-  if (deferredMessages.length >= currentMessages.length) {
-    return deferredMessages;
-  }
 
-  for (let index = 0; index < deferredMessages.length; index += 1) {
+  const sharedLength = Math.min(deferredMessages.length, currentMessages.length);
+  for (let index = 0; index < sharedLength; index += 1) {
     if (currentMessages[index]?.id !== deferredMessages[index]?.id) {
-      return deferredMessages;
+      return currentMessages;
+    }
+    if (currentMessages[index] !== deferredMessages[index]) {
+      return [
+        ...deferredMessages.slice(0, index),
+        ...currentMessages.slice(index),
+      ];
     }
   }
 
-  return [...deferredMessages, ...currentMessages.slice(deferredMessages.length)];
+  if (currentMessages.length > deferredMessages.length) {
+    return [
+      ...deferredMessages,
+      ...currentMessages.slice(deferredMessages.length),
+    ];
+  }
+
+  if (deferredMessages.length > currentMessages.length) {
+    return currentMessages;
+  }
+
+  return deferredMessages;
 }
 
 function isSpaceKey(event: {

@@ -343,6 +343,7 @@ impl AppState {
             ),
             remote_sse_fallback_resynced_revision: Arc::new(Mutex::new(HashMap::new())),
             remote_delta_replay_cache: Arc::new(Mutex::new(RemoteDeltaReplayCache::default())),
+            remote_delta_hydrations_in_flight: Arc::new(Mutex::new(HashSet::new())),
             terminal_local_command_semaphore: Arc::new(tokio::sync::Semaphore::new(
                 TERMINAL_LOCAL_COMMAND_CONCURRENCY_LIMIT,
             )),

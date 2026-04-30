@@ -2824,6 +2824,144 @@ describe("App live state — reconnect", () => {
     }
   });
 
+  it("ignores a stale Lagged-recovery state snapshot after a newer live delta already advanced the stream", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`Unexpected fetch: ${String(input)}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const scrollIntoViewSpy = stubScrollIntoView();
+
+    try {
+      await renderApp();
+
+      const eventSource = latestEventSource();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "test",
+              messageCount: 1,
+              messagesLoaded: true,
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+
+      await clickAndSettle(
+        await screen.findByRole("button", { name: "Sessions" }),
+      );
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+      const sessionRowButton =
+        within(sessionList).getByText("Codex Session").closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+      await clickAndSettle(sessionRowButton);
+
+      act(() => {
+        eventSource.dispatchNamedEvent("lagged", "1");
+        eventSource.dispatchNamedEvent("delta", {
+          type: "messageCreated",
+          revision: 3,
+          sessionId: "session-1",
+          messageId: "message-assistant-1",
+          messageIndex: 1,
+          messageCount: 2,
+          message: {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Newer live delta body.",
+          },
+          preview: "Newer live delta body.",
+          status: "active",
+        });
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.getAllByText("Newer live delta body.").length,
+        ).toBeGreaterThan(0);
+      });
+
+      act(() => {
+        eventSource.dispatchNamedEvent("state", {
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "idle",
+              preview: "Stale lagged recovery body.",
+              messageCount: 2,
+              messagesLoaded: true,
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-stale",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Stale lagged recovery body.",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+
+      expect(screen.queryByText("Stale lagged recovery body.")).toBeNull();
+      expect(
+        screen.getAllByText("Newer live delta body.").length,
+      ).toBeGreaterThan(0);
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
+      ).toBe(false);
+    } finally {
+      scrollIntoViewSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("recreates the EventSource after an error when the browser does not reopen quickly", async () => {
     // Scenario: the dev-mode Vite proxy returns 502 during the brief
     // backend-restart gap, or the browser leaves EventSource in CONNECTING

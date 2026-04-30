@@ -548,6 +548,7 @@ export function useAppLiveState(
   const hydrationRetryTimersRef = useRef<Map<string, number>>(new Map());
   const hydrationRetryAttemptsRef = useRef<Map<string, number>>(new Map());
   const forceAdoptNextStateEventRef = useRef(false);
+  const laggedRecoveryBaselineRevisionRef = useRef<number | null>(null);
 
   const [workspaceFilesChangedEvent, setWorkspaceFilesChangedEvent] =
     useState<WorkspaceFilesChangedEvent | null>(null);
@@ -1804,6 +1805,11 @@ export function useAppLiveState(
       sessionIds: Iterable<string>,
       now = Date.now(),
     ) {
+      // Data-bearing live events must advance this baseline for their sessions.
+      // Otherwise `maybeRequestLiveSessionResumeWatchdogResync` can interpret
+      // ordinary long-running streams as a wake gap and poll /api/state until
+      // an unrelated focus/reconnect event clears the cooldown. See
+      // docs/architecture.md "Live-state reconnect and watchdog recovery".
       for (const sessionId of sessionIds) {
         lastLiveSessionResumeWatchdogTickAtBySessionId.set(sessionId, now);
       }
@@ -2333,6 +2339,22 @@ export function useAppLiveState(
       });
     }
 
+    function shouldForceAdoptNextStateEvent() {
+      if (!forceAdoptNextStateEventRef.current) {
+        return false;
+      }
+      const laggedBaselineRevision = laggedRecoveryBaselineRevisionRef.current;
+      return (
+        laggedBaselineRevision === null ||
+        latestStateRevisionRef.current === laggedBaselineRevision
+      );
+    }
+
+    function clearForceAdoptNextStateEvent() {
+      forceAdoptNextStateEventRef.current = false;
+      laggedRecoveryBaselineRevisionRef.current = null;
+    }
+
     function handleStateEvent(event: MessageEvent<string>) {
       if (cancelled) {
         return;
@@ -2353,6 +2375,7 @@ export function useAppLiveState(
           payload,
           "_sseFallback",
         );
+        const forceStateEvent = shouldForceAdoptNextStateEvent();
         profiler?.mark("peek");
         if (
           rawRevision !== null &&
@@ -2361,18 +2384,18 @@ export function useAppLiveState(
             latestStateRevisionRef.current,
             rawRevision,
             {
-              force: forceAdoptNextStateEventRef.current,
-              allowRevisionDowngrade: forceAdoptNextStateEventRef.current,
+              force: forceStateEvent,
+              allowRevisionDowngrade: forceStateEvent,
               lastSeenServerInstanceId: lastSeenServerInstanceIdRef.current,
               nextServerInstanceId: rawServerInstanceId,
               seenServerInstanceIds: seenServerInstanceIdsRef.current,
-              allowUnknownServerInstance: forceAdoptNextStateEventRef.current,
+              allowUnknownServerInstance: forceStateEvent,
             },
           )
         ) {
           profiledRevision = rawRevision;
           profiledAdopted = false;
-          forceAdoptNextStateEventRef.current = false;
+          clearForceAdoptNextStateEvent();
           if (!pendingBadLiveEventRecovery) {
             confirmReconnectRecoveryFromLiveEvent();
           }
@@ -2390,7 +2413,7 @@ export function useAppLiveState(
         if (state._sseFallback) {
           // Marked fallback payloads only signal that the client should refetch
           // the authoritative snapshot from /api/state.
-          forceAdoptNextStateEventRef.current = false;
+          clearForceAdoptNextStateEvent();
           profiler?.mark("fallback");
           requestStateResync({
             allowAuthoritativeRollback: true,
@@ -2399,7 +2422,7 @@ export function useAppLiveState(
           return;
         }
 
-        const force = forceAdoptNextStateEventRef.current;
+        const force = forceStateEvent;
         // SSE state events are always the first event on a new connection
         // (before any deltas), so there is no risk of a delta racing ahead
         // and being overwritten. Allow revision downgrade so a restarted
@@ -2411,7 +2434,7 @@ export function useAppLiveState(
         });
         profiler?.mark("adoptState");
         profiledAdopted = adopted;
-        forceAdoptNextStateEventRef.current = false;
+        clearForceAdoptNextStateEvent();
         // Confirm recovery after an adopted state. A parseable but rejected
         // state is still useful stream proof in ordinary reconnects, but it
         // must not clear pending bad-event recovery because it did not repair
@@ -2440,6 +2463,7 @@ export function useAppLiveState(
         clearRecoveredBackendRequestError();
         profiler?.mark("clearErrors");
       } catch (error) {
+        clearForceAdoptNextStateEvent();
         if (!cancelled) {
           setBackendConnectionIssueDetail(
             describeBackendConnectionIssueDetail(error),
@@ -2740,6 +2764,7 @@ export function useAppLiveState(
       // catch-up. Arm force-adopt so the next state event is taken regardless
       // of revision parity. See bugs.md "SSE Lagged-recovery snapshot can be
       // silently ignored".
+      laggedRecoveryBaselineRevisionRef.current = latestStateRevisionRef.current;
       forceAdoptNextStateEventRef.current = true;
     }
 
@@ -2782,6 +2807,7 @@ export function useAppLiveState(
       reconnectRecoveryConfirmedSinceLastError = false;
       pendingBadLiveEventRecovery = false;
       allowReconnectRecoveryWithoutExplicitOpen = false;
+      clearForceAdoptNextStateEvent();
       const isOnline = readNavigatorOnline();
       const hasHydratedState = latestStateRevisionRef.current !== null;
       setBackendConnectionState(
@@ -2928,6 +2954,7 @@ export function useAppLiveState(
       syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current = () => {};
       clearInitialStateResyncRetryTimeout();
       clearReconnectStateResyncTimeout();
+      clearForceAdoptNextStateEvent();
       if (workspaceFilesChangedEventFlushTimeoutRef.current !== null) {
         window.clearTimeout(workspaceFilesChangedEventFlushTimeoutRef.current);
         workspaceFilesChangedEventFlushTimeoutRef.current = null;

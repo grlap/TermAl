@@ -947,6 +947,35 @@ describe("classifyFetchedSessionAdoption", () => {
     ).toBe("adopted");
   });
 
+  it("allows explicit text-repair hydration at the request revision after an unrelated newer live revision", () => {
+    expect(
+      classifyFetchedSessionAdoption({
+        responseSession: makeSession({
+          messages: [message],
+          messagesLoaded: true,
+          messageCount: 1,
+          sessionMutationStamp: 2,
+        }),
+        responseRevision: 6,
+        responseServerInstanceId: "server-a",
+        requestContext: makeHydrationRequestContext({
+          allowDivergentTextRepairAfterNewerRevision: true,
+          revision: 6,
+          sessionMutationStamp: 2,
+        }),
+        currentSession: makeSession({
+          messages: [{ ...message, text: "Corrupted gapped live stream" }],
+          messagesLoaded: true,
+          messageCount: 1,
+          sessionMutationStamp: 2,
+        }),
+        currentRevision: 7,
+        currentServerInstanceId: "server-a",
+        seenServerInstanceIds: new Set(["server-a"]),
+      }),
+    ).toBe("adopted");
+  });
+
   it("rejects stale lower-revision responses once the session is loaded", () => {
     expect(
       classifyFetchedSessionAdoption({

@@ -183,6 +183,7 @@ impl AppState {
             &target.remote.id,
             &remote_state,
             Some(&target.remote_session_id),
+            false,
         );
         let removed = if let Some(index) = inner.find_session_index(&target.local_session_id) {
             inner.remove_session_at(index);
