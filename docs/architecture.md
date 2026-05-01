@@ -31,6 +31,12 @@ Optional sidecar:
 server stores preferences, manages remote connections, and routes project work
 to local or remote TermAl servers over SSH-managed tunnels.
 
+**Delegation status:** Phase 1 supports local read-only child delegation
+sessions only. Worker mode, writable worktree policies, and remote-backed
+delegation requests are well-formed but unimplemented and return `501 Not
+Implemented` so clients can treat them as feature-gated rather than malformed
+input.
+
 ---
 
 ## Backend

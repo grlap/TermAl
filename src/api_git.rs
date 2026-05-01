@@ -108,6 +108,13 @@ async fn apply_git_file_action(
             );
         }
 
+        state.ensure_read_only_delegation_allows_write_action(
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+            Some(&request.workdir),
+            "git file actions",
+        )?;
+
         let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
         let workdir = normalize_git_workdir_path(&workdir)?;
         let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
@@ -175,6 +182,13 @@ async fn commit_git_changes(
             );
         }
 
+        state.ensure_read_only_delegation_allows_write_action(
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+            Some(&request.workdir),
+            "git commits",
+        )?;
+
         let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
         let workdir = normalize_git_workdir_path(&workdir)?;
         let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
@@ -238,6 +252,13 @@ async fn push_git_changes(
             );
         }
 
+        state.ensure_read_only_delegation_allows_write_action(
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+            Some(&request.workdir),
+            "git pushes",
+        )?;
+
         let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
         push_git_repo(&workdir)
     })
@@ -263,6 +284,13 @@ async fn sync_git_changes(
                 }),
             );
         }
+
+        state.ensure_read_only_delegation_allows_write_action(
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+            Some(&request.workdir),
+            "git sync",
+        )?;
 
         let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
         sync_git_repo(&workdir)

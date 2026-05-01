@@ -72,6 +72,7 @@ export type SessionSummarySnapshot = Readonly<{
   externalSessionId?: string | null;
   geminiApprovalMode?: GeminiApprovalMode | null;
   id: string;
+  lastResponseTimestamp?: string | null;
   model: string;
   modelOptions?: readonly SessionModelOption[];
   name: string;
@@ -293,6 +294,22 @@ function collectUserPromptHistory(messages: readonly Message[]) {
   return prompts.length === 0 ? EMPTY_PROMPT_HISTORY : prompts;
 }
 
+function collectLastResponseTimestamp(messages: readonly Message[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.author !== "assistant") {
+      continue;
+    }
+
+    const timestamp = message.timestamp.trim();
+    if (timestamp) {
+      return timestamp;
+    }
+  }
+
+  return null;
+}
+
 function sameDraftAttachments(
   previous: readonly ComposerDraftAttachment[] | undefined,
   next: readonly ComposerDraftAttachment[] | undefined,
@@ -476,6 +493,7 @@ function buildSessionSummarySnapshot(
   session: Session,
   previous: SessionSummarySnapshot | undefined,
 ) {
+  const lastResponseTimestamp = collectLastResponseTimestamp(session.messages);
   const nextModelOptions =
     previous && sameSessionModelOptions(previous.modelOptions, session.modelOptions)
       ? previous.modelOptions
@@ -500,7 +518,8 @@ function buildSessionSummarySnapshot(
     previous.geminiApprovalMode === session.geminiApprovalMode &&
     previous.externalSessionId === session.externalSessionId &&
     previous.agentCommandsRevision === session.agentCommandsRevision &&
-    previous.codexThreadState === session.codexThreadState
+    previous.codexThreadState === session.codexThreadState &&
+    previous.lastResponseTimestamp === lastResponseTimestamp
   ) {
     return previous;
   }
@@ -516,6 +535,7 @@ function buildSessionSummarySnapshot(
     externalSessionId: session.externalSessionId,
     geminiApprovalMode: session.geminiApprovalMode,
     id: session.id,
+    lastResponseTimestamp,
     model: session.model,
     modelOptions: nextModelOptions,
     name: session.name,

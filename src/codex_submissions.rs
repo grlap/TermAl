@@ -151,6 +151,17 @@ impl AppState {
                 "approval decisions cannot be marked pending, interrupted, or canceled manually",
             ));
         }
+        if matches!(
+            decision,
+            ApprovalDecision::Accepted | ApprovalDecision::AcceptedForSession
+        ) {
+            self.ensure_read_only_delegation_allows_write_action(
+                Some(session_id),
+                None,
+                None,
+                "approval acceptance",
+            )?;
+        }
 
         let mut claude_runtime_action: Option<(ClaudeRuntimeHandle, ClaudePendingApproval)> = None;
         let mut codex_runtime_action: Option<(CodexRuntimeHandle, CodexPendingApproval)> = None;

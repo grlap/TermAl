@@ -80,7 +80,12 @@ export function pruneLiveTransportActivitySessions(
 
 export type SessionDeltaEvent = Exclude<
   DeltaEvent,
-  { type: "codexUpdated" } | { type: "orchestratorsUpdated" }
+  | { type: "codexUpdated" }
+  | { type: "orchestratorsUpdated" }
+  | { type: "delegationCreated" }
+  | { type: "delegationUpdated" }
+  | { type: "delegationCompleted" }
+  | { type: "delegationCanceled" }
 >;
 type MessageCreatedDelta = Extract<
   SessionDeltaEvent,

@@ -249,10 +249,9 @@ export const DEFAULT_DIAGRAM_THEME_OVERRIDE_MODE: DiagramThemeOverrideMode = "on
 
 // Mermaid's render aesthetic. `classic` is the default sharp look
 // TermAl has always used; `handDrawn` routes through Mermaid's
-// rough.js integration for a sketched / whiteboard feel;
-// `neo` is Mermaid's newer refreshed sharp look. Configured via
-// the top-level `look` field in `mermaid.initialize`. Set to the
-// user's preference at render time; changing the preference
+// rough.js integration for a sketched / whiteboard feel. Configured
+// via the top-level `look` field in `mermaid.initialize`. Set to
+// the user's preference at render time; changing the preference
 // applies to the next Mermaid render.
 export const DIAGRAM_LOOKS = [
   {
@@ -266,12 +265,6 @@ export const DIAGRAM_LOOKS = [
     name: "Hand-drawn",
     description:
       "Sketchy rough.js strokes for a whiteboard / notebook feel. Same palette, wobbly lines.",
-  },
-  {
-    id: "neo",
-    name: "Neo",
-    description:
-      "Mermaid's newer sharp look — tighter corners, slightly lighter edges.",
   },
 ] as const;
 

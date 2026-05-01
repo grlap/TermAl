@@ -4,7 +4,104 @@ This file tracks reproduced, current issues. Resolved work, speculative refactor
 cleanup notes, and external limitations do not belong here. Review follow-up task
 items live in the Implementation Tasks section.
 
+Also fixed in the current tree: failed delegation starts now keep the child session as an error transcript instead of returning a removed child; delegation cancel uses the non-dispatching stop path and clears queued child prompts; session deletion reconciles parent/child delegation links; read-only delegated children are blocked from mutable settings, file, git, review, and terminal routes; delegation public summaries are compacted while explicit result reads keep the full summary; the feature brief matches the implemented no-wait, summary-SSE API; `DelegationWritePolicy` now uses camelCase discriminator values; result-packet parsing tolerates preambles and status-label case drift; and unsupported Phase-1 delegation variants return `501 Not Implemented`.
+
+Also fixed in the current tree: terminal delegation refresh clears completed/failed child queues before lifecycle dispatch can run a follow-up prompt; parent removal detaches and shuts down impacted child runtimes without publishing parent-card deltas for the removed session; read-only delegation guards now cover project/workdir-scoped writes without `sessionId` and reject approval acceptance; delegation creation trims empty model overrides back to the agent default; terminal child dispatch re-checks delegation status under the dispatch lock to close the create/cancel race; `DelegationWritePolicy` accepts legacy snake_case discriminators for persisted records; targeted equal-revision repair retries now use the existing reconnect backoff; and failed-start delegation responses re-fetch the post-failure child snapshot.
+
 ## Active Repo Bugs
+
+## Full delegation records are persisted in the metadata row
+
+**Severity:** Low - delegation prompts/results are rewritten with metadata persistence instead of using a narrower delta path.
+
+`src/persisted_state.rs:38` persists full `DelegationRecord` values in the metadata row. Delegation prompts and results can be larger than ordinary metadata, so every metadata persist can clone and rewrite data that behaves more like session content.
+
+**Current behavior:**
+- Full delegation records are stored with metadata.
+- Prompt/result payloads can be rewritten on broad metadata saves.
+- Summary state and durable full records share the same persistence boundary.
+
+**Proposal:**
+- Give delegations their own persisted rows or mutation-stamped delta path.
+- Keep `/api/state` summaries derived separately from durable full records.
+
+## Delegation backend tests bypass production child dispatch
+
+**Severity:** Medium - delegation tests can pass while production child dispatch is broken.
+
+`src/delegations.rs:559` uses a `#[cfg(test)]` child-turn stub for delegation tests instead of the production `dispatch_turn` / `deliver_turn_dispatch` path. This means route and lifecycle tests can miss regressions in the actual child turn start path.
+
+**Current behavior:**
+- Backend delegation tests synthesize child output through a test-only path.
+- Production dispatch and runtime delivery are not exercised by the delegation fixture.
+- Child-start regressions can pass the focused delegation test suite.
+
+**Proposal:**
+- Replace the test-only prompt injector with an injectable stub runtime or focused integration path that exercises production dispatch.
+- Keep unit-level helpers where useful, but add at least one production dispatch regression.
+
+## Delegation lifecycle hooks lack production-path coverage
+
+**Severity:** Medium - direct refresh tests do not prove the lifecycle hooks are wired in the real turn paths.
+
+`src/turn_lifecycle.rs:330` refreshes delegation state from production turn lifecycle hooks, but current coverage calls `refresh_delegation_for_child_session` directly. Hook placement regressions in finish, error, or runtime-exit paths could leave delegation status stale while direct helper tests still pass.
+
+**Current behavior:**
+- Tests validate direct delegation refresh behavior.
+- Production lifecycle paths are not all driven end to end.
+- Completion/error/runtime-exit hook regressions can be missed.
+
+**Proposal:**
+- Add tests that finish, error, and runtime-exit a delegated child through the production lifecycle functions.
+- Assert delegation status/result, parent-card updates, and lifecycle events after each path.
+
+## Delegation SSE recovery coverage lacks stale/newer timing cases
+
+**Severity:** Low - equal-revision delegation repair variants are pinned, but stale/newer timing remains under-covered.
+
+`ui/src/app-live-state.ts` handles delegation SSE repair/recovery. Current coverage table-tests equal-revision `delegationCreated`, `delegationUpdated`, `delegationCompleted`, and `delegationCanceled`, but stale revisions, newer revisions, and reconnect recovery timing can still regress without a focused failure.
+
+**Current behavior:**
+- Equal-revision delegation delta variants repair through `/api/state`.
+- Stale and newer revision cases are not table-tested.
+- Reconnect recovery timing for delegation repair remains under-covered.
+
+**Proposal:**
+- Add stale and newer revision cases for each delegation delta variant.
+- Assert state repair scheduling, revision adoption timing, reconnect recovery confirmation, and non-use of normal session-delta handling.
+
+## `ensure_read_only_delegation_allows_write_action` runs `fs::canonicalize` under the state mutex
+
+**Severity:** Medium - the round-14 write-enforcement gate calls `path_contains` → `fs::canonicalize` on every iterated delegation's child workdir while holding `Mutex<StateInner>`. Disk I/O under the state lock blocks every concurrent state operation (delta publish, session lookup, etc.).
+
+`src/delegations.rs:480-491` (the no-`session_id` branch of `ensure_read_only_delegation_allows_write_action`) calls `delegation_write_scope_matches_record` → `path_contains` → `fs::canonicalize` on `record.session.workdir` for each iterated delegation, twice per record (both directions of the bidirectional containment check). The gate fires on every project-scoped write API: `/api/file`, `/api/git/*`, `/api/terminal/*`, `/api/review`. On slow filesystems or network-mounted workdirs, every concurrent state operation stalls behind the canonicalize.
+
+**Current behavior:**
+- Hot path (write APIs) runs `fs::canonicalize` under the state mutex.
+- For N active read-only delegations, 2N canonicalize calls per write request.
+- Concurrent state operations (delta publish, session lookups, `commit_locked`) block behind the disk I/O.
+
+**Proposal:**
+- Drop the mutex before canonicalizing — clone the workdirs out of `inner.delegations` first, release the lock, then run canonicalize off-lock.
+- Or precompute canonical workdirs into `DelegationRecord` at create time so the gate uses byte-level prefix matching with no I/O.
+- Or use a string-level prefix match (already canonical in `record.session.workdir` if create canonicalized once); reserve `fs::canonicalize` for the request workdir only.
+
+## Mutually-exclusive branches in `ensure_read_only_delegation_allows_write_action` re-open the round-13 bypass
+
+**Severity:** Medium - a caller that supplies a non-delegated `session_id` plus a `project_id`/`workdir` under a sibling read-only delegation hits the per-session branch, finds no `parent_delegation_id`, and bypasses the new project/workdir scope check.
+
+`src/delegations.rs:463-491`. The branches use `if let Some(session_id) ... else { ... project/workdir scan ... }`. The two branches should both run (logical OR). Today's behavior: the per-session branch wins when `session_id` is present, even if that session is unrelated to the delegated scope; the new project/workdir scan from round 14 is bypassed entirely. The round-13 bypass-by-omitting-`session_id` is closed for direct API callers, but a delegated child agent that knows or can guess the parent's session id can still write to the parent's project from a sibling session — the very case the round-14 fix was meant to close.
+
+**Current behavior:**
+- `if let Some(session_id) = ...` branches into the per-session check.
+- Per-session check: looks up that session's `parent_delegation_id`. If none, returns `Ok` (allow).
+- Else branch (no `session_id`): runs the project_id/workdir scan added in round 14.
+- A non-delegated `session_id` + project_id/workdir under an active sibling delegation: per-session branch wins, returns `Ok`, bypasses the workdir scan.
+
+**Proposal:**
+- Run both branches (logical OR — either gate firing should reject). The per-session branch handles the "child writes outside its allowed surface" case; the project/workdir branch handles "any caller writes inside an actively delegated scope."
+- Add a regression: parent session with active read-only delegation, write request from the parent's session_id with `project_id` set; assert 403.
+- Bonus: also test the same scenario with `workdir` parameter (the git/terminal endpoint shape).
 
 ## Markdown diff change-block grouping rules duplicated between renderer and index builder
 
@@ -895,6 +992,26 @@ The graceful-shutdown reload regression creates a fresh `AppState::new_with_path
 
 ## Implementation Tasks
 
+- [ ] P2: Add automatic delegation refresh coverage after child turn completion:
+  complete, error, and runtime-exit a delegated child through production turn lifecycle paths rather than calling `refresh_delegation_for_child_session` directly, then assert the delegation record, parent card, and lifecycle event update.
+- [ ] P2: Add production delegated-turn boundary coverage when child prompts are queued:
+  current direct-refresh coverage proves a queued follow-up does not block result capture. Drive completed and failed child-with-queued-prompt cases through production turn completion and assert terminal delegation refresh either suppresses queued dispatch or does not terminalize until it is safe.
+- [ ] P2: Add delegation cancel terminal-state coverage:
+  extend the current completed-child and queued-child cancel coverage to also cover failed children, unknown ids, and running-session cancellation.
+- [ ] P2: Add read-only delegated-child policy enforcement coverage:
+  existing coverage checks session settings, file writes with a child `sessionId`, project-scoped file writes without `sessionId`, and approval acceptance. Add remaining route-level assertions for git, terminal execution/streaming, review-document writes, and no-`sessionId` requests that only supply matching `workdir`.
+- [ ] P2: Add delegation start-dispatch race coverage:
+  interleave create-side validation, cancellation, and child dispatch so a terminal delegation cannot start a live runtime after the state lock is dropped.
+- [ ] P2: Add failed delegation create-response consistency coverage:
+  force a child-start failure through `POST /api/sessions/{id}/delegations`, then assert the response `childSession`, returned revision, delegation status, and durable child state all describe the same errored child snapshot.
+- [ ] P2: Add parent-removal delegated-runtime cleanup coverage:
+  remove a parent delegation session while a child delegation is actively running and assert the child runtime is killed or detached, queued prompts/pending callbacks are cleared, and no background work continues.
+- [ ] P2: Add delegation limit and nesting-depth coverage:
+  cover the fifth active delegation conflict, allowing another delegation after completion or cancellation, and rejecting creation beyond the configured nesting depth.
+- [ ] P2: Add delegation result route JSON shape coverage:
+  complete a delegation, call `GET /api/delegations/{id}/result`, and assert the camelCase response fields such as `childSessionId`, `commandsRun`, and `changedFiles`.
+- [ ] P2: Add remote ignored delegation-delta coverage:
+  dispatch a remote delegation delta through the remote path and assert no local delegation is materialized while the remote applied revision still advances.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
 - [ ] P2: Add equal-revision gap repair snapshot adoption coverage:
@@ -939,7 +1056,91 @@ The graceful-shutdown reload regression creates a fresh `AppState::new_with_path
   the new `App.live-state.reconnect.test.tsx` test exercises the revision-gap branch (the `messageCreated` delta omits `sessionMutationStamp` so it falls into the resync fallback). Add `sessionMutationStamp` so the delta routes through the matched-stamp fast-path that the surrounding `handleDeltaEvent` comment is most concerned about, OR rename the test to clarify it covers the revision-gap branch specifically and add a sibling test for the textDelta fast-path.
 - [ ] P2: Split the bad-live-event + workspaceFilesChanged test into isolated arrange-act-assert phases:
   `ui/src/backend-connection.test.tsx:1225-1261` co-fires the stale `delta` and the `workspaceFilesChanged` event in one `act()`. The assertion `countStateFetches() === hydratedStateFetchCount` is satisfied if either side skips confirmation, so the test cannot pinpoint which side regressed. Dispatch `workspaceFilesChanged` alone first and assert no fetch fired; then add the stale delta separately and re-assert.
-- [ ] P2: Add post-idle unmount assertions to programmatic search-pin release tests:
-  the native scroll release path now asserts the previously pinned target unmounts after the top window renders. The user-owned scroll-write and wheel-intent tests still only assert the destination window renders because old pages may remain overmounted until idle compaction; add a post-idle assertion if we want to pin that cleanup behavior.
-- [ ] P2: Investigate pre-existing flake on "keeps the virtualizer handle stable" test in `VirtualizedConversationMessageList.test.tsx:630-672`:
-  React/TS reviewer observed 1/4 local flake on `expect(virtualizerHandleRef.current).toBe(initialHandle)`. Not introduced by the round 7 polish, but worth tracking — the underlying handle-identity invariant evidently still has a race even with the new render-count predicate making polling more permissive.
+- [ ] P2: Roll the `diagramLook` migration into a table-driven helper or document the dual-source contract in `workspace-storage.ts:131-143`:
+  `normalizeStoredWorkspaceLayoutPreferences` is open-coded for `"neo"` only and mixes schema-validation (`isStoredWorkspaceLayout`) with schema-evolution. Future enum retirements will accrete `if (value.foo === "X") delete normalized.foo` branches inline without a unifying contract. Either (a) generalize to `normalizeRetiredEnumValues(value, [{ field: "diagramLook", retired: ["neo"] }])` with a header comment, or (b) move the `"neo"` drop into `isStoredWorkspaceLayout`'s `diagramLook` branch with a comment naming the migration policy ("retired values drop silently; truly invalid values still reject the layout").
+- [ ] P2: Restore `"neo"` to `WorkspaceLayoutDocument.diagramLook` in `ui/src/api.ts:106, 481` and concentrate narrowing in `parseStoredWorkspaceLayout`:
+  the API type was tightened to `"classic" | "handDrawn"`, but the wire may still carry `"neo"` from older clients (the backend treats `diagramLook` as opaque inside `workspace: Value`). The runtime is safe because `app-workspace-layout.ts:443-457` normalizes immediately, but the TS type now lies about server reality during the migration window. Anyone reading the type and writing `if (response.layout.diagramLook === "neo")` will get a TS error and conclude the case is impossible. Keep the API type as `"classic" | "handDrawn" | "neo"` (or `string`) and add a comment naming `parseStoredWorkspaceLayout` as the canonical normalizer.
+- [ ] P2: Add a positive-roundtrip test for `diagramLook: "handDrawn"` in `workspace-storage.test.ts`:
+  current coverage is purely negative ("neo" gets stripped). A regression where `normalizeStoredWorkspaceLayoutPreferences` accidentally stripped any `diagramLook` (e.g. inverting `!== "neo"`) would not fail any current test. Add a quick test that a stored layout with `diagramLook: "handDrawn"` round-trips with the field preserved.
+- [ ] P2: Compose `"neo"`-stripping with sibling normalizations in `workspace-storage.test.ts:372-391`:
+  the new "drops the retired Mermaid neo look" test uses a minimal payload. Add one assertion combining `diagramLook: "neo"` AND a legacy Windows root path so a future change that breaks normalization order is caught.
+- [ ] P2: Add a constrained-parent rendering check to the Mermaid iframe sizing test in `MarkdownContent.test.tsx:463-489`:
+  current test asserts inline style values only. The production comment at `mermaid-render.ts:138-144` calls out the fixed-height-blank-frame trade-off (very wide diagrams scroll horizontally rather than scaling to fit). A future regression that re-introduces aspect-ratio scaling, or accidentally removes `max-width: none` from the srcdoc CSS, would not fail any test. Optionally render the iframe inside a `width: 400px` parent and assert the iframe's `getBoundingClientRect().height` matches the inline `frameHeight`, OR at minimum assert the `srcDoc` still contains `max-width: none` for the SVG selector.
+- [ ] P2: Add reverse cross-links from `orchestration.md`, `concurrent-session-link-cards.md`, and `diff-review-workflow.md` to `agent-delegation-sessions.md`:
+  per CLAUDE.md "cross-link them both ways", the new exploratory brief lists three siblings as "Related" but none back-link. A reader of `orchestration.md` reasoning about "should this go in a graph or as ad hoc delegation?" has no signpost to the delegation brief. Most cleanly: add a "Related Features" line in each of the three referenced briefs.
+- [ ] P2: Clarify `DelegationStatus.queued` ownership in `docs/features/agent-delegation-sessions.md` Lifecycle:
+  status includes `"queued"` but the brief never explains who owns the queue or when a delegation transitions out of it. The Lifecycle section (1. Spawn → 2. Run) jumps straight from creation to running. A `"queued"` state implies a separate scheduler/throttle layer (mentioned only obliquely in line 252's "per-parent concurrency and nesting-depth limits"). Affects SSE protocol — `delegationUpdated` would need to fire on queued→running transitions. Add one sentence in Lifecycle §1 either confirming queued is the throttle mechanism (and how it transitions to running) or removing `"queued"` from the v1 status set.
+- [ ] P2: Use the lazy form for `useRef` initializer in `VirtualizedConversationMessageList.tsx:1404-1410`:
+  current `useRef({ buildLayoutSnapshot, jumpToMessageLocation, ... })` allocates a fresh five-property object on every render and discards it (React only honors the first value). The immediately-following `useLayoutEffect` builds an equivalent object that IS used. Switch to `useRef<...>(undefined as unknown as ...)` and let the post-commit effect populate on first run. Minor inefficiency in a hot path that re-renders on every scroll/measure tick.
+- [ ] P2: Update stale `USER_SCROLL_ADJUSTMENT_COOLDOWN_MS` comment reference in `AgentSessionPanel.test.tsx:2104`:
+  the constant was renamed to `VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS`. Future grep-based code archaeology will not find it under the old name. Comment-only fix.
+- [ ] P2: Document new delegation REST endpoints + SSE delta events in `docs/architecture.md`:
+  CLAUDE.md / project conventions require new endpoints documented in `docs/architecture.md`. Round 11 added `POST /api/sessions/{id}/delegations`, `GET /api/delegations/{id}`, `GET /api/delegations/{id}/result`, `POST /api/delegations/{id}/cancel`, plus four `DeltaEvent::Delegation*` SSE event types — none documented in `docs/architecture.md`. Add four rows to the HTTP API table (with status codes 201/200/404/409/400) and four lines to the SSE event listing block.
+- [ ] P2: Add remaining cancel-path tests to `src/tests/delegations.rs`:
+  current coverage covers completed-child cancellation and queued child prompt cleanup. Add failed-child, unknown-id, and running-runtime cancellation route cases.
+- [ ] P2: Add path canonicalization rejection tests to `src/tests/delegations.rs`:
+  the brief §"Path Validation" requires rejecting `..`-traversal, drive-relative Windows paths, UNC paths, and symlink escapes. `create_read_only_delegation` validates `cwd` is inside the project at line 99 (`path_contains`), but no test asserts an escaping `cwd` is rejected. Add a test per category.
+- [ ] P2: Add empty-prompt rejection test to `src/tests/delegations.rs`:
+  `src/delegations.rs:52` rejects empty/whitespace-only `prompt` with 400, but no test exercises this branch. One-liner test.
+- [ ] P2: Cover the cross-remote delegation no-op arm in `src/tests/remote.rs`:
+  `src/remote_routes.rs:2005-2017` returns `None` from `remote_delta_replay_key` for delegation events and the dispatch arm advances `remote_applied_revisions` without mirroring. Add a `remote_delegation_delta_advances_revision_without_local_record` test that dispatches `DelegationCreated` to `apply_remote_delta_event`, asserts `inner.delegations` is unchanged, asserts `remote_applied_revisions[remote_id]` advanced, and asserts `replay_key.is_none()`.
+- [ ] P2: Replace `#[cfg(test)] start_delegation_child_turn` with stub-runtime path in `src/tests/delegations.rs:391-420`:
+  the test-only override directly synthesizes a `Message::Text` and bypasses `dispatch_turn` → `deliver_turn_dispatch`. Real lifecycle bugs (e.g. the queued-prompt completion bug) cannot be observed through this fixture. Replace with a `TestRecorder`-based stub runtime so the production dispatch path runs end-to-end.
+- [ ] P2: Expand UI tests for delegation delta dispatch in `ui/src/app-live-state.test.ts`:
+  current coverage pins equal-revision repair for all delegation delta variants plus a newer delta landing before repair adoption. Add stale/newer timing cases, same-revision sibling deltas involving session-created and parent-card deltas, and delayed or failed `/api/state` repair cases. Assert reconnect/fallback recovery remains active until the authoritative repair snapshot is adopted and that delegation events do not flow through normal session-delta handling.
+- [ ] P2: Drop redundant per-field `#[serde(rename = "...")]` in `DeltaEvent::Delegation*` variants:
+  `DelegationWritePolicy` now uses `rename_all_fields = "camelCase"`, but the delegation SSE delta variants still carry per-field renames such as `#[serde(rename = "delegationId")]`. Drop the redundant attributes if `DeltaEvent` can safely adopt `rename_all_fields = "camelCase"` without changing other variant wire shapes.
+- [ ] P2: Add parent-ownership enforcement to delegation read/cancel routes:
+  brief §"Resource limits" requires "delegation ids are parent-scoped; a parent can only inspect, wait for, or cancel delegations it created." Phase 1 has per-parent running-count and nesting-depth caps, but direct `GET /api/delegations/{id}` / result / cancel routes still identify only the delegation id. Add a parent-scoped route or explicit parent ownership check before Phase 2 ships agent-facing MCP tools (`termal_spawn_session` etc.).
+- [ ] P2: Cancel response should signal "was already terminal" in `src/api.rs:557-562`:
+  current `cancel_delegation` returns 200 with `DelegationStatusResponse` whether or not the cancel actually changed state. MCP/agent callers cannot distinguish "I just cancelled it" from "already canceled by someone else." Add `wasAlreadyTerminal: bool` to the response, or document the idempotent-no-status-change contract in `docs/architecture.md`.
+- [ ] P2: Expand the file-level header for `src/delegations.rs`:
+  790 lines concentrating routes, lifecycle observers, prompt construction, parent-card mutation, persistence wiring, and SSE deltas in one module. Per CLAUDE.md, the header should enumerate cross-cutting responsibilities and explicit non-goals (no remote forwarding, no worker policy yet) so future readers see the boundary. Note that the missing parent-card transcript delta is a bug, not a non-goal. Below the Rust 3000-line scrutiny threshold but worth documenting before the file grows.
+- [ ] P2: Drain delta-pump loops to `Err(TryRecvError::Empty)` in `src/tests/delegations.rs:416, 449, 551`:
+  current `(0..8).any(...)` and `for _ in 0..3` iterations call `next_delegation_delta_event`, which `try_recv().expect(...)` and panics on `Empty`. If a future refactor reduces published deltas below the loop bound (e.g. coalescing two deltas into one), the test panics regardless of whether the assertion would have passed. Replace fixed-count loops with a drain loop that breaks on `TryRecvError::Empty` and exposes a sentinel so a Found assertion can fail cleanly.
+- [ ] P2: Annotate the delegation constants in `src/delegations.rs:5-13`:
+  `MAX_DELEGATION_PUBLIC_SUMMARY_CHARS`, `DELEGATION_RESULT_PACKET_SEARCH_BYTES`, `DELEGATION_NO_LONGER_STARTABLE_MESSAGE`, plus the existing `MAX_DELEGATION_PROMPT_BYTES` / `MAX_RUNNING_DELEGATIONS_PER_PARENT` / `MAX_DELEGATION_DEPTH` sit unannotated above type defs. Add a one-line `//` above each naming the consumer (e.g. "public summary cap shipped on every SSE delta"), the trade-off, and the doc/bug entry that justifies the magnitude.
+- [ ] P2: Tighten `parse_delegation_result_packet` summary terminator in `src/delegations.rs:1169`:
+  current `if cleaned.ends_with(':') && !cleaned.starts_with('-')` treats any in-summary line ending in `:` as a section heading. A multi-line summary like `Summary:\nThe issue is here:\n  detail` drops everything after `here:`. Use a known-section allowlist (`Findings:`, `Commands Run:`, `Files Inspected:`, `Notes:`, `Status:`) or match `^[A-Z][A-Za-z ]+:$` plus a prior blank line.
+- [ ] P2: Guard `cancel_delegation` commit on `lifecycle_delta.is_some()` in `src/delegations.rs:415`:
+  current code calls `commit_locked` unconditionally on the "stop conflicted + already terminal + no refresh delta" branch. Bumps the global revision and publishes a `state` event with no actual delegation change — every duplicate cancel against an already-terminal delegation that races a stop conflict triggers an unnecessary state broadcast. Match the early-return branch at lines 357-365 which already gates on `lifecycle_delta.is_some()`.
+- [ ] P2: Add `DelegationFailed` SSE delta variant (or extend `DelegationUpdated`) in `src/wire.rs:1555-1562`:
+  `DeltaEvent::DelegationUpdated` carries `(delegationId, status, updatedAt)` only. When `mark_delegation_failed_locked` returns a `DelegationLifecycleDelta::Updated` for a `Failed` transition, SSE-only subscribers cannot see the failure summary without a separate `GET /api/delegations/{id}/result`. `Completed` and `Canceled` get their own variants with `result`/`reason` payloads; `Failed` should be symmetric. Currently masked by the eager full-resync in the UI; will become user-visible if Phase 3 lands a targeted-delta path.
+- [ ] P2: Document `ensure_read_only_delegation_allows_write_action` bypass in `src/delegations.rs:444-476`:
+  the gate keys solely on `session_id` and short-circuits to allow when the field is empty. A delegated read-only LLM that omits `session_id` and supplies only `project_id` (which the agent already knows) bypasses the check. Phase 1 single-user local-only is a guardrail not a hard boundary; runtime-layer protections (Cursor plan-mode, Claude read-only spawn flags) still apply for the in-flight runtime. Either harden by gating on `(session_id-or-project-resolved) parent-delegation membership`, or document explicitly as a known guardrail gap with a `// SECURITY:` comment naming the Phase 2 hardening item.
+- [ ] P2: Move terminal gating call below the remote-scope check in `src/terminal.rs:17-20, 148-151`:
+  inconsistent with sibling api_files/api_git/api_review which place the gate AFTER the remote-scope check. For Phase 1 has no observable effect (remote terminals proxy through), but the inconsistent ordering means a delegated read-only child that targets a remote project will receive a 403 from the local check before ever reaching the proxy. Cosmetic inconsistency but worth fixing for code-archaeology.
+- [ ] P2: Tighten `forceAdoptEqualOrNewerRevision` type discipline in `ui/src/app-live-state.ts:2069`:
+  destructured as `number | null` from `PendingStateResyncOptions` and passed to `requestStateResync({ forceAdoptEqualOrNewerRevision })` whose option type is `number | undefined`. Runtime `coalescePendingStateResyncOptions` defensively gates with `typeof === "number"` so the `null` is silently swallowed; type contract is muddied. Convert via `?? undefined` at the call site, or narrow before passing.
+- [ ] P2: Decide `Math.min` vs `Math.max` for `forceAdoptEqualOrNewerRevision` coalesce in `ui/src/app-live-state-resync-options.ts:90-96`:
+  current `Math.min` accepts more retries; the local-revision pin enforces the actual freshness contract. Conceptually `Math.max` would be the strictest floor (a snapshot at revision 5 wouldn't include the delegation event at revision 7). Either flip to `Math.max` for clarity, or add a comment justifying `min`.
+- [ ] P2: Pin `false → true` direction for OR-coalesce in `ui/src/app-live-state-resync-options.test.ts:73-85`:
+  the new "retains reconnect confirmation-on-adoption once observed" test pins the `true → undefined` direction. Add the symmetric `false → true` direction (flag starts false, second call passes true → result true) to catch a future change to a `null`-clobber semantic.
+- [ ] P2: Add the four delegation REST endpoints + four SSE delta events to the route table and event listing in `docs/architecture.md`:
+  the round-13 status paragraph addressed the 501 contract but did NOT add the endpoints to the HTTP API table at lines 146-204 or the four `Delegation*` entries to the `DeltaEvent` listing at lines 293-302. Both need to land for the round-12 documentation gap to fully close.
+- [ ] P2: Apply `while ... try_recv()` drain pattern to two pre-existing brittle delta-pump sites in `src/tests/delegations.rs:521, 624`:
+  the round-14 new tests at `:939-955` use `while delta_events.try_recv().is_ok()` correctly. The pre-existing `(0..8).any(|_| matches!(next_delegation_delta_event(...), ...))` at line 521 and `for _ in 0..3` at line 624 still call `next_delegation_delta_event`, which `try_recv().expect(...)` and panics on `Empty`. Future refactors that reduce published deltas would panic regardless of the assertion. Replace with a drain loop that breaks on `TryRecvError::Empty`.
+- [ ] P2: Cover `ApprovalDecision::AcceptedForSession` in `read_only_delegation_rejects_approval_acceptance` (`src/tests/delegations.rs:1098-1138`):
+  the production guard at `src/codex_submissions.rs:154-161` blocks both `Accepted` AND `AcceptedForSession`. The current test only covers `Accepted`; the `AcceptedForSession` arm could regress silently.
+- [ ] P2: Cover the `workdir`-only branch of `ensure_read_only_delegation_allows_write_action` in `src/tests/delegations.rs`:
+  `read_only_delegation_blocks_project_writes_without_session_id` covers the `project_id`-only branch, but the new `workdir`-only branch (used by `/api/git/*` + `/api/terminal/*`) is unverified. The bidirectional `path_contains` logic at `src/delegations.rs:1213-1214` (workdir-inside-record OR record-inside-workdir) is wholly untested.
+- [ ] P2: Add a regression for `delegated_child_dispatch_is_blocked_locked` in `src/tests/delegations.rs`:
+  the new gate at `src/turn_dispatch.rs:490-494` is the round-13 HIGH-severity cancel-vs-dispatch race fix. Without a test that interleaves create + cancel + dispatch, a future refactor can revert the gate silently. Test should: create delegation, cancel before child has dispatched, attempt dispatch, assert 409 CONFLICT with `DELEGATION_NO_LONGER_STARTABLE_MESSAGE`.
+- [ ] P2: Publish a `MessageUpdated` delta when `detach_delegation_child_runtime_locked` flips Pending approval/request statuses in `src/delegations.rs:1067-1093`:
+  `cancel_pending_interaction_messages` mutates `Approval::Pending → Rejected` and `*Request::Pending → Canceled` in the child transcript without publishing a per-message delta. Other call sites (`session_lifecycle.rs:361`, `turn_lifecycle.rs:416`) at least follow with a synthesized "Turn stopped by user." Text message that carries `MessageCreated`. Live clients keep the old `Pending` status until they re-fetch the session.
+- [ ] P2: Push a "Delegation halted" transcript marker when the parent is removed in `src/delegations.rs:1067-1093`:
+  the detach path doesn't push any transcript marker; the orphaned-and-failed child is preserved (per the test) but a user later opening that child sees its transcript ending mid-turn with no in-band explanation.
+- [ ] P2: Drop the dead return value of `mark_delegation_failed_after_start_error` in `src/delegations.rs:507`:
+  current signature `Result<(u64, DelegationRecord), ApiError>` is consumed by the single caller via `?` which discards the success tuple. Change to `Result<(), ApiError>`.
+- [ ] P2: De-duplicate queue-clear logic between `mark_delegation_failed_locked` and `clear_delegation_child_queue_locked` in `src/delegations.rs:1000-1003, 1067-1075`:
+  the failed path inlines `queued_prompts.clear() + sync_pending_prompts(child)` instead of calling the shared helper. Minor DRY consistency.
+- [ ] P2: Test the third snake_case alias `isolated_worktree` in `src/tests/delegations.rs:1209-1226`:
+  round 14 added `read_only`, `shared_worktree`, AND `isolated_worktree` aliases to `DelegationWritePolicy`. The new test covers the first two; the third alias is untested.
+- [ ] P2: Reject whitespace-only `prompt` in `src/delegations.rs:165-167`:
+  current `request.prompt = "   "` passes the `MAX_DELEGATION_PROMPT_BYTES` check and lands as a whitespace-only delegation. Add a `bad_request` for whitespace-only prompts (the title field already trims and falls back to default; prompt should likewise reject whitespace).
+- [ ] P2: Symmetrize cancel vs fail child-state mutation in `src/delegations.rs:1022-1068`:
+  `mark_delegation_failed_locked` sets `child.session.status = Error`; `mark_delegation_canceled_locked` only updates `preview` and clears the queue. After `cancel_delegation` returns, `delegation.status == Canceled` while `child.session.status` may still be `Active`/`Idle` until `stop_session_with_options` propagates. Either set `child.session.status` for symmetry or document why cancel intentionally leaves status to be settled by the stop path.
+- [ ] P2: Add a code comment explaining the asymmetric bidirectional `path_contains` in `src/delegations.rs:1199-1215`:
+  if a delegation's child workdir is set to a broad path (e.g. `/`), the second branch makes ALL workdir-bearing write requests match. Phase 1 typical case (child workdir = parent workdir = project root) is fine; future broadening of allowed child workdirs would surprise. Document the trade-off inline.
+- [ ] P2: Document `terminal.rs` gate ordering as fail-closed-by-design in `src/terminal.rs:17-22, 150-155`:
+  terminal gates BEFORE the remote-scope short-circuit (siblings gate AFTER). Defensible because Phase 1 delegations reject remote-backed projects upfront, so a delegated child never resolves to a remote scope; gating locally first is defense-in-depth, not a leak. Add a one-line code comment naming the intent so a future refactor doesn't "fix" it.

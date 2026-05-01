@@ -189,7 +189,6 @@ impl IntoResponse for ApiError {
     }
 }
 
-
 /// Defines the agent variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 enum Agent {
@@ -348,6 +347,8 @@ struct Session {
     pending_prompts: Vec<PendingPrompt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     session_mutation_stamp: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parent_delegation_id: Option<String>,
 }
 
 fn session_messages_loaded_default() -> bool {
@@ -590,7 +591,6 @@ enum ApprovalDecision {
     Rejected,
 }
 
-
 /// Represents the approval request payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -637,6 +637,184 @@ struct CreateSessionRequest {
     claude_approval_mode: Option<ClaudeApprovalMode>,
     claude_effort: Option<ClaudeEffortLevel>,
     gemini_approval_mode: Option<GeminiApprovalMode>,
+}
+
+/// Delegated child session mode.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum DelegationMode {
+    Reviewer,
+    Explorer,
+    Worker,
+}
+
+/// Delegated child session lifecycle status.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum DelegationStatus {
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    Canceled,
+}
+
+/// Delegated child write policy. Phase 1 only accepts `ReadOnly`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+enum DelegationWritePolicy {
+    #[serde(alias = "read_only")]
+    ReadOnly,
+    #[serde(alias = "shared_worktree")]
+    SharedWorktree {
+        owned_paths: Vec<String>,
+    },
+    #[serde(alias = "isolated_worktree")]
+    IsolatedWorktree {
+        owned_paths: Vec<String>,
+        worktree_path: String,
+    },
+}
+
+/// Compact result packet for a completed delegation.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationResult {
+    delegation_id: String,
+    child_session_id: String,
+    status: DelegationStatus,
+    summary: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    findings: Vec<DelegationFinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    changed_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    commands_run: Vec<DelegationCommandResult>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    notes: Vec<String>,
+}
+
+/// Summary-safe result metadata for broad state/SSE subscribers.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationResultSummary {
+    delegation_id: String,
+    child_session_id: String,
+    status: DelegationStatus,
+    summary: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationFinding {
+    severity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    line: Option<u32>,
+    message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationCommandResult {
+    command: String,
+    status: String,
+}
+
+/// Persisted parent-child delegation metadata.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationRecord {
+    id: String,
+    parent_session_id: String,
+    child_session_id: String,
+    mode: DelegationMode,
+    status: DelegationStatus,
+    title: String,
+    prompt: String,
+    cwd: String,
+    agent: Agent,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    write_policy: DelegationWritePolicy,
+    created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    result: Option<DelegationResult>,
+}
+
+/// Summary-safe delegation metadata for `/api/state` and broad SSE deltas.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationSummary {
+    id: String,
+    parent_session_id: String,
+    child_session_id: String,
+    mode: DelegationMode,
+    status: DelegationStatus,
+    title: String,
+    agent: Agent,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    write_policy: DelegationWritePolicy,
+    created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    result: Option<DelegationResultSummary>,
+}
+
+/// Request payload for creating a Phase 1 read-only delegation.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateDelegationRequest {
+    prompt: String,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    agent: Option<Agent>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    mode: Option<DelegationMode>,
+    #[serde(default)]
+    write_policy: Option<DelegationWritePolicy>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationResponse {
+    revision: u64,
+    delegation: DelegationRecord,
+    child_session: Session,
+    #[serde(default)]
+    server_instance_id: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationStatusResponse {
+    revision: u64,
+    delegation: DelegationRecord,
+    #[serde(default)]
+    server_instance_id: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationResultResponse {
+    revision: u64,
+    result: DelegationResult,
+    #[serde(default)]
+    server_instance_id: String,
 }
 
 /// Represents the create project request payload.
@@ -751,7 +929,6 @@ struct DirectoryResponse {
     name: String,
     path: String,
 }
-
 
 /// Represents the error response payload.
 #[derive(Deserialize, Serialize)]
@@ -977,6 +1154,8 @@ struct StateResponse {
     workspaces: Vec<WorkspaceLayoutSummary>,
     #[serde(default)]
     sessions: Vec<Session>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    delegations: Vec<DelegationSummary>,
 }
 
 /// Represents one full session response payload.
@@ -1104,7 +1283,6 @@ struct CreateProjectResponse {
     state: StateResponse,
 }
 
-
 /// Represents a agent command.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1222,7 +1400,6 @@ struct InstructionSearchGraph {
 struct PickProjectRootResponse {
     path: Option<String>,
 }
-
 
 /// Defines the delta event variants.
 #[derive(Deserialize, Serialize)]
@@ -1371,5 +1548,33 @@ enum DeltaEvent {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         sessions: Vec<Session>,
     },
+    DelegationCreated {
+        revision: u64,
+        delegation: DelegationSummary,
+    },
+    DelegationUpdated {
+        revision: u64,
+        #[serde(rename = "delegationId")]
+        delegation_id: String,
+        status: DelegationStatus,
+        #[serde(rename = "updatedAt")]
+        updated_at: String,
+    },
+    DelegationCompleted {
+        revision: u64,
+        #[serde(rename = "delegationId")]
+        delegation_id: String,
+        result: DelegationResultSummary,
+        #[serde(rename = "completedAt")]
+        completed_at: String,
+    },
+    DelegationCanceled {
+        revision: u64,
+        #[serde(rename = "delegationId")]
+        delegation_id: String,
+        #[serde(rename = "canceledAt")]
+        canceled_at: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
 }
-

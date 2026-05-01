@@ -34,6 +34,8 @@ struct PersistedState {
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     orchestrator_instances: Vec<OrchestratorInstance>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    delegations: Vec<DelegationRecord>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     workspace_layouts: BTreeMap<String, WorkspaceLayoutDocument>,
     sessions: Vec<PersistedSessionRecord>,
@@ -60,6 +62,7 @@ impl PersistedState {
             projects: inner.projects.clone(),
             ignored_discovered_codex_thread_ids: inner.ignored_discovered_codex_thread_ids.clone(),
             orchestrator_instances: inner.orchestrator_instances.clone(),
+            delegations: inner.delegations.clone(),
             workspace_layouts: inner.workspace_layouts.clone(),
             sessions: Vec::new(),
         }
@@ -94,6 +97,7 @@ impl PersistedState {
             projects: self.projects.clone(),
             ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids.clone(),
             orchestrator_instances: self.orchestrator_instances.clone(),
+            delegations: self.delegations.clone(),
             workspace_layouts: self.workspace_layouts.clone(),
             sessions: Vec::new(),
         }
@@ -130,6 +134,7 @@ impl PersistedState {
             remote_transcript_snapshot_applied_revisions: HashMap::new(),
             remote_session_transcript_applied_revisions: HashMap::new(),
             orchestrator_instances: self.orchestrator_instances,
+            delegations: self.delegations,
             workspace_layouts: self.workspace_layouts,
             sessions: self
                 .sessions

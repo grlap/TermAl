@@ -17,6 +17,8 @@ describe("state resync option coalescing", () => {
       rearmOnSuccess: false,
       rearmUntilLiveEventOnSuccess: false,
       rearmAfterSameInstanceProgressUntilLiveEvent: false,
+      confirmReconnectRecoveryOnAdoption: false,
+      forceAdoptEqualOrNewerRevision: null,
       rearmOnFailure: false,
     });
   });
@@ -29,10 +31,13 @@ describe("state resync option coalescing", () => {
       rearmOnSuccess: true,
       rearmUntilLiveEventOnSuccess: true,
       rearmAfterSameInstanceProgressUntilLiveEvent: true,
+      confirmReconnectRecoveryOnAdoption: true,
+      forceAdoptEqualOrNewerRevision: 7,
       rearmOnFailure: true,
     });
     const second = coalescePendingStateResyncOptions(first, {
       allowUnknownServerInstance: true,
+      forceAdoptEqualOrNewerRevision: 5,
     });
 
     expect(second).toEqual({
@@ -43,6 +48,8 @@ describe("state resync option coalescing", () => {
       rearmOnSuccess: true,
       rearmUntilLiveEventOnSuccess: true,
       rearmAfterSameInstanceProgressUntilLiveEvent: true,
+      confirmReconnectRecoveryOnAdoption: true,
+      forceAdoptEqualOrNewerRevision: 5,
       rearmOnFailure: true,
     });
   });
@@ -60,6 +67,20 @@ describe("state resync option coalescing", () => {
       preserveWatchdogCooldown: true,
       rearmOnSuccess: true,
       rearmUntilLiveEventOnSuccess: true,
+    });
+  });
+
+  it("retains reconnect confirmation-on-adoption once observed", () => {
+    const first = coalescePendingStateResyncOptions(null, {
+      confirmReconnectRecoveryOnAdoption: true,
+    });
+    const second = coalescePendingStateResyncOptions(first, {
+      preserveWatchdogCooldown: true,
+    });
+
+    expect(second).toMatchObject({
+      confirmReconnectRecoveryOnAdoption: true,
+      preserveWatchdogCooldown: true,
     });
   });
 
@@ -101,6 +122,8 @@ describe("state resync option coalescing", () => {
       rearmOnSuccess: false,
       rearmUntilLiveEventOnSuccess: false,
       rearmAfterSameInstanceProgressUntilLiveEvent: false,
+      confirmReconnectRecoveryOnAdoption: false,
+      forceAdoptEqualOrNewerRevision: null,
       rearmOnFailure: false,
     });
   });

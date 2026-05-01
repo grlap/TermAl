@@ -176,6 +176,13 @@ async fn write_file(
             );
         }
 
+        state.ensure_read_only_delegation_allows_write_action(
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+            None,
+            "file writes",
+        )?;
+
         if request.content.as_bytes().len() > MAX_FILE_CONTENT_BYTES {
             return Err(ApiError::bad_request(format!(
                 "file content exceeds the {} MB write limit",

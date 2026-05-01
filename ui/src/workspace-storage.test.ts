@@ -369,6 +369,27 @@ describe("workspace storage", () => {
     });
   });
 
+  it("drops the retired Mermaid neo look without rejecting the layout", () => {
+    const raw = JSON.stringify({
+      controlPanelSide: "left",
+      diagramLook: "neo",
+      workspace: {
+        root: null,
+        panes: [],
+        activePaneId: null,
+      },
+    });
+
+    expect(parseStoredWorkspaceLayout(raw)).toEqual({
+      controlPanelSide: "left",
+      workspace: {
+        root: null,
+        panes: [],
+        activePaneId: null,
+      },
+    });
+  });
+
   it("parses and normalizes legacy Windows workspace paths", () => {
     const legacyRoot = String.raw`\\?\C:\repo`;
     const legacyFile = String.raw`\\?\C:\repo\src\main.ts`;

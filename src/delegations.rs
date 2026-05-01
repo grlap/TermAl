@@ -1,0 +1,1465 @@
+// Phase 1 delegation records: durable parent-child metadata plus read-only
+// child sessions. The child remains a normal session; this layer only owns the
+// parent card, lifecycle metadata, and compact result packet.
+
+const MAX_DELEGATION_PROMPT_BYTES: usize = 64 * 1024;
+const MAX_DELEGATION_PUBLIC_SUMMARY_CHARS: usize = 1000;
+const DELEGATION_RESULT_PACKET_SEARCH_BYTES: usize = 32 * 1024;
+const MAX_RUNNING_DELEGATIONS_PER_PARENT: usize = 4;
+const MAX_DELEGATION_DEPTH: usize = 3;
+const DELEGATION_NO_LONGER_STARTABLE_MESSAGE: &str = "delegation is no longer running";
+#[cfg(test)]
+const TEST_FORCE_DELEGATION_START_FAILURE_PROMPT: &str =
+    "TERMAL_TEST_FORCE_DELEGATION_START_FAILURE";
+
+#[derive(Clone, Debug)]
+enum ParentDelegationCardDelta {
+    Created {
+        session_id: String,
+        message_id: String,
+        message_index: usize,
+        message_count: u32,
+        message: Message,
+        preview: String,
+        status: SessionStatus,
+        session_mutation_stamp: u64,
+    },
+    Updated {
+        session_id: String,
+        message_id: String,
+        message_index: usize,
+        message_count: u32,
+        agents: Vec<ParallelAgentProgress>,
+        preview: String,
+        session_mutation_stamp: u64,
+    },
+}
+
+#[derive(Clone, Debug)]
+enum DelegationLifecycleDelta {
+    Updated {
+        delegation_id: String,
+        status: DelegationStatus,
+        updated_at: String,
+        parent_card_delta: Option<ParentDelegationCardDelta>,
+    },
+    Completed {
+        delegation_id: String,
+        result: DelegationResult,
+        completed_at: String,
+        parent_card_delta: Option<ParentDelegationCardDelta>,
+    },
+    Canceled {
+        delegation_id: String,
+        canceled_at: String,
+        reason: Option<String>,
+        parent_card_delta: Option<ParentDelegationCardDelta>,
+    },
+}
+
+struct RemovedSessionDelegationReconciliation {
+    lifecycle_deltas: Vec<DelegationLifecycleDelta>,
+    runtimes_to_kill: Vec<KillableRuntime>,
+}
+
+impl StateInner {
+    fn next_delegation_id(&self) -> String {
+        format!("delegation-{}", Uuid::new_v4())
+    }
+
+    fn find_delegation_index(&self, delegation_id: &str) -> Option<usize> {
+        self.delegations
+            .iter()
+            .position(|record| record.id == delegation_id)
+    }
+
+    fn find_delegation_index_by_child_session_id(&self, child_session_id: &str) -> Option<usize> {
+        self.delegations
+            .iter()
+            .position(|record| record.child_session_id == child_session_id)
+    }
+}
+
+impl AppState {
+    fn create_read_only_delegation(
+        &self,
+        parent_session_id: &str,
+        request: CreateDelegationRequest,
+    ) -> Result<DelegationResponse, ApiError> {
+        let parent_session_id = normalize_optional_identifier(Some(parent_session_id))
+            .ok_or_else(|| ApiError::bad_request("parent session id is required"))?
+            .to_owned();
+        let prompt = request.prompt.trim();
+        if prompt.is_empty() {
+            return Err(ApiError::bad_request("delegation prompt cannot be empty"));
+        }
+        if prompt.len() > MAX_DELEGATION_PROMPT_BYTES {
+            return Err(ApiError::bad_request(format!(
+                "delegation prompt must be at most {} bytes",
+                MAX_DELEGATION_PROMPT_BYTES
+            )));
+        }
+        let mode = request.mode.unwrap_or(DelegationMode::Reviewer);
+        if mode == DelegationMode::Worker {
+            return Err(ApiError::from_status(
+                StatusCode::NOT_IMPLEMENTED,
+                "worker delegations are not implemented in Phase 1",
+            ));
+        }
+        let write_policy = request
+            .write_policy
+            .unwrap_or(DelegationWritePolicy::ReadOnly);
+        if write_policy != DelegationWritePolicy::ReadOnly {
+            return Err(ApiError::from_status(
+                StatusCode::NOT_IMPLEMENTED,
+                "only readOnly delegation write policy is implemented in Phase 1",
+            ));
+        }
+
+        let (parent_workdir, parent_project_id, parent_agent) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let parent_index = inner
+                .find_visible_session_index(&parent_session_id)
+                .ok_or_else(ApiError::local_session_missing)?;
+            let parent = &inner.sessions[parent_index].session;
+            (
+                parent.workdir.clone(),
+                parent.project_id.clone(),
+                parent.agent,
+            )
+        };
+
+        let requested_cwd = request
+            .cwd
+            .as_deref()
+            .map(resolve_session_workdir)
+            .transpose()?;
+        let cwd = requested_cwd.unwrap_or(parent_workdir);
+        if let Some(project_id) = parent_project_id.as_deref() {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let project = inner
+                .find_project(project_id)
+                .ok_or_else(|| ApiError::bad_request(format!("unknown project `{project_id}`")))?;
+            if project.remote_id != LOCAL_REMOTE_ID {
+                return Err(ApiError::from_status(
+                    StatusCode::NOT_IMPLEMENTED,
+                    "delegations for remote-backed projects are not implemented in Phase 1",
+                ));
+            }
+            if !path_contains(&project.root_path, FsPath::new(&cwd)) {
+                return Err(ApiError::bad_request(format!(
+                    "delegation cwd `{cwd}` must stay inside project `{}`",
+                    project.name
+                )));
+            }
+        }
+
+        let agent = request.agent.unwrap_or(parent_agent);
+        validate_agent_session_setup(agent, &cwd).map_err(ApiError::bad_request)?;
+        self.invalidate_agent_readiness_cache();
+        let _ = self.agent_readiness_snapshot();
+        let title = request
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| "Delegated review".to_owned());
+        let model = request
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_visible_session_index(&parent_session_id)
+            .ok_or_else(ApiError::local_session_missing)?;
+        if active_delegation_count_for_parent(&inner, &parent_session_id)
+            >= MAX_RUNNING_DELEGATIONS_PER_PARENT
+        {
+            return Err(ApiError::conflict(format!(
+                "parent session already has {MAX_RUNNING_DELEGATIONS_PER_PARENT} active delegations"
+            )));
+        }
+        if delegation_depth_for_parent(&inner, &parent_session_id) >= MAX_DELEGATION_DEPTH {
+            return Err(ApiError::conflict(format!(
+                "delegation nesting depth is limited to {MAX_DELEGATION_DEPTH}"
+            )));
+        }
+        let delegation_id = inner.next_delegation_id();
+        let now = stamp_now();
+        let child_record = inner.create_session(
+            agent,
+            Some(title.clone()),
+            cwd.clone(),
+            parent_project_id.clone(),
+            model,
+        );
+        let child_session_id = child_record.session.id.clone();
+        let child_index = inner
+            .find_session_index(&child_session_id)
+            .expect("just-created child session should be indexed");
+        {
+            let child_record = inner
+                .session_mut_by_index(child_index)
+                .expect("child session index should be valid");
+            if child_record.session.agent.supports_codex_prompt_settings() {
+                child_record.codex_approval_policy = CodexApprovalPolicy::Never;
+                child_record.codex_sandbox_mode = CodexSandboxMode::ReadOnly;
+                child_record.session.approval_policy = Some(CodexApprovalPolicy::Never);
+                child_record.session.sandbox_mode = Some(CodexSandboxMode::ReadOnly);
+            } else if child_record.session.agent.supports_cursor_mode() {
+                child_record.session.cursor_mode = Some(CursorMode::Plan);
+            } else if child_record.session.agent.supports_claude_approval_mode() {
+                child_record.session.claude_approval_mode = Some(ClaudeApprovalMode::Plan);
+            } else if child_record.session.agent.supports_gemini_approval_mode() {
+                child_record.session.gemini_approval_mode = Some(GeminiApprovalMode::Plan);
+            }
+            child_record.session.parent_delegation_id = Some(delegation_id.clone());
+        }
+        let child_session = Self::wire_session_from_record(&inner.sessions[child_index]);
+        let child_delta_session = Self::wire_session_summary_from_record(&inner.sessions[child_index]);
+        let record = DelegationRecord {
+            id: delegation_id.clone(),
+            parent_session_id,
+            child_session_id: child_session_id.clone(),
+            mode,
+            status: DelegationStatus::Running,
+            title,
+            prompt: prompt.to_owned(),
+            cwd,
+            agent: child_session.agent,
+            model: Some(child_session.model.clone()),
+            write_policy,
+            created_at: now.clone(),
+            started_at: Some(now),
+            completed_at: None,
+            result: None,
+        };
+        inner.delegations.push(record.clone());
+        let parent_card_delta = add_parent_delegation_card_locked(&mut inner, &record);
+        let revision = self
+            .commit_locked(&mut inner)
+            .map_err(|err| ApiError::internal(format!("failed to persist delegation: {err:#}")))?;
+        drop(inner);
+        self.publish_delta(&DeltaEvent::SessionCreated {
+            revision,
+            session_id: child_session.id.clone(),
+            session: child_delta_session,
+        });
+        if let Some(delta) = parent_card_delta {
+            self.publish_parent_delegation_card_delta(revision, delta);
+        }
+        self.publish_delta(&DeltaEvent::DelegationCreated {
+            revision,
+            delegation: delegation_summary_from_record(&record),
+        });
+
+        let runtime_prompt = build_read_only_delegation_prompt(&record);
+        if let Err(err) =
+            self.start_delegation_child_turn(&record.id, &record.child_session_id, runtime_prompt)
+        {
+            if err.status == StatusCode::CONFLICT
+                && err.message == DELEGATION_NO_LONGER_STARTABLE_MESSAGE
+            {
+                return self.delegation_response_from_state(&record.id);
+            }
+            let detail = format!("failed to start child session: {}", err.message);
+            self.mark_delegation_failed_after_start_error(
+                &record.id,
+                &record.child_session_id,
+                &detail,
+            )?;
+            return self.delegation_response_from_state(&record.id);
+        }
+
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let latest_delegation = inner
+            .find_delegation_index(&record.id)
+            .and_then(|index| inner.delegations.get(index))
+            .cloned()
+            .ok_or_else(|| ApiError::internal("created delegation disappeared"))?;
+        let child_session = inner
+            .find_session_index(&record.child_session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .map(Self::wire_session_from_record)
+            .ok_or_else(|| ApiError::internal("created child session disappeared"))?;
+        let latest_revision = inner.revision;
+
+        Ok(DelegationResponse {
+            revision: latest_revision,
+            delegation: latest_delegation,
+            child_session,
+            server_instance_id: self.server_instance_id.clone(),
+        })
+    }
+
+    fn delegation_response_from_state(
+        &self,
+        delegation_id: &str,
+    ) -> Result<DelegationResponse, ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let delegation = inner
+            .find_delegation_index(delegation_id)
+            .and_then(|index| inner.delegations.get(index))
+            .cloned()
+            .ok_or_else(|| ApiError::not_found("delegation not found"))?;
+        let child_session = inner
+            .find_session_index(&delegation.child_session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .map(Self::wire_session_from_record)
+            .ok_or_else(|| ApiError::not_found("delegation child session not found"))?;
+        Ok(DelegationResponse {
+            revision: inner.revision,
+            delegation,
+            child_session,
+            server_instance_id: self.server_instance_id.clone(),
+        })
+    }
+
+    fn get_delegation(&self, delegation_id: &str) -> Result<DelegationStatusResponse, ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_delegation_index(delegation_id)
+            .ok_or_else(|| ApiError::not_found("delegation not found"))?;
+        let delegation = inner.delegations[index].clone();
+        Ok(DelegationStatusResponse {
+            revision: inner.revision,
+            delegation,
+            server_instance_id: self.server_instance_id.clone(),
+        })
+    }
+
+    fn get_delegation_result(
+        &self,
+        delegation_id: &str,
+    ) -> Result<DelegationResultResponse, ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_delegation_index(delegation_id)
+            .ok_or_else(|| ApiError::not_found("delegation not found"))?;
+        let delegation = &inner.delegations[index];
+        let result = delegation
+            .result
+            .clone()
+            .ok_or_else(|| ApiError::conflict("delegation result is not available yet"))?;
+        Ok(DelegationResultResponse {
+            revision: inner.revision,
+            result,
+            server_instance_id: self.server_instance_id.clone(),
+        })
+    }
+
+    fn cancel_delegation(&self, delegation_id: &str) -> Result<DelegationStatusResponse, ApiError> {
+        let child_session_id = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_delegation_index(delegation_id)
+                .ok_or_else(|| ApiError::not_found("delegation not found"))?;
+            let lifecycle_delta = refresh_delegation_from_child_locked(&mut inner, index);
+            let revision = if lifecycle_delta.is_some() {
+                self.commit_locked(&mut inner).map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to persist delegation status before cancel: {err:#}"
+                    ))
+                })?
+            } else {
+                inner.revision
+            };
+            let delegation = &inner.delegations[index];
+            if delegation_is_terminal(delegation.status) {
+                let response = DelegationStatusResponse {
+                    revision,
+                    delegation: delegation.clone(),
+                    server_instance_id: self.server_instance_id.clone(),
+                };
+                drop(inner);
+                if let Some(delta) = lifecycle_delta {
+                    self.publish_delegation_lifecycle_delta(revision, delta);
+                }
+                return Ok(response);
+            }
+            let child_session_id = delegation.child_session_id.clone();
+            drop(inner);
+            if let Some(delta) = lifecycle_delta {
+                self.publish_delegation_lifecycle_delta(revision, delta);
+            }
+            child_session_id
+        };
+
+        let stop_conflicted = match self.stop_session_with_options(
+            &child_session_id,
+            StopSessionOptions {
+                dispatch_queued_prompts_on_success: false,
+                orchestrator_stop_instance_id: None,
+            },
+        ) {
+            Ok(_) => false,
+            Err(err) if err.status == StatusCode::CONFLICT || err.status == StatusCode::NOT_FOUND => {
+                true
+            }
+            Err(err) => return Err(err),
+        };
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_delegation_index(delegation_id)
+            .ok_or_else(|| ApiError::not_found("delegation not found"))?;
+        let lifecycle_delta = if stop_conflicted {
+            let refreshed_delta = refresh_delegation_from_child_locked(&mut inner, index);
+            if delegation_is_terminal(inner.delegations[index].status) {
+                refreshed_delta
+            } else {
+                mark_delegation_canceled_locked(&mut inner, index, None)
+            }
+        } else {
+            mark_delegation_canceled_locked(&mut inner, index, None)
+        };
+        let revision = self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist delegation cancelation: {err:#}"))
+        })?;
+        let delegation = inner.delegations[index].clone();
+        drop(inner);
+        if let Some(delta) = lifecycle_delta {
+            self.publish_delegation_lifecycle_delta(revision, delta);
+        }
+        Ok(DelegationStatusResponse {
+            revision,
+            delegation,
+            server_instance_id: self.server_instance_id.clone(),
+        })
+    }
+
+    fn refresh_delegation_for_child_session(&self, child_session_id: &str) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_delegation_index_by_child_session_id(child_session_id) else {
+            return Ok(());
+        };
+        let Some(lifecycle_delta) = refresh_delegation_from_child_locked(&mut inner, index) else {
+            return Ok(());
+        };
+        let revision = self.commit_locked(&mut inner)?;
+        drop(inner);
+        self.publish_delegation_lifecycle_delta(revision, lifecycle_delta);
+        Ok(())
+    }
+
+    fn ensure_read_only_delegation_allows_write_action(
+        &self,
+        session_id: Option<&str>,
+        project_id: Option<&str>,
+        workdir: Option<&str>,
+        action: &str,
+    ) -> Result<(), ApiError> {
+        let session_id = normalize_optional_identifier(session_id);
+        let project_id = normalize_optional_identifier(project_id);
+        let workdir = workdir.map(str::trim).filter(|value| !value.is_empty());
+        if session_id.is_none() && project_id.is_none() && workdir.is_none() {
+            return Ok(());
+        }
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let blocked = if let Some(session_id) = session_id {
+            let Some(session_index) = inner.find_visible_session_index(session_id) else {
+                return Ok(());
+            };
+            let Some(delegation_id) = inner.sessions[session_index]
+                .session
+                .parent_delegation_id
+                .as_deref()
+            else {
+                return Ok(());
+            };
+            inner
+                .delegations
+                .iter()
+                .find(|delegation| delegation.id == delegation_id)
+                .map(|delegation| delegation.write_policy == DelegationWritePolicy::ReadOnly)
+                .unwrap_or(true)
+        } else {
+            inner.delegations.iter().any(|delegation| {
+                !delegation_is_terminal(delegation.status)
+                    && delegation.write_policy == DelegationWritePolicy::ReadOnly
+                    && inner
+                        .find_session_index(&delegation.child_session_id)
+                        .and_then(|index| inner.sessions.get(index))
+                        .is_some_and(|record| {
+                            delegation_write_scope_matches_record(record, project_id, workdir)
+                        })
+            })
+        };
+        if blocked {
+            return Err(ApiError::from_status(
+                StatusCode::FORBIDDEN,
+                format!("{action} is disabled for read-only delegated sessions"),
+            ));
+        }
+        Ok(())
+    }
+
+    #[cfg_attr(test, allow(dead_code))]
+    fn mark_delegation_failed_after_start_error(
+        &self,
+        delegation_id: &str,
+        child_session_id: &str,
+        detail: &str,
+    ) -> Result<(u64, DelegationRecord), ApiError> {
+        let (revision, delegation, lifecycle_delta, runtime_to_kill) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_delegation_index(delegation_id)
+                .ok_or_else(|| ApiError::not_found("delegation not found"))?;
+            let lifecycle_delta = mark_delegation_failed_locked(&mut inner, index, detail);
+            let runtime_to_kill =
+                detach_delegation_child_runtime_locked(&mut inner, child_session_id);
+            let revision = self.commit_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!("failed to persist delegation failure: {err:#}"))
+            })?;
+            let delegation = inner.delegations[index].clone();
+            (revision, delegation, lifecycle_delta, runtime_to_kill)
+        };
+
+        if let Some(runtime) = runtime_to_kill {
+            if let Err(err) =
+                shutdown_removed_runtime(runtime, &format!("failed delegation `{delegation_id}`"))
+            {
+                eprintln!("delegation cleanup warning> {err:#}");
+            }
+        }
+        if let Some(delta) = lifecycle_delta {
+            self.publish_delegation_lifecycle_delta(revision, delta);
+        }
+        Ok((revision, delegation))
+    }
+
+    fn publish_delegation_lifecycle_delta(&self, revision: u64, delta: DelegationLifecycleDelta) {
+        match delta {
+            DelegationLifecycleDelta::Updated {
+                delegation_id,
+                status,
+                updated_at,
+                parent_card_delta,
+            } => {
+                self.publish_delta(&DeltaEvent::DelegationUpdated {
+                    revision,
+                    delegation_id,
+                    status,
+                    updated_at,
+                });
+                if let Some(delta) = parent_card_delta {
+                    self.publish_parent_delegation_card_delta(revision, delta);
+                }
+            }
+            DelegationLifecycleDelta::Completed {
+                delegation_id,
+                result,
+                completed_at,
+                parent_card_delta,
+            } => {
+                self.publish_delta(&DeltaEvent::DelegationCompleted {
+                    revision,
+                    delegation_id,
+                    result: delegation_result_summary(&result),
+                    completed_at,
+                });
+                if let Some(delta) = parent_card_delta {
+                    self.publish_parent_delegation_card_delta(revision, delta);
+                }
+            }
+            DelegationLifecycleDelta::Canceled {
+                delegation_id,
+                canceled_at,
+                reason,
+                parent_card_delta,
+            } => {
+                self.publish_delta(&DeltaEvent::DelegationCanceled {
+                    revision,
+                    delegation_id,
+                    canceled_at,
+                    reason,
+                });
+                if let Some(delta) = parent_card_delta {
+                    self.publish_parent_delegation_card_delta(revision, delta);
+                }
+            }
+        }
+    }
+
+    fn publish_parent_delegation_card_delta(
+        &self,
+        revision: u64,
+        delta: ParentDelegationCardDelta,
+    ) {
+        match delta {
+            ParentDelegationCardDelta::Created {
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                message,
+                preview,
+                status,
+                session_mutation_stamp,
+            } => self.publish_delta(&DeltaEvent::MessageCreated {
+                revision,
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                message,
+                preview,
+                status,
+                session_mutation_stamp: Some(session_mutation_stamp),
+            }),
+            ParentDelegationCardDelta::Updated {
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                agents,
+                preview,
+                session_mutation_stamp,
+            } => self.publish_delta(&DeltaEvent::ParallelAgentsUpdate {
+                revision,
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                agents,
+                preview,
+                session_mutation_stamp: Some(session_mutation_stamp),
+            }),
+        }
+    }
+
+    #[cfg(not(test))]
+    fn start_delegation_child_turn(
+        &self,
+        delegation_id: &str,
+        child_session_id: &str,
+        runtime_prompt: String,
+    ) -> Result<(), ApiError> {
+        self.ensure_delegation_can_start_child_turn(delegation_id, child_session_id)?;
+        let dispatch = self.dispatch_turn(
+            child_session_id,
+            SendMessageRequest {
+                text: runtime_prompt,
+                expanded_text: None,
+                attachments: Vec::new(),
+            },
+        )?;
+        if let DispatchTurnResult::Dispatched(dispatch) = dispatch {
+            deliver_turn_dispatch(self, dispatch)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn start_delegation_child_turn(
+        &self,
+        delegation_id: &str,
+        child_session_id: &str,
+        runtime_prompt: String,
+    ) -> Result<(), ApiError> {
+        if runtime_prompt.contains(TEST_FORCE_DELEGATION_START_FAILURE_PROMPT) {
+            return Err(ApiError::internal("forced delegation start failure"));
+        }
+        self.ensure_delegation_can_start_child_turn(delegation_id, child_session_id)?;
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_visible_session_index(child_session_id)
+            .ok_or_else(|| ApiError::not_found("child session not found"))?;
+        let message_id = inner.next_message_id();
+        let message = Message::Text {
+            attachments: Vec::new(),
+            id: message_id,
+            timestamp: stamp_now(),
+            author: Author::You,
+            text: runtime_prompt,
+            expanded_text: None,
+        };
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("child session index should be valid");
+        push_message_on_record(record, message);
+        record.session.status = SessionStatus::Active;
+        record.session.preview = "Delegated task started.".to_owned();
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist child prompt: {err:#}"))
+        })?;
+        Ok(())
+    }
+
+    fn ensure_delegation_can_start_child_turn(
+        &self,
+        delegation_id: &str,
+        child_session_id: &str,
+    ) -> Result<(), ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let delegation = inner
+            .find_delegation_index(delegation_id)
+            .and_then(|index| inner.delegations.get(index))
+            .ok_or_else(|| ApiError::not_found("delegation not found"))?;
+        if delegation.child_session_id != child_session_id {
+            return Err(ApiError::conflict("delegation child session mismatch"));
+        }
+        if delegation_is_terminal(delegation.status) {
+            return Err(ApiError::conflict(
+                DELEGATION_NO_LONGER_STARTABLE_MESSAGE,
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn build_read_only_delegation_prompt(record: &DelegationRecord) -> String {
+    format!(
+        "You are a delegated child session for TermAl delegation `{}`.\n\
+\n\
+Mode: {:?}\n\
+Parent session: `{}`\n\
+Child session: `{}`\n\
+Working directory: `{}`\n\
+Write policy: read-only. Do not edit, stage, commit, push, or otherwise mutate files.\n\
+Other sessions may be active in the same workspace. Do not revert unrelated changes.\n\
+\n\
+Task:\n{}\n\
+\n\
+Final answer requirements:\n\
+- Start with `## Result`.\n\
+- Include `Status: completed` or `Status: failed`.\n\
+- Include a concise `Summary:` section.\n\
+- Include `Findings:`, `Commands Run:`, and `Files Inspected:` sections, using `- None` when empty.",
+        record.id,
+        record.mode,
+        record.parent_session_id,
+        record.child_session_id,
+        record.cwd,
+        record.prompt,
+    )
+}
+
+fn add_parent_delegation_card_locked(
+    inner: &mut StateInner,
+    delegation: &DelegationRecord,
+) -> Option<ParentDelegationCardDelta> {
+    let Some(parent_index) = inner.find_session_index(&delegation.parent_session_id) else {
+        return None;
+    };
+    let message_id = inner.next_message_id();
+    let agent = ParallelAgentProgress {
+        detail: Some(format!(
+            "{} delegation in `{}` using {}{}",
+            delegation_write_policy_label(&delegation.write_policy),
+            delegation.cwd,
+            delegation.agent.name(),
+            delegation
+                .model
+                .as_deref()
+                .map(|model| format!(" / {model}"))
+                .unwrap_or_default()
+        )),
+        id: delegation.id.clone(),
+        status: ParallelAgentStatus::Running,
+        title: delegation.title.clone(),
+    };
+    let record = inner
+        .session_mut_by_index(parent_index)
+        .expect("parent session index should be valid");
+    let message = Message::ParallelAgents {
+        id: message_id.clone(),
+        timestamp: stamp_now(),
+        author: Author::Assistant,
+        agents: vec![agent],
+    };
+    if let Some(preview) = message.preview_text() {
+        record.session.preview = preview;
+    }
+    let message_index = push_message_on_record(record, message.clone());
+    Some(ParentDelegationCardDelta::Created {
+        session_id: record.session.id.clone(),
+        message_id,
+        message_index,
+        message_count: session_message_count(record),
+        message,
+        preview: record.session.preview.clone(),
+        status: record.session.status,
+        session_mutation_stamp: record.mutation_stamp,
+    })
+}
+
+fn update_parent_delegation_card_locked(
+    inner: &mut StateInner,
+    delegation: &DelegationRecord,
+    status: ParallelAgentStatus,
+    detail: String,
+) -> Option<ParentDelegationCardDelta> {
+    let Some(parent_index) = inner.find_session_index(&delegation.parent_session_id) else {
+        return None;
+    };
+    let record = inner
+        .session_mut_by_index(parent_index)
+        .expect("parent session index should be valid");
+    for (message_index, message) in record.session.messages.iter_mut().enumerate().rev() {
+        let Message::ParallelAgents { id, agents, .. } = message else {
+            continue;
+        };
+        let Some(agent) = agents.iter_mut().find(|agent| agent.id == delegation.id) else {
+            continue;
+        };
+        agent.status = status;
+        agent.detail = Some(detail);
+        let agents = agents.clone();
+        let preview = parallel_agents_preview_text(&agents);
+        record.session.preview = preview.clone();
+        return Some(ParentDelegationCardDelta::Updated {
+            session_id: record.session.id.clone(),
+            message_id: id.clone(),
+            message_index,
+            message_count: session_message_count(record),
+            agents,
+            preview,
+            session_mutation_stamp: record.mutation_stamp,
+        });
+    }
+    None
+}
+
+fn refresh_delegation_from_child_locked(
+    inner: &mut StateInner,
+    delegation_index: usize,
+) -> Option<DelegationLifecycleDelta> {
+    let delegation = inner.delegations.get(delegation_index)?.clone();
+    if delegation_is_terminal(delegation.status) {
+        return None;
+    }
+
+    let child_outcome = delegation_child_outcome(inner, &delegation.child_session_id);
+    match child_outcome {
+        DelegationChildOutcome::Running => {
+            if delegation.status == DelegationStatus::Running {
+                None
+            } else {
+                let updated_at = stamp_now();
+                let record = inner.delegations.get_mut(delegation_index)?;
+                record.status = DelegationStatus::Running;
+                record.started_at.get_or_insert_with(|| updated_at.clone());
+                let parent_card_delta = update_parent_delegation_card_locked(
+                    inner,
+                    &delegation,
+                    ParallelAgentStatus::Running,
+                    "Delegated session is running.".to_owned(),
+                );
+                Some(DelegationLifecycleDelta::Updated {
+                    delegation_id: delegation.id,
+                    status: DelegationStatus::Running,
+                    updated_at,
+                    parent_card_delta,
+                })
+            }
+        }
+        DelegationChildOutcome::Completed {
+            summary,
+            changed_files,
+            commands_run,
+        } => {
+            let completed_at = stamp_now();
+            let result = DelegationResult {
+                delegation_id: delegation.id.clone(),
+                child_session_id: delegation.child_session_id.clone(),
+                status: DelegationStatus::Completed,
+                summary,
+                findings: Vec::new(),
+                changed_files,
+                commands_run,
+                notes: Vec::new(),
+            };
+            let record = inner.delegations.get_mut(delegation_index)?;
+            record.status = DelegationStatus::Completed;
+            record.completed_at = Some(completed_at.clone());
+            record.result = Some(result.clone());
+            clear_delegation_child_queue_locked(inner, &delegation.child_session_id);
+            let parent_card_delta = update_parent_delegation_card_locked(
+                inner,
+                &delegation,
+                ParallelAgentStatus::Completed,
+                compact_delegation_public_summary(&result.summary),
+            );
+            Some(DelegationLifecycleDelta::Completed {
+                delegation_id: delegation.id,
+                result,
+                completed_at,
+                parent_card_delta,
+            })
+        }
+        DelegationChildOutcome::Failed { summary } => {
+            mark_delegation_failed_locked(inner, delegation_index, &summary)
+        }
+        DelegationChildOutcome::IdleWithoutResult => mark_delegation_failed_locked(
+            inner,
+            delegation_index,
+            "child finished without a result packet",
+        ),
+        DelegationChildOutcome::Missing => mark_delegation_failed_locked(
+            inner,
+            delegation_index,
+            "delegation child session no longer exists",
+        ),
+    }
+}
+
+fn reconcile_delegations_for_removed_session_locked(
+    inner: &mut StateInner,
+    removed_session_id: &str,
+) -> RemovedSessionDelegationReconciliation {
+    let impacted = inner
+        .delegations
+        .iter()
+        .enumerate()
+        .filter_map(|(index, delegation)| {
+            if delegation_is_terminal(delegation.status) {
+                None
+            } else if delegation.child_session_id == removed_session_id {
+                Some((index, "delegation child session was removed", None, false))
+            } else if delegation.parent_session_id == removed_session_id {
+                Some((
+                    index,
+                    "delegation parent session was removed",
+                    Some(delegation.child_session_id.clone()),
+                    true,
+                ))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut deltas = Vec::new();
+    let mut runtimes_to_kill = Vec::new();
+    for (index, detail, child_session_id_to_unlink, removed_parent_session) in impacted {
+        if let Some(child_session_id) = child_session_id_to_unlink.as_deref() {
+            if let Some(runtime) = detach_delegation_child_runtime_locked(inner, child_session_id) {
+                runtimes_to_kill.push(runtime);
+            }
+        }
+        if let Some(delta) = mark_delegation_failed_locked(inner, index, detail) {
+            deltas.push(if removed_parent_session {
+                strip_parent_card_delta(delta)
+            } else {
+                delta
+            });
+        }
+        if let Some(child_session_id) = child_session_id_to_unlink {
+            if let Some(child_index) = inner.find_session_index(&child_session_id) {
+                let child = inner
+                    .session_mut_by_index(child_index)
+                    .expect("child session index should be valid");
+                child.session.parent_delegation_id = None;
+            }
+        }
+    }
+    RemovedSessionDelegationReconciliation {
+        lifecycle_deltas: deltas,
+        runtimes_to_kill,
+    }
+}
+
+fn mark_delegation_failed_locked(
+    inner: &mut StateInner,
+    delegation_index: usize,
+    detail: &str,
+) -> Option<DelegationLifecycleDelta> {
+    let delegation = inner.delegations.get(delegation_index)?.clone();
+    if delegation_is_terminal(delegation.status) {
+        return None;
+    }
+    let completed_at = stamp_now();
+    let summary = detail.trim();
+    let summary = if summary.is_empty() {
+        "Delegation failed."
+    } else {
+        summary
+    };
+    let public_summary = compact_delegation_public_summary(summary);
+    let result = DelegationResult {
+        delegation_id: delegation.id.clone(),
+        child_session_id: delegation.child_session_id.clone(),
+        status: DelegationStatus::Failed,
+        summary: summary.to_owned(),
+        findings: Vec::new(),
+        changed_files: Vec::new(),
+        commands_run: Vec::new(),
+        notes: Vec::new(),
+    };
+    let record = inner.delegations.get_mut(delegation_index)?;
+    record.status = DelegationStatus::Failed;
+    record.completed_at = Some(completed_at.clone());
+    record.result = Some(result);
+    if let Some(child_index) = inner.find_session_index(&delegation.child_session_id) {
+        let child = inner
+            .session_mut_by_index(child_index)
+            .expect("child session index should be valid");
+        child.queued_prompts.clear();
+        sync_pending_prompts(child);
+        child.session.status = SessionStatus::Error;
+        child.session.preview = public_summary.clone();
+    }
+    let parent_card_delta = update_parent_delegation_card_locked(
+        inner,
+        &delegation,
+        ParallelAgentStatus::Error,
+        public_summary,
+    );
+    Some(DelegationLifecycleDelta::Updated {
+        delegation_id: delegation.id,
+        status: DelegationStatus::Failed,
+        updated_at: completed_at,
+        parent_card_delta,
+    })
+}
+
+fn mark_delegation_canceled_locked(
+    inner: &mut StateInner,
+    delegation_index: usize,
+    reason: Option<String>,
+) -> Option<DelegationLifecycleDelta> {
+    let delegation = inner.delegations.get(delegation_index)?.clone();
+    if delegation_is_terminal(delegation.status) {
+        return None;
+    }
+    let canceled_at = stamp_now();
+    let raw_summary = reason.as_deref().unwrap_or("Delegation canceled.");
+    let public_summary = compact_delegation_public_summary(raw_summary);
+    let result = DelegationResult {
+        delegation_id: delegation.id.clone(),
+        child_session_id: delegation.child_session_id.clone(),
+        status: DelegationStatus::Canceled,
+        summary: raw_summary.to_owned(),
+        findings: Vec::new(),
+        changed_files: Vec::new(),
+        commands_run: Vec::new(),
+        notes: Vec::new(),
+    };
+    let record = inner.delegations.get_mut(delegation_index)?;
+    record.status = DelegationStatus::Canceled;
+    record.completed_at = Some(canceled_at.clone());
+    record.result = Some(result);
+    if let Some(child_index) = inner.find_session_index(&delegation.child_session_id) {
+        let child = inner
+            .session_mut_by_index(child_index)
+            .expect("child session index should be valid");
+        child.queued_prompts.clear();
+        sync_pending_prompts(child);
+        child.session.preview = public_summary.clone();
+    }
+    let parent_card_delta = update_parent_delegation_card_locked(
+        inner,
+        &delegation,
+        ParallelAgentStatus::Error,
+        public_summary,
+    );
+    Some(DelegationLifecycleDelta::Canceled {
+        delegation_id: delegation.id,
+        canceled_at,
+        reason,
+        parent_card_delta,
+    })
+}
+
+fn clear_delegation_child_queue_locked(inner: &mut StateInner, child_session_id: &str) {
+    let Some(child_index) = inner.find_session_index(child_session_id) else {
+        return;
+    };
+    let child = inner
+        .session_mut_by_index(child_index)
+        .expect("child session index should be valid");
+    child.queued_prompts.clear();
+    sync_pending_prompts(child);
+}
+
+fn detach_delegation_child_runtime_locked(
+    inner: &mut StateInner,
+    child_session_id: &str,
+) -> Option<KillableRuntime> {
+    let child_index = inner.find_session_index(child_session_id)?;
+    let child = inner
+        .session_mut_by_index(child_index)
+        .expect("child session index should be valid");
+    let runtime = match &child.runtime {
+        SessionRuntime::Claude(handle) => Some(KillableRuntime::Claude(handle.clone())),
+        SessionRuntime::Codex(handle) => Some(KillableRuntime::Codex(handle.clone())),
+        SessionRuntime::Acp(handle) => Some(KillableRuntime::Acp(handle.clone())),
+        SessionRuntime::None => None,
+    };
+    child.runtime = SessionRuntime::None;
+    child.runtime_reset_required = false;
+    child.runtime_stop_in_progress = false;
+    child.deferred_stop_callbacks.clear();
+    child.active_turn_start_message_count = None;
+    child.active_turn_file_changes.clear();
+    child.active_turn_file_change_grace_deadline = None;
+    child.queued_prompts.clear();
+    sync_pending_prompts(child);
+    clear_all_pending_requests(child);
+    cancel_pending_interaction_messages(&mut child.session.messages);
+    runtime
+}
+
+fn strip_parent_card_delta(delta: DelegationLifecycleDelta) -> DelegationLifecycleDelta {
+    match delta {
+        DelegationLifecycleDelta::Updated {
+            delegation_id,
+            status,
+            updated_at,
+            parent_card_delta: _,
+        } => DelegationLifecycleDelta::Updated {
+            delegation_id,
+            status,
+            updated_at,
+            parent_card_delta: None,
+        },
+        DelegationLifecycleDelta::Completed {
+            delegation_id,
+            result,
+            completed_at,
+            parent_card_delta: _,
+        } => DelegationLifecycleDelta::Completed {
+            delegation_id,
+            result,
+            completed_at,
+            parent_card_delta: None,
+        },
+        DelegationLifecycleDelta::Canceled {
+            delegation_id,
+            canceled_at,
+            reason,
+            parent_card_delta: _,
+        } => DelegationLifecycleDelta::Canceled {
+            delegation_id,
+            canceled_at,
+            reason,
+            parent_card_delta: None,
+        },
+    }
+}
+
+fn delegation_is_terminal(status: DelegationStatus) -> bool {
+    matches!(
+        status,
+        DelegationStatus::Completed | DelegationStatus::Failed | DelegationStatus::Canceled
+    )
+}
+
+enum DelegationChildOutcome {
+    Running,
+    Completed {
+        summary: String,
+        changed_files: Vec<String>,
+        commands_run: Vec<DelegationCommandResult>,
+    },
+    Failed {
+        summary: String,
+    },
+    IdleWithoutResult,
+    Missing,
+}
+
+struct ParsedDelegationResult {
+    status: DelegationStatus,
+    summary: String,
+}
+
+fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> DelegationChildOutcome {
+    let Some(child_index) = inner.find_session_index(child_session_id) else {
+        return DelegationChildOutcome::Missing;
+    };
+    let child = &inner.sessions[child_index];
+    match child.session.status {
+        SessionStatus::Active | SessionStatus::Approval => DelegationChildOutcome::Running,
+        SessionStatus::Error => DelegationChildOutcome::Failed {
+            summary: child.session.preview.clone(),
+        },
+        SessionStatus::Idle => {
+            if let Some(result) = latest_assistant_delegation_result(&child.session) {
+                if result.status == DelegationStatus::Failed {
+                    DelegationChildOutcome::Failed {
+                        summary: result.summary,
+                    }
+                } else {
+                    DelegationChildOutcome::Completed {
+                        summary: result.summary,
+                        changed_files: child_changed_files(&child.session),
+                        commands_run: child_commands_run(&child.session),
+                    }
+                }
+            } else {
+                DelegationChildOutcome::IdleWithoutResult
+            }
+        }
+    }
+}
+
+fn delegation_write_scope_matches_record(
+    record: &SessionRecord,
+    project_id: Option<&str>,
+    workdir: Option<&str>,
+) -> bool {
+    if project_id.is_some_and(|project_id| record.session.project_id.as_deref() == Some(project_id))
+    {
+        return true;
+    }
+    workdir.is_some_and(|workdir| {
+        path_contains(&record.session.workdir, FsPath::new(workdir))
+            || path_contains(workdir, FsPath::new(&record.session.workdir))
+    })
+}
+
+fn delegated_child_dispatch_is_blocked_locked(inner: &StateInner, session_index: usize) -> bool {
+    let Some(record) = inner.sessions.get(session_index) else {
+        return false;
+    };
+    let Some(delegation_id) = record.session.parent_delegation_id.as_deref() else {
+        return false;
+    };
+    inner
+        .delegations
+        .iter()
+        .find(|delegation| {
+            delegation.id == delegation_id && delegation.child_session_id == record.session.id
+        })
+        .is_some_and(|delegation| delegation_is_terminal(delegation.status))
+}
+
+fn latest_assistant_delegation_result(session: &Session) -> Option<ParsedDelegationResult> {
+    // Walk back through assistant messages and parse each candidate. The agent
+    // is asked to put `## Result` last, but realistic runtimes can append a
+    // trailing chunk after the result packet (status text, diff summary, etc.).
+    // Stopping at the latest assistant message would misclassify those runs as
+    // `IdleWithoutResult`; instead, keep scanning until we find a parseable
+    // packet.
+    session.messages.iter().rev().find_map(|message| {
+        let text = match message {
+            Message::Text {
+                author: Author::Assistant,
+                text,
+                ..
+            } => non_empty_trimmed(text),
+            Message::Markdown {
+                author: Author::Assistant,
+                markdown,
+                title,
+                ..
+            } => non_empty_trimmed(markdown).or_else(|| non_empty_trimmed(title)),
+            Message::SubagentResult {
+                author: Author::Assistant,
+                summary,
+                title,
+                ..
+            } => non_empty_trimmed(summary).or_else(|| non_empty_trimmed(title)),
+            Message::Diff {
+                author: Author::Assistant,
+                summary,
+                ..
+            } => non_empty_trimmed(summary),
+            _ => None,
+        };
+        text.and_then(|t| parse_delegation_result_packet(&t))
+    })
+}
+
+fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> {
+    let search_window = delegation_result_search_window(text);
+    let mut lines = search_window
+        .lines()
+        .skip_while(|line| !line.trim().eq_ignore_ascii_case("## Result"));
+    lines.next()?;
+
+    let mut status = None;
+    let mut summary_lines = Vec::new();
+    let mut in_summary = false;
+    for line in lines {
+        let cleaned = line.trim();
+        if let Some((label, value)) = cleaned.split_once(':') {
+            if label.trim().eq_ignore_ascii_case("status") {
+                status = match value.trim().to_ascii_lowercase().as_str() {
+                    "completed" => Some(DelegationStatus::Completed),
+                    "failed" => Some(DelegationStatus::Failed),
+                    _ => None,
+                };
+                in_summary = false;
+                continue;
+            }
+        }
+
+        if cleaned.eq_ignore_ascii_case("Summary:") {
+            in_summary = true;
+            continue;
+        }
+
+        if cleaned.ends_with(':') && !cleaned.starts_with('-') {
+            in_summary = false;
+        } else if in_summary {
+            summary_lines.push(line);
+        }
+    }
+
+    let status = status?;
+    let summary = summary_lines.join("\n").trim().to_owned();
+    let summary = if summary.is_empty() {
+        match status {
+            DelegationStatus::Completed => "Delegation completed.".to_owned(),
+            DelegationStatus::Failed => "Delegation failed.".to_owned(),
+            _ => return None,
+        }
+    } else {
+        summary
+    };
+    Some(ParsedDelegationResult { status, summary })
+}
+
+fn delegation_result_search_window(text: &str) -> &str {
+    if text.len() <= DELEGATION_RESULT_PACKET_SEARCH_BYTES {
+        return text;
+    }
+    let mut start = text.len() - DELEGATION_RESULT_PACKET_SEARCH_BYTES;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    &text[start..]
+}
+
+fn compact_delegation_public_summary(summary: &str) -> String {
+    let compact = summary
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let compact = if compact.is_empty() {
+        "Delegation updated.".to_owned()
+    } else {
+        compact
+    };
+    truncate_chars(&compact, MAX_DELEGATION_PUBLIC_SUMMARY_CHARS)
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    let mut end = 0;
+    for (count, (index, ch)) in value.char_indices().enumerate() {
+        if count == max_chars {
+            return format!("{}...", &value[..end]);
+        }
+        end = index + ch.len_utf8();
+    }
+    value.to_owned()
+}
+
+fn child_changed_files(session: &Session) -> Vec<String> {
+    let mut files = BTreeSet::new();
+    for message in &session.messages {
+        if let Message::FileChanges { files: entries, .. } = message {
+            for entry in entries {
+                files.insert(entry.path.clone());
+            }
+        }
+    }
+    files.into_iter().collect()
+}
+
+fn child_commands_run(session: &Session) -> Vec<DelegationCommandResult> {
+    session
+        .messages
+        .iter()
+        .filter_map(|message| {
+            if let Message::Command {
+                command, status, ..
+            } = message
+            {
+                Some(DelegationCommandResult {
+                    command: command.clone(),
+                    status: status.label().to_owned(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn non_empty_trimmed(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
+
+fn active_delegation_count_for_parent(inner: &StateInner, parent_session_id: &str) -> usize {
+    inner
+        .delegations
+        .iter()
+        .filter(|delegation| {
+            delegation.parent_session_id == parent_session_id
+                && !delegation_is_terminal(delegation.status)
+        })
+        .count()
+}
+
+fn delegation_depth_for_parent(inner: &StateInner, parent_session_id: &str) -> usize {
+    let mut depth = 0;
+    let mut current_session_id = parent_session_id;
+    let mut seen = HashSet::new();
+    while let Some(parent_delegation_id) = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == current_session_id)
+        .and_then(|record| record.session.parent_delegation_id.as_deref())
+    {
+        if !seen.insert(parent_delegation_id.to_owned()) {
+            break;
+        }
+        let Some(parent_delegation) = inner
+            .delegations
+            .iter()
+            .find(|delegation| delegation.id == parent_delegation_id)
+        else {
+            break;
+        };
+        depth += 1;
+        current_session_id = &parent_delegation.parent_session_id;
+    }
+    depth
+}
+
+fn delegation_result_summary(result: &DelegationResult) -> DelegationResultSummary {
+    DelegationResultSummary {
+        delegation_id: result.delegation_id.clone(),
+        child_session_id: result.child_session_id.clone(),
+        status: result.status,
+        summary: compact_delegation_public_summary(&result.summary),
+    }
+}
+
+fn delegation_summary_from_record(record: &DelegationRecord) -> DelegationSummary {
+    DelegationSummary {
+        id: record.id.clone(),
+        parent_session_id: record.parent_session_id.clone(),
+        child_session_id: record.child_session_id.clone(),
+        mode: record.mode,
+        status: record.status,
+        title: record.title.clone(),
+        agent: record.agent,
+        model: record.model.clone(),
+        write_policy: record.write_policy.clone(),
+        created_at: record.created_at.clone(),
+        started_at: record.started_at.clone(),
+        completed_at: record.completed_at.clone(),
+        result: record.result.as_ref().map(delegation_result_summary),
+    }
+}
+
+fn delegation_write_policy_label(write_policy: &DelegationWritePolicy) -> &'static str {
+    match write_policy {
+        DelegationWritePolicy::ReadOnly => "Read-only",
+        DelegationWritePolicy::SharedWorktree { .. } => "Shared-worktree",
+        DelegationWritePolicy::IsolatedWorktree { .. } => "Isolated-worktree",
+    }
+}

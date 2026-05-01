@@ -24,7 +24,7 @@ import {
   upsertSessionStoreSession,
 } from "./session-store";
 import type { StateResponse } from "./api";
-import type { Message, Session } from "./types";
+import type { DelegationSummary, Message, Session } from "./types";
 import type { WorkspaceState } from "./workspace";
 
 class EventSourceMock {
@@ -90,6 +90,27 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     preview: "",
     messages: [],
     messagesLoaded: false,
+    ...overrides,
+  };
+}
+
+function makeDelegationSummary(
+  overrides: Partial<DelegationSummary> = {},
+): DelegationSummary {
+  return {
+    id: "delegation-1",
+    parentSessionId: "session-1",
+    childSessionId: "child-session",
+    mode: "reviewer",
+    status: "running",
+    title: "Review",
+    agent: "Codex",
+    model: "codex",
+    writePolicy: { kind: "readOnly" },
+    createdAt: "10:00",
+    startedAt: "10:00",
+    completedAt: null,
+    result: null,
     ...overrides,
   };
 }
@@ -344,6 +365,167 @@ describe("deferred session-store sync", () => {
     });
 
     expect(getSessionRecordSnapshotForTesting(session.id)).toBeNull();
+  });
+});
+
+describe("delegation delta repair", () => {
+  it.each([
+    [
+      "delegationCreated",
+      () => ({
+        type: "delegationCreated",
+        revision: 2,
+        delegation: makeDelegationSummary(),
+      }),
+    ],
+    [
+      "delegationUpdated",
+      () => ({
+        type: "delegationUpdated",
+        revision: 2,
+        delegationId: "delegation-1",
+        status: "running",
+        updatedAt: "10:01",
+      }),
+    ],
+    [
+      "delegationCompleted",
+      () => ({
+        type: "delegationCompleted",
+        revision: 2,
+        delegationId: "delegation-1",
+        completedAt: "10:02",
+        result: {
+          delegationId: "delegation-1",
+          childSessionId: "child-session",
+          status: "completed",
+          summary: "Done.",
+        },
+      }),
+    ],
+    [
+      "delegationCanceled",
+      () => ({
+        type: "delegationCanceled",
+        revision: 2,
+        delegationId: "delegation-1",
+        canceledAt: "10:03",
+        reason: "Canceled.",
+      }),
+    ],
+  ])("repairs equal-revision %s without session-delta hydration", async (_, makeDelta) => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    const session = makeSession({
+      messagesLoaded: true,
+      messageCount: 1,
+      sessionMutationStamp: 2,
+    });
+    const fetchState = vi
+      .spyOn(api, "fetchState")
+      .mockResolvedValue(makeStateResponse(session, 2));
+    const fetchSession = vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const params = makeLiveStateParams(session);
+    params.adoptionRefs.latestStateRevisionRef.current = 2;
+    params.adoptionRefs.sessionsRef.current = [session];
+
+    renderLiveStateHarness(params, () => {});
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", makeDelta());
+    });
+
+    await waitFor(() => expect(fetchState).toHaveBeenCalledTimes(1));
+    expect(fetchSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps delegation repair pending when a newer delta lands before adoption", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    const session = makeSession({
+      preview: "parent card already applied",
+      messagesLoaded: true,
+      messageCount: 1,
+      sessionMutationStamp: 2,
+    });
+    let resolveFirstRepair!: (state: StateResponse) => void;
+    let resolveSecondRepair!: (state: StateResponse) => void;
+    const firstRepair = new Promise<StateResponse>((resolve) => {
+      resolveFirstRepair = resolve;
+    });
+    const secondRepair = new Promise<StateResponse>((resolve) => {
+      resolveSecondRepair = resolve;
+    });
+    const fetchState = vi
+      .spyOn(api, "fetchState")
+      .mockImplementationOnce(() => firstRepair)
+      .mockImplementationOnce(() => secondRepair);
+    const repairedState = {
+        ...makeStateResponse(session, 2),
+        projects: [
+          {
+            id: "project-repaired",
+            name: "Repaired Project",
+            rootPath: "C:/workspace",
+          },
+        ],
+      };
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const params = makeLiveStateParams(session);
+    params.adoptionRefs.latestStateRevisionRef.current = 2;
+    params.adoptionRefs.sessionsRef.current = [session];
+
+    renderLiveStateHarness(params, () => {});
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+    expect(eventSource).toBeDefined();
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "delegationCreated",
+        revision: 2,
+        delegation: makeDelegationSummary({
+          parentSessionId: session.id,
+        }),
+      });
+    });
+
+    await waitFor(() => expect(fetchState).toHaveBeenCalledTimes(1));
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "codexUpdated",
+        revision: 3,
+        codex: {},
+      });
+    });
+    await act(async () => {
+      resolveFirstRepair(repairedState);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(fetchState).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      resolveSecondRepair({
+        ...repairedState,
+        revision: 3,
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(params.adoptionRefs.projectsRef.current[0]?.id).toBe(
+        "project-repaired",
+      ),
+    );
+    expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(3);
   });
 });
 

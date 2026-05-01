@@ -181,6 +181,17 @@ import {
 // workspace pane }`) opened a phantom on protocol mismatch.
 export type AdoptCreatedSessionOutcome = "adopted" | "stale" | "recovering";
 
+type DelegationDeltaEvent = Extract<
+  DeltaEvent,
+  {
+    type:
+      | "delegationCreated"
+      | "delegationUpdated"
+      | "delegationCompleted"
+      | "delegationCanceled";
+  }
+>;
+
 export type AdoptStateOptions = {
   force?: boolean;
   /** Allow adopting a snapshot with a lower revision than the current one.
@@ -194,6 +205,15 @@ export type AdoptStateOptions = {
 
 function isSessionDeltaEvent(delta: DeltaEvent): delta is SessionDeltaEvent {
   return "sessionId" in delta && typeof delta.sessionId === "string";
+}
+
+function isDelegationDeltaEvent(delta: DeltaEvent): delta is DelegationDeltaEvent {
+  return (
+    delta.type === "delegationCreated" ||
+    delta.type === "delegationUpdated" ||
+    delta.type === "delegationCompleted" ||
+    delta.type === "delegationCanceled"
+  );
 }
 
 export type AdoptSessionsOptions = {
@@ -1740,8 +1760,10 @@ export function useAppLiveState(
      */
     function scheduleReconnectStateResync({
       rearmAfterSameInstanceProgressUntilLiveEvent = false,
+      requestOptions,
     }: {
       rearmAfterSameInstanceProgressUntilLiveEvent?: boolean;
+      requestOptions?: RequestStateResyncOptions;
     } = {}) {
       // Preserve any reopen proof until a real EventSource.onerror starts a new
       // outage cycle. Otherwise a bad post-reopen event can arm fallback polling
@@ -1765,6 +1787,7 @@ export function useAppLiveState(
           rearmUntilLiveEventOnSuccess: true,
           rearmAfterSameInstanceProgressUntilLiveEvent,
           rearmOnFailure: true,
+          ...requestOptions,
         });
       }, delayMs);
     }
@@ -1863,6 +1886,8 @@ export function useAppLiveState(
               rearmOnSuccess,
               rearmUntilLiveEventOnSuccess,
               rearmAfterSameInstanceProgressUntilLiveEvent,
+              confirmReconnectRecoveryOnAdoption,
+              forceAdoptEqualOrNewerRevision,
               rearmOnFailure,
               openSessionId,
               paneId,
@@ -1893,6 +1918,10 @@ export function useAppLiveState(
                 shouldPreferAuthoritativeSnapshot &&
                 requestedRevision !== null &&
                 latestStateRevisionRef.current === requestedRevision;
+              const shouldConsiderTargetedRepairSnapshot =
+                allowAuthoritativeRollback &&
+                shouldPreferAuthoritativeSnapshot &&
+                forceAdoptEqualOrNewerRevision !== null;
               const shouldTrustAuthoritativeReplacementInstance =
                 shouldConsiderAuthoritativeSnapshot &&
                 receivedReplacementInstance;
@@ -1960,6 +1989,12 @@ export function useAppLiveState(
                 !receivedReplacementInstance &&
                 requestedRevision !== null &&
                 state.revision <= requestedRevision;
+              const shouldTrustTargetedEqualRevisionRepair =
+                shouldConsiderTargetedRepairSnapshot &&
+                !receivedReplacementInstance &&
+                latestStateRevisionRef.current !== null &&
+                state.revision === latestStateRevisionRef.current &&
+                state.revision >= forceAdoptEqualOrNewerRevision;
               // Trusting a replacement instance lets newer restart snapshots
               // through the server-instance guard. Force/downgrade remains
               // limited to equal-revision snapshots, not-newer replacement
@@ -1971,7 +2006,8 @@ export function useAppLiveState(
                 (isEqualRevisionSnapshot ||
                   isNotNewerReplacementSnapshot ||
                   isEqualRevisionAutomaticReconnectSnapshot ||
-                  shouldTrustWatchdogSnapshot);
+                  shouldTrustWatchdogSnapshot ||
+                  shouldTrustTargetedEqualRevisionRepair);
               const shouldAllowUnknownServerInstance =
                 allowUnknownServerInstance ||
                 shouldTrustAuthoritativeReplacementInstance;
@@ -1994,6 +2030,13 @@ export function useAppLiveState(
                 latestStateRevisionRef.current === requestedRevision &&
                 state.revision < requestedRevision &&
                 !reconnectStateResyncTimeoutId;
+              const shouldRetryTargetedEqualRevisionRepair =
+                !adopted &&
+                shouldConsiderTargetedRepairSnapshot &&
+                !receivedReplacementInstance &&
+                latestStateRevisionRef.current !== null &&
+                state.revision >= forceAdoptEqualOrNewerRevision &&
+                state.revision < latestStateRevisionRef.current;
               if (adopted) {
                 clearInitialStateResyncRetryTimeout();
                 if (
@@ -2019,6 +2062,18 @@ export function useAppLiveState(
                   state.sessions,
                   adoptedAt,
                 );
+                if (confirmReconnectRecoveryOnAdoption) {
+                  confirmReconnectRecoveryFromDeltaEvent();
+                }
+              } else if (shouldRetryTargetedEqualRevisionRepair) {
+                scheduleReconnectStateResync({
+                  requestOptions: {
+                    allowAuthoritativeRollback: true,
+                    confirmReconnectRecoveryOnAdoption,
+                    forceAdoptEqualOrNewerRevision,
+                    rearmOnFailure: true,
+                  },
+                });
               } else if (shouldRetryStaleSameInstanceSnapshot) {
                 // A same-instance snapshot that still lags behind the client's
                 // locally adopted revision can arrive during create/fork wake-gap
@@ -2501,8 +2556,24 @@ export function useAppLiveState(
 
       try {
         const delta = JSON.parse(event.data) as DeltaEvent;
+        const currentRevision = latestStateRevisionRef.current;
+        if (isDelegationDeltaEvent(delta)) {
+          if (currentRevision === null || delta.revision >= currentRevision) {
+            requestStateResync({
+              allowAuthoritativeRollback: currentRevision !== null,
+              confirmReconnectRecoveryOnAdoption: true,
+              forceAdoptEqualOrNewerRevision: delta.revision,
+              rearmOnFailure: true,
+            });
+          } else if (!pendingBadLiveEventRecovery) {
+            confirmReconnectRecoveryFromDeltaEvent();
+          }
+          setBackendConnectionIssueDetail(null);
+          clearRecoveredBackendRequestError();
+          return;
+        }
         const revisionAction = decideDeltaRevisionAction(
-          latestStateRevisionRef.current,
+          currentRevision,
           delta.revision,
         );
         if (revisionAction === "ignore") {

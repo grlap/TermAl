@@ -28,7 +28,11 @@ fn delta_event_revision(event: &DeltaEvent) -> u64 {
         | DeltaEvent::CommandUpdate { revision, .. }
         | DeltaEvent::ParallelAgentsUpdate { revision, .. }
         | DeltaEvent::CodexUpdated { revision, .. }
-        | DeltaEvent::OrchestratorsUpdated { revision, .. } => *revision,
+        | DeltaEvent::OrchestratorsUpdated { revision, .. }
+        | DeltaEvent::DelegationCreated { revision, .. }
+        | DeltaEvent::DelegationUpdated { revision, .. }
+        | DeltaEvent::DelegationCompleted { revision, .. }
+        | DeltaEvent::DelegationCanceled { revision, .. } => *revision,
     }
 }
 
@@ -160,8 +164,9 @@ fn sync_remote_state_inner(
     //
     // Broad-sync path captures rollback BEFORE `retain_sessions` runs so
     // the tombstones it queues can be unwound on failure.
-    let pre_retain_rollback_state =
-        focus_remote_session_id.is_none().then(|| RemoteSyncRollback::capture(inner));
+    let pre_retain_rollback_state = focus_remote_session_id
+        .is_none()
+        .then(|| RemoteSyncRollback::capture(inner));
 
     // Inline-build the remote→local project id map with the typed
     // keys/values so it plugs into `localize_remote_*` helpers
@@ -231,7 +236,13 @@ fn sync_remote_state_inner(
                         .get(remote_project_id)
                         .cloned()
                 })
-                .or_else(|| record.session.project_id.as_deref().map(LocalProjectId::from));
+                .or_else(|| {
+                    record
+                        .session
+                        .project_id
+                        .as_deref()
+                        .map(LocalProjectId::from)
+                });
             Some((idx, remote_session_id.to_string(), local_project_id))
         })
         .collect();
@@ -303,7 +314,8 @@ fn apply_remote_state_if_newer_locked(
     {
         return false;
     }
-    if !force && inner.should_skip_remote_applied_snapshot_revision(remote_id, remote_state.revision)
+    if !force
+        && inner.should_skip_remote_applied_snapshot_revision(remote_id, remote_state.revision)
     {
         return false;
     }
@@ -410,8 +422,8 @@ fn upsert_remote_proxy_session_record(
     if let Some(index) = inner.find_remote_session_index(remote_id, &remote_session.id) {
         apply_remote_session_to_record(
             inner
-        .session_mut_by_index(index)
-        .expect("session index should be valid"),
+                .session_mut_by_index(index)
+                .expect("session index should be valid"),
             local_project_id,
             remote_session,
         );
@@ -480,8 +492,8 @@ fn ensure_remote_proxy_session_record(
         if update_existing {
             apply_remote_session_to_record(
                 inner
-        .session_mut_by_index(index)
-        .expect("session index should be valid"),
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
                 local_project_id,
                 remote_session,
             );
@@ -504,6 +516,9 @@ fn localize_remote_session(
     let mut session = remote_session.clone();
     session.id = local_session_id.to_owned();
     session.project_id = local_project_id;
+    // Delegation records are intentionally not mirrored across remotes in this
+    // phase, so a remote child link would be dangling in the local proxy state.
+    session.parent_delegation_id = None;
     session
 }
 
@@ -570,7 +585,9 @@ fn local_session_id_for_remote_session(
     fallback_local_project_id: Option<&str>,
 ) -> Option<LocalSessionId> {
     if let Some(index) = inner.find_remote_session_index(remote_id, remote_session_id.as_str()) {
-        return Some(LocalSessionId::from(inner.sessions[index].session.id.clone()));
+        return Some(LocalSessionId::from(
+            inner.sessions[index].session.id.clone(),
+        ));
     }
 
     let remote_session = remote_sessions_by_id?.get(remote_session_id.as_str())?;
@@ -665,8 +682,7 @@ fn localize_remote_orchestrator_instance(
 
     let mut pending_transitions = Vec::with_capacity(remote_orchestrator.pending_transitions.len());
     for transition in &remote_orchestrator.pending_transitions {
-        let remote_source_session_id =
-            RemoteSessionId::from(transition.source_session_id.as_str());
+        let remote_source_session_id = RemoteSessionId::from(transition.source_session_id.as_str());
         let source_session_id = local_session_id_for_remote_session(
             inner,
             remote_id,
@@ -771,8 +787,7 @@ fn ensure_remote_orchestrator_instance(
     remote_sessions_by_id: Option<&HashMap<&str, &Session>>,
     update_existing: bool,
 ) -> Result<(OrchestratorInstance, bool), anyhow::Error> {
-    if let Some(index) = inner.find_remote_orchestrator_index(remote_id, &remote_orchestrator.id)
-    {
+    if let Some(index) = inner.find_remote_orchestrator_index(remote_id, &remote_orchestrator.id) {
         if !update_existing {
             return Ok((inner.orchestrator_instances[index].clone(), false));
         }
@@ -898,11 +913,7 @@ fn process_remote_event_stream_reader<R: BufRead>(
             line.with_context(|| format!("failed to read SSE line for remote `{remote_id}`"))?;
         if line.is_empty() {
             dispatch_remote_event_with_recovery(
-                state,
-                remote_id,
-                event_name,
-                data_lines,
-                recovery,
+                state, remote_id, event_name, data_lines, recovery,
             )?;
             event_name.clear();
             data_lines.clear();
@@ -923,13 +934,7 @@ fn process_remote_event_stream_reader<R: BufRead>(
     // control-only frame such as `event: lagged\n` has no data lines but still
     // must arm recovery; data-bearing arms decide whether an empty body is valid.
     if !event_name.is_empty() || !data_lines.is_empty() {
-        dispatch_remote_event_with_recovery(
-            state,
-            remote_id,
-            event_name,
-            data_lines,
-            recovery,
-        )?;
+        dispatch_remote_event_with_recovery(state, remote_id, event_name, data_lines, recovery)?;
         event_name.clear();
         data_lines.clear();
     }
@@ -980,21 +985,20 @@ fn dispatch_remote_event_with_recovery(
             // An intervening empty `state` frame is still a frame boundary and
             // must not leave the one-shot force-adopt marker armed for a later
             // same-revision snapshot.
-            let force_lagged_recovery_state = if std::mem::take(
-                &mut recovery.force_next_state_after_lagged,
-            ) {
-                let current_remote_revision = {
-                    let inner = state.inner.lock().expect("state mutex poisoned");
-                    inner
-                        .remote_applied_revisions
-                        .get(remote_id)
-                        .copied()
-                        .unwrap_or_default()
+            let force_lagged_recovery_state =
+                if std::mem::take(&mut recovery.force_next_state_after_lagged) {
+                    let current_remote_revision = {
+                        let inner = state.inner.lock().expect("state mutex poisoned");
+                        inner
+                            .remote_applied_revisions
+                            .get(remote_id)
+                            .copied()
+                            .unwrap_or_default()
+                    };
+                    current_remote_revision == recovery.lagged_recovery_baseline_revision
+                } else {
+                    false
                 };
-                current_remote_revision == recovery.lagged_recovery_baseline_revision
-            } else {
-                false
-            };
             if data_lines.is_empty() {
                 return Ok(());
             }

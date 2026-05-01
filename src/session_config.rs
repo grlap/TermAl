@@ -67,6 +67,12 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_session_settings(session_id, request);
         }
+        self.ensure_read_only_delegation_allows_write_action(
+            Some(session_id),
+            None,
+            None,
+            "session settings updates",
+        )?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_visible_session_index(session_id)

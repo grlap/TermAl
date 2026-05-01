@@ -2,7 +2,9 @@
 
 ## Status
 
-Exploratory. No product code implements this yet.
+Foundation in progress. Product UI is not implemented yet, but the frontend now
+has a pure overview projection helper that can derive lightweight map items
+from loaded messages, optional virtualizer layout snapshots, and marker inputs.
 
 The conversation overview map is a zoomed-out, approximate view of a long
 session transcript. It gives the user a fast spatial sense of the whole
@@ -197,6 +199,9 @@ virtualizer/session navigation API.
 
 ### Phase 1: static overview rail
 
+- Build the pure overview projection helper from loaded `session.messages`.
+- Add deterministic tests for item classification, height projection, marker
+  projection, and map-coordinate lookup.
 - Build overview items from loaded `session.messages`.
 - Render a compact right-side rail for long sessions.
 - Show message-type blocks and marker pins.

@@ -6,7 +6,7 @@ Phases 1–4 plus diagram-theme Override mode, Diagram look
 selection, and Diagram palette selection shipped. The Settings
 panel exposes a "Markdown" tab with five rows: Markdown theme,
 Markdown style, Diagram theme override (`on` / `off`), Diagram
-look (`classic` / `handDrawn` / `neo`), and Diagram palette
+look (`classic` / `handDrawn`), and Diagram palette
 (`match` plus Mermaid's five built-in presets — `default` /
 `dark` / `forest` / `neutral` / `base`). Selections persist
 across reloads (localStorage) and follow the same layout
@@ -333,7 +333,7 @@ all orthogonal — any combination composes cleanly.
 
 ### Diagram look
 
-Mermaid exposes three render aesthetics through the top-level
+TermAl exposes two Mermaid render aesthetics through the top-level
 `look` config field:
 
 - `classic` (default) — Mermaid's long-standing sharp geometric
@@ -341,14 +341,11 @@ Mermaid exposes three render aesthetics through the top-level
 - `handDrawn` — rough.js sketched strokes; the same palette as
   `classic` but with wobbly lines for a notebook / whiteboard
   feel.
-- `neo` — Mermaid's newer sharp look with slightly tighter
-  corners.
-
 The user picks one from a fourth row under the Markdown settings
 tab. The preference is keyed on `termal-diagram-look` in
 localStorage and rides the same workspace-layout round-trip as
 the other Markdown preferences. `readActiveDiagramLook` in
-`ui/src/message-cards.tsx` reads the `data-diagram-look`
+`ui/src/mermaid-render.ts` reads the `data-diagram-look`
 attribute from `<html>` at render time and passes it to Mermaid's
 `look` field in `buildTermalMermaidConfig`. A fixed
 `handDrawnSeed` (`DIAGRAM_HAND_DRAWN_SEED = 42` in `themes.ts`)

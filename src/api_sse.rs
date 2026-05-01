@@ -51,6 +51,7 @@ fn empty_state_events_response() -> StateResponse {
         orchestrators: Vec::new(),
         workspaces: Vec::new(),
         sessions: Vec::new(),
+        delegations: Vec::new(),
     }
 }
 

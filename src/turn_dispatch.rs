@@ -487,6 +487,11 @@ impl AppState {
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
+        if delegated_child_dispatch_is_blocked_locked(&inner, index) {
+            return Err(ApiError::conflict(
+                DELEGATION_NO_LONGER_STARTABLE_MESSAGE,
+            ));
+        }
 
         let mut prompt = request.text.trim().to_owned();
         let mut expanded_prompt = request

@@ -112,7 +112,7 @@ export function parseStoredWorkspaceLayout(raw: string | null | undefined): Stor
   }
 
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = normalizeStoredWorkspaceLayoutPreferences(JSON.parse(raw));
     if (!isStoredWorkspaceLayout(parsed)) {
       return null;
     }
@@ -126,6 +126,20 @@ export function parseStoredWorkspaceLayout(raw: string | null | undefined): Stor
   } catch {
     return null;
   }
+}
+
+function normalizeStoredWorkspaceLayoutPreferences(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  if (value.diagramLook !== "neo") {
+    return value;
+  }
+
+  const normalized = { ...value };
+  delete normalized.diagramLook;
+  return normalized;
 }
 
 function isStoredWorkspaceLayout(value: unknown): value is StoredWorkspaceLayout {

@@ -17,12 +17,13 @@ function createTextMessage(
   id: string,
   author: TextMessage["author"],
   text: string,
+  timestamp = id,
 ): TextMessage {
   return {
     author,
     id,
     text,
-    timestamp: id,
+    timestamp,
     type: "text",
   };
 }
@@ -322,7 +323,48 @@ describe("session-store summary snapshots", () => {
     resetSessionStoreForTesting();
   });
 
-  it("preserves summary identity when only transcript fields change", () => {
+  it("preserves summary identity when assistant transcript text changes without a new response time", () => {
+    const initialSession = createSession({
+      messages: [
+        createTextMessage("user-1", "you", "First prompt"),
+        createTextMessage("assistant-1", "assistant", "Streaming", "10:01"),
+      ],
+      preview: "Streaming",
+    });
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [initialSession],
+    });
+    const firstSummary = getSessionSummarySnapshotForTesting(initialSession.id);
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [
+        createSession({
+          messages: [
+            createTextMessage("user-1", "you", "First prompt"),
+            createTextMessage("assistant-1", "assistant", "Still streaming", "10:01"),
+          ],
+          pendingPrompts: [
+            {
+              id: "pending-1",
+              text: "Queued prompt",
+              timestamp: "pending-1",
+            },
+          ],
+          preview: "Streaming",
+        }),
+      ],
+    });
+    const secondSummary = getSessionSummarySnapshotForTesting(initialSession.id);
+
+    expect(secondSummary).toBe(firstSummary);
+  });
+
+  it("updates the summary when a new assistant response time arrives", () => {
     const initialSession = createSession();
 
     syncComposerSessionsStore({
@@ -339,22 +381,16 @@ describe("session-store summary snapshots", () => {
         createSession({
           messages: [
             ...initialSession.messages,
-            createTextMessage("assistant-1", "assistant", "Streaming"),
+            createTextMessage("assistant-1", "assistant", "Done", "10:01"),
           ],
-          pendingPrompts: [
-            {
-              id: "pending-1",
-              text: "Queued prompt",
-              timestamp: "pending-1",
-            },
-          ],
-          preview: "Streaming",
+          preview: "Done",
         }),
       ],
     });
     const secondSummary = getSessionSummarySnapshotForTesting(initialSession.id);
 
-    expect(secondSummary).toBe(firstSummary);
+    expect(secondSummary).not.toBe(firstSummary);
+    expect(secondSummary?.lastResponseTimestamp).toBe("10:01");
   });
 
   it("updates the summary when a summary-visible field changes", () => {

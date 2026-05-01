@@ -10,6 +10,9 @@ import type {
   CodexReasoningEffort,
   CodexState,
   CursorMode,
+  DelegationRecord,
+  DelegationResult,
+  DelegationSummary,
   GeminiApprovalMode,
   ImageAttachment,
   InstructionSearchResponse,
@@ -60,6 +63,7 @@ export type StateResponse = {
   orchestrators: OrchestratorInstance[];
   workspaces: WorkspaceLayoutSummary[];
   sessions: Session[];
+  delegations?: DelegationSummary[];
 };
 
 export type CreateSessionResponse = {
@@ -93,6 +97,25 @@ export type CreateProjectResponse = {
   state: StateResponse;
 };
 
+export type DelegationResponse = {
+  revision: number;
+  delegation: DelegationRecord;
+  childSession: Session;
+  serverInstanceId: string;
+};
+
+export type DelegationStatusResponse = {
+  revision: number;
+  delegation: DelegationRecord;
+  serverInstanceId: string;
+};
+
+export type DelegationResultResponse = {
+  revision: number;
+  result: DelegationResult;
+  serverInstanceId: string;
+};
+
 export type WorkspaceLayoutDocument = {
   id: string;
   revision: number;
@@ -103,7 +126,7 @@ export type WorkspaceLayoutDocument = {
   markdownThemeId?: string;
   markdownStyleId?: string;
   diagramThemeOverrideMode?: "on" | "off";
-  diagramLook?: "classic" | "handDrawn" | "neo";
+  diagramLook?: "classic" | "handDrawn";
   diagramPalette?: "match" | "default" | "dark" | "forest" | "neutral" | "base";
   fontSizePx?: number;
   editorFontSizePx?: number;
@@ -353,6 +376,23 @@ type CreateSessionRequest = {
   geminiApprovalMode?: GeminiApprovalMode;
 };
 
+type CreateDelegationRequest = {
+  prompt: string;
+  title?: string;
+  cwd?: string;
+  agent?: AgentType;
+  model?: string;
+  mode?: "reviewer" | "explorer" | "worker";
+  writePolicy?:
+    | { kind: "readOnly" }
+    | { kind: "sharedWorktree"; ownedPaths: string[] }
+    | {
+        kind: "isolatedWorktree";
+        ownedPaths: string[];
+        worktreePath: string;
+      };
+};
+
 type CreateProjectRequest = {
   name?: string;
   rootPath: string;
@@ -478,7 +518,7 @@ export function saveWorkspaceLayout(
     markdownThemeId?: string;
     markdownStyleId?: string;
     diagramThemeOverrideMode?: "on" | "off";
-    diagramLook?: "classic" | "handDrawn" | "neo";
+    diagramLook?: "classic" | "handDrawn";
     diagramPalette?: "match" | "default" | "dark" | "forest" | "neutral" | "base";
     fontSizePx?: number;
     editorFontSizePx?: number;
@@ -530,6 +570,40 @@ export function createSession(payload: CreateSessionRequest) {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function createDelegation(
+  parentSessionId: string,
+  payload: CreateDelegationRequest,
+) {
+  return request<DelegationResponse>(
+    `/api/sessions/${encodeURIComponent(parentSessionId)}/delegations`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function fetchDelegationStatus(delegationId: string) {
+  return request<DelegationStatusResponse>(
+    `/api/delegations/${encodeURIComponent(delegationId)}`,
+  );
+}
+
+export function fetchDelegationResult(delegationId: string) {
+  return request<DelegationResultResponse>(
+    `/api/delegations/${encodeURIComponent(delegationId)}/result`,
+  );
+}
+
+export function cancelDelegation(delegationId: string) {
+  return request<DelegationStatusResponse>(
+    `/api/delegations/${encodeURIComponent(delegationId)}/cancel`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export function createProject(payload: CreateProjectRequest) {

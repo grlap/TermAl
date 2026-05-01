@@ -508,12 +508,6 @@ where
         .map_err(|err| ApiError::internal(format!("blocking task failed: {err}")))?
 }
 
-
-
-
-
-
-
 /// Creates session.
 async fn create_session(
     State(state): State<AppState>,
@@ -521,6 +515,45 @@ async fn create_session(
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), ApiError> {
     let response = run_blocking_api(move || state.create_session(request)).await?;
     Ok((StatusCode::CREATED, Json(response)))
+}
+
+/// Creates a Phase 1 read-only child delegation session.
+async fn create_session_delegation(
+    AxumPath(parent_session_id): AxumPath<String>,
+    State(state): State<AppState>,
+    Json(request): Json<CreateDelegationRequest>,
+) -> Result<(StatusCode, Json<DelegationResponse>), ApiError> {
+    let response =
+        run_blocking_api(move || state.create_read_only_delegation(&parent_session_id, request))
+            .await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+/// Gets delegation status and metadata.
+async fn get_delegation_status(
+    AxumPath(delegation_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<DelegationStatusResponse>, ApiError> {
+    let response = run_blocking_api(move || state.get_delegation(&delegation_id)).await?;
+    Ok(Json(response))
+}
+
+/// Gets a completed delegation result packet.
+async fn get_delegation_result(
+    AxumPath(delegation_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<DelegationResultResponse>, ApiError> {
+    let response = run_blocking_api(move || state.get_delegation_result(&delegation_id)).await?;
+    Ok(Json(response))
+}
+
+/// Cancels a running delegation child session.
+async fn cancel_delegation(
+    AxumPath(delegation_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<DelegationStatusResponse>, ApiError> {
+    let response = run_blocking_api(move || state.cancel_delegation(&delegation_id)).await?;
+    Ok(Json(response))
 }
 
 /// Creates project.
@@ -758,4 +791,3 @@ async fn submit_codex_app_request(
     .await?;
     Ok(Json(response))
 }
-

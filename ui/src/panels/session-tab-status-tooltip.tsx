@@ -5,8 +5,8 @@
 //
 // What this file owns:
 //   - `SessionTabStatusTooltip` — the React component that renders
-//     the pane-tab status hover card (Agent / State / Project /
-//     Location / Model / optional Session / Policy / Sandbox /
+//     the pane-tab status hover card (Agent / State / Last response /
+//     Project / Location / Model / optional Session / Policy / Sandbox /
 //     Reasoning / Thread / Approval / Effort / Mode rows, 5h + 7d
 //     Codex rate-limit meters, Codex notices list).
 //   - `CodexRateLimitMeter` — the tiny inline component that draws
@@ -230,6 +230,9 @@ export function buildSessionTooltipRows(
   const rows: SessionTooltipRow[] = [
     { key: "Agent", value: session.agent },
     { key: "State", value: formatTooltipEnumLabel(session.status) },
+    ...(session.lastResponseTimestamp
+      ? [{ key: "Last response", value: session.lastResponseTimestamp }]
+      : []),
     { key: "Project", value: formatSessionTooltipProjectLabel(session, projectLookup) },
     { key: "Location", value: formatSessionTooltipLocationLabel(session, projectLookup, remoteLookup) },
     formatSessionTooltipModelRow(session),

@@ -234,6 +234,7 @@ impl AppState {
             message_count: session_message_count(record),
             pending_prompts: session.pending_prompts.clone(),
             session_mutation_stamp: Some(record.mutation_stamp),
+            parent_delegation_id: session.parent_delegation_id.clone(),
         }
     }
 
@@ -552,6 +553,11 @@ impl AppState {
                 .filter(|record| !record.hidden)
                 .map(Self::wire_session_summary_from_record)
                 .collect(),
+            delegations: inner
+                .delegations
+                .iter()
+                .map(delegation_summary_from_record)
+                .collect(),
         }
     }
 
@@ -582,6 +588,11 @@ impl AppState {
                     }
                 })
                 .collect(),
+            delegations: inner
+                .delegations
+                .iter()
+                .map(delegation_summary_from_record)
+                .collect(),
         }
     }
 
@@ -610,6 +621,11 @@ impl AppState {
                 .iter()
                 .filter(|record| !record.hidden)
                 .map(Self::wire_session_from_record)
+                .collect(),
+            delegations: inner
+                .delegations
+                .iter()
+                .map(delegation_summary_from_record)
                 .collect(),
         }
     }

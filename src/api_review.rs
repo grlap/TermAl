@@ -82,6 +82,13 @@ async fn put_review(
             );
         }
 
+        state.ensure_read_only_delegation_allows_write_action(
+            query.session_id.as_deref(),
+            query.project_id.as_deref(),
+            None,
+            "review document writes",
+        )?;
+
         let review_root = resolve_review_storage_root(
             &state,
             query.session_id.as_deref(),

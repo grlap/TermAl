@@ -14,6 +14,12 @@ async fn run_terminal_command(
 ) -> Result<Json<TerminalCommandResponse>, ApiError> {
     let command = validate_terminal_command(&request.command)?;
     let workdir_request = validate_terminal_workdir(&request.workdir)?;
+    state.ensure_read_only_delegation_allows_write_action(
+        request.session_id.as_deref(),
+        request.project_id.as_deref(),
+        Some(&workdir_request),
+        "terminal commands",
+    )?;
 
     // Peek whether this request will resolve to a remote scope using only
     // in-memory state (no network I/O). We must acquire the 429 permit
@@ -141,6 +147,12 @@ async fn run_terminal_command_stream(
 {
     let command = validate_terminal_command(&request.command)?;
     let workdir_request = validate_terminal_workdir(&request.workdir)?;
+    state.ensure_read_only_delegation_allows_write_action(
+        request.session_id.as_deref(),
+        request.project_id.as_deref(),
+        Some(&workdir_request),
+        "terminal commands",
+    )?;
     let cancellation = Arc::new(AtomicBool::new(false));
     let cancel_on_drop = TerminalStreamCancelGuard {
         cancellation: cancellation.clone(),

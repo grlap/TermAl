@@ -16,6 +16,8 @@ export type RequestStateResyncOptions = {
   rearmOnSuccess?: boolean;
   rearmUntilLiveEventOnSuccess?: boolean;
   rearmAfterSameInstanceProgressUntilLiveEvent?: boolean;
+  confirmReconnectRecoveryOnAdoption?: boolean;
+  forceAdoptEqualOrNewerRevision?: number;
   rearmOnFailure?: boolean;
   openSessionId?: string;
   paneId?: string | null;
@@ -29,6 +31,8 @@ export type PendingStateResyncOptions = {
   rearmOnSuccess: boolean;
   rearmUntilLiveEventOnSuccess: boolean;
   rearmAfterSameInstanceProgressUntilLiveEvent: boolean;
+  confirmReconnectRecoveryOnAdoption: boolean;
+  forceAdoptEqualOrNewerRevision: number | null;
   rearmOnFailure: boolean;
   openSessionId?: string;
   paneId?: string | null;
@@ -43,6 +47,8 @@ function createEmptyPendingStateResyncOptions(): PendingStateResyncOptions {
     rearmOnSuccess: false,
     rearmUntilLiveEventOnSuccess: false,
     rearmAfterSameInstanceProgressUntilLiveEvent: false,
+    confirmReconnectRecoveryOnAdoption: false,
+    forceAdoptEqualOrNewerRevision: null,
     rearmOnFailure: false,
   };
 }
@@ -74,6 +80,21 @@ export function coalescePendingStateResyncOptions(
   next.rearmAfterSameInstanceProgressUntilLiveEvent =
     next.rearmAfterSameInstanceProgressUntilLiveEvent ||
     options?.rearmAfterSameInstanceProgressUntilLiveEvent === true;
+  next.confirmReconnectRecoveryOnAdoption =
+    next.confirmReconnectRecoveryOnAdoption ||
+    options?.confirmReconnectRecoveryOnAdoption === true;
+  if (
+    typeof options?.forceAdoptEqualOrNewerRevision === "number" &&
+    Number.isSafeInteger(options.forceAdoptEqualOrNewerRevision)
+  ) {
+    next.forceAdoptEqualOrNewerRevision =
+      next.forceAdoptEqualOrNewerRevision === null
+        ? options.forceAdoptEqualOrNewerRevision
+        : Math.min(
+            next.forceAdoptEqualOrNewerRevision,
+            options.forceAdoptEqualOrNewerRevision,
+          );
+  }
   next.rearmOnFailure =
     next.rearmOnFailure || options?.rearmOnFailure === true;
   if (options?.openSessionId !== undefined) {

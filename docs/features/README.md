@@ -31,6 +31,7 @@ design decisions, and future plans.
 ## Planned Or Exploratory Briefs
 
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
+- [Agent Delegation Sessions](./agent-delegation-sessions.md)
 - [Conversation Overview Map](./conversation-overview-map.md)
 - [Conversation Markers](./conversation-markers.md)
 - [Editor Buffer Persistence](./editor-buffer-persistence.md)

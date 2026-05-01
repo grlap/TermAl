@@ -589,6 +589,8 @@ struct StateInner {
     sessions: Vec<SessionRecord>,
     /// Runtime instances for orchestrator templates live beside ordinary sessions.
     orchestrator_instances: Vec<OrchestratorInstance>,
+    /// Durable parent-child delegation links for ordinary sessions.
+    delegations: Vec<DelegationRecord>,
     /// Server-backed workspace documents keyed by workspace id.
     workspace_layouts: BTreeMap<String, WorkspaceLayoutDocument>,
     /// Monotonic counter used to stamp mutated session records. The persist
@@ -623,6 +625,7 @@ impl StateInner {
             remote_session_transcript_applied_revisions: HashMap::new(),
             sessions: Vec::new(),
             orchestrator_instances: Vec::new(),
+            delegations: Vec::new(),
             workspace_layouts: BTreeMap::new(),
             last_mutation_stamp: 0,
             removed_session_ids: Vec::new(),

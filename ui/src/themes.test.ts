@@ -295,6 +295,9 @@ describe("theme helpers", () => {
 
     window.localStorage.setItem(DIAGRAM_LOOK_STORAGE_KEY, "sketchy");
     expect(getStoredDiagramLookPreference()).toBe(DEFAULT_DIAGRAM_LOOK);
+
+    window.localStorage.setItem(DIAGRAM_LOOK_STORAGE_KEY, "neo");
+    expect(getStoredDiagramLookPreference()).toBe(DEFAULT_DIAGRAM_LOOK);
   });
 
   it("reads, persists, and applies the diagram look", () => {
@@ -305,18 +308,18 @@ describe("theme helpers", () => {
     applyDiagramLookPreference("handDrawn");
     expect(document.documentElement.dataset.diagramLook).toBe("handDrawn");
 
-    persistDiagramLookPreference("neo");
-    applyDiagramLookPreference("neo");
-    expect(window.localStorage.getItem(DIAGRAM_LOOK_STORAGE_KEY)).toBe("neo");
-    expect(document.documentElement.dataset.diagramLook).toBe("neo");
+    persistDiagramLookPreference("classic");
+    applyDiagramLookPreference("classic");
+    expect(window.localStorage.getItem(DIAGRAM_LOOK_STORAGE_KEY)).toBe("classic");
+    expect(document.documentElement.dataset.diagramLook).toBe("classic");
   });
 
   it("keeps the diagram-look registry aligned with the runtime guard", () => {
     const ids = DIAGRAM_LOOKS.map((entry) => entry.id);
     expect(ids).toContain(DEFAULT_DIAGRAM_LOOK);
     expect(ids.every((id) => isDiagramLook(id))).toBe(true);
-    // Sentinel list — Mermaid 11.x ships classic, handDrawn, neo.
-    expect(ids).toEqual(["classic", "handDrawn", "neo"]);
+    expect(ids).toEqual(["classic", "handDrawn"]);
+    expect(isDiagramLook("neo")).toBe(false);
     expect(isDiagramLook("sketchy")).toBe(false);
     expect(isDiagramLook(null)).toBe(false);
   });

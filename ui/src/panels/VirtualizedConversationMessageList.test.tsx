@@ -10,6 +10,7 @@ import type { RefObject } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS,
   VirtualizedConversationMessageList,
   type VirtualizedConversationMessageListHandleRef,
 } from "./VirtualizedConversationMessageList";
@@ -110,15 +111,23 @@ function renderVirtualizedHarness({
   let nextFrameId = 1;
   let scrollTop = initialScrollTop;
   const scrollWrites: number[] = [];
-  const estimatedLayout = buildVirtualizedMessageLayout(
-    messages.map((message) =>
-      estimateConversationMessageHeight(message, {
-        availableWidthPx: clientWidth,
-      }),
-    ),
-  );
+  const buildEstimatedLayout = (nextMessages: Message[]) =>
+    buildVirtualizedMessageLayout(
+      nextMessages.map((message) =>
+        estimateConversationMessageHeight(message, {
+          availableWidthPx: clientWidth,
+        }),
+      ),
+    );
+  let currentMessages = messages;
+  let estimatedLayout = buildEstimatedLayout(currentMessages);
   const resolvedScrollHeight =
     scrollHeight ?? (() => estimatedLayout.totalHeight);
+
+  const setCurrentMessages = (nextMessages: Message[]) => {
+    currentMessages = nextMessages;
+    estimatedLayout = buildEstimatedLayout(currentMessages);
+  };
 
   class ResizeObserverMock {
     constructor(private readonly callback: ResizeObserverCallback) {}
@@ -167,10 +176,10 @@ function renderVirtualizedHarness({
         return makeDomRect({ height: clientHeight, width: clientWidth });
       }
       if (element.classList.contains("virtualized-message-slot")) {
-        const messageIndex = messages.findIndex(
+        const messageIndex = currentMessages.findIndex(
           (candidate) => candidate.id === element.dataset.messageId,
         );
-        const message = messageIndex >= 0 ? messages[messageIndex] : undefined;
+        const message = messageIndex >= 0 ? currentMessages[messageIndex] : undefined;
         if (message) {
           const customRect = slotRect?.(message, messageIndex, scrollTop);
           if (customRect) {
@@ -204,7 +213,7 @@ function renderVirtualizedHarness({
       isActive
       renderMessageCard={renderMessageCard}
       sessionId="session-a"
-      messages={messages}
+      messages={currentMessages}
       scrollContainerRef={scrollContainerRef}
       onApprovalDecision={() => {}}
       onUserInputSubmit={() => {}}
@@ -229,7 +238,9 @@ function renderVirtualizedHarness({
 
   return {
     ...result,
-    estimatedLayout,
+    get estimatedLayout() {
+      return estimatedLayout;
+    },
     get scrollTop() {
       return scrollTop;
     },
@@ -237,6 +248,13 @@ function renderVirtualizedHarness({
     restore,
     scrollNode,
     scrollWrites,
+    rerenderWithMessages(
+      nextMessages: Message[],
+      nextSearchOptions: VirtualizedSearchOptions = {},
+    ) {
+      setCurrentMessages(nextMessages);
+      result.rerender(renderList(nextSearchOptions));
+    },
     rerenderWithSearch(nextSearchOptions: VirtualizedSearchOptions) {
       result.rerender(renderList(nextSearchOptions));
     },
@@ -250,6 +268,14 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
+
+async function advanceIdleMountedRangeCompaction() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(
+      VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS + 1,
+    );
+  });
+}
 
 describe("VirtualizedConversationMessageList foundation", () => {
   it("exposes a layout snapshot and explicit jump helpers", async () => {
@@ -456,14 +482,16 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
       expect(screen.queryByText("message-1")).not.toBeInTheDocument();
 
+      vi.useFakeTimers();
       act(() => {
         harness.setScrollTop(0);
         fireEvent.scroll(harness.scrollNode);
       });
 
-      await waitFor(() => {
-        expect(screen.getByText("message-1")).toBeInTheDocument();
-      });
+      expect(screen.getByText("message-1")).toBeInTheDocument();
+
+      await advanceIdleMountedRangeCompaction();
+      expect(screen.queryByText("message-140")).not.toBeInTheDocument();
     } finally {
       harness.restore();
     }
@@ -593,6 +621,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
       expect(screen.queryByText("message-1")).not.toBeInTheDocument();
 
+      vi.useFakeTimers();
       act(() => {
         harness.setScrollTop(0);
         notifyMessageStackScrollWrite(harness.scrollNode, {
@@ -601,9 +630,10 @@ describe("VirtualizedConversationMessageList foundation", () => {
         });
       });
 
-      await waitFor(() => {
-        expect(screen.getByText("message-1")).toBeInTheDocument();
-      });
+      expect(screen.getByText("message-1")).toBeInTheDocument();
+
+      await advanceIdleMountedRangeCompaction();
+      expect(screen.queryByText("message-140")).not.toBeInTheDocument();
     } finally {
       harness.restore();
     }
@@ -625,6 +655,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
       expect(screen.queryByText("message-1")).not.toBeInTheDocument();
 
+      vi.useFakeTimers();
       act(() => {
         // Wheel/touch/key intent can release the search pin before the pane's
         // follow-up scroll write arrives as a programmatic event.
@@ -635,9 +666,10 @@ describe("VirtualizedConversationMessageList foundation", () => {
         });
       });
 
-      await waitFor(() => {
-        expect(screen.getByText("message-1")).toBeInTheDocument();
-      });
+      expect(screen.getByText("message-1")).toBeInTheDocument();
+
+      await advanceIdleMountedRangeCompaction();
+      expect(screen.queryByText("message-140")).not.toBeInTheDocument();
     } finally {
       harness.restore();
     }
@@ -695,7 +727,8 @@ describe("VirtualizedConversationMessageList foundation", () => {
         expect(harness.scrollTop).toBeGreaterThanOrEqual(18_000);
         expect(harness.scrollTop).toBeLessThan(19_000);
       });
-      const initialHandle = virtualizerHandleRef.current;
+      const initialHandle = virtualizerHandleRef.current!;
+      expect(initialHandle.jumpToMessageIndex(170)).toBe(false);
       const renderCountBeforeRerender = renderCount;
 
       act(() => {
@@ -711,6 +744,36 @@ describe("VirtualizedConversationMessageList foundation", () => {
         expect(renderDelta).toBeGreaterThanOrEqual(5);
         expect(renderDelta).toBeLessThan(120);
         expect(virtualizerHandleRef.current).toBe(initialHandle);
+      });
+
+      const expandedMessages = makeTextMessages(180);
+      const expandedMatchedKeys = new Set(
+        expandedMessages.map((message) => `message:${message.id}`),
+      );
+      act(() => {
+        harness.rerenderWithMessages(expandedMessages, {
+          conversationSearchQuery: "Message",
+          conversationSearchMatchedItemKeys: expandedMatchedKeys,
+          conversationSearchActiveItemKey: "message:message-140",
+        });
+      });
+
+      await waitFor(() => {
+        expect(virtualizerHandleRef.current).toBe(initialHandle);
+        expect(initialHandle.getLayoutSnapshot().messageCount).toBe(180);
+      });
+
+      act(() => {
+        expect(
+          initialHandle.jumpToMessageIndex(170, {
+            align: "center",
+            flush: true,
+          }),
+        ).toBe(true);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("message-171")).toBeInTheDocument();
       });
     } finally {
       harness.restore();

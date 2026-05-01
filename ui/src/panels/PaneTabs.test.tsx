@@ -837,6 +837,55 @@ describe("PaneTabs", () => {
     expect(tooltip).toHaveTextContent("High");
   });
 
+  it("shows the last assistant response time in the status tooltip", async () => {
+    renderPaneTabs({
+      sessionLookup: new Map([
+        [
+          "session-1",
+          makeSession("session-1", "C:/repo", "Codex Replies", {
+            messages: [
+              {
+                author: "you",
+                id: "prompt-1",
+                text: "First prompt",
+                timestamp: "09:12:00",
+                type: "text",
+              },
+              {
+                author: "assistant",
+                id: "assistant-1",
+                text: "First answer",
+                timestamp: "09:12:08",
+                type: "text",
+              },
+              {
+                author: "you",
+                id: "prompt-2",
+                text: "Follow-up prompt",
+                timestamp: "09:13:00",
+                type: "text",
+              },
+            ],
+          }),
+        ],
+      ]),
+      tabs: [
+        {
+          id: "tab-session",
+          kind: "session",
+          sessionId: "session-1",
+        },
+      ],
+    });
+
+    fireEvent.mouseEnter(screen.getByRole("tab", { name: /Codex Replies/i }));
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Last response:");
+    expect(tooltip).toHaveTextContent("09:12:08");
+    expect(tooltip).not.toHaveTextContent("09:13:00");
+  });
+
   it("prefers the live model label in the status tooltip", async () => {
     renderPaneTabs({
       sessionLookup: new Map([

@@ -23,6 +23,7 @@ mod codex_discovery;
 mod codex_protocol;
 mod codex_threads;
 mod cursor;
+mod delegations;
 mod file_changes;
 mod git;
 mod http_routes;
@@ -876,6 +877,7 @@ fn sample_remote_orchestrator_state(
                 message_count: 0,
                 pending_prompts: Vec::new(),
                 session_mutation_stamp: None,
+                parent_delegation_id: None,
             };
             if session.agent.supports_codex_prompt_settings() {
                 session.approval_policy = Some(default_codex_approval_policy());
@@ -945,6 +947,7 @@ fn sample_remote_orchestrator_state(
             stopped_session_ids_during_stop: Vec::new(),
         }],
         sessions,
+        delegations: Vec::new(),
     }
 }
 
@@ -1235,7 +1238,12 @@ async fn request_json<T: for<'de> Deserialize<'de>>(
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("response body should read");
-    let parsed = serde_json::from_slice(&body).expect("response body should be valid JSON");
+    let parsed = serde_json::from_slice(&body).unwrap_or_else(|err| {
+        panic!(
+            "response body should be valid JSON (status {status}, body {:?}): {err}",
+            String::from_utf8_lossy(&body)
+        )
+    });
     (status, parsed)
 }
 

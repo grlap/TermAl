@@ -49,7 +49,13 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_kill_session(session_id);
         }
-        let (runtime_to_kill, hidden_runtimes_to_kill) = {
+        let (
+            runtime_to_kill,
+            hidden_runtimes_to_kill,
+            delegation_runtimes_to_kill,
+            revision,
+            delegation_lifecycle_deltas,
+        ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -68,6 +74,8 @@ impl AppState {
                 SessionRuntime::Acp(handle) => Some(KillableRuntime::Acp(handle.clone())),
                 SessionRuntime::None => None,
             };
+            let delegation_reconciliation =
+                reconcile_delegations_for_removed_session_locked(&mut inner, session_id);
             inner.remove_session_at(index);
 
             let mut hidden_runtimes = Vec::new();
@@ -111,14 +119,21 @@ impl AppState {
             }
             inner.normalize_orchestrator_instances();
 
-            self.commit_locked(&mut inner).map_err(|err| {
+            let revision = self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
-            (runtime, hidden_runtimes)
+            (
+                runtime,
+                hidden_runtimes,
+                delegation_reconciliation.runtimes_to_kill,
+                revision,
+                delegation_reconciliation.lifecycle_deltas,
+            )
         };
 
         if let Some(runtime) = runtime_to_kill {
-            if let Err(err) = shutdown_removed_runtime(runtime, &format!("session `{session_id}`"))
+            if let Err(err) =
+                shutdown_removed_runtime(runtime, &format!("session `{session_id}`"))
             {
                 eprintln!("session cleanup warning> {err:#}");
             }
@@ -127,6 +142,16 @@ impl AppState {
             if let Err(err) = shutdown_removed_runtime(runtime, "a hidden Claude spare") {
                 eprintln!("session cleanup warning> {err:#}");
             }
+        }
+        for runtime in delegation_runtimes_to_kill {
+            if let Err(err) =
+                shutdown_removed_runtime(runtime, "a removed parent delegation child")
+            {
+                eprintln!("session cleanup warning> {err:#}");
+            }
+        }
+        for delta in delegation_lifecycle_deltas {
+            self.publish_delegation_lifecycle_delta(revision, delta);
         }
 
         self.resume_pending_orchestrator_transitions()

@@ -129,6 +129,9 @@ export type VirtualizedConversationLayoutSnapshot = {
 };
 
 export type VirtualizedConversationMessageListHandle = {
+  // Stable for the lifetime of the mount. Methods read the latest layout
+  // state internally, so consumers can keep the handle as an effect dependency
+  // without retriggering on every virtualized layout update.
   getLayoutSnapshot: () => VirtualizedConversationLayoutSnapshot;
   // Returns false when the list is inactive, the scroll node is missing, or the
   // target cannot be resolved from the currently loaded transcript.
@@ -157,7 +160,7 @@ const IDLE_MOUNTED_COMPACTION_PAGE_HYSTERESIS = 2;
 const ACTIVE_VIEWPORT_STARTUP_RESYNC_FRAMES = 12;
 const BOTTOM_BOUNDARY_REVEAL_SETTLE_FRAMES = 12;
 const BOTTOM_BOUNDARY_REVEAL_DELAY_MS = 220;
-const USER_SCROLL_ADJUSTMENT_COOLDOWN_MS = 200;
+export const VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS = 200;
 // Separate, much shorter cooldown for the deferred-heavy-content (Markdown,
 // tool blocks) activation gate. Heavy content paint should resume almost
 // immediately after the user stops scrolling, while the broader scroll-state
@@ -1398,22 +1401,45 @@ export function VirtualizedConversationMessageList({
     visiblePageRange,
   ]);
 
+  const virtualizerHandleStateRef = useRef({
+    buildLayoutSnapshot,
+    jumpToMessageLocation,
+    messageLocationById,
+    messagesLength: messages.length,
+    pages,
+  });
   useLayoutEffect(() => {
-    if (!virtualizerHandleRef) {
-      return undefined;
-    }
-
-    const handle: VirtualizedConversationMessageListHandle = {
-      getLayoutSnapshot: buildLayoutSnapshot,
+    virtualizerHandleStateRef.current = {
+      buildLayoutSnapshot,
+      jumpToMessageLocation,
+      messageLocationById,
+      messagesLength: messages.length,
+      pages,
+    };
+  }, [
+    buildLayoutSnapshot,
+    jumpToMessageLocation,
+    messageLocationById,
+    messages.length,
+    pages,
+  ]);
+  const virtualizerStableHandle = useMemo<VirtualizedConversationMessageListHandle>(
+    () => ({
+      getLayoutSnapshot: () =>
+        virtualizerHandleStateRef.current.buildLayoutSnapshot(),
       jumpToMessageId: (messageId, options) => {
+        const { jumpToMessageLocation, messageLocationById } =
+          virtualizerHandleStateRef.current;
         const location = messageLocationById.get(messageId);
         return location ? jumpToMessageLocation(location, options) : false;
       },
       jumpToMessageIndex: (messageIndex, options) => {
+        const { jumpToMessageLocation, messagesLength, pages } =
+          virtualizerHandleStateRef.current;
         if (
           !Number.isInteger(messageIndex) ||
           messageIndex < 0 ||
-          messageIndex >= messages.length
+          messageIndex >= messagesLength
         ) {
           return false;
         }
@@ -1440,21 +1466,22 @@ export function VirtualizedConversationMessageList({
           options,
         );
       },
-    };
-    virtualizerHandleRef.current = handle;
+    }),
+    [],
+  );
+
+  useLayoutEffect(() => {
+    if (!virtualizerHandleRef) {
+      return undefined;
+    }
+
+    virtualizerHandleRef.current = virtualizerStableHandle;
     return () => {
-      if (virtualizerHandleRef.current === handle) {
+      if (virtualizerHandleRef.current === virtualizerStableHandle) {
         virtualizerHandleRef.current = null;
       }
     };
-  }, [
-    buildLayoutSnapshot,
-    jumpToMessageLocation,
-    messageLocationById,
-    messages.length,
-    pages,
-    virtualizerHandleRef,
-  ]);
+  }, [virtualizerHandleRef, virtualizerStableHandle]);
 
   useEffect(() => {
     return () => {
@@ -1494,7 +1521,7 @@ export function VirtualizedConversationMessageList({
     }
 
     const inUserScrollCooldown =
-      performance.now() - lastUserScrollInputTimeRef.current < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
+      performance.now() - lastUserScrollInputTimeRef.current < VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
     const userScrollKind = lastUserScrollKindRef.current;
     // Only incremental scroll should grow via this layout effect. Seek-style
     // jumps (PageUp/PageDown/Home/End, large scrollbar moves) are owned by the
@@ -1542,7 +1569,7 @@ export function VirtualizedConversationMessageList({
     }
 
     const inUserScrollCooldown =
-      performance.now() - lastUserScrollInputTimeRef.current < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
+      performance.now() - lastUserScrollInputTimeRef.current < VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
     const viewportEscapedMountedBand = !rangeContainsRange(
       mountedPageRange,
       visiblePageRange,
@@ -1601,7 +1628,7 @@ export function VirtualizedConversationMessageList({
     const isUserScrollCooldown =
       hasUserScrollInteractionRef.current &&
       performance.now() - lastUserScrollInputTimeRef.current <
-        USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
+        VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
     const isProgrammaticBottomFollowCooldown =
       pendingProgrammaticBottomFollowUntilRef.current >= performance.now();
     if (!isUserScrollCooldown || isProgrammaticBottomFollowCooldown) {
@@ -1678,7 +1705,7 @@ export function VirtualizedConversationMessageList({
     const isUserScrollCooldown =
       hasUserScrollInteractionRef.current &&
       performance.now() - lastUserScrollInputTimeRef.current <
-        USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
+        VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
     if (!isUserScrollCooldown) {
       return;
     }
@@ -1984,7 +2011,7 @@ export function VirtualizedConversationMessageList({
     }
 
     const timeSinceUserScroll = performance.now() - lastUserScrollInputTimeRef.current;
-    if (timeSinceUserScroll < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS) {
+    if (timeSinceUserScroll < VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS) {
       return;
     }
 
@@ -2082,7 +2109,7 @@ export function VirtualizedConversationMessageList({
           releaseConversationSearchPinForUserScroll();
           setHasUserScrollInteraction(true);
           lastUserScrollInputTimeRef.current = performance.now();
-          scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
+          scheduleIdleMountedRangeCompaction(VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
           // Scrollbar-thumb drag and touch-inertia scrolls have no preceding
           // wheel/touch/key event, so `prewarmMountedRangeForUpwardWheel`
           // never runs for them. Without flush, `setMountedPageRange` batches
@@ -2192,7 +2219,7 @@ export function VirtualizedConversationMessageList({
           : "incremental";
       setHasUserScrollInteraction(true);
       lastUserScrollInputTimeRef.current = performance.now();
-      scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
+      scheduleIdleMountedRangeCompaction(VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
       const prewarmDeltaY = wheelDeltaY ?? touchDeltaY;
       if (prewarmDeltaY !== null && prewarmDeltaY < 0) {
         prewarmMountedRangeForUpwardWheel(node, prewarmDeltaY);
@@ -2289,7 +2316,7 @@ export function VirtualizedConversationMessageList({
             releaseConversationSearchPinForUserScroll();
           }
           lastUserScrollInputTimeRef.current = scrollWriteTime;
-          scheduleIdleMountedRangeCompaction(USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
+          scheduleIdleMountedRangeCompaction(VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
         }
         const isActiveUpwardUserScrollWrite =
           explicitScrollSource === "user" &&
@@ -2441,10 +2468,10 @@ export function VirtualizedConversationMessageList({
       }
 
       const timeSinceUserScroll = performance.now() - lastUserScrollInputTimeRef.current;
-      const inUserScrollCooldown = timeSinceUserScroll < USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
+      const inUserScrollCooldown = timeSinceUserScroll < VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
       if (inUserScrollCooldown) {
         scheduleDeferredLayoutVersion(
-          USER_SCROLL_ADJUSTMENT_COOLDOWN_MS - timeSinceUserScroll,
+          VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS - timeSinceUserScroll,
         );
         return;
       }

@@ -7,9 +7,9 @@
 //     zeroes body descenders / scroll-root overflow so the iframe
 //     can be sized off the SVG viewBox.
 //   - `getMermaidDiagramFrameStyle` — reads the SVG's viewBox and
-//     returns `{ aspectRatio, height, width, maxWidth }` css for the
-//     iframe, clamped against upper/lower bounds that protect the
-//     layout from pathologically large diagrams.
+//     returns `{ height, width, maxWidth }` css for the iframe,
+//     clamped against upper/lower bounds that protect the layout
+//     from pathologically large diagrams.
 //   - `clampMermaidDiagramExtent`, `readMermaidSvgDimensions` —
 //     the clamp math and the viewBox parser that back the frame-
 //     style helper.
@@ -134,21 +134,15 @@ export function getMermaidDiagramFrameStyle(svg: string): CSSProperties {
   );
 
   return {
-    // `max-width: 100%` can shrink a wide iframe below `frameWidth`.
-    // If height stays fixed, the SVG scales down horizontally while
-    // the iframe keeps the old unscaled height, leaving a large blank
-    // area below wide ER diagrams. Use CSS aspect-ratio so the used
-    // height scales with the constrained width.
+    // The srcdoc keeps the SVG at intrinsic width (`max-width: none`)
+    // and lets wide diagrams scroll horizontally inside the iframe.
+    // Do not use CSS aspect-ratio here: `max-width: 100%` can shrink
+    // the iframe's used width without shrinking the SVG inside it,
+    // which scales the iframe height down and clips the diagram.
     //
-    // Trade-off: very tall, narrow diagrams in narrow columns can be
-    // clipped at the bottom because the srcdoc intentionally keeps
-    // vertical overflow hidden. That keeps wide diagrams tight instead
-    // of restoring the old fixed-height blank-frame behavior.
-    //
-    // `frameHeight` still includes the historical 24px vertical slack
-    // for scrollbar chrome / Mermaid temp-DOM text-measurement drift.
-    aspectRatio: `${frameWidth} / ${frameHeight}`,
-    height: "auto",
+    // `frameHeight` includes the historical 24px vertical slack for
+    // scrollbar chrome / Mermaid temp-DOM text-measurement drift.
+    height: `${frameHeight}px`,
     width: `${frameWidth}px`,
     maxWidth: "100%",
   };
@@ -401,9 +395,9 @@ export function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidC
     darkMode: isDark,
     theme,
     // Render aesthetic. `handDrawn` routes through Mermaid's rough.js
-    // integration; `neo` is Mermaid's newer sharp look; `classic` is
-    // the long-standing default. We also pin `handDrawnSeed` so the
-    // sketch is deterministic across re-renders of the same diagram
+    // integration; `classic` is the long-standing default. We also
+    // pin `handDrawnSeed` so the sketch is deterministic across
+    // re-renders of the same diagram
     // (otherwise every keystroke in Source mode re-wobbles the
     // strokes, which is distracting).
     look,

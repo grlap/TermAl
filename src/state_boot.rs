@@ -298,5 +298,9 @@ impl StateInner {
                 }
             }
         }
+
+        for delegation_index in 0..self.delegations.len() {
+            let _ = refresh_delegation_from_child_locked(self, delegation_index);
+        }
     }
 }

@@ -61,11 +61,12 @@ impl AppState {
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let message_id = (!cleaned.is_empty()).then(|| inner.next_message_id());
-            let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
-                .then(|| inner.next_message_id());
+            let file_change_message_id =
+                (!inner.sessions[index].active_turn_file_changes.is_empty())
+                    .then(|| inner.next_message_id());
             let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(());
             }
@@ -109,6 +110,10 @@ impl AppState {
             }
             has_queued_prompts
         };
+
+        if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
+            eprintln!("state warning> failed to refresh delegation after turn failure: {err:#}");
+        }
 
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;
@@ -205,11 +210,12 @@ impl AppState {
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
-                .then(|| inner.next_message_id());
+            let file_change_message_id =
+                (!inner.sessions[index].active_turn_file_changes.is_empty())
+                    .then(|| inner.next_message_id());
             let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(());
             }
@@ -227,13 +233,19 @@ impl AppState {
             if let Some(message_id) = file_change_message_id {
                 push_active_turn_file_changes_on_record(record, message_id);
             }
-            finish_active_turn_file_change_tracking(inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"));
+            finish_active_turn_file_change_tracking(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+            );
             let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
             self.commit_locked(&mut inner)?;
             has_queued_prompts
         };
+        if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
+            eprintln!("state warning> failed to refresh delegation after turn error: {err:#}");
+        }
+
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
@@ -263,11 +275,12 @@ impl AppState {
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
-                .then(|| inner.next_message_id());
+            let file_change_message_id =
+                (!inner.sessions[index].active_turn_file_changes.is_empty())
+                    .then(|| inner.next_message_id());
             let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(());
             }
@@ -292,13 +305,18 @@ impl AppState {
                 completion_revision,
             );
             if let Some(message_id) = file_change_message_id {
-                push_active_turn_file_changes_on_record(inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"), message_id);
+                push_active_turn_file_changes_on_record(
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid"),
+                    message_id,
+                );
             }
-            finish_active_turn_file_change_tracking(inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"));
+            finish_active_turn_file_change_tracking(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+            );
             self.commit_locked(&mut inner)?;
             let orchestrator_delta = orchestrator_changed
                 .then(|| (inner.revision, inner.orchestrator_instances.clone()));
@@ -307,6 +325,10 @@ impl AppState {
 
         if let Some((revision, orchestrators)) = orchestrator_delta {
             self.publish_orchestrators_updated(revision, orchestrators);
+        }
+
+        if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
+            eprintln!("state warning> failed to refresh delegation after turn completion: {err:#}");
         }
 
         if should_dispatch_next {
@@ -379,12 +401,13 @@ impl AppState {
             } else {
                 None
             };
-            let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
-                .then(|| inner.next_message_id());
+            let file_change_message_id =
+                (!inner.sessions[index].active_turn_file_changes.is_empty())
+                    .then(|| inner.next_message_id());
             let has_queued_prompts = {
                 let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
                 record.runtime = SessionRuntime::None;
                 record.runtime_reset_required = false;
                 record.orchestrator_auto_dispatch_blocked = false;
@@ -411,12 +434,18 @@ impl AppState {
                 }
                 !record.queued_prompts.is_empty()
             };
-            finish_active_turn_file_change_tracking(inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"));
+            finish_active_turn_file_change_tracking(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+            );
             self.commit_locked(&mut inner)?;
             has_queued_prompts
         };
+
+        if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
+            eprintln!("state warning> failed to refresh delegation after runtime exit: {err:#}");
+        }
 
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;

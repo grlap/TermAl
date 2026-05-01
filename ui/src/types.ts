@@ -275,9 +275,82 @@ export type Session = {
   messagesLoaded?: boolean | null;
   pendingPrompts?: PendingPrompt[];
   sessionMutationStamp?: number | null;
+  parentDelegationId?: string | null;
 };
 
 export type CodexThreadState = "active" | "archived";
+
+export type DelegationMode = "reviewer" | "explorer" | "worker";
+export type DelegationStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "canceled";
+
+export type DelegationWritePolicy =
+  | { kind: "readOnly" }
+  | { kind: "sharedWorktree"; ownedPaths: string[] }
+  | {
+      kind: "isolatedWorktree";
+      ownedPaths: string[];
+      worktreePath: string;
+    };
+
+export type DelegationFinding = {
+  severity: string;
+  file?: string | null;
+  line?: number | null;
+  message: string;
+};
+
+export type DelegationCommandResult = {
+  command: string;
+  status: string;
+};
+
+export type DelegationResult = {
+  delegationId: string;
+  childSessionId: string;
+  status: DelegationStatus;
+  summary: string;
+  findings?: DelegationFinding[];
+  changedFiles?: string[];
+  commandsRun?: DelegationCommandResult[];
+  notes?: string[];
+};
+
+export type DelegationResultSummary = {
+  delegationId: string;
+  childSessionId: string;
+  status: DelegationStatus;
+  summary: string;
+};
+
+export type DelegationRecord = {
+  id: string;
+  parentSessionId: string;
+  childSessionId: string;
+  mode: DelegationMode;
+  status: DelegationStatus;
+  title: string;
+  prompt: string;
+  cwd: string;
+  agent: AgentType;
+  model?: string | null;
+  writePolicy: DelegationWritePolicy;
+  createdAt: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  result?: DelegationResult | null;
+};
+
+export type DelegationSummary = Omit<
+  DelegationRecord,
+  "prompt" | "cwd" | "result"
+> & {
+  result?: DelegationResultSummary | null;
+};
 
 export type Message =
   | TextMessage
@@ -642,6 +715,36 @@ export type OrchestratorsUpdatedEvent = {
   sessions?: Session[];
 };
 
+export type DelegationCreatedEvent = {
+  type: "delegationCreated";
+  revision: number;
+  delegation: DelegationSummary;
+};
+
+export type DelegationUpdatedEvent = {
+  type: "delegationUpdated";
+  revision: number;
+  delegationId: string;
+  status: DelegationStatus;
+  updatedAt: string;
+};
+
+export type DelegationCompletedEvent = {
+  type: "delegationCompleted";
+  revision: number;
+  delegationId: string;
+  result: DelegationResultSummary;
+  completedAt: string;
+};
+
+export type DelegationCanceledEvent = {
+  type: "delegationCanceled";
+  revision: number;
+  delegationId: string;
+  canceledAt: string;
+  reason?: string | null;
+};
+
 export type CodexUpdatedEvent = {
   type: "codexUpdated";
   revision: number;
@@ -677,7 +780,11 @@ export type DeltaEvent =
   | CommandUpdateEvent
   | ParallelAgentsUpdateEvent
   | CodexUpdatedEvent
-  | OrchestratorsUpdatedEvent;
+  | OrchestratorsUpdatedEvent
+  | DelegationCreatedEvent
+  | DelegationUpdatedEvent
+  | DelegationCompletedEvent
+  | DelegationCanceledEvent;
 
 export type SessionSettingsField =
   | "model"

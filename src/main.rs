@@ -275,6 +275,13 @@ fn app_router(state: AppState) -> Router {
         .route("/api/projects/pick", post(pick_project_root))
         .route("/api/sessions", post(create_session))
         .route("/api/sessions/{id}", get(get_session))
+        .route(
+            "/api/sessions/{id}/delegations",
+            post(create_session_delegation),
+        )
+        .route("/api/delegations/{id}", get(get_delegation_status))
+        .route("/api/delegations/{id}/result", get(get_delegation_result))
+        .route("/api/delegations/{id}/cancel", post(cancel_delegation))
         .route("/api/sessions/{id}/settings", post(update_session_settings))
         .route(
             "/api/sessions/{id}/model-options/refresh",
@@ -481,6 +488,7 @@ include!("session_sync.rs");
 include!("state_accessors.rs");
 include!("state_boot.rs");
 include!("state_inner.rs");
+include!("delegations.rs");
 include!("ids.rs");
 include!("app_boot.rs");
 include!("agent_readiness.rs");
