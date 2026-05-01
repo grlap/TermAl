@@ -70,6 +70,11 @@ type VirtualizedHarnessOptions = {
   conversationSearchMatchedItemKeys?: ReadonlySet<string>;
   conversationSearchActiveItemKey?: string | null;
   scrollHeight?: () => number;
+  slotRect?: (
+    message: Message,
+    messageIndex: number,
+    scrollTop: number,
+  ) => { height: number; top: number } | null;
   slotHeight?: (message: Message) => number;
   virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
 };
@@ -93,6 +98,7 @@ function renderVirtualizedHarness({
   conversationSearchMatchedItemKeys = new Set(),
   conversationSearchActiveItemKey = null,
   scrollHeight,
+  slotRect,
   slotHeight = () => 80,
   virtualizerHandleRef,
 }: VirtualizedHarnessOptions) {
@@ -165,6 +171,12 @@ function renderVirtualizedHarness({
           (candidate) => candidate.id === element.dataset.messageId,
         );
         const message = messageIndex >= 0 ? messages[messageIndex] : undefined;
+        if (message) {
+          const customRect = slotRect?.(message, messageIndex, scrollTop);
+          if (customRect) {
+            return makeDomRect(customRect);
+          }
+        }
         const height = message ? slotHeight(message) : 80;
         return makeDomRect({
           top:
@@ -206,8 +218,9 @@ function renderVirtualizedHarness({
         conversationSearchMatchedItemKeys
       }
       conversationSearchActiveItemKey={
-        searchOptions.conversationSearchActiveItemKey ??
-        conversationSearchActiveItemKey
+        "conversationSearchActiveItemKey" in searchOptions
+          ? searchOptions.conversationSearchActiveItemKey
+          : conversationSearchActiveItemKey
       }
       virtualizerHandleRef={virtualizerHandleRef}
     />
@@ -456,7 +469,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
-  it("rearms a released search pin after query or active result changes", async () => {
+  it("keeps a released search pin released for same-result query changes and rearms on active-result changes", async () => {
     const messages = makeTextMessages(160);
     const matchedKeys = new Set(messages.map((message) => `message:${message.id}`));
     const harness = renderVirtualizedHarness({
@@ -478,6 +491,8 @@ describe("VirtualizedConversationMessageList foundation", () => {
       await waitFor(() => {
         expect(screen.getByText("message-1")).toBeInTheDocument();
       });
+      expect(screen.queryByText("message-140")).not.toBeInTheDocument();
+      expect(harness.scrollTop).toBe(0);
 
       act(() => {
         harness.rerenderWithSearch({
@@ -487,8 +502,10 @@ describe("VirtualizedConversationMessageList foundation", () => {
         });
       });
       await waitFor(() => {
-        expect(screen.getByText("message-140")).toBeInTheDocument();
+        expect(screen.getByText("message-1")).toBeInTheDocument();
       });
+      expect(screen.queryByText("message-140")).not.toBeInTheDocument();
+      expect(harness.scrollTop).toBe(0);
 
       act(() => {
         harness.setScrollTop(0);
@@ -519,6 +536,42 @@ describe("VirtualizedConversationMessageList foundation", () => {
       await waitFor(() => {
         expect(screen.getByText("message-140")).toBeInTheDocument();
       });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("does not recenter the same active search match while the query is refined", async () => {
+    const messages = makeTextMessages(160);
+    const matchedKeys = new Set(messages.map((message) => `message:${message.id}`));
+    const harness = renderVirtualizedHarness({
+      messages,
+      conversationSearchQuery: "Message",
+      conversationSearchMatchedItemKeys: matchedKeys,
+      conversationSearchActiveItemKey: "message:message-140",
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-140")).toBeInTheDocument();
+        expect(harness.scrollTop).toBeGreaterThanOrEqual(18_000);
+      });
+      const scrollTopAfterInitialPin = harness.scrollTop;
+      const scrollWriteCountAfterInitialPin = harness.scrollWrites.length;
+
+      act(() => {
+        harness.rerenderWithSearch({
+          conversationSearchQuery: "Message 14",
+          conversationSearchMatchedItemKeys: matchedKeys,
+          conversationSearchActiveItemKey: "message:message-140",
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("message-140")).toBeInTheDocument();
+      });
+      expect(harness.scrollTop).toBe(scrollTopAfterInitialPin);
+      expect(harness.scrollWrites).toHaveLength(scrollWriteCountAfterInitialPin);
     } finally {
       harness.restore();
     }
@@ -573,6 +626,8 @@ describe("VirtualizedConversationMessageList foundation", () => {
       expect(screen.queryByText("message-1")).not.toBeInTheDocument();
 
       act(() => {
+        // Wheel/touch/key intent can release the search pin before the pane's
+        // follow-up scroll write arrives as a programmatic event.
         fireEvent.wheel(harness.scrollNode, { deltaY: -48 });
         harness.setScrollTop(0);
         notifyMessageStackScrollWrite(harness.scrollNode, {
@@ -588,17 +643,48 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("uses the estimated search target when the mounted target has zero geometry", async () => {
+    const messages = makeTextMessages(160);
+    const matchedKeys = new Set(messages.map((message) => `message:${message.id}`));
+    const harness = renderVirtualizedHarness({
+      messages,
+      conversationSearchQuery: "Message",
+      conversationSearchMatchedItemKeys: matchedKeys,
+      conversationSearchActiveItemKey: "message:message-140",
+      slotRect: (message) =>
+        message.id === "message-140" ? { height: 0, top: 0 } : null,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-140")).toBeInTheDocument();
+        expect(
+          harness.container.querySelector('[data-message-id="message-140"]'),
+        ).toBeInTheDocument();
+        expect(harness.scrollTop).toBeGreaterThanOrEqual(18_000);
+        expect(harness.scrollTop).toBeLessThan(19_000);
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("keeps the virtualizer handle stable while a search result remains pinned", async () => {
     const messages = makeTextMessages(160);
     const matchedKeys = new Set(messages.map((message) => `message:${message.id}`));
     const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
       current: null,
     };
+    let renderCount = 0;
     const harness = renderVirtualizedHarness({
       messages,
       conversationSearchQuery: "Message",
       conversationSearchMatchedItemKeys: matchedKeys,
       conversationSearchActiveItemKey: "message:message-140",
+      renderMessageCard: (message) => {
+        renderCount += 1;
+        return <article className="message-card">{message.id}</article>;
+      },
       virtualizerHandleRef,
     });
 
@@ -606,12 +692,11 @@ describe("VirtualizedConversationMessageList foundation", () => {
       await waitFor(() => {
         expect(screen.getByText("message-140")).toBeInTheDocument();
         expect(virtualizerHandleRef.current).not.toBeNull();
-      });
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
+        expect(harness.scrollTop).toBeGreaterThanOrEqual(18_000);
+        expect(harness.scrollTop).toBeLessThan(19_000);
       });
       const initialHandle = virtualizerHandleRef.current;
+      const renderCountBeforeRerender = renderCount;
 
       act(() => {
         harness.rerenderWithSearch({
@@ -622,6 +707,9 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
 
       await waitFor(() => {
+        const renderDelta = renderCount - renderCountBeforeRerender;
+        expect(renderDelta).toBeGreaterThanOrEqual(5);
+        expect(renderDelta).toBeLessThan(120);
         expect(virtualizerHandleRef.current).toBe(initialHandle);
       });
     } finally {

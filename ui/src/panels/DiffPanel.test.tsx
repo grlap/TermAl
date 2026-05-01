@@ -718,33 +718,85 @@ describe("DiffPanel", () => {
     expect(changeCounter).toBeInTheDocument();
     expect(changeCounter).toHaveAttribute("aria-live", "polite");
     expect(changeCounter).toHaveAttribute("aria-atomic", "true");
+    const originalScrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "scrollIntoView",
+    );
+    const originalHtmlScrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView",
+    );
+    const scrollIntoViewCalls: Array<{
+      element: Element;
+      options?: boolean | ScrollIntoViewOptions;
+    }> = [];
+    const recordScrollIntoView = function recordScrollIntoView(
+      this: Element,
+      options?: boolean | ScrollIntoViewOptions,
+    ) {
+      scrollIntoViewCalls.push({ element: this, options });
+    };
+    const scrolledChangeIndexes = () =>
+      scrollIntoViewCalls
+        .filter(
+          ({ options }) =>
+            typeof options === "object" &&
+            options !== null &&
+            options.block === "center",
+        )
+        .map(({ element }) =>
+          (element as HTMLElement).dataset.markdownDiffChangeIndex ?? null,
+        );
 
-    // Stub scrollIntoView so the test environment can record nav
-    // intent without depending on a real layout.
-    const scrollIntoViewMock = vi.fn();
-    blocks.forEach((block) => {
-      block.scrollIntoView = scrollIntoViewMock;
-    });
+    try {
+      Object.defineProperty(Element.prototype, "scrollIntoView", {
+        configurable: true,
+        value: recordScrollIntoView,
+      });
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+        configurable: true,
+        value: recordScrollIntoView,
+      });
 
-    // Next: 1 → 2, second block scrolled into view.
-    await clickAndSettle(screen.getByRole("button", { name: "Next change" }));
-    expect(screen.getByText("Change 2 of 2")).toBeInTheDocument();
-    expect(scrollIntoViewMock).toHaveBeenLastCalledWith({ block: "center" });
+      // Next: 1 -> 2, second block scrolled into view.
+      await clickAndSettle(screen.getByRole("button", { name: "Next change" }));
+      expect(screen.getByText("Change 2 of 2")).toBeInTheDocument();
+      expect(scrolledChangeIndexes()).toEqual(["1"]);
 
-    // Next at the end wraps to 1, first block scrolled into view.
-    await clickAndSettle(screen.getByRole("button", { name: "Next change" }));
-    expect(screen.getByText("Change 1 of 2")).toBeInTheDocument();
-    expect(scrollIntoViewMock).toHaveBeenCalledTimes(2);
+      // Next at the end wraps to 1, first block scrolled into view.
+      await clickAndSettle(screen.getByRole("button", { name: "Next change" }));
+      expect(screen.getByText("Change 1 of 2")).toBeInTheDocument();
+      expect(scrolledChangeIndexes()).toEqual(["1", "0"]);
 
-    // Previous: 1 → wraps to 2.
-    await clickAndSettle(screen.getByRole("button", { name: "Previous change" }));
-    expect(screen.getByText("Change 2 of 2")).toBeInTheDocument();
-    expect(scrollIntoViewMock).toHaveBeenCalledTimes(3);
+      // Previous: 1 wraps to 2.
+      await clickAndSettle(screen.getByRole("button", { name: "Previous change" }));
+      expect(screen.getByText("Change 2 of 2")).toBeInTheDocument();
+      expect(scrolledChangeIndexes()).toEqual(["1", "0", "1"]);
 
-    // Previous: 2 → 1.
-    await clickAndSettle(screen.getByRole("button", { name: "Previous change" }));
-    expect(screen.getByText("Change 1 of 2")).toBeInTheDocument();
-    expect(scrollIntoViewMock).toHaveBeenCalledTimes(4);
+      // Previous: 2 -> 1.
+      await clickAndSettle(screen.getByRole("button", { name: "Previous change" }));
+      expect(screen.getByText("Change 1 of 2")).toBeInTheDocument();
+      expect(scrolledChangeIndexes()).toEqual(["1", "0", "1", "0"]);
+    } finally {
+      if (originalScrollIntoViewDescriptor) {
+        Object.defineProperty(
+          Element.prototype,
+          "scrollIntoView",
+          originalScrollIntoViewDescriptor,
+        );
+      } else {
+        delete (Element.prototype as Partial<Element>).scrollIntoView;
+      }
+      if (originalHtmlScrollIntoViewDescriptor) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollIntoView",
+          originalHtmlScrollIntoViewDescriptor,
+        );
+      } else {
+        delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+      }
+    }
   });
 
   it("preserves scroll offsets when switching between file and rendered Markdown diff views", async () => {
