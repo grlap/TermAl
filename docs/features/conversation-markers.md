@@ -9,6 +9,8 @@ conversation. They let the user mark important points in a long transcript,
 name and color those points, jump between them, and optionally ask agents to
 use them as context boundaries.
 
+Related feature: [Conversation Overview Map](conversation-overview-map.md).
+
 ## Problem
 
 TermAl conversations can become long quickly: streamed reasoning, tool output,
@@ -282,9 +284,24 @@ Marker changes should be delta-friendly.
 
 ```ts
 type SessionMarkerDelta =
-  | { type: "markerCreated"; sessionId: string; marker: ConversationMarker }
-  | { type: "markerUpdated"; sessionId: string; marker: ConversationMarker }
-  | { type: "markerDeleted"; sessionId: string; markerId: string };
+  | {
+      type: "markerCreated";
+      revision: number;
+      sessionId: string;
+      marker: ConversationMarker;
+    }
+  | {
+      type: "markerUpdated";
+      revision: number;
+      sessionId: string;
+      marker: ConversationMarker;
+    }
+  | {
+      type: "markerDeleted";
+      revision: number;
+      sessionId: string;
+      markerId: string;
+    };
 ```
 
 Frontend application rules:

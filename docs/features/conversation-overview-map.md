@@ -13,6 +13,8 @@ This is a separate feature from Conversation Markers. Markers are durable
 semantic anchors; the overview map is a navigation surface over the whole
 transcript.
 
+Related feature: [Conversation Markers](conversation-markers.md).
+
 ## Problem
 
 Long TermAl sessions are hard to reason about from the normal chat viewport.

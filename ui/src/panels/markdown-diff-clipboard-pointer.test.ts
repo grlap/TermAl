@@ -143,6 +143,7 @@ describe("markdown-diff-clipboard-pointer", () => {
         documentWithCaret.caretPositionFromPoint =
           originalCaretPositionFromPoint;
       }
+      document.getSelection()?.removeAllRanges();
     }
   });
 

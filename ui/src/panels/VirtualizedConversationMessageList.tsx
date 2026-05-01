@@ -93,6 +93,8 @@ export type RenderMessageCard = (
 ) => JSX.Element | null;
 
 export type VirtualizedConversationJumpOptions = {
+  // `center` is the default. `flush` is for callers that need the target DOM
+  // mounted before the next browser paint.
   align?: "start" | "center" | "end";
   flush?: boolean;
 };
@@ -103,12 +105,17 @@ export type VirtualizedConversationLayoutMessage = {
   pageIndex: number;
   type: Message["type"];
   author: Message["author"];
+  // Estimated document-space top; per-message geometry is not measured.
   estimatedTopPx: number;
   estimatedHeightPx: number;
+  // Page-level measurement reused for every message in the page until null
+  // means the page has not been measured yet.
   measuredPageHeightPx: number | null;
 };
 
 export type VirtualizedConversationLayoutSnapshot = {
+  // A point-in-time snapshot for overview/marker navigation. Identity changes
+  // as layout and scroll state changes; it is not a subscription object.
   sessionId: string;
   messageCount: number;
   estimatedTotalHeightPx: number;
@@ -123,6 +130,8 @@ export type VirtualizedConversationLayoutSnapshot = {
 
 export type VirtualizedConversationMessageListHandle = {
   getLayoutSnapshot: () => VirtualizedConversationLayoutSnapshot;
+  // Returns false when the list is inactive, the scroll node is missing, or the
+  // target cannot be resolved from the currently loaded transcript.
   jumpToMessageId: (
     messageId: string,
     options?: VirtualizedConversationJumpOptions,
@@ -134,6 +143,7 @@ export type VirtualizedConversationMessageListHandle = {
 };
 
 export type VirtualizedConversationMessageListHandleRef = {
+  // Set while the list is mounted; cleared on unmount.
   current: VirtualizedConversationMessageListHandle | null;
 };
 
@@ -157,7 +167,7 @@ const MIN_PAGE_COVERAGE_HEIGHT_PX = 64;
 
 const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
 
-type VirtualizedRange = { startIndex: number; endIndex: number };
+export type VirtualizedRange = { startIndex: number; endIndex: number };
 type UserScrollKind = "incremental" | "page_jump" | "seek" | null;
 type MessageLocation = {
   message: Message;
@@ -393,10 +403,14 @@ export function VirtualizedConversationMessageList({
     conversationSearchActiveItemKey?.startsWith("message:")
       ? conversationSearchActiveItemKey.slice("message:".length)
       : null;
-  const activeConversationSearchPinKey =
-    hasConversationSearch && activeConversationSearchMessageId !== null
-      ? `${activeConversationSearchMessageId}\n${conversationSearchQuery.trim()}`
-      : null;
+  const activeConversationSearchPinKey = useMemo(() => {
+    const trimmedQuery = conversationSearchQuery.trim();
+    if (trimmedQuery.length === 0 || activeConversationSearchMessageId === null) {
+      return null;
+    }
+
+    return JSON.stringify([sessionId, activeConversationSearchMessageId, trimmedQuery]);
+  }, [activeConversationSearchMessageId, conversationSearchQuery, sessionId]);
 
   const pageHeightsRef = useRef<Record<string, number>>({});
   const estimatedPageHeightsRef = useRef<Record<string, EstimatedPageHeightEntry>>(
@@ -405,7 +419,8 @@ export function VirtualizedConversationMessageList({
   const shouldKeepBottomAfterLayoutRef = useRef(false);
   const isDetachedFromBottomRef = useRef(false);
   const skipNextMountedPrependRestoreRef = useRef(false);
-  const lastPinnedConversationSearchIdRef = useRef<string | null>(null);
+  const lastPinnedConversationSearchPinKeyRef = useRef<string | null>(null);
+  const activeConversationSearchPinKeyRef = useRef<string | null>(null);
   const lastUserScrollInputTimeRef = useRef(Number.NEGATIVE_INFINITY);
   const lastUserScrollKindRef = useRef<UserScrollKind>(null);
   const lastTouchClientYRef = useRef<number | null>(null);
@@ -435,6 +450,7 @@ export function VirtualizedConversationMessageList({
   const pendingBottomBoundarySeekRef = useRef(false);
   const renderedListRef = useRef<HTMLDivElement | null>(null);
   const hasUserScrollInteractionRef = useRef(false);
+  activeConversationSearchPinKeyRef.current = activeConversationSearchPinKey;
 
   const [viewport, setViewport] = useState({
     height: DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
@@ -464,13 +480,25 @@ export function VirtualizedConversationMessageList({
       current === nextValue ? current : nextValue,
     );
   }, []);
+  // Search navigation keeps the active result's page band mounted until the
+  // reader takes control. A real user scroll releases that exact selection,
+  // and changing the active key clears the release so the next selected result
+  // can pin again. The key is JSON encoded to avoid separator assumptions
+  // across session id, message id, and query text.
   const releaseConversationSearchPinForUserScroll = useCallback(() => {
-    if (activeConversationSearchPinKey === null) {
+    const pinKey = activeConversationSearchPinKeyRef.current;
+    if (pinKey === null) {
       return;
     }
 
     setReleasedConversationSearchPinKey((current) =>
-      current === activeConversationSearchPinKey ? current : activeConversationSearchPinKey,
+      current === pinKey ? current : pinKey,
+    );
+  }, []);
+
+  useEffect(() => {
+    setReleasedConversationSearchPinKey((current) =>
+      current !== null && current !== activeConversationSearchPinKey ? null : current,
     );
   }, [activeConversationSearchPinKey]);
 
@@ -886,7 +914,9 @@ export function VirtualizedConversationMessageList({
   const activeMountedBufferBelowPxRef = useRef(activeMountedBufferBelowPx);
   activeMountedBufferBelowPxRef.current = activeMountedBufferBelowPx;
 
-  const searchPinnedMountedPageRange = (() => {
+  // See the search pin state-machine comment above
+  // `releaseConversationSearchPinForUserScroll`.
+  const searchPinnedMountedPageRange = useMemo(() => {
     if (
       !isActive ||
       !hasConversationSearch ||
@@ -909,7 +939,19 @@ export function VirtualizedConversationMessageList({
       startIndex: baseRange.startIndex,
       endIndex: Math.min(baseRange.endIndex + ACTIVE_MOUNTED_EXTRA_PAGES_BELOW, pages.length),
     };
-  })();
+  }, [
+    activeConversationSearchPinKey,
+    activeConversationSearchScrollTop,
+    activeMountedBufferAbovePx,
+    activeMountedBufferBelowPx,
+    hasConversationSearch,
+    isActive,
+    pageHeights,
+    pageLayout.tops,
+    pages.length,
+    releasedConversationSearchPinKey,
+    viewportHeight,
+  ]);
   const renderedMountedPageRange = useMemo(() => {
     return searchPinnedMountedPageRange ?? mountedPageRange;
   }, [mountedPageRange, searchPinnedMountedPageRange]);
@@ -1695,14 +1737,15 @@ export function VirtualizedConversationMessageList({
     if (
       !isActive ||
       !hasConversationSearch ||
+      !activeConversationSearchPinKey ||
       !activeConversationSearchMessageId ||
       activeConversationSearchScrollTop === null
     ) {
-      lastPinnedConversationSearchIdRef.current = null;
+      lastPinnedConversationSearchPinKeyRef.current = null;
       return;
     }
 
-    if (lastPinnedConversationSearchIdRef.current === activeConversationSearchMessageId) {
+    if (lastPinnedConversationSearchPinKeyRef.current === activeConversationSearchPinKey) {
       return;
     }
 
@@ -1753,9 +1796,10 @@ export function VirtualizedConversationMessageList({
       shouldKeepBottomAfterLayoutRef.current = false;
     }
     writeScrollTopAndSyncViewport(node, nextScrollTop);
-    lastPinnedConversationSearchIdRef.current = activeConversationSearchMessageId;
+    lastPinnedConversationSearchPinKeyRef.current = activeConversationSearchPinKey;
   }, [
     activeConversationSearchMessageId,
+    activeConversationSearchPinKey,
     activeConversationSearchScrollTop,
     applyMountedPageRange,
     buildWorkingMountedRangeForScrollTop,
