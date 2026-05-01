@@ -69,6 +69,10 @@ async fn put_review(
 ) -> Result<Json<ReviewDocumentResponse>, ApiError> {
     validate_review_change_set_id(&change_set_id)?;
     let response = run_blocking_api(move || {
+        state.ensure_read_only_delegation_allows_session_write_action(
+            query.session_id.as_deref(),
+            "review document writes",
+        )?;
         if let Some(scope) = state
             .remote_scope_for_request(query.session_id.as_deref(), query.project_id.as_deref())?
         {

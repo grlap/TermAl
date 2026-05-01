@@ -521,8 +521,20 @@ async fn create_session(
 async fn create_session_delegation(
     AxumPath(parent_session_id): AxumPath<String>,
     State(state): State<AppState>,
-    Json(request): Json<CreateDelegationRequest>,
+    request: Result<Json<CreateDelegationRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<DelegationResponse>), ApiError> {
+    let Json(request) = request.map_err(|rejection| {
+        let status = match &rejection {
+            JsonRejection::JsonDataError(_) | JsonRejection::JsonSyntaxError(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            _ => rejection.status(),
+        };
+        ApiError::from_status(
+            status,
+            format!("invalid delegation request JSON: {}", rejection.body_text()),
+        )
+    })?;
     let response =
         run_blocking_api(move || state.create_read_only_delegation(&parent_session_id, request))
             .await?;

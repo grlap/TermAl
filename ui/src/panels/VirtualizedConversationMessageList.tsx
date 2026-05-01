@@ -1401,13 +1401,23 @@ export function VirtualizedConversationMessageList({
     visiblePageRange,
   ]);
 
-  const virtualizerHandleStateRef = useRef({
-    buildLayoutSnapshot,
-    jumpToMessageLocation,
-    messageLocationById,
-    messagesLength: messages.length,
-    pages,
-  });
+  type VirtualizerHandleState = {
+    buildLayoutSnapshot: typeof buildLayoutSnapshot;
+    jumpToMessageLocation: typeof jumpToMessageLocation;
+    messageLocationById: typeof messageLocationById;
+    messagesLength: number;
+    pages: typeof pages;
+  };
+  const virtualizerHandleStateRef = useRef<VirtualizerHandleState | null>(null);
+  if (virtualizerHandleStateRef.current === null) {
+    virtualizerHandleStateRef.current = {
+      buildLayoutSnapshot,
+      jumpToMessageLocation,
+      messageLocationById,
+      messagesLength: messages.length,
+      pages,
+    };
+  }
   useLayoutEffect(() => {
     virtualizerHandleStateRef.current = {
       buildLayoutSnapshot,
@@ -1423,19 +1433,26 @@ export function VirtualizedConversationMessageList({
     messages.length,
     pages,
   ]);
+  const readVirtualizerHandleState = useCallback(() => {
+    const state = virtualizerHandleStateRef.current;
+    if (state === null) {
+      throw new Error("virtualizer handle state is not initialized");
+    }
+    return state;
+  }, []);
   const virtualizerStableHandle = useMemo<VirtualizedConversationMessageListHandle>(
     () => ({
       getLayoutSnapshot: () =>
-        virtualizerHandleStateRef.current.buildLayoutSnapshot(),
+        readVirtualizerHandleState().buildLayoutSnapshot(),
       jumpToMessageId: (messageId, options) => {
         const { jumpToMessageLocation, messageLocationById } =
-          virtualizerHandleStateRef.current;
+          readVirtualizerHandleState();
         const location = messageLocationById.get(messageId);
         return location ? jumpToMessageLocation(location, options) : false;
       },
       jumpToMessageIndex: (messageIndex, options) => {
         const { jumpToMessageLocation, messagesLength, pages } =
-          virtualizerHandleStateRef.current;
+          readVirtualizerHandleState();
         if (
           !Number.isInteger(messageIndex) ||
           messageIndex < 0 ||
@@ -1467,7 +1484,7 @@ export function VirtualizedConversationMessageList({
         );
       },
     }),
-    [],
+    [readVirtualizerHandleState],
   );
 
   useLayoutEffect(() => {

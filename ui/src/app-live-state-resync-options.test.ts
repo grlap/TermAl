@@ -49,9 +49,31 @@ describe("state resync option coalescing", () => {
       rearmUntilLiveEventOnSuccess: true,
       rearmAfterSameInstanceProgressUntilLiveEvent: true,
       confirmReconnectRecoveryOnAdoption: true,
-      forceAdoptEqualOrNewerRevision: 5,
+      forceAdoptEqualOrNewerRevision: 7,
       rearmOnFailure: true,
     });
+  });
+
+  it("raises the forced adoption revision floor across coalesced requests", () => {
+    const first = coalescePendingStateResyncOptions(null, {
+      forceAdoptEqualOrNewerRevision: 5,
+    });
+    const second = coalescePendingStateResyncOptions(first, {
+      forceAdoptEqualOrNewerRevision: 7,
+    });
+
+    expect(second.forceAdoptEqualOrNewerRevision).toBe(7);
+  });
+
+  it("keeps the higher forced adoption revision floor when later requests are lower", () => {
+    const first = coalescePendingStateResyncOptions(null, {
+      forceAdoptEqualOrNewerRevision: 7,
+    });
+    const second = coalescePendingStateResyncOptions(first, {
+      forceAdoptEqualOrNewerRevision: 5,
+    });
+
+    expect(second.forceAdoptEqualOrNewerRevision).toBe(7);
   });
 
   it("retains live-event rearming across coalesced narrower requests", () => {
@@ -82,6 +104,18 @@ describe("state resync option coalescing", () => {
       confirmReconnectRecoveryOnAdoption: true,
       preserveWatchdogCooldown: true,
     });
+  });
+
+  it("upgrades reconnect confirmation-on-adoption from false to true", () => {
+    const first = coalescePendingStateResyncOptions(null, {
+      confirmReconnectRecoveryOnAdoption: false,
+    });
+    const second = coalescePendingStateResyncOptions(first, {
+      confirmReconnectRecoveryOnAdoption: true,
+    });
+
+    expect(first.confirmReconnectRecoveryOnAdoption).toBe(false);
+    expect(second.confirmReconnectRecoveryOnAdoption).toBe(true);
   });
 
   it("keeps the pending navigation target until another explicit session target replaces it", () => {

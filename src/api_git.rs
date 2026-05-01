@@ -86,11 +86,49 @@ async fn read_git_diff(
 }
 
 /// Applies Git file action.
+fn ensure_git_repo_root_write_allowed(
+    state: &AppState,
+    session_id: Option<&str>,
+    project_id: Option<&str>,
+    repo_root: &FsPath,
+    action: &str,
+) -> Result<(), ApiError> {
+    let repo_root = repo_root.to_string_lossy();
+    state.ensure_read_only_delegation_allows_write_action(
+        session_id,
+        project_id,
+        Some(repo_root.as_ref()),
+        action,
+    )
+}
+
+fn ensure_git_path_write_allowed(
+    state: &AppState,
+    session_id: Option<&str>,
+    project_id: Option<&str>,
+    repo_root: &FsPath,
+    relative_path: &FsPath,
+    action: &str,
+) -> Result<(), ApiError> {
+    let target_path = repo_root.join(relative_path);
+    let target_path = target_path.to_string_lossy();
+    state.ensure_read_only_delegation_allows_write_action(
+        session_id,
+        project_id,
+        Some(target_path.as_ref()),
+        action,
+    )
+}
+
 async fn apply_git_file_action(
     State(state): State<AppState>,
     Json(request): Json<GitFileActionRequest>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
     let response = run_blocking_api(move || {
+        state.ensure_read_only_delegation_allows_session_write_action(
+            request.session_id.as_deref(),
+            "git file actions",
+        )?;
         if let Some(scope) = state.remote_scope_for_request(
             request.session_id.as_deref(),
             request.project_id.as_deref(),
@@ -120,6 +158,13 @@ async fn apply_git_file_action(
         let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
             return Err(ApiError::bad_request("no git repository found"));
         };
+        ensure_git_repo_root_write_allowed(
+            &state,
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+            &repo_root,
+            "git file actions",
+        )?;
 
         let current_path = normalize_git_repo_relative_path(&request.path)?;
         let original_path = request
@@ -127,6 +172,24 @@ async fn apply_git_file_action(
             .as_deref()
             .map(normalize_git_repo_relative_path)
             .transpose()?;
+        ensure_git_path_write_allowed(
+            &state,
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+            &repo_root,
+            FsPath::new(&current_path),
+            "git file actions",
+        )?;
+        if let Some(original_path) = original_path.as_deref() {
+            ensure_git_path_write_allowed(
+                &state,
+                request.session_id.as_deref(),
+                request.project_id.as_deref(),
+                &repo_root,
+                FsPath::new(original_path),
+                "git file actions",
+            )?;
+        }
 
         match request.action {
             GitFileAction::Stage => {
@@ -168,6 +231,10 @@ async fn commit_git_changes(
     Json(request): Json<GitCommitRequest>,
 ) -> Result<Json<GitCommitResponse>, ApiError> {
     let response = run_blocking_api(move || {
+        state.ensure_read_only_delegation_allows_session_write_action(
+            request.session_id.as_deref(),
+            "git commits",
+        )?;
         if let Some(scope) = state.remote_scope_for_request(
             request.session_id.as_deref(),
             request.project_id.as_deref(),
@@ -194,6 +261,13 @@ async fn commit_git_changes(
         let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
             return Err(ApiError::bad_request("no git repository found"));
         };
+        ensure_git_repo_root_write_allowed(
+            &state,
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+            &repo_root,
+            "git commits",
+        )?;
 
         let message = request.message.trim();
         if message.is_empty() {
@@ -239,6 +313,10 @@ async fn push_git_changes(
     Json(request): Json<GitRepoActionRequest>,
 ) -> Result<Json<GitRepoActionResponse>, ApiError> {
     let response = run_blocking_api(move || {
+        state.ensure_read_only_delegation_allows_session_write_action(
+            request.session_id.as_deref(),
+            "git pushes",
+        )?;
         if let Some(scope) = state.remote_scope_for_request(
             request.session_id.as_deref(),
             request.project_id.as_deref(),
@@ -260,6 +338,15 @@ async fn push_git_changes(
         )?;
 
         let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
+        if let Some(repo_root) = resolve_git_repo_root(&workdir)? {
+            ensure_git_repo_root_write_allowed(
+                &state,
+                request.session_id.as_deref(),
+                request.project_id.as_deref(),
+                &repo_root,
+                "git pushes",
+            )?;
+        }
         push_git_repo(&workdir)
     })
     .await?;
@@ -272,6 +359,10 @@ async fn sync_git_changes(
     Json(request): Json<GitRepoActionRequest>,
 ) -> Result<Json<GitRepoActionResponse>, ApiError> {
     let response = run_blocking_api(move || {
+        state.ensure_read_only_delegation_allows_session_write_action(
+            request.session_id.as_deref(),
+            "git sync",
+        )?;
         if let Some(scope) = state.remote_scope_for_request(
             request.session_id.as_deref(),
             request.project_id.as_deref(),
@@ -293,6 +384,15 @@ async fn sync_git_changes(
         )?;
 
         let workdir = resolve_existing_requested_path(&request.workdir, "path")?;
+        if let Some(repo_root) = resolve_git_repo_root(&workdir)? {
+            ensure_git_repo_root_write_allowed(
+                &state,
+                request.session_id.as_deref(),
+                request.project_id.as_deref(),
+                &repo_root,
+                "git sync",
+            )?;
+        }
         sync_git_repo(&workdir)
     })
     .await?;

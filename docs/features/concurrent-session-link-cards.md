@@ -6,6 +6,10 @@ Exploratory. Codex subagent and parallel-agent messages are implemented as
 structured cards, but the explicit linked-session card workflow described here
 is still future design work.
 
+Related:
+- [Agent Delegation Sessions](./agent-delegation-sessions.md) - a bounded
+  parent-child workflow that can reuse linked-session card presentation.
+
 This brief describes a message type that represents another agent session
 linked from the current conversation. The linked sessions remain fully
 disjoined; the card is purely a graphical representation, a UI convenience

@@ -5,6 +5,9 @@ Backlog source: [`docs/bugs.md`](../bugs.md)
 The detailed diff-preview and review-plan content below was moved out of `docs/bugs.md`.
 
 Related:
+- [Agent Delegation Sessions](./agent-delegation-sessions.md) - read-only
+  reviewer delegations can consume or produce review findings around this
+  workflow.
 - [Markdown Document View](./markdown-document-view.md) — rendered
   Markdown diff editor underneath this workflow, with inline
   Mermaid / KaTeX rendering for review sessions.

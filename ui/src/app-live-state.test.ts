@@ -445,6 +445,65 @@ describe("delegation delta repair", () => {
     expect(fetchSession).not.toHaveBeenCalled();
   });
 
+  it("replays same-revision parent-card deltas after the state snapshot revision is current", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    const session = makeSession({
+      messagesLoaded: false,
+      messageCount: 1,
+      sessionMutationStamp: 2,
+    });
+    const fetchState = vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const params = makeLiveStateParams(session);
+    params.adoptionRefs.latestStateRevisionRef.current = 2;
+    params.adoptionRefs.sessionsRef.current = [session];
+
+    renderLiveStateHarness(params, () => {});
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "messageCreated",
+        revision: 2,
+        sessionId: session.id,
+        messageId: "parent-card",
+        messageIndex: 0,
+        messageCount: 1,
+        message: {
+          id: "parent-card",
+          type: "parallelAgents",
+          author: "assistant",
+          timestamp: "10:01",
+          agents: [
+            {
+              id: "delegation-1",
+              title: "Review",
+              status: "running",
+              summary: "Reviewing",
+            },
+          ],
+        },
+        preview: "Reviewing",
+        status: "idle",
+        sessionMutationStamp: 2,
+      });
+    });
+
+    const updated = params.adoptionRefs.sessionsRef.current[0];
+    expect(updated.messages).toHaveLength(1);
+    expect(updated.messages[0]?.id).toBe("parent-card");
+    expect(updated.messagesLoaded).toBe(true);
+    expect(fetchState).not.toHaveBeenCalled();
+  });
+
   it("keeps delegation repair pending when a newer delta lands before adoption", async () => {
     vi.stubGlobal(
       "EventSource",

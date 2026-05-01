@@ -2101,7 +2101,7 @@ describe("AgentSessionPanel conversation caching", () => {
   it("skips the bottom pin write only while the user is actively scrolling", async () => {
     // Regression guard for the "near-bottom streaming re-pins the
     // viewport and fights user scroll-up" symptom. Inside
-    // `USER_SCROLL_ADJUSTMENT_COOLDOWN_MS` (200 ms) of a `wheel` /
+    // `VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS` (200 ms) of a `wheel` /
     // `touchmove` / `keydown` event on the scroll container, a
     // streaming-driven height measurement must not snap `scrollTop`
     // back to the bottom — even when the user is still within the

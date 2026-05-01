@@ -35,7 +35,10 @@ to local or remote TermAl servers over SSH-managed tunnels.
 sessions only. Worker mode, writable worktree policies, and remote-backed
 delegation requests are well-formed but unimplemented and return `501 Not
 Implemented` so clients can treat them as feature-gated rather than malformed
-input.
+input. While a read-only delegation is running, local TermAl-mediated writes are
+blocked for the delegated project/workdir scope from any session, not just from
+the child session, so parent/sibling `sessionId` routing cannot bypass the
+read-only policy.
 
 ---
 
@@ -195,6 +198,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/codex/thread/rollback` | Roll back the live Codex thread |
 | GET | `/api/sessions/{id}/agent-commands` | Read local agent-command shortcuts |
 | POST | `/api/sessions/{id}/messages` | Send message |
+| POST | `/api/sessions/{id}/delegations` | Create a Phase 1 read-only child delegation session. Returns `201` with `DelegationResponse`; unsupported worker/writable/remote-backed variants return `501`, active-limit conflicts return `409`, handler-level prompt/scope validation returns `400`, and JSON schema/deserialization failures return `422`. |
 | POST | `/api/sessions/{id}/queued-prompts/{prompt_id}/cancel` | Cancel queued prompt |
 | POST | `/api/sessions/{id}/stop` | Stop active turn |
 | POST | `/api/sessions/{id}/kill` | Kill and remove session |
@@ -202,6 +206,9 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/user-input/{message_id}` | Submit structured Codex user-input answers |
 | POST | `/api/sessions/{id}/mcp-elicitation/{message_id}` | Submit an MCP elicitation response |
 | POST | `/api/sessions/{id}/codex/requests/{message_id}` | Reply to a generic Codex app-server request |
+| GET | `/api/delegations/{id}` | Read delegation metadata/status -> `DelegationStatusResponse`; unknown ids return `404`. |
+| GET | `/api/delegations/{id}/result` | Read a completed delegation result packet -> `DelegationResultResponse`; unknown ids return `404`, unfinished delegations return `409`. |
+| POST | `/api/delegations/{id}/cancel` | Cancel a running delegation child session -> `DelegationStatusResponse`; unknown ids return `404`. Terminal delegations are idempotent and return the current status. |
 
 For local sessions, `GET /api/sessions/{id}` is a local full-transcript read. For
 unloaded remote-proxy sessions, the same route synchronously calls the owning
@@ -299,6 +306,10 @@ DeltaEvent::MessageUpdated       { revision, session_id, message_id, message_ind
 DeltaEvent::SessionCreated       { revision, session_id, session } // metadata-first session summary; local + remote-proxied session creation; forwarded by remote backends after id localization
 DeltaEvent::CodexUpdated         { revision, codex } // latest process-global CodexState snapshot; remotes consume the revision for ordering but do not localize Codex state into proxy sessions
 DeltaEvent::OrchestratorsUpdated { revision, orchestrators[], sessions[] } // sessions[] contains metadata-first summaries for referenced sessions and is omitted on the wire when empty; IDs inside each instance are scoped to the originating server; translate via sync_remote_state_inner before forwarding remotely.
+DeltaEvent::DelegationCreated    { revision, delegation } // summary-safe delegation record for a newly spawned child session
+DeltaEvent::DelegationUpdated    { revision, delegation_id, status, updated_at } // lightweight lifecycle status transition; failed transitions require follow-up result fetch today
+DeltaEvent::DelegationCompleted  { revision, delegation_id, result, completed_at } // terminal completion with summary-safe result payload
+DeltaEvent::DelegationCanceled   { revision, delegation_id, canceled_at, reason? } // terminal cancellation status for parent-card and drawer updates
 ```
 
 For inbound remote session-scoped deltas, `session_mutation_stamp?` is a

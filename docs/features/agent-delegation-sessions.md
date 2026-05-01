@@ -173,6 +173,12 @@ TermAl creates:
 - parent delegation card
 - SSE update for both parent and child surfaces
 
+Phase 1 REST spawn does not park records in `queued`: it either creates a
+`running` delegation immediately or rejects with `409` when the per-parent
+active limit is full. `queued` is reserved for a future scheduler/throttle layer
+that would own the queued-to-running transition and emit `delegationUpdated`
+when dispatch actually starts.
+
 ### 2. Run
 
 The child runs like any other session.
@@ -379,6 +385,10 @@ be explicit about which guarantees are enforced and which are advisory.
 `readOnly`:
 - TermAl launches the child with the strictest available agent permission mode.
 - TermAl-mediated write/file/edit commands are disabled for the child.
+- While the read-only delegation is running, TermAl also blocks local
+  TermAl-mediated writes from parent or sibling sessions that target the same
+  project/workdir scope. This fail-closed project lock prevents bypassing a
+  reviewer delegation by switching session ids.
 - The final result records commands run and declares whether any file changes
   were observed.
 - If the underlying agent CLI cannot be hard-sandboxed, the UI must label the

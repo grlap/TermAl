@@ -14,10 +14,11 @@ async fn run_terminal_command(
 ) -> Result<Json<TerminalCommandResponse>, ApiError> {
     let command = validate_terminal_command(&request.command)?;
     let workdir_request = validate_terminal_workdir(&request.workdir)?;
-    state.ensure_read_only_delegation_allows_write_action(
+    // Phase 1 delegated children are local-only, so this cheap session gate
+    // catches child writes before remote routing. Project/workdir scope checks
+    // still run after routing decides the request is local.
+    state.ensure_read_only_delegation_allows_session_write_action(
         request.session_id.as_deref(),
-        request.project_id.as_deref(),
-        Some(&workdir_request),
         "terminal commands",
     )?;
 
@@ -125,6 +126,12 @@ async fn run_terminal_command(
         })?;
     let response = tokio::task::spawn_blocking(move || {
         let _permit = permit;
+        state.ensure_read_only_delegation_allows_write_action(
+            request.session_id.as_deref(),
+            request.project_id.as_deref(),
+            Some(&workdir_request),
+            "terminal commands",
+        )?;
         let workdir = resolve_project_scoped_requested_path(
             &state,
             request.session_id.as_deref(),
@@ -147,10 +154,11 @@ async fn run_terminal_command_stream(
 {
     let command = validate_terminal_command(&request.command)?;
     let workdir_request = validate_terminal_workdir(&request.workdir)?;
-    state.ensure_read_only_delegation_allows_write_action(
+    // Phase 1 delegated children are local-only, so this cheap session gate
+    // catches child writes before remote routing. Project/workdir scope checks
+    // still run after routing decides the request is local.
+    state.ensure_read_only_delegation_allows_session_write_action(
         request.session_id.as_deref(),
-        request.project_id.as_deref(),
-        Some(&workdir_request),
         "terminal commands",
     )?;
     let cancellation = Arc::new(AtomicBool::new(false));
@@ -255,6 +263,12 @@ async fn run_terminal_command_stream(
             let session_id = request.session_id.clone();
             let project_id = request.project_id.clone();
             move || {
+                state.ensure_read_only_delegation_allows_write_action(
+                    session_id.as_deref(),
+                    project_id.as_deref(),
+                    Some(&workdir_request),
+                    "terminal commands",
+                )?;
                 resolve_project_scoped_requested_path(
                     &state,
                     session_id.as_deref(),

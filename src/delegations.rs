@@ -1,12 +1,21 @@
 // Phase 1 delegation records: durable parent-child metadata plus read-only
-// child sessions. The child remains a normal session; this layer only owns the
-// parent card, lifecycle metadata, and compact result packet.
+// child sessions. The child remains a normal session; this layer owns parent
+// cards, lifecycle/result metadata, compact `/api/state` summaries, result
+// parsing, read-only guard integration, queue cleanup, and delegation SSE
+// deltas. It does not remote-forward delegation creation or implement writable
+// worker policies yet.
 
+// Keep prompts bounded because they are embedded into child-agent startup input.
 const MAX_DELEGATION_PROMPT_BYTES: usize = 64 * 1024;
+// Public summaries ride in `/api/state`; full summaries stay behind result reads.
 const MAX_DELEGATION_PUBLIC_SUMMARY_CHARS: usize = 1000;
+// Result packets are expected near the end of long assistant output.
 const DELEGATION_RESULT_PACKET_SEARCH_BYTES: usize = 32 * 1024;
+// Phase 1 starts children immediately but still enforces simple fan-out limits.
 const MAX_RUNNING_DELEGATIONS_PER_PARENT: usize = 4;
+// Keep nesting shallow until delegation ownership/scheduling is explicit.
 const MAX_DELEGATION_DEPTH: usize = 3;
+// Shared conflict text for create/cancel races before child dispatch starts.
 const DELEGATION_NO_LONGER_STARTABLE_MESSAGE: &str = "delegation is no longer running";
 #[cfg(test)]
 const TEST_FORCE_DELEGATION_START_FAILURE_PROMPT: &str =
@@ -116,18 +125,26 @@ impl AppState {
             ));
         }
 
-        let (parent_workdir, parent_project_id, parent_agent) = {
+        let (parent_workdir, parent_project_id, parent_agent, parent_is_remote_backed) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let parent_index = inner
                 .find_visible_session_index(&parent_session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
-            let parent = &inner.sessions[parent_index].session;
+            let parent_record = &inner.sessions[parent_index];
+            let parent = &parent_record.session;
             (
                 parent.workdir.clone(),
                 parent.project_id.clone(),
                 parent.agent,
+                parent_record.remote_id.is_some() || parent_record.remote_session_id.is_some(),
             )
         };
+        if parent_is_remote_backed {
+            return Err(ApiError::from_status(
+                StatusCode::NOT_IMPLEMENTED,
+                "delegations for remote-backed sessions are not implemented in Phase 1",
+            ));
+        }
 
         let requested_cwd = request
             .cwd
@@ -417,9 +434,13 @@ impl AppState {
         } else {
             mark_delegation_canceled_locked(&mut inner, index, None)
         };
-        let revision = self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!("failed to persist delegation cancelation: {err:#}"))
-        })?;
+        let revision = if lifecycle_delta.is_some() {
+            self.commit_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!("failed to persist delegation cancelation: {err:#}"))
+            })?
+        } else {
+            inner.revision
+        };
         let delegation = inner.delegations[index].clone();
         drop(inner);
         if let Some(delta) = lifecycle_delta {
@@ -459,40 +480,157 @@ impl AppState {
         if session_id.is_none() && project_id.is_none() && workdir.is_none() {
             return Ok(());
         }
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        let blocked = if let Some(session_id) = session_id {
-            let Some(session_index) = inner.find_visible_session_index(session_id) else {
-                return Ok(());
-            };
-            let Some(delegation_id) = inner.sessions[session_index]
-                .session
-                .parent_delegation_id
-                .as_deref()
-            else {
-                return Ok(());
-            };
-            inner
-                .delegations
-                .iter()
-                .find(|delegation| delegation.id == delegation_id)
-                .map(|delegation| delegation.write_policy == DelegationWritePolicy::ReadOnly)
-                .unwrap_or(true)
-        } else {
-            inner.delegations.iter().any(|delegation| {
-                !delegation_is_terminal(delegation.status)
-                    && delegation.write_policy == DelegationWritePolicy::ReadOnly
-                    && inner
-                        .find_session_index(&delegation.child_session_id)
-                        .and_then(|index| inner.sessions.get(index))
-                        .is_some_and(|record| {
-                            delegation_write_scope_matches_record(record, project_id, workdir)
+        let (
+            blocked_by_session_delegation,
+            mut write_targets,
+            delegated_write_scopes,
+            local_projects,
+        ) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let blocked_by_session_delegation =
+                read_only_session_delegation_block_locked(&inner, session_id);
+            if blocked_by_session_delegation.is_some() {
+                (
+                    blocked_by_session_delegation,
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                )
+            } else {
+                // Missing/non-visible sessions do not short-circuit here: explicit
+                // project/workdir scope may still overlap a running delegation.
+                let session_record = session_id
+                    .and_then(|session_id| inner.find_visible_session_index(session_id))
+                    .and_then(|session_index| inner.sessions.get(session_index));
+
+                let mut write_targets = Vec::new();
+                if project_id.is_some() || workdir.is_some() {
+                    write_targets.push(DelegationWriteTarget {
+                        project_id: project_id.map(str::to_owned),
+                        workdir: workdir.map(str::to_owned),
+                    });
+                }
+                if let Some(record) = session_record {
+                    let session_workdir = record.session.workdir.trim();
+                    write_targets.push(DelegationWriteTarget {
+                        project_id: record.session.project_id.clone(),
+                        workdir: if session_workdir.is_empty() {
+                            None
+                        } else {
+                            Some(session_workdir.to_owned())
+                        },
+                    });
+                }
+
+                let delegated_write_scopes = if write_targets
+                    .iter()
+                    .any(|target| target.project_id.is_some() || target.workdir.is_some())
+                {
+                    inner
+                        .delegations
+                        .iter()
+                        .filter_map(|delegation| {
+                            if delegation_is_terminal(delegation.status)
+                                || delegation.write_policy != DelegationWritePolicy::ReadOnly
+                            {
+                                return None;
+                            }
+
+                            let session_scope = inner
+                                .find_session_index(&delegation.child_session_id)
+                                .and_then(|index| inner.sessions.get(index));
+                            let (project_id, workdir) = session_scope
+                                .map(|record| {
+                                    (
+                                        record.session.project_id.clone(),
+                                        record.session.workdir.trim().to_owned(),
+                                    )
+                                })
+                                .unwrap_or_else(|| (None, delegation.cwd.trim().to_owned()));
+                            Some(DelegationWriteScope {
+                                title: delegation.title.clone(),
+                                project_id,
+                                workdir,
+                            })
                         })
-            })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let needs_local_project_inference = write_targets.iter().any(|target| {
+                    target.workdir.is_some()
+                        || (target.project_id.is_some() && target.workdir.is_none())
+                });
+                let local_projects: Vec<LocalProjectWriteScope> =
+                    if needs_local_project_inference {
+                        inner
+                            .projects
+                            .iter()
+                            .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
+                            .filter_map(|project| {
+                                let root_path = project.root_path.trim();
+                                (!root_path.is_empty()).then(|| LocalProjectWriteScope {
+                                    project_id: project.id.clone(),
+                                    root_path: root_path.to_owned(),
+                                })
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                (
+                    blocked_by_session_delegation,
+                    write_targets,
+                    delegated_write_scopes,
+                    local_projects,
+                )
+            }
         };
-        if blocked {
+        append_local_project_write_targets(&mut write_targets, &local_projects);
+        let blocked_by_scope_delegation = delegated_write_scopes
+            .iter()
+            .find(|scope| {
+                write_targets.iter().any(|target| {
+                    delegation_write_scope_matches(
+                        scope,
+                        target.project_id.as_deref(),
+                        target.workdir.as_deref(),
+                    )
+                })
+            });
+        if blocked_by_session_delegation.is_some() || blocked_by_scope_delegation.is_some() {
+            let delegation_title = blocked_by_session_delegation
+                .and_then(|block| block.title)
+                .or_else(|| blocked_by_scope_delegation.map(|scope| scope.title.clone()));
+            let detail = delegation_title
+                .map(|title| format!(" while read-only delegation `{title}` is running"))
+                .unwrap_or_else(|| {
+                    " while an expired read-only delegation is still attached".to_owned()
+                });
             return Err(ApiError::from_status(
                 StatusCode::FORBIDDEN,
-                format!("{action} is disabled for read-only delegated sessions"),
+                format!("{action} is disabled for read-only delegated sessions{detail}"),
+            ));
+        }
+        Ok(())
+    }
+
+    fn ensure_read_only_delegation_allows_session_write_action(
+        &self,
+        session_id: Option<&str>,
+        action: &str,
+    ) -> Result<(), ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        if let Some(block) = read_only_session_delegation_block_locked(&inner, session_id) {
+            let detail = block
+                .title
+                .map(|title| format!(" while read-only delegation `{title}` is running"))
+                .unwrap_or_else(|| {
+                    " while an expired read-only delegation is still attached".to_owned()
+                });
+            return Err(ApiError::from_status(
+                StatusCode::FORBIDDEN,
+                format!("{action} is disabled for read-only delegated sessions{detail}"),
             ));
         }
         Ok(())
@@ -504,20 +642,22 @@ impl AppState {
         delegation_id: &str,
         child_session_id: &str,
         detail: &str,
-    ) -> Result<(u64, DelegationRecord), ApiError> {
-        let (revision, delegation, lifecycle_delta, runtime_to_kill) = {
+    ) -> Result<(), ApiError> {
+        let (revision, lifecycle_delta, runtime_to_kill) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_delegation_index(delegation_id)
                 .ok_or_else(|| ApiError::not_found("delegation not found"))?;
-            let lifecycle_delta = mark_delegation_failed_locked(&mut inner, index, detail);
+            let Some(lifecycle_delta) = mark_delegation_failed_locked(&mut inner, index, detail)
+            else {
+                return Ok(());
+            };
             let runtime_to_kill =
                 detach_delegation_child_runtime_locked(&mut inner, child_session_id);
             let revision = self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist delegation failure: {err:#}"))
             })?;
-            let delegation = inner.delegations[index].clone();
-            (revision, delegation, lifecycle_delta, runtime_to_kill)
+            (revision, lifecycle_delta, runtime_to_kill)
         };
 
         if let Some(runtime) = runtime_to_kill {
@@ -527,10 +667,8 @@ impl AppState {
                 eprintln!("delegation cleanup warning> {err:#}");
             }
         }
-        if let Some(delta) = lifecycle_delta {
-            self.publish_delegation_lifecycle_delta(revision, delta);
-        }
-        Ok((revision, delegation))
+        self.publish_delegation_lifecycle_delta(revision, lifecycle_delta);
+        Ok(())
     }
 
     fn publish_delegation_lifecycle_delta(&self, revision: u64, delta: DelegationLifecycleDelta) {
@@ -996,12 +1134,11 @@ fn mark_delegation_failed_locked(
     record.status = DelegationStatus::Failed;
     record.completed_at = Some(completed_at.clone());
     record.result = Some(result);
+    clear_delegation_child_queue_locked(inner, &delegation.child_session_id);
     if let Some(child_index) = inner.find_session_index(&delegation.child_session_id) {
         let child = inner
             .session_mut_by_index(child_index)
             .expect("child session index should be valid");
-        child.queued_prompts.clear();
-        sync_pending_prompts(child);
         child.session.status = SessionStatus::Error;
         child.session.preview = public_summary.clone();
     }
@@ -1045,12 +1182,11 @@ fn mark_delegation_canceled_locked(
     record.status = DelegationStatus::Canceled;
     record.completed_at = Some(canceled_at.clone());
     record.result = Some(result);
+    clear_delegation_child_queue_locked(inner, &delegation.child_session_id);
     if let Some(child_index) = inner.find_session_index(&delegation.child_session_id) {
         let child = inner
             .session_mut_by_index(child_index)
             .expect("child session index should be valid");
-        child.queued_prompts.clear();
-        sync_pending_prompts(child);
         child.session.preview = public_summary.clone();
     }
     let parent_card_delta = update_parent_delegation_card_locked(
@@ -1200,18 +1336,108 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
     }
 }
 
-fn delegation_write_scope_matches_record(
-    record: &SessionRecord,
+struct DelegationWriteScope {
+    title: String,
+    project_id: Option<String>,
+    workdir: String,
+}
+
+struct DelegationWriteTarget {
+    project_id: Option<String>,
+    workdir: Option<String>,
+}
+
+struct LocalProjectWriteScope {
+    project_id: String,
+    root_path: String,
+}
+
+struct DelegationWriteBlock {
+    title: Option<String>,
+}
+
+fn append_local_project_write_targets(
+    write_targets: &mut Vec<DelegationWriteTarget>,
+    local_projects: &[LocalProjectWriteScope],
+) {
+    let mut inferred_targets = Vec::new();
+    for target in write_targets.iter() {
+        if let Some(project_id) = target.project_id.as_deref() {
+            if let Some(project) = local_projects
+                .iter()
+                .find(|project| project.project_id == project_id)
+            {
+                inferred_targets.push(DelegationWriteTarget {
+                    project_id: Some(project.project_id.clone()),
+                    workdir: Some(project.root_path.clone()),
+                });
+            }
+        }
+
+        let Some(workdir) = target.workdir.as_deref() else {
+            continue;
+        };
+        for project in local_projects
+            .iter()
+            .filter(|project| path_contains(&project.root_path, FsPath::new(workdir)))
+        {
+            inferred_targets.push(DelegationWriteTarget {
+                project_id: Some(project.project_id.clone()),
+                workdir: Some(project.root_path.clone()),
+            });
+        }
+    }
+    write_targets.extend(inferred_targets);
+}
+
+fn read_only_session_delegation_block_locked(
+    inner: &StateInner,
+    session_id: Option<&str>,
+) -> Option<DelegationWriteBlock> {
+    let session_id = normalize_optional_identifier(session_id)?;
+    let session_index = inner.find_visible_session_index(session_id)?;
+    let record = inner.sessions.get(session_index)?;
+    let delegation_id = record.session.parent_delegation_id.as_deref()?;
+    match inner
+        .delegations
+        .iter()
+        .find(|delegation| delegation.id == delegation_id)
+    {
+        Some(delegation)
+            if !delegation_is_terminal(delegation.status)
+                && delegation.write_policy == DelegationWritePolicy::ReadOnly =>
+        {
+            Some(DelegationWriteBlock {
+                title: Some(delegation.title.clone()),
+            })
+        }
+        Some(_) => None,
+        None => {
+            // Production paths should not leave a child session pointing at a
+            // missing delegation. If that anomaly appears, keep writes blocked
+            // and use fallback wording so the stale link is visible.
+            Some(DelegationWriteBlock { title: None })
+        }
+    }
+}
+
+fn delegation_write_scope_matches(
+    scope: &DelegationWriteScope,
     project_id: Option<&str>,
     workdir: Option<&str>,
 ) -> bool {
-    if project_id.is_some_and(|project_id| record.session.project_id.as_deref() == Some(project_id))
-    {
+    if project_id.is_some_and(|project_id| scope.project_id.as_deref() == Some(project_id)) {
         return true;
     }
+    let scope_workdir = scope.workdir.trim();
+    if scope_workdir.is_empty() {
+        return false;
+    }
     workdir.is_some_and(|workdir| {
-        path_contains(&record.session.workdir, FsPath::new(workdir))
-            || path_contains(workdir, FsPath::new(&record.session.workdir))
+        // Match both directions: callers writing inside the delegated tree and
+        // callers targeting a broader ancestor of the delegated tree are blocked.
+        path_contains(scope_workdir, FsPath::new(workdir))
+            || path_contains(workdir, FsPath::new(scope_workdir))
     })
 }
 

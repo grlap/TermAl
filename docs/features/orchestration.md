@@ -2,6 +2,11 @@
 
 Backlog source: [`docs/bugs.md`](../bugs.md)
 
+Related:
+- [Agent Delegation Sessions](./agent-delegation-sessions.md) - ad hoc
+  child-session delegation for immediate bounded subtasks; use orchestration
+  templates for reusable graph workflows.
+
 ## Status
 
 Implemented for template authoring, project-scoped launches, runtime instances,

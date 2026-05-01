@@ -207,6 +207,16 @@ function isSessionDeltaEvent(delta: DeltaEvent): delta is SessionDeltaEvent {
   return "sessionId" in delta && typeof delta.sessionId === "string";
 }
 
+function isSameRevisionReplayableSessionDelta(
+  delta: DeltaEvent,
+): delta is Exclude<SessionDeltaEvent, { type: "textDelta" }> {
+  // Same-revision state snapshots may carry only summary data. Idempotent
+  // session deltas can still fill retained transcript details after that
+  // snapshot advances the global revision; `textDelta` is excluded because it
+  // appends text and cannot be replayed safely.
+  return isSessionDeltaEvent(delta) && delta.type !== "textDelta";
+}
+
 function isDelegationDeltaEvent(delta: DeltaEvent): delta is DelegationDeltaEvent {
   return (
     delta.type === "delegationCreated" ||
@@ -2070,7 +2080,8 @@ export function useAppLiveState(
                   requestOptions: {
                     allowAuthoritativeRollback: true,
                     confirmReconnectRecoveryOnAdoption,
-                    forceAdoptEqualOrNewerRevision,
+                    forceAdoptEqualOrNewerRevision:
+                      forceAdoptEqualOrNewerRevision ?? undefined,
                     rearmOnFailure: true,
                   },
                 });
@@ -2577,6 +2588,56 @@ export function useAppLiveState(
           delta.revision,
         );
         if (revisionAction === "ignore") {
+          if (
+            currentRevision !== null &&
+            delta.revision === currentRevision &&
+            isSameRevisionReplayableSessionDelta(delta)
+          ) {
+            const result = applyDeltaToSessions(sessionsRef.current, delta);
+            if (
+              result.kind === "applied" ||
+              result.kind === "appliedNeedsResync"
+            ) {
+              confirmReconnectRecoveryFromDeltaEvent();
+              const appliedAt = Date.now();
+              cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
+              markLiveTransportActivity([delta.sessionId], appliedAt);
+              markLiveSessionResumeWatchdogBaseline(
+                [delta.sessionId],
+                appliedAt,
+              );
+              latestStateRevisionRef.current = delta.revision;
+              sessionsRef.current = result.sessions;
+              const updatedSession =
+                result.sessions.find(
+                  (session) => session.id === delta.sessionId,
+                ) ?? null;
+              if (updatedSession) {
+                queueSessionSliceForRender(updatedSession.id);
+              }
+              scheduleSessionRender();
+              setBackendConnectionIssueDetail(null);
+              clearRecoveredBackendRequestError();
+              if (result.kind === "appliedNeedsResync") {
+                requestStateResync({
+                  allowAuthoritativeRollback: true,
+                  forceAdoptEqualOrNewerRevision: delta.revision,
+                  rearmOnFailure: true,
+                });
+                startSessionHydration(delta.sessionId);
+              }
+              return;
+            }
+
+            requestStateResync({
+              allowAuthoritativeRollback: true,
+              forceAdoptEqualOrNewerRevision: delta.revision,
+              rearmOnFailure: true,
+            });
+            startSessionHydration(delta.sessionId);
+            return;
+          }
+
           if ("sessionId" in delta && typeof delta.sessionId === "string") {
             cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
           } else if (

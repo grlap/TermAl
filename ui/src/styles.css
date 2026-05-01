@@ -7088,6 +7088,21 @@ textarea {
   color: inherit;
 }
 
+/*
+ * Code-block wrap policy: `pre-wrap` + `break-word`, NOT `pre`.
+ *
+ * `white-space: pre` preserves whitespace AND forbids any line break, so
+ * long lines force a horizontal scrollbar even when the chat bubble has
+ * room — e.g., a one-line "Status: 44 open (1 Critical, 32 High, ...)"
+ * that's ~5-10 chars past the container width still scrolls instead of
+ * wrapping. `pre-wrap` preserves whitespace (so indentation is intact)
+ * but allows wrapping at whitespace when the line would overflow.
+ * `overflow-wrap: break-word` lets unbreakable tokens (long URLs, long
+ * identifiers) break mid-token as a last resort.
+ *
+ * `overflow: auto` stays as a final fallback in case content still
+ * cannot be made to fit (rare).
+ */
 .markdown-copy pre {
   margin: 0;
   border-radius: var(--code-surface-radius);
@@ -7096,7 +7111,8 @@ textarea {
   padding: 1rem;
   overflow: auto;
   max-width: 100%;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
 .markdown-copy pre code {
@@ -7241,21 +7257,51 @@ textarea {
   opacity: 0.75;
 }
 
+/*
+ * Table sizing policy: prefer wrapping over horizontal scroll.
+ *
+ * `width: 100%; max-width: 100%; table-layout: auto` lets the browser
+ * distribute column widths from cell content but caps the table at the
+ * container width, so the existing `overflow-wrap: anywhere` on cells
+ * (below) actually engages on prose tables. The previous policy
+ * (`width: max-content; min-width: 100%`) sized the table to fit every
+ * cell on a single line, which made the wrapper's `overflow-x: auto`
+ * fire even when cells could have wrapped — clipping the rightmost
+ * column behind a horizontal scrollbar for ordinary prose tables.
+ *
+ * The `.markdown-table-scroll` wrapper still has `overflow-x: auto`,
+ * so a row that genuinely cannot wrap (e.g., a single unbreakable
+ * token wider than the container) still falls back to a scrollbar
+ * instead of overflowing the bubble.
+ */
 .markdown-table-scroll > table,
 .markdown-copy table {
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
+  max-width: 100%;
+  table-layout: auto;
   border-collapse: collapse;
   font-size: 0.92rem;
 }
 
+/*
+ * Cell wrap policy: `break-word`, NOT `anywhere`.
+ *
+ * `overflow-wrap: anywhere` lets the browser break inside any word AND
+ * computes `min-content` as a single character — so `table-layout: auto`
+ * sized short-cell columns (e.g., "#", "Severity") down to ~1ch and broke
+ * "Medium" / "Severity" / "10" across lines for the bug-list render.
+ * `break-word` keeps the longest word as the column's min-content (so
+ * "Medium" stays whole), but still breaks within a word when nothing
+ * else would fit. Code spans inside cells keep `anywhere` (rule below)
+ * because long identifiers genuinely need to break mid-token.
+ */
 .markdown-copy th,
 .markdown-copy td {
   border: 1px solid var(--line);
   padding: 0.58rem 0.72rem;
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .markdown-copy th {

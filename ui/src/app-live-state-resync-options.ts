@@ -90,7 +90,7 @@ export function coalescePendingStateResyncOptions(
     next.forceAdoptEqualOrNewerRevision =
       next.forceAdoptEqualOrNewerRevision === null
         ? options.forceAdoptEqualOrNewerRevision
-        : Math.min(
+        : Math.max(
             next.forceAdoptEqualOrNewerRevision,
             options.forceAdoptEqualOrNewerRevision,
           );

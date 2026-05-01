@@ -160,6 +160,10 @@ async fn write_file(
     Json(request): Json<WriteFileRequest>,
 ) -> Result<Json<FileResponse>, ApiError> {
     let response = run_blocking_api(move || {
+        state.ensure_read_only_delegation_allows_session_write_action(
+            request.session_id.as_deref(),
+            "file writes",
+        )?;
         if let Some(scope) = state.remote_scope_for_request(
             request.session_id.as_deref(),
             request.project_id.as_deref(),
