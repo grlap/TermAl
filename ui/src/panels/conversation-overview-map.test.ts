@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildConversationOverviewProjection,
+  buildConversationOverviewSegments,
   findConversationOverviewItemAtY,
   getConversationOverviewItemByMessageId,
 } from "./conversation-overview-map";
@@ -356,6 +357,54 @@ describe("conversation overview map", () => {
     );
   });
 
+  it("aligns the rendered viewport marker bottom with the rail bottom at scroll end", () => {
+    const messages = Array.from({ length: 100 }, (_, index) =>
+      textMessage(`m${index + 1}`, {
+        text: `message ${index + 1}`,
+      }),
+    );
+    const layoutSnapshot: VirtualizedConversationLayoutSnapshot = {
+      sessionId: "session-1",
+      messageCount: messages.length,
+      estimatedTotalHeightPx: 1_000,
+      viewportTopPx: 999,
+      viewportHeightPx: 1,
+      viewportWidthPx: 800,
+      isActive: true,
+      visiblePageRange: {
+        startIndex: 99,
+        endIndex: 99,
+      },
+      mountedPageRange: {
+        startIndex: 99,
+        endIndex: 99,
+      },
+      messages: messages.map((message, index) => ({
+        messageId: message.id,
+        messageIndex: index,
+        pageIndex: index,
+        type: message.type,
+        author: message.author,
+        estimatedTopPx: index * 10,
+        estimatedHeightPx: 10,
+        measuredPageHeightPx: null,
+      })),
+    };
+
+    const projection = buildConversationOverviewProjection({
+      layoutSnapshot,
+      maxHeightPx: 100,
+      messages,
+    });
+
+    expect(projection.totalHeightPx).toBe(100);
+    expect(projection.viewportHeightPx).toBe(8);
+    expect(projection.viewportTopPx).toBe(92);
+    expect(projection.viewportTopPx + projection.viewportHeightPx).toBe(
+      projection.totalHeightPx,
+    );
+  });
+
   it("hit-tests against true scaled bounds when visual minimum heights overlap", () => {
     const messages = Array.from({ length: 10 }, (_, index) =>
       textMessage(`m${index + 1}`, {
@@ -400,5 +449,112 @@ describe("conversation overview map", () => {
     expect(projection.items[0]?.mapHeightPx).toBe(2);
     expect(projection.items[9]?.mapTopPx).toBeCloseTo(0.9);
     expect(findConversationOverviewItemAtY(projection, 0.95)?.messageId).toBe("m10");
+  });
+
+  it("clumps dense mixed messages into fewer visual segments without changing hit testing", () => {
+    const messages = Array.from({ length: 120 }, (_, index) =>
+      textMessage(`m${index + 1}`, {
+        author: index % 2 === 0 ? "you" : "assistant",
+        text: `message ${index + 1}`,
+      }),
+    );
+    const layoutSnapshot: VirtualizedConversationLayoutSnapshot = {
+      sessionId: "session-1",
+      messageCount: messages.length,
+      estimatedTotalHeightPx: messages.length,
+      viewportTopPx: 0,
+      viewportHeightPx: 1,
+      viewportWidthPx: 800,
+      isActive: true,
+      visiblePageRange: {
+        startIndex: 0,
+        endIndex: 1,
+      },
+      mountedPageRange: {
+        startIndex: 0,
+        endIndex: 1,
+      },
+      messages: messages.map((message, index) => ({
+        messageId: message.id,
+        messageIndex: index,
+        pageIndex: index,
+        type: message.type,
+        author: message.author,
+        estimatedTopPx: index,
+        estimatedHeightPx: 1,
+        measuredPageHeightPx: null,
+      })),
+    };
+
+    const projection = buildConversationOverviewProjection({
+      layoutSnapshot,
+      maxHeightPx: 12,
+      messages,
+      minItemHeightPx: 2,
+    });
+    const segments = buildConversationOverviewSegments(projection, {
+      maxItemsPerSegment: 20,
+    });
+
+    expect(segments).toHaveLength(6);
+    expect(segments[0]).toEqual(
+      expect.objectContaining({
+        startMessageIndex: 0,
+        endMessageIndex: 19,
+        itemCount: 20,
+        kind: "mixed",
+      }),
+    );
+    expect(segments.length).toBeLessThan(projection.items.length);
+    expect(findConversationOverviewItemAtY(projection, 7.55)?.messageId).toBe("m76");
+  });
+
+  it("keeps marker, error, and live-turn landmarks as standalone visual segments", () => {
+    const messages: Message[] = [
+      textMessage("m1", { text: "first" }),
+      commandMessage("m2", { status: "error" }),
+      textMessage("m3", { text: "marked" }),
+      textMessage("m4", { text: "last" }),
+    ];
+    const projection = buildConversationOverviewProjection({
+      maxHeightPx: 100,
+      messages,
+      markers: [
+        {
+          id: "marker-1",
+          messageId: "m3",
+          name: "Important",
+        },
+      ],
+      tailItems: [
+        {
+          id: "live-turn:session-1",
+          kind: "live_turn",
+          status: "running",
+          estimatedHeightPx: 20,
+        },
+      ],
+    });
+    const segments = buildConversationOverviewSegments(projection);
+
+    expect(
+      segments.map((segment) => ({
+        count: segment.itemCount,
+        id: projection.items[segment.startItemIndex]?.messageId,
+        markerIds: segment.markerIds,
+        status: segment.status,
+      })),
+    ).toEqual([
+      { count: 1, id: "m1", markerIds: [], status: null },
+      { count: 1, id: "m2", markerIds: [], status: "error" },
+      { count: 1, id: "m3", markerIds: ["marker-1"], status: null },
+      { count: 1, id: "m4", markerIds: [], status: null },
+      {
+        count: 1,
+        id: "live-turn:session-1",
+        markerIds: [],
+        status: "running",
+      },
+    ]);
   });
 });

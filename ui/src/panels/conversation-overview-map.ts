@@ -84,6 +84,24 @@ export type ConversationOverviewProjection = {
   viewportHeightPx: number;
 };
 
+export type ConversationOverviewSegmentKind =
+  | ConversationOverviewItemKind
+  | "mixed";
+
+export type ConversationOverviewSegment = {
+  id: string;
+  startItemIndex: number;
+  endItemIndex: number;
+  startMessageIndex: number;
+  endMessageIndex: number;
+  itemCount: number;
+  kind: ConversationOverviewSegmentKind;
+  status: ConversationOverviewItemStatus;
+  mapTopPx: number;
+  mapHeightPx: number;
+  markerIds: string[];
+};
+
 export type BuildConversationOverviewProjectionOptions = {
   messages: readonly Message[];
   layoutSnapshot?: VirtualizedConversationLayoutSnapshot | null;
@@ -95,10 +113,21 @@ export type BuildConversationOverviewProjectionOptions = {
   maxSampleLength?: number;
 };
 
+export type BuildConversationOverviewSegmentsOptions = {
+  minDenseSegmentHeightPx?: number;
+  maxDenseSegmentHeightPx?: number;
+  maxItemsPerSegment?: number;
+  minSegmentHeightPx?: number;
+};
+
 const DEFAULT_AVAILABLE_WIDTH_PX = 760;
 const DEFAULT_MAX_HEIGHT_PX = 960;
 const DEFAULT_MIN_ITEM_HEIGHT_PX = 2;
 const DEFAULT_MAX_SAMPLE_LENGTH = 96;
+const MIN_VIEWPORT_MARKER_HEIGHT_PX = 8;
+const DEFAULT_MIN_DENSE_SEGMENT_HEIGHT_PX = 3;
+const DEFAULT_MAX_DENSE_SEGMENT_HEIGHT_PX = 6;
+const DEFAULT_MAX_ITEMS_PER_SEGMENT = 64;
 
 export function buildConversationOverviewProjection({
   messages,
@@ -177,6 +206,8 @@ export function buildConversationOverviewProjection({
     const estimatedHeightPx = Math.max(1, tailItem.estimatedHeightPx);
     items.push({
       messageId: tailItem.id,
+      // Tail items are not real transcript messages. Callers must dispatch
+      // them by `kind` before falling back to message-index navigation.
       messageIndex: messages.length + tailIndex,
       type: null,
       author: tailItem.author ?? "assistant",
@@ -257,6 +288,59 @@ export function projectConversationOverviewViewport(
   };
 }
 
+export function buildConversationOverviewSegments(
+  projection: ConversationOverviewProjection,
+  {
+    minDenseSegmentHeightPx = DEFAULT_MIN_DENSE_SEGMENT_HEIGHT_PX,
+    maxDenseSegmentHeightPx = DEFAULT_MAX_DENSE_SEGMENT_HEIGHT_PX,
+    maxItemsPerSegment = DEFAULT_MAX_ITEMS_PER_SEGMENT,
+    minSegmentHeightPx = DEFAULT_MIN_ITEM_HEIGHT_PX,
+  }: BuildConversationOverviewSegmentsOptions = {},
+): ConversationOverviewSegment[] {
+  if (projection.items.length === 0) {
+    return [];
+  }
+
+  const segments: ConversationOverviewSegment[] = [];
+  let startItemIndex = 0;
+  let endItemIndex = 0;
+
+  const pushSegment = () => {
+    segments.push(
+      createConversationOverviewSegment(
+        projection,
+        startItemIndex,
+        endItemIndex,
+        minSegmentHeightPx,
+      ),
+    );
+  };
+
+  for (let itemIndex = 1; itemIndex < projection.items.length; itemIndex += 1) {
+    if (
+      canMergeConversationOverviewSegmentItem({
+        endItemIndex,
+        itemIndex,
+        maxDenseSegmentHeightPx,
+        maxItemsPerSegment,
+        minDenseSegmentHeightPx,
+        projection,
+        startItemIndex,
+      })
+    ) {
+      endItemIndex = itemIndex;
+      continue;
+    }
+
+    pushSegment();
+    startItemIndex = itemIndex;
+    endItemIndex = itemIndex;
+  }
+
+  pushSegment();
+  return segments;
+}
+
 function summarizeConversationOverviewTailItem(
   item: ConversationOverviewTailItemInput,
   maxSampleLength: number,
@@ -304,6 +388,165 @@ export function getConversationOverviewItemByMessageId(
   messageId: string,
 ): ConversationOverviewItem | null {
   return projection.items.find((item) => item.messageId === messageId) ?? null;
+}
+
+function canMergeConversationOverviewSegmentItem({
+  endItemIndex,
+  itemIndex,
+  maxDenseSegmentHeightPx,
+  maxItemsPerSegment,
+  minDenseSegmentHeightPx,
+  projection,
+  startItemIndex,
+}: {
+  projection: ConversationOverviewProjection;
+  startItemIndex: number;
+  endItemIndex: number;
+  itemIndex: number;
+  minDenseSegmentHeightPx: number;
+  maxDenseSegmentHeightPx: number;
+  maxItemsPerSegment: number;
+}) {
+  const currentItem = projection.items[endItemIndex];
+  const nextItem = projection.items[itemIndex];
+  if (!currentItem || !nextItem) {
+    return false;
+  }
+  if (
+    isStandaloneConversationOverviewItem(currentItem) ||
+    isStandaloneConversationOverviewItem(nextItem)
+  ) {
+    return false;
+  }
+  const sameVisualClass =
+    currentItem.kind === nextItem.kind && currentItem.status === nextItem.status;
+  if (sameVisualClass) {
+    return true;
+  }
+
+  const itemCount = itemIndex - startItemIndex + 1;
+  if (itemCount > maxItemsPerSegment) {
+    return false;
+  }
+
+  const currentHeightPx = getConversationOverviewSegmentTrueHeightPx(
+    projection,
+    startItemIndex,
+    endItemIndex,
+  );
+  const nextHeightPx = getConversationOverviewItemTrueHeightPx(
+    projection,
+    nextItem,
+  );
+  const mergedHeightPx = getConversationOverviewSegmentTrueHeightPx(
+    projection,
+    startItemIndex,
+    itemIndex,
+  );
+  return (
+    currentHeightPx < minDenseSegmentHeightPx ||
+    nextHeightPx < minDenseSegmentHeightPx ||
+    mergedHeightPx <= maxDenseSegmentHeightPx
+  );
+}
+
+function createConversationOverviewSegment(
+  projection: ConversationOverviewProjection,
+  startItemIndex: number,
+  endItemIndex: number,
+  minSegmentHeightPx: number,
+): ConversationOverviewSegment {
+  const firstItem = projection.items[startItemIndex];
+  const lastItem = projection.items[endItemIndex] ?? firstItem;
+  const segmentItems = projection.items.slice(startItemIndex, endItemIndex + 1);
+  const mapTopPx = firstItem.documentTopPx * projection.scale;
+  const trueBottomPx =
+    (lastItem.documentTopPx + lastItem.documentHeightPx) * projection.scale;
+  const boundedBottomPx = clamp(trueBottomPx, mapTopPx, projection.totalHeightPx);
+  const visual = resolveConversationOverviewSegmentVisual(segmentItems);
+
+  return {
+    id:
+      startItemIndex === endItemIndex
+        ? `segment:${firstItem.messageId}`
+        : `segment:${firstItem.messageId}:${lastItem.messageId}`,
+    startItemIndex,
+    endItemIndex,
+    startMessageIndex: firstItem.messageIndex,
+    endMessageIndex: lastItem.messageIndex,
+    itemCount: segmentItems.length,
+    kind: visual.kind,
+    status: visual.status,
+    mapTopPx,
+    mapHeightPx: Math.max(minSegmentHeightPx, boundedBottomPx - mapTopPx),
+    markerIds: segmentItems.flatMap((item) => item.markerIds),
+  };
+}
+
+function resolveConversationOverviewSegmentVisual(
+  items: readonly ConversationOverviewItem[],
+): Pick<ConversationOverviewSegment, "kind" | "status"> {
+  const firstItem = items[0];
+  const sameKind = items.every((item) => item.kind === firstItem.kind);
+  const status = resolveConversationOverviewSegmentStatus(items);
+  if (sameKind) {
+    return {
+      kind: firstItem.kind,
+      status,
+    };
+  }
+  return {
+    kind: "mixed",
+    status,
+  };
+}
+
+function resolveConversationOverviewSegmentStatus(
+  items: readonly ConversationOverviewItem[],
+): ConversationOverviewItemStatus {
+  const statusPriority: ConversationOverviewItemStatus[] = [
+    "error",
+    "approval",
+    "running",
+    "success",
+  ];
+  for (const status of statusPriority) {
+    if (items.some((item) => item.status === status)) {
+      return status;
+    }
+  }
+  return null;
+}
+
+function isStandaloneConversationOverviewItem(item: ConversationOverviewItem) {
+  return (
+    item.kind === "live_turn" ||
+    item.markerIds.length > 0 ||
+    item.status === "approval" ||
+    item.status === "error" ||
+    item.status === "running"
+  );
+}
+
+function getConversationOverviewItemTrueHeightPx(
+  projection: ConversationOverviewProjection,
+  item: ConversationOverviewItem,
+) {
+  return item.documentHeightPx * projection.scale;
+}
+
+function getConversationOverviewSegmentTrueHeightPx(
+  projection: ConversationOverviewProjection,
+  startItemIndex: number,
+  endItemIndex: number,
+) {
+  const firstItem = projection.items[startItemIndex];
+  const lastItem = projection.items[endItemIndex] ?? firstItem;
+  return Math.max(
+    0,
+    (lastItem.documentTopPx + lastItem.documentHeightPx - firstItem.documentTopPx) *
+      projection.scale,
+  );
 }
 
 function classifyConversationOverviewItem(
@@ -571,7 +814,12 @@ function projectViewportHeight(
 
   const sourceHeight =
     (layoutSnapshot.viewportHeightPx / estimatedScrollHeightPx) * sourceHeightPx;
-  return clamp(sourceHeight, 0, sourceHeightPx) * scale;
+  const projectedHeightPx = clamp(sourceHeight, 0, sourceHeightPx) * scale;
+  return clamp(
+    Math.max(MIN_VIEWPORT_MARKER_HEIGHT_PX, projectedHeightPx),
+    0,
+    sourceHeightPx * scale,
+  );
 }
 
 function clamp(value: number, min: number, max: number) {

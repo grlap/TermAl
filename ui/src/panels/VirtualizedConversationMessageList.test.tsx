@@ -342,6 +342,45 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("exposes a DOM-backed viewport snapshot through the handle", async () => {
+    const messages = makeTextMessages(48);
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      clientHeight: 300,
+      clientWidth: 640,
+      initialScrollTop: 950,
+      messages,
+      scrollHeight: () => 1_200,
+      virtualizerHandleRef,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(virtualizerHandleRef.current).not.toBeNull();
+      });
+
+      expect(virtualizerHandleRef.current!.getViewportSnapshot()).toMatchObject({
+        estimatedTotalHeightPx: 1_200,
+        messageCount: messages.length,
+        sessionId: "session-a",
+        viewportHeightPx: 300,
+        viewportTopPx: 900,
+        viewportWidthPx: 640,
+      });
+
+      harness.setScrollTop(450);
+
+      expect(virtualizerHandleRef.current!.getViewportSnapshot()).toMatchObject({
+        estimatedTotalHeightPx: 1_200,
+        viewportTopPx: 450,
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("updates the heavy-render preference immediately when direct scroll input starts", async () => {
     const messages = makeTextMessages(4);
     const preferImmediateValues: boolean[] = [];

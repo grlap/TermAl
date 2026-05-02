@@ -5,10 +5,11 @@
 Foundation in progress. The frontend now has a pure overview projection helper
 and a first product rail for loaded long virtualized sessions. The rail derives
 lightweight map items from loaded messages, optional virtualizer layout
-snapshots, and marker inputs; shows message-type blocks, marker pins, and the
-active viewport; and supports click/drag navigation through the virtualizer
-handle. Hover tooltips, marker filters, summary-only hydration jumps, and any
-canvas scaling path are still future work.
+snapshots, and marker inputs; renders clumped DOM segments for dense message
+runs; shows marker pins and the active viewport; and supports click/drag
+navigation through the virtualizer handle. Hover tooltips, marker filters, and
+summary-only hydration jumps are still future work. Canvas rendering is a last
+resort only if clumped DOM segments still profile poorly.
 
 The conversation overview map is a zoomed-out, approximate view of a long
 session transcript. It gives the user a fast spatial sense of the whole
@@ -227,7 +228,9 @@ virtualizer/session navigation API.
 
 ### Phase 4: large-session scaling
 
-- Move rail rendering to canvas if DOM costs become visible.
+- Clump dense message runs into a bounded number of DOM segments before
+  considering canvas rendering.
+- Move rail rendering to canvas only if segmented DOM still profiles poorly.
 - Cache overview projections by session mutation stamp.
 - Add incremental recompute for streaming updates.
 

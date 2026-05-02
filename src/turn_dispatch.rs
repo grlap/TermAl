@@ -46,6 +46,47 @@ struct StartedTurnMessageDelta {
 }
 
 impl AppState {
+    #[cfg(test)]
+    fn install_test_acp_runtime_override(&self, agent: AcpAgent, runtime: AcpRuntimeHandle) {
+        self.test_acp_runtime_overrides
+            .lock()
+            .expect("test ACP runtime overrides mutex poisoned")
+            .push(TestAcpRuntimeOverride { agent, runtime });
+    }
+
+    #[cfg(test)]
+    fn has_test_acp_runtime_override(&self, agent: AcpAgent) -> bool {
+        self.test_acp_runtime_overrides
+            .lock()
+            .expect("test ACP runtime overrides mutex poisoned")
+            .iter()
+            .any(|override_runtime| override_runtime.agent == agent)
+    }
+
+    fn start_acp_runtime_for_turn(
+        &self,
+        session_id: String,
+        workdir: String,
+        agent: AcpAgent,
+        gemini_approval_mode: Option<GeminiApprovalMode>,
+    ) -> Result<AcpRuntimeHandle> {
+        #[cfg(test)]
+        {
+            let mut overrides = self
+                .test_acp_runtime_overrides
+                .lock()
+                .expect("test ACP runtime overrides mutex poisoned");
+            if let Some(index) = overrides
+                .iter()
+                .position(|override_runtime| override_runtime.agent == agent)
+            {
+                return Ok(overrides.remove(index).runtime);
+            }
+        }
+
+        spawn_acp_runtime(self.clone(), session_id, workdir, agent, gemini_approval_mode)
+    }
+
     fn publish_started_turn_message_delta(&self, revision: u64, delta: StartedTurnMessageDelta) {
         self.publish_delta(&DeltaEvent::MessageCreated {
             revision,
@@ -283,8 +324,8 @@ impl AppState {
                         ));
                     }
                     SessionRuntime::None => {
-                        let handle = spawn_acp_runtime(
-                            self.clone(),
+                        let handle = self
+                            .start_acp_runtime_for_turn(
                             record.session.id.clone(),
                             record.session.workdir.clone(),
                             expected_acp_agent,

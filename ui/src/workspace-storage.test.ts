@@ -369,10 +369,10 @@ describe("workspace storage", () => {
     });
   });
 
-  it("drops the retired Mermaid neo look without rejecting the layout", () => {
+  it("preserves current Mermaid diagram look preferences", () => {
     const raw = JSON.stringify({
       controlPanelSide: "left",
-      diagramLook: "neo",
+      diagramLook: "handDrawn",
       workspace: {
         root: null,
         panes: [],
@@ -382,10 +382,74 @@ describe("workspace storage", () => {
 
     expect(parseStoredWorkspaceLayout(raw)).toEqual({
       controlPanelSide: "left",
+      diagramLook: "handDrawn",
       workspace: {
         root: null,
         panes: [],
         activePaneId: null,
+      },
+    });
+  });
+
+  it("drops the retired Mermaid neo look without rejecting the layout", () => {
+    const legacyFile = String.raw`\\?\C:\repo\docs\demo.md`;
+    const normalizedFile = String.raw`C:\repo\docs\demo.md`;
+    const raw = JSON.stringify({
+      controlPanelSide: "left",
+      diagramLook: "neo",
+      workspace: {
+        root: {
+          type: "pane",
+          paneId: "pane-a",
+        },
+        panes: [
+          {
+            id: "pane-a",
+            tabs: [
+              {
+                id: "tab-source",
+                kind: "source",
+                path: legacyFile,
+                originSessionId: "session-1",
+              },
+            ],
+            activeTabId: "tab-source",
+            activeSessionId: "session-1",
+            viewMode: "source",
+            lastSessionViewMode: "session",
+            sourcePath: legacyFile,
+          },
+        ],
+        activePaneId: "pane-a",
+      },
+    });
+
+    expect(parseStoredWorkspaceLayout(raw)).toEqual({
+      controlPanelSide: "left",
+      workspace: {
+        root: {
+          type: "pane",
+          paneId: "pane-a",
+        },
+        panes: [
+          {
+            id: "pane-a",
+            tabs: [
+              {
+                id: "tab-source",
+                kind: "source",
+                path: normalizedFile,
+                originSessionId: "session-1",
+              },
+            ],
+            activeTabId: "tab-source",
+            activeSessionId: "session-1",
+            viewMode: "source",
+            lastSessionViewMode: "session",
+            sourcePath: normalizedFile,
+          },
+        ],
+        activePaneId: "pane-a",
       },
     });
   });

@@ -306,6 +306,8 @@ struct AppState {
     state_broadcast_tx: mpsc::Sender<StateResponse>,
     /// Lazily created shared Codex app-server reused across Codex sessions.
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
+    #[cfg(test)]
+    test_acp_runtime_overrides: Arc<Mutex<Vec<TestAcpRuntimeOverride>>>,
     /// Cached app-level agent readiness lives outside `self.inner` so full
     /// snapshots can clone the latest value without filesystem work under the
     /// main state mutex.

@@ -828,6 +828,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
         state_broadcast_tx: mpsc::channel().0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
+        test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
         remote_registry: test_remote_registry(),
@@ -1252,7 +1253,7 @@ fn commit_delta_locked_after_shutdown_falls_back_to_synchronous_persist() {
         .preview
         .clone();
     drop(reloaded_inner);
-    drop(restarted);
+    restarted.shutdown_persist_blocking();
 
     assert_eq!(
         preview, "post-shutdown delta",
@@ -1291,7 +1292,7 @@ fn graceful_shutdown_drain_persists_final_mutation_across_reload() {
     let persistence_path = state_root.join("sessions.json");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
-    let durable_session_id;
+    let durable_session_ids;
     {
         let state = AppState::new_with_paths(
             project_root.to_string_lossy().into_owned(),
@@ -1300,31 +1301,31 @@ fn graceful_shutdown_drain_persists_final_mutation_across_reload() {
         )
         .expect("initial state should boot");
 
-        // Commit a session through the production path. `commit_locked`
+        // Commit a burst through the production path. Each `commit_locked`
         // bumps the revision and signals `PersistRequest::Delta` to the
         // background worker, which the test-build worker drains and writes
         // via `persist_state_from_persisted` (the JSON fallback that runs
-        // under `#[cfg(test)]`).
-        durable_session_id = create_test_project_session(
-            &state,
-            Agent::Claude,
-            &create_test_project(&state, &project_root, "Graceful Shutdown Durability"),
-            &project_root,
-        );
+        // under `#[cfg(test)]`). A burst keeps this test sensitive to the
+        // shutdown drain ordering instead of relying on a single mutation
+        // that the worker might happen to flush before shutdown begins.
+        let project = create_test_project(&state, &project_root, "Graceful Shutdown Durability");
+        durable_session_ids = (0..50)
+            .map(|_| create_test_project_session(&state, Agent::Claude, &project, &project_root))
+            .collect::<Vec<_>>();
 
         // The commit's `Delta` signal may or may not have been processed
         // by the worker before this point — that's the durability window
         // the graceful drain closes. `shutdown_persist_blocking` sends
         // `PersistRequest::Shutdown` and joins; the worker's loop drains
         // every queued Delta + the Shutdown signal, runs one final tick
-        // that captures `durable_session_id`, and only then exits. After
+        // that captures the whole burst, and only then exits. After
         // the join returns, the JSON file on disk MUST contain the
-        // session.
+        // sessions.
         state.shutdown_persist_blocking();
     }
 
     // Reload from the same path. The reborn `AppState` must observe the
-    // session that the prior process committed just before shutdown.
+    // sessions that the prior process committed just before shutdown.
     let restarted = AppState::new_with_paths(
         project_root.to_string_lossy().into_owned(),
         persistence_path.clone(),
@@ -1333,16 +1334,19 @@ fn graceful_shutdown_drain_persists_final_mutation_across_reload() {
     .expect("restarted state should boot from the persisted file");
 
     let reloaded_inner = restarted.inner.lock().expect("state mutex poisoned");
-    let session_index = reloaded_inner.find_session_index(&durable_session_id);
+    let missing_session_ids = durable_session_ids
+        .iter()
+        .filter(|session_id| reloaded_inner.find_session_index(session_id).is_none())
+        .collect::<Vec<_>>();
     assert!(
-        session_index.is_some(),
-        "the session committed just before graceful shutdown must be reloadable from the \
+        missing_session_ids.is_empty(),
+        "every session committed just before graceful shutdown must be reloadable from the \
          persistence file — without `shutdown_persist_blocking`'s final drain, the \
          `PersistRequest::Delta` queued by `commit_locked` would be lost when the worker \
-         exited and the next process boot would never see this session",
+         exited and the next process boot would never see the full burst; missing: {missing_session_ids:?}",
     );
     drop(reloaded_inner);
-    drop(restarted);
+    restarted.shutdown_persist_blocking();
 
     // Best-effort cleanup; tests that fail mid-flight intentionally leave
     // the temp files in place for postmortem inspection.

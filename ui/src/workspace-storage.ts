@@ -133,6 +133,9 @@ function normalizeStoredWorkspaceLayoutPreferences(value: unknown): unknown {
     return value;
   }
 
+  // Retired enum values are accepted only at this persisted/wire boundary
+  // and are dropped before current schema validation. Unknown non-retired
+  // values still reject the layout in `isStoredWorkspaceLayout`.
   if (value.diagramLook !== "neo") {
     return value;
   }

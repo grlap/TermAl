@@ -253,6 +253,13 @@ struct AcpRuntimeHandle {
     process: Arc<SharedChild>,
 }
 
+#[cfg(test)]
+#[derive(Clone)]
+struct TestAcpRuntimeOverride {
+    agent: AcpAgent,
+    runtime: AcpRuntimeHandle,
+}
+
 impl AcpRuntimeHandle {
     fn kill(&self) -> Result<()> {
         kill_child_process(&self.process, self.agent.label())

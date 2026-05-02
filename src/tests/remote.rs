@@ -3686,6 +3686,48 @@ fn local_replay_test_remote() -> RemoteConfig {
     }
 }
 
+#[test]
+fn remote_delegation_delta_advances_revision_without_local_record() {
+    let state = test_app_state();
+    let remote = local_replay_test_remote();
+    let event = DeltaEvent::DelegationCreated {
+        revision: 7,
+        delegation: DelegationSummary {
+            id: "remote-delegation-1".to_owned(),
+            parent_session_id: "remote-parent-session".to_owned(),
+            child_session_id: "remote-child-session".to_owned(),
+            mode: DelegationMode::Reviewer,
+            status: DelegationStatus::Running,
+            title: "Remote delegation".to_owned(),
+            agent: Agent::Codex,
+            model: None,
+            write_policy: DelegationWritePolicy::ReadOnly,
+            created_at: "2026-04-05 10:00:00".to_owned(),
+            started_at: Some("2026-04-05 10:00:01".to_owned()),
+            completed_at: None,
+            result: None,
+        },
+    };
+    assert!(
+        AppState::remote_delta_replay_key(&remote.id, &event).is_none(),
+        "remote delegation deltas should not enter replay-key suppression"
+    );
+
+    state
+        .apply_remote_delta_event(&remote.id, event)
+        .expect("remote delegation delta should be consumed as a no-op");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner.delegations.is_empty(),
+        "remote delegation deltas must not materialize local delegation records"
+    );
+    assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&7));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Seeds through `apply_remote_delta_event(SessionCreated)` so replay-cache
 // tests exercise the same apply/note path as live remote deltas.
 fn seed_remote_proxy_session_via_apply_delta(

@@ -5,7 +5,116 @@ tasks. Resolved work, fixed-history notes, speculative refactors, cleanup notes,
 and external limitations do not belong here. Review follow-up task items live in
 the Implementation Tasks section.
 
+Also fixed in the current tree: delegation backend coverage now drives covered
+Codex child starts through `dispatch_turn` and the runtime channel instead of
+the old `#[cfg(test)]` prompt injector; delegation lifecycle refresh paths now
+have production-path coverage for child turn completion boundaries; and the
+graceful-shutdown reload regression now drains the restarted `AppState` worker
+before temporary persistence paths are removed.
+
 ## Active Repo Bugs
+
+## Windows delegation cwd validation misses device namespace aliases
+
+**Severity:** Medium - Windows UNC-equivalent device paths can reach filesystem metadata lookup before rejection.
+
+`src/delegations.rs:1309` rejects ordinary UNC prefixes, but Windows also accepts namespace forms such as `\\.\UNC\server\share\dir` and `\\?\GLOBALROOT\Device\Mup\...`. The drive-relative guard at `src/delegations.rs:1304` also misses non-absolute `VerbatimDisk` inputs such as `\\?\C:relative`.
+
+**Current behavior:**
+- Standard UNC inputs are rejected before project-boundary resolution.
+- Windows device namespace and some verbatim disk forms are not rejected by the same prefix filter.
+- Those paths can reach filesystem metadata lookup before final rejection.
+
+**Proposal:**
+- Use a Windows prefix allowlist before any filesystem lookup.
+- Allow only local absolute `Disk(_)` and `VerbatimDisk(_)` paths, and reject `UNC`, `VerbatimUNC`, `DeviceNS(_)`, unsupported `Verbatim(_)`, and non-absolute verbatim disk inputs.
+- Add Windows coverage for device namespace and verbatim drive-relative forms.
+
+## Mermaid dynamic import fallback lacks import-failure coverage
+
+**Severity:** Medium - the first fallback branch can regress when the optimized Mermaid module chunk fails to load.
+
+`ui/src/message-cards.tsx:230` catches dynamic `import("mermaid")` failures and falls back to the bundled script path. Current coverage exercises fallback after the module import succeeds and rendering fails, but not the branch where the dynamic import itself rejects.
+
+**Current behavior:**
+- Render-failure fallback after a successful Mermaid import is covered.
+- Dynamic import fetch failure is not forced in tests.
+- A broken first fallback branch could pass the current test suite.
+
+**Proposal:**
+- Add an isolated Vitest case that forces `import("mermaid")` to reject with a dynamic import fetch error.
+- Assert the bundled script path renders successfully.
+
+## Delegation result parser treats summary Status lines as packet metadata
+
+**Severity:** Low - valid summary text can reset packet status and truncate or drop the parsed delegation result.
+
+`src/delegations.rs:1541` parses `Status:` globally, including after `Summary:` capture has started. A valid summary line such as `Status: still failing` can be interpreted as packet metadata instead of summary content.
+
+**Current behavior:**
+- `Status:` is recognized anywhere in the packet.
+- Summary body lines that start with `Status:` can change parser state.
+- Result summaries can be truncated or dropped.
+
+**Proposal:**
+- Parse `Status:` only before summary capture starts, or otherwise gate status parsing so summary body text remains summary text.
+- Add a regression with `Status:` inside a multi-line summary.
+
+## Windows symlink escape test silently skips coverage
+
+**Severity:** Low - the delegation symlink escape regression can pass on Windows without testing the escape path.
+
+`src/tests/delegations.rs:3814` returns early on Windows if `symlink_dir` fails. Windows is a P0 platform, and symlink or reparse-point behavior is part of the path-canonicalization surface the test is meant to cover.
+
+**Current behavior:**
+- Windows setups without symlink privileges can skip the escape assertion silently.
+- CI can report the test as passing without covering the Windows escape case.
+
+**Proposal:**
+- Use a Windows junction or reparse-point fallback that works in CI.
+- If the prerequisite truly cannot be provided, make the test explicitly ignored instead of silently passing.
+
+## Remote delegation no-op coverage only pins created deltas
+
+**Severity:** Low - only one delegation delta variant is covered for the remote no-op contract.
+
+`src/tests/remote.rs:3693` covers `DelegationCreated`, while production remote handling also treats `DelegationUpdated`, `DelegationCompleted`, and `DelegationCanceled` as non-materializing remote deltas.
+
+**Current behavior:**
+- `DelegationCreated` is asserted not to create local delegation records while remote applied revision advances.
+- Other delegation delta variants are not table-tested under the same contract.
+
+**Proposal:**
+- Table-drive the remote no-op assertions across all delegation delta variants.
+- Assert local delegation state remains unchanged and remote applied revision advances for each variant.
+
+## Conversation overview segment cap does not bound homogeneous runs
+
+**Severity:** Low - `maxItemsPerSegment` reads as a hard cap but same-kind message runs can bypass it.
+
+`ui/src/panels/conversation-overview-map.ts:422` merges same-visual-class messages before enforcing the item cap. Homogeneous transcript runs can therefore collapse into a single unbounded segment, which weakens keyboard and accessibility navigation granularity and makes the option contract misleading.
+
+**Current behavior:**
+- Mixed-kind runs are split according to the configured segment cap.
+- Same-kind runs can exceed `maxItemsPerSegment`.
+
+**Proposal:**
+- Apply the item cap before the same-visual-class fast path, or rename/comment the option as a mixed-run cap.
+- Add focused coverage for a long homogeneous run.
+
+## Mermaid fallback loader lives in the message card renderer
+
+**Severity:** Low - Mermaid fallback loading and cache ownership are mixed into an already large rendering component.
+
+`ui/src/message-cards.tsx:182` now owns dynamic import failure classification and global fallback script loading, while `mermaid-render.ts` already owns Mermaid rendering configuration and queueing.
+
+**Current behavior:**
+- Mermaid fallback loader/cache logic lives in `message-cards.tsx`.
+- Rendering, fallback loading, and message-card composition are coupled in the same large module.
+
+**Proposal:**
+- Move fallback loading into `mermaid-render.ts` or a small `mermaid-loader.ts`.
+- Keep message cards calling a single render helper.
 
 ## Full delegation records are persisted in the metadata row
 
@@ -21,36 +130,6 @@ the Implementation Tasks section.
 **Proposal:**
 - Give delegations their own persisted rows or mutation-stamped delta path.
 - Keep `/api/state` summaries derived separately from durable full records.
-
-## Delegation backend tests bypass production child dispatch
-
-**Severity:** Medium - delegation tests can pass while production child dispatch is broken.
-
-`src/delegations.rs:559` uses a `#[cfg(test)]` child-turn stub for delegation tests instead of the production `dispatch_turn` / `deliver_turn_dispatch` path. This means route and lifecycle tests can miss regressions in the actual child turn start path.
-
-**Current behavior:**
-- Backend delegation tests synthesize child output through a test-only path.
-- Production dispatch and runtime delivery are not exercised by the delegation fixture.
-- Child-start regressions can pass the focused delegation test suite.
-
-**Proposal:**
-- Replace the test-only prompt injector with an injectable stub runtime or focused integration path that exercises production dispatch.
-- Keep unit-level helpers where useful, but add at least one production dispatch regression.
-
-## Delegation lifecycle hooks lack production-path coverage
-
-**Severity:** Medium - direct refresh tests do not prove the lifecycle hooks are wired in the real turn paths.
-
-`src/turn_lifecycle.rs:330` refreshes delegation state from production turn lifecycle hooks, but current coverage calls `refresh_delegation_for_child_session` directly. Hook placement regressions in finish, error, or runtime-exit paths could leave delegation status stale while direct helper tests still pass.
-
-**Current behavior:**
-- Tests validate direct delegation refresh behavior.
-- Production lifecycle paths are not all driven end to end.
-- Completion/error/runtime-exit hook regressions can be missed.
-
-**Proposal:**
-- Add tests that finish, error, and runtime-exit a delegated child through the production lifecycle functions.
-- Assert delegation status/result, parent-card updates, and lifecycle events after each path.
 
 ## Delegation SSE recovery coverage lacks stale/newer timing cases
 
@@ -940,42 +1019,16 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - Drop or overwrite superseded snapshots before they can accumulate in memory.
 - Add a burst test that publishes multiple large snapshots while the broadcaster is delayed and asserts only the latest snapshot is retained.
 
-## Reload persistence regression leaves a restarted worker alive during cleanup
-
-**Severity:** Low - the reload test can produce noisy or flaky cleanup because the reloaded state's worker is not shut down.
-
-The graceful-shutdown reload regression creates a fresh `AppState::new_with_paths` to verify persisted state, but then drops it without shutting down its persist worker before temp directories are removed. That worker can still enqueue boot-time persist work and log failed writes after the test deletes its temporary persistence path, which is especially fragile on Windows.
-
-**Current behavior:**
-- The test reloads state through a new `AppState`.
-- The reloaded state's persist worker is not explicitly drained before temp cleanup.
-
-**Proposal:**
-- Call `restarted.shutdown_persist_blocking()` after dropping any held inner-state guards and before removing temp directories.
-- Keep the test's durable-reload assertion intact while making cleanup deterministic.
-
 ## Implementation Tasks
 
-- [ ] P2: Add automatic delegation refresh coverage after child turn completion:
-  complete, error, and runtime-exit a delegated child through production turn lifecycle paths rather than calling `refresh_delegation_for_child_session` directly, then assert the delegation record, parent card, and lifecycle event update.
-- [ ] P2: Add production delegated-turn boundary coverage when child prompts are queued:
-  current direct-refresh coverage proves a queued follow-up does not block result capture. Drive completed and failed child-with-queued-prompt cases through production turn completion and assert terminal delegation refresh either suppresses queued dispatch or does not terminalize until it is safe.
-- [ ] P2: Add delegation cancel terminal-state coverage:
-  extend the current completed-child and queued-child cancel coverage to also cover failed children, unknown ids, and running-session cancellation.
-- [ ] P2: Add read-only delegated-child policy enforcement coverage:
-  existing coverage checks session settings, file writes with a child `sessionId`, project-scoped file writes without `sessionId`, parent/sibling `sessionId` file writes that omit explicit project/workdir, mixed explicit/session-derived scope handling, local terminal execution/streaming, terminal workdir-only requests, git/review remote-project pre-route guards, and approval acceptance. Add the remaining route-level assertions for terminal remote-project proxy rejection and local `/api/git/push` + `/api/git/sync` project/workdir guard rejection before Git execution errors.
 - [ ] P2: Add delegation start-dispatch race coverage:
   interleave create-side validation, cancellation, and child dispatch so a terminal delegation cannot start a live runtime after the state lock is dropped.
-- [ ] P2: Add failed delegation create-response consistency coverage:
-  force a child-start failure through `POST /api/sessions/{id}/delegations`, then assert the response `childSession`, returned revision, delegation status, and durable child state all describe the same errored child snapshot.
 - [ ] P2: Add parent-removal delegated-runtime cleanup coverage:
   remove a parent delegation session while a child delegation is actively running and assert the child runtime is killed or detached, queued prompts/pending callbacks are cleared, and no background work continues.
-- [ ] P2: Add delegation limit and nesting-depth coverage:
-  cover the fifth active delegation conflict, allowing another delegation after completion or cancellation, and rejecting creation beyond the configured nesting depth.
-- [ ] P2: Add delegation result route JSON shape coverage:
-  complete a delegation, call `GET /api/sessions/{id}/delegations/{delegation_id}/result`, and assert the camelCase response fields such as `childSessionId`, `commandsRun`, and `changedFiles`.
+- [ ] P2: Add Windows delegation cwd prefix coverage:
+  cover device namespace UNC aliases, `GLOBALROOT`/Mup paths, and non-absolute verbatim disk inputs before any filesystem metadata lookup is attempted.
 - [ ] P2: Add remote ignored delegation-delta coverage:
-  dispatch a remote delegation delta through the remote path and assert no local delegation is materialized while the remote applied revision still advances.
+  table-drive `DelegationCreated`, `DelegationUpdated`, `DelegationCompleted`, and `DelegationCanceled` through the remote path and assert no local delegation is materialized while the remote applied revision still advances.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
 - [ ] P2: Add equal-revision gap repair snapshot adoption coverage:
@@ -1008,46 +1061,26 @@ The graceful-shutdown reload regression creates a fresh `AppState::new_with_path
   trigger the non-manual reconnect fallback path, adopt a same-instance `/api/state` snapshot with forward progress while SSE remains unopened/unconfirmed, advance timers, and assert fallback polling continues until a data-bearing live event confirms recovery.
 - [ ] P2 watchdog wake-gap stop-after-progress regression:
   trigger watchdog wake-gap recovery, adopt same-instance `/api/state` progress, and assert no additional reconnect polling occurs before a later live event.
-- [ ] P2: Tighten `graceful_shutdown_drain_persists_final_mutation_across_reload` against worker timing:
-  the current single-commit-then-shutdown shape can pass even without the graceful-drain fix if the worker happens to drain the Delta before Shutdown arrives. Commit many sessions in rapid succession (e.g. 50) before calling `shutdown_persist_blocking()` so at least one is guaranteed in-flight, and assert all of them are reloadable from the fresh `AppState::new_with_paths`.
 - [ ] P2: Cover the index clamp-on-shrink branch in `MarkdownDiffView` and `RenderedDiffView`:
   re-render the parent with a smaller `regions`/`segments` array while `currentChangeIndex`/`currentRegionIndex` points past the new end and assert the counter snaps to "Change/Region 1 of N" while prev/next still wrap correctly. Today the existing prev/next tests only exercise wrap-around at full length; the `current >= changeCount/regionCount` clamp branch in the `useEffect` is unexercised.
 - [ ] P2: Add rendered diff render-budget coverage:
   create many Mermaid/math rendered regions and assert the preview applies the same document-level caps as a single `MarkdownContent` document.
+- [ ] P2: Add Mermaid dynamic import fallback coverage:
+  force `import("mermaid")` to reject with a dynamic module fetch error and assert the bundled fallback script path renders successfully.
 - [ ] P2: Add single-target rendered diff navigation coverage:
   assert prev/next scrolls the only Markdown diff change and the only rendered diff region even though the selected index does not change.
 - [ ] P2: Route the new lagged-recovery reconnect test through the textDelta fast-path it documents:
   the new `App.live-state.reconnect.test.tsx` test exercises the revision-gap branch (the `messageCreated` delta omits `sessionMutationStamp` so it falls into the resync fallback). Add `sessionMutationStamp` so the delta routes through the matched-stamp fast-path that the surrounding `handleDeltaEvent` comment is most concerned about, OR rename the test to clarify it covers the revision-gap branch specifically and add a sibling test for the textDelta fast-path.
 - [ ] P2: Split the bad-live-event + workspaceFilesChanged test into isolated arrange-act-assert phases:
   `ui/src/backend-connection.test.tsx:1225-1261` co-fires the stale `delta` and the `workspaceFilesChanged` event in one `act()`. The assertion `countStateFetches() === hydratedStateFetchCount` is satisfied if either side skips confirmation, so the test cannot pinpoint which side regressed. Dispatch `workspaceFilesChanged` alone first and assert no fetch fired; then add the stale delta separately and re-assert.
-- [ ] P2: Roll the `diagramLook` migration into a table-driven helper or document the dual-source contract in `workspace-storage.ts:131-143`:
-  `normalizeStoredWorkspaceLayoutPreferences` is open-coded for `"neo"` only and mixes schema-validation (`isStoredWorkspaceLayout`) with schema-evolution. Future enum retirements will accrete `if (value.foo === "X") delete normalized.foo` branches inline without a unifying contract. Either (a) generalize to `normalizeRetiredEnumValues(value, [{ field: "diagramLook", retired: ["neo"] }])` with a header comment, or (b) move the `"neo"` drop into `isStoredWorkspaceLayout`'s `diagramLook` branch with a comment naming the migration policy ("retired values drop silently; truly invalid values still reject the layout").
-- [ ] P2: Restore `"neo"` to `WorkspaceLayoutDocument.diagramLook` in `ui/src/api.ts:106, 481` and concentrate narrowing in `parseStoredWorkspaceLayout`:
-  the API type was tightened to `"classic" | "handDrawn"`, but the wire may still carry `"neo"` from older clients (the backend treats `diagramLook` as opaque inside `workspace: Value`). The runtime is safe because `app-workspace-layout.ts:443-457` normalizes immediately, but the TS type now lies about server reality during the migration window. Anyone reading the type and writing `if (response.layout.diagramLook === "neo")` will get a TS error and conclude the case is impossible. Keep the API type as `"classic" | "handDrawn" | "neo"` (or `string`) and add a comment naming `parseStoredWorkspaceLayout` as the canonical normalizer.
-- [ ] P2: Add a positive-roundtrip test for `diagramLook: "handDrawn"` in `workspace-storage.test.ts`:
-  current coverage is purely negative ("neo" gets stripped). A regression where `normalizeStoredWorkspaceLayoutPreferences` accidentally stripped any `diagramLook` (e.g. inverting `!== "neo"`) would not fail any current test. Add a quick test that a stored layout with `diagramLook: "handDrawn"` round-trips with the field preserved.
-- [ ] P2: Compose `"neo"`-stripping with sibling normalizations in `workspace-storage.test.ts:372-391`:
-  the new "drops the retired Mermaid neo look" test uses a minimal payload. Add one assertion combining `diagramLook: "neo"` AND a legacy Windows root path so a future change that breaks normalization order is caught.
-- [ ] P2: Add a constrained-parent rendering check to the Mermaid iframe sizing test in `MarkdownContent.test.tsx:463-489`:
-  current test asserts inline style values only. The production comment at `mermaid-render.ts:138-144` calls out the fixed-height-blank-frame trade-off (very wide diagrams scroll horizontally rather than scaling to fit). A future regression that re-introduces aspect-ratio scaling, or accidentally removes `max-width: none` from the srcdoc CSS, would not fail any test. Optionally render the iframe inside a `width: 400px` parent and assert the iframe's `getBoundingClientRect().height` matches the inline `frameHeight`, OR at minimum assert the `srcDoc` still contains `max-width: none` for the SVG selector.
-- [ ] P2: Add remaining cancel-path tests to `src/tests/delegations.rs`:
-  current coverage covers completed-child cancellation and queued child prompt cleanup. Add failed-child, unknown-id, and running-runtime cancellation route cases.
-- [ ] P2: Add path canonicalization rejection tests to `src/tests/delegations.rs`:
-  the brief §"Path Validation" requires rejecting `..`-traversal, drive-relative Windows paths, UNC paths, and symlink escapes. `create_read_only_delegation` validates `cwd` is inside the project at line 99 (`path_contains`), but no test asserts an escaping `cwd` is rejected. Add a test per category.
-- [ ] P2: Cover the cross-remote delegation no-op arm in `src/tests/remote.rs`:
-  `src/remote_routes.rs:2005-2017` returns `None` from `remote_delta_replay_key` for delegation events and the dispatch arm advances `remote_applied_revisions` without mirroring. Add a `remote_delegation_delta_advances_revision_without_local_record` test that dispatches `DelegationCreated` to `apply_remote_delta_event`, asserts `inner.delegations` is unchanged, asserts `remote_applied_revisions[remote_id]` advanced, and asserts `replay_key.is_none()`.
-- [ ] P2: Replace `#[cfg(test)] start_delegation_child_turn` with stub-runtime path in `src/tests/delegations.rs:391-420`:
-  the test-only override directly synthesizes a `Message::Text` and bypasses `dispatch_turn` → `deliver_turn_dispatch`. Real lifecycle bugs (e.g. the queued-prompt completion bug) cannot be observed through this fixture. Replace with a `TestRecorder`-based stub runtime so the production dispatch path runs end-to-end.
 - [ ] P2: Expand UI tests for delegation delta dispatch in `ui/src/app-live-state.test.ts`:
   current coverage pins equal-revision repair for all delegation delta variants plus a newer delta landing before repair adoption. Add stale/newer timing cases, same-revision sibling deltas involving session-created and parent-card deltas, and delayed or failed `/api/state` repair cases. Assert reconnect/fallback recovery remains active until the authoritative repair snapshot is adopted and that delegation events do not flow through normal session-delta handling.
 - [ ] P2: Drop redundant per-field `#[serde(rename = "...")]` in `DeltaEvent::Delegation*` variants:
   `DelegationWritePolicy` now uses `rename_all_fields = "camelCase"`, but the delegation SSE delta variants still carry per-field renames such as `#[serde(rename = "delegationId")]`. Drop the redundant attributes if `DeltaEvent` can safely adopt `rename_all_fields = "camelCase"` without changing other variant wire shapes.
-- [ ] P2: Tighten `parse_delegation_result_packet` summary terminator in `src/delegations.rs:1169`:
-  current `if cleaned.ends_with(':') && !cleaned.starts_with('-')` treats any in-summary line ending in `:` as a section heading. A multi-line summary like `Summary:\nThe issue is here:\n  detail` drops everything after `here:`. Use a known-section allowlist (`Findings:`, `Commands Run:`, `Files Inspected:`, `Notes:`, `Status:`) or match `^[A-Z][A-Za-z ]+:$` plus a prior blank line.
 - [ ] P2: Add `DelegationFailed` SSE delta variant (or extend `DelegationUpdated`) in `src/wire.rs:1555-1562`:
   `DeltaEvent::DelegationUpdated` carries `(delegationId, status, updatedAt)` only. When `mark_delegation_failed_locked` returns a `DelegationLifecycleDelta::Updated` for a `Failed` transition, SSE-only subscribers cannot see the failure summary without a separate `GET /api/sessions/{id}/delegations/{delegation_id}/result`. `Completed` and `Canceled` get their own variants with `result`/`reason` payloads; `Failed` should be symmetric. Currently masked by the eager full-resync in the UI; will become user-visible if Phase 3 lands a targeted-delta path.
-- [ ] P2: Add a regression for `delegated_child_dispatch_is_blocked_locked` in `src/tests/delegations.rs`:
-  the new gate at `src/turn_dispatch.rs:490-494` is the round-13 HIGH-severity cancel-vs-dispatch race fix. Without a test that interleaves create + cancel + dispatch, a future refactor can revert the gate silently. Test should: create delegation, cancel before child has dispatched, attempt dispatch, assert 409 CONFLICT with `DELEGATION_NO_LONGER_STARTABLE_MESSAGE`.
+- [ ] P2: Add delegation result `Status:`-inside-summary coverage:
+  parse a delegation result packet with `Status:` inside the `Summary:` body and assert the line remains summary text instead of resetting packet metadata.
 - [ ] P2: Publish a `MessageUpdated` delta when `detach_delegation_child_runtime_locked` flips Pending approval/request statuses in `src/delegations.rs:1067-1093`:
   `cancel_pending_interaction_messages` mutates `Approval::Pending → Rejected` and `*Request::Pending → Canceled` in the child transcript without publishing a per-message delta. Other call sites (`session_lifecycle.rs:361`, `turn_lifecycle.rs:416`) at least follow with a synthesized "Turn stopped by user." Text message that carries `MessageCreated`. Live clients keep the old `Pending` status until they re-fetch the session.
 - [ ] P2: Push a "Delegation halted" transcript marker when the parent is removed in `src/delegations.rs:1067-1093`:
@@ -1056,3 +1089,9 @@ The graceful-shutdown reload regression creates a fresh `AppState::new_with_path
   `mark_delegation_failed_locked` sets `child.session.status = Error`; `mark_delegation_canceled_locked` only updates `preview` and clears the queue. After `cancel_delegation` returns, `delegation.status == Canceled` while `child.session.status` may still be `Active`/`Idle` until `stop_session_with_options` propagates. Either set `child.session.status` for symmetry or document why cancel intentionally leaves status to be settled by the stop path.
 - [ ] P2: Add cached `running_read_only_delegations` index for `delegated_write_scopes` in `src/delegations.rs:493-515`:
   scoped write checks now early-out when the session-only gate already blocks, and local projects are only collected when project/workdir inference needs them. The remaining scalability concern is that scoped writes still scan historical delegations before filtering terminal/non-read-only records. Consider a `StateInner::running_read_only_delegations` cached index updated on lifecycle transitions.
+- [ ] P2: Pin `response.delegation.result` in `delegation_route_failed_start_response_matches_durable_child_state` (`src/tests/delegations.rs:1731-1796`):
+  current test asserts `response.delegation == stored_delegation` and the child preview, but doesn't directly assert that the response carries the failure summary in `delegation.result`. A regression that dropped the failed-result attachment to the response only (not durable state) wouldn't fail the test. Add `assert_eq!(response.delegation.result.as_ref().map(|r| r.summary.as_str()), Some("forced delegation start failure"));` (or whatever sentinel summary the test injects).
+- [ ] P2: Add Windows symlink or junction escape coverage for delegation cwd validation:
+  avoid silently returning when `symlink_dir` fails on Windows; use a junction/reparse-point fallback or make the prerequisite explicit with an ignored test.
+- [ ] P2: Add homogeneous conversation-overview segment cap coverage:
+  build a long same-kind message run with `maxItemsPerSegment` set and assert the segment policy is either capped or explicitly documented as a mixed-run-only cap.

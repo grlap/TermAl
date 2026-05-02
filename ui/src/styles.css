@@ -3794,6 +3794,15 @@ textarea {
   align-content: start;
 }
 
+.message-stack:has(.conversation-with-overview) {
+  scrollbar-width: none;
+}
+
+.message-stack:has(.conversation-with-overview)::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 .message-stack.control-panel-stack {
   align-content: stretch;
   grid-template-rows: minmax(0, 1fr);
@@ -3849,8 +3858,10 @@ textarea {
 }
 
 .conversation-with-overview {
+  --conversation-overview-rail-width: 1.6rem;
+
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 1.6rem;
+  grid-template-columns: minmax(0, 1fr) var(--conversation-overview-rail-width);
   align-items: start;
   gap: 0.65rem;
 }
@@ -3864,10 +3875,12 @@ textarea {
 .conversation-overview-rail {
   --conversation-overview-lane-left: 0.25rem;
   --conversation-overview-lane-width: calc(100% - 0.5rem);
+  --conversation-overview-sticky-inset: 0.5rem;
 
   position: sticky;
-  top: 0.75rem;
-  width: 1.6rem;
+  top: var(--conversation-overview-sticky-inset);
+  width: var(--conversation-overview-rail-width);
+  max-height: calc(100vh - (var(--conversation-overview-sticky-inset) * 2));
   min-height: 6rem;
   border: 1px solid var(--line);
   border-radius: 0.45rem;
@@ -3929,6 +3942,11 @@ textarea {
 .conversation-overview-item.is-live_turn {
   background: var(--signal-blue);
   opacity: 0.82;
+}
+
+.conversation-overview-item.is-mixed {
+  background: color-mix(in srgb, var(--text-muted) 72%, var(--signal-blue));
+  opacity: 0.5;
 }
 
 .conversation-overview-marker {

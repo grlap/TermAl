@@ -15,6 +15,16 @@ function textMessages(count: number): Message[] {
   }));
 }
 
+function assistantTextMessages(count: number): Message[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `assistant-message-${index + 1}`,
+    type: "text",
+    author: "assistant",
+    timestamp: `11:${String(index).padStart(2, "0")}`,
+    text: `Assistant message ${index + 1}`,
+  }));
+}
+
 function layoutSnapshot(messages: Message[]): VirtualizedConversationLayoutSnapshot {
   return {
     sessionId: "session-1",
@@ -89,6 +99,36 @@ describe("ConversationOverviewRail", () => {
       top: "100px",
       height: "150px",
     });
+  });
+
+  it("renders long same-kind runs as a single clumped visual segment", () => {
+    const messages = assistantTextMessages(100);
+    const onNavigate = vi.fn();
+    const { container } = render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={layoutSnapshot(messages)}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const segments = container.querySelectorAll(".conversation-overview-segment");
+
+    expect(segments).toHaveLength(1);
+    expect(
+      screen.getByLabelText(/Assistant responses 1-100 \(100 messages\)/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(segments[0]);
+
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: "assistant-message-1",
+        messageIndex: 0,
+      }),
+    );
   });
 
   it("can move the viewport indicator without replacing layout geometry", () => {
@@ -182,6 +222,58 @@ describe("ConversationOverviewRail", () => {
         messageId: "message-2",
         messageIndex: 1,
       }),
+    );
+  });
+
+  it("navigates on item pointer down and suppresses the follow-up click", () => {
+    const messages = textMessages(5);
+    const onNavigate = vi.fn();
+
+    render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={layoutSnapshot(messages)}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const rail = screen.getByLabelText("Conversation overview");
+    const secondItem = screen.getByLabelText(/Assistant response 2/);
+    vi.spyOn(rail, "getBoundingClientRect").mockReturnValue({
+      bottom: 250,
+      height: 250,
+      left: 0,
+      right: 24,
+      top: 0,
+      width: 24,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(secondItem, {
+      button: 0,
+      clientY: 75,
+      pointerId: 9,
+    });
+    fireEvent.pointerUp(secondItem, {
+      clientY: 75,
+      pointerId: 9,
+    });
+    fireEvent.click(secondItem);
+
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "message-2" }),
+    );
+
+    fireEvent.click(screen.getByLabelText(/User prompt 3/));
+
+    expect(onNavigate).toHaveBeenCalledTimes(2);
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ messageId: "message-3" }),
     );
   });
 

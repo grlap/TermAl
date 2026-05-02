@@ -460,6 +460,73 @@ describe("MarkdownContent Mermaid diagrams", () => {
     expect(container.querySelector("code.language-mermaid")?.textContent).toBe("flowchart TD\n  A -->");
   });
 
+  it("uses the bundled Mermaid renderer when Vite optimized layout chunks fail", async () => {
+    const mermaidWindow = window as typeof window & {
+      mermaid?: typeof mermaid;
+      __termalMermaidBundleLoadPromise?: Promise<typeof mermaid>;
+    };
+    const previousMermaid = mermaidWindow.mermaid;
+    const previousBundleLoadPromise =
+      mermaidWindow.__termalMermaidBundleLoadPromise;
+    const fallbackRender = vi.fn(async (id: string) => ({
+      diagramType: "flowchart",
+      svg: `<svg data-testid="bundled-mermaid-svg" id="${id}"><text>fallback</text></svg>`,
+    }));
+    const fallbackMermaid = {
+      initialize: vi.fn(),
+      render: fallbackRender,
+    } as unknown as typeof mermaid;
+    const appendChild = document.head.appendChild.bind(document.head);
+    const appendChildSpy = vi
+      .spyOn(document.head, "appendChild")
+      .mockImplementation((node) => {
+        const result = appendChild(node);
+        if (node instanceof HTMLScriptElement) {
+          queueMicrotask(() => {
+            mermaidWindow.mermaid = fallbackMermaid;
+            node.onload?.(new Event("load"));
+          });
+        }
+        return result;
+      });
+
+    delete mermaidWindow.mermaid;
+    delete mermaidWindow.__termalMermaidBundleLoadPromise;
+    mermaidRenderMock.mockRejectedValueOnce(
+      new Error(
+        "Failed to fetch dynamically imported module: http://127.0.0.1:4173/node_modules/.vite/deps/dagre.js",
+      ),
+    );
+
+    try {
+      render(
+        <MarkdownContent
+          markdown={["```mermaid", "flowchart TD", "  A --> B", "```"].join("\n")}
+        />,
+      );
+
+      expect(await screen.findByTestId("mermaid-frame")).toBeInTheDocument();
+      expect(fallbackRender).toHaveBeenCalledWith(
+        expect.stringContaining("-bundled"),
+        "flowchart TD\n  A --> B",
+      );
+      expect(screen.queryByText(/Mermaid render failed:/)).not.toBeInTheDocument();
+    } finally {
+      appendChildSpy.mockRestore();
+      if (previousMermaid) {
+        mermaidWindow.mermaid = previousMermaid;
+      } else {
+        delete mermaidWindow.mermaid;
+      }
+      if (previousBundleLoadPromise) {
+        mermaidWindow.__termalMermaidBundleLoadPromise =
+          previousBundleLoadPromise;
+      } else {
+        delete mermaidWindow.__termalMermaidBundleLoadPromise;
+      }
+    }
+  });
+
   it("caps Mermaid iframe dimensions when the SVG viewBox is pathologically large", async () => {
     // A huge `viewBox` — could be hostile Markdown, agent output with a very
     // large flowchart, or a bug in the renderer. The iframe is sandboxed so
@@ -527,23 +594,29 @@ describe("MarkdownContent Mermaid diagrams", () => {
     });
 
     render(
-      <MarkdownContent
-        markdown={[
-          "```mermaid",
-          "erDiagram",
-          "  USERS {",
-          "    uuid id",
-          "  }",
-          "```",
-        ].join("\n")}
-      />,
+      <div data-testid="narrow-mermaid-parent" style={{ width: "400px" }}>
+        <MarkdownContent
+          markdown={[
+            "```mermaid",
+            "erDiagram",
+            "  USERS {",
+            "    uuid id",
+            "  }",
+            "```",
+          ].join("\n")}
+        />
+      </div>,
     );
 
     const frame = await screen.findByTestId("mermaid-frame");
+    expect(screen.getByTestId("narrow-mermaid-parent")).toHaveStyle({ width: "400px" });
     expect(frame.style.width).toBe("2343px");
     expect(frame.style.maxWidth).toBe("100%");
     expect(frame.style.height).toBe("951px");
     expect(frame.style.aspectRatio).toBe("");
+    expect((frame as HTMLIFrameElement).srcdoc).toContain(
+      "svg{display:block;max-width:none;height:auto",
+    );
   });
 
   it("clamps Mermaid iframe dimensions up to the lower bound when the viewBox is negative", async () => {

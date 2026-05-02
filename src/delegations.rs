@@ -172,7 +172,10 @@ impl AppState {
         let requested_cwd = request
             .cwd
             .as_deref()
-            .map(resolve_session_workdir)
+            .map(|cwd| {
+                validate_delegation_cwd_input(cwd)?;
+                resolve_session_workdir(cwd)
+            })
             .transpose()?;
         let cwd = requested_cwd.unwrap_or(parent_workdir);
         if let Some(project_id) = parent_project_id.as_deref() {
@@ -195,7 +198,21 @@ impl AppState {
         }
 
         let agent = request.agent.unwrap_or(parent_agent);
-        validate_agent_session_setup(agent, &cwd).map_err(ApiError::bad_request)?;
+        let has_test_runtime_override = {
+            #[cfg(test)]
+            {
+                agent
+                    .acp_runtime()
+                    .is_some_and(|acp_agent| self.has_test_acp_runtime_override(acp_agent))
+            }
+            #[cfg(not(test))]
+            {
+                false
+            }
+        };
+        if !has_test_runtime_override {
+            validate_agent_session_setup(agent, &cwd).map_err(ApiError::bad_request)?;
+        }
         self.invalidate_agent_readiness_cache();
         let _ = self.agent_readiness_snapshot();
         let title = request
@@ -796,13 +813,16 @@ impl AppState {
         }
     }
 
-    #[cfg(not(test))]
     fn start_delegation_child_turn(
         &self,
         delegation_id: &str,
         child_session_id: &str,
         runtime_prompt: String,
     ) -> Result<(), ApiError> {
+        #[cfg(test)]
+        if runtime_prompt.contains(TEST_FORCE_DELEGATION_START_FAILURE_PROMPT) {
+            return Err(ApiError::internal("forced delegation start failure"));
+        }
         self.ensure_delegation_can_start_child_turn(delegation_id, child_session_id)?;
         let dispatch = self.dispatch_turn(
             child_session_id,
@@ -815,42 +835,6 @@ impl AppState {
         if let DispatchTurnResult::Dispatched(dispatch) = dispatch {
             deliver_turn_dispatch(self, dispatch)?;
         }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    fn start_delegation_child_turn(
-        &self,
-        delegation_id: &str,
-        child_session_id: &str,
-        runtime_prompt: String,
-    ) -> Result<(), ApiError> {
-        if runtime_prompt.contains(TEST_FORCE_DELEGATION_START_FAILURE_PROMPT) {
-            return Err(ApiError::internal("forced delegation start failure"));
-        }
-        self.ensure_delegation_can_start_child_turn(delegation_id, child_session_id)?;
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_visible_session_index(child_session_id)
-            .ok_or_else(|| ApiError::not_found("child session not found"))?;
-        let message_id = inner.next_message_id();
-        let message = Message::Text {
-            attachments: Vec::new(),
-            id: message_id,
-            timestamp: stamp_now(),
-            author: Author::You,
-            text: runtime_prompt,
-            expanded_text: None,
-        };
-        let record = inner
-            .session_mut_by_index(index)
-            .expect("child session index should be valid");
-        push_message_on_record(record, message);
-        record.session.status = SessionStatus::Active;
-        record.session.preview = "Delegated task started.".to_owned();
-        self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!("failed to persist child prompt: {err:#}"))
-        })?;
         Ok(())
     }
 
@@ -1310,6 +1294,31 @@ fn delegation_is_terminal(status: DelegationStatus) -> bool {
     )
 }
 
+fn validate_delegation_cwd_input(cwd: &str) -> Result<(), ApiError> {
+    #[cfg(windows)]
+    {
+        let trimmed = cwd.trim();
+        let path = FsPath::new(trimmed);
+        if let Some(std::path::Component::Prefix(prefix)) = path.components().next() {
+            match prefix.kind() {
+                std::path::Prefix::Disk(_) if !path.is_absolute() => {
+                    return Err(ApiError::bad_request(
+                        "delegation cwd cannot be a drive-relative Windows path",
+                    ));
+                }
+                std::path::Prefix::UNC(_, _) | std::path::Prefix::VerbatimUNC(_, _) => {
+                    return Err(ApiError::bad_request(
+                        "delegation cwd cannot be a UNC path",
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+    let _ = cwd;
+    Ok(())
+}
+
 enum DelegationChildOutcome {
     Running,
     Completed {
@@ -1546,7 +1555,7 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
             continue;
         }
 
-        if cleaned.ends_with(':') && !cleaned.starts_with('-') {
+        if is_delegation_result_section_heading(cleaned) {
             in_summary = false;
         } else if in_summary {
             summary_lines.push(line);
@@ -1565,6 +1574,16 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
         summary
     };
     Some(ParsedDelegationResult { status, summary })
+}
+
+fn is_delegation_result_section_heading(cleaned: &str) -> bool {
+    let Some(label) = cleaned.strip_suffix(':') else {
+        return false;
+    };
+    matches!(
+        label.trim().to_ascii_lowercase().as_str(),
+        "status" | "summary" | "findings" | "commands run" | "files inspected" | "notes"
+    )
 }
 
 fn delegation_result_search_window(text: &str) -> &str {

@@ -6,9 +6,9 @@ import * as slashPalette from "./session-slash-palette";
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
-  buildConversationOverviewTailItems,
   includeUndeferredMessageTail,
 } from "./AgentSessionPanel";
+import { buildConversationOverviewTailItems } from "./conversation-overview-controller";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { RunningIndicator } from "./session-activity-cards";
 import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
@@ -1120,6 +1120,87 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(scrollWrites.some((write) => write > scrollAfterMessageJump)).toBe(
         true,
       );
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
+  it("refreshes the conversation overview viewport and max height from scroll and resize events", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const scrollNode = document.createElement("section");
+    let clientHeight = 500;
+    let scrollTop = 0;
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => clientHeight,
+    });
+    Object.defineProperty(scrollNode, "clientWidth", {
+      configurable: true,
+      get: () => 1000,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 20_000,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      callback(performance.now());
+      return 1;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
+
+    try {
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("active-session", {
+          status: "active",
+          messages: makeTextMessages(90),
+        }),
+        scrollContainerRef: { current: scrollNode },
+      });
+
+      const rail = await screen.findByLabelText("Conversation overview");
+      const viewport = screen.getByTestId("conversation-overview-viewport");
+
+      await waitFor(() => {
+        expect(rail).toHaveStyle({ height: "476px" });
+      });
+      const initialViewportTop = viewport.style.top;
+
+      act(() => {
+        scrollTop = 1_500;
+        fireEvent.scroll(scrollNode);
+      });
+
+      await waitFor(() => {
+        expect(viewport.style.top).not.toBe(initialViewportTop);
+      });
+
+      act(() => {
+        clientHeight = 700;
+        window.dispatchEvent(new Event("resize"));
+      });
+
+      await waitFor(() => {
+        expect(rail).toHaveStyle({ height: "676px" });
+      });
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       window.requestAnimationFrame = originalRequestAnimationFrame;

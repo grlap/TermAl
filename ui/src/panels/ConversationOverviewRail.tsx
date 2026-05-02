@@ -8,10 +8,12 @@ import {
 
 import {
   buildConversationOverviewProjection,
+  buildConversationOverviewSegments,
   findConversationOverviewItemAtY,
   projectConversationOverviewViewport,
   type ConversationOverviewItem,
   type ConversationOverviewMarkerInput,
+  type ConversationOverviewSegment,
   type ConversationOverviewTailItemInput,
 } from "./conversation-overview-map";
 import type {
@@ -64,6 +66,10 @@ export function ConversationOverviewRail({
     () => projectConversationOverviewViewport(projection, viewportSnapshot),
     [projection, viewportSnapshot],
   );
+  const segments = useMemo(
+    () => buildConversationOverviewSegments(projection),
+    [projection],
+  );
 
   if (messages.length < minMessages || projection.items.length === 0) {
     return null;
@@ -88,7 +94,7 @@ export function ConversationOverviewRail({
     }
     const startedItem =
       event.target instanceof HTMLElement
-        ? event.target.closest<HTMLElement>(".conversation-overview-item")
+        ? event.target.closest<HTMLElement>(".conversation-overview-segment")
         : null;
     dragPointerIdRef.current = event.pointerId;
     dragStartedItemRef.current = startedItem || null;
@@ -132,7 +138,7 @@ export function ConversationOverviewRail({
     }
   };
 
-  const focusOverviewItemAtIndex = (index: number) => {
+  const focusOverviewSegmentAtIndex = (index: number) => {
     railRef.current
       ?.querySelector<HTMLButtonElement>(
         `[data-conversation-overview-index="${index}"]`,
@@ -140,7 +146,7 @@ export function ConversationOverviewRail({
       ?.focus();
   };
 
-  const handleItemKeyDown = (
+  const handleSegmentKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
     index: number,
   ) => {
@@ -148,14 +154,14 @@ export function ConversationOverviewRail({
     switch (event.key) {
       case "ArrowDown":
       case "ArrowRight":
-        nextIndex = Math.min(index + 1, projection.items.length - 1);
+        nextIndex = Math.min(index + 1, segments.length - 1);
         break;
       case "ArrowUp":
       case "ArrowLeft":
         nextIndex = Math.max(index - 1, 0);
         break;
       case "End":
-        nextIndex = projection.items.length - 1;
+        nextIndex = segments.length - 1;
         break;
       case "Home":
         nextIndex = 0;
@@ -165,7 +171,14 @@ export function ConversationOverviewRail({
       return;
     }
     event.preventDefault();
-    focusOverviewItemAtIndex(nextIndex);
+    focusOverviewSegmentAtIndex(nextIndex);
+  };
+
+  const navigateToSegment = (segment: ConversationOverviewSegment) => {
+    const item = projection.items[segment.startItemIndex];
+    if (item) {
+      onNavigate(item);
+    }
   };
 
   return (
@@ -180,13 +193,13 @@ export function ConversationOverviewRail({
       onPointerCancel={finishRailDrag}
       style={{ height: `${Math.ceil(projection.totalHeightPx)}px` }}
     >
-      {projection.items.map((item, index) => (
+      {segments.map((segment, index) => (
         <button
-          key={item.messageId}
+          key={segment.id}
           type="button"
-          aria-label={overviewItemLabel(item)}
-          className={`conversation-overview-item is-${item.kind}${
-            item.status ? ` has-status-${item.status}` : ""
+          aria-label={overviewSegmentLabel(segment, projection.items)}
+          className={`conversation-overview-item conversation-overview-segment is-${segment.kind}${
+            segment.status ? ` has-status-${segment.status}` : ""
           }`}
           data-conversation-overview-index={index}
           onClick={(event) => {
@@ -194,12 +207,12 @@ export function ConversationOverviewRail({
               suppressNextClickRef.current = false;
               return;
             }
-            onNavigate(item);
+            navigateToSegment(segment);
           }}
-          onKeyDown={(event) => handleItemKeyDown(event, index)}
+          onKeyDown={(event) => handleSegmentKeyDown(event, index)}
           style={{
-            top: `${item.mapTopPx}px`,
-            height: `${item.mapHeightPx}px`,
+            top: `${segment.mapTopPx}px`,
+            height: `${segment.mapHeightPx}px`,
           }}
           tabIndex={index === 0 ? 0 : -1}
         />
@@ -249,6 +262,52 @@ function resolvePointerEventTarget(event: PointerEvent<HTMLElement>) {
 function overviewItemLabel(item: ConversationOverviewItem) {
   const sample = item.textSample ? `: ${item.textSample}` : "";
   return `${overviewKindLabel(item.kind)} ${item.messageIndex + 1}${sample}`;
+}
+
+function overviewSegmentLabel(
+  segment: ConversationOverviewSegment,
+  items: readonly ConversationOverviewItem[],
+) {
+  const firstItem = items[segment.startItemIndex];
+  const lastItem = items[segment.endItemIndex] ?? firstItem;
+  if (!firstItem || !lastItem || segment.itemCount <= 1) {
+    return firstItem ? overviewItemLabel(firstItem) : "Conversation overview segment";
+  }
+
+  const sample = firstItem.textSample ? `: ${firstItem.textSample}` : "";
+  return `${overviewSegmentKindLabel(segment)} ${firstItem.messageIndex + 1}-${
+    lastItem.messageIndex + 1
+  } (${segment.itemCount} messages)${sample}`;
+}
+
+function overviewSegmentKindLabel(segment: ConversationOverviewSegment) {
+  if (segment.kind === "mixed") {
+    return "Mixed messages";
+  }
+  switch (segment.kind) {
+    case "approval":
+      return "Approvals";
+    case "assistant_text":
+      return "Assistant responses";
+    case "command":
+      return "Commands";
+    case "diff":
+      return "Diffs";
+    case "file_changes":
+      return "File changes";
+    case "input_request":
+      return "Input requests";
+    case "live_turn":
+      return "Live turns";
+    case "parallel_agents":
+      return "Parallel agent updates";
+    case "subagent_result":
+      return "Subagent results";
+    case "thinking":
+      return "Thinking updates";
+    case "user_prompt":
+      return "User prompts";
+  }
 }
 
 function overviewKindLabel(kind: ConversationOverviewItem["kind"]) {
