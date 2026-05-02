@@ -27,11 +27,15 @@ fn delta_event_revision(event: &DeltaEvent) -> u64 {
         | DeltaEvent::TextReplace { revision, .. }
         | DeltaEvent::CommandUpdate { revision, .. }
         | DeltaEvent::ParallelAgentsUpdate { revision, .. }
+        | DeltaEvent::ConversationMarkerCreated { revision, .. }
+        | DeltaEvent::ConversationMarkerUpdated { revision, .. }
+        | DeltaEvent::ConversationMarkerDeleted { revision, .. }
         | DeltaEvent::CodexUpdated { revision, .. }
         | DeltaEvent::OrchestratorsUpdated { revision, .. }
         | DeltaEvent::DelegationCreated { revision, .. }
         | DeltaEvent::DelegationUpdated { revision, .. }
         | DeltaEvent::DelegationCompleted { revision, .. }
+        | DeltaEvent::DelegationFailed { revision, .. }
         | DeltaEvent::DelegationCanceled { revision, .. } => *revision,
     }
 }

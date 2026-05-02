@@ -136,6 +136,49 @@ describe("reconcileSessions", () => {
     expect(merged[0].messages[0]).toBe(previous[0].messages[0]);
   });
 
+  it("adopts marker changes from summary session snapshots", () => {
+    const previous = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Hello",
+          },
+        ],
+        markers: [],
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 1,
+        markers: [
+          {
+            id: "marker-1",
+            sessionId: "session-a",
+            kind: "decision",
+            name: "Decision",
+            color: "#3b82f6",
+            messageId: "message-1",
+            messageIndexHint: 0,
+            createdAt: "10:00:00",
+            updatedAt: "10:00:00",
+            createdBy: "user",
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0].messages).toBe(previous[0].messages);
+    expect(merged[0].markers).toEqual(next[0].markers);
+  });
+
   it("reuses the existing session object when the mutation stamp matches", () => {
     const previous = [
       makeSession("session-a", {

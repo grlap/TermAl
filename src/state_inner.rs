@@ -157,6 +157,7 @@ impl StateInner {
                 messages: Vec::new(),
                 messages_loaded: true,
                 message_count: 0,
+                markers: Vec::new(),
                 pending_prompts: Vec::new(),
                 session_mutation_stamp: None,
                 parent_delegation_id: None,

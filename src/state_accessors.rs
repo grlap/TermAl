@@ -232,6 +232,7 @@ impl AppState {
             messages: Vec::new(),
             messages_loaded: false,
             message_count: session_message_count(record),
+            markers: session.markers.clone(),
             pending_prompts: session.pending_prompts.clone(),
             session_mutation_stamp: Some(record.mutation_stamp),
             parent_delegation_id: session.parent_delegation_id.clone(),

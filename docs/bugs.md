@@ -5,30 +5,128 @@ tasks. Resolved work, fixed-history notes, speculative refactors, cleanup notes,
 and external limitations do not belong here. Review follow-up task items live in
 the Implementation Tasks section.
 
-Also fixed in the current tree: delegation backend coverage now drives covered
-Codex child starts through `dispatch_turn` and the runtime channel instead of
-the old `#[cfg(test)]` prompt injector; delegation lifecycle refresh paths now
-have production-path coverage for child turn completion boundaries; and the
-graceful-shutdown reload regression now drains the restarted `AppState` worker
-before temporary persistence paths are removed.
-
 ## Active Repo Bugs
 
-## Windows delegation cwd validation misses device namespace aliases
+## Conversation marker validation failures bump per-session mutation stamp
 
-**Severity:** Medium - Windows UNC-equivalent device paths can reach filesystem metadata lookup before rejection.
+**Severity:** Medium - `create_conversation_marker`, `update_conversation_marker`, and `delete_conversation_marker` advance `record.mutation_stamp` and `inner.last_mutation_stamp` BEFORE validating the request, so any rejected request still triggers a phantom session re-write on the next persist worker tick.
 
-`src/delegations.rs:1309` rejects ordinary UNC prefixes, but Windows also accepts namespace forms such as `\\.\UNC\server\share\dir` and `\\?\GLOBALROOT\Device\Mup\...`. The drive-relative guard at `src/delegations.rs:1304` also misses non-absolute `VerbatimDisk` inputs such as `\\?\C:relative`.
+`src/session_markers.rs:32-68, 84-108, 129-152` calls `inner.session_mut_by_index(index)` (which auto-bumps the stamps) before `ensure_local_marker_session(record)?` and `build_conversation_marker(record, request)?`. A request that fails validation (remote-proxy reject, name/body/color length, missing message_id) returns `Err` but has already advanced the per-session stamp. The persist worker re-writes that session on its next tick with no actual content change. Same applies to update/delete when the marker is not found or the session is remote.
 
 **Current behavior:**
-- Standard UNC inputs are rejected before project-boundary resolution.
-- Windows device namespace and some verbatim disk forms are not rejected by the same prefix filter.
-- Those paths can reach filesystem metadata lookup before final rejection.
+- All three marker mutation routes call `session_mut_by_index` (which mutates stamps) before any validation.
+- Validation failures return the appropriate `ApiError` to the client.
+- The bumped stamps cause the persist worker to re-write the unchanged session on the next tick.
+- Phantom writes are content-free but trigger I/O.
 
 **Proposal:**
-- Use a Windows prefix allowlist before any filesystem lookup.
-- Allow only local absolute `Disk(_)` and `VerbatimDisk(_)` paths, and reject `UNC`, `VerbatimUNC`, `DeviceNS(_)`, unsupported `Verbatim(_)`, and non-absolute verbatim disk inputs.
-- Add Windows coverage for device namespace and verbatim drive-relative forms.
+- Validate first: look up the marker index via `&inner.sessions[index].session.markers` for update/delete, validate the body for create, then call `session_mut_by_index` only after the request is known to be applicable.
+- Add a regression that issues an invalid create/update/delete and asserts `inner.last_mutation_stamp` is unchanged (or the persist worker observes no work).
+
+## Marker PATCH cannot clear nullable marker fields
+
+**Severity:** Medium - `body: null` and `endMessageId: null` are treated like omitted fields, so clients cannot clear optional marker data through the HTTP PATCH route.
+
+`src/wire.rs:376` uses nested `Option<Option<String>>` fields for marker patch data. With the current serde shape, explicit JSON null and an absent field both deserialize to the outer `None`, so a null-only PATCH is rejected as an empty request and mixed PATCH requests cannot clear the nullable fields.
+
+**Current behavior:**
+- `PATCH /api/sessions/{id}/markers/{marker_id}` accepts `body` and `endMessageId` as nullable fields.
+- JSON `null` for those fields is not preserved as an explicit clear operation.
+- Clients cannot clear marker body text or end-message anchors through the route.
+
+**Proposal:**
+- Use a custom nullable-field deserializer or `serde_with::rust::double_option` semantics for patch DTO fields.
+- Add route or serde coverage for `body: null` and `endMessageId: null`.
+
+## Marker JSON extractor errors bypass the API error envelope
+
+**Severity:** Medium - malformed marker create/update JSON returns Axum's default rejection response instead of the project-standard `{ "error": ... }` response.
+
+`src/api.rs:590` and the sibling marker update handler use bare `Json<T>` extractors. Deserialization failures therefore bypass `ApiError`, unlike nearby delegation creation handling that maps `JsonRejection` into the canonical API error shape.
+
+**Current behavior:**
+- Marker create/update routes use bare `Json(request): Json<...>` extractors.
+- Bad JSON, schema errors, or missing content type return Axum's default rejection body.
+- Clients see a different error response shape than other TermAl API endpoints.
+
+**Proposal:**
+- Switch marker create/update handlers to accept `Result<Json<_>, JsonRejection>`.
+- Map rejection errors through `ApiError` and cover the route behavior with HTTP-level tests.
+
+## Remote marker snapshots keep remote session IDs
+
+**Severity:** Medium - full remote session snapshots localize `Session.id` but leave nested `ConversationMarker.session_id` values in the remote namespace.
+
+`src/remote_sync.rs:520` rewrites the proxy session id during remote snapshot localization, but embedded markers keep their original remote `session_id`. Marker deltas localize the same field before replay, so full snapshots and later deltas disagree about marker ownership.
+
+**Current behavior:**
+- Remote session snapshots create local proxy sessions with localized `session.id`.
+- Embedded `session.markers[*].session_id` values can still contain the remote session id.
+- Frontend state and persistence can observe a session whose marker ids do not match the owning local session.
+
+**Proposal:**
+- Rewrite each marker's `session_id` to the localized session id in `localize_remote_session`.
+- Add remote snapshot/hydration coverage that includes markers.
+
+## Marker CRUD does not proxy remote-backed sessions
+
+**Severity:** Medium - marker create/update/delete rejects remote proxy sessions instead of following the session-scoped remote proxy pattern.
+
+`src/session_markers.rs:341` rejects marker mutations for remote proxy sessions. The frontend marker API helpers are otherwise local/remote agnostic, so marker actions that work for local sessions fail for remote-backed sessions behind the same UI contract.
+
+**Current behavior:**
+- Local marker CRUD rejects remote proxy sessions.
+- The frontend cannot create, update, or delete markers on remote-backed sessions through the same API helpers.
+- Remote marker deltas can still arrive, so read and write behavior is asymmetric.
+
+**Proposal:**
+- Add remote marker proxy methods that forward to the owning remote session id.
+- Localize and apply the remote result before responding, matching existing remote session-scoped patterns.
+
+## Marker updates are blocked by CORS preflight
+
+**Severity:** Low - the new marker update route uses PATCH but the server CORS method allowlist does not include PATCH.
+
+`src/main.rs:200` allows GET, POST, PUT, and DELETE, while `src/main.rs:296` registers `PATCH /api/sessions/{id}/markers/{marker_id}`. Browser clients using CORS will fail preflight before the request reaches the route.
+
+**Current behavior:**
+- The marker update route is registered as PATCH.
+- CORS preflight does not allow PATCH.
+- Cross-origin browser clients cannot update markers even when the origin is otherwise allowed.
+
+**Proposal:**
+- Add `axum::http::Method::PATCH` to the CORS `allow_methods` list.
+- Keep route method docs/tests aligned with the allowlist.
+
+## Unknown marker kinds are accepted as custom markers
+
+**Severity:** Low - request typos in finite marker kind values can be silently persisted as `custom`.
+
+`src/wire.rs:318` uses `#[serde(other)]` on the shared `ConversationMarkerKind`. That is useful for tolerant persisted/session loading, but it also applies to create/update request DTOs, so API input like `"decison"` can succeed as a custom marker.
+
+**Current behavior:**
+- Unknown marker kind strings deserialize to `ConversationMarkerKind::Custom`.
+- Marker create/update requests can accept typos as successful custom markers.
+- API callers do not get feedback that they sent an unsupported finite marker kind.
+
+**Proposal:**
+- Use strict marker-kind deserialization for HTTP request DTOs.
+- Keep tolerant fallback separate for persisted or remote/session payload loading if needed.
+
+## Windows delegation symlink escape coverage is ignored by default
+
+**Severity:** Medium - the Windows delegation cwd symlink escape regression is not exercised by the normal test suite.
+
+`src/tests/delegations.rs:4244` marks the Windows symlink escape test ignored. Windows is a P0 platform for TermAl, so cwd validation can regress in a platform-specific path while CI and ordinary local test runs still report green.
+
+**Current behavior:**
+- The Windows symlink escape regression exists only as an ignored test.
+- Normal test runs do not execute the Windows cwd escape guard.
+- Privilege-gated symlink behavior can hide regressions unless a developer opts into the ignored test.
+
+**Proposal:**
+- Keep a non-ignored opportunistic test that skips only when symlink privileges are unavailable.
+- Or add a junction/non-privileged equivalent that covers the same escape boundary on Windows.
 
 ## Mermaid dynamic import fallback lacks import-failure coverage
 
@@ -44,49 +142,6 @@ before temporary persistence paths are removed.
 **Proposal:**
 - Add an isolated Vitest case that forces `import("mermaid")` to reject with a dynamic import fetch error.
 - Assert the bundled script path renders successfully.
-
-## Delegation result parser treats summary Status lines as packet metadata
-
-**Severity:** Low - valid summary text can reset packet status and truncate or drop the parsed delegation result.
-
-`src/delegations.rs:1541` parses `Status:` globally, including after `Summary:` capture has started. A valid summary line such as `Status: still failing` can be interpreted as packet metadata instead of summary content.
-
-**Current behavior:**
-- `Status:` is recognized anywhere in the packet.
-- Summary body lines that start with `Status:` can change parser state.
-- Result summaries can be truncated or dropped.
-
-**Proposal:**
-- Parse `Status:` only before summary capture starts, or otherwise gate status parsing so summary body text remains summary text.
-- Add a regression with `Status:` inside a multi-line summary.
-
-## Windows symlink escape test silently skips coverage
-
-**Severity:** Low - the delegation symlink escape regression can pass on Windows without testing the escape path.
-
-`src/tests/delegations.rs:3814` returns early on Windows if `symlink_dir` fails. Windows is a P0 platform, and symlink or reparse-point behavior is part of the path-canonicalization surface the test is meant to cover.
-
-**Current behavior:**
-- Windows setups without symlink privileges can skip the escape assertion silently.
-- CI can report the test as passing without covering the Windows escape case.
-
-**Proposal:**
-- Use a Windows junction or reparse-point fallback that works in CI.
-- If the prerequisite truly cannot be provided, make the test explicitly ignored instead of silently passing.
-
-## Remote delegation no-op coverage only pins created deltas
-
-**Severity:** Low - only one delegation delta variant is covered for the remote no-op contract.
-
-`src/tests/remote.rs:3693` covers `DelegationCreated`, while production remote handling also treats `DelegationUpdated`, `DelegationCompleted`, and `DelegationCanceled` as non-materializing remote deltas.
-
-**Current behavior:**
-- `DelegationCreated` is asserted not to create local delegation records while remote applied revision advances.
-- Other delegation delta variants are not table-tested under the same contract.
-
-**Proposal:**
-- Table-drive the remote no-op assertions across all delegation delta variants.
-- Assert local delegation state remains unchanged and remote applied revision advances for each variant.
 
 ## Conversation overview segment cap does not bound homogeneous runs
 
@@ -131,20 +186,20 @@ before temporary persistence paths are removed.
 - Give delegations their own persisted rows or mutation-stamped delta path.
 - Keep `/api/state` summaries derived separately from durable full records.
 
-## Delegation SSE recovery coverage lacks stale/newer timing cases
+## Delegation SSE recovery coverage lacks reconnect failure timing cases
 
-**Severity:** Low - equal-revision delegation repair variants are pinned, but stale/newer timing remains under-covered.
+**Severity:** Low - common delegation repair revisions are pinned, but reconnect failure and sibling-delta timing remains under-covered.
 
-`ui/src/app-live-state.ts` handles delegation SSE repair/recovery. Current coverage table-tests equal-revision `delegationCreated`, `delegationUpdated`, `delegationCompleted`, and `delegationCanceled`, but stale revisions, newer revisions, and reconnect recovery timing can still regress without a focused failure.
+`ui/src/app-live-state.ts` handles delegation SSE repair/recovery. Current coverage table-tests stale, equal-revision, and newer delegation delta variants, but reconnect recovery timing, failed `/api/state` repair, and same-revision sibling deltas can still regress without a focused failure.
 
 **Current behavior:**
-- Equal-revision delegation delta variants repair through `/api/state`.
-- Stale and newer revision cases are not table-tested.
+- Stale, equal-revision, and newer delegation delta variants are table-tested.
 - Reconnect recovery timing for delegation repair remains under-covered.
+- Failed `/api/state` delegation repair and same-revision sibling interactions are not pinned.
 
 **Proposal:**
-- Add stale and newer revision cases for each delegation delta variant.
-- Assert state repair scheduling, revision adoption timing, reconnect recovery confirmation, and non-use of normal session-delta handling.
+- Add delayed or failed `/api/state` repair cases for delegation deltas.
+- Assert reconnect recovery remains active until authoritative repair succeeds, including same-revision sibling deltas involving session-created and parent-card deltas.
 
 ## Markdown diff change-block grouping rules duplicated between renderer and index builder
 
@@ -1021,14 +1076,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Add delegation start-dispatch race coverage:
-  interleave create-side validation, cancellation, and child dispatch so a terminal delegation cannot start a live runtime after the state lock is dropped.
-- [ ] P2: Add parent-removal delegated-runtime cleanup coverage:
-  remove a parent delegation session while a child delegation is actively running and assert the child runtime is killed or detached, queued prompts/pending callbacks are cleared, and no background work continues.
-- [ ] P2: Add Windows delegation cwd prefix coverage:
-  cover device namespace UNC aliases, `GLOBALROOT`/Mup paths, and non-absolute verbatim disk inputs before any filesystem metadata lookup is attempted.
-- [ ] P2: Add remote ignored delegation-delta coverage:
-  table-drive `DelegationCreated`, `DelegationUpdated`, `DelegationCompleted`, and `DelegationCanceled` through the remote path and assert no local delegation is materialized while the remote applied revision still advances.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
 - [ ] P2: Add equal-revision gap repair snapshot adoption coverage:
@@ -1074,24 +1121,28 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Split the bad-live-event + workspaceFilesChanged test into isolated arrange-act-assert phases:
   `ui/src/backend-connection.test.tsx:1225-1261` co-fires the stale `delta` and the `workspaceFilesChanged` event in one `act()`. The assertion `countStateFetches() === hydratedStateFetchCount` is satisfied if either side skips confirmation, so the test cannot pinpoint which side regressed. Dispatch `workspaceFilesChanged` alone first and assert no fetch fired; then add the stale delta separately and re-assert.
 - [ ] P2: Expand UI tests for delegation delta dispatch in `ui/src/app-live-state.test.ts`:
-  current coverage pins equal-revision repair for all delegation delta variants plus a newer delta landing before repair adoption. Add stale/newer timing cases, same-revision sibling deltas involving session-created and parent-card deltas, and delayed or failed `/api/state` repair cases. Assert reconnect/fallback recovery remains active until the authoritative repair snapshot is adopted and that delegation events do not flow through normal session-delta handling.
-- [ ] P2: Drop redundant per-field `#[serde(rename = "...")]` in `DeltaEvent::Delegation*` variants:
-  `DelegationWritePolicy` now uses `rename_all_fields = "camelCase"`, but the delegation SSE delta variants still carry per-field renames such as `#[serde(rename = "delegationId")]`. Drop the redundant attributes if `DeltaEvent` can safely adopt `rename_all_fields = "camelCase"` without changing other variant wire shapes.
-- [ ] P2: Add `DelegationFailed` SSE delta variant (or extend `DelegationUpdated`) in `src/wire.rs:1555-1562`:
-  `DeltaEvent::DelegationUpdated` carries `(delegationId, status, updatedAt)` only. When `mark_delegation_failed_locked` returns a `DelegationLifecycleDelta::Updated` for a `Failed` transition, SSE-only subscribers cannot see the failure summary without a separate `GET /api/sessions/{id}/delegations/{delegation_id}/result`. `Completed` and `Canceled` get their own variants with `result`/`reason` payloads; `Failed` should be symmetric. Currently masked by the eager full-resync in the UI; will become user-visible if Phase 3 lands a targeted-delta path.
-- [ ] P2: Add delegation result `Status:`-inside-summary coverage:
-  parse a delegation result packet with `Status:` inside the `Summary:` body and assert the line remains summary text instead of resetting packet metadata.
-- [ ] P2: Publish a `MessageUpdated` delta when `detach_delegation_child_runtime_locked` flips Pending approval/request statuses in `src/delegations.rs:1067-1093`:
-  `cancel_pending_interaction_messages` mutates `Approval::Pending → Rejected` and `*Request::Pending → Canceled` in the child transcript without publishing a per-message delta. Other call sites (`session_lifecycle.rs:361`, `turn_lifecycle.rs:416`) at least follow with a synthesized "Turn stopped by user." Text message that carries `MessageCreated`. Live clients keep the old `Pending` status until they re-fetch the session.
-- [ ] P2: Push a "Delegation halted" transcript marker when the parent is removed in `src/delegations.rs:1067-1093`:
-  the detach path doesn't push any transcript marker; the orphaned-and-failed child is preserved (per the test) but a user later opening that child sees its transcript ending mid-turn with no in-band explanation.
-- [ ] P2: Symmetrize cancel vs fail child-state mutation in `src/delegations.rs:1022-1068`:
-  `mark_delegation_failed_locked` sets `child.session.status = Error`; `mark_delegation_canceled_locked` only updates `preview` and clears the queue. After `cancel_delegation` returns, `delegation.status == Canceled` while `child.session.status` may still be `Active`/`Idle` until `stop_session_with_options` propagates. Either set `child.session.status` for symmetry or document why cancel intentionally leaves status to be settled by the stop path.
-- [ ] P2: Add cached `running_read_only_delegations` index for `delegated_write_scopes` in `src/delegations.rs:493-515`:
-  scoped write checks now early-out when the session-only gate already blocks, and local projects are only collected when project/workdir inference needs them. The remaining scalability concern is that scoped writes still scan historical delegations before filtering terminal/non-read-only records. Consider a `StateInner::running_read_only_delegations` cached index updated on lifecycle transitions.
-- [ ] P2: Pin `response.delegation.result` in `delegation_route_failed_start_response_matches_durable_child_state` (`src/tests/delegations.rs:1731-1796`):
-  current test asserts `response.delegation == stored_delegation` and the child preview, but doesn't directly assert that the response carries the failure summary in `delegation.result`. A regression that dropped the failed-result attachment to the response only (not durable state) wouldn't fail the test. Add `assert_eq!(response.delegation.result.as_ref().map(|r| r.summary.as_str()), Some("forced delegation start failure"));` (or whatever sentinel summary the test injects).
-- [ ] P2: Add Windows symlink or junction escape coverage for delegation cwd validation:
-  avoid silently returning when `symlink_dir` fails on Windows; use a junction/reparse-point fallback or make the prerequisite explicit with an ignored test.
+  current coverage pins stale, equal-revision, and newer repair for all delegation delta variants plus a newer delta landing before repair adoption. Add same-revision sibling deltas involving session-created and parent-card deltas, and delayed or failed `/api/state` repair cases. Assert reconnect/fallback recovery remains active until the authoritative repair snapshot is adopted and that delegation events do not flow through normal session-delta handling.
 - [ ] P2: Add homogeneous conversation-overview segment cap coverage:
   build a long same-kind message run with `maxItemsPerSegment` set and assert the segment policy is either capped or explicitly documented as a mixed-run-only cap.
+- [ ] P2: Reformat `strip_parent_card_delta` in `src/delegations.rs:1478-1525`:
+  the new `Completed`/`Failed`/`Canceled` arms have an extra four-space indent compared to the existing `Updated` arm. Compiles cleanly (match arms are whitespace-insensitive), but `cargo fmt -- --check src/delegations.rs` reports a diff. The file isn't auto-formatted because it's pulled in via `include!` from `main.rs:510`, so project-level `cargo fmt --check` passes. Fix the indentation now to keep the file readable and so a future `include!`-aware fmt run is a no-op.
+- [ ] P2: Document new conversation marker REST routes + SSE delta events in `docs/architecture.md`:
+  round 30 ships 4 new REST endpoints (`GET/POST /api/sessions/{id}/markers`, `PATCH/DELETE /api/sessions/{id}/markers/{marker_id}`), 3 new marker SSE delta variants (`conversationMarkerCreated/Updated/Deleted`), a new `DelegationFailed` delta variant, a new persisted field (`Session.markers`), and a new wire type (`ConversationMarker`). None reflected in `docs/architecture.md`. Add alongside the existing delegations rows for the same parent-scoped pattern.
+- [ ] P2: Switch marker create/update routes to the `Result<Json<_>, JsonRejection>` envelope pattern in `src/api.rs:586-595`:
+  current `Json(request): Json<...>` extractors return Axum's default text body on bad JSON, not the `ErrorResponse { error }` envelope. Inconsistent with `create_session_delegation` (`src/api.rs:524-537`) which returns the canonical wire shape. Apply the same `Json::<...>::from_request` + `JsonRejection` mapping for marker create/update.
+- [ ] P2: Add marker HTTP route coverage:
+  drive Axum GET/POST/PATCH/DELETE marker routes with encoded ids, malformed JSON, PATCH preflight assertions, status/envelope assertions, and clear-field PATCH payloads for `body: null` and `endMessageId: null`.
+- [ ] P2: Add remote conversation marker delta coverage:
+  cover create/update/delete replay keys, remote proxy application, local `session_id` localization, mismatched marker/session ids, and delete idempotence for remote marker deltas.
+- [ ] P2: Add remote marker snapshot localization coverage:
+  hydrate or sync a remote proxy session containing markers and assert both `session.id` and every `session.markers[*].session_id` are rewritten to the local proxy id.
+- [ ] P2: Add frontend marker API helper coverage:
+  assert encoded marker paths, HTTP methods, and JSON bodies, including preservation of `null` for marker field clear operations.
+- [ ] P2: Add marker delta reducer resync-guard coverage:
+  cover `messagesLoaded:false` summary sessions, missing-session marker deltas, and `marker.sessionId !== sessionId` payloads, asserting they request resync instead of mutating the wrong session.
+- [ ] P2: Add non-ignored Windows delegation symlink escape coverage:
+  cover the delegation cwd symlink escape boundary in the normal Windows test suite, either with an opportunistic symlink test that skips only when privileges are unavailable or with a junction/non-privileged equivalent.
+- [ ] P2: Drop redundant per-field `#[serde(rename = ...)]` in `DeltaEvent::ConversationMarker*` variants (`src/wire.rs:1644-1680`):
+  the enum already declares `rename_all_fields = "camelCase"` at line 1512. Per-field renames (`sessionId`, `markerId`, `sessionMutationStamp`) are redundant and invite drift if someone changes the parent rule. Drop them; do the existing bugs.md cleanup task for `Delegation*` variants in the same commit so all variants land canonical.
+- [ ] P2: Apply the `cancel_pending_interaction_messages` `Vec<usize>` return value at `session_lifecycle.rs:366` and `turn_lifecycle.rs:416`:
+  round 30 wired the per-message `MessageUpdated` delta publication for the delegation-detach path (`src/delegations.rs:1423-1459`), but the two non-delegation call sites still discard the new return and rely on subsequent `commit_locked` full-snapshot SSE. The bugs.md task is therefore PARTIAL — extend the same delta-publish loop to the remaining two call sites, OR document why those paths intentionally rely on full-snapshot SSE.

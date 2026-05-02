@@ -35,7 +35,7 @@ use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use base64::Engine as _;
 use chrono::Local;
@@ -292,6 +292,14 @@ fn app_router(state: AppState) -> Router {
             "/api/sessions/{id}/delegations/{delegation_id}/cancel",
             post(cancel_delegation),
         )
+        .route(
+            "/api/sessions/{id}/markers",
+            get(list_session_markers).post(create_session_marker),
+        )
+        .route(
+            "/api/sessions/{id}/markers/{marker_id}",
+            patch(update_session_marker).delete(delete_session_marker),
+        )
         .route("/api/sessions/{id}/settings", post(update_session_settings))
         .route(
             "/api/sessions/{id}/model-options/refresh",
@@ -487,6 +495,7 @@ include!("session_lifecycle.rs");
 include!("session_messages.rs");
 include!("codex_submissions.rs");
 include!("session_config.rs");
+include!("session_markers.rs");
 include!("turn_dispatch.rs");
 include!("session_crud.rs");
 include!("sse_broadcast.rs");

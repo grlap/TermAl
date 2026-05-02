@@ -134,6 +134,23 @@ enum RemoteDeltaReplayPayload {
         preview_fingerprint: String,
         session_mutation_stamp: Option<u64>,
     },
+    ConversationMarkerCreated {
+        session_id: String,
+        marker_id: String,
+        marker_fingerprint: String,
+        session_mutation_stamp: Option<u64>,
+    },
+    ConversationMarkerUpdated {
+        session_id: String,
+        marker_id: String,
+        marker_fingerprint: String,
+        session_mutation_stamp: Option<u64>,
+    },
+    ConversationMarkerDeleted {
+        session_id: String,
+        marker_id: String,
+        session_mutation_stamp: Option<u64>,
+    },
     CodexUpdated {
         codex_fingerprint: String,
     },
@@ -593,6 +610,8 @@ struct StateInner {
     orchestrator_instances: Vec<OrchestratorInstance>,
     /// Durable parent-child delegation links for ordinary sessions.
     delegations: Vec<DelegationRecord>,
+    /// Indexes currently running read-only delegation records by `delegations` index.
+    running_read_only_delegations: BTreeSet<usize>,
     /// Server-backed workspace documents keyed by workspace id.
     workspace_layouts: BTreeMap<String, WorkspaceLayoutDocument>,
     /// Monotonic counter used to stamp mutated session records. The persist
@@ -628,6 +647,7 @@ impl StateInner {
             sessions: Vec::new(),
             orchestrator_instances: Vec::new(),
             delegations: Vec::new(),
+            running_read_only_delegations: BTreeSet::new(),
             workspace_layouts: BTreeMap::new(),
             last_mutation_stamp: 0,
             removed_session_ids: Vec::new(),

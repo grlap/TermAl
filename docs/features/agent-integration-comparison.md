@@ -90,3 +90,24 @@ with differences isolated to:
 See individual feature briefs for full protocol details:
 - [`cursor-cli-integration.md`](./cursor-cli-integration.md)
 - [`gemini-cli-integration.md`](./gemini-cli-integration.md)
+
+## Future candidate: Kimi CLI
+
+Kimi is not currently a supported TermAl agent, but it is a strong future-work
+candidate because Kimi CLI now documents ACP support through `kimi --acp`.
+The preferred path is to extend the shared ACP adapter with `AcpAgent::Kimi`
+rather than adding a separate OpenAI-compatible chat runtime.
+
+| Concern | Kimi CLI |
+|---------|----------|
+| Status in TermAl | Future work |
+| Executable | `kimi` |
+| Subcommand | `--acp` |
+| Protocol | ACP over stdio |
+| Default model candidate | `kimi-k2.6` |
+| Auth/API key | Moonshot/Kimi API key, usually `MOONSHOT_API_KEY` |
+| Platform caveat | Kimi CLI is currently documented for macOS and Linux only |
+| Main risk | Technical-preview CLI and provider-specific ACP behavior |
+
+See [`kimi-cli-integration.md`](./kimi-cli-integration.md) for the future-work
+brief.

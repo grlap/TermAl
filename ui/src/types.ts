@@ -96,6 +96,33 @@ export type SessionModelOption = {
   supportedReasoningEfforts?: CodexReasoningEffort[];
 };
 
+export type ConversationMarkerKind =
+  | "checkpoint"
+  | "decision"
+  | "review"
+  | "bug"
+  | "question"
+  | "handoff"
+  | "custom";
+
+export type ConversationMarkerAuthor = "user" | "agent" | "system";
+
+export type ConversationMarker = {
+  id: string;
+  sessionId: string;
+  kind: ConversationMarkerKind;
+  name: string;
+  body?: string | null;
+  color: string;
+  messageId: string;
+  messageIndexHint: number;
+  endMessageId?: string | null;
+  endMessageIndexHint?: number | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: ConversationMarkerAuthor;
+};
+
 export type CodexRateLimitWindow = {
   resetsAt?: number | null;
   usedPercent?: number | null;
@@ -273,6 +300,7 @@ export type Session = {
   messages: Message[];
   messageCount?: number | null;
   messagesLoaded?: boolean | null;
+  markers?: ConversationMarker[];
   pendingPrompts?: PendingPrompt[];
   sessionMutationStamp?: number | null;
   parentDelegationId?: string | null;
@@ -708,6 +736,30 @@ export type ParallelAgentsUpdateEvent = {
   sessionMutationStamp?: number | null;
 };
 
+export type ConversationMarkerCreatedEvent = {
+  type: "conversationMarkerCreated";
+  revision: number;
+  sessionId: string;
+  marker: ConversationMarker;
+  sessionMutationStamp?: number | null;
+};
+
+export type ConversationMarkerUpdatedEvent = {
+  type: "conversationMarkerUpdated";
+  revision: number;
+  sessionId: string;
+  marker: ConversationMarker;
+  sessionMutationStamp?: number | null;
+};
+
+export type ConversationMarkerDeletedEvent = {
+  type: "conversationMarkerDeleted";
+  revision: number;
+  sessionId: string;
+  markerId: string;
+  sessionMutationStamp?: number | null;
+};
+
 export type OrchestratorsUpdatedEvent = {
   type: "orchestratorsUpdated";
   revision: number;
@@ -735,6 +787,14 @@ export type DelegationCompletedEvent = {
   delegationId: string;
   result: DelegationResultSummary;
   completedAt: string;
+};
+
+export type DelegationFailedEvent = {
+  type: "delegationFailed";
+  revision: number;
+  delegationId: string;
+  result: DelegationResultSummary;
+  failedAt: string;
 };
 
 export type DelegationCanceledEvent = {
@@ -779,11 +839,15 @@ export type DeltaEvent =
   | TextReplaceEvent
   | CommandUpdateEvent
   | ParallelAgentsUpdateEvent
+  | ConversationMarkerCreatedEvent
+  | ConversationMarkerUpdatedEvent
+  | ConversationMarkerDeletedEvent
   | CodexUpdatedEvent
   | OrchestratorsUpdatedEvent
   | DelegationCreatedEvent
   | DelegationUpdatedEvent
   | DelegationCompletedEvent
+  | DelegationFailedEvent
   | DelegationCanceledEvent;
 
 export type SessionSettingsField =

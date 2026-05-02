@@ -2,7 +2,10 @@
 
 ## Status
 
-Exploratory. No product code implements this yet.
+In progress. The current tree has the shared marker data model, session
+persistence, marker CRUD routes, marker SSE deltas, frontend API helpers, live
+delta application, and overview-rail marker pins. Transcript chips, marker
+list UI, previous/next controls, and agent workflow actions are still pending.
 
 Conversation markers are durable, user-visible anchors inside an agent
 conversation. They let the user mark important points in a long transcript,
@@ -285,22 +288,25 @@ Marker changes should be delta-friendly.
 ```ts
 type SessionMarkerDelta =
   | {
-      type: "markerCreated";
+      type: "conversationMarkerCreated";
       revision: number;
       sessionId: string;
       marker: ConversationMarker;
+      sessionMutationStamp?: number | null;
     }
   | {
-      type: "markerUpdated";
+      type: "conversationMarkerUpdated";
       revision: number;
       sessionId: string;
       marker: ConversationMarker;
+      sessionMutationStamp?: number | null;
     }
   | {
-      type: "markerDeleted";
+      type: "conversationMarkerDeleted";
       revision: number;
       sessionId: string;
       markerId: string;
+      sessionMutationStamp?: number | null;
     };
 ```
 

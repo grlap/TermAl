@@ -799,6 +799,139 @@ describe("DiffPanel", () => {
     }
   });
 
+  it("scrolls the lone Markdown diff change into view when prev/next wraps to the same index", async () => {
+    // Bug ledger: "Rendered Markdown diff navigation does not scroll
+    // when there is exactly one change". With `changeCount === 1`,
+    // prev/next compute the same index (0 -> 0); React bails on the
+    // no-op state set, the scroll effect does not re-run, and the
+    // controls appear dead. The fix advances a `navigationTick` on
+    // every prev/next press so the scroll effect fires regardless of
+    // whether `currentChangeIndex` changed.
+    fetchFileMock.mockResolvedValue({
+      content: "Shared intro.\n# Staged document\nShared outro.\n",
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,3 +1,3 @@",
+            " Shared intro.",
+            "-# Base document",
+            "+# Staged document",
+            " Shared outro.",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: "Shared intro.\n# Base document\nShared outro.\n",
+              source: "head",
+            },
+            after: {
+              content: "Shared intro.\n# Staged document\nShared outro.\n",
+              source: "index",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-markdown-single-change-nav"
+          filePath="/repo/README.md"
+          gitSectionId="staged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    // Exactly one change block, the counter says "Change 1 of 1".
+    await waitFor(() => {
+      const matches = document.querySelectorAll<HTMLElement>(
+        "[data-markdown-diff-change-index]",
+      );
+      expect(matches.length).toBe(1);
+    });
+    expect(screen.getByText("Change 1 of 1")).toBeInTheDocument();
+
+    const originalScrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "scrollIntoView",
+    );
+    const originalHtmlScrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView",
+    );
+    const scrollIntoViewCalls: Array<{
+      element: Element;
+      options?: boolean | ScrollIntoViewOptions;
+    }> = [];
+    const recordScrollIntoView = function recordScrollIntoView(
+      this: Element,
+      options?: boolean | ScrollIntoViewOptions,
+    ) {
+      scrollIntoViewCalls.push({ element: this, options });
+    };
+    const scrolledChangeIndexes = () =>
+      scrollIntoViewCalls
+        .filter(
+          ({ options }) =>
+            typeof options === "object" &&
+            options !== null &&
+            options.block === "center",
+        )
+        .map(({ element }) =>
+          (element as HTMLElement).dataset.markdownDiffChangeIndex ?? null,
+        );
+
+    try {
+      Object.defineProperty(Element.prototype, "scrollIntoView", {
+        configurable: true,
+        value: recordScrollIntoView,
+      });
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+        configurable: true,
+        value: recordScrollIntoView,
+      });
+
+      // Next: the lone block scrolls into view even though the index
+      // wraps from 0 to 0.
+      await clickAndSettle(screen.getByRole("button", { name: "Next change" }));
+      expect(screen.getByText("Change 1 of 1")).toBeInTheDocument();
+      expect(scrolledChangeIndexes()).toEqual(["0"]);
+
+      // Previous: same — scrolls again on the same lone block.
+      await clickAndSettle(screen.getByRole("button", { name: "Previous change" }));
+      expect(screen.getByText("Change 1 of 1")).toBeInTheDocument();
+      expect(scrolledChangeIndexes()).toEqual(["0", "0"]);
+    } finally {
+      if (originalScrollIntoViewDescriptor) {
+        Object.defineProperty(
+          Element.prototype,
+          "scrollIntoView",
+          originalScrollIntoViewDescriptor,
+        );
+      } else {
+        delete (Element.prototype as Partial<Element>).scrollIntoView;
+      }
+      if (originalHtmlScrollIntoViewDescriptor) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollIntoView",
+          originalHtmlScrollIntoViewDescriptor,
+        );
+      } else {
+        delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+      }
+    }
+  });
+
   it("preserves scroll offsets when switching between file and rendered Markdown diff views", async () => {
     fetchFileMock.mockResolvedValue({
       content: "# Worktree document\n\nThis is not staged.\n",

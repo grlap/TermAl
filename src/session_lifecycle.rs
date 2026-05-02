@@ -55,6 +55,7 @@ impl AppState {
             delegation_runtimes_to_kill,
             revision,
             delegation_lifecycle_deltas,
+            delegation_child_transcript_deltas,
         ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -128,6 +129,7 @@ impl AppState {
                 delegation_reconciliation.runtimes_to_kill,
                 revision,
                 delegation_reconciliation.lifecycle_deltas,
+                delegation_reconciliation.child_transcript_deltas,
             )
         };
 
@@ -149,6 +151,9 @@ impl AppState {
             {
                 eprintln!("session cleanup warning> {err:#}");
             }
+        }
+        for delta in delegation_child_transcript_deltas {
+            self.publish_delegation_child_transcript_delta(revision, delta);
         }
         for delta in delegation_lifecycle_deltas {
             self.publish_delegation_lifecycle_delta(revision, delta);

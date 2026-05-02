@@ -573,6 +573,49 @@ async fn cancel_delegation(
     Ok(Json(response))
 }
 
+/// Lists conversation markers for one session.
+async fn list_session_markers(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<ConversationMarkersResponse>, ApiError> {
+    let response =
+        run_blocking_api(move || state.list_conversation_markers(&session_id)).await?;
+    Ok(Json(response))
+}
+
+/// Creates a conversation marker.
+async fn create_session_marker(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+    Json(request): Json<CreateConversationMarkerRequest>,
+) -> Result<(StatusCode, Json<ConversationMarkerResponse>), ApiError> {
+    let response =
+        run_blocking_api(move || state.create_conversation_marker(&session_id, request)).await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+/// Updates a conversation marker.
+async fn update_session_marker(
+    AxumPath((session_id, marker_id)): AxumPath<(String, String)>,
+    State(state): State<AppState>,
+    Json(request): Json<UpdateConversationMarkerRequest>,
+) -> Result<Json<ConversationMarkerResponse>, ApiError> {
+    let response =
+        run_blocking_api(move || state.update_conversation_marker(&session_id, &marker_id, request))
+            .await?;
+    Ok(Json(response))
+}
+
+/// Deletes a conversation marker.
+async fn delete_session_marker(
+    AxumPath((session_id, marker_id)): AxumPath<(String, String)>,
+    State(state): State<AppState>,
+) -> Result<Json<DeleteConversationMarkerResponse>, ApiError> {
+    let response =
+        run_blocking_api(move || state.delete_conversation_marker(&session_id, &marker_id)).await?;
+    Ok(Json(response))
+}
+
 /// Creates project.
 async fn create_project(
     State(state): State<AppState>,

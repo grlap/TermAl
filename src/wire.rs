@@ -305,6 +305,110 @@ struct Project {
     remote_project_id: Option<String>,
 }
 
+/// Enumerates conversation marker categories.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum ConversationMarkerKind {
+    Checkpoint,
+    Decision,
+    Review,
+    Bug,
+    Question,
+    Handoff,
+    #[serde(other)]
+    Custom,
+}
+
+/// Enumerates conversation marker authors.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ConversationMarkerAuthor {
+    User,
+    Agent,
+    System,
+}
+
+/// Represents a user or system marker anchored to a conversation message.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationMarker {
+    id: String,
+    session_id: String,
+    kind: ConversationMarkerKind,
+    name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    body: Option<String>,
+    color: String,
+    message_id: String,
+    message_index_hint: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    end_message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    end_message_index_hint: Option<usize>,
+    created_at: String,
+    updated_at: String,
+    created_by: ConversationMarkerAuthor,
+}
+
+/// Request to create a conversation marker.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateConversationMarkerRequest {
+    kind: ConversationMarkerKind,
+    name: String,
+    #[serde(default)]
+    body: Option<String>,
+    color: String,
+    message_id: String,
+    #[serde(default)]
+    end_message_id: Option<String>,
+}
+
+/// Request to patch a conversation marker.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateConversationMarkerRequest {
+    #[serde(default)]
+    kind: Option<ConversationMarkerKind>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    body: Option<Option<String>>,
+    #[serde(default)]
+    color: Option<String>,
+    #[serde(default)]
+    message_id: Option<String>,
+    #[serde(default)]
+    end_message_id: Option<Option<String>>,
+}
+
+/// Response containing all conversation markers for one session.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationMarkersResponse {
+    markers: Vec<ConversationMarker>,
+    revision: u64,
+    server_instance_id: String,
+}
+
+/// Response containing one conversation marker mutation.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationMarkerResponse {
+    marker: ConversationMarker,
+    revision: u64,
+    server_instance_id: String,
+}
+
+/// Response containing one deleted conversation marker mutation.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteConversationMarkerResponse {
+    marker_id: String,
+    revision: u64,
+    server_instance_id: String,
+}
+
 /// Represents session.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -343,6 +447,8 @@ struct Session {
     messages_loaded: bool,
     #[serde(default, rename = "messageCount")]
     message_count: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    markers: Vec<ConversationMarker>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pending_prompts: Vec<PendingPrompt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1403,7 +1509,7 @@ struct PickProjectRootResponse {
 
 /// Defines the delta event variants.
 #[derive(Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 enum DeltaEvent {
     SessionCreated {
         revision: u64,
@@ -1535,6 +1641,43 @@ enum DeltaEvent {
         )]
         session_mutation_stamp: Option<u64>,
     },
+    ConversationMarkerCreated {
+        revision: u64,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        marker: ConversationMarker,
+        #[serde(
+            rename = "sessionMutationStamp",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_mutation_stamp: Option<u64>,
+    },
+    ConversationMarkerUpdated {
+        revision: u64,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        marker: ConversationMarker,
+        #[serde(
+            rename = "sessionMutationStamp",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_mutation_stamp: Option<u64>,
+    },
+    ConversationMarkerDeleted {
+        revision: u64,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "markerId")]
+        marker_id: String,
+        #[serde(
+            rename = "sessionMutationStamp",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        session_mutation_stamp: Option<u64>,
+    },
     CodexUpdated {
         // Process-global Codex runtime metadata. The payload is the latest
         // CodexState snapshot for this small subsystem, not localized remote
@@ -1554,25 +1697,25 @@ enum DeltaEvent {
     },
     DelegationUpdated {
         revision: u64,
-        #[serde(rename = "delegationId")]
         delegation_id: String,
         status: DelegationStatus,
-        #[serde(rename = "updatedAt")]
         updated_at: String,
     },
     DelegationCompleted {
         revision: u64,
-        #[serde(rename = "delegationId")]
         delegation_id: String,
         result: DelegationResultSummary,
-        #[serde(rename = "completedAt")]
         completed_at: String,
+    },
+    DelegationFailed {
+        revision: u64,
+        delegation_id: String,
+        result: DelegationResultSummary,
+        failed_at: String,
     },
     DelegationCanceled {
         revision: u64,
-        #[serde(rename = "delegationId")]
         delegation_id: String,
-        #[serde(rename = "canceledAt")]
         canceled_at: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,

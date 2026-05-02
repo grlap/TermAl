@@ -652,6 +652,38 @@ impl AppState {
                 preview_fingerprint: Self::remote_delta_text_fingerprint(preview),
                 session_mutation_stamp: *session_mutation_stamp,
             },
+            DeltaEvent::ConversationMarkerCreated {
+                session_id,
+                marker,
+                session_mutation_stamp,
+                ..
+            } => RemoteDeltaReplayPayload::ConversationMarkerCreated {
+                session_id: session_id.clone(),
+                marker_id: marker.id.clone(),
+                marker_fingerprint: Self::remote_delta_payload_fingerprint(marker)?,
+                session_mutation_stamp: *session_mutation_stamp,
+            },
+            DeltaEvent::ConversationMarkerUpdated {
+                session_id,
+                marker,
+                session_mutation_stamp,
+                ..
+            } => RemoteDeltaReplayPayload::ConversationMarkerUpdated {
+                session_id: session_id.clone(),
+                marker_id: marker.id.clone(),
+                marker_fingerprint: Self::remote_delta_payload_fingerprint(marker)?,
+                session_mutation_stamp: *session_mutation_stamp,
+            },
+            DeltaEvent::ConversationMarkerDeleted {
+                session_id,
+                marker_id,
+                session_mutation_stamp,
+                ..
+            } => RemoteDeltaReplayPayload::ConversationMarkerDeleted {
+                session_id: session_id.clone(),
+                marker_id: marker_id.clone(),
+                session_mutation_stamp: *session_mutation_stamp,
+            },
             DeltaEvent::CodexUpdated { revision: _, codex } => {
                 RemoteDeltaReplayPayload::CodexUpdated {
                     codex_fingerprint: Self::remote_delta_payload_fingerprint(codex)?,
@@ -674,6 +706,7 @@ impl AppState {
             DeltaEvent::DelegationCreated { .. }
             | DeltaEvent::DelegationUpdated { .. }
             | DeltaEvent::DelegationCompleted { .. }
+            | DeltaEvent::DelegationFailed { .. }
             | DeltaEvent::DelegationCanceled { .. } => return None,
         };
         Some(RemoteDeltaReplayKey {
@@ -1943,6 +1976,187 @@ impl AppState {
                 }
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
+            DeltaEvent::ConversationMarkerCreated {
+                marker,
+                session_id,
+                session_mutation_stamp: remote_session_mutation_stamp,
+                ..
+            } => {
+                if marker.session_id != session_id {
+                    return Err(anyhow!(
+                        "remote marker payload session id `{}` did not match event id `{session_id}`",
+                        marker.session_id
+                    ));
+                }
+                let (local_session_id, localized_marker, revision, session_mutation_stamp) = {
+                    let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if inner.should_skip_remote_session_applied_delta_revision(
+                        remote_id,
+                        &session_id,
+                        remote_revision,
+                    ) {
+                        return Ok(());
+                    }
+                    let index = inner
+                        .find_remote_session_index(remote_id, &session_id)
+                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
+                    let (local_session_id, localized_marker, session_mutation_stamp) = {
+                        let record = inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid");
+                        let local_session_id = record.session.id.clone();
+                        let mut localized_marker = marker;
+                        localized_marker.session_id = local_session_id.clone();
+                        if let Some(existing_index) = record
+                            .session
+                            .markers
+                            .iter()
+                            .position(|entry| entry.id == localized_marker.id)
+                        {
+                            record.session.markers[existing_index] = localized_marker.clone();
+                        } else {
+                            record.session.markers.push(localized_marker.clone());
+                        }
+                        if remote_session_mutation_stamp.is_some() {
+                            record.session.session_mutation_stamp = remote_session_mutation_stamp;
+                        }
+                        (local_session_id, localized_marker, record.mutation_stamp)
+                    };
+                    let revision = self.commit_persisted_delta_locked(&mut inner)?;
+                    inner.note_remote_applied_revision(remote_id, remote_revision);
+                    (
+                        local_session_id,
+                        localized_marker,
+                        revision,
+                        session_mutation_stamp,
+                    )
+                };
+                self.publish_delta(&DeltaEvent::ConversationMarkerCreated {
+                    revision,
+                    session_id: local_session_id,
+                    marker: localized_marker,
+                    session_mutation_stamp: Some(session_mutation_stamp),
+                });
+                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
+            }
+            DeltaEvent::ConversationMarkerUpdated {
+                marker,
+                session_id,
+                session_mutation_stamp: remote_session_mutation_stamp,
+                ..
+            } => {
+                if marker.session_id != session_id {
+                    return Err(anyhow!(
+                        "remote marker payload session id `{}` did not match event id `{session_id}`",
+                        marker.session_id
+                    ));
+                }
+                let (local_session_id, localized_marker, revision, session_mutation_stamp) = {
+                    let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if inner.should_skip_remote_session_applied_delta_revision(
+                        remote_id,
+                        &session_id,
+                        remote_revision,
+                    ) {
+                        return Ok(());
+                    }
+                    let index = inner
+                        .find_remote_session_index(remote_id, &session_id)
+                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
+                    let (local_session_id, localized_marker, session_mutation_stamp) = {
+                        let record = inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid");
+                        let local_session_id = record.session.id.clone();
+                        let mut localized_marker = marker;
+                        localized_marker.session_id = local_session_id.clone();
+                        if let Some(existing_index) = record
+                            .session
+                            .markers
+                            .iter()
+                            .position(|entry| entry.id == localized_marker.id)
+                        {
+                            record.session.markers[existing_index] = localized_marker.clone();
+                        } else {
+                            record.session.markers.push(localized_marker.clone());
+                        }
+                        if remote_session_mutation_stamp.is_some() {
+                            record.session.session_mutation_stamp = remote_session_mutation_stamp;
+                        }
+                        (local_session_id, localized_marker, record.mutation_stamp)
+                    };
+                    let revision = self.commit_persisted_delta_locked(&mut inner)?;
+                    inner.note_remote_applied_revision(remote_id, remote_revision);
+                    (
+                        local_session_id,
+                        localized_marker,
+                        revision,
+                        session_mutation_stamp,
+                    )
+                };
+                self.publish_delta(&DeltaEvent::ConversationMarkerUpdated {
+                    revision,
+                    session_id: local_session_id,
+                    marker: localized_marker,
+                    session_mutation_stamp: Some(session_mutation_stamp),
+                });
+                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
+            }
+            DeltaEvent::ConversationMarkerDeleted {
+                marker_id,
+                session_id,
+                session_mutation_stamp: remote_session_mutation_stamp,
+                ..
+            } => {
+                let Some((local_session_id, revision, session_mutation_stamp)) = ({
+                    let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if inner.should_skip_remote_session_applied_delta_revision(
+                        remote_id,
+                        &session_id,
+                        remote_revision,
+                    ) {
+                        return Ok(());
+                    }
+                    let index = inner
+                        .find_remote_session_index(remote_id, &session_id)
+                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
+                    let existing_index = inner.sessions[index]
+                        .session
+                        .markers
+                        .iter()
+                        .position(|entry| entry.id == marker_id);
+                    let Some(existing_index) = existing_index else {
+                        inner.note_remote_applied_revision(remote_id, remote_revision);
+                        drop(inner);
+                        self.note_remote_applied_delta_replay(&remote_delta_replay_key);
+                        return Ok(());
+                    };
+                    let (local_session_id, session_mutation_stamp) = {
+                        let record = inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid");
+                        let local_session_id = record.session.id.clone();
+                        record.session.markers.remove(existing_index);
+                        if remote_session_mutation_stamp.is_some() {
+                            record.session.session_mutation_stamp = remote_session_mutation_stamp;
+                        }
+                        (local_session_id, record.mutation_stamp)
+                    };
+                    inner.note_remote_applied_revision(remote_id, remote_revision);
+                    let revision = self.commit_persisted_delta_locked(&mut inner)?;
+                    Some((local_session_id, revision, session_mutation_stamp))
+                }) else {
+                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
+                    return Ok(());
+                };
+                self.publish_delta(&DeltaEvent::ConversationMarkerDeleted {
+                    revision,
+                    session_id: local_session_id,
+                    marker_id,
+                    session_mutation_stamp: Some(session_mutation_stamp),
+                });
+                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
+            }
             DeltaEvent::OrchestratorsUpdated {
                 orchestrators,
                 sessions,
@@ -2005,6 +2219,7 @@ impl AppState {
             DeltaEvent::DelegationCreated { .. }
             | DeltaEvent::DelegationUpdated { .. }
             | DeltaEvent::DelegationCompleted { .. }
+            | DeltaEvent::DelegationFailed { .. }
             | DeltaEvent::DelegationCanceled { .. } => {
                 // Delegations are local parent/child session relationships.
                 // Cross-machine delegation is a non-goal for this phase, so

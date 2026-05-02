@@ -85,6 +85,7 @@ export type SessionDeltaEvent = Exclude<
   | { type: "delegationCreated" }
   | { type: "delegationUpdated" }
   | { type: "delegationCompleted" }
+  | { type: "delegationFailed" }
   | { type: "delegationCanceled" }
 >;
 type MessageCreatedDelta = Extract<
@@ -94,6 +95,15 @@ type MessageCreatedDelta = Extract<
 type MessageUpdatedDelta = Extract<
   SessionDeltaEvent,
   { type: "messageUpdated" }
+>;
+type TranscriptDelta = Extract<
+  SessionDeltaEvent,
+  | { type: "messageCreated" }
+  | { type: "messageUpdated" }
+  | { type: "textDelta" }
+  | { type: "textReplace" }
+  | { type: "commandUpdate" }
+  | { type: "parallelAgentsUpdate" }
 >;
 
 export type DeltaApplyResult =
@@ -165,7 +175,7 @@ function isValidMessageIndexForCount(
 
 function applyMetadataOnlySessionDelta(
   session: Session,
-  delta: Exclude<SessionDeltaEvent, { type: "sessionCreated" }>,
+  delta: TranscriptDelta,
 ): Session {
   const pendingPrompts =
     delta.type === "messageCreated"
@@ -659,6 +669,46 @@ export function applyDeltaToSessions(
         }),
       };
     }
+    case "conversationMarkerCreated":
+    case "conversationMarkerUpdated": {
+      if (sessionIndex === -1 || delta.marker.sessionId !== delta.sessionId) {
+        return { kind: "needsResync" };
+      }
+      const session = sessions[sessionIndex];
+      return {
+        kind: "applied",
+        sessions: replaceSession(sessions, sessionIndex, {
+          ...session,
+          markers: upsertConversationMarker(
+            session.markers ?? [],
+            delta.marker,
+          ),
+          sessionMutationStamp: resolveSessionMutationStamp(
+            session,
+            delta.sessionMutationStamp,
+          ),
+        }),
+      };
+    }
+    case "conversationMarkerDeleted": {
+      if (sessionIndex === -1) {
+        return { kind: "needsResync" };
+      }
+      const session = sessions[sessionIndex];
+      return {
+        kind: "applied",
+        sessions: replaceSession(sessions, sessionIndex, {
+          ...session,
+          markers: (session.markers ?? []).filter(
+            (marker) => marker.id !== delta.markerId,
+          ),
+          sessionMutationStamp: resolveSessionMutationStamp(
+            session,
+            delta.sessionMutationStamp,
+          ),
+        }),
+      };
+    }
     default: {
       const _exhaustive: never = delta;
       void _exhaustive;
@@ -671,6 +721,19 @@ function replaceSession(sessions: Session[], index: number, session: Session) {
   const updatedSessions = sessions.slice();
   updatedSessions[index] = session;
   return updatedSessions;
+}
+
+function upsertConversationMarker(
+  markers: NonNullable<Session["markers"]>,
+  marker: NonNullable<Session["markers"]>[number],
+) {
+  const index = markers.findIndex((entry) => entry.id === marker.id);
+  if (index === -1) {
+    return [...markers, marker];
+  }
+  const updatedMarkers = markers.slice();
+  updatedMarkers[index] = marker;
+  return updatedMarkers;
 }
 
 function removePendingPromptById(

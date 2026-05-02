@@ -154,6 +154,14 @@ export function MarkdownDiffView({
   );
   const changeCount = changeBlocks.length;
   const [currentChangeIndex, setCurrentChangeIndex] = useState(0);
+  // `navigationTick` advances on every prev/next press so the scroll
+  // effect below fires even when `currentChangeIndex` does not change.
+  // Without this, the single-change case (`changeCount === 1`) wraps
+  // the index from 0 to 0; React bails on the no-op state set, the
+  // effect never re-runs, and prev/next appear dead. Bumping the tick
+  // gives the effect an explicit "user requested navigation" signal
+  // that is independent of the index value.
+  const [navigationTick, setNavigationTick] = useState(0);
   // Clamp the current index when the segment set shrinks (e.g., the
   // user committed a section so a previously-changed block is now
   // unchanged). Falls back to 0 when there are no changes; the
@@ -173,11 +181,13 @@ export function MarkdownDiffView({
     setCurrentChangeIndex((current) =>
       current <= 0 ? Math.max(changeCount - 1, 0) : current - 1,
     );
+    setNavigationTick((tick) => tick + 1);
   }, [changeCount]);
   const goToNextChange = useCallback(() => {
     setCurrentChangeIndex((current) =>
       current >= changeCount - 1 ? 0 : current + 1,
     );
+    setNavigationTick((tick) => tick + 1);
   }, [changeCount]);
   // Previous implementations here froze `segments` and the source content
   // they were computed from while any section was editing, in order to keep
@@ -219,16 +229,25 @@ export function MarkdownDiffView({
   // a navigation button yet and the panel should respect whatever
   // scroll position the parent restored.
   const lastScrolledChangeIndexRef = useRef<number | null>(null);
+  const lastScrolledNavigationTickRef = useRef(0);
   useEffect(() => {
     if (changeCount === 0) {
       lastScrolledChangeIndexRef.current = null;
       return;
     }
-    if (lastScrolledChangeIndexRef.current === currentChangeIndex) {
+    if (lastScrolledChangeIndexRef.current === null) {
+      // Initial mount: record the baseline but skip the scroll so the
+      // parent's restored scroll position survives. The user has not
+      // pressed a navigation button yet.
+      lastScrolledChangeIndexRef.current = currentChangeIndex;
+      lastScrolledNavigationTickRef.current = navigationTick;
       return;
     }
-    if (lastScrolledChangeIndexRef.current === null) {
-      lastScrolledChangeIndexRef.current = currentChangeIndex;
+    const indexChanged =
+      lastScrolledChangeIndexRef.current !== currentChangeIndex;
+    const navigationRequested =
+      lastScrolledNavigationTickRef.current !== navigationTick;
+    if (!indexChanged && !navigationRequested) {
       return;
     }
     const scrollContainer = scrollRef.current;
@@ -243,7 +262,8 @@ export function MarkdownDiffView({
     }
     target.scrollIntoView({ block: "center" });
     lastScrolledChangeIndexRef.current = currentChangeIndex;
-  }, [changeCount, currentChangeIndex, scrollRef]);
+    lastScrolledNavigationTickRef.current = navigationTick;
+  }, [changeCount, currentChangeIndex, navigationTick, scrollRef]);
 
   return (
     <div className="source-editor-shell source-editor-shell-with-statusbar markdown-diff-shell">

@@ -717,6 +717,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
             messages={visibleMessages}
             layoutSnapshot={conversationOverview.layoutSnapshot}
             viewportSnapshot={conversationOverview.viewportSnapshot}
+            markers={session.markers}
             tailItems={conversationOverview.tailItems}
             maxHeightPx={conversationOverview.maxHeightPx}
             onNavigate={conversationOverview.navigate}

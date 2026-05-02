@@ -94,7 +94,8 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.sessionMutationStamp === next.sessionMutationStamp &&
     previous.status === next.status &&
     previous.preview === next.preview &&
-    (previous.messageCount ?? null) === (next.messageCount ?? null)
+    (previous.messageCount ?? null) === (next.messageCount ?? null) &&
+    sameConversationMarkers(previous.markers, next.markers)
   );
 }
 
@@ -232,6 +233,41 @@ function sameModelOptions(previous?: Session["modelOptions"], next?: Session["mo
       previousSupportedReasoningEfforts.every(
         (effort, effortIndex) => nextSupportedReasoningEfforts[effortIndex] === effort,
       )
+    );
+  });
+}
+
+function sameConversationMarkers(
+  previous?: Session["markers"],
+  next?: Session["markers"],
+) {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous?.length && !next?.length) {
+    return true;
+  }
+  if (!previous || !next || previous.length !== next.length) {
+    return false;
+  }
+
+  return previous.every((marker, index) => {
+    const nextMarker = next[index];
+    return (
+      nextMarker?.id === marker.id &&
+      nextMarker.sessionId === marker.sessionId &&
+      nextMarker.kind === marker.kind &&
+      nextMarker.name === marker.name &&
+      (nextMarker.body ?? null) === (marker.body ?? null) &&
+      nextMarker.color === marker.color &&
+      nextMarker.messageId === marker.messageId &&
+      nextMarker.messageIndexHint === marker.messageIndexHint &&
+      (nextMarker.endMessageId ?? null) === (marker.endMessageId ?? null) &&
+      (nextMarker.endMessageIndexHint ?? null) ===
+        (marker.endMessageIndexHint ?? null) &&
+      nextMarker.createdAt === marker.createdAt &&
+      nextMarker.updatedAt === marker.updatedAt &&
+      nextMarker.createdBy === marker.createdBy
     );
   });
 }

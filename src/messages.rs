@@ -103,32 +103,38 @@ fn expire_pending_interaction_messages(messages: &mut [Message]) -> usize {
 }
 
 /// Cancels pending interaction messages.
-fn cancel_pending_interaction_messages(messages: &mut [Message]) {
-    for message in messages {
+fn cancel_pending_interaction_messages(messages: &mut [Message]) -> Vec<usize> {
+    let mut changed_indices = Vec::new();
+    for (index, message) in messages.iter_mut().enumerate() {
         match message {
             Message::Approval { decision, .. } => {
                 if *decision == ApprovalDecision::Pending {
                     *decision = ApprovalDecision::Rejected;
+                    changed_indices.push(index);
                 }
             }
             Message::UserInputRequest { state, .. } => {
                 if *state == InteractionRequestState::Pending {
                     *state = InteractionRequestState::Canceled;
+                    changed_indices.push(index);
                 }
             }
             Message::McpElicitationRequest { state, .. } => {
                 if *state == InteractionRequestState::Pending {
                     *state = InteractionRequestState::Canceled;
+                    changed_indices.push(index);
                 }
             }
             Message::CodexAppRequest { state, .. } => {
                 if *state == InteractionRequestState::Pending {
                     *state = InteractionRequestState::Canceled;
+                    changed_indices.push(index);
                 }
             }
             _ => {}
         }
     }
+    changed_indices
 }
 
 /// Marks running command messages as failed.

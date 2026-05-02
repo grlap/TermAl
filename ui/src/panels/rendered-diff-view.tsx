@@ -138,6 +138,13 @@ export function RenderedDiffView({
 }) {
   const regionCount = regions.length;
   const [currentRegionIndex, setCurrentRegionIndex] = useState(0);
+  // `navigationTick` advances on every prev/next press so the scroll
+  // effect below fires even when `currentRegionIndex` does not change.
+  // Without this, the single-region case (`regionCount === 1`) wraps
+  // the index from 0 to 0; React bails on the no-op state set, the
+  // effect never re-runs, and prev/next appear dead. Mirrors the
+  // `MarkdownDiffView` navigation contract.
+  const [navigationTick, setNavigationTick] = useState(0);
   // Clamp the index when the region set shrinks (e.g., the user
   // edited the upstream source so a region is gone). Falls back to 0
   // when there are no regions; the counter UI handles the empty case
@@ -157,11 +164,13 @@ export function RenderedDiffView({
     setCurrentRegionIndex((current) =>
       current <= 0 ? Math.max(regionCount - 1, 0) : current - 1,
     );
+    setNavigationTick((tick) => tick + 1);
   }, [regionCount]);
   const goToNextRegion = useCallback(() => {
     setCurrentRegionIndex((current) =>
       current >= regionCount - 1 ? 0 : current + 1,
     );
+    setNavigationTick((tick) => tick + 1);
   }, [regionCount]);
   // Scroll the active region into view when the index advances via
   // prev/next. Initial mount intentionally skips the scroll so the
@@ -170,16 +179,24 @@ export function RenderedDiffView({
   // `MarkdownDiffView` scroll-into-view contract.
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledIndexRef = useRef<number | null>(null);
+  const lastScrolledNavigationTickRef = useRef(0);
   useEffect(() => {
     if (regionCount === 0) {
       lastScrolledIndexRef.current = null;
       return;
     }
-    if (lastScrolledIndexRef.current === currentRegionIndex) {
+    if (lastScrolledIndexRef.current === null) {
+      // Initial mount: record the baseline but skip the scroll so the
+      // parent's restored scroll position survives.
+      lastScrolledIndexRef.current = currentRegionIndex;
+      lastScrolledNavigationTickRef.current = navigationTick;
       return;
     }
-    if (lastScrolledIndexRef.current === null) {
-      lastScrolledIndexRef.current = currentRegionIndex;
+    const indexChanged =
+      lastScrolledIndexRef.current !== currentRegionIndex;
+    const navigationRequested =
+      lastScrolledNavigationTickRef.current !== navigationTick;
+    if (!indexChanged && !navigationRequested) {
       return;
     }
     const container = scrollContainerRef.current;
@@ -194,7 +211,8 @@ export function RenderedDiffView({
     }
     target.scrollIntoView({ block: "center" });
     lastScrolledIndexRef.current = currentRegionIndex;
-  }, [currentRegionIndex, regionCount]);
+    lastScrolledNavigationTickRef.current = navigationTick;
+  }, [currentRegionIndex, navigationTick, regionCount]);
 
   return (
     <div

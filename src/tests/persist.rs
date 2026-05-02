@@ -733,6 +733,150 @@ fn persisted_state_clears_runtime_session_mutation_stamp_on_load() {
 }
 
 #[test]
+fn persisted_state_round_trips_conversation_markers() {
+    let path = std::env::temp_dir().join(format!("termal-conversation-markers-{}", Uuid::new_v4()));
+    let mut inner = StateInner::new();
+    let record = inner.create_session(
+        Agent::Codex,
+        Some("Marked".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
+    );
+    let session_id = record.session.id.clone();
+    let index = inner
+        .find_session_index(&session_id)
+        .expect("session should exist");
+    inner.sessions[index]
+        .session
+        .markers
+        .push(ConversationMarker {
+            id: "marker-1".to_owned(),
+            session_id: session_id.clone(),
+            kind: ConversationMarkerKind::Decision,
+            name: "Use the overview rail".to_owned(),
+            body: Some("User accepted the overview-map direction.".to_owned()),
+            color: "#3b82f6".to_owned(),
+            message_id: "message-1".to_owned(),
+            message_index_hint: 0,
+            end_message_id: Some("message-3".to_owned()),
+            end_message_index_hint: Some(2),
+            created_at: "2026-05-01 10:00:00".to_owned(),
+            updated_at: "2026-05-01 10:05:00".to_owned(),
+            created_by: ConversationMarkerAuthor::User,
+        });
+
+    persist_state(&path, &inner).expect("persisted state should be written");
+
+    let encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap())
+        .expect("persisted state should deserialize");
+    assert_eq!(
+        encoded["sessions"][0]["session"]["markers"][0]["name"],
+        Value::String("Use the overview rail".to_owned())
+    );
+
+    let loaded = load_state(&path)
+        .expect("persisted state should load")
+        .expect("persisted state should exist");
+    let markers = &loaded.sessions[0].session.markers;
+    assert_eq!(markers.len(), 1);
+    assert_eq!(markers[0].id, "marker-1");
+    assert_eq!(markers[0].session_id, session_id);
+    assert_eq!(markers[0].kind, ConversationMarkerKind::Decision);
+    assert_eq!(markers[0].created_by, ConversationMarkerAuthor::User);
+    assert_eq!(markers[0].end_message_id.as_deref(), Some("message-3"));
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn persisted_state_defaults_missing_conversation_markers() {
+    let path = std::env::temp_dir().join(format!(
+        "termal-conversation-markers-missing-{}",
+        Uuid::new_v4()
+    ));
+    let mut inner = StateInner::new();
+    inner.create_session(
+        Agent::Claude,
+        Some("No Markers".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
+    );
+    persist_state(&path, &inner).expect("persisted state should be written");
+
+    let mut encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap())
+        .expect("persisted state should deserialize");
+    encoded["sessions"][0]["session"]
+        .as_object_mut()
+        .expect("persisted session should be an object")
+        .remove("markers");
+    fs::write(&path, serde_json::to_vec(&encoded).unwrap()).expect("persisted state should update");
+
+    let loaded = load_state(&path)
+        .expect("persisted state should load")
+        .expect("persisted state should exist");
+    assert!(loaded.sessions[0].session.markers.is_empty());
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn persisted_state_maps_unknown_conversation_marker_kind_to_custom() {
+    let path = std::env::temp_dir().join(format!(
+        "termal-conversation-marker-kind-{}",
+        Uuid::new_v4()
+    ));
+    let mut inner = StateInner::new();
+    let record = inner.create_session(
+        Agent::Codex,
+        Some("Marked".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
+    );
+    let session_id = record.session.id.clone();
+    let index = inner
+        .find_session_index(&session_id)
+        .expect("session should exist");
+    inner.sessions[index]
+        .session
+        .markers
+        .push(ConversationMarker {
+            id: "marker-legacy".to_owned(),
+            session_id,
+            kind: ConversationMarkerKind::Custom,
+            name: "Legacy marker".to_owned(),
+            body: None,
+            color: "#94a3b8".to_owned(),
+            message_id: "message-1".to_owned(),
+            message_index_hint: 0,
+            end_message_id: None,
+            end_message_index_hint: None,
+            created_at: "2026-05-01 10:00:00".to_owned(),
+            updated_at: "2026-05-01 10:00:00".to_owned(),
+            created_by: ConversationMarkerAuthor::System,
+        });
+    persist_state(&path, &inner).expect("persisted state should be written");
+
+    let mut encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap())
+        .expect("persisted state should deserialize");
+    encoded["sessions"][0]["session"]["markers"][0]["kind"] =
+        Value::String("obsoleteKind".to_owned());
+    fs::write(&path, serde_json::to_vec(&encoded).unwrap()).expect("persisted state should update");
+
+    let loaded = load_state(&path)
+        .expect("persisted state should load")
+        .expect("persisted state should exist");
+    assert_eq!(
+        loaded.sessions[0].session.markers[0].kind,
+        ConversationMarkerKind::Custom
+    );
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn persisted_state_rejects_oversized_legacy_json_before_reading() {
     let path =
         std::env::temp_dir().join(format!("termal-oversized-legacy-state-{}", Uuid::new_v4()));

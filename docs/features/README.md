@@ -35,5 +35,6 @@ design decisions, and future plans.
 - [Conversation Overview Map](./conversation-overview-map.md)
 - [Conversation Markers](./conversation-markers.md)
 - [Editor Buffer Persistence](./editor-buffer-persistence.md)
+- [Kimi CLI Integration](./kimi-cli-integration.md)
 - [Territory Visualization](./territory-visualization.md)
 - [WhatsApp Integration](./whatsapp-integration.md)

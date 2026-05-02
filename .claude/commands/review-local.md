@@ -123,9 +123,13 @@ Present the consolidated note directly to the user (do NOT write it to a file un
 
 After presenting the review to the user, update `docs/bugs.md` to reflect the findings. Read the file first to understand the current structure, then apply these three operations:
 
-### 6a. Mark resolved bugs as fixed
+### 6a. Remove resolved bugs
 
-If the reviewed changes fix any **active bug entries** (the `## Heading` sections with Severity/Current behavior/Proposal), move them into the "also fixed in the current tree" preamble paragraphs at the top of the file. Write a brief summary of how each was fixed, matching the existing preamble style.
+If the reviewed changes fix any **active bug entries** (the `## Heading` sections with Severity/Current behavior/Proposal), **delete those entries entirely** from `docs/bugs.md`.
+
+`docs/bugs.md` is an active-state ledger only. Its own preamble explicitly says "Resolved work, fixed-history notes, speculative refactors, cleanup notes, and external limitations do not belong here." Do NOT move resolved entries into a "fixed in the current tree" preamble paragraph or any other history-style note. Just remove them.
+
+If the reader needs to see what changed, that is what `git log` and PR descriptions are for — not `docs/bugs.md`.
 
 ### 6b. Add new bug entries
 

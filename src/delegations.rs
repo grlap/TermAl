@@ -20,6 +20,9 @@ const DELEGATION_NO_LONGER_STARTABLE_MESSAGE: &str = "delegation is no longer ru
 #[cfg(test)]
 const TEST_FORCE_DELEGATION_START_FAILURE_PROMPT: &str =
     "TERMAL_TEST_FORCE_DELEGATION_START_FAILURE";
+#[cfg(test)]
+const TEST_CANCEL_DELEGATION_BEFORE_START_PROMPT: &str =
+    "TERMAL_TEST_CANCEL_DELEGATION_BEFORE_START";
 
 #[derive(Clone, Debug)]
 enum ParentDelegationCardDelta {
@@ -45,6 +48,30 @@ enum ParentDelegationCardDelta {
 }
 
 #[derive(Clone, Debug)]
+enum DelegationChildTranscriptDelta {
+    MessageCreated {
+        session_id: String,
+        message_id: String,
+        message_index: usize,
+        message_count: u32,
+        message: Message,
+        preview: String,
+        status: SessionStatus,
+        session_mutation_stamp: u64,
+    },
+    MessageUpdated {
+        session_id: String,
+        message_id: String,
+        message_index: usize,
+        message_count: u32,
+        message: Message,
+        preview: String,
+        status: SessionStatus,
+        session_mutation_stamp: u64,
+    },
+}
+
+#[derive(Clone, Debug)]
 enum DelegationLifecycleDelta {
     Updated {
         delegation_id: String,
@@ -58,6 +85,12 @@ enum DelegationLifecycleDelta {
         completed_at: String,
         parent_card_delta: Option<ParentDelegationCardDelta>,
     },
+    Failed {
+        delegation_id: String,
+        result: DelegationResult,
+        failed_at: String,
+        parent_card_delta: Option<ParentDelegationCardDelta>,
+    },
     Canceled {
         delegation_id: String,
         canceled_at: String,
@@ -68,10 +101,40 @@ enum DelegationLifecycleDelta {
 
 struct RemovedSessionDelegationReconciliation {
     lifecycle_deltas: Vec<DelegationLifecycleDelta>,
+    child_transcript_deltas: Vec<DelegationChildTranscriptDelta>,
     runtimes_to_kill: Vec<KillableRuntime>,
 }
 
+#[derive(Default)]
+struct DetachedDelegationChildRuntime {
+    runtime: Option<KillableRuntime>,
+    transcript_deltas: Vec<DelegationChildTranscriptDelta>,
+}
+
 impl StateInner {
+    fn rebuild_running_read_only_delegations(&mut self) {
+        self.running_read_only_delegations = self
+            .delegations
+            .iter()
+            .enumerate()
+            .filter_map(|(index, delegation)| {
+                running_read_only_delegation_index_entry(delegation, index)
+            })
+            .collect();
+    }
+
+    fn sync_running_read_only_delegation_index(&mut self, delegation_index: usize) {
+        if let Some(delegation) = self.delegations.get(delegation_index) {
+            if running_read_only_delegation_index_entry(delegation, delegation_index).is_some() {
+                self.running_read_only_delegations.insert(delegation_index);
+            } else {
+                self.running_read_only_delegations.remove(&delegation_index);
+            }
+        } else {
+            self.running_read_only_delegations.remove(&delegation_index);
+        }
+    }
+
     fn next_delegation_id(&self) -> String {
         format!("delegation-{}", Uuid::new_v4())
     }
@@ -87,6 +150,15 @@ impl StateInner {
             .iter()
             .position(|record| record.child_session_id == child_session_id)
     }
+}
+
+fn running_read_only_delegation_index_entry(
+    delegation: &DelegationRecord,
+    index: usize,
+) -> Option<usize> {
+    (!delegation_is_terminal(delegation.status)
+        && delegation.write_policy == DelegationWritePolicy::ReadOnly)
+        .then_some(index)
 }
 
 fn find_parent_delegation_index_locked(
@@ -296,7 +368,9 @@ impl AppState {
             completed_at: None,
             result: None,
         };
+        let delegation_index = inner.delegations.len();
         inner.delegations.push(record.clone());
+        inner.sync_running_read_only_delegation_index(delegation_index);
         let parent_card_delta = add_parent_delegation_card_locked(&mut inner, &record);
         let revision = self
             .commit_locked(&mut inner)
@@ -314,6 +388,29 @@ impl AppState {
             revision,
             delegation: delegation_summary_from_record(&record),
         });
+
+        #[cfg(test)]
+        if record
+            .prompt
+            .contains(TEST_CANCEL_DELEGATION_BEFORE_START_PROMPT)
+        {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(index) = inner.find_delegation_index(&record.id) {
+                if let Some(delta) = mark_delegation_canceled_locked(
+                    &mut inner,
+                    index,
+                    Some("test canceled delegation before child start".to_owned()),
+                ) {
+                    let revision = self.commit_locked(&mut inner).map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to persist test delegation cancelation: {err:#}"
+                        ))
+                    })?;
+                    drop(inner);
+                    self.publish_delegation_lifecycle_delta(revision, delta);
+                }
+            }
+        }
 
         let runtime_prompt = build_read_only_delegation_prompt(&record);
         if let Err(err) =
@@ -572,15 +669,10 @@ impl AppState {
                     .any(|target| target.project_id.is_some() || target.workdir.is_some())
                 {
                     inner
-                        .delegations
+                        .running_read_only_delegations
                         .iter()
+                        .filter_map(|delegation_index| inner.delegations.get(*delegation_index))
                         .filter_map(|delegation| {
-                            if delegation_is_terminal(delegation.status)
-                                || delegation.write_policy != DelegationWritePolicy::ReadOnly
-                            {
-                                return None;
-                            }
-
                             let session_scope = inner
                                 .find_session_index(&delegation.child_session_id)
                                 .and_then(|index| inner.sessions.get(index));
@@ -685,7 +777,7 @@ impl AppState {
         child_session_id: &str,
         detail: &str,
     ) -> Result<(), ApiError> {
-        let (revision, lifecycle_delta, runtime_to_kill) = {
+        let (revision, lifecycle_delta, detached_child) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_delegation_index(delegation_id)
@@ -694,20 +786,23 @@ impl AppState {
             else {
                 return Ok(());
             };
-            let runtime_to_kill =
-                detach_delegation_child_runtime_locked(&mut inner, child_session_id);
+            let detached_child =
+                detach_delegation_child_runtime_locked(&mut inner, child_session_id, None);
             let revision = self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist delegation failure: {err:#}"))
             })?;
-            (revision, lifecycle_delta, runtime_to_kill)
+            (revision, lifecycle_delta, detached_child)
         };
 
-        if let Some(runtime) = runtime_to_kill {
+        if let Some(runtime) = detached_child.runtime {
             if let Err(err) =
                 shutdown_removed_runtime(runtime, &format!("failed delegation `{delegation_id}`"))
             {
                 eprintln!("delegation cleanup warning> {err:#}");
             }
+        }
+        for delta in detached_child.transcript_deltas {
+            self.publish_delegation_child_transcript_delta(revision, delta);
         }
         self.publish_delegation_lifecycle_delta(revision, lifecycle_delta);
         Ok(())
@@ -742,6 +837,22 @@ impl AppState {
                     delegation_id,
                     result: delegation_result_summary(&result),
                     completed_at,
+                });
+                if let Some(delta) = parent_card_delta {
+                    self.publish_parent_delegation_card_delta(revision, delta);
+                }
+            }
+            DelegationLifecycleDelta::Failed {
+                delegation_id,
+                result,
+                failed_at,
+                parent_card_delta,
+            } => {
+                self.publish_delta(&DeltaEvent::DelegationFailed {
+                    revision,
+                    delegation_id,
+                    result: delegation_result_summary(&result),
+                    failed_at,
                 });
                 if let Some(delta) = parent_card_delta {
                     self.publish_parent_delegation_card_delta(revision, delta);
@@ -808,6 +919,55 @@ impl AppState {
                 message_count,
                 agents,
                 preview,
+                session_mutation_stamp: Some(session_mutation_stamp),
+            }),
+        }
+    }
+
+    fn publish_delegation_child_transcript_delta(
+        &self,
+        revision: u64,
+        delta: DelegationChildTranscriptDelta,
+    ) {
+        match delta {
+            DelegationChildTranscriptDelta::MessageCreated {
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                message,
+                preview,
+                status,
+                session_mutation_stamp,
+            } => self.publish_delta(&DeltaEvent::MessageCreated {
+                revision,
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                message,
+                preview,
+                status,
+                session_mutation_stamp: Some(session_mutation_stamp),
+            }),
+            DelegationChildTranscriptDelta::MessageUpdated {
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                message,
+                preview,
+                status,
+                session_mutation_stamp,
+            } => self.publish_delta(&DeltaEvent::MessageUpdated {
+                revision,
+                session_id,
+                message_id,
+                message_index,
+                message_count,
+                message,
+                preview,
+                status,
                 session_mutation_stamp: Some(session_mutation_stamp),
             }),
         }
@@ -990,6 +1150,7 @@ fn refresh_delegation_from_child_locked(
                 let record = inner.delegations.get_mut(delegation_index)?;
                 record.status = DelegationStatus::Running;
                 record.started_at.get_or_insert_with(|| updated_at.clone());
+                inner.sync_running_read_only_delegation_index(delegation_index);
                 let parent_card_delta = update_parent_delegation_card_locked(
                     inner,
                     &delegation,
@@ -1024,6 +1185,7 @@ fn refresh_delegation_from_child_locked(
             record.status = DelegationStatus::Completed;
             record.completed_at = Some(completed_at.clone());
             record.result = Some(result.clone());
+            inner.sync_running_read_only_delegation_index(delegation_index);
             clear_delegation_child_queue_locked(inner, &delegation.child_session_id);
             let parent_card_delta = update_parent_delegation_card_locked(
                 inner,
@@ -1081,13 +1243,9 @@ fn reconcile_delegations_for_removed_session_locked(
         .collect::<Vec<_>>();
 
     let mut deltas = Vec::new();
+    let mut child_transcript_deltas = Vec::new();
     let mut runtimes_to_kill = Vec::new();
     for (index, detail, child_session_id_to_unlink, removed_parent_session) in impacted {
-        if let Some(child_session_id) = child_session_id_to_unlink.as_deref() {
-            if let Some(runtime) = detach_delegation_child_runtime_locked(inner, child_session_id) {
-                runtimes_to_kill.push(runtime);
-            }
-        }
         if let Some(delta) = mark_delegation_failed_locked(inner, index, detail) {
             deltas.push(if removed_parent_session {
                 strip_parent_card_delta(delta)
@@ -1096,6 +1254,15 @@ fn reconcile_delegations_for_removed_session_locked(
             });
         }
         if let Some(child_session_id) = child_session_id_to_unlink {
+            let detached_child = detach_delegation_child_runtime_locked(
+                inner,
+                &child_session_id,
+                Some("Delegation halted: parent session was removed."),
+            );
+            if let Some(runtime) = detached_child.runtime {
+                runtimes_to_kill.push(runtime);
+            }
+            child_transcript_deltas.extend(detached_child.transcript_deltas);
             if let Some(child_index) = inner.find_session_index(&child_session_id) {
                 let child = inner
                     .session_mut_by_index(child_index)
@@ -1106,6 +1273,7 @@ fn reconcile_delegations_for_removed_session_locked(
     }
     RemovedSessionDelegationReconciliation {
         lifecycle_deltas: deltas,
+        child_transcript_deltas,
         runtimes_to_kill,
     }
 }
@@ -1140,7 +1308,8 @@ fn mark_delegation_failed_locked(
     let record = inner.delegations.get_mut(delegation_index)?;
     record.status = DelegationStatus::Failed;
     record.completed_at = Some(completed_at.clone());
-    record.result = Some(result);
+    record.result = Some(result.clone());
+    inner.sync_running_read_only_delegation_index(delegation_index);
     clear_delegation_child_queue_locked(inner, &delegation.child_session_id);
     if let Some(child_index) = inner.find_session_index(&delegation.child_session_id) {
         let child = inner
@@ -1155,10 +1324,10 @@ fn mark_delegation_failed_locked(
         ParallelAgentStatus::Error,
         public_summary,
     );
-    Some(DelegationLifecycleDelta::Updated {
+    Some(DelegationLifecycleDelta::Failed {
         delegation_id: delegation.id,
-        status: DelegationStatus::Failed,
-        updated_at: completed_at,
+        result,
+        failed_at: completed_at,
         parent_card_delta,
     })
 }
@@ -1189,11 +1358,13 @@ fn mark_delegation_canceled_locked(
     record.status = DelegationStatus::Canceled;
     record.completed_at = Some(canceled_at.clone());
     record.result = Some(result);
+    inner.sync_running_read_only_delegation_index(delegation_index);
     clear_delegation_child_queue_locked(inner, &delegation.child_session_id);
     if let Some(child_index) = inner.find_session_index(&delegation.child_session_id) {
         let child = inner
             .session_mut_by_index(child_index)
             .expect("child session index should be valid");
+        child.session.status = SessionStatus::Idle;
         child.session.preview = public_summary.clone();
     }
     let parent_card_delta = update_parent_delegation_card_locked(
@@ -1224,8 +1395,12 @@ fn clear_delegation_child_queue_locked(inner: &mut StateInner, child_session_id:
 fn detach_delegation_child_runtime_locked(
     inner: &mut StateInner,
     child_session_id: &str,
-) -> Option<KillableRuntime> {
-    let child_index = inner.find_session_index(child_session_id)?;
+    halted_marker_text: Option<&str>,
+) -> DetachedDelegationChildRuntime {
+    let halted_marker = halted_marker_text.map(|text| (inner.next_message_id(), text.to_owned()));
+    let Some(child_index) = inner.find_session_index(child_session_id) else {
+        return DetachedDelegationChildRuntime::default();
+    };
     let child = inner
         .session_mut_by_index(child_index)
         .expect("child session index should be valid");
@@ -1245,8 +1420,59 @@ fn detach_delegation_child_runtime_locked(
     child.queued_prompts.clear();
     sync_pending_prompts(child);
     clear_all_pending_requests(child);
-    cancel_pending_interaction_messages(&mut child.session.messages);
-    runtime
+    let changed_message_indices = cancel_pending_interaction_messages(&mut child.session.messages);
+    let created_marker = halted_marker.map(|(message_id, text)| {
+        let message = Message::Text {
+            attachments: Vec::new(),
+            id: message_id,
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text,
+            expanded_text: None,
+        };
+        if let Some(preview) = message.preview_text() {
+            child.session.preview = preview;
+        }
+        let message_index = push_message_on_record(child, message.clone());
+        (message_index, message)
+    });
+    let session_id = child.session.id.clone();
+    let message_count = session_message_count(child);
+    let preview = child.session.preview.clone();
+    let status = child.session.status;
+    let session_mutation_stamp = child.mutation_stamp;
+    let mut transcript_deltas = changed_message_indices
+        .into_iter()
+        .filter_map(|message_index| {
+            let message = child.session.messages.get(message_index)?.clone();
+            Some(DelegationChildTranscriptDelta::MessageUpdated {
+                session_id: session_id.clone(),
+                message_id: message.id().to_owned(),
+                message_index,
+                message_count,
+                message,
+                preview: preview.clone(),
+                status,
+                session_mutation_stamp,
+            })
+        })
+        .collect::<Vec<_>>();
+    if let Some((message_index, message)) = created_marker {
+        transcript_deltas.push(DelegationChildTranscriptDelta::MessageCreated {
+            session_id,
+            message_id: message.id().to_owned(),
+            message_index,
+            message_count,
+            message,
+            preview,
+            status,
+            session_mutation_stamp,
+        });
+    }
+    DetachedDelegationChildRuntime {
+        runtime,
+        transcript_deltas,
+    }
 }
 
 fn strip_parent_card_delta(delta: DelegationLifecycleDelta) -> DelegationLifecycleDelta {
@@ -1262,20 +1488,31 @@ fn strip_parent_card_delta(delta: DelegationLifecycleDelta) -> DelegationLifecyc
             updated_at,
             parent_card_delta: None,
         },
-        DelegationLifecycleDelta::Completed {
-            delegation_id,
-            result,
-            completed_at,
-            parent_card_delta: _,
-        } => DelegationLifecycleDelta::Completed {
-            delegation_id,
-            result,
-            completed_at,
-            parent_card_delta: None,
-        },
-        DelegationLifecycleDelta::Canceled {
-            delegation_id,
-            canceled_at,
+            DelegationLifecycleDelta::Completed {
+                delegation_id,
+                result,
+                completed_at,
+                parent_card_delta: _,
+            } => DelegationLifecycleDelta::Completed {
+                delegation_id,
+                result,
+                completed_at,
+                parent_card_delta: None,
+            },
+            DelegationLifecycleDelta::Failed {
+                delegation_id,
+                result,
+                failed_at,
+                parent_card_delta: _,
+            } => DelegationLifecycleDelta::Failed {
+                delegation_id,
+                result,
+                failed_at,
+                parent_card_delta: None,
+            },
+            DelegationLifecycleDelta::Canceled {
+                delegation_id,
+                canceled_at,
             reason,
             parent_card_delta: _,
         } => DelegationLifecycleDelta::Canceled {
@@ -1306,10 +1543,28 @@ fn validate_delegation_cwd_input(cwd: &str) -> Result<(), ApiError> {
                         "delegation cwd cannot be a drive-relative Windows path",
                     ));
                 }
-                std::path::Prefix::UNC(_, _) | std::path::Prefix::VerbatimUNC(_, _) => {
+                std::path::Prefix::VerbatimDisk(_) if !path.is_absolute() => {
                     return Err(ApiError::bad_request(
-                        "delegation cwd cannot be a UNC path",
+                        "delegation cwd cannot be a drive-relative Windows path",
                     ));
+                }
+                std::path::Prefix::UNC(_, _) | std::path::Prefix::VerbatimUNC(_, _) => {
+                    return Err(ApiError::bad_request("delegation cwd cannot be a UNC path"));
+                }
+                std::path::Prefix::DeviceNS(_) => {
+                    return Err(ApiError::bad_request(
+                        "delegation cwd cannot be a Windows device namespace path",
+                    ));
+                }
+                std::path::Prefix::Verbatim(prefix) => {
+                    let prefix = prefix.to_string_lossy();
+                    if prefix.eq_ignore_ascii_case("GLOBALROOT")
+                        || prefix.eq_ignore_ascii_case("Mup")
+                    {
+                        return Err(ApiError::bad_request(
+                            "delegation cwd cannot be a Windows device namespace path",
+                        ));
+                    }
                 }
                 _ => {}
             }
@@ -1538,16 +1793,19 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
     let mut in_summary = false;
     for line in lines {
         let cleaned = line.trim();
-        if let Some((label, value)) = cleaned.split_once(':') {
-            if label.trim().eq_ignore_ascii_case("status") {
-                status = match value.trim().to_ascii_lowercase().as_str() {
-                    "completed" => Some(DelegationStatus::Completed),
-                    "failed" => Some(DelegationStatus::Failed),
-                    _ => None,
-                };
-                in_summary = false;
-                continue;
+        if !in_summary {
+            if let Some((label, value)) = cleaned.split_once(':') {
+                if label.trim().eq_ignore_ascii_case("status") {
+                    status = match value.trim().to_ascii_lowercase().as_str() {
+                        "completed" => Some(DelegationStatus::Completed),
+                        "failed" => Some(DelegationStatus::Failed),
+                        _ => None,
+                    };
+                    continue;
+                }
             }
+        } else if is_delegation_result_section_heading(cleaned) {
+            in_summary = false;
         }
 
         if cleaned.eq_ignore_ascii_case("Summary:") {
@@ -1555,9 +1813,7 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
             continue;
         }
 
-        if is_delegation_result_section_heading(cleaned) {
-            in_summary = false;
-        } else if in_summary {
+        if in_summary {
             summary_lines.push(line);
         }
     }
@@ -1568,11 +1824,12 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
         match status {
             DelegationStatus::Completed => "Delegation completed.".to_owned(),
             DelegationStatus::Failed => "Delegation failed.".to_owned(),
-            _ => return None,
+            _ => String::new(),
         }
     } else {
         summary
     };
+
     Some(ParsedDelegationResult { status, summary })
 }
 
@@ -1582,7 +1839,7 @@ fn is_delegation_result_section_heading(cleaned: &str) -> bool {
     };
     matches!(
         label.trim().to_ascii_lowercase().as_str(),
-        "status" | "summary" | "findings" | "commands run" | "files inspected" | "notes"
+        "findings" | "commands run" | "files inspected" | "notes"
     )
 }
 

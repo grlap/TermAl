@@ -2265,6 +2265,84 @@ describe("applyDeltaToSessions", () => {
     });
   });
 
+  it("applies conversation marker create, update, and delete deltas", () => {
+    const sessions = [
+      makeSession("session-a", {
+        sessionMutationStamp: 10,
+        markers: [],
+      }),
+    ];
+
+    const createResult = applyDeltaToSessions(sessions, {
+      type: "conversationMarkerCreated",
+      revision: 11,
+      sessionId: "session-a",
+      marker: {
+        id: "marker-1",
+        sessionId: "session-a",
+        kind: "decision",
+        name: "Decision",
+        color: "#3b82f6",
+        messageId: "message-1",
+        messageIndexHint: 0,
+        createdAt: "10:00:00",
+        updatedAt: "10:00:00",
+        createdBy: "user",
+      },
+      sessionMutationStamp: 11,
+    });
+    expect(createResult.kind).toBe("applied");
+    if (createResult.kind !== "applied") {
+      throw new Error("expected marker create to apply");
+    }
+    expect(createResult.sessions[0].markers).toHaveLength(1);
+    expect(createResult.sessions[0].sessionMutationStamp).toBe(11);
+
+    const updateResult = applyDeltaToSessions(createResult.sessions, {
+      type: "conversationMarkerUpdated",
+      revision: 12,
+      sessionId: "session-a",
+      marker: {
+        id: "marker-1",
+        sessionId: "session-a",
+        kind: "checkpoint",
+        name: "Checkpoint",
+        color: "#22c55e",
+        messageId: "message-1",
+        messageIndexHint: 0,
+        endMessageId: "message-2",
+        endMessageIndexHint: 1,
+        createdAt: "10:00:00",
+        updatedAt: "10:01:00",
+        createdBy: "user",
+      },
+      sessionMutationStamp: 12,
+    });
+    expect(updateResult.kind).toBe("applied");
+    if (updateResult.kind !== "applied") {
+      throw new Error("expected marker update to apply");
+    }
+    expect(updateResult.sessions[0].markers?.[0]).toMatchObject({
+      kind: "checkpoint",
+      name: "Checkpoint",
+      endMessageId: "message-2",
+    });
+
+    const deleteResult = applyDeltaToSessions(updateResult.sessions, {
+      type: "conversationMarkerDeleted",
+      revision: 13,
+      sessionId: "session-a",
+      markerId: "marker-1",
+      sessionMutationStamp: 13,
+    });
+    expect(deleteResult.kind).toBe("applied");
+    if (deleteResult.kind !== "applied") {
+      throw new Error("expected marker delete to apply");
+    }
+    expect(deleteResult.sessions[0].markers).toEqual([]);
+    expect(deleteResult.sessions[0].sessionMutationStamp).toBe(13);
+  });
+
   it("replaces text when a final authoritative update arrives", () => {
     const sessions = [
       makeSession("session-a", {

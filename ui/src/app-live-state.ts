@@ -188,6 +188,7 @@ type DelegationDeltaEvent = Extract<
       | "delegationCreated"
       | "delegationUpdated"
       | "delegationCompleted"
+      | "delegationFailed"
       | "delegationCanceled";
   }
 >;
@@ -222,6 +223,7 @@ function isDelegationDeltaEvent(delta: DeltaEvent): delta is DelegationDeltaEven
     delta.type === "delegationCreated" ||
     delta.type === "delegationUpdated" ||
     delta.type === "delegationCompleted" ||
+    delta.type === "delegationFailed" ||
     delta.type === "delegationCanceled"
   );
 }

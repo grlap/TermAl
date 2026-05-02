@@ -9,6 +9,8 @@ import type {
   ClaudeEffortLevel,
   CodexReasoningEffort,
   CodexState,
+  ConversationMarker,
+  ConversationMarkerKind,
   CursorMode,
   DelegationRecord,
   DelegationResult,
@@ -114,6 +116,42 @@ export type DelegationResultResponse = {
   revision: number;
   result: DelegationResult;
   serverInstanceId: string;
+};
+
+export type ConversationMarkersResponse = {
+  markers: ConversationMarker[];
+  revision: number;
+  serverInstanceId: string;
+};
+
+export type ConversationMarkerResponse = {
+  marker: ConversationMarker;
+  revision: number;
+  serverInstanceId: string;
+};
+
+export type DeleteConversationMarkerResponse = {
+  markerId: string;
+  revision: number;
+  serverInstanceId: string;
+};
+
+export type CreateConversationMarkerRequest = {
+  kind: ConversationMarkerKind;
+  name: string;
+  body?: string | null;
+  color: string;
+  messageId: string;
+  endMessageId?: string | null;
+};
+
+export type UpdateConversationMarkerRequest = {
+  kind?: ConversationMarkerKind;
+  name?: string;
+  body?: string | null;
+  color?: string;
+  messageId?: string;
+  endMessageId?: string | null;
 };
 
 export type WorkspaceLayoutDocument = {
@@ -614,6 +652,52 @@ export function cancelDelegation(parentSessionId: string, delegationId: string) 
     `/api/sessions/${parent}/delegations/${delegation}/cancel`,
     {
       method: "POST",
+    },
+  );
+}
+
+export function fetchConversationMarkers(sessionId: string) {
+  return request<ConversationMarkersResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/markers`,
+  );
+}
+
+export function createConversationMarker(
+  sessionId: string,
+  payload: CreateConversationMarkerRequest,
+) {
+  return request<ConversationMarkerResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/markers`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function updateConversationMarker(
+  sessionId: string,
+  markerId: string,
+  payload: UpdateConversationMarkerRequest,
+) {
+  const session = encodeURIComponent(sessionId);
+  const marker = encodeURIComponent(markerId);
+  return request<ConversationMarkerResponse>(
+    `/api/sessions/${session}/markers/${marker}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function deleteConversationMarker(sessionId: string, markerId: string) {
+  const session = encodeURIComponent(sessionId);
+  const marker = encodeURIComponent(markerId);
+  return request<DeleteConversationMarkerResponse>(
+    `/api/sessions/${session}/markers/${marker}`,
+    {
+      method: "DELETE",
     },
   );
 }

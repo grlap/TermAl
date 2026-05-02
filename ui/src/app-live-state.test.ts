@@ -115,6 +115,69 @@ function makeDelegationSummary(
   };
 }
 
+function makeDelegationDeltaCases(revision: number) {
+  return [
+    [
+      "delegationCreated",
+      () => ({
+        type: "delegationCreated",
+        revision,
+        delegation: makeDelegationSummary(),
+      }),
+    ],
+    [
+      "delegationUpdated",
+      () => ({
+        type: "delegationUpdated",
+        revision,
+        delegationId: "delegation-1",
+        status: "running",
+        updatedAt: "10:01",
+      }),
+    ],
+    [
+      "delegationCompleted",
+      () => ({
+        type: "delegationCompleted",
+        revision,
+        delegationId: "delegation-1",
+        completedAt: "10:02",
+        result: {
+          delegationId: "delegation-1",
+          childSessionId: "child-session",
+          status: "completed",
+          summary: "Done.",
+        },
+      }),
+    ],
+    [
+      "delegationFailed",
+      () => ({
+        type: "delegationFailed",
+        revision,
+        delegationId: "delegation-1",
+        failedAt: "10:02",
+        result: {
+          delegationId: "delegation-1",
+          childSessionId: "child-session",
+          status: "failed",
+          summary: "Failed.",
+        },
+      }),
+    ],
+    [
+      "delegationCanceled",
+      () => ({
+        type: "delegationCanceled",
+        revision,
+        delegationId: "delegation-1",
+        canceledAt: "10:03",
+        reason: "Canceled.",
+      }),
+    ],
+  ] as const;
+}
+
 function makeHydrationRequestContext(
   overrides: Partial<SessionHydrationRequestContext> = {},
 ): SessionHydrationRequestContext {
@@ -369,51 +432,7 @@ describe("deferred session-store sync", () => {
 });
 
 describe("delegation delta repair", () => {
-  it.each([
-    [
-      "delegationCreated",
-      () => ({
-        type: "delegationCreated",
-        revision: 2,
-        delegation: makeDelegationSummary(),
-      }),
-    ],
-    [
-      "delegationUpdated",
-      () => ({
-        type: "delegationUpdated",
-        revision: 2,
-        delegationId: "delegation-1",
-        status: "running",
-        updatedAt: "10:01",
-      }),
-    ],
-    [
-      "delegationCompleted",
-      () => ({
-        type: "delegationCompleted",
-        revision: 2,
-        delegationId: "delegation-1",
-        completedAt: "10:02",
-        result: {
-          delegationId: "delegation-1",
-          childSessionId: "child-session",
-          status: "completed",
-          summary: "Done.",
-        },
-      }),
-    ],
-    [
-      "delegationCanceled",
-      () => ({
-        type: "delegationCanceled",
-        revision: 2,
-        delegationId: "delegation-1",
-        canceledAt: "10:03",
-        reason: "Canceled.",
-      }),
-    ],
-  ])("repairs equal-revision %s without session-delta hydration", async (_, makeDelta) => {
+  it.each(makeDelegationDeltaCases(2))("repairs equal-revision %s without session-delta hydration", async (_, makeDelta) => {
     vi.stubGlobal(
       "EventSource",
       EventSourceMock as unknown as typeof EventSource,
@@ -444,6 +463,85 @@ describe("delegation delta repair", () => {
     await waitFor(() => expect(fetchState).toHaveBeenCalledTimes(1));
     expect(fetchSession).not.toHaveBeenCalled();
   });
+
+  it.each(makeDelegationDeltaCases(1))(
+    "ignores stale %s without state repair",
+    async (_, makeDelta) => {
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      const session = makeSession({
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 5,
+      });
+      const fetchState = vi.spyOn(api, "fetchState").mockImplementation(
+        () => new Promise<StateResponse>(() => {}),
+      );
+      const fetchSession = vi.spyOn(api, "fetchSession").mockImplementation(
+        () =>
+          new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+      );
+      const params = makeLiveStateParams(session);
+      params.adoptionRefs.latestStateRevisionRef.current = 2;
+      params.adoptionRefs.sessionsRef.current = [session];
+
+      renderLiveStateHarness(params, () => {});
+      const eventSource =
+        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+      act(() => {
+        eventSource?.dispatchNamedEvent("delta", makeDelta());
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(fetchState).not.toHaveBeenCalled();
+      expect(fetchSession).not.toHaveBeenCalled();
+      expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(2);
+    },
+  );
+
+  it.each(makeDelegationDeltaCases(3))(
+    "repairs newer %s through authoritative state",
+    async (_, makeDelta) => {
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      const session = makeSession({
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 2,
+      });
+      const fetchState = vi
+        .spyOn(api, "fetchState")
+        .mockResolvedValue(makeStateResponse(session, 3));
+      const fetchSession = vi.spyOn(api, "fetchSession").mockImplementation(
+        () =>
+          new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+      );
+      const params = makeLiveStateParams(session);
+      params.adoptionRefs.latestStateRevisionRef.current = 2;
+      params.adoptionRefs.sessionsRef.current = [session];
+
+      renderLiveStateHarness(params, () => {});
+      const eventSource =
+        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+      act(() => {
+        eventSource?.dispatchNamedEvent("delta", makeDelta());
+      });
+
+      await waitFor(() => expect(fetchState).toHaveBeenCalledTimes(1));
+      expect(fetchSession).not.toHaveBeenCalled();
+      await waitFor(() =>
+        expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(3),
+      );
+    },
+  );
 
   it("replays same-revision parent-card deltas after the state snapshot revision is current", async () => {
     vi.stubGlobal(

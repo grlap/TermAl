@@ -723,6 +723,46 @@ fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
 }
 
 #[test]
+fn create_delegation_terminalized_before_start_does_not_dispatch_child_prompt() {
+    let (state, input_rx) =
+        test_app_state_with_delegation_codex_runtime("delegation-create-start-race");
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+
+    let response = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: format!("Simulate race. {TEST_CANCEL_DELEGATION_BEFORE_START_PROMPT}"),
+                title: Some("Create Start Race".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("terminalized delegation create should return current state");
+
+    assert_eq!(response.delegation.status, DelegationStatus::Canceled);
+    assert!(
+        matches!(input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "terminalized create/start race must not dispatch a child runtime prompt"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let child = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == response.delegation.child_session_id)
+        .expect("child session should remain visible");
+    assert!(matches!(child.runtime, SessionRuntime::None));
+    assert!(child.session.messages.is_empty());
+    assert_eq!(child.session.status, SessionStatus::Idle);
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn delegated_child_completion_refreshes_through_production_lifecycle_hook() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);
@@ -849,11 +889,12 @@ fn delegated_child_failure_refreshes_through_production_lifecycle_hook() {
             serde_json::from_str(&payload).expect("delta event should deserialize");
         saw_failed_delta |= matches!(
             &event,
-            DeltaEvent::DelegationUpdated {
+            DeltaEvent::DelegationFailed {
                 delegation_id,
-                status: DelegationStatus::Failed,
+                result,
                 ..
             } if delegation_id == &created.delegation.id
+                && result.summary.contains("delegated child failed")
         );
         saw_parent_update |= matches!(
             event,
@@ -937,11 +978,12 @@ fn delegated_child_runtime_exit_refreshes_through_production_lifecycle_hook() {
             serde_json::from_str(&payload).expect("delta event should deserialize");
         saw_failed_delta |= matches!(
             &event,
-            DeltaEvent::DelegationUpdated {
+            DeltaEvent::DelegationFailed {
                 delegation_id,
-                status: DelegationStatus::Failed,
+                result,
                 ..
             } if delegation_id == &created.delegation.id
+                && result.summary.contains("delegated child runtime exited")
         );
         saw_parent_update |= matches!(
             event,
@@ -1769,6 +1811,14 @@ async fn delegation_route_failed_start_response_matches_durable_child_state() {
             .preview
             .contains("failed to start child session: forced delegation start failure")
     );
+    assert_eq!(
+        response
+            .delegation
+            .result
+            .as_ref()
+            .map(|result| result.summary.as_str()),
+        Some("failed to start child session: forced delegation start failure")
+    );
     let inner = state.inner.lock().expect("state mutex poisoned");
     assert_eq!(response.revision, inner.revision);
     let stored_delegation = inner
@@ -1947,6 +1997,20 @@ fn delegation_result_packet_summary_allows_colon_terminated_text_lines() {
 }
 
 #[test]
+fn delegation_result_packet_summary_preserves_status_labeled_text() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\nStatus: completed\n\nSummary:\nStatus: the inspected path is stable.\nNo changes needed.",
+    )
+    .expect("summary text containing Status: should not reset packet metadata");
+
+    assert_eq!(parsed.status, DelegationStatus::Completed);
+    assert_eq!(
+        parsed.summary,
+        "Status: the inspected path is stable.\nNo changes needed."
+    );
+}
+
+#[test]
 fn delegation_public_result_summary_is_capped() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);
@@ -2070,6 +2134,7 @@ fn cancel_preserves_completed_delegation_result() {
                 DeltaEvent::DelegationCreated { .. }
                     | DeltaEvent::DelegationUpdated { .. }
                     | DeltaEvent::DelegationCompleted { .. }
+                    | DeltaEvent::DelegationFailed { .. }
                     | DeltaEvent::DelegationCanceled { .. }
             ),
             "terminal cancel should not publish delegation deltas"
@@ -2272,6 +2337,50 @@ async fn delegation_cancel_running_runtime_route_interrupts_child() {
 }
 
 #[test]
+fn mark_delegation_canceled_sets_child_session_idle() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Cancel through locked marker.".to_owned(),
+                title: Some("Locked Cancel".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let delegation_index = inner
+        .find_delegation_index(&created.delegation.id)
+        .expect("delegation should exist");
+    let child_index = inner
+        .find_session_index(&created.delegation.child_session_id)
+        .expect("child session should exist");
+    inner
+        .session_mut_by_index(child_index)
+        .expect("child session index should be valid")
+        .session
+        .status = SessionStatus::Active;
+    mark_delegation_canceled_locked(&mut inner, delegation_index, None)
+        .expect("running delegation should transition to canceled");
+    let child = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == created.delegation.child_session_id)
+        .expect("child session should still exist");
+    assert_eq!(child.session.status, SessionStatus::Idle);
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn failed_start_cleanup_is_noop_for_already_terminal_delegation() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);
@@ -2380,6 +2489,18 @@ fn terminal_read_only_delegations_do_not_keep_child_session_write_blocked() {
             },
         )
         .expect("failed delegation should still return a child session");
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let running_ids = inner
+            .running_read_only_delegations
+            .iter()
+            .filter_map(|index| inner.delegations.get(*index))
+            .map(|delegation| delegation.id.as_str())
+            .collect::<BTreeSet<_>>();
+        assert!(running_ids.contains(completed.delegation.id.as_str()));
+        assert!(running_ids.contains(canceled.delegation.id.as_str()));
+        assert!(!running_ids.contains(failed.delegation.id.as_str()));
+    }
 
     finish_delegation_child_with_assistant_text(
         &state,
@@ -2430,6 +2551,12 @@ fn terminal_read_only_delegations_do_not_keep_child_session_write_blocked() {
             )
             .expect("terminal child session settings should update");
     }
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner.running_read_only_delegations.is_empty(),
+        "terminal delegation transitions should leave no running read-only index entries"
+    );
+    drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
@@ -2568,6 +2695,231 @@ fn removing_delegation_child_or_parent_terminalizes_records() {
         .expect("child session should remain visible");
     assert_eq!(child.session.parent_delegation_id, None);
     drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn removing_delegation_parent_detaches_child_runtime_and_marks_transcript() {
+    let (state, input_rx) =
+        test_app_state_with_delegation_codex_runtime("delegation-parent-remove-runtime");
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let mut delta_events = state.subscribe_delta_events();
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Remove parent while child is running.".to_owned(),
+                title: Some("Parent Removed Runtime".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("initial delegation prompt should dispatch");
+
+    let runtime = shared_codex_runtime_for_state(&state);
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            created.delegation.child_session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("delegation-parent-remove-thread".to_owned()),
+                turn_id: Some("delegation-parent-remove-turn".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert(
+            "delegation-parent-remove-thread".to_owned(),
+            created.delegation.child_session_id.clone(),
+        );
+
+    let pending_message_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let child_index = inner
+            .find_session_index(&created.delegation.child_session_id)
+            .expect("child session should exist");
+        let pending_message_id = inner.next_message_id();
+        let queued_prompt_id = inner.next_message_id();
+        let questions = vec![UserInputQuestion {
+            header: "Choice".to_owned(),
+            id: "choice".to_owned(),
+            is_other: false,
+            is_secret: false,
+            options: None,
+            question: "Continue?".to_owned(),
+        }];
+        let child = inner
+            .session_mut_by_index(child_index)
+            .expect("child session index should be valid");
+        push_message_on_record(
+            child,
+            Message::UserInputRequest {
+                id: pending_message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Need input".to_owned(),
+                detail: "Waiting for user input".to_owned(),
+                questions: questions.clone(),
+                state: InteractionRequestState::Pending,
+                submitted_answers: None,
+            },
+        );
+        child.pending_codex_user_inputs.insert(
+            pending_message_id.clone(),
+            CodexPendingUserInput {
+                questions,
+                request_id: json!("pending-user-input"),
+            },
+        );
+        child.queued_prompts.push_back(QueuedPromptRecord {
+            source: QueuedPromptSource::User,
+            attachments: Vec::new(),
+            pending_prompt: PendingPrompt {
+                attachments: Vec::new(),
+                id: queued_prompt_id,
+                timestamp: stamp_now(),
+                text: "do not dispatch after parent removal".to_owned(),
+                expanded_text: None,
+            },
+        });
+        sync_pending_prompts(child);
+        child.deferred_stop_callbacks = vec![DeferredStopCallback::TurnCompleted];
+        pending_message_id
+    };
+    while delta_events.try_recv().is_ok() {}
+
+    let command_thread = std::thread::spawn(move || {
+        let command = input_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("parent removal should interrupt the running child");
+        match command {
+            CodexRuntimeCommand::InterruptTurn {
+                thread_id,
+                turn_id,
+                response_tx,
+            } => {
+                assert_eq!(thread_id, "delegation-parent-remove-thread");
+                assert_eq!(turn_id, "delegation-parent-remove-turn");
+                let _ = response_tx.send(Ok(()));
+            }
+            _ => panic!("expected child turn interrupt command"),
+        }
+    });
+
+    state
+        .kill_session(&parent_session_id)
+        .expect("parent removal should succeed");
+    command_thread
+        .join()
+        .expect("parent removal command thread should join cleanly");
+
+    let mut saw_pending_update = false;
+    let mut saw_halt_marker = false;
+    while let Ok(payload) = delta_events.try_recv() {
+        let delta: DeltaEvent = serde_json::from_str(&payload).expect("delta should deserialize");
+        match delta {
+            DeltaEvent::MessageUpdated {
+                session_id,
+                message_id,
+                message:
+                    Message::UserInputRequest {
+                        state: InteractionRequestState::Canceled,
+                        ..
+                    },
+                session_mutation_stamp: Some(_),
+                ..
+            } if session_id == created.delegation.child_session_id
+                && message_id == pending_message_id =>
+            {
+                saw_pending_update = true;
+            }
+            DeltaEvent::MessageCreated {
+                session_id,
+                message:
+                    Message::Text {
+                        text,
+                        author: Author::Assistant,
+                        ..
+                    },
+                session_mutation_stamp: Some(_),
+                ..
+            } if session_id == created.delegation.child_session_id
+                && text == "Delegation halted: parent session was removed." =>
+            {
+                saw_halt_marker = true;
+            }
+            DeltaEvent::ParallelAgentsUpdate { session_id, .. }
+                if session_id == parent_session_id =>
+            {
+                panic!(
+                    "parent removal should not publish a parent-card delta for the removed session"
+                )
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        saw_pending_update,
+        "detaching a child with pending input should publish MessageUpdated"
+    );
+    assert!(
+        saw_halt_marker,
+        "parent removal should publish an in-band child halt marker"
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let child = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == created.delegation.child_session_id)
+        .expect("child session should remain visible");
+    assert_eq!(child.session.parent_delegation_id, None);
+    assert_eq!(child.session.status, SessionStatus::Error);
+    assert!(matches!(child.runtime, SessionRuntime::None));
+    assert!(child.queued_prompts.is_empty());
+    assert!(child.session.pending_prompts.is_empty());
+    assert!(child.pending_codex_user_inputs.is_empty());
+    assert!(child.deferred_stop_callbacks.is_empty());
+    assert!(child.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. } if text == "Delegation halted: parent session was removed."
+    )));
+    assert!(child.session.messages.iter().any(|message| matches!(
+        message,
+        Message::UserInputRequest {
+            id,
+            state: InteractionRequestState::Canceled,
+            ..
+        } if id == &pending_message_id
+    )));
+    drop(inner);
+
+    assert!(
+        !runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned")
+            .contains_key(&created.delegation.child_session_id)
+    );
+    assert!(
+        !runtime
+            .thread_sessions
+            .lock()
+            .expect("shared Codex thread mutex poisoned")
+            .contains_key("delegation-parent-remove-thread")
+    );
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
@@ -3790,7 +4142,69 @@ fn delegation_rejects_windows_unc_cwd_before_metadata_lookup() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-#[cfg(any(unix, windows))]
+#[cfg(windows)]
+#[test]
+fn delegation_rejects_windows_device_namespace_unc_alias_cwd() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let err = expect_delegation_cwd_rejected(
+        &state,
+        &parent_session_id,
+        r"\\.\UNC\server\share\termal-delegation-cwd".to_owned(),
+    );
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(err.message.contains("device namespace"));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[cfg(windows)]
+#[test]
+fn delegation_rejects_windows_globalroot_and_mup_cwd() {
+    for cwd in [
+        r"\\?\GLOBALROOT\Device\Mup\server\share\termal-delegation-cwd",
+        r"\\?\Mup\server\share\termal-delegation-cwd",
+    ] {
+        let state = test_app_state();
+        let parent_session_id = test_session_id(&state, Agent::Codex);
+        let err = expect_delegation_cwd_rejected(&state, &parent_session_id, cwd.to_owned());
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(err.message.contains("device namespace"));
+
+        let _ = fs::remove_file(state.persistence_path.as_path());
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn delegation_rejects_windows_verbatim_drive_relative_cwd() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let drive = std::env::current_dir()
+        .expect("current dir should resolve")
+        .components()
+        .find_map(|component| match component {
+            std::path::Component::Prefix(prefix) => match prefix.kind() {
+                std::path::Prefix::Disk(drive) | std::path::Prefix::VerbatimDisk(drive) => {
+                    Some((drive as char).to_ascii_uppercase())
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap_or('C');
+    let err = expect_delegation_cwd_rejected(
+        &state,
+        &parent_session_id,
+        format!(r"\\?\{drive}:termal-drive-relative-cwd"),
+    );
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(err.message.contains("drive-relative"));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[cfg(unix)]
 #[test]
 fn delegation_rejects_symlinked_cwd_escape_from_project() {
     let state = test_app_state();
@@ -3808,20 +4222,43 @@ fn delegation_rejects_symlinked_cwd_escape_from_project() {
     let parent_session_id =
         create_test_project_session(&state, Agent::Codex, &project_id, &project_root);
     let link_path = project_root.join("outside-link");
-    if let Err(err) = create_test_dir_symlink(&outside_root, &link_path) {
-        #[cfg(windows)]
-        {
-            eprintln!("skipping symlink escape delegation test; symlink creation failed: {err}");
-            let _ = fs::remove_file(state.persistence_path.as_path());
-            let _ = fs::remove_dir_all(project_root);
-            let _ = fs::remove_dir_all(outside_root);
-            return;
-        }
-        #[cfg(unix)]
-        {
-            panic!("test symlink should be created: {err}");
-        }
-    }
+    create_test_dir_symlink(&outside_root, &link_path).expect("test symlink should be created");
+
+    let err = expect_delegation_cwd_rejected(
+        &state,
+        &parent_session_id,
+        link_path.to_string_lossy().into_owned(),
+    );
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(err.message.contains("must stay inside project"));
+
+    let _ = fs::remove_dir(&link_path);
+    let _ = fs::remove_file(&link_path);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+    let _ = fs::remove_dir_all(project_root);
+    let _ = fs::remove_dir_all(outside_root);
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires Windows Developer Mode or symlink privilege"]
+fn delegation_rejects_windows_symlinked_cwd_escape_from_project() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-delegation-cwd-link-root-{}",
+        Uuid::new_v4()
+    ));
+    let outside_root = std::env::temp_dir().join(format!(
+        "termal-delegation-cwd-link-outside-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    fs::create_dir_all(&outside_root).expect("outside directory should exist");
+    let project_id = create_test_project(&state, &project_root, "Delegation Symlink Root");
+    let parent_session_id =
+        create_test_project_session(&state, Agent::Codex, &project_id, &project_root);
+    let link_path = project_root.join("outside-link");
+    create_test_dir_symlink(&outside_root, &link_path).expect("test symlink should be created");
 
     let err = expect_delegation_cwd_rejected(
         &state,
