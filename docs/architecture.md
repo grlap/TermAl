@@ -197,6 +197,10 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/codex/thread/compact` | Request Codex thread compaction |
 | POST | `/api/sessions/{id}/codex/thread/rollback` | Roll back the live Codex thread |
 | GET | `/api/sessions/{id}/agent-commands` | Read local agent-command shortcuts |
+| GET | `/api/sessions/{id}/markers` | List conversation markers anchored to messages in the session transcript. Local sessions read from the local record; remote-proxy sessions are read-only unless routed through the remote marker mutation endpoints below. |
+| POST | `/api/sessions/{id}/markers` | Create a conversation marker and publish `ConversationMarkerCreated`. Returns `201` with `ConversationMarkerResponse`; malformed JSON uses the standard `ApiError` envelope. |
+| PATCH | `/api/sessions/{id}/markers/{marker_id}` | Patch marker kind/name/body/color/message anchors. Nullable `body` and `endMessageId` clear those fields. Publishes `ConversationMarkerUpdated`. |
+| DELETE | `/api/sessions/{id}/markers/{marker_id}` | Delete one conversation marker and publish `ConversationMarkerDeleted`. |
 | POST | `/api/sessions/{id}/messages` | Send message |
 | POST | `/api/sessions/{id}/delegations` | Create a Phase 1 read-only child delegation session. Returns `201` with `DelegationResponse`; unsupported worker/writable/remote-backed variants return `501`, active-limit conflicts return `409`, handler-level prompt/scope validation returns `400`, and JSON schema/deserialization failures return `422`. |
 | POST | `/api/sessions/{id}/queued-prompts/{prompt_id}/cancel` | Cancel queued prompt |
@@ -306,9 +310,13 @@ DeltaEvent::MessageUpdated       { revision, session_id, message_id, message_ind
 DeltaEvent::SessionCreated       { revision, session_id, session } // metadata-first session summary; local + remote-proxied session creation; forwarded by remote backends after id localization
 DeltaEvent::CodexUpdated         { revision, codex } // latest process-global CodexState snapshot; remotes consume the revision for ordering but do not localize Codex state into proxy sessions
 DeltaEvent::OrchestratorsUpdated { revision, orchestrators[], sessions[] } // sessions[] contains metadata-first summaries for referenced sessions and is omitted on the wire when empty; IDs inside each instance are scoped to the originating server; translate via sync_remote_state_inner before forwarding remotely.
+DeltaEvent::ConversationMarkerCreated { revision, session_id, marker, session_mutation_stamp? } // marker inserted on a session; marker.session_id must match the event session_id after remote localization
+DeltaEvent::ConversationMarkerUpdated { revision, session_id, marker, session_mutation_stamp? } // marker replacement; mismatched marker/session ids are treated as a resync-worthy protocol error
+DeltaEvent::ConversationMarkerDeleted { revision, session_id, marker_id, session_mutation_stamp? } // marker removal; delete is idempotent for remote replay
 DeltaEvent::DelegationCreated    { revision, delegation } // summary-safe delegation record for a newly spawned child session
 DeltaEvent::DelegationUpdated    { revision, delegation_id, status, updated_at } // lightweight lifecycle status transition; failed transitions require follow-up result fetch today
 DeltaEvent::DelegationCompleted  { revision, delegation_id, result, completed_at } // terminal completion with summary-safe result payload
+DeltaEvent::DelegationFailed     { revision, delegation_id, result, failed_at } // terminal failure with summary-safe result payload
 DeltaEvent::DelegationCanceled   { revision, delegation_id, canceled_at, reason? } // terminal cancellation status for parent-card and drawer updates
 ```
 
@@ -368,9 +376,11 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 `PersistedState` is the logical projection of `StateInner` that excludes
 runtime handles, pending approval maps, and empty collections. On disk it
 splits across two SQLite tables: `app_state` (one row per schema version +
-one metadata row carrying preferences, projects, remotes, workspaces, and
+one metadata row carrying preferences, projects, remotes, workspaces, delegation
+metadata, and
 bookkeeping counters) and `sessions` (one row per session keyed by id,
-value_json carrying the serialized `PersistedSessionRecord`). This two-table
+value_json carrying the serialized `PersistedSessionRecord`, including
+conversation markers anchored to that session's messages). This two-table
 split lets the background persist thread write only the **changed** session
 rows on each commit — see `collect_persist_delta`, `persist_delta_via_cache`,
 and `SqlitePersistConnectionCache` in `src/persist.rs`.

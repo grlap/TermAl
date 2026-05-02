@@ -17,6 +17,56 @@
 
 use super::*;
 
+fn push_pending_approval_message(state: &AppState, session_id: &str) -> String {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(session_id)
+        .expect("session should exist");
+    let message_id = inner.next_message_id();
+    let record = inner
+        .session_mut_by_index(index)
+        .expect("session index should be valid");
+    push_message_on_record(
+        record,
+        Message::Approval {
+            id: message_id.clone(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            title: "Approve command".to_owned(),
+            command: "echo pending".to_owned(),
+            command_language: None,
+            detail: "Waiting for approval".to_owned(),
+            decision: ApprovalDecision::Pending,
+        },
+    );
+    message_id
+}
+
+fn delta_stream_has_rejected_approval_update(
+    delta_events: &mut broadcast::Receiver<String>,
+    session_id: &str,
+    message_id: &str,
+) -> bool {
+    let mut saw_update = false;
+    while let Ok(payload) = delta_events.try_recv() {
+        let event: DeltaEvent = serde_json::from_str(&payload).expect("delta should deserialize");
+        saw_update |= matches!(
+            event,
+            DeltaEvent::MessageUpdated {
+                session_id: delta_session_id,
+                message_id: delta_message_id,
+                message: Message::Approval {
+                    decision: ApprovalDecision::Rejected,
+                    ..
+                },
+                session_mutation_stamp: Some(_),
+                ..
+            } if delta_session_id == session_id && delta_message_id == message_id
+        );
+    }
+    saw_update
+}
+
 // pins the coarse scope of the stdin watchdog: a stall on the shared codex
 // writer clears the whole runtime (not just the stalled session) and marks
 // the affected session as error with the generic "agent communication timed
@@ -179,6 +229,45 @@ fn runtime_exit_is_suppressed_while_stop_is_in_progress() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+#[test]
+fn runtime_exit_publishes_message_updated_for_canceled_pending_interactions() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-runtime-exit-pending-update".to_owned(),
+        input_tx,
+        process: process.clone(),
+    };
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Approval;
+        inner.sessions[index].session.preview = "Waiting for approval...".to_owned();
+    }
+    let message_id = push_pending_approval_message(&state, &session_id);
+    let mut delta_events = state.subscribe_delta_events();
+
+    state
+        .handle_runtime_exit_if_matches(&session_id, &runtime_token, Some("runtime exited"))
+        .expect("handle_runtime_exit_if_matches should succeed");
+
+    assert!(
+        delta_stream_has_rejected_approval_update(&mut delta_events, &session_id, &message_id),
+        "runtime exit should publish MessageUpdated for canceled pending approval"
+    );
+
+    let _ = process.kill();
+    let _ = process.wait();
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // pins the successful-stop path: when stop_session drives the dedicated kill
 // to completion, any buffered deferred_stop_callbacks are dropped, the
 // runtime detaches, and the session settles to idle with "turn stopped by
@@ -232,6 +321,43 @@ fn successful_stop_discards_deferred_callbacks() {
     assert!(input_rx.recv_timeout(Duration::from_millis(100)).is_err());
     process.wait().unwrap();
 
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn stop_session_publishes_message_updated_for_canceled_pending_interactions() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-pending-update".to_owned(),
+        input_tx,
+        process: process.clone(),
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Approval;
+        inner.sessions[index].session.preview = "Waiting for approval...".to_owned();
+    }
+    let message_id = push_pending_approval_message(&state, &session_id);
+    let mut delta_events = state.subscribe_delta_events();
+
+    state
+        .stop_session(&session_id)
+        .expect("stop_session should succeed");
+
+    assert!(
+        delta_stream_has_rejected_approval_update(&mut delta_events, &session_id, &message_id),
+        "stop_session should publish MessageUpdated for canceled pending approval"
+    );
+
+    let _ = process.wait();
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 

@@ -17,6 +17,7 @@ import {
   archiveCodexThread,
   cancelQueuedPrompt,
   compactCodexThread,
+  createConversationMarker,
   createProject,
   createSession,
   fetchAgentCommands,
@@ -310,6 +311,10 @@ export type UseAppSessionActionsReturn = {
     numTurns: number,
   ) => Promise<void>;
   handleRefreshAgentCommands: (sessionId: string) => Promise<void>;
+  handleCreateConversationMarker: (
+    sessionId: string,
+    messageId: string,
+  ) => Promise<boolean>;
 };
 
 export function useAppSessionActions(
@@ -619,6 +624,27 @@ export function useAppSessionActions(
     setWorkspace((current) =>
       applyControlPanelLayout(reconcileWorkspaceState(current, nextSessions)),
     );
+  }
+
+  function upsertConversationMarkerLocally(
+    session: Session,
+    marker: NonNullable<Session["markers"]>[number],
+  ): Session {
+    const markers = session.markers ?? [];
+    const markerIndex = markers.findIndex((entry) => entry.id === marker.id);
+    if (markerIndex === -1) {
+      return {
+        ...session,
+        markers: [...markers, marker],
+      };
+    }
+
+    const updatedMarkers = markers.slice();
+    updatedMarkers[markerIndex] = marker;
+    return {
+      ...session,
+      markers: updatedMarkers,
+    };
   }
 
   function buildOptimisticSessionSettingsUpdate(
@@ -2039,6 +2065,69 @@ export function useAppSessionActions(
     }
   }
 
+  async function handleCreateConversationMarker(
+    sessionId: string,
+    messageId: string,
+  ) {
+    const session = sessionLookup.get(sessionId);
+    if (!session || !session.messages.some((message) => message.id === messageId)) {
+      return false;
+    }
+
+    setUpdatingSessionIds((current) =>
+      setSessionFlag(current, sessionId, true),
+    );
+    try {
+      const response = await createConversationMarker(sessionId, {
+        kind: "checkpoint",
+        name: "Checkpoint",
+        body: null,
+        color: "#3b82f6",
+        messageId,
+        endMessageId: null,
+      });
+      if (!isMountedRef.current) {
+        return false;
+      }
+
+      updateSessionLocally(sessionId, (currentSession) =>
+        upsertConversationMarkerLocally(currentSession, response.marker),
+      );
+      if (
+        isServerInstanceMismatch(
+          lastSeenServerInstanceIdRef.current,
+          response.serverInstanceId,
+        )
+      ) {
+        requestActionRecoveryResync({
+          openSessionId: sessionId,
+          paneId: findWorkspacePaneIdForSession(workspace, sessionId),
+          allowUnknownServerInstance: true,
+        });
+        forceSseReconnect();
+      } else if (
+        latestStateRevisionRef.current === null ||
+        response.revision > latestStateRevisionRef.current
+      ) {
+        latestStateRevisionRef.current = response.revision;
+      }
+      setRequestError(null);
+      return true;
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return false;
+      }
+      reportRequestError(error);
+      return false;
+    } finally {
+      if (isMountedRef.current) {
+        setUpdatingSessionIds((current) =>
+          setSessionFlag(current, sessionId, false),
+        );
+      }
+    }
+  }
+
   return {
     handleSend,
     handleDraftAttachmentsAdd,
@@ -2063,5 +2152,6 @@ export function useAppSessionActions(
     handleCompactCodexThread,
     handleRollbackCodexThread,
     handleRefreshAgentCommands,
+    handleCreateConversationMarker,
   };
 }

@@ -80,6 +80,11 @@ fn create_test_dir_symlink(target: &FsPath, link: &FsPath) -> std::io::Result<()
     }
 }
 
+#[cfg(windows)]
+fn windows_symlink_privilege_unavailable(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::PermissionDenied || err.raw_os_error() == Some(1314)
+}
+
 fn expect_delegation_cwd_rejected(
     state: &AppState,
     parent_session_id: &str,
@@ -4241,7 +4246,6 @@ fn delegation_rejects_symlinked_cwd_escape_from_project() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires Windows Developer Mode or symlink privilege"]
 fn delegation_rejects_windows_symlinked_cwd_escape_from_project() {
     let state = test_app_state();
     let project_root = std::env::temp_dir().join(format!(
@@ -4258,7 +4262,16 @@ fn delegation_rejects_windows_symlinked_cwd_escape_from_project() {
     let parent_session_id =
         create_test_project_session(&state, Agent::Codex, &project_id, &project_root);
     let link_path = project_root.join("outside-link");
-    create_test_dir_symlink(&outside_root, &link_path).expect("test symlink should be created");
+    if let Err(err) = create_test_dir_symlink(&outside_root, &link_path) {
+        let _ = fs::remove_file(state.persistence_path.as_path());
+        let _ = fs::remove_dir_all(project_root);
+        let _ = fs::remove_dir_all(outside_root);
+        if windows_symlink_privilege_unavailable(&err) {
+            eprintln!("skipping Windows symlink cwd escape test: {err}");
+            return;
+        }
+        panic!("test symlink should be created: {err}");
+    }
 
     let err = expect_delegation_cwd_rejected(
         &state,

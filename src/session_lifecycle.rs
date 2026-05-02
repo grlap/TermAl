@@ -346,7 +346,7 @@ impl AppState {
             }
         }
         let orchestrator_stop_instance_id = options.orchestrator_stop_instance_id.clone();
-        let should_dispatch_next = {
+        let (should_dispatch_next, pending_interaction_updates, revision) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -355,15 +355,16 @@ impl AppState {
             let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
                 .then(|| inner.next_message_id());
             let mut thread_id_to_suppress = None;
-            {
+            let pending_interaction_updates = {
                 let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
                 record.runtime = SessionRuntime::None;
                 record.runtime_reset_required = false;
                 record.runtime_stop_in_progress = false;
                 record.deferred_stop_callbacks.clear();
-                cancel_pending_interaction_messages(&mut record.session.messages);
+                let pending_interaction_indices =
+                    cancel_pending_interaction_messages(&mut record.session.messages);
                 clear_all_pending_requests(record);
                 if clear_external_session_id {
                     // Interrupt failures can leave the detached Codex thread running, so any
@@ -388,7 +389,8 @@ impl AppState {
                 if let Some(message_id) = file_change_message_id {
                     push_active_turn_file_changes_on_record(record, message_id);
                 }
-            }
+                message_updated_delta_parts_for_indices(record, pending_interaction_indices)
+            };
 
             // Suppress rediscovery of the detached thread after the record
             // borrow is released. Without this, the still-running thread
@@ -398,9 +400,11 @@ impl AppState {
                 inner.ignore_discovered_codex_thread(Some(thread_id));
             }
 
-            finish_active_turn_file_change_tracking(inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"));
+            finish_active_turn_file_change_tracking(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+            );
             let mut stopped_orchestrator_instance_index = None;
             let mut added_stopped_session_id = false;
             if let Some(orchestrator_instance_id) = orchestrator_stop_instance_id.as_deref() {
@@ -424,24 +428,28 @@ impl AppState {
             }
             let has_queued_prompts = options.dispatch_queued_prompts_on_success
                 && !inner.sessions[index].queued_prompts.is_empty();
-            if let Err(err) = self.commit_locked(&mut inner) {
-                if added_stopped_session_id {
-                    if let Some(instance_index) = stopped_orchestrator_instance_index {
-                        inner.orchestrator_instances[instance_index]
-                            .stopped_session_ids_during_stop
-                            .retain(|candidate| candidate != session_id);
+            let revision = match self.commit_locked(&mut inner) {
+                Ok(revision) => revision,
+                Err(err) => {
+                    if added_stopped_session_id {
+                        if let Some(instance_index) = stopped_orchestrator_instance_index {
+                            inner.orchestrator_instances[instance_index]
+                                .stopped_session_ids_during_stop
+                                .retain(|candidate| candidate != session_id);
+                        }
                     }
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid")
+                        .orchestrator_auto_dispatch_blocked = true;
+                    return Err(ApiError::internal(format!(
+                        "failed to persist session state: {err:#}"
+                    )));
                 }
-                inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid")
-                    .orchestrator_auto_dispatch_blocked = true;
-                return Err(ApiError::internal(format!(
-                    "failed to persist session state: {err:#}"
-                )));
-            }
-            has_queued_prompts
+            };
+            (has_queued_prompts, pending_interaction_updates, revision)
         };
+        self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
 
         if let Some(orchestrator_instance_id) = orchestrator_stop_instance_id.as_deref() {
             self.note_stopped_orchestrator_session(orchestrator_instance_id, session_id);

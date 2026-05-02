@@ -243,6 +243,7 @@ export function SessionPaneView({
   onForkCodexThread,
   onRefreshSessionModelOptions,
   onRefreshAgentCommands,
+  onCreateConversationMarker,
   onRollbackCodexThread,
   onUnarchiveCodexThread,
   onOrchestratorStateUpdated,
@@ -426,6 +427,10 @@ export function SessionPaneView({
   ) => void;
   onRefreshSessionModelOptions: (sessionId: string) => void;
   onRefreshAgentCommands: (sessionId: string) => void;
+  onCreateConversationMarker: (
+    sessionId: string,
+    messageId: string,
+  ) => void;
   onRollbackCodexThread: (sessionId: string, numTurns: number) => void;
   onUnarchiveCodexThread: (sessionId: string) => void;
   onOrchestratorStateUpdated: (state: StateResponse) => void;
@@ -3128,6 +3133,7 @@ export function SessionPaneView({
             onMcpElicitationSubmit={onMcpElicitationSubmit}
             onCodexAppRequestSubmit={onCodexAppRequestSubmit}
             onCancelQueuedPrompt={onCancelQueuedPrompt}
+            onCreateConversationMarker={onCreateConversationMarker}
             onSessionSettingsChange={onSessionSettingsChange}
             conversationSearchQuery={
               hasSessionFindQuery ? sessionFindQuery : ""

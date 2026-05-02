@@ -3841,16 +3841,184 @@ textarea {
   contain-intrinsic-size: auto 120px;
 }
 
-.message-slot.session-search-hit > .message-card {
+.message-slot.session-search-hit > .message-card,
+.message-slot.session-search-hit > .conversation-message-marker-shell > .message-card {
   border-color: var(--view-selected-border);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--view-selected-border) 58%, transparent);
 }
 
-.message-slot.session-search-hit-active > .message-card {
+.message-slot.session-search-hit-active > .message-card,
+.message-slot.session-search-hit-active > .conversation-message-marker-shell > .message-card {
   border-color: var(--signal-blue);
   box-shadow:
     0 0 0 1px var(--accent-blue-border),
     0 0 0 0.3rem var(--accent-blue-soft);
+}
+
+.conversation-marker-navigator {
+  position: sticky;
+  top: var(--space-sm);
+  z-index: 10;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-sm);
+  width: min(100%, 42rem);
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius-button);
+  padding: var(--space-xs);
+  background: color-mix(in srgb, var(--surface-elevated) 92%, transparent);
+  box-shadow: 0 0.55rem 1.2rem color-mix(in srgb, var(--shadow-color, black) 16%, transparent);
+}
+
+.conversation-marker-navigator-copy,
+.conversation-marker-nav-controls,
+.conversation-marker-list,
+.conversation-message-markers {
+  display: flex;
+  align-items: center;
+}
+
+.conversation-marker-navigator-copy {
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.conversation-marker-count {
+  min-width: 1.35rem;
+  border-radius: var(--control-radius-button);
+  padding: 0.1rem 0.38rem;
+  background: var(--surface-white-soft);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.conversation-marker-nav-controls {
+  gap: var(--space-xs);
+}
+
+.conversation-marker-nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-size-sm);
+  height: var(--control-size-sm);
+  padding: 0;
+}
+
+.conversation-marker-nav-button svg {
+  width: var(--icon-size-sm);
+  height: var(--icon-size-sm);
+}
+
+.conversation-marker-list,
+.conversation-message-markers {
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.conversation-marker-list {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.conversation-message-markers {
+  flex-wrap: wrap;
+  margin: 0 0 var(--space-xs) var(--message-card-padding-x);
+}
+
+.conversation-message-marker-shell {
+  position: relative;
+  min-width: 0;
+}
+
+.conversation-message-marker-toolbar {
+  position: absolute;
+  top: var(--space-sm);
+  right: var(--space-sm);
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.conversation-message-marker-shell:hover .conversation-message-marker-toolbar,
+.conversation-message-marker-shell:focus-within .conversation-message-marker-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.conversation-message-marker-add-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-size-sm);
+  height: var(--control-size-sm);
+  padding: 0;
+  background: color-mix(in srgb, var(--surface-elevated) 92%, transparent);
+  box-shadow: 0 0.4rem 1rem color-mix(in srgb, var(--shadow-color, black) 18%, transparent);
+}
+
+.conversation-message-marker-add-button svg {
+  width: var(--icon-size-sm);
+  height: var(--icon-size-sm);
+}
+
+.conversation-marker-chip {
+  --conversation-marker-color: var(--signal-blue);
+
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-xs);
+  max-width: min(18rem, 100%);
+  min-height: 1.75rem;
+  border: 1px solid color-mix(in srgb, var(--conversation-marker-color) 44%, var(--line));
+  border-radius: var(--control-radius-button);
+  padding: 0.22rem 0.48rem;
+  background: color-mix(in srgb, var(--conversation-marker-color) 13%, var(--surface-card));
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.conversation-marker-chip:hover,
+.conversation-marker-chip:focus-visible,
+.conversation-marker-chip.is-active {
+  border-color: color-mix(in srgb, var(--conversation-marker-color) 74%, var(--line));
+  background: color-mix(in srgb, var(--conversation-marker-color) 20%, var(--surface-card));
+  outline: none;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--conversation-marker-color) 48%, transparent),
+    0 0 0 0.22rem color-mix(in srgb, var(--conversation-marker-color) 16%, transparent);
+}
+
+.conversation-marker-chip-swatch {
+  width: 0.58rem;
+  height: 0.58rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--conversation-marker-color);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface-card) 82%, transparent);
+}
+
+.conversation-marker-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-marker-chip-kind {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .virtualized-message-list {

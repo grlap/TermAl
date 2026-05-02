@@ -137,6 +137,66 @@ fn cancel_pending_interaction_messages(messages: &mut [Message]) -> Vec<usize> {
     changed_indices
 }
 
+struct MessageUpdatedDeltaParts {
+    session_id: String,
+    message_id: String,
+    message_index: usize,
+    message_count: u32,
+    message: Message,
+    preview: String,
+    status: SessionStatus,
+    session_mutation_stamp: u64,
+}
+
+fn message_updated_delta_parts_for_indices(
+    record: &SessionRecord,
+    message_indices: Vec<usize>,
+) -> Vec<MessageUpdatedDeltaParts> {
+    let session_id = record.session.id.clone();
+    let message_count = session_message_count(record);
+    let preview = record.session.preview.clone();
+    let status = record.session.status;
+    let session_mutation_stamp = record.mutation_stamp;
+    message_indices
+        .into_iter()
+        .filter_map(|message_index| {
+            let message = record.session.messages.get(message_index)?.clone();
+            Some(MessageUpdatedDeltaParts {
+                session_id: session_id.clone(),
+                message_id: message.id().to_owned(),
+                message_index,
+                message_count,
+                message,
+                preview: preview.clone(),
+                status,
+                session_mutation_stamp,
+            })
+        })
+        .collect()
+}
+
+impl AppState {
+    fn publish_message_updated_delta_parts(
+        &self,
+        revision: u64,
+        updates: Vec<MessageUpdatedDeltaParts>,
+    ) {
+        for update in updates {
+            self.publish_delta(&DeltaEvent::MessageUpdated {
+                revision,
+                session_id: update.session_id,
+                message_id: update.message_id,
+                message_index: update.message_index,
+                message_count: update.message_count,
+                message: update.message,
+                preview: update.preview,
+                status: update.status,
+                session_mutation_stamp: Some(update.session_mutation_stamp),
+            });
+        }
+    }
+}
+
 /// Marks running command messages as failed.
 fn fail_running_command_messages(messages: &mut [Message]) {
     for message in messages {

@@ -675,6 +675,9 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
+      if (session.messagesLoaded === false) {
+        return { kind: "needsResync" };
+      }
       return {
         kind: "applied",
         sessions: replaceSession(sessions, sessionIndex, {
@@ -695,6 +698,9 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
+      if (session.messagesLoaded === false) {
+        return { kind: "needsResync" };
+      }
       return {
         kind: "applied",
         sessions: replaceSession(sessions, sessionIndex, {

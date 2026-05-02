@@ -2269,6 +2269,7 @@ describe("applyDeltaToSessions", () => {
     const sessions = [
       makeSession("session-a", {
         sessionMutationStamp: 10,
+        messagesLoaded: true,
         markers: [],
       }),
     ];
@@ -2341,6 +2342,74 @@ describe("applyDeltaToSessions", () => {
     }
     expect(deleteResult.sessions[0].markers).toEqual([]);
     expect(deleteResult.sessions[0].sessionMutationStamp).toBe(13);
+  });
+
+  it("requests resync for marker deltas against summary or inconsistent sessions", () => {
+    const marker = {
+      id: "marker-1",
+      sessionId: "session-a",
+      kind: "decision",
+      name: "Decision",
+      color: "#3b82f6",
+      messageId: "message-1",
+      messageIndexHint: 0,
+      createdAt: "10:00:00",
+      updatedAt: "10:00:00",
+      createdBy: "user",
+    } as const;
+    const markerDeltas: SessionDeltaEvent[] = [
+      {
+        type: "conversationMarkerCreated",
+        revision: 11,
+        sessionId: "session-a",
+        marker,
+        sessionMutationStamp: 11,
+      },
+      {
+        type: "conversationMarkerUpdated",
+        revision: 12,
+        sessionId: "session-a",
+        marker: {
+          ...marker,
+          name: "Updated decision",
+          updatedAt: "10:01:00",
+        },
+        sessionMutationStamp: 12,
+      },
+      {
+        type: "conversationMarkerDeleted",
+        revision: 13,
+        sessionId: "session-a",
+        markerId: "marker-1",
+        sessionMutationStamp: 13,
+      },
+    ];
+
+    markerDeltas.forEach((delta) => {
+      expect(
+        applyDeltaToSessions(
+          [makeSession("session-a", { messagesLoaded: false, markers: [] })],
+          delta,
+        ).kind,
+      ).toBe("needsResync");
+      expect(applyDeltaToSessions([], delta).kind).toBe("needsResync");
+    });
+
+    expect(
+      applyDeltaToSessions(
+        [makeSession("session-a", { messagesLoaded: true, markers: [] })],
+        {
+          type: "conversationMarkerCreated",
+          revision: 14,
+          sessionId: "session-a",
+          marker: {
+            ...marker,
+            sessionId: "session-b",
+          },
+          sessionMutationStamp: 14,
+        },
+      ).kind,
+    ).toBe("needsResync");
   });
 
   it("replaces text when a final authoritative update arrives", () => {

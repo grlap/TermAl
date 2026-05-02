@@ -508,6 +508,19 @@ where
         .map_err(|err| ApiError::internal(format!("blocking task failed: {err}")))?
 }
 
+fn api_json_rejection(label: &str, rejection: JsonRejection) -> ApiError {
+    let status = match &rejection {
+        JsonRejection::JsonDataError(_) | JsonRejection::JsonSyntaxError(_) => {
+            StatusCode::UNPROCESSABLE_ENTITY
+        }
+        _ => rejection.status(),
+    };
+    ApiError::from_status(
+        status,
+        format!("invalid {label} JSON: {}", rejection.body_text()),
+    )
+}
+
 /// Creates session.
 async fn create_session(
     State(state): State<AppState>,
@@ -523,18 +536,7 @@ async fn create_session_delegation(
     State(state): State<AppState>,
     request: Result<Json<CreateDelegationRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<DelegationResponse>), ApiError> {
-    let Json(request) = request.map_err(|rejection| {
-        let status = match &rejection {
-            JsonRejection::JsonDataError(_) | JsonRejection::JsonSyntaxError(_) => {
-                StatusCode::UNPROCESSABLE_ENTITY
-            }
-            _ => rejection.status(),
-        };
-        ApiError::from_status(
-            status,
-            format!("invalid delegation request JSON: {}", rejection.body_text()),
-        )
-    })?;
+    let Json(request) = request.map_err(|rejection| api_json_rejection("delegation request", rejection))?;
     let response =
         run_blocking_api(move || state.create_read_only_delegation(&parent_session_id, request))
             .await?;
@@ -587,8 +589,10 @@ async fn list_session_markers(
 async fn create_session_marker(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
-    Json(request): Json<CreateConversationMarkerRequest>,
+    request: Result<Json<CreateConversationMarkerRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ConversationMarkerResponse>), ApiError> {
+    let Json(request) =
+        request.map_err(|rejection| api_json_rejection("conversation marker request", rejection))?;
     let response =
         run_blocking_api(move || state.create_conversation_marker(&session_id, request)).await?;
     Ok((StatusCode::CREATED, Json(response)))
@@ -598,8 +602,10 @@ async fn create_session_marker(
 async fn update_session_marker(
     AxumPath((session_id, marker_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
-    Json(request): Json<UpdateConversationMarkerRequest>,
+    request: Result<Json<UpdateConversationMarkerRequest>, JsonRejection>,
 ) -> Result<Json<ConversationMarkerResponse>, ApiError> {
+    let Json(request) =
+        request.map_err(|rejection| api_json_rejection("conversation marker request", rejection))?;
     let response =
         run_blocking_api(move || state.update_conversation_marker(&session_id, &marker_id, request))
             .await?;

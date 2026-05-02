@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiRequestError,
   cancelDelegation,
+  createConversationMarker,
   createOrchestratorInstance,
+  deleteConversationMarker,
+  fetchConversationMarkers,
   deleteWorkspaceLayout,
   fetchDelegationResult,
   fetchDelegationStatus,
@@ -14,6 +17,7 @@ import {
   runTerminalCommandStream,
   saveFile,
   TERMINAL_SSE_BUFFER_MAX_CHARS,
+  updateConversationMarker,
 } from "./api";
 
 describe("createOrchestratorInstance", () => {
@@ -101,7 +105,7 @@ describe("delegation API helpers", () => {
   });
 
   function stubJsonFetch() {
-    const fetchMock = vi.fn().mockResolvedValue(
+    const fetchMock = vi.fn<typeof fetch>(async () =>
       new Response("{}", {
         status: 200,
         headers: {
@@ -157,6 +161,98 @@ describe("delegation API helpers", () => {
         method: "POST",
       }),
     );
+  });
+});
+
+describe("conversation marker API helpers", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  function stubJsonFetch() {
+    const fetchMock = vi.fn<typeof fetch>(async (_input, _init) =>
+      new Response("{}", {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("builds encoded marker paths with the expected HTTP methods", async () => {
+    const fetchMock = stubJsonFetch();
+
+    await fetchConversationMarkers("session/one two");
+    await createConversationMarker("session/one two", {
+      kind: "decision",
+      name: "Decision",
+      body: "Keep the current design.",
+      color: "#3b82f6",
+      messageId: "message-1",
+      endMessageId: "message-2",
+    });
+    await updateConversationMarker("session/one two", "marker/one two", {
+      name: "Updated decision",
+    });
+    await deleteConversationMarker("session/one two", "marker/one two");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/sessions/session%2Fone%20two/markers",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/sessions/session%2Fone%20two/markers",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/sessions/session%2Fone%20two/markers/marker%2Fone%20two",
+      expect.objectContaining({
+        method: "PATCH",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/sessions/session%2Fone%20two/markers/marker%2Fone%20two",
+      expect.objectContaining({
+        method: "DELETE",
+      }),
+    );
+  });
+
+  it("preserves nullable marker clear fields in update payloads", async () => {
+    const fetchMock = stubJsonFetch();
+
+    await updateConversationMarker("session/one two", "marker/one two", {
+      body: null,
+      endMessageId: null,
+    });
+
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const init = firstCall?.[1];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      body: null,
+      endMessageId: null,
+    });
   });
 });
 

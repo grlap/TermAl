@@ -1,5 +1,6 @@
 import {
   memo,
+  useCallback,
   useDeferredValue,
   useEffect,
   useLayoutEffect,
@@ -7,6 +8,7 @@ import {
   useRef,
   useState,
   type ClipboardEvent as ReactClipboardEvent,
+  type CSSProperties,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -23,6 +25,7 @@ import {
   MessageSlot,
   PanelEmptyState,
 } from "./session-message-leaves";
+import { DiffNavArrow } from "./DiffPanelIcons";
 import {
   PendingPromptCard,
   RunningIndicator,
@@ -65,6 +68,7 @@ import type {
   PendingPrompt,
   SandboxMode,
   Session,
+  ConversationMarker,
 } from "../types";
 import type { PaneViewMode } from "../workspace";
 
@@ -80,6 +84,8 @@ type PromptHistoryState = {
 };
 
 const EMPTY_PENDING_PROMPTS: readonly PendingPrompt[] = [];
+const EMPTY_CONVERSATION_MARKERS: readonly ConversationMarker[] = [];
+const NOOP_CREATE_CONVERSATION_MARKER = () => {};
 
 type SessionSettingsField =
   | "model"
@@ -184,6 +190,7 @@ export function AgentSessionPanel({
   onMcpElicitationSubmit,
   onCodexAppRequestSubmit,
   onCancelQueuedPrompt,
+  onCreateConversationMarker = NOOP_CREATE_CONVERSATION_MARKER,
   onSessionSettingsChange,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
@@ -209,6 +216,7 @@ export function AgentSessionPanel({
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
+  onCreateConversationMarker?: (sessionId: string, messageId: string) => void;
   onSessionSettingsChange: (
       sessionId: string,
       field: SessionSettingsField,
@@ -239,6 +247,9 @@ export function AgentSessionPanel({
     onCodexAppRequestSubmit,
   );
   const stableOnCancelQueuedPrompt = useStableEvent(onCancelQueuedPrompt);
+  const stableOnCreateConversationMarker = useStableEvent(
+    onCreateConversationMarker,
+  );
   const stableOnSessionSettingsChange = useStableEvent(onSessionSettingsChange);
 
   return (
@@ -258,6 +269,7 @@ export function AgentSessionPanel({
       onMcpElicitationSubmit={stableOnMcpElicitationSubmit}
       onCodexAppRequestSubmit={stableOnCodexAppRequestSubmit}
       onCancelQueuedPrompt={stableOnCancelQueuedPrompt}
+      onCreateConversationMarker={stableOnCreateConversationMarker}
       onSessionSettingsChange={stableOnSessionSettingsChange}
       conversationSearchQuery={conversationSearchQuery}
       conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
@@ -386,6 +398,7 @@ const SessionBody = memo(function SessionBody({
   onMcpElicitationSubmit,
   onCodexAppRequestSubmit,
   onCancelQueuedPrompt,
+  onCreateConversationMarker,
   onSessionSettingsChange,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
@@ -411,6 +424,7 @@ const SessionBody = memo(function SessionBody({
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
+  onCreateConversationMarker: (sessionId: string, messageId: string) => void;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -483,6 +497,7 @@ const SessionBody = memo(function SessionBody({
           onMcpElicitationSubmit={onMcpElicitationSubmit}
           onCodexAppRequestSubmit={onCodexAppRequestSubmit}
           onCancelQueuedPrompt={onCancelQueuedPrompt}
+          onCreateConversationMarker={onCreateConversationMarker}
           conversationSearchQuery={conversationSearchQuery}
           conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
           conversationSearchActiveItemKey={conversationSearchActiveItemKey}
@@ -548,6 +563,7 @@ const SessionBody = memo(function SessionBody({
   previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
   previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
   previous.onCancelQueuedPrompt === next.onCancelQueuedPrompt &&
+  previous.onCreateConversationMarker === next.onCreateConversationMarker &&
   previous.onSessionSettingsChange === next.onSessionSettingsChange &&
   previous.conversationSearchQuery === next.conversationSearchQuery &&
   previous.conversationSearchMatchedItemKeys === next.conversationSearchMatchedItemKeys &&
@@ -582,6 +598,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   onMcpElicitationSubmit,
   onCodexAppRequestSubmit,
   onCancelQueuedPrompt,
+  onCreateConversationMarker,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
   conversationSearchActiveItemKey,
@@ -599,6 +616,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
+  onCreateConversationMarker: (sessionId: string, messageId: string) => void;
   conversationSearchQuery: string;
   conversationSearchMatchedItemKeys: ReadonlySet<string>;
   conversationSearchActiveItemKey: string | null;
@@ -635,6 +653,138 @@ const SessionConversationPage = memo(function SessionConversationPage({
     showWaitingIndicator,
     waitingIndicatorPrompt,
   });
+  const visibleMarkers = session.markers ?? EMPTY_CONVERSATION_MARKERS;
+  const markersByMessageId = useMemo(
+    () => groupConversationMarkersByMessageId(visibleMarkers),
+    [visibleMarkers],
+  );
+  const sortedMarkers = useMemo(
+    () => sortConversationMarkersForNavigation(visibleMarkers, visibleMessages),
+    [visibleMarkers, visibleMessages],
+  );
+  const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
+  const messageSlotNodesRef = useRef<Map<string, HTMLElement>>(new Map());
+
+  useEffect(() => {
+    if (
+      activeMarkerId &&
+      !visibleMarkers.some((marker) => marker.id === activeMarkerId)
+    ) {
+      setActiveMarkerId(null);
+    }
+  }, [activeMarkerId, visibleMarkers]);
+
+  const handleConversationItemMount = useCallback(
+    (itemKey: string, node: HTMLElement | null) => {
+      const messageId = itemKey.startsWith("message:")
+        ? itemKey.slice("message:".length)
+        : null;
+      if (messageId) {
+        if (node) {
+          messageSlotNodesRef.current.set(messageId, node);
+        } else {
+          messageSlotNodesRef.current.delete(messageId);
+        }
+      }
+      onConversationSearchItemMount(itemKey, node);
+    },
+    [onConversationSearchItemMount],
+  );
+
+  const jumpToMarker = useCallback(
+    (marker: ConversationMarker) => {
+      setActiveMarkerId(marker.id);
+      const jumpedWithVirtualizer =
+        conversationOverview.virtualizerHandleRef.current?.jumpToMessageId(
+          marker.messageId,
+          { align: "center" },
+        ) ?? false;
+      if (jumpedWithVirtualizer) {
+        return;
+      }
+      (
+        messageSlotNodesRef.current.get(marker.messageId) ??
+        findMountedConversationMessageSlot(marker.messageId)
+      )
+        ?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    },
+    [conversationOverview.virtualizerHandleRef],
+  );
+
+  const navigateMarkerByOffset = useCallback(
+    (offset: -1 | 1) => {
+      if (sortedMarkers.length === 0) {
+        return;
+      }
+      const currentIndex =
+        activeMarkerId === null
+          ? -1
+          : sortedMarkers.findIndex((marker) => marker.id === activeMarkerId);
+      const fallbackIndex = offset > 0 ? 0 : sortedMarkers.length - 1;
+      const nextIndex =
+        currentIndex === -1
+          ? fallbackIndex
+          : (currentIndex + offset + sortedMarkers.length) %
+            sortedMarkers.length;
+      jumpToMarker(sortedMarkers[nextIndex]);
+    },
+    [activeMarkerId, jumpToMarker, sortedMarkers],
+  );
+
+  const renderMarkedMessageCard = useCallback<RenderMessageCard>(
+    (
+      message,
+      preferImmediateHeavyRender,
+      onMessageApprovalDecision,
+      onMessageUserInputSubmit,
+      onMessageMcpElicitationSubmit,
+      onMessageCodexAppRequestSubmit,
+    ) => {
+      const rendered = renderMessageCard(
+        message,
+        preferImmediateHeavyRender,
+        onMessageApprovalDecision,
+        onMessageUserInputSubmit,
+        onMessageMcpElicitationSubmit,
+        onMessageCodexAppRequestSubmit,
+      );
+      const messageMarkers = markersByMessageId.get(message.id) ?? [];
+      if (!rendered) {
+        return null;
+      }
+      return (
+        <div className="conversation-message-marker-shell">
+          <div className="conversation-message-marker-toolbar">
+            <button
+              type="button"
+              className="ghost-button conversation-message-marker-add-button"
+              title="Add checkpoint marker"
+              aria-label="Add checkpoint marker"
+              onClick={() => onCreateConversationMarker(session.id, message.id)}
+            >
+              <MarkerPlusIcon />
+            </button>
+          </div>
+          {messageMarkers.length > 0 ? (
+            <ConversationMessageMarkers
+              markers={messageMarkers}
+              activeMarkerId={activeMarkerId}
+              onMarkerClick={jumpToMarker}
+            />
+          ) : null}
+          {rendered}
+        </div>
+      );
+    },
+    [
+      activeMarkerId,
+      jumpToMarker,
+      markersByMessageId,
+      onCreateConversationMarker,
+      renderMessageCard,
+      session.id,
+    ],
+  );
 
   if (visibleMessages.length === 0 && visiblePendingPrompts.length === 0 && !showWaitingIndicator) {
     return (
@@ -653,7 +803,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
 
   const conversationMessages = (
     <ConversationMessageList
-      renderMessageCard={renderMessageCard}
+      renderMessageCard={renderMarkedMessageCard}
       sessionId={session.id}
       messages={visibleMessages}
       scrollContainerRef={scrollContainerRef}
@@ -670,7 +820,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       conversationSearchQuery={conversationSearchQuery}
       conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
       conversationSearchActiveItemKey={conversationSearchActiveItemKey}
-      onConversationSearchItemMount={onConversationSearchItemMount}
+      onConversationSearchItemMount={handleConversationItemMount}
       />
   );
   const liveTurnCard = showWaitingIndicator ? (
@@ -696,9 +846,19 @@ const SessionConversationPage = memo(function SessionConversationPage({
       />
     </MessageSlot>
   ));
+  const markerNavigation = sortedMarkers.length > 0 ? (
+    <ConversationMarkerNavigator
+      markers={sortedMarkers}
+      activeMarkerId={activeMarkerId}
+      onJump={jumpToMarker}
+      onNavigatePrevious={() => navigateMarkerByOffset(-1)}
+      onNavigateNext={() => navigateMarkerByOffset(1)}
+    />
+  ) : null;
 
   const conversationContent = (
     <>
+      {markerNavigation}
       {conversationMessages}
       {liveTurnCard}
       {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
@@ -717,7 +877,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
             messages={visibleMessages}
             layoutSnapshot={conversationOverview.layoutSnapshot}
             viewportSnapshot={conversationOverview.viewportSnapshot}
-            markers={session.markers}
+            markers={visibleMarkers}
             tailItems={conversationOverview.tailItems}
             maxHeightPx={conversationOverview.maxHeightPx}
             onNavigate={conversationOverview.navigate}
@@ -744,6 +904,198 @@ const SessionConversationPage = memo(function SessionConversationPage({
   previous.conversationSearchActiveItemKey === next.conversationSearchActiveItemKey &&
   previous.onConversationSearchItemMount === next.onConversationSearchItemMount
 );
+
+function groupConversationMarkersByMessageId(
+  markers: readonly ConversationMarker[],
+) {
+  const byMessageId = new Map<string, ConversationMarker[]>();
+  markers.forEach((marker) => {
+    const bucket = byMessageId.get(marker.messageId);
+    if (bucket) {
+      bucket.push(marker);
+    } else {
+      byMessageId.set(marker.messageId, [marker]);
+    }
+  });
+  return byMessageId;
+}
+
+function findMountedConversationMessageSlot(messageId: string) {
+  const expectedItemKey = `message:${messageId}`;
+  const candidates = document.querySelectorAll<HTMLElement>(
+    "[data-session-search-item-key]",
+  );
+  for (const candidate of candidates) {
+    if (candidate.dataset.sessionSearchItemKey === expectedItemKey) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function sortConversationMarkersForNavigation(
+  markers: readonly ConversationMarker[],
+  messages: readonly Message[],
+) {
+  if (markers.length === 0) {
+    return [];
+  }
+  const messageIndexById = new Map<string, number>();
+  messages.forEach((message, index) => {
+    messageIndexById.set(message.id, index);
+  });
+  return [...markers].sort((left, right) => {
+    const leftIndex =
+      messageIndexById.get(left.messageId) ??
+      left.messageIndexHint ??
+      Number.MAX_SAFE_INTEGER;
+    const rightIndex =
+      messageIndexById.get(right.messageId) ??
+      right.messageIndexHint ??
+      Number.MAX_SAFE_INTEGER;
+    if (leftIndex !== rightIndex) {
+      return leftIndex - rightIndex;
+    }
+    const createdOrder = left.createdAt.localeCompare(right.createdAt);
+    return createdOrder === 0 ? left.id.localeCompare(right.id) : createdOrder;
+  });
+}
+
+function MarkerPlusIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M7.25 2.5h1.5v4.75h4.75v1.5H8.75v4.75h-1.5V8.75H2.5v-1.5h4.75Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function ConversationMarkerNavigator({
+  markers,
+  activeMarkerId,
+  onJump,
+  onNavigatePrevious,
+  onNavigateNext,
+}: {
+  markers: readonly ConversationMarker[];
+  activeMarkerId: string | null;
+  onJump: (marker: ConversationMarker) => void;
+  onNavigatePrevious: () => void;
+  onNavigateNext: () => void;
+}) {
+  return (
+    <nav className="conversation-marker-navigator" aria-label="Conversation markers">
+      <div className="conversation-marker-navigator-copy">
+        <span className="card-label">Markers</span>
+        <span className="conversation-marker-count">{markers.length}</span>
+      </div>
+      <div className="conversation-marker-nav-controls">
+        <button
+          type="button"
+          className="ghost-button conversation-marker-nav-button"
+          aria-label="Previous marker"
+          title="Previous marker"
+          onClick={onNavigatePrevious}
+        >
+          <DiffNavArrow direction="up" />
+        </button>
+        <button
+          type="button"
+          className="ghost-button conversation-marker-nav-button"
+          aria-label="Next marker"
+          title="Next marker"
+          onClick={onNavigateNext}
+        >
+          <DiffNavArrow direction="down" />
+        </button>
+      </div>
+      <div className="conversation-marker-list">
+        {markers.map((marker) => (
+          <ConversationMarkerChip
+            key={marker.id}
+            marker={marker}
+            isActive={marker.id === activeMarkerId}
+            onClick={() => onJump(marker)}
+          />
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+function ConversationMessageMarkers({
+  markers,
+  activeMarkerId,
+  onMarkerClick,
+}: {
+  markers: readonly ConversationMarker[];
+  activeMarkerId: string | null;
+  onMarkerClick: (marker: ConversationMarker) => void;
+}) {
+  return (
+    <div className="conversation-message-markers">
+      {markers.map((marker) => (
+        <ConversationMarkerChip
+          key={marker.id}
+          marker={marker}
+          isActive={marker.id === activeMarkerId}
+          onClick={() => onMarkerClick(marker)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ConversationMarkerChip({
+  marker,
+  isActive,
+  onClick,
+}: {
+  marker: ConversationMarker;
+  isActive: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`conversation-marker-chip${isActive ? " is-active" : ""}`}
+      style={{
+        "--conversation-marker-color": marker.color,
+      } as CSSProperties}
+      title={marker.body ?? marker.name}
+      aria-label={`Jump to ${formatConversationMarkerKind(marker.kind)} marker ${marker.name}`}
+      onClick={onClick}
+    >
+      <span className="conversation-marker-chip-swatch" aria-hidden="true" />
+      <span className="conversation-marker-chip-name">{marker.name}</span>
+      <span className="conversation-marker-chip-kind">
+        {formatConversationMarkerKind(marker.kind)}
+      </span>
+    </button>
+  );
+}
+
+function formatConversationMarkerKind(kind: ConversationMarker["kind"]) {
+  switch (kind) {
+    case "checkpoint":
+      return "Checkpoint";
+    case "decision":
+      return "Decision";
+    case "review":
+      return "Review";
+    case "bug":
+      return "Bug";
+    case "question":
+      return "Question";
+    case "handoff":
+      return "Handoff";
+    case "custom":
+    default:
+      return "Marker";
+  }
+}
 
 function ConversationMessageList({
   renderMessageCard,

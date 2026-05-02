@@ -520,6 +520,9 @@ fn localize_remote_session(
     let mut session = remote_session.clone();
     session.id = local_session_id.to_owned();
     session.project_id = local_project_id;
+    for marker in &mut session.markers {
+        marker.session_id = local_session_id.to_owned();
+    }
     // Delegation records are intentionally not mirrored across remotes in this
     // phase, so a remote child link would be dangling in the local proxy state.
     session.parent_delegation_id = None;

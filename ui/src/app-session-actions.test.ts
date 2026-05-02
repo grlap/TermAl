@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { useAppSessionActions } from "./app-session-actions";
 import type { StateResponse } from "./api";
-import type { Project, Session } from "./types";
+import type { ConversationMarker, Project, Session } from "./types";
 import type { WorkspaceState } from "./workspace";
 
 function makeSession(id: string, overrides: Partial<Session> = {}): Session {
@@ -355,6 +355,63 @@ describe("useAppSessionActions", () => {
     expect(adoptState).toHaveBeenCalledWith(staleState);
     expect(params.requestActionRecoveryResync).not.toHaveBeenCalled();
     expect(reportRequestError).toHaveBeenCalledWith(originalError);
+  });
+
+  it("creates checkpoint markers and updates the local session slice", async () => {
+    const marker: ConversationMarker = {
+      id: "marker-1",
+      sessionId: "session-1",
+      kind: "checkpoint",
+      name: "Checkpoint",
+      body: null,
+      color: "#3b82f6",
+      messageId: "message-1",
+      messageIndexHint: 0,
+      endMessageId: null,
+      endMessageIndexHint: null,
+      createdAt: "2026-05-01 10:00:00",
+      updatedAt: "2026-05-01 10:00:00",
+      createdBy: "user",
+    };
+    const session = makeSession("session-1", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          text: "Decision point",
+          timestamp: "10:00",
+        },
+      ],
+      markers: [],
+    });
+    const createConversationMarkerSpy = vi
+      .spyOn(api, "createConversationMarker")
+      .mockResolvedValue({
+        marker,
+        revision: 6,
+        serverInstanceId: "server-a",
+      });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[session.id, session]]);
+    params.refs.sessionsRef.current = [session];
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleCreateConversationMarker("session-1", "message-1"),
+    ).resolves.toBe(true);
+
+    expect(createConversationMarkerSpy).toHaveBeenCalledWith("session-1", {
+      kind: "checkpoint",
+      name: "Checkpoint",
+      body: null,
+      color: "#3b82f6",
+      messageId: "message-1",
+      endMessageId: null,
+    });
+    expect(params.refs.sessionsRef.current[0].markers).toEqual([marker]);
+    expect(params.refs.latestStateRevisionRef.current).toBe(6);
+    expect(params.setters.setRequestError).toHaveBeenCalledWith(null);
   });
 
   it("reads live sessions after stale same-instance settings success", async () => {

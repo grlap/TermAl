@@ -201,6 +201,7 @@ fn app_router(state: AppState) -> Router {
             axum::http::Method::GET,
             axum::http::Method::POST,
             axum::http::Method::PUT,
+            axum::http::Method::PATCH,
             axum::http::Method::DELETE,
         ])
         .allow_headers([axum::http::header::ACCEPT, axum::http::header::CONTENT_TYPE]);

@@ -35,19 +35,29 @@ impl AppState {
         request: CreateConversationMarkerRequest,
     ) -> Result<ConversationMarkerResponse, ApiError> {
         let session_id = normalize_marker_route_id(session_id, "session id")?;
+        if self.remote_session_target(&session_id)?.is_some() {
+            return self.proxy_remote_create_conversation_marker(&session_id, request);
+        }
+
         let (marker, revision, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(&session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
-            let (marker, session_mutation_stamp) = {
+            let marker = {
+                let record = inner
+                    .session_by_index(index)
+                    .expect("session index should be valid");
+                let marker = build_conversation_marker(record, request)?;
+                ensure_local_marker_session(record)?;
+                marker
+            };
+            let session_mutation_stamp = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
-                ensure_local_marker_session(record)?;
-                let marker = build_conversation_marker(record, request)?;
                 record.session.markers.push(marker.clone());
-                (marker, record.mutation_stamp)
+                record.mutation_stamp
             };
             let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist conversation marker: {err:#}"))
@@ -80,15 +90,18 @@ impl AppState {
                 "conversation marker update must include at least one field",
             ));
         }
+        if self.remote_session_target(&session_id)?.is_some() {
+            return self.proxy_remote_update_conversation_marker(&session_id, &marker_id, request);
+        }
 
         let (marker, revision, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(&session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
-            let (marker, session_mutation_stamp) = {
+            let marker = {
                 let record = inner
-                    .session_mut_by_index(index)
+                    .session_by_index(index)
                     .expect("session index should be valid");
                 ensure_local_marker_session(record)?;
                 let marker_index = record
@@ -99,7 +112,20 @@ impl AppState {
                     .ok_or_else(|| ApiError::not_found("conversation marker not found"))?;
                 let next_marker =
                     patch_conversation_marker(record, marker_index, request, &session_id)?;
-                (next_marker, record.mutation_stamp)
+                next_marker
+            };
+            let session_mutation_stamp = {
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                let marker_index = record
+                    .session
+                    .markers
+                    .iter()
+                    .position(|entry| entry.id == marker_id)
+                    .ok_or_else(|| ApiError::not_found("conversation marker not found"))?;
+                record.session.markers[marker_index] = marker.clone();
+                record.mutation_stamp
             };
             let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist conversation marker: {err:#}"))
@@ -126,16 +152,33 @@ impl AppState {
     ) -> Result<DeleteConversationMarkerResponse, ApiError> {
         let session_id = normalize_marker_route_id(session_id, "session id")?;
         let marker_id = normalize_marker_route_id(marker_id, "marker id")?;
+        if self.remote_session_target(&session_id)?.is_some() {
+            return self.proxy_remote_delete_conversation_marker(&session_id, &marker_id);
+        }
+
         let (revision, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(&session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
+            {
+                let record = inner
+                    .session_by_index(index)
+                    .expect("session index should be valid");
+                ensure_local_marker_session(record)?;
+                if !record
+                    .session
+                    .markers
+                    .iter()
+                    .any(|marker| marker.id == marker_id)
+                {
+                    return Err(ApiError::not_found("conversation marker not found"));
+                }
+            }
             let session_mutation_stamp = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
-                ensure_local_marker_session(record)?;
                 let marker_index = record
                     .session
                     .markers
@@ -162,10 +205,167 @@ impl AppState {
             server_instance_id: self.server_instance_id.clone(),
         })
     }
+
+    fn proxy_remote_create_conversation_marker(
+        &self,
+        session_id: &str,
+        request: CreateConversationMarkerRequest,
+    ) -> Result<ConversationMarkerResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        let remote_response: ConversationMarkerResponse = self.remote_registry.request_json(
+            &target.remote,
+            Method::POST,
+            &format!(
+                "/api/sessions/{}/markers",
+                encode_uri_component(&target.remote_session_id)
+            ),
+            &[],
+            Some(serde_json::to_value(request).map_err(|err| {
+                ApiError::internal(format!("failed to encode marker create request: {err}"))
+            })?),
+        )?;
+        self.apply_remote_marker_response(target, remote_response, true)
+    }
+
+    fn proxy_remote_update_conversation_marker(
+        &self,
+        session_id: &str,
+        marker_id: &str,
+        request: UpdateConversationMarkerRequest,
+    ) -> Result<ConversationMarkerResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        let remote_response: ConversationMarkerResponse = self.remote_registry.request_json(
+            &target.remote,
+            Method::PATCH,
+            &format!(
+                "/api/sessions/{}/markers/{}",
+                encode_uri_component(&target.remote_session_id),
+                encode_uri_component(marker_id)
+            ),
+            &[],
+            Some(serde_json::to_value(request).map_err(|err| {
+                ApiError::internal(format!("failed to encode marker update request: {err}"))
+            })?),
+        )?;
+        self.apply_remote_marker_response(target, remote_response, false)
+    }
+
+    fn proxy_remote_delete_conversation_marker(
+        &self,
+        session_id: &str,
+        marker_id: &str,
+    ) -> Result<DeleteConversationMarkerResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        let remote_response: DeleteConversationMarkerResponse = self.remote_registry.request_json(
+            &target.remote,
+            Method::DELETE,
+            &format!(
+                "/api/sessions/{}/markers/{}",
+                encode_uri_component(&target.remote_session_id),
+                encode_uri_component(marker_id)
+            ),
+            &[],
+            None,
+        )?;
+        if remote_response.marker_id != marker_id {
+            return Err(ApiError::bad_gateway(format!(
+                "remote deleted marker id `{}` did not match requested marker `{marker_id}`",
+                remote_response.marker_id
+            )));
+        }
+        self.apply_remote_marker_delete_response(target, remote_response)
+    }
+
+    fn apply_remote_marker_response(
+        &self,
+        target: RemoteSessionTarget,
+        remote_response: ConversationMarkerResponse,
+        created: bool,
+    ) -> Result<ConversationMarkerResponse, ApiError> {
+        if remote_response.marker.session_id != target.remote_session_id {
+            return Err(ApiError::bad_gateway(format!(
+                "remote marker payload session id `{}` did not match requested session `{}`",
+                remote_response.marker.session_id, target.remote_session_id
+            )));
+        }
+        let remote_revision = remote_response.revision;
+        let marker_id = remote_response.marker.id.clone();
+        let event = if created {
+            DeltaEvent::ConversationMarkerCreated {
+                revision: remote_revision,
+                session_id: target.remote_session_id.clone(),
+                marker: remote_response.marker,
+                session_mutation_stamp: None,
+            }
+        } else {
+            DeltaEvent::ConversationMarkerUpdated {
+                revision: remote_revision,
+                session_id: target.remote_session_id.clone(),
+                marker: remote_response.marker,
+                session_mutation_stamp: None,
+            }
+        };
+        self.apply_remote_delta_event(&target.remote.id, event)
+        .map_err(|err| {
+            ApiError::bad_gateway(format!("failed to apply remote marker response: {err:#}"))
+        })?;
+
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&target.local_session_id)
+            .ok_or_else(ApiError::local_session_missing)?;
+        let record = inner
+            .session_by_index(index)
+            .ok_or_else(ApiError::local_session_missing)?;
+        let marker = record
+            .session
+            .markers
+            .iter()
+            .find(|marker| marker.id == marker_id)
+            .cloned()
+            .ok_or_else(|| ApiError::not_found("conversation marker not found"))?;
+        Ok(ConversationMarkerResponse {
+            marker,
+            revision: inner.revision,
+            server_instance_id: self.server_instance_id.clone(),
+        })
+    }
+
+    fn apply_remote_marker_delete_response(
+        &self,
+        target: RemoteSessionTarget,
+        remote_response: DeleteConversationMarkerResponse,
+    ) -> Result<DeleteConversationMarkerResponse, ApiError> {
+        let marker_id = remote_response.marker_id.clone();
+        self.apply_remote_delta_event(
+            &target.remote.id,
+            DeltaEvent::ConversationMarkerDeleted {
+                revision: remote_response.revision,
+                session_id: target.remote_session_id,
+                marker_id: marker_id.clone(),
+                session_mutation_stamp: None,
+            },
+        )
+        .map_err(|err| {
+            ApiError::bad_gateway(format!("failed to apply remote marker delete response: {err:#}"))
+        })?;
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        Ok(DeleteConversationMarkerResponse {
+            marker_id,
+            revision: inner.revision,
+            server_instance_id: self.server_instance_id.clone(),
+        })
+    }
 }
 
 fn build_conversation_marker(
-    record: &mut SessionRecord,
+    record: &SessionRecord,
     request: CreateConversationMarkerRequest,
 ) -> Result<ConversationMarker, ApiError> {
     let session_id = record.session.id.clone();
@@ -173,7 +373,7 @@ fn build_conversation_marker(
     let body = normalize_conversation_marker_body(request.body)?;
     let color = normalize_conversation_marker_color(&request.color)?;
     let message_id = normalize_marker_route_id(&request.message_id, "message id")?;
-    let message_index_hint = message_index_on_record(record, &message_id)
+    let message_index_hint = message_index_on_session(&record.session, &message_id)
         .ok_or_else(|| ApiError::bad_request("conversation marker message id was not found"))?;
     let (end_message_id, end_message_index_hint) = resolve_marker_end_anchor(
         record,
@@ -199,7 +399,7 @@ fn build_conversation_marker(
 }
 
 fn patch_conversation_marker(
-    record: &mut SessionRecord,
+    record: &SessionRecord,
     marker_index: usize,
     request: UpdateConversationMarkerRequest,
     session_id: &str,
@@ -225,7 +425,7 @@ fn patch_conversation_marker(
     }
     if let Some(message_id) = request.message_id {
         let message_id = normalize_marker_route_id(&message_id, "message id")?;
-        let message_index_hint = message_index_on_record(record, &message_id)
+        let message_index_hint = message_index_on_session(&record.session, &message_id)
             .ok_or_else(|| ApiError::bad_request("conversation marker message id was not found"))?;
         marker.message_id = message_id;
         marker.message_index_hint = message_index_hint;
@@ -254,12 +454,11 @@ fn patch_conversation_marker(
     marker.session_id = session_id.to_owned();
     marker.updated_at = stamp_now();
 
-    record.session.markers[marker_index] = marker.clone();
     Ok(marker)
 }
 
 fn resolve_marker_end_anchor(
-    record: &mut SessionRecord,
+    record: &SessionRecord,
     start_message_index: usize,
     end_message_id: Option<&str>,
 ) -> Result<(Option<String>, Option<usize>), ApiError> {
@@ -267,7 +466,7 @@ fn resolve_marker_end_anchor(
         return Ok((None, None));
     };
     let end_message_id = normalize_marker_route_id(end_message_id, "end message id")?;
-    let end_message_index = message_index_on_record(record, &end_message_id)
+    let end_message_index = message_index_on_session(&record.session, &end_message_id)
         .ok_or_else(|| ApiError::bad_request("conversation marker end message id was not found"))?;
     if end_message_index < start_message_index {
         return Err(ApiError::bad_request(
@@ -275,6 +474,13 @@ fn resolve_marker_end_anchor(
         ));
     }
     Ok((Some(end_message_id), Some(end_message_index)))
+}
+
+fn message_index_on_session(session: &Session, message_id: &str) -> Option<usize> {
+    session
+        .messages
+        .iter()
+        .position(|message| message.id() == message_id)
 }
 
 fn update_conversation_marker_request_has_changes(request: &UpdateConversationMarkerRequest) -> bool {

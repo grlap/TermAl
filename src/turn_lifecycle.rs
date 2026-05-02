@@ -358,7 +358,7 @@ impl AppState {
         error_message: Option<&str>,
     ) -> Result<()> {
         let cleaned = error_message.map(str::trim).unwrap_or("");
-        let should_dispatch_next = {
+        let (should_dispatch_next, pending_interaction_updates, revision) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -404,7 +404,7 @@ impl AppState {
             let file_change_message_id =
                 (!inner.sessions[index].active_turn_file_changes.is_empty())
                     .then(|| inner.next_message_id());
-            let has_queued_prompts = {
+            let (has_queued_prompts, pending_interaction_updates) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -413,7 +413,8 @@ impl AppState {
                 record.orchestrator_auto_dispatch_blocked = false;
                 record.runtime_stop_in_progress = false;
                 record.deferred_stop_callbacks.clear();
-                cancel_pending_interaction_messages(&mut record.session.messages);
+                let pending_interaction_indices =
+                    cancel_pending_interaction_messages(&mut record.session.messages);
                 clear_all_pending_requests(record);
                 if let Some(detail) = detail.as_ref() {
                     if let Some(message_id) = message_id {
@@ -432,16 +433,20 @@ impl AppState {
                 if let Some(message_id) = file_change_message_id {
                     push_active_turn_file_changes_on_record(record, message_id);
                 }
-                !record.queued_prompts.is_empty()
+                (
+                    !record.queued_prompts.is_empty(),
+                    message_updated_delta_parts_for_indices(record, pending_interaction_indices),
+                )
             };
             finish_active_turn_file_change_tracking(
                 inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid"),
             );
-            self.commit_locked(&mut inner)?;
-            has_queued_prompts
+            let revision = self.commit_locked(&mut inner)?;
+            (has_queued_prompts, pending_interaction_updates, revision)
         };
+        self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
 
         if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
             eprintln!("state warning> failed to refresh delegation after runtime exit: {err:#}");

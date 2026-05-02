@@ -350,40 +350,103 @@ struct ConversationMarker {
     created_by: ConversationMarkerAuthor,
 }
 
+fn parse_conversation_marker_kind_request<E>(value: &str) -> Result<ConversationMarkerKind, E>
+where
+    E: serde::de::Error,
+{
+    match value {
+        "checkpoint" => Ok(ConversationMarkerKind::Checkpoint),
+        "decision" => Ok(ConversationMarkerKind::Decision),
+        "review" => Ok(ConversationMarkerKind::Review),
+        "bug" => Ok(ConversationMarkerKind::Bug),
+        "question" => Ok(ConversationMarkerKind::Question),
+        "handoff" => Ok(ConversationMarkerKind::Handoff),
+        "custom" => Ok(ConversationMarkerKind::Custom),
+        _ => Err(E::custom(format!(
+            "unsupported conversation marker kind `{value}`"
+        ))),
+    }
+}
+
+fn deserialize_conversation_marker_kind_request<'de, D>(
+    deserializer: D,
+) -> Result<ConversationMarkerKind, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+    parse_conversation_marker_kind_request(&value)
+}
+
+fn deserialize_optional_conversation_marker_kind_request<'de, D>(
+    deserializer: D,
+) -> Result<Option<ConversationMarkerKind>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let Some(value) = <Option<String> as serde::Deserialize>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    parse_conversation_marker_kind_request(&value).map(Some)
+}
+
+fn deserialize_nullable_marker_field<'de, D, T>(
+    deserializer: D,
+) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    <Option<T> as serde::Deserialize>::deserialize(deserializer).map(Some)
+}
+
 /// Request to create a conversation marker.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateConversationMarkerRequest {
+    #[serde(deserialize_with = "deserialize_conversation_marker_kind_request")]
     kind: ConversationMarkerKind,
     name: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     body: Option<String>,
     color: String,
     message_id: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     end_message_id: Option<String>,
 }
 
 /// Request to patch a conversation marker.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateConversationMarkerRequest {
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_conversation_marker_kind_request",
+        skip_serializing_if = "Option::is_none"
+    )]
     kind: Option<ConversationMarkerKind>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_nullable_marker_field",
+        skip_serializing_if = "Option::is_none"
+    )]
     body: Option<Option<String>>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     color: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     message_id: Option<String>,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_nullable_marker_field",
+        skip_serializing_if = "Option::is_none"
+    )]
     end_message_id: Option<Option<String>>,
 }
 
 /// Response containing all conversation markers for one session.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConversationMarkersResponse {
     markers: Vec<ConversationMarker>,
@@ -392,7 +455,7 @@ struct ConversationMarkersResponse {
 }
 
 /// Response containing one conversation marker mutation.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConversationMarkerResponse {
     marker: ConversationMarker,
@@ -401,7 +464,7 @@ struct ConversationMarkerResponse {
 }
 
 /// Response containing one deleted conversation marker mutation.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DeleteConversationMarkerResponse {
     marker_id: String,
@@ -1643,39 +1706,23 @@ enum DeltaEvent {
     },
     ConversationMarkerCreated {
         revision: u64,
-        #[serde(rename = "sessionId")]
         session_id: String,
         marker: ConversationMarker,
-        #[serde(
-            rename = "sessionMutationStamp",
-            default,
-            skip_serializing_if = "Option::is_none"
-        )]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         session_mutation_stamp: Option<u64>,
     },
     ConversationMarkerUpdated {
         revision: u64,
-        #[serde(rename = "sessionId")]
         session_id: String,
         marker: ConversationMarker,
-        #[serde(
-            rename = "sessionMutationStamp",
-            default,
-            skip_serializing_if = "Option::is_none"
-        )]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         session_mutation_stamp: Option<u64>,
     },
     ConversationMarkerDeleted {
         revision: u64,
-        #[serde(rename = "sessionId")]
         session_id: String,
-        #[serde(rename = "markerId")]
         marker_id: String,
-        #[serde(
-            rename = "sessionMutationStamp",
-            default,
-            skip_serializing_if = "Option::is_none"
-        )]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         session_mutation_stamp: Option<u64>,
     },
     CodexUpdated {

@@ -1488,31 +1488,31 @@ fn strip_parent_card_delta(delta: DelegationLifecycleDelta) -> DelegationLifecyc
             updated_at,
             parent_card_delta: None,
         },
-            DelegationLifecycleDelta::Completed {
-                delegation_id,
-                result,
-                completed_at,
-                parent_card_delta: _,
-            } => DelegationLifecycleDelta::Completed {
-                delegation_id,
-                result,
-                completed_at,
-                parent_card_delta: None,
-            },
-            DelegationLifecycleDelta::Failed {
-                delegation_id,
-                result,
-                failed_at,
-                parent_card_delta: _,
-            } => DelegationLifecycleDelta::Failed {
-                delegation_id,
-                result,
-                failed_at,
-                parent_card_delta: None,
-            },
-            DelegationLifecycleDelta::Canceled {
-                delegation_id,
-                canceled_at,
+        DelegationLifecycleDelta::Completed {
+            delegation_id,
+            result,
+            completed_at,
+            parent_card_delta: _,
+        } => DelegationLifecycleDelta::Completed {
+            delegation_id,
+            result,
+            completed_at,
+            parent_card_delta: None,
+        },
+        DelegationLifecycleDelta::Failed {
+            delegation_id,
+            result,
+            failed_at,
+            parent_card_delta: _,
+        } => DelegationLifecycleDelta::Failed {
+            delegation_id,
+            result,
+            failed_at,
+            parent_card_delta: None,
+        },
+        DelegationLifecycleDelta::Canceled {
+            delegation_id,
+            canceled_at,
             reason,
             parent_card_delta: _,
         } => DelegationLifecycleDelta::Canceled {

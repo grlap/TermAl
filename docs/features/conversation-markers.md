@@ -4,8 +4,10 @@
 
 In progress. The current tree has the shared marker data model, session
 persistence, marker CRUD routes, marker SSE deltas, frontend API helpers, live
-delta application, and overview-rail marker pins. Transcript chips, marker
-list UI, previous/next controls, and agent workflow actions are still pending.
+delta application, overview-rail marker pins, transcript chips, marker
+list/previous-next navigation, and a quick checkpoint action on transcript
+messages. Full marker edit/delete UI and agent workflow actions are still
+pending.
 
 Conversation markers are durable, user-visible anchors inside an agent
 conversation. They let the user mark important points in a long transcript,
@@ -377,7 +379,8 @@ Rules:
 ### Phase 2: marker CRUD
 
 - Add marker routes.
-- Add create/edit/delete UI.
+- Add quick checkpoint creation UI.
+- Add full edit/delete UI.
 - Publish marker deltas over SSE.
 - Add unresolved-anchor handling.
 

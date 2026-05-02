@@ -25,7 +25,13 @@ import {
   getScrollContainerBottomGap,
   isScrollContainerNearBottom,
 } from "./conversation-virtualization";
-import type { CommandMessage, DiffMessage, Message, Session } from "../types";
+import type {
+  CommandMessage,
+  ConversationMarker,
+  DiffMessage,
+  Message,
+  Session,
+} from "../types";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
@@ -75,6 +81,28 @@ function makeDiffMessages(count: number): DiffMessage[] {
     diff: "@@ -1 +1 @@\n-old\n+new",
     changeType: "edit",
   }));
+}
+
+function makeConversationMarker(
+  input: Partial<ConversationMarker> & Pick<ConversationMarker, "id" | "messageId" | "name">,
+): ConversationMarker {
+  const { id, messageId, name, ...overrides } = input;
+  return {
+    id,
+    sessionId: "session-1",
+    kind: "decision",
+    name,
+    body: null,
+    color: "#22c55e",
+    messageId,
+    messageIndexHint: 0,
+    endMessageId: null,
+    endMessageIndexHint: null,
+    createdAt: "2026-05-01 10:00:00",
+    updatedAt: "2026-05-01 10:00:00",
+    createdBy: "user",
+    ...overrides,
+  };
 }
 
 const EMPTY_AGENT_COMMANDS: {
@@ -287,6 +315,89 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(
       screen.queryByRole("button", { name: "Cancel queued prompt" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("renders conversation marker chips and navigates between markers", () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const messages = makeTextMessages(3);
+    const activeSession = makeSession("session-1", {
+      messages,
+      markers: [
+        makeConversationMarker({
+          id: "marker-2",
+          messageId: "message-3",
+          name: "Later issue",
+          kind: "bug",
+          color: "#ef4444",
+          messageIndexHint: 2,
+        }),
+        makeConversationMarker({
+          id: "marker-1",
+          messageId: "message-1",
+          name: "Accepted direction",
+          kind: "decision",
+          color: "#22c55e",
+          messageIndexHint: 0,
+        }),
+      ],
+    });
+
+    try {
+      renderSessionPanelWithDefaults({ activeSession });
+
+      expect(
+        screen.getByRole("navigation", { name: "Conversation markers" }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Markers")).toBeInTheDocument();
+      expect(screen.getByText("2")).toBeInTheDocument();
+      expect(
+        screen.getAllByRole("button", {
+          name: "Jump to Decision marker Accepted direction",
+        }),
+      ).toHaveLength(2);
+      expect(
+        screen.getAllByRole("button", {
+          name: "Jump to Bug marker Later issue",
+        }),
+      ).toHaveLength(2);
+
+      fireEvent.click(screen.getByRole("button", { name: "Next marker" }));
+
+      expect(
+        screen.getAllByRole("button", {
+          name: "Jump to Decision marker Accepted direction",
+        })[0],
+      ).toHaveClass("is-active");
+    } finally {
+      if (originalScrollIntoView) {
+        Element.prototype.scrollIntoView = originalScrollIntoView;
+      } else {
+        delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      }
+    }
+  });
+
+  it("dispatches checkpoint marker creation from a message toolbar", () => {
+    const onCreateConversationMarker = vi.fn();
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      onCreateConversationMarker,
+    });
+
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Add checkpoint marker" })[0],
+    );
+
+    expect(onCreateConversationMarker).toHaveBeenCalledWith(
+      "session-1",
+      "message-1",
+    );
   });
 
   it("dispatches visible message actions through the latest parent callbacks", async () => {

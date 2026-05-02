@@ -7,126 +7,86 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Conversation marker validation failures bump per-session mutation stamp
+## Same-revision stop and failure deltas can hide terminal messages
 
-**Severity:** Medium - `create_conversation_marker`, `update_conversation_marker`, and `delete_conversation_marker` advance `record.mutation_stamp` and `inner.last_mutation_stamp` BEFORE validating the request, so any rejected request still triggers a phantom session re-write on the next persist worker tick.
+**Severity:** High - stop/runtime-exit paths can publish partial same-revision deltas before the full snapshot that contains newly appended terminal messages.
 
-`src/session_markers.rs:32-68, 84-108, 129-152` calls `inner.session_mut_by_index(index)` (which auto-bumps the stamps) before `ensure_local_marker_session(record)?` and `build_conversation_marker(record, request)?`. A request that fails validation (remote-proxy reject, name/body/color length, missing message_id) returns `Err` but has already advanced the per-session stamp. The persist worker re-writes that session on its next tick with no actual content change. Same applies to update/delete when the marker is not found or the session is remote.
-
-**Current behavior:**
-- All three marker mutation routes call `session_mut_by_index` (which mutates stamps) before any validation.
-- Validation failures return the appropriate `ApiError` to the client.
-- The bumped stamps cause the persist worker to re-write the unchanged session on the next tick.
-- Phantom writes are content-free but trigger I/O.
-
-**Proposal:**
-- Validate first: look up the marker index via `&inner.sessions[index].session.markers` for update/delete, validate the body for create, then call `session_mut_by_index` only after the request is known to be applicable.
-- Add a regression that issues an invalid create/update/delete and asserts `inner.last_mutation_stamp` is unchanged (or the persist worker observes no work).
-
-## Marker PATCH cannot clear nullable marker fields
-
-**Severity:** Medium - `body: null` and `endMessageId: null` are treated like omitted fields, so clients cannot clear optional marker data through the HTTP PATCH route.
-
-`src/wire.rs:376` uses nested `Option<Option<String>>` fields for marker patch data. With the current serde shape, explicit JSON null and an absent field both deserialize to the outer `None`, so a null-only PATCH is rejected as an empty request and mixed PATCH requests cannot clear the nullable fields.
+`src/session_lifecycle.rs:431`, `src/session_lifecycle.rs:452`, and `src/turn_lifecycle.rs:446` now combine `commit_locked()` snapshots with same-revision `MessageUpdated` deltas for canceled pending interactions. Full snapshots are serialized through the async SSE broadcaster while deltas publish directly, so a delta can arrive first, advance the frontend to that revision, and cause the later same-revision snapshot to be rejected before the appended "Turn stopped by user" / "Turn failed" message is adopted.
 
 **Current behavior:**
-- `PATCH /api/sessions/{id}/markers/{marker_id}` accepts `body` and `endMessageId` as nullable fields.
-- JSON `null` for those fields is not preserved as an explicit clear operation.
-- Clients cannot clear marker body text or end-message anchors through the route.
+- Stop/runtime-exit paths append terminal messages and commit a full snapshot.
+- The same mutation then publishes partial `MessageUpdated` deltas for pending interaction cancellation.
+- Clients can accept the delta first and reject the later full snapshot as stale.
+- Newly appended terminal messages may remain hidden until another refresh or state change.
 
 **Proposal:**
-- Use a custom nullable-field deserializer or `serde_with::rust::double_option` semantics for patch DTO fields.
-- Add route or serde coverage for `body: null` and `endMessageId: null`.
+- Fully delta-encode all message changes for that revision, including appended stop/failure/file-change messages.
+- Or split pending-interaction updates and terminal-message snapshots into ordered revisions.
+- Add a regression that forces delta-before-snapshot delivery and asserts terminal stop/failure messages still render.
 
-## Marker JSON extractor errors bypass the API error envelope
+## Remote marker proxy writes can replay as duplicate remote deltas
 
-**Severity:** Medium - malformed marker create/update JSON returns Axum's default rejection response instead of the project-standard `{ "error": ... }` response.
+**Severity:** Medium - proxy-created marker deltas are not replay-equivalent to the remote SSE events they trigger.
 
-`src/api.rs:590` and the sibling marker update handler use bare `Json<T>` extractors. Deserialization failures therefore bypass `ApiError`, unlike nearby delegation creation handling that maps `JsonRejection` into the canonical API error shape.
+`src/session_markers.rs:300` and `src/session_markers.rs:307` synthesize local marker created/updated deltas from remote HTTP responses with `session_mutation_stamp: None`. The remote replay key in `src/remote_routes.rs:655` includes `session_mutation_stamp`, so the later remote SSE event for the same write can arrive with `Some(stamp)` and fail to match the already-applied proxy event.
 
 **Current behavior:**
-- Marker create/update routes use bare `Json(request): Json<...>` extractors.
-- Bad JSON, schema errors, or missing content type return Axum's default rejection body.
-- Clients see a different error response shape than other TermAl API endpoints.
+- Remote marker proxy writes apply a local delta immediately.
+- The synthesized delta omits the remote session mutation stamp.
+- The real remote SSE delta can use a different replay key and apply again.
+- Local revision/mutation stamps and marker deltas can be duplicated.
 
 **Proposal:**
-- Switch marker create/update handlers to accept `Result<Json<_>, JsonRejection>`.
-- Map rejection errors through `ApiError` and cover the route behavior with HTTP-level tests.
+- Include the remote session mutation stamp in marker mutation responses.
+- Or make proxy application and remote replay use a shared semantic identity for the same event.
+- Add coverage that performs a remote marker proxy write and then replays the matching remote SSE delta without duplicating the local marker event.
 
-## Remote marker snapshots keep remote session IDs
+## Marker REST responses mutate local state before revision gating
 
-**Severity:** Medium - full remote session snapshots localize `Session.id` but leave nested `ConversationMarker.session_id` values in the remote namespace.
+**Severity:** Medium - stale marker HTTP responses can overwrite newer marker state after SSE or state repair has advanced the client.
 
-`src/remote_sync.rs:520` rewrites the proxy session id during remote snapshot localization, but embedded markers keep their original remote `session_id`. Marker deltas localize the same field before replay, so full snapshots and later deltas disagree about marker ownership.
+`ui/src/app-session-actions.ts:2093` applies `response.marker` locally before checking `response.revision` and `response.serverInstanceId`. If a newer SSE event or repair snapshot has already moved `latestStateRevisionRef.current` forward, the older HTTP response can still resurrect or overwrite marker state.
 
 **Current behavior:**
-- Remote session snapshots create local proxy sessions with localized `session.id`.
-- Embedded `session.markers[*].session_id` values can still contain the remote session id.
-- Frontend state and persistence can observe a session whose marker ids do not match the owning local session.
+- Marker create/update action handlers upsert the response marker first.
+- Revision and server-instance checks happen after the local mutation.
+- Stale same-instance responses are not treated as no-op successes.
 
 **Proposal:**
-- Rewrite each marker's `session_id` to the localized session id in `localize_remote_session`.
-- Add remote snapshot/hydration coverage that includes markers.
+- Gate marker REST responses by server instance and revision before `updateSessionLocally`.
+- Treat stale same-instance responses as successful no-ops and rely on the newer state already present.
+- Add action-level coverage where a marker HTTP response resolves after a newer SSE/state repair and must not overwrite marker state.
 
-## Marker CRUD does not proxy remote-backed sessions
+## Remote marker PATCH can accept a different marker id
 
-**Severity:** Medium - marker create/update/delete rejects remote proxy sessions instead of following the session-scoped remote proxy pattern.
+**Severity:** Medium - a remote PATCH response can upsert a marker whose id differs from the id in the PATCH path.
 
-`src/session_markers.rs:341` rejects marker mutations for remote proxy sessions. The frontend marker API helpers are otherwise local/remote agnostic, so marker actions that work for local sessions fail for remote-backed sessions behind the same UI contract.
+`src/session_markers.rs:254` applies the marker returned by a remote `PATCH /markers/{id}` response. `apply_remote_marker_response` validates the session id at `src/session_markers.rs:291`, but it does not mirror the delete-side marker-id check before applying the update response.
 
 **Current behavior:**
-- Local marker CRUD rejects remote proxy sessions.
-- The frontend cannot create, update, or delete markers on remote-backed sessions through the same API helpers.
-- Remote marker deltas can still arrive, so read and write behavior is asymmetric.
+- The proxy sends a specific marker id in the remote PATCH path.
+- The response marker id is not checked against the requested marker id.
+- A skewed remote can cause a successful PATCH to upsert a different marker.
 
 **Proposal:**
-- Add remote marker proxy methods that forward to the owning remote session id.
-- Localize and apply the remote result before responding, matching existing remote session-scoped patterns.
+- Validate the response marker id before applying remote update responses.
+- Return an error if the remote response marker id does not match the requested marker id.
+- Add a remote update regression that returns a different marker id and asserts the proxy rejects it.
 
-## Marker updates are blocked by CORS preflight
+## Marker navigator logic is embedded in AgentSessionPanel
 
-**Severity:** Low - the new marker update route uses PATCH but the server CORS method allowlist does not include PATCH.
+**Severity:** Low - marker grouping, sorting, DOM lookup, navigation state, and chip rendering are growing an already large panel component.
 
-`src/main.rs:200` allows GET, POST, PUT, and DELETE, while `src/main.rs:296` registers `PATCH /api/sessions/{id}/markers/{marker_id}`. Browser clients using CORS will fail preflight before the request reaches the route.
+`ui/src/panels/AgentSessionPanel.tsx:653` now hosts a distinct marker navigator/chip subsystem. The file is past the architecture review threshold, and the marker navigation feature has a clear extraction boundary with its own state, helpers, DOM lookup, and tests.
 
 **Current behavior:**
-- The marker update route is registered as PATCH.
-- CORS preflight does not allow PATCH.
-- Cross-origin browser clients cannot update markers even when the origin is otherwise allowed.
+- Marker navigator logic lives directly in `AgentSessionPanel.tsx`.
+- The panel owns marker grouping, sorting, DOM slot lookup, navigation state, and rendering.
+- Future marker UI changes are coupled to the broader session panel.
 
 **Proposal:**
-- Add `axum::http::Method::PATCH` to the CORS `allow_methods` list.
-- Keep route method docs/tests aligned with the allowlist.
-
-## Unknown marker kinds are accepted as custom markers
-
-**Severity:** Low - request typos in finite marker kind values can be silently persisted as `custom`.
-
-`src/wire.rs:318` uses `#[serde(other)]` on the shared `ConversationMarkerKind`. That is useful for tolerant persisted/session loading, but it also applies to create/update request DTOs, so API input like `"decison"` can succeed as a custom marker.
-
-**Current behavior:**
-- Unknown marker kind strings deserialize to `ConversationMarkerKind::Custom`.
-- Marker create/update requests can accept typos as successful custom markers.
-- API callers do not get feedback that they sent an unsupported finite marker kind.
-
-**Proposal:**
-- Use strict marker-kind deserialization for HTTP request DTOs.
-- Keep tolerant fallback separate for persisted or remote/session payload loading if needed.
-
-## Windows delegation symlink escape coverage is ignored by default
-
-**Severity:** Medium - the Windows delegation cwd symlink escape regression is not exercised by the normal test suite.
-
-`src/tests/delegations.rs:4244` marks the Windows symlink escape test ignored. Windows is a P0 platform for TermAl, so cwd validation can regress in a platform-specific path while CI and ordinary local test runs still report green.
-
-**Current behavior:**
-- The Windows symlink escape regression exists only as an ignored test.
-- Normal test runs do not execute the Windows cwd escape guard.
-- Privilege-gated symlink behavior can hide regressions unless a developer opts into the ignored test.
-
-**Proposal:**
-- Keep a non-ignored opportunistic test that skips only when symlink privileges are unavailable.
-- Or add a junction/non-privileged equivalent that covers the same escape boundary on Windows.
+- Extract a focused conversation-marker panel/helper module.
+- Move marker-specific tests next to that module while leaving `AgentSessionPanel` to wire data and callbacks.
 
 ## Mermaid dynamic import fallback lacks import-failure coverage
 
@@ -1124,25 +1084,27 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   current coverage pins stale, equal-revision, and newer repair for all delegation delta variants plus a newer delta landing before repair adoption. Add same-revision sibling deltas involving session-created and parent-card deltas, and delayed or failed `/api/state` repair cases. Assert reconnect/fallback recovery remains active until the authoritative repair snapshot is adopted and that delegation events do not flow through normal session-delta handling.
 - [ ] P2: Add homogeneous conversation-overview segment cap coverage:
   build a long same-kind message run with `maxItemsPerSegment` set and assert the segment policy is either capped or explicitly documented as a mixed-run-only cap.
-- [ ] P2: Reformat `strip_parent_card_delta` in `src/delegations.rs:1478-1525`:
-  the new `Completed`/`Failed`/`Canceled` arms have an extra four-space indent compared to the existing `Updated` arm. Compiles cleanly (match arms are whitespace-insensitive), but `cargo fmt -- --check src/delegations.rs` reports a diff. The file isn't auto-formatted because it's pulled in via `include!` from `main.rs:510`, so project-level `cargo fmt --check` passes. Fix the indentation now to keep the file readable and so a future `include!`-aware fmt run is a no-op.
-- [ ] P2: Document new conversation marker REST routes + SSE delta events in `docs/architecture.md`:
-  round 30 ships 4 new REST endpoints (`GET/POST /api/sessions/{id}/markers`, `PATCH/DELETE /api/sessions/{id}/markers/{marker_id}`), 3 new marker SSE delta variants (`conversationMarkerCreated/Updated/Deleted`), a new `DelegationFailed` delta variant, a new persisted field (`Session.markers`), and a new wire type (`ConversationMarker`). None reflected in `docs/architecture.md`. Add alongside the existing delegations rows for the same parent-scoped pattern.
-- [ ] P2: Switch marker create/update routes to the `Result<Json<_>, JsonRejection>` envelope pattern in `src/api.rs:586-595`:
-  current `Json(request): Json<...>` extractors return Axum's default text body on bad JSON, not the `ErrorResponse { error }` envelope. Inconsistent with `create_session_delegation` (`src/api.rs:524-537`) which returns the canonical wire shape. Apply the same `Json::<...>::from_request` + `JsonRejection` mapping for marker create/update.
-- [ ] P2: Add marker HTTP route coverage:
-  drive Axum GET/POST/PATCH/DELETE marker routes with encoded ids, malformed JSON, PATCH preflight assertions, status/envelope assertions, and clear-field PATCH payloads for `body: null` and `endMessageId: null`.
-- [ ] P2: Add remote conversation marker delta coverage:
-  cover create/update/delete replay keys, remote proxy application, local `session_id` localization, mismatched marker/session ids, and delete idempotence for remote marker deltas.
-- [ ] P2: Add remote marker snapshot localization coverage:
-  hydrate or sync a remote proxy session containing markers and assert both `session.id` and every `session.markers[*].session_id` are rewritten to the local proxy id.
-- [ ] P2: Add frontend marker API helper coverage:
-  assert encoded marker paths, HTTP methods, and JSON bodies, including preservation of `null` for marker field clear operations.
-- [ ] P2: Add marker delta reducer resync-guard coverage:
-  cover `messagesLoaded:false` summary sessions, missing-session marker deltas, and `marker.sessionId !== sessionId` payloads, asserting they request resync instead of mutating the wrong session.
-- [ ] P2: Add non-ignored Windows delegation symlink escape coverage:
-  cover the delegation cwd symlink escape boundary in the normal Windows test suite, either with an opportunistic symlink test that skips only when privileges are unavailable or with a junction/non-privileged equivalent.
-- [ ] P2: Drop redundant per-field `#[serde(rename = ...)]` in `DeltaEvent::ConversationMarker*` variants (`src/wire.rs:1644-1680`):
-  the enum already declares `rename_all_fields = "camelCase"` at line 1512. Per-field renames (`sessionId`, `markerId`, `sessionMutationStamp`) are redundant and invite drift if someone changes the parent rule. Drop them; do the existing bugs.md cleanup task for `Delegation*` variants in the same commit so all variants land canonical.
-- [ ] P2: Apply the `cancel_pending_interaction_messages` `Vec<usize>` return value at `session_lifecycle.rs:366` and `turn_lifecycle.rs:416`:
-  round 30 wired the per-message `MessageUpdated` delta publication for the delegation-detach path (`src/delegations.rs:1423-1459`), but the two non-delegation call sites still discard the new return and rely on subsequent `commit_locked` full-snapshot SSE. The bugs.md task is therefore PARTIAL — extend the same delta-publish loop to the remaining two call sites, OR document why those paths intentionally rely on full-snapshot SSE.
+- [ ] P2: Scope marker slot lookup to the panel root in `ui/src/panels/AgentSessionPanel.tsx:921-931`:
+  `findMountedConversationMessageSlot` does a global `document.querySelectorAll("[data-session-search-item-key]")` and returns the first match by `messageId`. When the same session is rendered in two workspace panes, this can scroll the wrong pane's slot when the in-page `messageSlotNodesRef` cache misses (e.g. after a remount). Scope to the panel root via the `scrollContainerRef` parent or include a pane id in the selector.
+- [ ] P2: Reset `messageSlotNodesRef` on session change in `ui/src/panels/AgentSessionPanel.tsx:666-692`:
+  ref keys by `messageId` only and is never cleared. If `SessionConversationPage` is reused for a different session (page is keyed by session id higher up, but if memoization changes), stale message-id keys could persist across sessions. Add `useEffect(() => messageSlotNodesRef.current.clear(), [session.id])` to harden.
+- [ ] P2: Add stop/runtime-exit same-revision SSE ordering coverage:
+  force `MessageUpdated` cancellation deltas to arrive before the full snapshot and assert appended stop/failure terminal messages still render.
+- [ ] P2: Add marker REST stale-response gating coverage:
+  resolve marker create/update HTTP responses after a newer SSE or state repair and assert stale same-instance responses do not overwrite local marker state.
+- [ ] P2: Add remote marker proxy replay-equivalence coverage:
+  perform a remote marker proxy write, then replay the matching remote SSE delta and assert the local revision/mutation state and marker delta are not duplicated.
+- [ ] P2: Add remote marker update id-mismatch coverage:
+  have a remote PATCH response return a different marker id and assert the proxy rejects it instead of upserting the wrong marker.
+- [ ] P2: Add remote marker update/delete proxy coverage:
+  cover the remote-backed PATCH and DELETE marker proxy branches, including request method/path/body, nullable PATCH serialization, delete response id checks, and localized response application.
+- [ ] P2: Extend marker mutation-stamp regression coverage to update/delete failures:
+  add rejected update and delete cases, such as missing marker or bad anchor, and assert both `inner.last_mutation_stamp` and the session mutation stamp remain unchanged.
+- [ ] P2: Add PATCH-specific marker request rejection tests:
+  cover malformed PATCH JSON and an update payload with an unknown marker kind, pinning the `update_session_marker` rejection path and strict update DTO deserialization.
+- [ ] P2: Tighten `apply_remote_marker_response` stale-skip semantics in `src/session_markers.rs:285-338`:
+  after `apply_remote_delta_event` succeeds, the function re-reads the local marker. If the remote revision was already observed via SSE (`should_skip_remote_applied_delta_revision`), the apply is a no-op and the local marker may be stale or absent for that id, causing a `not_found` response to a successful remote create. In practice the SSE applied the same payload so the read finds a marker — but not the one the apply step "intended." Either return the localized marker built before the apply call, or assert the local read matches `marker_id`+`updated_at` from the remote response. Same concern at `apply_remote_marker_delete_response:357-364`.
+- [ ] P2: Add server-instance mismatch resync coverage to `app-session-actions.test.ts`:
+  current tests cover the happy path of `handleCreateConversationMarker` (local upsert + revision advance) but not the `isServerInstanceMismatch` resync branch. A regression that dropped the resync would not fail any test today.
+- [ ] P2: Make marker hover toolbar reachable on touch-only devices (`ui/src/styles.css:3920-3935`):
+  toolbar is `pointer-events: none` until hover/focus-within. Touch-only devices without a hover state cannot reveal the "Add checkpoint marker" button. Toolbar can be tab-reached after the user lands on something focusable inside the message; flag if Phase 1 wants touch parity. Add a long-press or always-visible mode for touch.
