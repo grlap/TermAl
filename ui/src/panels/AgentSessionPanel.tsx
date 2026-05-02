@@ -34,7 +34,18 @@ import {
   type McpElicitationSubmitHandler,
   type RenderMessageCard,
   type UserInputSubmitHandler,
+  type VirtualizedConversationLayoutSnapshot,
+  type VirtualizedConversationMessageListHandle,
+  type VirtualizedConversationViewportSnapshot,
 } from "./VirtualizedConversationMessageList";
+import {
+  CONVERSATION_OVERVIEW_MIN_MESSAGES,
+  ConversationOverviewRail,
+} from "./ConversationOverviewRail";
+import type {
+  ConversationOverviewItem,
+  ConversationOverviewTailItemInput,
+} from "./conversation-overview-map";
 import {
   renderHighlightedText,
   type SearchHighlightTone,
@@ -99,6 +110,10 @@ type SessionSettingsValue =
   | GeminiApprovalMode;
 
 const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES = 80;
+const CONVERSATION_OVERVIEW_LIVE_TURN_HEIGHT_PX = 108;
+const CONVERSATION_OVERVIEW_FALLBACK_MAX_HEIGHT_PX = 520;
+const CONVERSATION_OVERVIEW_MIN_HEIGHT_PX = 160;
+const CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX = 24;
 const EMPTY_COMPOSER_ATTACHMENTS: readonly {
   byteSize: number;
   fileName: string;
@@ -624,6 +639,194 @@ const SessionConversationPage = memo(function SessionConversationPage({
       ? visiblePendingPromptsBase
       : filteredPendingPrompts;
   }, [visibleMessages, visiblePendingPromptsBase]);
+  const overviewTailItems = useMemo(
+    () =>
+      buildConversationOverviewTailItems({
+        agent: session.agent,
+        sessionId: session.id,
+        showWaitingIndicator,
+        waitingIndicatorPrompt,
+      }),
+    [session.agent, session.id, showWaitingIndicator, waitingIndicatorPrompt],
+  );
+  const shouldRenderConversationOverview =
+    visibleMessages.length >= CONVERSATION_OVERVIEW_MIN_MESSAGES;
+  const virtualizerHandleRef = useRef<VirtualizedConversationMessageListHandle | null>(null);
+  const [overviewLayoutSnapshot, setOverviewLayoutSnapshot] =
+    useState<VirtualizedConversationLayoutSnapshot | null>(null);
+  const [overviewViewportSnapshot, setOverviewViewportSnapshot] =
+    useState<VirtualizedConversationViewportSnapshot | null>(null);
+  const overviewSessionIdRef = useRef(session.id);
+  const overviewNavigationFrameIdsRef = useRef<Set<number>>(new Set());
+  overviewSessionIdRef.current = session.id;
+  const refreshOverviewLayoutSnapshot = useCallback(() => {
+    const nextSnapshot = virtualizerHandleRef.current?.getLayoutSnapshot() ?? null;
+    setOverviewLayoutSnapshot((previousSnapshot) =>
+      areConversationOverviewLayoutSnapshotsEqual(previousSnapshot, nextSnapshot)
+        ? previousSnapshot
+        : nextSnapshot,
+    );
+    const nextViewportSnapshot =
+      nextSnapshot === null
+        ? null
+        : extractConversationOverviewViewportSnapshot(nextSnapshot);
+    setOverviewViewportSnapshot((previousSnapshot) =>
+      areConversationOverviewViewportSnapshotsEqual(
+        previousSnapshot,
+        nextViewportSnapshot,
+      )
+        ? previousSnapshot
+        : nextViewportSnapshot,
+    );
+  }, []);
+  const refreshOverviewViewportSnapshot = useCallback(() => {
+    const nextSnapshot = virtualizerHandleRef.current?.getViewportSnapshot() ?? null;
+    setOverviewViewportSnapshot((previousSnapshot) =>
+      areConversationOverviewViewportSnapshotsEqual(previousSnapshot, nextSnapshot)
+        ? previousSnapshot
+        : nextSnapshot,
+    );
+  }, []);
+  const cancelOverviewNavigationFrames = useCallback(() => {
+    overviewNavigationFrameIdsRef.current.forEach((frameId) => {
+      window.cancelAnimationFrame(frameId);
+    });
+    overviewNavigationFrameIdsRef.current.clear();
+  }, []);
+  const scheduleOverviewNavigationFrame = useCallback((callback: () => void) => {
+    const expectedSessionId = overviewSessionIdRef.current;
+    let frameId: number | null = null;
+    let ranSynchronously = false;
+    const runFrame = () => {
+      if (frameId === null) {
+        ranSynchronously = true;
+      } else {
+        overviewNavigationFrameIdsRef.current.delete(frameId);
+      }
+      if (overviewSessionIdRef.current !== expectedSessionId) {
+        return;
+      }
+      callback();
+    };
+    frameId = window.requestAnimationFrame(runFrame);
+    if (!ranSynchronously) {
+      overviewNavigationFrameIdsRef.current.add(frameId);
+    }
+  }, []);
+  const handleOverviewNavigate = useCallback(
+    (item: ConversationOverviewItem) => {
+      const handle = virtualizerHandleRef.current;
+      if (!handle) {
+        return;
+      }
+      if (item.kind === "live_turn") {
+        const jumpedToTail =
+          visibleMessages.length > 0
+            ? handle.jumpToMessageIndex(visibleMessages.length - 1, { align: "end" })
+            : false;
+        const scrollTailIntoView = () => {
+          const node = scrollContainerRef.current;
+          if (!node) {
+            return;
+          }
+          node.scrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+          refreshOverviewViewportSnapshot();
+        };
+        if (jumpedToTail) {
+          scheduleOverviewNavigationFrame(scrollTailIntoView);
+        } else {
+          scrollTailIntoView();
+        }
+        return;
+      }
+      const jumped =
+        handle.jumpToMessageId(item.messageId, { align: "center" }) ||
+        handle.jumpToMessageIndex(item.messageIndex, { align: "center" });
+      if (jumped) {
+        scheduleOverviewNavigationFrame(refreshOverviewViewportSnapshot);
+      }
+    },
+    [
+      refreshOverviewViewportSnapshot,
+      scheduleOverviewNavigationFrame,
+      scrollContainerRef,
+      visibleMessages.length,
+    ],
+  );
+
+  useEffect(() => cancelOverviewNavigationFrames, [
+    cancelOverviewNavigationFrames,
+    session.id,
+    shouldRenderConversationOverview,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!isActive || !shouldRenderConversationOverview) {
+      setOverviewLayoutSnapshot((previousSnapshot) =>
+        previousSnapshot === null ? previousSnapshot : null,
+      );
+      setOverviewViewportSnapshot((previousSnapshot) =>
+        previousSnapshot === null ? previousSnapshot : null,
+      );
+      return;
+    }
+    refreshOverviewLayoutSnapshot();
+  }, [
+    isActive,
+    refreshOverviewLayoutSnapshot,
+    session.id,
+    shouldRenderConversationOverview,
+    visibleMessages.length,
+  ]);
+
+  useEffect(() => {
+    if (!isActive || !shouldRenderConversationOverview) {
+      return undefined;
+    }
+    const scrollNode = scrollContainerRef.current;
+    let layoutFrameId: number | null = null;
+    let viewportFrameId: number | null = null;
+    const scheduleLayoutRefresh = () => {
+      if (layoutFrameId !== null) {
+        return;
+      }
+      layoutFrameId = window.requestAnimationFrame(() => {
+        layoutFrameId = null;
+        refreshOverviewLayoutSnapshot();
+      });
+    };
+    const scheduleViewportRefresh = () => {
+      if (viewportFrameId !== null) {
+        return;
+      }
+      viewportFrameId = window.requestAnimationFrame(() => {
+        viewportFrameId = null;
+        refreshOverviewViewportSnapshot();
+      });
+    };
+
+    scheduleLayoutRefresh();
+    scrollNode?.addEventListener("scroll", scheduleViewportRefresh, {
+      passive: true,
+    });
+    window.addEventListener("resize", scheduleLayoutRefresh);
+    return () => {
+      if (layoutFrameId !== null) {
+        window.cancelAnimationFrame(layoutFrameId);
+      }
+      if (viewportFrameId !== null) {
+        window.cancelAnimationFrame(viewportFrameId);
+      }
+      scrollNode?.removeEventListener("scroll", scheduleViewportRefresh);
+      window.removeEventListener("resize", scheduleLayoutRefresh);
+    };
+  }, [
+    isActive,
+    refreshOverviewLayoutSnapshot,
+    refreshOverviewViewportSnapshot,
+    scrollContainerRef,
+    shouldRenderConversationOverview,
+  ]);
 
   if (visibleMessages.length === 0 && visiblePendingPrompts.length === 0 && !showWaitingIndicator) {
     return (
@@ -640,49 +843,87 @@ const SessionConversationPage = memo(function SessionConversationPage({
     );
   }
 
+  const conversationMessages = (
+    <ConversationMessageList
+      renderMessageCard={renderMessageCard}
+      sessionId={session.id}
+      messages={visibleMessages}
+      scrollContainerRef={scrollContainerRef}
+      virtualizerHandleRef={
+        shouldRenderConversationOverview ? virtualizerHandleRef : undefined
+      }
+      isActive={isActive}
+      onApprovalDecision={onApprovalDecision}
+      onUserInputSubmit={onUserInputSubmit}
+      onMcpElicitationSubmit={onMcpElicitationSubmit}
+      onCodexAppRequestSubmit={onCodexAppRequestSubmit}
+      conversationSearchQuery={conversationSearchQuery}
+      conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
+      conversationSearchActiveItemKey={conversationSearchActiveItemKey}
+      onConversationSearchItemMount={onConversationSearchItemMount}
+      />
+  );
+  const liveTurnCard = showWaitingIndicator ? (
+    <RunningIndicator agent={session.agent} lastPrompt={waitingIndicatorPrompt} />
+  ) : null;
+  const pendingPromptCards = visiblePendingPrompts.map((prompt) => (
+    <MessageSlot
+      key={prompt.id}
+      itemKey={isActive ? `pendingPrompt:${prompt.id}` : undefined}
+      isSearchMatch={conversationSearchMatchedItemKeys.has(`pendingPrompt:${prompt.id}`)}
+      isSearchActive={conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`}
+      onSearchItemMount={onConversationSearchItemMount}
+    >
+      <PendingPromptCard
+        prompt={prompt}
+        onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
+        searchQuery={
+          conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? conversationSearchQuery : ""
+        }
+        searchHighlightTone={
+          conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? "active" : "match"
+        }
+      />
+    </MessageSlot>
+  ));
+
+  const conversationContent = (
+    <>
+      {conversationMessages}
+      {liveTurnCard}
+      {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
+      {pendingPromptCards}
+    </>
+  );
+
+  const overviewMaxHeightPx =
+    overviewViewportSnapshot?.viewportHeightPx !== undefined
+      ? Math.max(
+          CONVERSATION_OVERVIEW_MIN_HEIGHT_PX,
+          overviewViewportSnapshot.viewportHeightPx -
+            CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX,
+        )
+      : CONVERSATION_OVERVIEW_FALLBACK_MAX_HEIGHT_PX;
+
   return (
     <div className={`session-conversation-page${isActive ? " is-active" : ""}`} hidden={!isActive}>
-      <ConversationMessageList
-        renderMessageCard={renderMessageCard}
-        sessionId={session.id}
-        messages={visibleMessages}
-        scrollContainerRef={scrollContainerRef}
-        isActive={isActive}
-        onApprovalDecision={onApprovalDecision}
-        onUserInputSubmit={onUserInputSubmit}
-        onMcpElicitationSubmit={onMcpElicitationSubmit}
-        onCodexAppRequestSubmit={onCodexAppRequestSubmit}
-        conversationSearchQuery={conversationSearchQuery}
-        conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
-        conversationSearchActiveItemKey={conversationSearchActiveItemKey}
-        onConversationSearchItemMount={onConversationSearchItemMount}
-      />
-
-      {showWaitingIndicator ? (
-        <RunningIndicator agent={session.agent} lastPrompt={waitingIndicatorPrompt} />
-      ) : null}
-
-      {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
-      {visiblePendingPrompts.map((prompt) => (
-        <MessageSlot
-          key={prompt.id}
-          itemKey={isActive ? `pendingPrompt:${prompt.id}` : undefined}
-          isSearchMatch={conversationSearchMatchedItemKeys.has(`pendingPrompt:${prompt.id}`)}
-          isSearchActive={conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`}
-          onSearchItemMount={onConversationSearchItemMount}
-        >
-          <PendingPromptCard
-            prompt={prompt}
-            onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
-            searchQuery={
-              conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? conversationSearchQuery : ""
-            }
-            searchHighlightTone={
-              conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? "active" : "match"
-            }
+      {shouldRenderConversationOverview ? (
+        <div className="conversation-with-overview">
+          <div className="conversation-overview-content">
+            {conversationContent}
+          </div>
+          <ConversationOverviewRail
+            messages={visibleMessages}
+            layoutSnapshot={overviewLayoutSnapshot}
+            viewportSnapshot={overviewViewportSnapshot}
+            tailItems={overviewTailItems}
+            maxHeightPx={overviewMaxHeightPx}
+            onNavigate={handleOverviewNavigate}
           />
-        </MessageSlot>
-      ))}
+        </div>
+      ) : (
+        conversationContent
+      )}
     </div>
   );
 }, (previous, next) =>
@@ -702,11 +943,120 @@ const SessionConversationPage = memo(function SessionConversationPage({
   previous.onConversationSearchItemMount === next.onConversationSearchItemMount
 );
 
+/** @internal Exported for focused regression tests; not a cross-panel API. */
+export function buildConversationOverviewTailItems({
+  agent,
+  sessionId,
+  showWaitingIndicator,
+  waitingIndicatorPrompt,
+}: {
+  agent: Session["agent"];
+  sessionId: string;
+  showWaitingIndicator: boolean;
+  waitingIndicatorPrompt: string | null;
+}): readonly ConversationOverviewTailItemInput[] {
+  if (!showWaitingIndicator) {
+    return [];
+  }
+  const isCommand = Boolean(waitingIndicatorPrompt?.trim().startsWith("/"));
+  return [
+    {
+      id: `live-turn:${sessionId}`,
+      kind: "live_turn",
+      status: "running",
+      estimatedHeightPx: CONVERSATION_OVERVIEW_LIVE_TURN_HEIGHT_PX,
+      textSample: `${agent} is working — ${
+        isCommand ? "Executing a command" : "Waiting for output"
+      }`,
+      author: "assistant",
+    },
+  ];
+}
+
+function areConversationOverviewLayoutSnapshotsEqual(
+  left: VirtualizedConversationLayoutSnapshot | null,
+  right: VirtualizedConversationLayoutSnapshot | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  if (
+    left.sessionId !== right.sessionId ||
+    left.messageCount !== right.messageCount ||
+    left.estimatedTotalHeightPx !== right.estimatedTotalHeightPx ||
+    left.viewportWidthPx !== right.viewportWidthPx ||
+    left.isActive !== right.isActive ||
+    left.messages.length !== right.messages.length
+  ) {
+    return false;
+  }
+
+  return left.messages.every((leftMessage, index) => {
+    const rightMessage = right.messages[index];
+    return (
+      rightMessage !== undefined &&
+      leftMessage.messageId === rightMessage.messageId &&
+      leftMessage.messageIndex === rightMessage.messageIndex &&
+      leftMessage.pageIndex === rightMessage.pageIndex &&
+      leftMessage.type === rightMessage.type &&
+      leftMessage.author === rightMessage.author &&
+      leftMessage.estimatedTopPx === rightMessage.estimatedTopPx &&
+      leftMessage.estimatedHeightPx === rightMessage.estimatedHeightPx &&
+      leftMessage.measuredPageHeightPx === rightMessage.measuredPageHeightPx
+    );
+  });
+}
+
+function extractConversationOverviewViewportSnapshot(
+  snapshot: VirtualizedConversationLayoutSnapshot,
+): VirtualizedConversationViewportSnapshot {
+  return {
+    sessionId: snapshot.sessionId,
+    messageCount: snapshot.messageCount,
+    estimatedTotalHeightPx: snapshot.estimatedTotalHeightPx,
+    viewportTopPx: snapshot.viewportTopPx,
+    viewportHeightPx: snapshot.viewportHeightPx,
+    viewportWidthPx: snapshot.viewportWidthPx,
+    isActive: snapshot.isActive,
+    visiblePageRange: snapshot.visiblePageRange,
+    mountedPageRange: snapshot.mountedPageRange,
+  };
+}
+
+function areConversationOverviewViewportSnapshotsEqual(
+  left: VirtualizedConversationViewportSnapshot | null,
+  right: VirtualizedConversationViewportSnapshot | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return (
+    left.sessionId === right.sessionId &&
+    left.messageCount === right.messageCount &&
+    left.estimatedTotalHeightPx === right.estimatedTotalHeightPx &&
+    left.viewportTopPx === right.viewportTopPx &&
+    left.viewportHeightPx === right.viewportHeightPx &&
+    left.viewportWidthPx === right.viewportWidthPx &&
+    left.isActive === right.isActive &&
+    left.visiblePageRange.startIndex === right.visiblePageRange.startIndex &&
+    left.visiblePageRange.endIndex === right.visiblePageRange.endIndex &&
+    left.mountedPageRange.startIndex === right.mountedPageRange.startIndex &&
+    left.mountedPageRange.endIndex === right.mountedPageRange.endIndex
+  );
+}
+
 function ConversationMessageList({
   renderMessageCard,
   sessionId,
   messages,
   scrollContainerRef,
+  virtualizerHandleRef,
   isActive,
   onApprovalDecision,
   onUserInputSubmit,
@@ -721,6 +1071,7 @@ function ConversationMessageList({
   sessionId: string;
   messages: Message[];
   scrollContainerRef: RefObject<HTMLElement | null>;
+  virtualizerHandleRef?: { current: VirtualizedConversationMessageListHandle | null };
   isActive: boolean;
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
   onUserInputSubmit: UserInputSubmitHandler;
@@ -765,7 +1116,7 @@ function ConversationMessageList({
       // cleanly via the existing unmount cleanup. Without the key, refs like
       // `pendingMountedPrependRestoreRef`, `pendingDeferredLayoutAnchorRef`,
       // `pendingProgrammaticBottomFollowUntilRef`, the idle-compaction timer,
-      // and the bottom-stick state survive across sessions in the same pane —
+      // and the bottom-stick state survive across sessions in the same pane -
       // letting session A's queued restore corrupt session B's scroll, or an
       // A-armed timer mutate B's mounted range with stale flags.
       key={sessionId}
@@ -774,6 +1125,7 @@ function ConversationMessageList({
       sessionId={sessionId}
       messages={messages}
       scrollContainerRef={scrollContainerRef}
+      virtualizerHandleRef={virtualizerHandleRef}
       conversationSearchQuery={conversationSearchQuery}
       conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
       conversationSearchActiveItemKey={conversationSearchActiveItemKey}

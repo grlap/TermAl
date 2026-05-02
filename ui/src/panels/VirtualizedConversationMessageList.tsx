@@ -128,11 +128,17 @@ export type VirtualizedConversationLayoutSnapshot = {
   messages: VirtualizedConversationLayoutMessage[];
 };
 
+export type VirtualizedConversationViewportSnapshot = Omit<
+  VirtualizedConversationLayoutSnapshot,
+  "messages"
+>;
+
 export type VirtualizedConversationMessageListHandle = {
   // Stable for the lifetime of the mount. Methods read the latest layout
   // state internally, so consumers can keep the handle as an effect dependency
   // without retriggering on every virtualized layout update.
   getLayoutSnapshot: () => VirtualizedConversationLayoutSnapshot;
+  getViewportSnapshot: () => VirtualizedConversationViewportSnapshot;
   // Returns false when the list is inactive, the scroll node is missing, or the
   // target cannot be resolved from the currently loaded transcript.
   jumpToMessageId: (
@@ -160,6 +166,8 @@ const IDLE_MOUNTED_COMPACTION_PAGE_HYSTERESIS = 2;
 const ACTIVE_VIEWPORT_STARTUP_RESYNC_FRAMES = 12;
 const BOTTOM_BOUNDARY_REVEAL_SETTLE_FRAMES = 12;
 const BOTTOM_BOUNDARY_REVEAL_DELAY_MS = 220;
+const ACTIVE_SCROLL_MOUNTED_RANGE_COLLAPSE_EXTRA_PAGES = 12;
+const ACTIVE_SCROLL_MOUNTED_RANGE_COLLAPSE_MULTIPLIER = 2;
 export const VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS = 200;
 // Separate, much shorter cooldown for the deferred-heavy-content (Markdown,
 // tool blocks) activation gate. Heavy content paint should resume almost
@@ -275,6 +283,25 @@ function rangeContainsRange(container: VirtualizedRange, target: VirtualizedRang
     container.startIndex <= target.startIndex &&
     container.endIndex >= target.endIndex
   );
+}
+
+function getRangePageCount(range: VirtualizedRange) {
+  return Math.max(range.endIndex - range.startIndex, 0);
+}
+
+function shouldCollapseIncrementalMountedRange(
+  currentRange: VirtualizedRange,
+  targetRange: VirtualizedRange,
+) {
+  const targetPageCount = Math.max(getRangePageCount(targetRange), 1);
+  const combinedPageCount =
+    Math.max(currentRange.endIndex, targetRange.endIndex) -
+    Math.min(currentRange.startIndex, targetRange.startIndex);
+  const maxMountedPageCount = Math.max(
+    targetPageCount * ACTIVE_SCROLL_MOUNTED_RANGE_COLLAPSE_MULTIPLIER,
+    targetPageCount + ACTIVE_SCROLL_MOUNTED_RANGE_COLLAPSE_EXTRA_PAGES,
+  );
+  return combinedPageCount > maxMountedPageCount;
 }
 
 function getMountedMessageSlots(virtualizedListRoot: ParentNode | null) {
@@ -1125,7 +1152,7 @@ export function VirtualizedConversationMessageList({
       node: HTMLElement,
       scrollDelta: number,
       scrollKind: UserScrollKind,
-      options: { flush?: boolean } = {},
+      options: { allowSeekFlush?: boolean; flush?: boolean } = {},
     ) => {
       const nextWorkingRange = buildWorkingMountedRangeForScrollTop(
         node.scrollTop,
@@ -1133,11 +1160,16 @@ export function VirtualizedConversationMessageList({
       );
 
       const currentRange = mountedPageRangeRef.current;
+      const resolvedScrollKind =
+        scrollKind === "incremental" &&
+        shouldCollapseIncrementalMountedRange(currentRange, nextWorkingRange)
+          ? "seek"
+          : scrollKind;
       let nextRange: VirtualizedRange = currentRange;
 
-      if (scrollKind === "seek") {
+      if (resolvedScrollKind === "seek") {
         nextRange = nextWorkingRange;
-      } else if (scrollKind === "page_jump") {
+      } else if (resolvedScrollKind === "page_jump") {
         nextRange = expandRangeToRenderedPageEdges(node, {
           startIndex: Math.min(currentRange.startIndex, nextWorkingRange.startIndex),
           endIndex: Math.max(currentRange.endIndex, nextWorkingRange.endIndex),
@@ -1158,12 +1190,13 @@ export function VirtualizedConversationMessageList({
         return;
       }
 
-      if (scrollKind === "seek" || scrollKind === "page_jump") {
+      if (resolvedScrollKind === "seek" || resolvedScrollKind === "page_jump") {
+        lastUserScrollKindRef.current = resolvedScrollKind;
         pendingAggressiveIdleCompactionRef.current = true;
       }
 
       if (
-        scrollKind === "incremental" &&
+        resolvedScrollKind === "incremental" &&
         nextRange.startIndex < currentRange.startIndex &&
         !isScrollContainerNearBottom(node)
       ) {
@@ -1175,12 +1208,18 @@ export function VirtualizedConversationMessageList({
             scrollTop: node.scrollTop,
           };
         }
-      } else if (scrollKind === "seek" || scrollKind === "page_jump") {
+      } else if (resolvedScrollKind === "seek" || resolvedScrollKind === "page_jump") {
         pendingMountedPrependRestoreRef.current = null;
         skipNextMountedPrependRestoreRef.current = false;
       }
 
-      applyMountedPageRange(nextRange, options);
+      applyMountedPageRange(nextRange, {
+        flush:
+          options.flush ||
+          (options.allowSeekFlush !== false &&
+            (resolvedScrollKind === "seek" ||
+              resolvedScrollKind === "page_jump")),
+      });
     },
     [
       applyMountedPageRange,
@@ -1401,8 +1440,48 @@ export function VirtualizedConversationMessageList({
     visiblePageRange,
   ]);
 
+  const buildViewportSnapshot =
+    useCallback((): VirtualizedConversationViewportSnapshot => {
+      const node = isActive ? scrollContainerRef.current : null;
+      const snapshotViewportHeight =
+        node && node.clientHeight > 0 ? node.clientHeight : viewportHeight;
+      const snapshotViewportWidth =
+        node && node.clientWidth > 0 ? node.clientWidth : viewportWidth;
+      const snapshotScrollHeight =
+        node && node.scrollHeight > 0 ? node.scrollHeight : pageLayout.totalHeight;
+      const snapshotViewportTop = clampVirtualizedViewportScrollTop({
+        scrollTop: node ? node.scrollTop : viewportScrollTop,
+        totalHeight: snapshotScrollHeight,
+        viewportHeight: snapshotViewportHeight,
+      });
+
+      return {
+        sessionId,
+        messageCount: messages.length,
+        estimatedTotalHeightPx: snapshotScrollHeight,
+        viewportTopPx: snapshotViewportTop,
+        viewportHeightPx: snapshotViewportHeight,
+        viewportWidthPx: snapshotViewportWidth,
+        isActive,
+        visiblePageRange,
+        mountedPageRange: renderedMountedPageRange,
+      };
+    }, [
+      isActive,
+      messages.length,
+      pageLayout.totalHeight,
+      renderedMountedPageRange,
+      scrollContainerRef,
+      sessionId,
+      viewportHeight,
+      viewportScrollTop,
+      viewportWidth,
+      visiblePageRange,
+    ]);
+
   type VirtualizerHandleState = {
     buildLayoutSnapshot: typeof buildLayoutSnapshot;
+    buildViewportSnapshot: typeof buildViewportSnapshot;
     jumpToMessageLocation: typeof jumpToMessageLocation;
     messageLocationById: typeof messageLocationById;
     messagesLength: number;
@@ -1412,6 +1491,7 @@ export function VirtualizedConversationMessageList({
   if (virtualizerHandleStateRef.current === null) {
     virtualizerHandleStateRef.current = {
       buildLayoutSnapshot,
+      buildViewportSnapshot,
       jumpToMessageLocation,
       messageLocationById,
       messagesLength: messages.length,
@@ -1421,6 +1501,7 @@ export function VirtualizedConversationMessageList({
   useLayoutEffect(() => {
     virtualizerHandleStateRef.current = {
       buildLayoutSnapshot,
+      buildViewportSnapshot,
       jumpToMessageLocation,
       messageLocationById,
       messagesLength: messages.length,
@@ -1428,6 +1509,7 @@ export function VirtualizedConversationMessageList({
     };
   }, [
     buildLayoutSnapshot,
+    buildViewportSnapshot,
     jumpToMessageLocation,
     messageLocationById,
     messages.length,
@@ -1444,6 +1526,8 @@ export function VirtualizedConversationMessageList({
     () => ({
       getLayoutSnapshot: () =>
         readVirtualizerHandleState().buildLayoutSnapshot(),
+      getViewportSnapshot: () =>
+        readVirtualizerHandleState().buildViewportSnapshot(),
       jumpToMessageId: (messageId, options) => {
         const { jumpToMessageLocation, messageLocationById } =
           readVirtualizerHandleState();
@@ -2343,7 +2427,10 @@ export function VirtualizedConversationMessageList({
           node,
           scrollDelta,
           resolvedScrollKind,
-          { flush: isActiveUpwardUserScrollWrite },
+          {
+            allowSeekFlush: explicitScrollSource === "user",
+            flush: isActiveUpwardUserScrollWrite,
+          },
         );
       }
       scheduleProgrammaticViewportSync(node);

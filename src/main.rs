@@ -280,9 +280,18 @@ fn app_router(state: AppState) -> Router {
             "/api/sessions/{id}/delegations",
             post(create_session_delegation),
         )
-        .route("/api/delegations/{id}", get(get_delegation_status))
-        .route("/api/delegations/{id}/result", get(get_delegation_result))
-        .route("/api/delegations/{id}/cancel", post(cancel_delegation))
+        .route(
+            "/api/sessions/{id}/delegations/{delegation_id}",
+            get(get_delegation_status),
+        )
+        .route(
+            "/api/sessions/{id}/delegations/{delegation_id}/result",
+            get(get_delegation_result),
+        )
+        .route(
+            "/api/sessions/{id}/delegations/{delegation_id}/cancel",
+            post(cancel_delegation),
+        )
         .route("/api/sessions/{id}/settings", post(update_session_settings))
         .route(
             "/api/sessions/{id}/model-options/refresh",

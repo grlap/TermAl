@@ -374,6 +374,44 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("keeps long scrollbar drags from mounting every crossed page", async () => {
+    const messages = makeTextMessages(480);
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      clientHeight: 500,
+      messages,
+      virtualizerHandleRef,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(virtualizerHandleRef.current).not.toBeNull();
+      });
+
+      act(() => {
+        for (
+          let nextScrollTop = 400;
+          nextScrollTop < harness.estimatedLayout.totalHeight - 500;
+          nextScrollTop += 400
+        ) {
+          harness.setScrollTop(nextScrollTop);
+          fireEvent.scroll(harness.scrollNode);
+        }
+      });
+
+      const snapshot = virtualizerHandleRef.current!.getLayoutSnapshot();
+      const mountedPageCount =
+        snapshot.mountedPageRange.endIndex - snapshot.mountedPageRange.startIndex;
+      expect(snapshot.visiblePageRange.startIndex).toBeGreaterThan(0);
+      expect(snapshot.mountedPageRange.startIndex).toBeGreaterThan(0);
+      expect(mountedPageCount).toBeLessThanOrEqual(32);
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("suspends and resumes deferred rendering from the production scroll-input path", async () => {
     vi.useFakeTimers();
     const resumeListener = vi.fn();

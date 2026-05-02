@@ -89,6 +89,29 @@ impl StateInner {
     }
 }
 
+fn find_parent_delegation_index_locked(
+    inner: &StateInner,
+    parent_session_id: &str,
+    delegation_id: &str,
+) -> Result<usize, ApiError> {
+    let Some(parent_session_id) = normalize_optional_identifier(Some(parent_session_id)) else {
+        return Err(ApiError::not_found("delegation not found"));
+    };
+    if inner
+        .find_visible_session_index(parent_session_id)
+        .is_none()
+    {
+        return Err(ApiError::not_found("delegation not found"));
+    }
+    let index = inner
+        .find_delegation_index(delegation_id)
+        .ok_or_else(|| ApiError::not_found("delegation not found"))?;
+    if inner.delegations[index].parent_session_id != parent_session_id {
+        return Err(ApiError::not_found("delegation not found"));
+    }
+    Ok(index)
+}
+
 impl AppState {
     fn create_read_only_delegation(
         &self,
@@ -237,7 +260,8 @@ impl AppState {
             child_record.session.parent_delegation_id = Some(delegation_id.clone());
         }
         let child_session = Self::wire_session_from_record(&inner.sessions[child_index]);
-        let child_delta_session = Self::wire_session_summary_from_record(&inner.sessions[child_index]);
+        let child_delta_session =
+            Self::wire_session_summary_from_record(&inner.sessions[child_index]);
         let record = DelegationRecord {
             id: delegation_id.clone(),
             parent_session_id,
@@ -336,11 +360,13 @@ impl AppState {
         })
     }
 
-    fn get_delegation(&self, delegation_id: &str) -> Result<DelegationStatusResponse, ApiError> {
+    fn get_delegation(
+        &self,
+        parent_session_id: &str,
+        delegation_id: &str,
+    ) -> Result<DelegationStatusResponse, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_delegation_index(delegation_id)
-            .ok_or_else(|| ApiError::not_found("delegation not found"))?;
+        let index = find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
         let delegation = inner.delegations[index].clone();
         Ok(DelegationStatusResponse {
             revision: inner.revision,
@@ -351,12 +377,11 @@ impl AppState {
 
     fn get_delegation_result(
         &self,
+        parent_session_id: &str,
         delegation_id: &str,
     ) -> Result<DelegationResultResponse, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_delegation_index(delegation_id)
-            .ok_or_else(|| ApiError::not_found("delegation not found"))?;
+        let index = find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
         let delegation = &inner.delegations[index];
         let result = delegation
             .result
@@ -369,12 +394,15 @@ impl AppState {
         })
     }
 
-    fn cancel_delegation(&self, delegation_id: &str) -> Result<DelegationStatusResponse, ApiError> {
+    fn cancel_delegation(
+        &self,
+        parent_session_id: &str,
+        delegation_id: &str,
+    ) -> Result<DelegationStatusResponse, ApiError> {
         let child_session_id = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let index = inner
-                .find_delegation_index(delegation_id)
-                .ok_or_else(|| ApiError::not_found("delegation not found"))?;
+            let index =
+                find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
             let lifecycle_delta = refresh_delegation_from_child_locked(&mut inner, index);
             let revision = if lifecycle_delta.is_some() {
                 self.commit_locked(&mut inner).map_err(|err| {
@@ -414,16 +442,16 @@ impl AppState {
             },
         ) {
             Ok(_) => false,
-            Err(err) if err.status == StatusCode::CONFLICT || err.status == StatusCode::NOT_FOUND => {
+            Err(err)
+                if err.status == StatusCode::CONFLICT || err.status == StatusCode::NOT_FOUND =>
+            {
                 true
             }
             Err(err) => return Err(err),
         };
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_delegation_index(delegation_id)
-            .ok_or_else(|| ApiError::not_found("delegation not found"))?;
+        let index = find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
         let lifecycle_delta = if stop_conflicted {
             let refreshed_delta = refresh_delegation_from_child_locked(&mut inner, index);
             if delegation_is_terminal(inner.delegations[index].status) {
@@ -561,23 +589,22 @@ impl AppState {
                     target.workdir.is_some()
                         || (target.project_id.is_some() && target.workdir.is_none())
                 });
-                let local_projects: Vec<LocalProjectWriteScope> =
-                    if needs_local_project_inference {
-                        inner
-                            .projects
-                            .iter()
-                            .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
-                            .filter_map(|project| {
-                                let root_path = project.root_path.trim();
-                                (!root_path.is_empty()).then(|| LocalProjectWriteScope {
-                                    project_id: project.id.clone(),
-                                    root_path: root_path.to_owned(),
-                                })
+                let local_projects: Vec<LocalProjectWriteScope> = if needs_local_project_inference {
+                    inner
+                        .projects
+                        .iter()
+                        .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
+                        .filter_map(|project| {
+                            let root_path = project.root_path.trim();
+                            (!root_path.is_empty()).then(|| LocalProjectWriteScope {
+                                project_id: project.id.clone(),
+                                root_path: root_path.to_owned(),
                             })
-                            .collect()
-                    } else {
-                        Vec::new()
-                    };
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 (
                     blocked_by_session_delegation,
                     write_targets,
@@ -587,17 +614,15 @@ impl AppState {
             }
         };
         append_local_project_write_targets(&mut write_targets, &local_projects);
-        let blocked_by_scope_delegation = delegated_write_scopes
-            .iter()
-            .find(|scope| {
-                write_targets.iter().any(|target| {
-                    delegation_write_scope_matches(
-                        scope,
-                        target.project_id.as_deref(),
-                        target.workdir.as_deref(),
-                    )
-                })
-            });
+        let blocked_by_scope_delegation = delegated_write_scopes.iter().find(|scope| {
+            write_targets.iter().any(|target| {
+                delegation_write_scope_matches(
+                    scope,
+                    target.project_id.as_deref(),
+                    target.workdir.as_deref(),
+                )
+            })
+        });
         if blocked_by_session_delegation.is_some() || blocked_by_scope_delegation.is_some() {
             let delegation_title = blocked_by_session_delegation
                 .and_then(|block| block.title)
@@ -843,9 +868,7 @@ impl AppState {
             return Err(ApiError::conflict("delegation child session mismatch"));
         }
         if delegation_is_terminal(delegation.status) {
-            return Err(ApiError::conflict(
-                DELEGATION_NO_LONGER_STARTABLE_MESSAGE,
-            ));
+            return Err(ApiError::conflict(DELEGATION_NO_LONGER_STARTABLE_MESSAGE));
         }
         Ok(())
     }

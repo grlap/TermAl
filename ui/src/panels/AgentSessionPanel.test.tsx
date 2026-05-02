@@ -6,6 +6,7 @@ import * as slashPalette from "./session-slash-palette";
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
+  buildConversationOverviewTailItems,
   includeUndeferredMessageTail,
 } from "./AgentSessionPanel";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
@@ -983,6 +984,147 @@ describe("AgentSessionPanel conversation caching", () => {
     ).toHaveLength(1);
     expect(container.querySelector(".virtualized-message-list")).toBeNull();
     expect(screen.getByText(activeSession.messages[0]?.id ?? "")).toBeInTheDocument();
+  });
+
+  it("renders a conversation overview rail for long active sessions", () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    try {
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("active-session", {
+          status: "active",
+          messages: makeTextMessages(90),
+        }),
+        showWaitingIndicator: true,
+        waitingIndicatorPrompt: "run the build",
+      });
+
+      expect(screen.getAllByLabelText("Conversation overview")).toHaveLength(1);
+      const rail = screen.getByLabelText("Conversation overview");
+      expect(rail).toBeInTheDocument();
+      expect(
+        rail.closest(".conversation-with-overview")?.querySelector(".activity-card-live"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /^User prompt 1:/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", {
+          name: /^Live turn 91: Codex is working — Waiting for output/,
+        }),
+      ).toBeInTheDocument();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+    }
+  });
+
+  it.each([
+    ["Claude", "new prompt", "Claude is working — Waiting for output"],
+    ["Cursor", "new prompt", "Cursor is working — Waiting for output"],
+    ["Gemini", "new prompt", "Gemini is working — Waiting for output"],
+    ["Codex", "/review-local", "Codex is working — Executing a command"],
+  ] as const)(
+    "builds the conversation overview live-turn sample for %s",
+    (agent, waitingIndicatorPrompt, expectedSample) => {
+      expect(
+        buildConversationOverviewTailItems({
+          agent,
+          sessionId: "active-session",
+          showWaitingIndicator: true,
+          waitingIndicatorPrompt,
+        })[0],
+      ).toEqual(expect.objectContaining({ textSample: expectedSample }));
+    },
+  );
+
+  it("navigates the virtualized transcript from conversation overview items", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const scrollNode = document.createElement("section");
+    let scrollTop = 0;
+    const scrollWrites: number[] = [];
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(scrollNode, "clientWidth", {
+      configurable: true,
+      get: () => 1000,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 20_000,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+        scrollWrites.push(nextValue);
+      },
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      callback(performance.now());
+      return 1;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
+
+    try {
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("active-session", {
+          status: "active",
+          messages: makeTextMessages(90),
+        }),
+        scrollContainerRef: { current: scrollNode },
+        showWaitingIndicator: true,
+        waitingIndicatorPrompt: "run the build",
+      });
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
+      });
+
+      act(() => {
+        fireEvent.click(
+          screen.getByRole("button", { name: /^Assistant response 80:/ }),
+        );
+      });
+
+      expect(scrollTop).toBeGreaterThan(0);
+      const scrollAfterMessageJump = scrollTop;
+
+      act(() => {
+        fireEvent.click(
+          screen.getByRole("button", {
+            name: /^Live turn 91: Codex is working — Waiting for output/,
+          }),
+        );
+      });
+
+      expect(scrollTop).toBe(19_500);
+      expect(scrollWrites.some((write) => write > scrollAfterMessageJump)).toBe(
+        true,
+      );
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
   });
 
   it("does not carry deferred transcript cards across session switches", async () => {

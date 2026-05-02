@@ -165,7 +165,10 @@ async fn delegation_routes_create_status_and_unavailable_result() {
         &app,
         Request::builder()
             .method("GET")
-            .uri(format!("/api/delegations/{}", created.delegation.id))
+            .uri(format!(
+                "/api/sessions/{parent_session_id}/delegations/{}",
+                created.delegation.id
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -177,7 +180,10 @@ async fn delegation_routes_create_status_and_unavailable_result() {
         &app,
         Request::builder()
             .method("GET")
-            .uri(format!("/api/delegations/{}/result", created.delegation.id))
+            .uri(format!(
+                "/api/sessions/{parent_session_id}/delegations/{}/result",
+                created.delegation.id
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -189,6 +195,98 @@ async fn delegation_routes_create_status_and_unavailable_result() {
             .expect("error response should include a message")
             .contains("result is not available yet")
     );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[tokio::test]
+async fn delegation_routes_reject_wrong_parent() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let unrelated_parent_id = test_session_id(&state, Agent::Codex);
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "prompt": "Parent-scoped route check",
+        "title": "Scoped Delegation",
+        "mode": "reviewer",
+        "writePolicy": { "kind": "readOnly" }
+    }))
+    .expect("delegation request should serialize");
+
+    let (create_status, created): (StatusCode, DelegationResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{parent_session_id}/delegations"))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(create_status, StatusCode::CREATED);
+
+    let wrong_parent_status_path = format!(
+        "/api/sessions/{unrelated_parent_id}/delegations/{}",
+        created.delegation.id
+    );
+    let (status, body): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(wrong_parent_status_path)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["error"], "delegation not found");
+
+    let wrong_parent_result_path = format!(
+        "/api/sessions/{unrelated_parent_id}/delegations/{}/result",
+        created.delegation.id
+    );
+    let (status, body): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(wrong_parent_result_path)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["error"], "delegation not found");
+
+    let wrong_parent_cancel_path = format!(
+        "/api/sessions/{unrelated_parent_id}/delegations/{}/cancel",
+        created.delegation.id
+    );
+    let (status, body): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(wrong_parent_cancel_path)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["error"], "delegation not found");
+
+    let (status, fetched): (StatusCode, DelegationStatusResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/sessions/{parent_session_id}/delegations/{}",
+                created.delegation.id
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(fetched.delegation.status, DelegationStatus::Running);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
@@ -319,7 +417,7 @@ fn delegation_result_is_derived_from_completed_child_session() {
         .refresh_delegation_for_child_session(&created.delegation.child_session_id)
         .expect("refresh should complete");
     let response = state
-        .get_delegation_result(&created.delegation.id)
+        .get_delegation_result(&parent_session_id, &created.delegation.id)
         .expect("completed child should yield result");
     assert_eq!(response.result.status, DelegationStatus::Completed);
     assert!(response.result.summary.contains("No issues found"));
@@ -726,7 +824,7 @@ fn delegation_status_get_does_not_refresh_child_state() {
     };
 
     let response = state
-        .get_delegation(&created.delegation.id)
+        .get_delegation(&parent_session_id, &created.delegation.id)
         .expect("status should be readable");
 
     assert_eq!(response.revision, revision_before_get);
@@ -763,7 +861,7 @@ fn delegation_idle_child_without_result_packet_fails() {
         .refresh_delegation_for_child_session(&created.delegation.child_session_id)
         .expect("refresh should complete");
     let response = state
-        .get_delegation_result(&created.delegation.id)
+        .get_delegation_result(&parent_session_id, &created.delegation.id)
         .expect("failed delegation should expose a result");
 
     assert_eq!(response.result.status, DelegationStatus::Failed);
@@ -819,7 +917,7 @@ fn delegation_public_result_summary_is_capped() {
         .expect("refresh should complete");
 
     let result = state
-        .get_delegation_result(&created.delegation.id)
+        .get_delegation_result(&parent_session_id, &created.delegation.id)
         .expect("full result should be available");
     assert_eq!(result.result.summary, long_summary);
 
@@ -889,7 +987,7 @@ fn cancel_preserves_completed_delegation_result() {
     );
     let pre_cancel_revision = state.snapshot().revision;
     let response = state
-        .cancel_delegation(&created.delegation.id)
+        .cancel_delegation(&parent_session_id, &created.delegation.id)
         .expect("cancel should preserve completed state");
 
     assert_eq!(response.revision, pre_cancel_revision);
@@ -1042,7 +1140,7 @@ fn terminal_read_only_delegations_do_not_keep_child_session_write_blocked() {
         .refresh_delegation_for_child_session(&completed.delegation.child_session_id)
         .expect("refresh should complete delegation");
     state
-        .cancel_delegation(&canceled.delegation.id)
+        .cancel_delegation(&parent_session_id, &canceled.delegation.id)
         .expect("cancel should terminalize delegation");
 
     for (child_session_id, name) in [
@@ -1126,7 +1224,7 @@ fn delegation_cancel_clears_queued_child_prompts() {
     }
 
     let response = state
-        .cancel_delegation(&created.delegation.id)
+        .cancel_delegation(&parent_session_id, &created.delegation.id)
         .expect("cancel should terminalize delegation");
 
     assert_eq!(response.delegation.status, DelegationStatus::Canceled);

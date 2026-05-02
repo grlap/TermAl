@@ -585,21 +585,33 @@ export function createDelegation(
   );
 }
 
-export function fetchDelegationStatus(delegationId: string) {
+export function fetchDelegationStatus(
+  parentSessionId: string,
+  delegationId: string,
+) {
+  const parent = encodeURIComponent(parentSessionId);
+  const delegation = encodeURIComponent(delegationId);
   return request<DelegationStatusResponse>(
-    `/api/delegations/${encodeURIComponent(delegationId)}`,
+    `/api/sessions/${parent}/delegations/${delegation}`,
   );
 }
 
-export function fetchDelegationResult(delegationId: string) {
+export function fetchDelegationResult(
+  parentSessionId: string,
+  delegationId: string,
+) {
+  const parent = encodeURIComponent(parentSessionId);
+  const delegation = encodeURIComponent(delegationId);
   return request<DelegationResultResponse>(
-    `/api/delegations/${encodeURIComponent(delegationId)}/result`,
+    `/api/sessions/${parent}/delegations/${delegation}/result`,
   );
 }
 
-export function cancelDelegation(delegationId: string) {
+export function cancelDelegation(parentSessionId: string, delegationId: string) {
+  const parent = encodeURIComponent(parentSessionId);
+  const delegation = encodeURIComponent(delegationId);
   return request<DelegationStatusResponse>(
-    `/api/delegations/${encodeURIComponent(delegationId)}/cancel`,
+    `/api/sessions/${parent}/delegations/${delegation}/cancel`,
     {
       method: "POST",
     },

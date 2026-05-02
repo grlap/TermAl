@@ -543,28 +543,33 @@ async fn create_session_delegation(
 
 /// Gets delegation status and metadata.
 async fn get_delegation_status(
-    AxumPath(delegation_id): AxumPath<String>,
+    AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<DelegationStatusResponse>, ApiError> {
-    let response = run_blocking_api(move || state.get_delegation(&delegation_id)).await?;
+    let response =
+        run_blocking_api(move || state.get_delegation(&parent_session_id, &delegation_id)).await?;
     Ok(Json(response))
 }
 
 /// Gets a completed delegation result packet.
 async fn get_delegation_result(
-    AxumPath(delegation_id): AxumPath<String>,
+    AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<DelegationResultResponse>, ApiError> {
-    let response = run_blocking_api(move || state.get_delegation_result(&delegation_id)).await?;
+    let response =
+        run_blocking_api(move || state.get_delegation_result(&parent_session_id, &delegation_id))
+            .await?;
     Ok(Json(response))
 }
 
 /// Cancels a running delegation child session.
 async fn cancel_delegation(
-    AxumPath(delegation_id): AxumPath<String>,
+    AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<DelegationStatusResponse>, ApiError> {
-    let response = run_blocking_api(move || state.cancel_delegation(&delegation_id)).await?;
+    let response =
+        run_blocking_api(move || state.cancel_delegation(&parent_session_id, &delegation_id))
+            .await?;
     Ok(Json(response))
 }
 

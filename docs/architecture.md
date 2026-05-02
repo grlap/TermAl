@@ -206,9 +206,9 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/user-input/{message_id}` | Submit structured Codex user-input answers |
 | POST | `/api/sessions/{id}/mcp-elicitation/{message_id}` | Submit an MCP elicitation response |
 | POST | `/api/sessions/{id}/codex/requests/{message_id}` | Reply to a generic Codex app-server request |
-| GET | `/api/delegations/{id}` | Read delegation metadata/status -> `DelegationStatusResponse`; unknown ids return `404`. |
-| GET | `/api/delegations/{id}/result` | Read a completed delegation result packet -> `DelegationResultResponse`; unknown ids return `404`, unfinished delegations return `409`. |
-| POST | `/api/delegations/{id}/cancel` | Cancel a running delegation child session -> `DelegationStatusResponse`; unknown ids return `404`. Terminal delegations are idempotent and return the current status. |
+| GET | `/api/sessions/{id}/delegations/{delegation_id}` | Read delegation metadata/status -> `DelegationStatusResponse`; unknown delegation ids, unknown parent ids, and wrong-parent requests return `404`. |
+| GET | `/api/sessions/{id}/delegations/{delegation_id}/result` | Read a completed delegation result packet -> `DelegationResultResponse`; unknown delegation ids, unknown parent ids, and wrong-parent requests return `404`; unfinished delegations return `409`. |
+| POST | `/api/sessions/{id}/delegations/{delegation_id}/cancel` | Cancel a running delegation child session -> `DelegationStatusResponse`; unknown delegation ids, unknown parent ids, and wrong-parent requests return `404`. Terminal delegations are idempotent and return the current status. |
 
 For local sessions, `GET /api/sessions/{id}` is a local full-transcript read. For
 unloaded remote-proxy sessions, the same route synchronously calls the owning

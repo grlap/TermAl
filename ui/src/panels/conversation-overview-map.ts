@@ -8,6 +8,7 @@ import { estimateConversationMessageHeight } from "./conversation-virtualization
 import type {
   VirtualizedConversationLayoutMessage,
   VirtualizedConversationLayoutSnapshot,
+  VirtualizedConversationViewportSnapshot,
 } from "./VirtualizedConversationMessageList";
 
 export type ConversationOverviewItemKind =
@@ -17,6 +18,7 @@ export type ConversationOverviewItemKind =
   | "diff"
   | "file_changes"
   | "input_request"
+  | "live_turn"
   | "parallel_agents"
   | "subagent_result"
   | "thinking"
@@ -42,10 +44,19 @@ export type ConversationOverviewMarkerProjection = ConversationOverviewMarkerInp
   mapTopPx: number;
 };
 
+export type ConversationOverviewTailItemInput = {
+  id: string;
+  kind: ConversationOverviewItemKind;
+  status?: ConversationOverviewItemStatus;
+  estimatedHeightPx: number;
+  textSample?: string;
+  author?: Message["author"];
+};
+
 export type ConversationOverviewItem = {
   messageId: string;
   messageIndex: number;
-  type: Message["type"];
+  type: Message["type"] | null;
   author: Message["author"];
   kind: ConversationOverviewItemKind;
   status: ConversationOverviewItemStatus;
@@ -66,6 +77,7 @@ export type ConversationOverviewProjection = {
   items: ConversationOverviewItem[];
   markers: ConversationOverviewMarkerProjection[];
   sourceHeightPx: number;
+  estimatedScrollHeightPx: number;
   totalHeightPx: number;
   scale: number;
   viewportTopPx: number;
@@ -76,6 +88,7 @@ export type BuildConversationOverviewProjectionOptions = {
   messages: readonly Message[];
   layoutSnapshot?: VirtualizedConversationLayoutSnapshot | null;
   markers?: readonly ConversationOverviewMarkerInput[];
+  tailItems?: readonly ConversationOverviewTailItemInput[];
   availableWidthPx?: number;
   maxHeightPx?: number;
   minItemHeightPx?: number;
@@ -91,6 +104,7 @@ export function buildConversationOverviewProjection({
   messages,
   layoutSnapshot = null,
   markers = [],
+  tailItems = [],
   availableWidthPx = DEFAULT_AVAILABLE_WIDTH_PX,
   maxHeightPx = DEFAULT_MAX_HEIGHT_PX,
   minItemHeightPx = DEFAULT_MIN_ITEM_HEIGHT_PX,
@@ -104,17 +118,27 @@ export function buildConversationOverviewProjection({
     layoutByMessageId,
     measuredHeightByMessageId,
   });
-  const sourceHeightPx = Math.max(
+  const messageSourceHeightPx = Math.max(
     0,
     estimatedRows.reduce((total, row) => total + row.documentHeightPx, 0),
   );
+  const tailSourceHeightPx = tailItems.reduce(
+    (total, item) => total + Math.max(1, item.estimatedHeightPx),
+    0,
+  );
+  const sourceHeightPx = messageSourceHeightPx + tailSourceHeightPx;
   const boundedMaxHeightPx = Math.max(1, maxHeightPx);
   const scale =
     sourceHeightPx > boundedMaxHeightPx ? boundedMaxHeightPx / sourceHeightPx : 1;
   const totalHeightPx = sourceHeightPx === 0 ? 0 : Math.max(1, sourceHeightPx * scale);
+  const estimatedScrollHeightPx = Math.max(
+    1,
+    (layoutSnapshot?.estimatedTotalHeightPx ?? messageSourceHeightPx) +
+      tailSourceHeightPx,
+  );
 
   const projectedMarkers: ConversationOverviewMarkerProjection[] = [];
-  const items = estimatedRows.map((row, itemIndex) => {
+  const items: ConversationOverviewItem[] = estimatedRows.map((row, itemIndex) => {
     const itemMarkers = (markersByMessageId.get(row.message.id) ?? []).map((marker) => {
       const projection = {
         ...marker,
@@ -145,16 +169,103 @@ export function buildConversationOverviewProjection({
       textSample: summarizeConversationOverviewMessage(row.message, maxSampleLength),
     };
   });
+  let tailDocumentTopPx = messageSourceHeightPx;
+  let tailEstimatedTopPx =
+    layoutSnapshot?.estimatedTotalHeightPx ??
+    estimatedRows.reduce((total, row) => total + row.estimatedHeightPx, 0);
+  tailItems.forEach((tailItem, tailIndex) => {
+    const estimatedHeightPx = Math.max(1, tailItem.estimatedHeightPx);
+    items.push({
+      messageId: tailItem.id,
+      messageIndex: messages.length + tailIndex,
+      type: null,
+      author: tailItem.author ?? "assistant",
+      kind: tailItem.kind,
+      status: tailItem.status ?? null,
+      estimatedTopPx: tailEstimatedTopPx,
+      estimatedHeightPx,
+      measuredHeightPx: null,
+      measuredPageHeightPx: null,
+      documentTopPx: tailDocumentTopPx,
+      documentHeightPx: estimatedHeightPx,
+      mapTopPx: tailDocumentTopPx * scale,
+      mapHeightPx: Math.max(minItemHeightPx, estimatedHeightPx * scale),
+      markerIds: [],
+      markers: [],
+      textSample: summarizeConversationOverviewTailItem(
+        tailItem,
+        maxSampleLength,
+      ),
+    });
+    tailDocumentTopPx += estimatedHeightPx;
+    tailEstimatedTopPx += estimatedHeightPx;
+  });
+
+  const viewportHeightPx = projectViewportHeight(
+    layoutSnapshot,
+    sourceHeightPx,
+    scale,
+    estimatedScrollHeightPx,
+  );
 
   return {
     items,
     markers: projectedMarkers,
     sourceHeightPx,
+    estimatedScrollHeightPx,
     totalHeightPx,
     scale,
-    viewportTopPx: projectViewportTop(layoutSnapshot, sourceHeightPx, scale),
-    viewportHeightPx: projectViewportHeight(layoutSnapshot, sourceHeightPx, scale),
+    viewportTopPx: projectViewportTop(
+      layoutSnapshot,
+      sourceHeightPx,
+      scale,
+      estimatedScrollHeightPx,
+      viewportHeightPx,
+    ),
+    viewportHeightPx,
   };
+}
+
+export function projectConversationOverviewViewport(
+  projection: Pick<
+    ConversationOverviewProjection,
+    "estimatedScrollHeightPx" | "scale" | "sourceHeightPx" | "totalHeightPx"
+  >,
+  viewportSnapshot: VirtualizedConversationViewportSnapshot | null,
+) {
+  const estimatedScrollHeightPx = Math.max(
+    1,
+    viewportSnapshot?.estimatedTotalHeightPx ??
+      projection.estimatedScrollHeightPx,
+  );
+  const viewportHeightPx = projectViewportHeight(
+    viewportSnapshot,
+    projection.sourceHeightPx,
+    projection.scale,
+    estimatedScrollHeightPx,
+  );
+
+  return {
+    viewportTopPx: projectViewportTop(
+      viewportSnapshot,
+      projection.sourceHeightPx,
+      projection.scale,
+      estimatedScrollHeightPx,
+      viewportHeightPx,
+    ),
+    viewportHeightPx,
+  };
+}
+
+function summarizeConversationOverviewTailItem(
+  item: ConversationOverviewTailItemInput,
+  maxSampleLength: number,
+): string {
+  const sample = normalizeSample(item.textSample ?? "");
+  if (maxSampleLength <= 0 || sample.length <= maxSampleLength) {
+    return sample;
+  }
+  return `${sample.slice(0, Math.max(0, maxSampleLength - 3)).trimEnd()}...`;
 }
 
 export function findConversationOverviewItemAtY(
@@ -432,32 +543,34 @@ function buildEstimatedRows(
 }
 
 function projectViewportTop(
-  layoutSnapshot: VirtualizedConversationLayoutSnapshot | null,
+  layoutSnapshot: VirtualizedConversationViewportSnapshot | null,
   sourceHeightPx: number,
   scale: number,
+  estimatedScrollHeightPx: number,
+  projectedViewportHeightPx: number,
 ) {
-  if (!layoutSnapshot || sourceHeightPx <= 0 || layoutSnapshot.estimatedTotalHeightPx <= 0) {
+  if (!layoutSnapshot || sourceHeightPx <= 0 || estimatedScrollHeightPx <= 0) {
     return 0;
   }
 
   const sourceTopPx =
-    (layoutSnapshot.viewportTopPx / layoutSnapshot.estimatedTotalHeightPx) *
-    sourceHeightPx;
-  return clamp(sourceTopPx, 0, sourceHeightPx) * scale;
+    (layoutSnapshot.viewportTopPx / estimatedScrollHeightPx) * sourceHeightPx;
+  const maxTopPx = Math.max(sourceHeightPx * scale - projectedViewportHeightPx, 0);
+  return clamp(sourceTopPx * scale, 0, maxTopPx);
 }
 
 function projectViewportHeight(
-  layoutSnapshot: VirtualizedConversationLayoutSnapshot | null,
+  layoutSnapshot: VirtualizedConversationViewportSnapshot | null,
   sourceHeightPx: number,
   scale: number,
+  estimatedScrollHeightPx: number,
 ) {
-  if (!layoutSnapshot || sourceHeightPx <= 0 || layoutSnapshot.estimatedTotalHeightPx <= 0) {
+  if (!layoutSnapshot || sourceHeightPx <= 0 || estimatedScrollHeightPx <= 0) {
     return 0;
   }
 
   const sourceHeight =
-    (layoutSnapshot.viewportHeightPx / layoutSnapshot.estimatedTotalHeightPx) *
-    sourceHeightPx;
+    (layoutSnapshot.viewportHeightPx / estimatedScrollHeightPx) * sourceHeightPx;
   return clamp(sourceHeight, 0, sourceHeightPx) * scale;
 }
 

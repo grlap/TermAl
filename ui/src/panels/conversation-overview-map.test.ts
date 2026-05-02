@@ -268,6 +268,94 @@ describe("conversation overview map", () => {
     expect(findConversationOverviewItemAtY(projection, 999_999)?.messageId).toBe("m3");
   });
 
+  it("projects live-turn tail items after loaded transcript messages", () => {
+    const projection = buildConversationOverviewProjection({
+      maxHeightPx: 480,
+      messages: [
+        textMessage("m1", {
+          text: "first",
+        }),
+      ],
+      tailItems: [
+        {
+          id: "live-turn:session-1",
+          kind: "live_turn",
+          status: "running",
+          estimatedHeightPx: 120,
+          textSample: "Codex is working",
+        },
+      ],
+    });
+
+    expect(projection.items).toHaveLength(2);
+    expect(projection.items[1]).toEqual(
+      expect.objectContaining({
+        messageId: "live-turn:session-1",
+        messageIndex: 1,
+        type: null,
+        kind: "live_turn",
+        status: "running",
+        textSample: "Codex is working",
+      }),
+    );
+    expect(findConversationOverviewItemAtY(projection, 999_999)?.messageId).toBe(
+      "live-turn:session-1",
+    );
+  });
+
+  it("keeps the viewport marker inside the rail when the live-turn tail extends scroll height", () => {
+    const messages = [
+      textMessage("m1", { text: "first" }),
+      textMessage("m2", { text: "second" }),
+    ];
+    const layoutSnapshot: VirtualizedConversationLayoutSnapshot = {
+      sessionId: "session-1",
+      messageCount: messages.length,
+      estimatedTotalHeightPx: 200,
+      viewportTopPx: 190,
+      viewportHeightPx: 100,
+      viewportWidthPx: 800,
+      isActive: true,
+      visiblePageRange: {
+        startIndex: 0,
+        endIndex: 1,
+      },
+      mountedPageRange: {
+        startIndex: 0,
+        endIndex: 1,
+      },
+      messages: messages.map((message, index) => ({
+        messageId: message.id,
+        messageIndex: index,
+        pageIndex: index,
+        type: message.type,
+        author: message.author,
+        estimatedTopPx: index * 100,
+        estimatedHeightPx: 100,
+        measuredPageHeightPx: null,
+      })),
+    };
+
+    const projection = buildConversationOverviewProjection({
+      layoutSnapshot,
+      maxHeightPx: 140,
+      messages,
+      tailItems: [
+        {
+          id: "live-turn:session-1",
+          kind: "live_turn",
+          status: "running",
+          estimatedHeightPx: 80,
+          textSample: "Codex is working",
+        },
+      ],
+    });
+
+    expect(projection.viewportTopPx + projection.viewportHeightPx).toBeLessThanOrEqual(
+      projection.totalHeightPx,
+    );
+  });
+
   it("hit-tests against true scaled bounds when visual minimum heights overlap", () => {
     const messages = Array.from({ length: 10 }, (_, index) =>
       textMessage(`m${index + 1}`, {

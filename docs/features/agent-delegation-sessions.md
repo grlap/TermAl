@@ -219,9 +219,9 @@ MCP wrapper:
 
 ```text
 spawn_delegation(parentSessionId, request) -> DelegationRecord
-get_delegation_status(delegationId) -> DelegationStatus
-get_delegation_result(delegationId) -> DelegationResult
-cancel_delegation(delegationId) -> DelegationStatus
+get_delegation_status(parentSessionId, delegationId) -> DelegationStatus
+get_delegation_result(parentSessionId, delegationId) -> DelegationResult
+cancel_delegation(parentSessionId, delegationId) -> DelegationStatus
 ```
 
 ### MCP Tools
@@ -263,9 +263,9 @@ Safety limits for agent-facing tools:
 
 ```http
 POST /api/sessions/{parentSessionId}/delegations
-GET  /api/delegations/{delegationId}
-GET  /api/delegations/{delegationId}/result
-POST /api/delegations/{delegationId}/cancel
+GET  /api/sessions/{parentSessionId}/delegations/{delegationId}
+GET  /api/sessions/{parentSessionId}/delegations/{delegationId}/result
+POST /api/sessions/{parentSessionId}/delegations/{delegationId}/cancel
 ```
 
 There is no wait endpoint in Phase 1. A future internal command wrapper may

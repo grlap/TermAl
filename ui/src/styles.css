@@ -3848,6 +3848,114 @@ textarea {
   min-height: 1px;
 }
 
+.conversation-with-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1.6rem;
+  align-items: start;
+  gap: 0.65rem;
+}
+
+.conversation-overview-content {
+  display: grid;
+  gap: var(--message-stack-gap);
+  min-width: 0;
+}
+
+.conversation-overview-rail {
+  --conversation-overview-lane-left: 0.25rem;
+  --conversation-overview-lane-width: calc(100% - 0.5rem);
+
+  position: sticky;
+  top: 0.75rem;
+  width: 1.6rem;
+  min-height: 6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--surface-elevated) 80%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface-card) 72%, transparent);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.conversation-overview-item {
+  position: absolute;
+  left: var(--conversation-overview-lane-left);
+  width: var(--conversation-overview-lane-width);
+  min-height: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: var(--text-muted);
+  opacity: 0.42;
+  cursor: pointer;
+}
+
+.conversation-overview-item:hover,
+.conversation-overview-item:focus-visible {
+  opacity: 0.9;
+  outline: 1px solid var(--signal-blue);
+  outline-offset: 1px;
+}
+
+.conversation-overview-item.is-user_prompt {
+  background: var(--signal-blue);
+  opacity: 0.62;
+}
+
+.conversation-overview-item.is-command {
+  background: var(--signal-green);
+}
+
+.conversation-overview-item.is-diff,
+.conversation-overview-item.is-file_changes {
+  background: var(--signal-rose);
+}
+
+.conversation-overview-item.is-approval,
+.conversation-overview-item.is-input_request {
+  background: var(--signal-gold);
+}
+
+.conversation-overview-item.has-status-error {
+  background: var(--signal-red);
+  opacity: 0.72;
+}
+
+.conversation-overview-item.has-status-running {
+  background: var(--signal-blue);
+  opacity: 0.72;
+}
+
+.conversation-overview-item.is-live_turn {
+  background: var(--signal-blue);
+  opacity: 0.82;
+}
+
+.conversation-overview-marker {
+  position: absolute;
+  right: 0.1rem;
+  width: 0.35rem;
+  height: 0.35rem;
+  margin-top: -0.175rem;
+  border-radius: 50%;
+  background: var(--conversation-overview-marker-color, var(--signal-blue));
+  box-shadow: 0 0 0 1px var(--surface-card);
+  pointer-events: none;
+}
+
+.conversation-overview-viewport {
+  position: absolute;
+  left: var(--conversation-overview-lane-left);
+  width: var(--conversation-overview-lane-width);
+  min-height: 0.5rem;
+  box-sizing: border-box;
+  border: 1px solid var(--signal-blue);
+  border-radius: 0.35rem;
+  background: transparent;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface-card) 72%, transparent);
+  pointer-events: none;
+}
+
 .virtualized-message-range-block {
   min-height: 1px;
 }

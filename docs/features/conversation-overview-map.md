@@ -2,9 +2,13 @@
 
 ## Status
 
-Foundation in progress. Product UI is not implemented yet, but the frontend now
-has a pure overview projection helper that can derive lightweight map items
-from loaded messages, optional virtualizer layout snapshots, and marker inputs.
+Foundation in progress. The frontend now has a pure overview projection helper
+and a first product rail for loaded long virtualized sessions. The rail derives
+lightweight map items from loaded messages, optional virtualizer layout
+snapshots, and marker inputs; shows message-type blocks, marker pins, and the
+active viewport; and supports click/drag navigation through the virtualizer
+handle. Hover tooltips, marker filters, summary-only hydration jumps, and any
+canvas scaling path are still future work.
 
 The conversation overview map is a zoomed-out, approximate view of a long
 session transcript. It gives the user a fast spatial sense of the whole

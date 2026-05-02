@@ -2,8 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ApiRequestError,
+  cancelDelegation,
   createOrchestratorInstance,
   deleteWorkspaceLayout,
+  fetchDelegationResult,
+  fetchDelegationStatus,
   fetchWorkspaceLayout,
   fetchState,
   isBackendUnavailableError,
@@ -82,6 +85,78 @@ describe("createOrchestratorInstance", () => {
         transitions: [],
       },
     });
+  });
+});
+
+describe("delegation API helpers", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  function stubJsonFetch() {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("{}", {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("builds parent-scoped status URLs with encoded path segments", async () => {
+    const fetchMock = stubJsonFetch();
+
+    await fetchDelegationStatus("parent/session 1", "delegation/one two");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/parent%2Fsession%201/delegations/delegation%2Fone%20two",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("builds parent-scoped result URLs with encoded path segments", async () => {
+    const fetchMock = stubJsonFetch();
+
+    await fetchDelegationResult("parent/session 1", "delegation/one two");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/parent%2Fsession%201/delegations/delegation%2Fone%20two/result",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("posts cancel requests to the parent-scoped delegation route", async () => {
+    const fetchMock = stubJsonFetch();
+
+    await cancelDelegation("parent/session 1", "delegation/one two");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/parent%2Fsession%201/delegations/delegation%2Fone%20two/cancel",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+        method: "POST",
+      }),
+    );
   });
 });
 

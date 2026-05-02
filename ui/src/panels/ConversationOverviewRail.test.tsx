@@ -1,0 +1,401 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import { ConversationOverviewRail } from "./ConversationOverviewRail";
+import type { VirtualizedConversationLayoutSnapshot } from "./VirtualizedConversationMessageList";
+import type { Message } from "../types";
+
+function textMessages(count: number): Message[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `message-${index + 1}`,
+    type: "text",
+    author: index % 2 === 0 ? "you" : "assistant",
+    timestamp: `10:${String(index).padStart(2, "0")}`,
+    text: `Message ${index + 1}`,
+  }));
+}
+
+function layoutSnapshot(messages: Message[]): VirtualizedConversationLayoutSnapshot {
+  return {
+    sessionId: "session-1",
+    messageCount: messages.length,
+    estimatedTotalHeightPx: messages.length * 100,
+    viewportTopPx: 200,
+    viewportHeightPx: 300,
+    viewportWidthPx: 800,
+    isActive: true,
+    visiblePageRange: {
+      startIndex: 2,
+      endIndex: 5,
+    },
+    mountedPageRange: {
+      startIndex: 0,
+      endIndex: 7,
+    },
+    messages: messages.map((message, index) => ({
+      messageId: message.id,
+      messageIndex: index,
+      pageIndex: Math.floor(index / 8),
+      type: message.type,
+      author: message.author,
+      estimatedTopPx: index * 100,
+      estimatedHeightPx: 100,
+      measuredPageHeightPx: null,
+    })),
+  };
+}
+
+describe("ConversationOverviewRail", () => {
+  it("does not render below the long-session threshold", () => {
+    render(
+      <ConversationOverviewRail
+        messages={textMessages(3)}
+        layoutSnapshot={null}
+        minMessages={4}
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(
+      screen.queryByLabelText("Conversation overview"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders overview items, viewport, and marker pins", () => {
+    const messages = textMessages(5);
+
+    render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={layoutSnapshot(messages)}
+        markers={[
+          {
+            id: "marker-1",
+            messageId: "message-3",
+            name: "Important section",
+            color: "#38bdf8",
+          },
+        ]}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
+    expect(screen.getByLabelText(/User prompt 1/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Important section")).toBeInTheDocument();
+    expect(screen.getByTestId("conversation-overview-viewport")).toHaveStyle({
+      top: "100px",
+      height: "150px",
+    });
+  });
+
+  it("can move the viewport indicator without replacing layout geometry", () => {
+    const messages = textMessages(5);
+    const snapshot = layoutSnapshot(messages);
+    const { messages: _layoutMessages, ...viewportSnapshot } = snapshot;
+    const { rerender } = render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={snapshot}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("conversation-overview-viewport")).toHaveStyle({
+      top: "100px",
+      height: "150px",
+    });
+
+    rerender(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={snapshot}
+        viewportSnapshot={{
+          ...viewportSnapshot,
+          viewportTopPx: 100,
+        }}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("conversation-overview-viewport")).toHaveStyle({
+      top: "50px",
+      height: "150px",
+    });
+  });
+
+  it("anchors the viewport indicator at the bottom from the live scroll range", () => {
+    const messages = textMessages(5);
+    const snapshot = layoutSnapshot(messages);
+    const { messages: _layoutMessages, ...viewportSnapshot } = snapshot;
+
+    render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={{
+          ...snapshot,
+          estimatedTotalHeightPx: 1_000,
+        }}
+        viewportSnapshot={{
+          ...viewportSnapshot,
+          estimatedTotalHeightPx: 800,
+          viewportTopPx: 600,
+          viewportHeightPx: 200,
+        }}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("conversation-overview-viewport")).toHaveStyle({
+      top: "187.5px",
+      height: "62.5px",
+    });
+  });
+
+  it("navigates to the clicked overview item", () => {
+    const messages = textMessages(5);
+    const onNavigate = vi.fn();
+
+    render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={layoutSnapshot(messages)}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText(/Assistant response 2/));
+
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: "message-2",
+        messageIndex: 1,
+      }),
+    );
+  });
+
+  it("supports arrow-key navigation across overview items", () => {
+    const messages = textMessages(5);
+
+    render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={layoutSnapshot(messages)}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={() => {}}
+      />,
+    );
+
+    const firstItem = screen.getByLabelText(/User prompt 1/);
+    const secondItem = screen.getByLabelText(/Assistant response 2/);
+    const lastItem = screen.getByLabelText(/User prompt 5/);
+
+    expect(firstItem).toHaveAttribute("tabIndex", "0");
+    expect(secondItem).toHaveAttribute("tabIndex", "-1");
+
+    firstItem.focus();
+    fireEvent.keyDown(firstItem, { key: "ArrowDown" });
+
+    expect(secondItem).toHaveFocus();
+
+    fireEvent.keyDown(secondItem, { key: "End" });
+
+    expect(lastItem).toHaveFocus();
+
+    fireEvent.keyDown(lastItem, { key: "Home" });
+
+    expect(firstItem).toHaveFocus();
+  });
+
+  it("renders and navigates live-turn tail items", () => {
+    const messages = textMessages(5);
+    const onNavigate = vi.fn();
+
+    render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={layoutSnapshot(messages)}
+        minMessages={4}
+        maxHeightPx={250}
+        tailItems={[
+          {
+            id: "live-turn:session-1",
+            kind: "live_turn",
+            status: "running",
+            estimatedHeightPx: 120,
+            textSample: "Codex is working",
+          },
+        ]}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText(/Live turn 6: Codex is working/));
+
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "live_turn",
+        messageId: "live-turn:session-1",
+        messageIndex: 5,
+      }),
+    );
+  });
+
+  it("drags across the rail to scrub between overview items", () => {
+    const messages = textMessages(5);
+    const onNavigate = vi.fn();
+
+    render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={layoutSnapshot(messages)}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const rail = screen.getByLabelText("Conversation overview");
+    vi.spyOn(rail, "getBoundingClientRect").mockReturnValue({
+      bottom: 250,
+      height: 250,
+      left: 0,
+      right: 24,
+      top: 0,
+      width: 24,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(rail, {
+      button: 0,
+      clientY: 230,
+      pointerId: 7,
+    });
+    fireEvent.pointerMove(rail, {
+      clientY: 20,
+      pointerId: 7,
+    });
+    fireEvent.pointerUp(rail, {
+      pointerId: 7,
+    });
+
+    expect(onNavigate).toHaveBeenCalledTimes(2);
+    expect(onNavigate).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ messageId: "message-5" }),
+    );
+    expect(onNavigate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ messageId: "message-1" }),
+    );
+  });
+
+  it("does not suppress item clicks after background rail interactions", () => {
+    const messages = textMessages(5);
+    const onNavigate = vi.fn();
+
+    render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={layoutSnapshot(messages)}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const rail = screen.getByLabelText("Conversation overview");
+    vi.spyOn(rail, "getBoundingClientRect").mockReturnValue({
+      bottom: 250,
+      height: 250,
+      left: 0,
+      right: 24,
+      top: 0,
+      width: 24,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(rail, {
+      button: 0,
+      clientY: 230,
+      pointerId: 7,
+    });
+    fireEvent.pointerUp(rail, {
+      pointerId: 7,
+    });
+    onNavigate.mockClear();
+
+    fireEvent.click(screen.getByLabelText(/Assistant response 2/));
+
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "message-2" }),
+    );
+  });
+
+  it("does not suppress later item clicks after an item-started drag releases off item", () => {
+    const messages = textMessages(5);
+    const onNavigate = vi.fn();
+
+    render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={layoutSnapshot(messages)}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const rail = screen.getByLabelText("Conversation overview");
+    vi.spyOn(rail, "getBoundingClientRect").mockReturnValue({
+      bottom: 250,
+      height: 250,
+      left: 0,
+      right: 24,
+      top: 0,
+      width: 24,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(screen.getByLabelText(/User prompt 1/), {
+      button: 0,
+      clientY: 10,
+      pointerId: 7,
+    });
+    fireEvent.pointerMove(rail, {
+      clientY: 230,
+      pointerId: 7,
+    });
+    fireEvent.pointerUp(rail, {
+      clientY: 230,
+      pointerId: 7,
+    });
+    onNavigate.mockClear();
+
+    fireEvent.click(screen.getByLabelText(/Assistant response 2/));
+
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "message-2" }),
+    );
+  });
+});
