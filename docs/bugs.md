@@ -7,50 +7,301 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Commit-failure rollback can leave terminal sessions marked as active turns
+## Delegation commands are coupled to browser-relative transport
 
-**Severity:** Medium - idle or error sessions can keep collecting active-turn file changes after persistence failure.
+**Severity:** Medium - the advertised MCP/internal command surface can fail outside the browser UI runtime.
 
-`src/session_lifecycle.rs:454` and `src/turn_lifecycle.rs:459` restore `active_turn_start_message_count` after the session has already been moved to a terminal `Idle` or `Error` state. `record_active_turn_file_changes` treats that field as the active-turn marker, so the rollback can leave terminal sessions collecting workspace changes as if a turn were still running.
-
-**Current behavior:**
-- Stop and runtime-failure paths finish active-turn tracking before `commit_locked()`.
-- On commit failure, the rollback restores active-turn markers but keeps the terminal session state.
-- Later workspace file-change recording can attach changes to a non-active session.
-
-**Proposal:**
-- Either roll back the whole terminal mutation on commit failure, or keep the terminal in-memory state and leave active-turn tracking cleared.
-- Keep `active_turn_start_message_count`, `active_turn_file_changes`, and `active_turn_file_change_grace_deadline` consistent with the session lifecycle state.
-
-## Marker navigation cache is cleared after initial refs populate
-
-**Severity:** Low - initial marker jumps bypass the intended slot cache and rely on DOM fallback lookup.
-
-`ui/src/panels/AgentSessionPanel.tsx:668` clears `messageSlotNodesRef` in a passive effect keyed by session id. Initial visible message refs register during commit, then the effect clears the map, so marker jumps for already-mounted rows fall through to `findMountedConversationMessageSlot`.
+`ui/src/delegation-commands.ts:6` imports the browser `api.ts` transport directly. That transport calls `fetch(path, ...)` with relative `/api/...` URLs, which works in same-origin browser code but not in a Node-based MCP wrapper unless another layer injects a base URL or monkey-patches fetch.
 
 **Current behavior:**
-- Initial visible message slot refs are inserted into `messageSlotNodesRef`.
-- The session-id effect clears the map after those refs register.
-- Marker navigation still works through fallback DOM lookup, but the cache is effectively disabled for initially mounted rows.
+- The command module comment says UI/MCP wrappers can bind to the delegation commands.
+- The implementation is hard-wired to the browser API client.
+- Non-browser wrappers do not get a transport/base-url boundary.
 
 **Proposal:**
-- Key cached slots by session id, or clear before new refs register.
-- Add regression coverage for duplicate panes and session-switching with overlapping message ids.
+- Define the command layer over an injected delegation transport or `baseUrl`/`fetch` adapter.
+- Keep the current `api.ts` binding as the browser adapter.
+- Add wrapper/runtime coverage for the non-browser command path.
 
-## Marker navigation fixes lack wrong-pane and session-switch regression coverage
+## Delegation waits do not enforce deadlines while status fetches are in flight
 
-**Severity:** Medium - the tests do not pin the behaviors fixed by the scoped lookup and session-id cache reset.
+**Severity:** Medium - `wait_delegations` can block past its advertised timeout and create sustained polling load.
 
-The current marker tests render only one panel and do not rerender the same panel across sessions with overlapping message ids. A future change could return to global slot lookup or stale `messageSlotNodesRef` entries while the existing tests still pass.
+`ui/src/delegation-commands.ts:214` awaits `Promise.all(fetchDelegationStatus(...))` before checking `timeoutMs`. If a status request stalls, the wait cannot return `timeout` at the deadline. The same polling shape also lacks an external cancellation or aggregate dedupe/concurrency guard across long-lived wrapper calls.
 
 **Current behavior:**
-- Marker navigation coverage does not include duplicate panels with the same message id.
-- Coverage does not rerender the same component from one session to another with overlapping ids.
-- Wrong-pane or stale-session scrolling could regress unnoticed.
+- The timeout is checked only after each status batch resolves.
+- A stalled status request can keep a wait alive past `timeoutMs`.
+- Multiple local wrapper calls can start overlapping long-running poll loops.
 
 **Proposal:**
-- Add React Testing Library cases for duplicate panels where only the target panel scrolls.
-- Add a same-component session-switch case that proves stale slot refs are not reused.
+- Thread `AbortSignal` or deadline-aware behavior through the delegation status transport.
+- Race each poll batch against the remaining timeout and return `timeout` when the deadline wins.
+- Add wrapper-level cancellation, dedupe, or concurrency limits; consider a batched backend status endpoint.
+
+## Marker stale-response guard uses non-monotonic time strings
+
+**Severity:** Medium - stale marker mutation recovery can suppress a needed repair across midnight.
+
+`ui/src/app-session-actions.ts:710` treats `current.updatedAt.localeCompare(response.updatedAt) > 0` as evidence that the current marker is newer than a stale mutation response. Backend marker timestamps are production-shaped `HH:MM:SS` strings rather than date-bearing monotonic versions, so `23:59:59` sorts after `00:01:00` even when it is older.
+
+**Current behavior:**
+- Exact marker equality is accepted as stale-success.
+- A lexically greater `updatedAt` string is also accepted as stale-success.
+- Across midnight, older marker state can look newer and block recovery.
+
+**Proposal:**
+- Do not use `updatedAt` as a version for stale-response gating.
+- Require exact marker equality for stale success, or add a monotonic marker version/full timestamp contract.
+- Add coverage with production-shaped `HH:MM:SS` timestamps across midnight.
+
+## Marker slot cache is cleared during render
+
+**Severity:** Low - render-phase ref mutation can affect the committed marker navigation cache under interrupted renders.
+
+`ui/src/panels/AgentSessionPanel.tsx:675` clears `messageSlotNodesRef` during render when `session.id` changes. React refs are mutable, so an interrupted concurrent render can mutate the cache used by the currently committed tree. Fallback DOM lookup masks many cases, but the cache exists specifically to keep marker jumps scoped and stable.
+
+**Current behavior:**
+- Session-id changes clear the marker slot map during render.
+- The committed tree can observe a cache mutation from an interrupted render.
+- DOM fallback often hides the issue but weakens the cache contract.
+
+**Proposal:**
+- Key cached slots by session id, or replace the cache in commit-phase logic.
+- Guard message-slot ref callbacks by session id so stale registrations cannot leak across sessions.
+
+## Blank delegation ids look like successful empty waits
+
+**Severity:** Low - wrapper input mistakes can be reported as successful no-op waits.
+
+`ui/src/delegation-commands.ts:197` returns a completed empty result when normalization removes every delegation id. The single-id path calls the same helper, so `waitDelegationCommand(parent, " ")` can resolve as `{ outcome: "completed", delegations: [] }` instead of rejecting invalid input.
+
+**Current behavior:**
+- Blank ids are trimmed away by normalization.
+- An all-empty wait returns `completed`.
+- Tool or wrapper input mistakes can look successful.
+
+**Proposal:**
+- Reject blank ids in the single-id wait command.
+- Reject all-empty batches for `waitDelegationsCommand`.
+- Add input-validation coverage for blank and all-empty id lists.
+
+## Delegation status commands expose full records
+
+**Severity:** Low - future wrapper surfaces can expose more delegation data than status/cancel/wait callers need.
+
+`ui/src/delegation-commands.ts:37` returns full `DelegationRecord` objects from status-style command results. Those records include prompt, cwd, and result fields. Status, cancel, and wait callers usually need summary-safe metadata, while full result details can remain behind `get_delegation_result`.
+
+**Current behavior:**
+- Status, cancel, and wait command results include full delegation records.
+- Future MCP wrappers would expose prompt/cwd/result data through broad status paths.
+- There is no redacted status-specific result shape.
+
+**Proposal:**
+- Return command-specific redacted summaries for status, cancel, and wait.
+- Keep full details behind `get_delegation_result`.
+- Add coverage proving status-style command packets omit sensitive/full-result fields.
+
+## Delegation `failedChecks` allow-list does not match the backend's `CommandStatus` vocabulary
+
+**Severity:** High - a `running` command captured at result-fetch time is silently bucketed into `failedChecks`, and four of the five "passing" labels never appear from the producer.
+
+`ui/src/delegation-commands.ts:323-329` (`isFailedDelegationCheck`) treats any status outside `["ok", "pass", "passed", "success", "successful"]` as a failed check. The backend `CommandStatus` enum (`src/wire.rs:730-743`) has only three variants — `Running`, `Success`, `Error` — serialized as `"running"`, `"success"`, `"error"`. `src/delegations.rs:1911` writes `status.label().to_owned()` directly into `DelegationCommandResult.status`. So `"success"` is the only overlap; `"running"` is misclassified as a failed check, and `"ok"`/`"pass"`/`"passed"`/`"successful"` are dead allow-list entries that never appear from the producer. Test fixtures (`"passed"` / `"failed"`) hide the mismatch.
+
+**Current behavior:**
+- Backend can emit `"running"`, `"success"`, `"error"` only.
+- Frontend allow-list overlaps only on `"success"`.
+- `"running"` commands captured at result-fetch time are reported as failed.
+- Tests use `"passed"` / `"failed"` strings the backend never emits.
+
+**Proposal:**
+- Either align the frontend allow-list with the backend's actual `CommandStatus::label` set (`"success"` only) and explicitly handle `"running"` as in-progress.
+- Or have the backend emit a structured `passed: bool` next to the status string so the wrapper does not maintain a string-matching policy that drifts from the producer.
+- Update the test fixtures to use realistic backend labels.
+
+## Asymmetric `orchestrator_auto_dispatch_blocked` between two persist-failure rollback sites
+
+**Severity:** Medium - an Error session can remain auto-dispatch-eligible after a runtime-exit commit failure while disk and memory disagree.
+
+`src/session_lifecycle.rs:449` defensively sets `record.orchestrator_auto_dispatch_blocked = true` on persist-failure rollback in the stop-session path. `src/turn_lifecycle.rs:455` does NOT mirror that defensive set in the runtime-exit rollback path, and the inner block at `turn_lifecycle.rs:413` has already explicitly cleared the flag to `false` before the failed `commit_locked`. Net effect: if the runtime-exit commit fails, the session in-memory state is `SessionStatus::Error` with the "Turn failed: …" message, but the orchestrator can still observe it as eligible for auto-dispatch.
+
+**Current behavior:**
+- `stop_session` rollback sets `orchestrator_auto_dispatch_blocked = true` defensively.
+- `handle_runtime_exit_if_matches` rollback leaves the flag at whatever the inner block last wrote (`false`).
+- An Error session with a failed persist commit can still be re-dispatched.
+- The new tests do not pin `orchestrator_auto_dispatch_blocked` in either rollback path.
+
+**Proposal:**
+- Either mirror the `session_lifecycle.rs` defensive set (`true`) in `turn_lifecycle.rs`, or document why the asymmetry is intentional.
+- Tighten the persist-failure tests to also pin `orchestrator_auto_dispatch_blocked`, `runtime`, `runtime_stop_in_progress`, and the "stopped/failed" message presence.
+
+## Delegation `failedChecks` derivation is client-side only and will drift between wrapper releases
+
+**Severity:** Medium - the `failedChecks` field is part of the public `DelegationResultPacket` but the backend never produced or owned it.
+
+`ui/src/delegation-commands.ts:46-58, 301-319` derives `failedChecks` from `commandsRun` via `isFailedDelegationCheck`. When this surface ships as MCP, the tool schema will document `failedChecks` as a returned field equal in stature to `commandsRun`, but two consumers using different wrapper releases will compute differently. If the backend later adds new status labels (e.g., `"warning"`, `"skipped"`), the policy silently drifts between releases without backend support.
+
+**Current behavior:**
+- `failedChecks` is computed in the frontend wrapper.
+- The wire shape (`DelegationResult.commands_run`) does not carry it.
+- Two wrapper versions can compute different `failedChecks` for the same backend response.
+
+**Proposal:**
+- Move the `failedChecks` derivation to the backend (`DelegationResult` in `src/wire.rs`) so the wire shape carries it directly.
+- Or remove `failedChecks` from `DelegationResultPacket` and let MCP callers do their own filtering against a documented status vocabulary.
+- Do not ship a derived field that the producer does not own.
+
+## `waitDelegationsCommand` JSDoc enumerates only one of four reject paths
+
+**Severity:** Medium - MCP wrappers writing JSON-RPC error translation will miss two named throw paths.
+
+`ui/src/delegation-commands.ts:1297-1303` documents only "Status fetch errors reject the promise" but `waitDelegationsCommand` actually rejects through four distinct paths: `RangeError` (validation block), `MismatchedDelegationIdError` (id-mismatch defensive guard), `MixedDelegationServerInstanceError` (server-instance change mid-wait), and the underlying `ApiRequestError` from `fetchDelegationStatus`. The named errors are exported and presumably stable, but the JSDoc does not mention them by name.
+
+**Current behavior:**
+- The JSDoc covers one of four reject paths.
+- Two exported error classes with stable shape are part of the public surface but unmentioned in the JSDoc.
+- MCP wrapper authors writing the JSON-RPC error translation table will need to read the source.
+
+**Proposal:**
+- Expand the JSDoc above `waitDelegationsCommand` to enumerate every reject path with a one-sentence description and the error class name.
+- Cross-reference the named errors so MCP wrappers know which fields are stable.
+
+## `WaitDelegationsOutcome` discards partial state when reject paths fire mid-poll
+
+**Severity:** Medium - `recordsById` already accumulates partial state at throw time; an `"error"` outcome would let callers surface useful state instead of re-wrapping.
+
+`ui/src/delegation-commands.ts:60-69, 1304-1418` declares `WaitDelegationsOutcome = "completed" | "timeout"` but the function has four other reject paths. When a fetch fails mid-loop, the partial `delegations` / `completed` / `pending` lists already accumulated in `recordsById` are discarded with the throw. Callers wanting partial-state recovery must wrap the call themselves; documentation says exactly that, but it forces every MCP integrator into the same wrapping shape.
+
+**Current behavior:**
+- Mid-poll fetch failure rejects the promise with the partial state lost.
+- Outcome union does not model the partial-error case.
+- Every consumer must wrap the call to preserve partial state.
+
+**Proposal:**
+- Add a third outcome variant (e.g., `"error"` with an `error: { name, message }` field plus the partial `delegations`/`completed`/`pending` lists already accumulated) and convert the polling-loop throws into outcome returns.
+- Keep `RangeError` validation throws as throws — they fire before any partial state exists.
+
+## `MixedDelegationServerInstanceError` direction labels can lie about which is current
+
+**Severity:** Medium - the "expected" / "received" labels reflect `Promise.all` arrival order, not revision causality, so a stale-then-current batch reverses the labels.
+
+`ui/src/delegation-commands.ts:226-238` updates `lastServerInstanceId` only when `response.revision > lastRevision`, but the mismatch check runs against every response. If the first response in a batch is stale (`server-b` at revision 3) and the second is current (`server-a` at revision 5), the loop sets `lastServerInstanceId = "server-b"` first and then throws `MixedDelegationServerInstanceError("server-b", "server-a")`. The error message reads "server instance changed during wait: server-b -> server-a" — the opposite direction from reality. An MCP wrapper translating this into a JSON-RPC response would tell the agent the server changed FROM the current instance TO the stale one.
+
+**Current behavior:**
+- `lastServerInstanceId` is the first response's instance id when revisions arrive out-of-order.
+- Mismatch error message claims a directional transition that may be the reverse of the truth.
+- Within a single concurrent `Promise.all` batch there is no causal ordering anyway.
+
+**Proposal:**
+- Pre-pass the responses to find the highest-revision `serverInstanceId` and use that as the canonical baseline before checking for mixed batches.
+- Or reword the error as "batch contained both X and Y" without claiming a direction.
+
+## Marker compare helpers re-allocate per render inside `useAppSessionActions`
+
+**Severity:** Low - `conversationMarkerExactlyMatches` and `conversationMarkerSatisfiesResponse` close over no hook state but live inside the hook body.
+
+`ui/src/app-session-actions.ts:680-713` defines two new pure helpers nested inside `useAppSessionActions`. They have no dependency on hook scope (closure-free), so the only effect of their inner placement is per-render reallocation and a small cohesion-with-hook signal that misleads readers into assuming they need the closure. The file is already 2392 lines and module-scope pure helpers are the standard "this carries no closure state" idiom.
+
+**Current behavior:**
+- Both helpers re-allocate on every render of every consumer of `useAppSessionActions`.
+- No identity stability is required by call sites today; no rendering bug.
+
+**Proposal:**
+- Move both helpers to module scope above `useAppSessionActions`.
+- Pure code move, no signature change, identical call sites.
+
+## Delegation wait error classes lack discriminated union for callers
+
+**Severity:** Low - `MismatchedDelegationIdError` and `MixedDelegationServerInstanceError` force callers into `instanceof` chains or `name` string-matching.
+
+`ui/src/delegation-commands.ts:76-97` exports two error classes that capture distinct, recoverable conditions (delegation id swap vs server restart mid-wait). Callers wanting to distinguish them must either `instanceof`-check on each class (cross-module coupling) or match `error.name` strings. A tagged union or shared base class with a `kind: "mismatched-id" | "mixed-instance"` discriminator would compose better with `WaitDelegationsResult.outcome`.
+
+**Current behavior:**
+- Two exported classes; no shared discriminator.
+- Callers learn two error-handling shapes for the same operation.
+- The throw-vs-result split forces consumers to maintain two separate error-handling paths for one logical surface.
+
+**Proposal:**
+- Introduce a `DelegationWaitError` base class with a `kind` discriminator field, or expose a tagged union type (`WaitDelegationError = { kind: "mismatched-id"; ... } | { kind: "mixed-instance"; ... }`).
+- Or fold these conditions into `WaitDelegationsOutcome` variants and stop throwing at the boundary.
+- Defer until the first real consumer exists.
+
+## Delegation error classes lack `Object.setPrototypeOf` for cross-realm `instanceof`
+
+**Severity:** Low - the new error classes do not call `Object.setPrototypeOf(this, new.target.prototype)` like sibling `ApiRequestError` does.
+
+`ui/src/delegation-commands.ts:76-98` defines `MismatchedDelegationIdError` and `MixedDelegationServerInstanceError` without the prototype-restore pattern that `ApiRequestError` in `api.ts:471` uses. For an MCP wrapper boundary that re-instantiates objects across transports/realms (e.g., a JSON-RPC payload that reconstructs Error subclasses on the other side), `instanceof` checks may be unreliable. The structured fields (`requestedId`, `receivedId`, `expectedServerInstanceId`, `receivedServerInstanceId`) ARE own enumerable properties and JSON-serialize correctly, but `instanceof` at the catch site can fail.
+
+**Current behavior:**
+- Constructors do not restore `new.target.prototype`.
+- `ApiRequestError` (`api.ts:471`) uses the standard pattern.
+- Cross-realm `instanceof MismatchedDelegationIdError` may be unreliable when the wrapper bridges runtimes.
+
+**Proposal:**
+- Add `Object.setPrototypeOf(this, new.target.prototype)` to both constructors.
+- Document the JSON-serialized field shape so MCP integrators know what survives the transport.
+
+## Composed wait-command rate limits allow ~200 RPS for 30 minutes per call
+
+**Severity:** Low - `MAX_IDS=20 × (1000ms / MIN_INTERVAL_100ms) = 200 fetches/sec` for `MAX_TIMEOUT=30 min = 360,000 fetches per wait call`.
+
+`ui/src/delegation-commands.ts:24-26` defines `MIN_DELEGATION_WAIT_INTERVAL_MS = 100`, `MAX_DELEGATION_WAIT_TIMEOUT_MS = 30 * 60 * 1000`, `MAX_DELEGATION_WAIT_IDS = 20`. The values are reasonable individually but their composition is not — a single caller can sustain ~200 RPS for 30 minutes. There is no per-process concurrency cap on outstanding wait calls. Phase-1 single-user is fine, but the file's header explicitly stages this surface for an external MCP wrapper, where these limits become attacker-relevant.
+
+**Current behavior:**
+- No documentation of the composed budget.
+- No per-process concurrency limit on outstanding wait calls.
+- MCP wrapper exposing this would let external callers sustain ~200 RPS / call.
+
+**Proposal:**
+- Document the budget composition near the constants.
+- When the MCP wrapper lands, gate this surface behind a per-process concurrency limit and/or a higher minimum interval for non-UI callers.
+- Consider a server-side rate limit on the status endpoint.
+
+## `marker.color` is written to a CSS custom property without client-side validation
+
+**Severity:** Low - React's `setProperty` for CSS variables bypasses normal style sanitization; persisted color drift could become a vector for resource interpolation.
+
+`ui/src/panels/conversation-markers.tsx:171` does `style={{"--conversation-marker-color": marker.color} as CSSProperties}`. React forwards CSS custom properties via `el.style.setProperty`, which (unlike standard style sanitization) accepts arbitrary strings. Today the variable is consumed only for chip swatch fill (browser silently drops malformed values), but if any future consumer interpolates it into `background-image: url(var(--conversation-marker-color))` the channel becomes a vector. Marker colors are persisted in `~/.termal/sessions.json` (plain editable file) and broadcast in SSE deltas — currently single-user, but the field is also part of `conversationMarkerExactlyMatches` (which compares them strictly) so a tampered color causes spurious "differs" results.
+
+**Current behavior:**
+- `marker.color` flows into a CSS custom property without an allow-list.
+- Today's CSS consumer is benign (chip fill).
+- Persisted file tampering or future cross-tenant use would pass through unchecked.
+
+**Proposal:**
+- Validate `marker.color` against a CSS hex/rgb/named-color allow-list at the persistence boundary (server) and ideally also at SSE-adoption (client).
+- Apply the same allow-list when comparing markers so a tampered color normalizes rather than driving a `false` equality result.
+
+## `wait_delegation` vs `wait_delegations` MCP-surface naming asymmetry
+
+**Severity:** Low - `delegationCommands` exposes both as snake_case keys; calling agents will see two near-identical-named tools and have to disambiguate.
+
+`ui/src/delegation-commands.ts:280-287` exposes `spawn_delegation`, `get_delegation_status`, `get_delegation_result`, `cancel_delegation` (all singular), plus `wait_delegation` (singular wrapper) AND `wait_delegations` (batch). MCP tool surfaces tend to favor consistent verb-noun naming. If both end up exposed as separate MCP tools, calling agents see two near-identical tools.
+
+**Current behavior:**
+- `wait_delegation` is a one-line passthrough to `wait_delegations` with a single id.
+- Both are exposed in the public `delegationCommands` table.
+- An MCP wrapper binding both would offer near-identical tools to calling agents.
+
+**Proposal:**
+- Decide whether the singular wrapper actually needs to be a separate MCP tool, or if it's a TS convenience that should not be in `delegationCommands`.
+- If both must be MCP tools, give them distinguishable names (e.g., `wait_for_delegation` / `wait_for_all_delegations`).
+- Defer until the MCP wrapper landing decides which surface to bind.
+
+## `CreateDelegationRequest` optional fields silently accept undefined
+
+**Severity:** Low - the type is now exported and used by the future MCP tool's argument shape; defaults need JSDoc.
+
+`ui/src/api.ts:419-434` exports `CreateDelegationRequest` with `prompt: string` plus several optional fields (`title`, `cwd`, `agent`, `model`, `mode`, `writePolicy`). Several have meaningful backend defaults (e.g., `agent` defaults to parent session's agent, `mode` defaults to `"reviewer"`). MCP tool descriptions need to advertise these defaults; today the type signature is silent.
+
+**Current behavior:**
+- Optional fields silently accept undefined.
+- The MCP tool's argument-shape advertisement will be missing default semantics.
+- A misbehaving caller passing `agent: null` (legal JSON, not undefined) may produce a backend request body containing `"agent": null`.
+
+**Proposal:**
+- Document each optional field's default behavior in JSDoc on `CreateDelegationRequest`.
+- Either tighten the type to forbid `null` (not just `undefined`) or add a runtime guard in `spawnDelegationCommand` that strips `undefined` keys before sending.
 
 ## Mermaid fallback test does not assert the fallback bundle URL
 
@@ -66,21 +317,6 @@ The current marker tests render only one panel and do not rerender the same pane
 **Proposal:**
 - Capture the appended script element and assert its `src` is the expected Mermaid bundle URL.
 - Simulate `onload` only after the URL assertion passes.
-
-## Marker navigator logic is embedded in AgentSessionPanel
-
-**Severity:** Low - marker grouping, sorting, DOM lookup, navigation state, and chip rendering are growing an already large panel component.
-
-`ui/src/panels/AgentSessionPanel.tsx:653` now hosts a distinct marker navigator/chip subsystem. The file is past the architecture review threshold, and the marker navigation feature has a clear extraction boundary with its own state, helpers, DOM lookup, and tests.
-
-**Current behavior:**
-- Marker navigator logic lives directly in `AgentSessionPanel.tsx`.
-- The panel owns marker grouping, sorting, DOM slot lookup, navigation state, and rendering.
-- Future marker UI changes are coupled to the broader session panel.
-
-**Proposal:**
-- Extract a focused conversation-marker panel/helper module.
-- Move marker-specific tests next to that module while leaving `AgentSessionPanel` to wire data and callbacks.
 
 ## Conversation overview segment cap does not bound homogeneous runs
 
@@ -420,10 +656,6 @@ A future fourth recovery branch would need to update three sites; collapsing int
 **Proposal:**
 - Add a regression that triggers a watchdog wake-gap reconnect (no parse/reducer error), receives a same-instance progressed `/api/state` snapshot, advances `RECONNECT_STATE_RESYNC_MAX_DELAY_MS`, and asserts `countStateFetches()` did not increment.
 
-
-
-
-
 ## `app-live-state.ts` reconnect state machine continues to grow
 
 **Severity:** Low - `ui/src/app-live-state.ts:2504 lines`. TS utility threshold (1500) exceeded; new `pendingBadLiveEventRecovery` adds another flag-shaped piece of reconnect bookkeeping. The reconnect/resync state machine inside `useEffect` now coordinates 6+ pieces of cross-cutting state.
@@ -431,7 +663,6 @@ A future fourth recovery branch would need to update three sites; collapsing int
 **Proposal:**
 - Extract a `ReconnectStateMachine` (or similar) module that owns the flag set + transitions and exposes named events (`onSseError`, `onSseReopen`, `onBadLiveEvent`, `onSnapshotAdopted`, `onLiveEventConfirmed`).
 - Defer to a pure code-move commit per CLAUDE.md.
-
 
 ## `select_visible_session_hydration_fallback_error` lacks integration coverage
 
@@ -610,7 +841,6 @@ The adjacent `App.live-state.*.test.tsx` split (April 20) is the precedent for p
 **Proposal:**
 - Pure code move: extract into `AgentSessionPanel.composer.test.tsx`, `AgentSessionPanel.scroll.test.tsx`, `AgentSessionPanel.resize.test.tsx` (matching the App.live-state cluster shape).
 - Defer to a dedicated split commit; do not couple with feature changes.
-
 
 ## `src/tests/remote.rs` past the 5,000-line review threshold
 
@@ -930,7 +1160,6 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
 - Alternative: batch-measurement pass when the virtualization window shifts — hide the wrapper briefly, mount the newly-entering cards, wait for all their measurements, then reveal.
 - Not: raise the estimator cap. Large overshoots trade one visible artifact for a worse one.
 
-
 ## Hard kill (SIGKILL, power loss) can still lose the last un-drained persist write
 
 **Severity:** Low - restarting the backend process while the browser tab is still open can make the most recent assistant message disappear from the UI, because the persist thread has a small window between "commit fires" and "row is durably in SQLite" during which an un-drained mutation is lost on kill.
@@ -985,6 +1214,18 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
+- [ ] P2: Add delegation command transport-adapter coverage:
+  exercise the command layer through an injected absolute-url or mock transport path so future MCP/internal wrappers are not coupled to browser-relative `/api` fetches.
+- [ ] P2: Add deadline and cancellation coverage for delegation waits:
+  simulate a stalled status fetch and assert the wait returns `timeout` at the advertised deadline; also cover cancellation or dedupe behavior for overlapping waits.
+- [ ] P2: Add marker stale-response timestamp coverage:
+  use production-shaped `HH:MM:SS` marker timestamps around midnight and assert stale mutation responses cannot suppress a needed marker repair.
+- [ ] P2: Add marker cache commit-phase regression coverage:
+  cover session switching or interrupted-render-like cache replacement so marker slot registrations cannot mutate the committed session's cache during render.
+- [ ] P2: Add blank delegation id validation coverage:
+  assert single-id blank waits and all-empty wait batches reject invalid input instead of returning a completed empty result.
+- [ ] P2: Add delegation status redaction coverage:
+  assert status, cancel, and wait command results return summary-safe delegation fields and reserve full prompt/cwd/result details for `get_delegation_result`.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
 - [ ] P2: Add equal-revision gap repair snapshot adoption coverage:
@@ -1029,15 +1270,25 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `ui/src/backend-connection.test.tsx:1225-1261` co-fires the stale `delta` and the `workspaceFilesChanged` event in one `act()`. The assertion `countStateFetches() === hydratedStateFetchCount` is satisfied if either side skips confirmation, so the test cannot pinpoint which side regressed. Dispatch `workspaceFilesChanged` alone first and assert no fetch fired; then add the stale delta separately and re-assert.
 - [ ] P2: Add frontend stop/failure delta-before-snapshot terminal-message coverage:
   dispatch cancellation/update deltas before the same-revision snapshot and assert appended stop/failure terminal messages remain rendered without relying on a later unrelated refresh.
-- [ ] P2: Add active-turn commit-failure rollback coverage:
-  force `commit_locked()` to fail after stop/runtime terminalization and assert terminal sessions do not retain active-turn file-change tracking markers.
 - [ ] P2: Add homogeneous conversation-overview segment cap coverage:
   build a long same-kind message run with `maxItemsPerSegment` set and assert the segment policy is either capped or explicitly documented as a mixed-run-only cap.
-- [ ] P2: Add marker navigation duplicate-pane and session-switch regressions:
-  render duplicate panels with overlapping message ids and rerender one panel across sessions, then assert marker jumps scroll only the intended panel and stale slot refs are not reused.
 - [ ] P2: Assert the Mermaid fallback bundle URL in the fallback test:
   capture the appended script before simulating load and require its `src` to match the expected Mermaid bundle URL.
-- [ ] P2: Make marker hover toolbar reachable on touch-only devices (`ui/src/styles.css:3920-3935`):
-  toolbar is `pointer-events: none` until hover/focus-within. Touch-only devices without a hover state cannot reveal the "Add checkpoint marker" button. Toolbar can be tab-reached after the user lands on something focusable inside the message; flag if Phase 1 wants touch parity. Add a long-press or always-visible mode for touch.
-- [ ] P2: Add `shouldApplyMarkerMutationResponse` call sites for update + delete in `ui/src/app-session-actions.ts:653-684`:
-  the helper is helpfully extracted but only consumed by `handleCreateConversationMarker`. There is no `handleUpdateConversationMarker`/`handleDeleteConversationMarker` in this file (only `api.ts` exposes those). When marker update/delete UI is wired in, the gating helper exists but the new entry points must remember to use it. Add a TODO comment near the helper, or land the update/delete handlers immediately so the gate is applied uniformly.
+- [ ] P2: Replace exact-error-string assertions in `delegation-commands.test.ts` with type/property assertions:
+  `delegation-commands.test.ts:991-1009, 1018-1031, 1046, 1077` use full-string substring matches against the typed errors' message templates. Use `.rejects.toBeInstanceOf(MismatchedDelegationIdError)` plus `.requestedId`/`.receivedId` assertions; for `RangeError`s, prefer prefix-matching regex so wording polish does not break the suite.
+- [ ] P2: Replace `function scrollIntoView() { ... = this; }` capture pattern in `AgentSessionPanel.test.tsx`:
+  `AgentSessionPanel.test.tsx:1515, 1568, 1680` rely on `this`-binding inside a method-form function. Future swc/esbuild config that arrow-rewrites methods or any "use strict" tightening would silently break the capture. Use `vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) { scrolledNode = this; })` and rely on `mockRestore()` to clean up.
+- [ ] P2: Tighten `expectRequestErrorDeferredUpdatesOnly` to assert deferred-update payloads:
+  `app-session-actions.test.ts:158-172` checks shape (every call is a function, never null) but never invokes the deferred functions. A regression where the deferred function returns a stale or `null` next state would still pass. Invoke each captured updater with a fixed `prev` and assert the resulting next state.
+- [ ] P2: Scope marker-chip clicks via `within(navigator | messageCard)` instead of `getAllByRole(...)[0]`:
+  `AgentSessionPanel.test.tsx:412-416, 531-535` couple the click target to chip-render order across rail and per-message duplicates. Use `within(...)` to pin which chip dispatches the jump.
+- [ ] P2: Reset the composer-store explicitly in the session-switch marker test:
+  the new `keeps marker jumps working after switching sessions with the same message ids` test calls `syncComposerSessionsStore` with `[secondSession]` and never resets it. Add a `finally`-block reset (or assert the file's existing `afterEach` already does so) so a later test in the same file cannot observe `[secondSession]` from this test.
+- [ ] P2: Replace `timeoutMs: 1` in the `times out without canceling` delegation test:
+  `delegation-commands.test.ts:953-984` uses a 1ms timeout coupled tightly to internal `delay()` arithmetic. A future `Math.max(remainingMs, somePositiveFloor)` would silently turn timeout into completion. Use a more representative timeout (e.g., `MIN_DELEGATION_WAIT_INTERVAL_MS * 3`) and have the responses keep returning `running` while advancing timers in steps until the deadline elapses.
+- [ ] P2: Add doc-comment to `clear_active_turn_file_change_tracking` enumerating callers and intent:
+  the helper is now shared across normal-completion sites (`src/session_interaction.rs`, `src/state_accessors.rs`, etc.) and the two new persist-failure rollback sites (`src/session_lifecycle.rs:450`, `src/turn_lifecycle.rs:455`). A future "preserve grace deadline" tweak motivated by one purpose would silently change the other. Document the unconditional-wipe contract so readers see both intents.
+- [ ] P2: Add direct unit coverage for unscoped-root behavior of `findMountedConversationMessageSlot`:
+  `conversation-markers.test.ts:54-77` proves root-scoped lookup but does not assert the default-root (`document`) call. Add a third assertion exercising `findMountedConversationMessageSlot("message-1")` with no root argument to pin the document-scoped contract.
+- [ ] P2: Add Rust persist-failure rollback negative-coverage tests:
+  `src/tests/session_stop.rs:560`, `src/tests/session_stop_runtime.rs:897` only cover the failure path. Add a sibling test that runs the same setup with succeeding persistence and asserts the post-stop record retains its expected (non-cleared) fields, proving the cleanup is gated on the failure branch and that the helper is not unconditionally clearing on every commit.

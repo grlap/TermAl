@@ -379,6 +379,219 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
+  it("jumps to the cached marker slot when scroll-root lookup cannot see the panel", () => {
+    let scrolledNode: Element | null = null;
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function scrollIntoView() {
+      scrolledNode = this;
+    };
+    const detachedScrollRoot = document.createElement("section");
+    const onConversationSearchItemMount = vi.fn();
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(1),
+      markers: [
+        makeConversationMarker({
+          id: "marker-1",
+          messageId: "message-1",
+          name: "Cached target",
+        }),
+      ],
+    });
+
+    try {
+      renderSessionPanelWithDefaults({
+        activeSession,
+        scrollContainerRef: { current: detachedScrollRoot },
+        onConversationSearchItemMount,
+      });
+      expect(onConversationSearchItemMount).toHaveBeenCalledWith(
+        "message:message-1",
+        expect.any(HTMLElement),
+      );
+
+      fireEvent.click(
+        screen.getAllByRole("button", {
+          name: "Jump to Decision marker Cached target",
+        })[0],
+      );
+
+      const node = scrolledNode as unknown;
+      expect(node).toBeInstanceOf(HTMLElement);
+      if (!(node instanceof HTMLElement)) {
+        throw new Error("Expected marker jump to scroll a mounted HTMLElement");
+      }
+      expect(node.getAttribute("data-session-search-item-key")).toBe(
+        "message:message-1",
+      );
+    } finally {
+      if (originalScrollIntoView) {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      } else {
+        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      }
+    }
+  });
+
+  it("keeps marker jumps working after switching sessions with the same message ids", () => {
+    let scrolledText = "";
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function scrollIntoView() {
+      scrolledText = this.textContent ?? "";
+    };
+    const detachedScrollRoot = document.createElement("section");
+    const firstSession = makeSession("session-a", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "assistant",
+          text: "Session A message",
+        },
+      ],
+      markers: [
+        makeConversationMarker({
+          id: "marker-a",
+          messageId: "message-1",
+          name: "Session A marker",
+          sessionId: "session-a",
+        }),
+      ],
+    });
+    const secondSession = makeSession("session-b", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "assistant",
+          text: "Session B message",
+        },
+      ],
+      markers: [
+        makeConversationMarker({
+          id: "marker-b",
+          messageId: "message-1",
+          name: "Session B marker",
+          sessionId: "session-b",
+        }),
+      ],
+    });
+
+    try {
+      const rendered = renderSessionPanelWithDefaults({
+        activeSession: firstSession,
+        scrollContainerRef: { current: detachedScrollRoot },
+        renderMessageCard: (message) => (
+          <article className="message-card">
+            {message.type === "text" ? message.text : message.id}
+          </article>
+        ),
+      });
+      act(() => {
+        syncComposerSessionsStore({
+          sessions: [secondSession],
+          draftsBySessionId: {},
+          draftAttachmentsBySessionId: {},
+        });
+      });
+      rendered.rerender(
+        <AgentSessionPanel
+          paneId="pane-1"
+          viewMode="session"
+          activeSessionId="session-b"
+          isLoading={false}
+          isUpdating={false}
+          showWaitingIndicator={false}
+          waitingIndicatorPrompt={null}
+          commandMessages={[]}
+          diffMessages={[]}
+          scrollContainerRef={{ current: detachedScrollRoot }}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+          onCancelQueuedPrompt={() => {}}
+          onSessionSettingsChange={() => {}}
+          conversationSearchQuery=""
+          conversationSearchMatchedItemKeys={new Set()}
+          conversationSearchActiveItemKey={null}
+          onConversationSearchItemMount={() => {}}
+          renderCommandCard={() => null}
+          renderDiffCard={() => null}
+          renderMessageCard={(message) => (
+            <article className="message-card">
+              {message.type === "text" ? message.text : message.id}
+            </article>
+          )}
+          renderPromptSettings={() => null}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getAllByRole("button", {
+          name: "Jump to Decision marker Session B marker",
+        })[0],
+      );
+
+      expect(scrolledText).toContain("Session B message");
+    } finally {
+      if (originalScrollIntoView) {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      } else {
+        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      }
+    }
+  });
+
+  it("scopes marker fallback lookup to the active panel scroll root", () => {
+    let scrolledText = "";
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function scrollIntoView() {
+      scrolledText = this.textContent ?? "";
+    };
+    const leftRoot = document.createElement("section");
+    const rightRoot = document.createElement("section");
+    leftRoot.innerHTML =
+      '<article data-session-search-item-key="message:shared">left pane</article>';
+    rightRoot.innerHTML =
+      '<article data-session-search-item-key="message:shared">right pane</article>';
+    document.body.append(leftRoot, rightRoot);
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(1),
+      markers: [
+        makeConversationMarker({
+          id: "marker-1",
+          messageId: "shared",
+          name: "Fallback target",
+        }),
+      ],
+    });
+
+    try {
+      renderSessionPanelWithDefaults({
+        activeSession,
+        scrollContainerRef: { current: rightRoot },
+      });
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Jump to Decision marker Fallback target",
+        }),
+      );
+
+      expect(scrolledText).toBe("right pane");
+    } finally {
+      if (originalScrollIntoView) {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      } else {
+        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      }
+      leftRoot.remove();
+      rightRoot.remove();
+    }
+  });
+
   it("dispatches checkpoint marker creation from a message toolbar", () => {
     const onCreateConversationMarker = vi.fn();
     const activeSession = makeSession("session-1", {

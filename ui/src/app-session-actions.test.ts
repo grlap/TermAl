@@ -158,6 +158,17 @@ function makeSessionActionsParams(
   };
 }
 
+function expectRequestErrorDeferredUpdatesOnly(
+  setRequestError: Parameters<
+    typeof useAppSessionActions
+  >[0]["setters"]["setRequestError"],
+) {
+  const calls = vi.mocked(setRequestError).mock.calls;
+  expect(setRequestError).not.toHaveBeenCalledWith(null);
+  expect(calls.length).toBeGreaterThan(0);
+  expect(calls.every(([next]) => typeof next === "function")).toBe(true);
+}
+
 describe("useAppSessionActions", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -548,7 +559,7 @@ describe("useAppSessionActions", () => {
       allowUnknownServerInstance: true,
     });
     expect(params.forceSseReconnect).not.toHaveBeenCalled();
-    expect(params.setters.setRequestError).not.toHaveBeenCalledWith(null);
+    expectRequestErrorDeferredUpdatesOnly(params.setters.setRequestError);
   });
 
   it("recovers stale same-instance marker success when local marker evidence is behind", async () => {
@@ -604,7 +615,7 @@ describe("useAppSessionActions", () => {
       allowUnknownServerInstance: true,
     });
     expect(params.forceSseReconnect).not.toHaveBeenCalled();
-    expect(params.setters.setRequestError).not.toHaveBeenCalledWith(null);
+    expectRequestErrorDeferredUpdatesOnly(params.setters.setRequestError);
   });
 
   it("forces SSE reconnect when marker success comes from a new server instance", async () => {
@@ -717,6 +728,60 @@ describe("useAppSessionActions", () => {
     expect(params.setters.setRequestError).toHaveBeenCalledWith(null);
   });
 
+  it("recovers stale same-instance marker update when local marker data does not match", async () => {
+    const marker = makeConversationMarker({
+      updatedAt: "2026-05-01 10:00:00",
+    });
+    const updatedMarker = makeConversationMarker({
+      kind: "bug",
+      name: "Bug marker",
+      color: "#ef4444",
+      updatedAt: "2026-05-01 10:01:00",
+    });
+    const session = makeSession("session-1", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          text: "Decision point",
+          timestamp: "10:00",
+        },
+      ],
+      markers: [marker],
+      sessionMutationStamp: 7,
+    });
+    vi.spyOn(api, "updateConversationMarker").mockResolvedValue({
+      marker: updatedMarker,
+      revision: 6,
+      serverInstanceId: "server-a",
+      sessionMutationStamp: 6,
+    });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[session.id, session]]);
+    params.refs.sessionsRef.current = [session];
+    params.refs.latestStateRevisionRef.current = 7;
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleUpdateConversationMarker("session-1", "marker-1", {
+        kind: "bug",
+        name: "Bug marker",
+        color: "#ef4444",
+      }),
+    ).resolves.toBe(false);
+
+    expect(params.refs.sessionsRef.current[0].markers).toEqual([marker]);
+    expect(params.refs.sessionsRef.current[0].sessionMutationStamp).toBe(7);
+    expect(params.requestActionRecoveryResync).toHaveBeenCalledWith({
+      openSessionId: "session-1",
+      paneId: null,
+      allowUnknownServerInstance: true,
+    });
+    expect(params.forceSseReconnect).not.toHaveBeenCalled();
+    expectRequestErrorDeferredUpdatesOnly(params.setters.setRequestError);
+  });
+
   it("deletes conversation markers through the guarded marker response path", async () => {
     const marker = makeConversationMarker();
     const session = makeSession("session-1", {
@@ -801,6 +866,53 @@ describe("useAppSessionActions", () => {
     expect(params.requestActionRecoveryResync).not.toHaveBeenCalled();
     expect(params.forceSseReconnect).not.toHaveBeenCalled();
     expect(params.setters.setRequestError).toHaveBeenCalledWith(null);
+  });
+
+  it("recovers stale same-instance marker delete success when the marker is still present", async () => {
+    const marker = makeConversationMarker();
+    const sessionAtClick = makeSession("session-1", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          text: "Decision point",
+          timestamp: "10:00",
+        },
+      ],
+      markers: [marker],
+      sessionMutationStamp: 5,
+    });
+    const liveSession = {
+      ...sessionAtClick,
+      markers: [marker],
+      sessionMutationStamp: 7,
+    };
+    vi.spyOn(api, "deleteConversationMarker").mockResolvedValue({
+      markerId: "marker-1",
+      revision: 6,
+      serverInstanceId: "server-a",
+      sessionMutationStamp: 6,
+    });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[sessionAtClick.id, sessionAtClick]]);
+    params.refs.sessionsRef.current = [liveSession];
+    params.refs.latestStateRevisionRef.current = 7;
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleDeleteConversationMarker("session-1", "marker-1"),
+    ).resolves.toBe(false);
+
+    expect(params.refs.sessionsRef.current[0].markers).toEqual([marker]);
+    expect(params.refs.sessionsRef.current[0].sessionMutationStamp).toBe(7);
+    expect(params.requestActionRecoveryResync).toHaveBeenCalledWith({
+      openSessionId: "session-1",
+      paneId: null,
+      allowUnknownServerInstance: true,
+    });
+    expect(params.forceSseReconnect).not.toHaveBeenCalled();
+    expectRequestErrorDeferredUpdatesOnly(params.setters.setRequestError);
   });
 
   it("forces SSE reconnect when marker delete success comes from a new server instance", async () => {

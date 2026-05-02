@@ -416,7 +416,7 @@ type CreateSessionRequest = {
   geminiApprovalMode?: GeminiApprovalMode;
 };
 
-type CreateDelegationRequest = {
+export type CreateDelegationRequest = {
   prompt: string;
   title?: string;
   cwd?: string;

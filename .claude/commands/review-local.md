@@ -2,6 +2,8 @@ Review staged and unstaged changes using multiple specialized reviewers.
 
 **IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. All other git commands (diff, status, stash, add, etc.) may be executed freely.**
 
+**IMPORTANT: This command is review-only. Do NOT attempt to fix any bugs, edit source files, edit tests, run formatters that modify files, or otherwise change implementation code. The only allowed file update is `docs/bugs.md` in Step 6. If the review finds anything of any severity, `docs/bugs.md` MUST be updated in the same run to record or reconcile those findings.**
+
 ## Step 1: Build check
 
 Run `cargo check` to ensure the Rust backend compiles.
@@ -35,6 +37,10 @@ For each reviewer found in Step 3, launch a **Task agent** (subagent_type: gener
 
 ```
 You are a code reviewer focusing on: [REVIEWER NAME]
+
+This is a review-only task. Do NOT attempt to fix any bugs or edit any files.
+Your job is to identify issues and propose follow-up work for the main reviewer
+to record in docs/bugs.md.
 
 ## Your Review Instructions
 [CONTENT OF THE REVIEWER .md FILE]
@@ -81,7 +87,7 @@ Return your findings as a structured list:
 For each issue found:
 - **[SEVERITY: Critical/High/Medium/Low/Note]** `file:line` — Description of the issue
   - Why it matters: [explanation]
-  - Suggested fix: [if applicable]
+  - Suggested fix direction: [if applicable; do not implement it]
 
 If no issues found, say "No issues found."
 
@@ -117,11 +123,11 @@ After all reviewers complete, merge their findings into a single review note:
 
 Deduplicate: if two reviewers flag the same issue, merge them (note which reviewers caught it).
 
-Present the consolidated note directly to the user (do NOT write it to a file unless asked).
+Present the consolidated note directly to the user. Do NOT write the review note to a separate file.
 
 ## Step 6: Update `docs/bugs.md`
 
-After presenting the review to the user, update `docs/bugs.md` to reflect the findings. Read the file first to understand the current structure, then apply these three operations:
+After presenting the review to the user, update `docs/bugs.md` to reflect the findings. Do not modify any other file. If any reviewer found any issue, observation, test gap, or note of any severity, `docs/bugs.md` MUST be updated before the command is complete. Read the file first to understand the current structure, then apply these three operations:
 
 ### 6a. Remove resolved bugs
 
@@ -149,6 +155,8 @@ For each finding from the review (any severity: Critical, High, Medium, Low, or 
 - [bullet points describing the recommended fix]
 ```
 
+If a finding is already tracked in `docs/bugs.md`, do not create a duplicate. Update the existing bug entry or task item as needed to reflect the current review evidence, affected files, severity, or proposal. Do not leave `docs/bugs.md` unchanged when the review found something.
+
 ### 6c. Add or update task list items
 
 For **test gaps and coverage improvements** identified by the review, add P2 task items to the Implementation Tasks section. Match the existing format:
@@ -162,5 +170,5 @@ Remove any task items that the reviewed changes have completed (e.g., if a test 
 
 ### 6d. Skip if clean
 
-If the review found no actionable findings (no new bugs, no resolved bugs, no new tasks), do NOT touch bugs.md. Tell the user "bugs.md is up to date — no changes needed."
+Only skip `docs/bugs.md` when the review found no issues, no observations, no notes, no test gaps, no resolved active bugs, and no completed tasks. Tell the user "bugs.md is up to date — no changes needed."
 

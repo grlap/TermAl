@@ -1061,6 +1061,16 @@ describe("delegation delta repair", () => {
     });
     expect(fetchState).toHaveBeenCalledTimes(1);
     expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(3);
+    expect(setBackendConnectionState).toHaveBeenLastCalledWith("reconnecting");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchState).toHaveBeenCalledTimes(2);
+    expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(4);
+    expect(setBackendConnectionState).toHaveBeenLastCalledWith("reconnecting");
 
     act(() => {
       eventSource?.dispatchNamedEvent("delta", {
@@ -1075,7 +1085,7 @@ describe("delegation delta repair", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(fetchState).toHaveBeenCalledTimes(2);
+    expect(fetchState).toHaveBeenCalledTimes(3);
     expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(4);
     expect(setBackendConnectionState).toHaveBeenLastCalledWith("connected");
 
@@ -1085,7 +1095,7 @@ describe("delegation delta repair", () => {
       await Promise.resolve();
     });
 
-    expect(fetchState).toHaveBeenCalledTimes(2);
+    expect(fetchState).toHaveBeenCalledTimes(3);
   });
 });
 

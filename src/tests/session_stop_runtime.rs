@@ -894,7 +894,7 @@ fn fail_turn_if_runtime_matches_publishes_error_state_when_persist_fails() {
 }
 
 #[test]
-fn runtime_exit_restores_active_turn_file_tracking_when_persist_fails() {
+fn runtime_exit_clears_active_turn_file_tracking_when_persist_fails() {
     let mut state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
     let (runtime, _input_rx) =
@@ -935,11 +935,11 @@ fn runtime_exit_restores_active_turn_file_tracking_when_persist_fails() {
         .iter()
         .find(|record| record.session.id == session_id)
         .expect("Claude session should exist");
-    assert_eq!(record.active_turn_start_message_count, Some(0));
-    assert_eq!(
-        record.active_turn_file_changes.get("src/runtime.rs"),
-        Some(&WorkspaceFileChangeKind::Modified)
-    );
+    assert_eq!(record.session.status, SessionStatus::Error);
+    assert!(record.session.preview.contains("runtime crashed"));
+    assert!(record.active_turn_start_message_count.is_none());
+    assert!(record.active_turn_file_changes.is_empty());
+    assert!(record.active_turn_file_change_grace_deadline.is_none());
     drop(inner);
 
     let _ = fs::remove_dir_all(failing_persistence_path);

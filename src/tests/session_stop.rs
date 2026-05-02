@@ -557,7 +557,7 @@ fn successful_stop_discards_deferred_callbacks() {
 }
 
 #[test]
-fn stop_session_restores_active_turn_file_tracking_when_persist_fails() {
+fn stop_session_clears_active_turn_file_tracking_when_persist_fails() {
     let mut state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
     let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
@@ -605,11 +605,10 @@ fn stop_session_restores_active_turn_file_tracking_when_persist_fails() {
         .iter()
         .find(|record| record.session.id == session_id)
         .expect("Claude session should exist");
-    assert_eq!(record.active_turn_start_message_count, Some(0));
-    assert_eq!(
-        record.active_turn_file_changes.get("src/main.rs"),
-        Some(&WorkspaceFileChangeKind::Modified)
-    );
+    assert_eq!(record.session.status, SessionStatus::Idle);
+    assert!(record.active_turn_start_message_count.is_none());
+    assert!(record.active_turn_file_changes.is_empty());
+    assert!(record.active_turn_file_change_grace_deadline.is_none());
     drop(inner);
 
     process.wait().unwrap();
