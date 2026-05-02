@@ -68,6 +68,81 @@ fn test_app_state() -> AppState {
     state
 }
 
+#[test]
+fn delegation_create_and_completion_are_included_in_persist_delta() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let before_create = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner.last_mutation_stamp
+    };
+
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Check persistence delta coverage.".to_owned(),
+                title: Some("Persist Delta".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+
+    let create_watermark = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let delta = inner.collect_persist_delta(before_create);
+        let delegations = delta
+            .changed_delegations
+            .as_ref()
+            .expect("created delegation should be persisted");
+        assert!(
+            delegations
+                .iter()
+                .any(|delegation| delegation.id == created.delegation.id)
+        );
+        delta.watermark
+    };
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        assert!(
+            inner
+                .collect_persist_delta(create_watermark)
+                .changed_delegations
+                .is_none(),
+            "delegations should not be rewritten again after the watermark catches up"
+        );
+    }
+
+    let before_completion = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner.last_mutation_stamp
+    };
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &created.delegation.child_session_id,
+        "## Result\n\nStatus: completed\n\nSummary:\nDelegation complete.",
+    );
+    state
+        .refresh_delegation_for_child_session(&created.delegation.child_session_id)
+        .expect("refresh should complete delegation");
+
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let delta = inner.collect_persist_delta(before_completion);
+    let delegations = delta
+        .changed_delegations
+        .as_ref()
+        .expect("completed delegation should be persisted");
+    let delegation = delegations
+        .iter()
+        .find(|delegation| delegation.id == created.delegation.id)
+        .expect("completed delegation should be present");
+    assert_eq!(delegation.status, DelegationStatus::Completed);
+}
+
 #[cfg(any(unix, windows))]
 fn create_test_dir_symlink(target: &FsPath, link: &FsPath) -> std::io::Result<()> {
     #[cfg(unix)]

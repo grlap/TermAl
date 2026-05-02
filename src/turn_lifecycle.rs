@@ -358,7 +358,7 @@ impl AppState {
         error_message: Option<&str>,
     ) -> Result<()> {
         let cleaned = error_message.map(str::trim).unwrap_or("");
-        let (should_dispatch_next, pending_interaction_updates, revision) = {
+        let (should_dispatch_next, pending_interaction_updates, created_messages, revision) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -404,7 +404,7 @@ impl AppState {
             let file_change_message_id =
                 (!inner.sessions[index].active_turn_file_changes.is_empty())
                     .then(|| inner.next_message_id());
-            let (has_queued_prompts, pending_interaction_updates) = {
+            let (has_queued_prompts, pending_interaction_updates, created_messages) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -415,9 +415,11 @@ impl AppState {
                 record.deferred_stop_callbacks.clear();
                 let pending_interaction_indices =
                     cancel_pending_interaction_messages(&mut record.session.messages);
+                let mut created_message_indices = Vec::new();
                 clear_all_pending_requests(record);
                 if let Some(detail) = detail.as_ref() {
                     if let Some(message_id) = message_id {
+                        let failed_message_index = record.session.messages.len();
                         record.session.messages.push(Message::Text {
                             attachments: Vec::new(),
                             id: message_id,
@@ -426,16 +428,21 @@ impl AppState {
                             text: format!("Turn failed: {detail}"),
                             expanded_text: None,
                         });
+                        created_message_indices.push(failed_message_index);
                     }
                     record.session.status = SessionStatus::Error;
                     record.session.preview = make_preview(detail);
                 }
                 if let Some(message_id) = file_change_message_id {
-                    push_active_turn_file_changes_on_record(record, message_id);
+                    let file_change_message_index = record.session.messages.len();
+                    if push_active_turn_file_changes_on_record(record, message_id) {
+                        created_message_indices.push(file_change_message_index);
+                    }
                 }
                 (
                     !record.queued_prompts.is_empty(),
                     message_updated_delta_parts_for_indices(record, pending_interaction_indices),
+                    message_created_delta_parts_for_indices(record, created_message_indices),
                 )
             };
             finish_active_turn_file_change_tracking(
@@ -444,9 +451,15 @@ impl AppState {
                     .expect("session index should be valid"),
             );
             let revision = self.commit_locked(&mut inner)?;
-            (has_queued_prompts, pending_interaction_updates, revision)
+            (
+                has_queued_prompts,
+                pending_interaction_updates,
+                created_messages,
+                revision,
+            )
         };
         self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
+        self.publish_message_created_delta_parts(revision, created_messages);
 
         if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
             eprintln!("state warning> failed to refresh delegation after runtime exit: {err:#}");

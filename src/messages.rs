@@ -148,6 +148,17 @@ struct MessageUpdatedDeltaParts {
     session_mutation_stamp: u64,
 }
 
+struct MessageCreatedDeltaParts {
+    session_id: String,
+    message_id: String,
+    message_index: usize,
+    message_count: u32,
+    message: Message,
+    preview: String,
+    status: SessionStatus,
+    session_mutation_stamp: u64,
+}
+
 fn message_updated_delta_parts_for_indices(
     record: &SessionRecord,
     message_indices: Vec<usize>,
@@ -175,7 +186,54 @@ fn message_updated_delta_parts_for_indices(
         .collect()
 }
 
+fn message_created_delta_parts_for_indices(
+    record: &SessionRecord,
+    message_indices: Vec<usize>,
+) -> Vec<MessageCreatedDeltaParts> {
+    let session_id = record.session.id.clone();
+    let message_count = session_message_count(record);
+    let preview = record.session.preview.clone();
+    let status = record.session.status;
+    let session_mutation_stamp = record.mutation_stamp;
+    message_indices
+        .into_iter()
+        .filter_map(|message_index| {
+            let message = record.session.messages.get(message_index)?.clone();
+            Some(MessageCreatedDeltaParts {
+                session_id: session_id.clone(),
+                message_id: message.id().to_owned(),
+                message_index,
+                message_count,
+                message,
+                preview: preview.clone(),
+                status,
+                session_mutation_stamp,
+            })
+        })
+        .collect()
+}
+
 impl AppState {
+    fn publish_message_created_delta_parts(
+        &self,
+        revision: u64,
+        creates: Vec<MessageCreatedDeltaParts>,
+    ) {
+        for created in creates {
+            self.publish_delta(&DeltaEvent::MessageCreated {
+                revision,
+                session_id: created.session_id,
+                message_id: created.message_id,
+                message_index: created.message_index,
+                message_count: created.message_count,
+                message: created.message,
+                preview: created.preview,
+                status: created.status,
+                session_mutation_stamp: Some(created.session_mutation_stamp),
+            });
+        }
+    }
+
     fn publish_message_updated_delta_parts(
         &self,
         revision: u64,

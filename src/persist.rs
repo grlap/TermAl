@@ -655,6 +655,11 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
               id TEXT PRIMARY KEY,
               value_json TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS delegations (
+              id TEXT PRIMARY KEY,
+              value_json TEXT NOT NULL
+            );
             ",
         )
         .context("failed to initialize SQLite state schema")?;
@@ -677,6 +682,7 @@ fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
     // startup read path deliberately re-runs the full main/sidecar pass.
     harden_sqlite_state_file_permissions(path)?;
     let session_records = load_session_records_from_sqlite(&connection, path)?;
+    let delegation_records = load_delegation_records_from_sqlite(&connection, path)?;
     // The legacy lookup is only consulted when the primary key is
     // missing. `.or(...)` would eagerly run both queries (both sides
     // of `.or` must be evaluated before the combinator sees them),
@@ -700,6 +706,7 @@ fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
     if !session_records.is_empty() {
         persisted.sessions = session_records;
     }
+    persisted.delegations = delegation_records;
     Ok(Some(persisted.into_inner().with_context(|| {
         format!("failed to validate state from `{}`", path.display())
     })?))
@@ -755,9 +762,47 @@ fn load_session_records_from_sqlite(
 }
 
 #[cfg(not(test))]
+fn load_delegation_records_from_sqlite(
+    connection: &rusqlite::Connection,
+    path: &FsPath,
+) -> Result<Vec<DelegationRecord>> {
+    let mut statement = connection
+        .prepare("SELECT value_json FROM delegations ORDER BY rowid")
+        .with_context(|| format!("failed to prepare delegation load from `{}`", path.display()))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .with_context(|| {
+            format!(
+                "failed to query persisted delegations from `{}`",
+                path.display()
+            )
+        })?;
+    let mut records = Vec::new();
+    for row in rows {
+        let encoded = row
+            .with_context(|| format!("failed to read delegation row from `{}`", path.display()))?;
+        let record = serde_json::from_str(&encoded).with_context(|| {
+            format!(
+                "failed to parse persisted delegation row from `{}`",
+                path.display()
+            )
+        })?;
+        records.push(record);
+    }
+    Ok(records)
+}
+
+#[cfg(not(test))]
 fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) -> Result<()> {
     let metadata = persisted.metadata_only();
-    persist_state_parts_to_sqlite(path, &metadata, &persisted.sessions, true)
+    persist_state_parts_to_sqlite(
+        path,
+        &metadata,
+        &persisted.sessions,
+        true,
+        &persisted.delegations,
+        true,
+    )
 }
 
 #[cfg(not(test))]
@@ -786,6 +831,8 @@ fn persist_state_parts_to_sqlite(
     metadata: &PersistedState,
     sessions: &[PersistedSessionRecord],
     replace_sessions: bool,
+    delegations: &[DelegationRecord],
+    replace_delegations: bool,
 ) -> Result<()> {
     if let Some(parent) = path.parent() {
         create_local_state_directory(parent)?;
@@ -793,7 +840,15 @@ fn persist_state_parts_to_sqlite(
 
     let mut connection = open_sqlite_state_connection(path)?;
     ensure_sqlite_state_schema(&connection)?;
-    persist_state_parts_via_connection(&mut connection, path, metadata, sessions, replace_sessions)
+    persist_state_parts_via_connection(
+        &mut connection,
+        path,
+        metadata,
+        sessions,
+        replace_sessions,
+        delegations,
+        replace_delegations,
+    )
 }
 
 /// Applies one persist transaction to an already-open SQLite connection.
@@ -809,6 +864,8 @@ fn persist_state_parts_via_connection(
     metadata: &PersistedState,
     sessions: &[PersistedSessionRecord],
     replace_sessions: bool,
+    delegations: &[DelegationRecord],
+    replace_delegations: bool,
 ) -> Result<()> {
     let metadata_json =
         serde_json::to_string(metadata).context("failed to serialize persisted state metadata")?;
@@ -837,6 +894,26 @@ fn persist_state_parts_via_connection(
             rusqlite::params![&session.session.id, session_json],
         )
         .with_context(|| format!("failed to write persisted session to `{}`", path.display()))?;
+    }
+    if replace_delegations {
+        tx.execute("DELETE FROM delegations", [])
+            .with_context(|| format!("failed to replace delegations in `{}`", path.display()))?;
+    }
+    for delegation in delegations {
+        let delegation_json = serde_json::to_string(delegation)
+            .context("failed to serialize persisted delegation")?;
+        tx.execute(
+            "INSERT INTO delegations(id, value_json) VALUES(?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json",
+            rusqlite::params![&delegation.id, delegation_json],
+        )
+        .with_context(|| {
+            format!(
+                "failed to write persisted delegation `{}` to `{}`",
+                delegation.id,
+                path.display()
+            )
+        })?;
     }
     tx.commit()
         .with_context(|| format!("failed to commit persisted state to `{}`", path.display()))?;
@@ -916,9 +993,9 @@ impl SqlitePersistConnectionCache {
     }
 }
 
-/// Applies a `PersistDelta` — metadata upsert plus targeted session
-/// row `INSERT OR UPDATE`s and `DELETE`s — via the shared connection
-/// cache.
+/// Applies a `PersistDelta` — metadata upsert, targeted session
+/// row `INSERT OR UPDATE`s and `DELETE`s, and delegation-table rewrites
+/// when delegation state changed — via the shared connection cache.
 ///
 /// This is the sole production write path. It writes only the rows in
 /// `delta.changed_sessions` and removes only `delta.removed_session_ids`;
@@ -1021,6 +1098,26 @@ fn persist_delta_via_cache_inner(
                 path.display()
             )
         })?;
+    }
+    if let Some(delegations) = &delta.changed_delegations {
+        tx.execute("DELETE FROM delegations", [])
+            .with_context(|| format!("failed to replace delegations in `{}`", path.display()))?;
+        for delegation in delegations {
+            let delegation_json = serde_json::to_string(delegation)
+                .context("failed to serialize persisted delegation")?;
+            tx.execute(
+                "INSERT INTO delegations(id, value_json) VALUES(?1, ?2)
+                 ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json",
+                rusqlite::params![&delegation.id, delegation_json],
+            )
+            .with_context(|| {
+                format!(
+                    "failed to write persisted delegation `{}` to `{}`",
+                    delegation.id,
+                    path.display()
+                )
+            })?;
+        }
     }
     tx.commit().with_context(|| {
         format!(

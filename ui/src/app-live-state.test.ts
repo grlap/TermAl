@@ -602,6 +602,205 @@ describe("delegation delta repair", () => {
     expect(fetchState).not.toHaveBeenCalled();
   });
 
+  it("keeps delegation repair pending while same-revision sibling session deltas apply", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    const parentSession = makeSession({
+      messagesLoaded: false,
+      messageCount: 1,
+      sessionMutationStamp: 2,
+    });
+    let resolveRepair!: (state: StateResponse) => void;
+    const repair = new Promise<StateResponse>((resolve) => {
+      resolveRepair = resolve;
+    });
+    const fetchState = vi.spyOn(api, "fetchState").mockImplementation(
+      () => repair,
+    );
+    const fetchSession = vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const params = makeLiveStateParams(parentSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 2;
+    params.adoptionRefs.sessionsRef.current = [parentSession];
+
+    renderLiveStateHarness(params, () => {}, () => [
+      { id: parentSession.id, messagesLoaded: true },
+    ]);
+    fetchSession.mockClear();
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "delegationCreated",
+        revision: 2,
+        delegation: makeDelegationSummary({
+          parentSessionId: parentSession.id,
+        }),
+      });
+    });
+
+    await waitFor(() => expect(fetchState).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "sessionCreated",
+        revision: 2,
+        sessionId: "child-session",
+        session: makeSession({
+          id: "child-session",
+          name: "Delegation child",
+          messagesLoaded: true,
+          messageCount: 0,
+          sessionMutationStamp: 1,
+        }),
+      });
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "messageCreated",
+        revision: 2,
+        sessionId: parentSession.id,
+        messageId: "parent-card",
+        messageIndex: 0,
+        messageCount: 1,
+        message: {
+          id: "parent-card",
+          type: "parallelAgents",
+          author: "assistant",
+          timestamp: "10:01",
+          agents: [
+            {
+              id: "delegation-1",
+              title: "Review",
+              status: "running",
+              summary: "Reviewing",
+            },
+          ],
+        },
+        preview: "Reviewing",
+        status: "idle",
+        sessionMutationStamp: 2,
+      });
+    });
+
+    expect(fetchSession).not.toHaveBeenCalled();
+    expect(fetchState).toHaveBeenCalledTimes(1);
+    expect(
+      params.adoptionRefs.sessionsRef.current.some(
+        (session) => session.id === "child-session",
+      ),
+    ).toBe(true);
+    const updatedParent = params.adoptionRefs.sessionsRef.current.find(
+      (session) => session.id === parentSession.id,
+    );
+    expect(updatedParent?.messages[0]?.id).toBe("parent-card");
+
+    await act(async () => {
+      resolveRepair({
+        ...makeStateResponse(
+          {
+            ...parentSession,
+            messages: updatedParent?.messages ?? [],
+            messagesLoaded: true,
+            messageCount: 1,
+          },
+          2,
+        ),
+        projects: [
+          {
+            id: "project-repaired",
+            name: "Repaired Project",
+            rootPath: "C:/workspace",
+          },
+        ],
+        delegations: [
+          makeDelegationSummary({
+            parentSessionId: parentSession.id,
+          }),
+        ],
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(params.adoptionRefs.projectsRef.current[0]?.id).toBe(
+        "project-repaired",
+      ),
+    );
+    expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(2);
+  });
+
+  it("retries delegation repair after a transient state fetch failure", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    const session = makeSession({
+      messagesLoaded: true,
+      messageCount: 1,
+      sessionMutationStamp: 2,
+    });
+    let fetchStateCallCount = 0;
+    const fetchState = vi.spyOn(api, "fetchState").mockImplementation(() => {
+      fetchStateCallCount += 1;
+      if (fetchStateCallCount === 1) {
+        return Promise.reject(new Error("transient state repair failure"));
+      }
+      return Promise.resolve({
+        ...makeStateResponse(session, 3),
+        projects: [
+          {
+            id: "project-after-retry",
+            name: "Project After Retry",
+            rootPath: "C:/workspace",
+          },
+        ],
+      });
+    });
+    const fetchSession = vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const params = makeLiveStateParams(session);
+    params.adoptionRefs.latestStateRevisionRef.current = 2;
+    params.adoptionRefs.sessionsRef.current = [session];
+
+    renderLiveStateHarness(params, () => {});
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "delegationCreated",
+        revision: 3,
+        delegation: makeDelegationSummary({
+          parentSessionId: session.id,
+        }),
+      });
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchState).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchState).toHaveBeenCalledTimes(2);
+    expect(params.adoptionRefs.projectsRef.current[0]?.id).toBe(
+      "project-after-retry",
+    );
+    expect(fetchSession).not.toHaveBeenCalled();
+    expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(3);
+  });
+
   it("keeps delegation repair pending when a newer delta lands before adoption", async () => {
     vi.stubGlobal(
       "EventSource",

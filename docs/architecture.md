@@ -368,22 +368,23 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 
 ```
 ~/.termal/
-|-- termal.sqlite          # primary store: app_state + sessions tables (+ WAL/-shm sidecars)
+|-- termal.sqlite          # primary store: app_state + sessions + delegations tables (+ WAL/-shm sidecars)
 |-- orchestrators.json     # reusable orchestrator templates
 `-- telegram-bot.json      # optional Telegram relay chat binding
 ```
 
 `PersistedState` is the logical projection of `StateInner` that excludes
 runtime handles, pending approval maps, and empty collections. On disk it
-splits across two SQLite tables: `app_state` (one row per schema version +
-one metadata row carrying preferences, projects, remotes, workspaces, delegation
-metadata, and
-bookkeeping counters) and `sessions` (one row per session keyed by id,
-value_json carrying the serialized `PersistedSessionRecord`, including
-conversation markers anchored to that session's messages). This two-table
-split lets the background persist thread write only the **changed** session
-rows on each commit — see `collect_persist_delta`, `persist_delta_via_cache`,
-and `SqlitePersistConnectionCache` in `src/persist.rs`.
+splits across three SQLite tables: `app_state` (one row per schema version +
+one metadata row carrying preferences, projects, remotes, workspaces, and
+bookkeeping counters), `sessions` (one row per session keyed by id, value_json
+carrying the serialized `PersistedSessionRecord`, including conversation
+markers anchored to that session's messages), and `delegations` (one row per
+delegation keyed by id, value_json carrying the serialized `DelegationRecord`).
+This split lets the background persist thread write only the **changed**
+session rows on each commit and rewrite delegation rows only when delegation
+state changes — see `collect_persist_delta`, `persist_delta_via_cache`, and
+`SqlitePersistConnectionCache` in `src/persist.rs`.
 
 On startup, the backend loads state from `termal.sqlite` when it exists and
 otherwise boots a fresh local state. Template definitions live in

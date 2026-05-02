@@ -62,18 +62,19 @@ impl PersistedState {
             projects: inner.projects.clone(),
             ignored_discovered_codex_thread_ids: inner.ignored_discovered_codex_thread_ids.clone(),
             orchestrator_instances: inner.orchestrator_instances.clone(),
-            delegations: inner.delegations.clone(),
+            delegations: Vec::new(),
             workspace_layouts: inner.workspace_layouts.clone(),
             sessions: Vec::new(),
         }
     }
 
-    /// Returns a metadata-only copy of this persisted state with an
-    /// empty `sessions` vec.
+    /// Returns a metadata-only copy of this persisted state with empty
+    /// `sessions` and `delegations` vecs.
     ///
     /// Used by the synchronous persist path
     /// (`persist_persisted_state_to_sqlite`) to serialize the
-    /// `app_state` metadata row without the sessions payload. The
+    /// `app_state` metadata row without the sessions or delegation
+    /// payloads. The
     /// previous `persisted.clone(); metadata.sessions.clear();`
     /// pattern deep-cloned every session transcript just to drop the
     /// clone, which is wasteful for long transcripts. Cloning the
@@ -97,7 +98,7 @@ impl PersistedState {
             projects: self.projects.clone(),
             ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids.clone(),
             orchestrator_instances: self.orchestrator_instances.clone(),
-            delegations: self.delegations.clone(),
+            delegations: Vec::new(),
             workspace_layouts: self.workspace_layouts.clone(),
             sessions: Vec::new(),
         }
@@ -106,6 +107,7 @@ impl PersistedState {
     /// Builds the value from inner.
     fn from_inner(inner: &StateInner) -> Self {
         let mut persisted = Self::metadata_from_inner(inner);
+        persisted.delegations = inner.delegations.clone();
         persisted.sessions = inner
             .sessions
             .iter()
@@ -135,6 +137,7 @@ impl PersistedState {
             remote_session_transcript_applied_revisions: HashMap::new(),
             orchestrator_instances: self.orchestrator_instances,
             delegations: self.delegations,
+            delegation_mutation_stamp: 0,
             running_read_only_delegations: BTreeSet::new(),
             workspace_layouts: self.workspace_layouts,
             sessions: self

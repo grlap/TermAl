@@ -346,7 +346,7 @@ impl AppState {
             }
         }
         let orchestrator_stop_instance_id = options.orchestrator_stop_instance_id.clone();
-        let (should_dispatch_next, pending_interaction_updates, revision) = {
+        let (should_dispatch_next, pending_interaction_updates, created_messages, revision) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -355,7 +355,7 @@ impl AppState {
             let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
                 .then(|| inner.next_message_id());
             let mut thread_id_to_suppress = None;
-            let pending_interaction_updates = {
+            let (pending_interaction_updates, created_messages) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -365,6 +365,7 @@ impl AppState {
                 record.deferred_stop_callbacks.clear();
                 let pending_interaction_indices =
                     cancel_pending_interaction_messages(&mut record.session.messages);
+                let mut created_message_indices = Vec::new();
                 clear_all_pending_requests(record);
                 if clear_external_session_id {
                     // Interrupt failures can leave the detached Codex thread running, so any
@@ -378,6 +379,7 @@ impl AppState {
                 }
                 record.session.status = SessionStatus::Idle;
                 record.session.preview = "Turn stopped by user.".to_owned();
+                let stopped_message_index = record.session.messages.len();
                 record.session.messages.push(Message::Text {
                     attachments: Vec::new(),
                     id: message_id,
@@ -386,10 +388,17 @@ impl AppState {
                     text: "Turn stopped by user.".to_owned(),
                     expanded_text: None,
                 });
+                created_message_indices.push(stopped_message_index);
                 if let Some(message_id) = file_change_message_id {
-                    push_active_turn_file_changes_on_record(record, message_id);
+                    let file_change_message_index = record.session.messages.len();
+                    if push_active_turn_file_changes_on_record(record, message_id) {
+                        created_message_indices.push(file_change_message_index);
+                    }
                 }
-                message_updated_delta_parts_for_indices(record, pending_interaction_indices)
+                (
+                    message_updated_delta_parts_for_indices(record, pending_interaction_indices),
+                    message_created_delta_parts_for_indices(record, created_message_indices),
+                )
             };
 
             // Suppress rediscovery of the detached thread after the record
@@ -447,9 +456,15 @@ impl AppState {
                     )));
                 }
             };
-            (has_queued_prompts, pending_interaction_updates, revision)
+            (
+                has_queued_prompts,
+                pending_interaction_updates,
+                created_messages,
+                revision,
+            )
         };
         self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
+        self.publish_message_created_delta_parts(revision, created_messages);
 
         if let Some(orchestrator_instance_id) = orchestrator_stop_instance_id.as_deref() {
             self.note_stopped_orchestrator_session(orchestrator_instance_id, session_id);

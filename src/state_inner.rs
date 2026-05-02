@@ -280,6 +280,10 @@ impl StateInner {
         self.last_mutation_stamp
     }
 
+    fn mark_delegations_mutated(&mut self) {
+        self.delegation_mutation_stamp = self.next_mutation_stamp();
+    }
+
     /// Stamps the session at `index` with the next mutation stamp.
     ///
     /// Use when the caller already has the index (e.g., from a loop or a
@@ -475,6 +479,8 @@ impl StateInner {
             metadata: PersistedState::metadata_from_inner(self),
             changed_sessions,
             removed_session_ids: removed_ids,
+            changed_delegations: (self.delegation_mutation_stamp > watermark)
+                .then(|| self.delegations.clone()),
             drained_explicit_tombstones: retry_removed_ids,
             watermark: self.last_mutation_stamp,
         }

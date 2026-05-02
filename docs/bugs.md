@@ -7,22 +7,37 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Same-revision stop and failure deltas can hide terminal messages
+## Batched stop/failure message-created deltas are not replayable
 
-**Severity:** High - stop/runtime-exit paths can publish partial same-revision deltas before the full snapshot that contains newly appended terminal messages.
+**Severity:** High - stop/runtime-exit paths can still hide terminal messages when a file-change summary is appended in the same revision.
 
-`src/session_lifecycle.rs:431`, `src/session_lifecycle.rs:452`, and `src/turn_lifecycle.rs:446` now combine `commit_locked()` snapshots with same-revision `MessageUpdated` deltas for canceled pending interactions. Full snapshots are serialized through the async SSE broadcaster while deltas publish directly, so a delta can arrive first, advance the frontend to that revision, and cause the later same-revision snapshot to be rejected before the appended "Turn stopped by user" / "Turn failed" message is adopted.
+`src/session_lifecycle.rs` and `src/turn_lifecycle.rs` can append both a terminal stop/failure message and an active-turn file-change summary before publishing same-revision `MessageCreated` deltas. `src/messages.rs` builds every created-message delta with the final transcript `messageCount`, so a hydrated frontend that applies the first created delta still has one fewer message than the advertised count and requests repair instead of replaying the delta.
 
 **Current behavior:**
-- Stop/runtime-exit paths append terminal messages and commit a full snapshot.
-- The same mutation then publishes partial `MessageUpdated` deltas for pending interaction cancellation.
-- Clients can accept the delta first and reject the later full snapshot as stale.
-- Newly appended terminal messages may remain hidden until another refresh or state change.
+- Stop/runtime-exit with active file changes appends two messages in one revision.
+- Each `MessageCreated` delta carries the same final `messageCount`.
+- Hydrated clients reject the first created delta as incomplete.
+- The terminal stop/failure message can still depend on later snapshot repair.
 
 **Proposal:**
-- Fully delta-encode all message changes for that revision, including appended stop/failure/file-change messages.
-- Or split pending-interaction updates and terminal-message snapshots into ordered revisions.
-- Add a regression that forces delta-before-snapshot delivery and asserts terminal stop/failure messages still render.
+- Emit progressive message counts for sibling `MessageCreated` deltas, or replace them with a batch-created delta that is replay-equivalent.
+- Add coverage that seeds `active_turn_file_changes`, triggers stop and runtime-exit failure, and asserts hydrated clients can replay all created messages without a snapshot fallback.
+
+## Terminal-message deltas can carry stale session mutation stamps
+
+**Severity:** Medium - same-revision terminal-message deltas can describe an older session mutation than the committed snapshot.
+
+`src/session_lifecycle.rs` and `src/turn_lifecycle.rs` build terminal-message delta parts before later `session_mut_by_index` calls used for file-change tracking cleanup. That accessor advances the session mutation stamp, so the committed snapshot can publish a newer `sessionMutationStamp` than the deltas for the same revision.
+
+**Current behavior:**
+- Stop/runtime-exit paths capture terminal-message delta parts.
+- File-change cleanup later re-borrows the session mutably and advances its mutation stamp.
+- Published deltas can carry the pre-cleanup stamp while the snapshot carries the post-cleanup stamp.
+
+**Proposal:**
+- Build terminal-message delta parts after the final stamped session mutation.
+- Or avoid advancing the user-visible session mutation stamp for runtime-only file-change cleanup.
+- Add coverage that compares terminal-message delta stamps to the committed session stamp when file-change cleanup runs.
 
 ## Remote marker proxy writes can replay as duplicate remote deltas
 
@@ -130,36 +145,6 @@ the Implementation Tasks section.
 **Proposal:**
 - Move fallback loading into `mermaid-render.ts` or a small `mermaid-loader.ts`.
 - Keep message cards calling a single render helper.
-
-## Full delegation records are persisted in the metadata row
-
-**Severity:** Low - delegation prompts/results are rewritten with metadata persistence instead of using a narrower delta path.
-
-`src/persisted_state.rs:38` persists full `DelegationRecord` values in the metadata row. Delegation prompts and results can be larger than ordinary metadata, so every metadata persist can clone and rewrite data that behaves more like session content.
-
-**Current behavior:**
-- Full delegation records are stored with metadata.
-- Prompt/result payloads can be rewritten on broad metadata saves.
-- Summary state and durable full records share the same persistence boundary.
-
-**Proposal:**
-- Give delegations their own persisted rows or mutation-stamped delta path.
-- Keep `/api/state` summaries derived separately from durable full records.
-
-## Delegation SSE recovery coverage lacks reconnect failure timing cases
-
-**Severity:** Low - common delegation repair revisions are pinned, but reconnect failure and sibling-delta timing remains under-covered.
-
-`ui/src/app-live-state.ts` handles delegation SSE repair/recovery. Current coverage table-tests stale, equal-revision, and newer delegation delta variants, but reconnect recovery timing, failed `/api/state` repair, and same-revision sibling deltas can still regress without a focused failure.
-
-**Current behavior:**
-- Stale, equal-revision, and newer delegation delta variants are table-tested.
-- Reconnect recovery timing for delegation repair remains under-covered.
-- Failed `/api/state` delegation repair and same-revision sibling interactions are not pinned.
-
-**Proposal:**
-- Add delayed or failed `/api/state` repair cases for delegation deltas.
-- Assert reconnect recovery remains active until authoritative repair succeeds, including same-revision sibling deltas involving session-created and parent-card deltas.
 
 ## Markdown diff change-block grouping rules duplicated between renderer and index builder
 
@@ -1080,16 +1065,20 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   the new `App.live-state.reconnect.test.tsx` test exercises the revision-gap branch (the `messageCreated` delta omits `sessionMutationStamp` so it falls into the resync fallback). Add `sessionMutationStamp` so the delta routes through the matched-stamp fast-path that the surrounding `handleDeltaEvent` comment is most concerned about, OR rename the test to clarify it covers the revision-gap branch specifically and add a sibling test for the textDelta fast-path.
 - [ ] P2: Split the bad-live-event + workspaceFilesChanged test into isolated arrange-act-assert phases:
   `ui/src/backend-connection.test.tsx:1225-1261` co-fires the stale `delta` and the `workspaceFilesChanged` event in one `act()`. The assertion `countStateFetches() === hydratedStateFetchCount` is satisfied if either side skips confirmation, so the test cannot pinpoint which side regressed. Dispatch `workspaceFilesChanged` alone first and assert no fetch fired; then add the stale delta separately and re-assert.
-- [ ] P2: Expand UI tests for delegation delta dispatch in `ui/src/app-live-state.test.ts`:
-  current coverage pins stale, equal-revision, and newer repair for all delegation delta variants plus a newer delta landing before repair adoption. Add same-revision sibling deltas involving session-created and parent-card deltas, and delayed or failed `/api/state` repair cases. Assert reconnect/fallback recovery remains active until the authoritative repair snapshot is adopted and that delegation events do not flow through normal session-delta handling.
+- [ ] P2: Add multi-message stop/failure delta replay coverage:
+  seed `active_turn_file_changes`, trigger stop and runtime-exit failure paths, and assert all same-revision `MessageCreated` deltas carry replayable counts and matching session mutation stamps.
+- [ ] P2: Add frontend stop/failure delta-before-snapshot terminal-message coverage:
+  dispatch cancellation/update deltas before the same-revision snapshot and assert appended stop/failure terminal messages remain rendered without relying on a later unrelated refresh.
+- [ ] P2: Add delegation EventSource recovery timing coverage:
+  drive delegation repair through `EventSource.onerror`/`onopen` and assert reconnect recovery remains armed until live SSE data resumes after snapshot repair.
+- [ ] P2: Add delegation persist-delta transition coverage:
+  assert running, failed, and canceled delegation transitions mark delegation state as mutated and persist through the delta path, not only create/completion updates.
 - [ ] P2: Add homogeneous conversation-overview segment cap coverage:
   build a long same-kind message run with `maxItemsPerSegment` set and assert the segment policy is either capped or explicitly documented as a mixed-run-only cap.
 - [ ] P2: Scope marker slot lookup to the panel root in `ui/src/panels/AgentSessionPanel.tsx:921-931`:
   `findMountedConversationMessageSlot` does a global `document.querySelectorAll("[data-session-search-item-key]")` and returns the first match by `messageId`. When the same session is rendered in two workspace panes, this can scroll the wrong pane's slot when the in-page `messageSlotNodesRef` cache misses (e.g. after a remount). Scope to the panel root via the `scrollContainerRef` parent or include a pane id in the selector.
 - [ ] P2: Reset `messageSlotNodesRef` on session change in `ui/src/panels/AgentSessionPanel.tsx:666-692`:
   ref keys by `messageId` only and is never cleared. If `SessionConversationPage` is reused for a different session (page is keyed by session id higher up, but if memoization changes), stale message-id keys could persist across sessions. Add `useEffect(() => messageSlotNodesRef.current.clear(), [session.id])` to harden.
-- [ ] P2: Add stop/runtime-exit same-revision SSE ordering coverage:
-  force `MessageUpdated` cancellation deltas to arrive before the full snapshot and assert appended stop/failure terminal messages still render.
 - [ ] P2: Add marker REST stale-response gating coverage:
   resolve marker create/update HTTP responses after a newer SSE or state repair and assert stale same-instance responses do not overwrite local marker state.
 - [ ] P2: Add remote marker proxy replay-equivalence coverage:
@@ -1108,3 +1097,13 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   current tests cover the happy path of `handleCreateConversationMarker` (local upsert + revision advance) but not the `isServerInstanceMismatch` resync branch. A regression that dropped the resync would not fail any test today.
 - [ ] P2: Make marker hover toolbar reachable on touch-only devices (`ui/src/styles.css:3920-3935`):
   toolbar is `pointer-events: none` until hover/focus-within. Touch-only devices without a hover state cannot reveal the "Add checkpoint marker" button. Toolbar can be tab-reached after the user lands on something focusable inside the message; flag if Phase 1 wants touch parity. Add a long-press or always-visible mode for touch.
+- [ ] P2: Switch delegation persistence from rewrite-all to row-level upsert + tombstones in `src/persist.rs:1104-1123`:
+  the new `delegations` SQLite table uses `DELETE FROM delegations` then re-insert every row on any single-row change. Session table uses targeted upserts/deletes, but delegations rewrite the whole table per delta tick. With long delegation history this regresses to the same pattern the SQLite split set out to avoid. Add per-row insert/update + tombstone tracking matching the session pattern, OR document why wholesale rewrite is acceptable for delegation cardinality.
+- [ ] P2: Add stored-version guard to SQLite schema migration in `src/persist.rs:638-665`:
+  `SQLITE_SCHEMA_VERSION` was bumped to `"2"` but `ensure_sqlite_state_schema` ignores the existing value and unconditionally writes `"2"`. A downgrade to a v1 binary would silently lose dedicated `delegations` rows after the v2 binary cleared the embedded JSON copy from `app_state`. Add a stored-version check (read the `meta` row first, refuse downgrade or run a one-time legacy-to-table migration), and document the no-downgrade contract in `docs/features/sqlite-session-storage.md`.
+- [ ] P2: Document or fix the batched `message_count` semantic in `src/messages.rs:189-214`:
+  `message_created_delta_parts_for_indices` snapshots `message_count` once for the whole batch. When `stop_session` fires both terminal + file-changes deltas, the first delta reports `message_count = N+2` even though only one new message has been delivered. UI's `messageCreatedDeltaHasProtocolViolation` accepts this (`messageIndex < messageCount`), but the per-event `message_count` is no longer "count after this message is appended". Either re-read length per index, or document the all-deltas-from-same-commit semantic in the helper's doc comment so future readers understand the contract.
+- [ ] P2: Add a pure-delegation-update regression test in `src/tests/delegations.rs`:
+  `delegation_mutation_stamp` is now a second top-level mutation watermark next to `last_mutation_stamp`. Both new round-32 tests stage a delegation create which incidentally bumps a session via the parent card. Add a targeted regression for "pure delegation update produces a delta": `state.collect_persist_delta(0)` after modifying *only* delegation fields (no session push) should emit `changed_delegations` with the right ids.
+- [ ] P2: Document the empty-delegations upgrade edge case in `src/persisted_state.rs:122`:
+  `has_persisted_delegations = !self.delegations.is_empty()` means a load with zero delegations does not seed `delegation_mutation_stamp`, so the legacy embedded delegations payload never gets cleared from the metadata JSON if all delegations were removed before the v2 upgrade. Practically harmless (an empty `delegations: []` is small) but the comment "rewrites the metadata row without any legacy embedded delegation payload" is conditional on `delegations` being non-empty at upgrade time. Add a Note in the comment, or unconditionally seed the watermark.

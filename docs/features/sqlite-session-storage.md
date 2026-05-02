@@ -65,12 +65,19 @@ CREATE TABLE sessions (
   id TEXT PRIMARY KEY,
   value_json TEXT NOT NULL
 );
+
+CREATE TABLE delegations (
+  id TEXT PRIMARY KEY,
+  value_json TEXT NOT NULL
+);
 ```
 
-`app_state.metadataState` stores global app metadata without session rows.
-`sessions.value_json` stores one serialized session record per row. This is not
-the final lazy-message schema, but it is enough to stop create/fork persistence
-from rewriting every historical session in one monolithic file.
+`app_state.metadataState` stores global app metadata without session or
+delegation rows. `sessions.value_json` stores one serialized session record per
+row, and `delegations.value_json` stores one serialized delegation record per
+row. This is not the final lazy-message schema, but it is enough to stop
+create/fork persistence from rewriting every historical session in one
+monolithic file.
 
 ## Target Lazy-Loading Schema
 
@@ -153,7 +160,7 @@ CREATE INDEX idx_sessions_updated_at_ms
   ON sessions(updated_at_ms);
 ```
 
-`meta.schema_version` starts at `1`.
+`meta.schema_version` is `1`.
 
 ## API Shape
 
