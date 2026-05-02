@@ -1616,6 +1616,8 @@ export function useAppLiveState(
     // is true, and onerror clears both flags together for the next outage.
     let pendingBadLiveEventRecovery = false;
     let allowReconnectRecoveryWithoutExplicitOpen = false;
+    let delegationRepairAdoptedSinceLastReconnectError = false;
+    let lastDelegationRepairRequestedRevision: number | null = null;
     let nextReconnectStateResyncDelayMs = RECONNECT_STATE_RESYNC_DELAY_MS;
     let liveSessionResumeWatchdogIntervalId: ReturnType<
       typeof window.setInterval
@@ -2074,6 +2076,14 @@ export function useAppLiveState(
                   state.sessions,
                   adoptedAt,
                 );
+                if (
+                  !confirmReconnectRecoveryOnAdoption &&
+                  lastDelegationRepairRequestedRevision !== null &&
+                  forceAdoptEqualOrNewerRevision !== null &&
+                  state.revision >= lastDelegationRepairRequestedRevision
+                ) {
+                  delegationRepairAdoptedSinceLastReconnectError = true;
+                }
                 if (confirmReconnectRecoveryOnAdoption) {
                   confirmReconnectRecoveryFromDeltaEvent();
                 }
@@ -2572,9 +2582,22 @@ export function useAppLiveState(
         const currentRevision = latestStateRevisionRef.current;
         if (isDelegationDeltaEvent(delta)) {
           if (currentRevision === null || delta.revision >= currentRevision) {
+            if (
+              delegationRepairAdoptedSinceLastReconnectError &&
+              !pendingBadLiveEventRecovery
+            ) {
+              confirmReconnectRecoveryFromDeltaEvent();
+              delegationRepairAdoptedSinceLastReconnectError = false;
+              lastDelegationRepairRequestedRevision = null;
+            }
+            lastDelegationRepairRequestedRevision = delta.revision;
             requestStateResync({
               allowAuthoritativeRollback: currentRevision !== null,
-              confirmReconnectRecoveryOnAdoption: true,
+              // A delegation delta can require an authoritative `/api/state`
+              // repair for broad delegation/project state, but adopting that
+              // snapshot is not proof the reopened SSE stream is healthy.
+              // Keep reconnect polling armed until a later data-bearing SSE
+              // event confirms live delivery after the repair.
               forceAdoptEqualOrNewerRevision: delta.revision,
               rearmOnFailure: true,
             });
@@ -2941,6 +2964,8 @@ export function useAppLiveState(
       reconnectRecoveryConfirmedSinceLastError = false;
       pendingBadLiveEventRecovery = false;
       allowReconnectRecoveryWithoutExplicitOpen = false;
+      delegationRepairAdoptedSinceLastReconnectError = false;
+      lastDelegationRepairRequestedRevision = null;
       clearForceAdoptNextStateEvent();
       const isOnline = readNavigatorOnline();
       const hasHydratedState = latestStateRevisionRef.current !== null;

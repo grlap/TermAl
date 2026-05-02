@@ -666,6 +666,10 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const messageSlotNodesRef = useRef<Map<string, HTMLElement>>(new Map());
 
   useEffect(() => {
+    messageSlotNodesRef.current.clear();
+  }, [session.id]);
+
+  useEffect(() => {
     if (
       activeMarkerId &&
       !visibleMarkers.some((marker) => marker.id === activeMarkerId)
@@ -704,11 +708,14 @@ const SessionConversationPage = memo(function SessionConversationPage({
       }
       (
         messageSlotNodesRef.current.get(marker.messageId) ??
-        findMountedConversationMessageSlot(marker.messageId)
+        findMountedConversationMessageSlot(
+          marker.messageId,
+          scrollContainerRef.current ?? document,
+        )
       )
         ?.scrollIntoView?.({ block: "center", behavior: "smooth" });
     },
-    [conversationOverview.virtualizerHandleRef],
+    [conversationOverview.virtualizerHandleRef, scrollContainerRef],
   );
 
   const navigateMarkerByOffset = useCallback(
@@ -920,9 +927,12 @@ function groupConversationMarkersByMessageId(
   return byMessageId;
 }
 
-function findMountedConversationMessageSlot(messageId: string) {
+function findMountedConversationMessageSlot(
+  messageId: string,
+  root: ParentNode = document,
+) {
   const expectedItemKey = `message:${messageId}`;
-  const candidates = document.querySelectorAll<HTMLElement>(
+  const candidates = root.querySelectorAll<HTMLElement>(
     "[data-session-search-item-key]",
   );
   for (const candidate of candidates) {

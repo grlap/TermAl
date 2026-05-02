@@ -249,6 +249,13 @@ impl AppState {
                                     &delta.drained_explicit_tombstones,
                                 );
                             }
+                            if !delta.drained_delegation_tombstones.is_empty() {
+                                let mut inner =
+                                    inner_for_persist.lock().expect("state mutex poisoned");
+                                inner.restore_drained_delegation_tombstones(
+                                    &delta.drained_delegation_tombstones,
+                                );
+                            }
                             return Err(err);
                         }
                         watermark = next_watermark;

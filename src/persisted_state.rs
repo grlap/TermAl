@@ -137,7 +137,8 @@ impl PersistedState {
             remote_session_transcript_applied_revisions: HashMap::new(),
             orchestrator_instances: self.orchestrator_instances,
             delegations: self.delegations,
-            delegation_mutation_stamp: 0,
+            delegation_mutation_stamps: BTreeMap::new(),
+            removed_delegation_ids: BTreeMap::new(),
             running_read_only_delegations: BTreeSet::new(),
             workspace_layouts: self.workspace_layouts,
             sessions: self

@@ -404,6 +404,10 @@ impl AppState {
             let file_change_message_id =
                 (!inner.sessions[index].active_turn_file_changes.is_empty())
                     .then(|| inner.next_message_id());
+            let active_turn_start_message_count_before_commit =
+                inner.sessions[index].active_turn_start_message_count;
+            let active_turn_file_changes_before_commit =
+                inner.sessions[index].active_turn_file_changes.clone();
             let (has_queued_prompts, pending_interaction_updates, created_messages) = {
                 let record = inner
                     .session_mut_by_index(index)
@@ -446,7 +450,18 @@ impl AppState {
                     message_created_delta_parts_for_indices(record, created_message_indices),
                 )
             };
-            let revision = self.commit_locked(&mut inner)?;
+            let revision = match self.commit_locked(&mut inner) {
+                Ok(revision) => revision,
+                Err(err) => {
+                    let record = inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid");
+                    record.active_turn_start_message_count =
+                        active_turn_start_message_count_before_commit;
+                    record.active_turn_file_changes = active_turn_file_changes_before_commit;
+                    return Err(err);
+                }
+            };
             (
                 has_queued_prompts,
                 pending_interaction_updates,

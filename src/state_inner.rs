@@ -280,8 +280,49 @@ impl StateInner {
         self.last_mutation_stamp
     }
 
-    fn mark_delegations_mutated(&mut self) {
-        self.delegation_mutation_stamp = self.next_mutation_stamp();
+    fn mark_delegation_mutated(&mut self, delegation_index: usize) -> Option<u64> {
+        let delegation_id = self.delegations.get(delegation_index)?.id.clone();
+        Some(self.mark_delegation_id_mutated(delegation_id))
+    }
+
+    fn mark_delegation_id_mutated(&mut self, delegation_id: String) -> u64 {
+        let stamp = self.next_mutation_stamp();
+        self.delegation_mutation_stamps.insert(delegation_id, stamp);
+        stamp
+    }
+
+    fn record_removed_delegation(&mut self, delegation_id: String) {
+        let stamp = self.next_mutation_stamp();
+        self.delegation_mutation_stamps.remove(&delegation_id);
+        self.removed_delegation_ids.insert(delegation_id, stamp);
+    }
+
+    fn restore_drained_delegation_tombstones(&mut self, tombstones: &BTreeMap<String, u64>) {
+        for (delegation_id, stamp) in tombstones {
+            self.removed_delegation_ids
+                .entry(delegation_id.clone())
+                .and_modify(|existing| *existing = (*existing).max(*stamp))
+                .or_insert(*stamp);
+        }
+    }
+
+    fn mark_loaded_delegations_for_sqlite_migration(&mut self) {
+        let delegation_ids = self
+            .delegations
+            .iter()
+            .map(|delegation| delegation.id.clone())
+            .collect::<Vec<_>>();
+        for delegation_id in delegation_ids {
+            self.mark_delegation_id_mutated(delegation_id);
+        }
+    }
+
+    #[allow(dead_code)]
+    fn remove_delegation_at(&mut self, index: usize) -> DelegationRecord {
+        let record = self.delegations.remove(index);
+        self.record_removed_delegation(record.id.clone());
+        self.rebuild_running_read_only_delegations();
+        record
     }
 
     /// Stamps the session at `index` with the next mutation stamp.
@@ -449,6 +490,8 @@ impl StateInner {
     ///   regenerated on startup rather than persisted).
     /// - The tombstone list of explicitly removed session ids, drained
     ///   from `removed_session_ids`.
+    /// - Delegation rows and delegation tombstones whose runtime-only
+    ///   mutation stamps advanced past the watermark.
     ///
     /// Returns the new watermark (`last_mutation_stamp` at collection
     /// time) that the caller should install after a successful write.
@@ -461,6 +504,7 @@ impl StateInner {
     fn collect_persist_delta(&mut self, watermark: u64) -> PersistDelta {
         let mut changed_sessions: Vec<PersistedSessionRecord> = Vec::new();
         let retry_removed_ids = std::mem::take(&mut self.removed_session_ids);
+        let retry_removed_delegation_ids = std::mem::take(&mut self.removed_delegation_ids);
         let mut removed_ids = retry_removed_ids.clone();
         for record in &self.sessions {
             if record.mutation_stamp <= watermark {
@@ -475,12 +519,30 @@ impl StateInner {
                 changed_sessions.push(PersistedSessionRecord::from_record(record));
             }
         }
+        let changed_delegations = self
+            .delegations
+            .iter()
+            .filter(|delegation| {
+                self.delegation_mutation_stamps
+                    .get(&delegation.id)
+                    .is_some_and(|stamp| *stamp > watermark)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let removed_delegation_ids = retry_removed_delegation_ids
+            .iter()
+            .filter_map(|(delegation_id, stamp)| {
+                (*stamp > watermark).then(|| delegation_id.clone())
+            })
+            .collect::<Vec<_>>();
+
         PersistDelta {
             metadata: PersistedState::metadata_from_inner(self),
             changed_sessions,
             removed_session_ids: removed_ids,
-            changed_delegations: (self.delegation_mutation_stamp > watermark)
-                .then(|| self.delegations.clone()),
+            changed_delegations: (!changed_delegations.is_empty()).then_some(changed_delegations),
+            removed_delegation_ids,
+            drained_delegation_tombstones: retry_removed_delegation_ids,
             drained_explicit_tombstones: retry_removed_ids,
             watermark: self.last_mutation_stamp,
         }

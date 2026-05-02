@@ -645,7 +645,30 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
               key TEXT PRIMARY KEY,
               value TEXT NOT NULL
             );
-
+            ",
+        )
+        .context("failed to initialize SQLite meta schema")?;
+    let stored_schema_version = match connection.query_row(
+        "SELECT value FROM meta WHERE key = 'schema_version'",
+        [],
+        |row| row.get::<_, String>(0),
+    ) {
+        Ok(value) => Some(value),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(err) => return Err(err).context("failed to read SQLite state schema version"),
+    };
+    if let Some(stored_schema_version) = stored_schema_version.as_deref() {
+        if stored_schema_version != SQLITE_SCHEMA_VERSION {
+            bail!(
+                "unsupported SQLite state schema version `{}`; this binary supports `{}`",
+                stored_schema_version,
+                SQLITE_SCHEMA_VERSION
+            );
+        }
+    }
+    connection
+        .execute_batch(
+            "
             CREATE TABLE IF NOT EXISTS app_state (
               key TEXT PRIMARY KEY,
               value_json TEXT NOT NULL
@@ -706,10 +729,26 @@ fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
     if !session_records.is_empty() {
         persisted.sessions = session_records;
     }
-    persisted.delegations = delegation_records;
-    Ok(Some(persisted.into_inner().with_context(|| {
+    let loaded_delegations_from_table =
+        apply_sqlite_delegation_records(&mut persisted, delegation_records);
+    let mut inner = persisted.into_inner().with_context(|| {
         format!("failed to validate state from `{}`", path.display())
-    })?))
+    })?;
+    if !loaded_delegations_from_table && !inner.delegations.is_empty() {
+        inner.mark_loaded_delegations_for_sqlite_migration();
+    }
+    Ok(Some(inner))
+}
+
+fn apply_sqlite_delegation_records(
+    persisted: &mut PersistedState,
+    delegation_records: Vec<DelegationRecord>,
+) -> bool {
+    if delegation_records.is_empty() {
+        return false;
+    }
+    persisted.delegations = delegation_records;
+    true
 }
 
 #[cfg(not(test))]
@@ -994,13 +1033,14 @@ impl SqlitePersistConnectionCache {
 }
 
 /// Applies a `PersistDelta` — metadata upsert, targeted session
-/// row `INSERT OR UPDATE`s and `DELETE`s, and delegation-table rewrites
-/// when delegation state changed — via the shared connection cache.
+/// row `INSERT OR UPDATE`s and `DELETE`s, and targeted delegation row
+/// `INSERT OR UPDATE`s and `DELETE`s via the shared connection cache.
 ///
 /// This is the sole production write path. It writes only the rows in
-/// `delta.changed_sessions` and removes only `delta.removed_session_ids`;
-/// unchanged session rows are left untouched so a mutation on one
-/// session no longer rewrites every other session row every commit.
+/// `delta.changed_sessions` / `delta.changed_delegations` and removes only
+/// `delta.removed_session_ids` / `delta.removed_delegation_ids`; unchanged rows
+/// are left untouched so a mutation on one record no longer rewrites every
+/// other row every commit.
 /// See `state.rs::PersistDelta` and `StateInner::collect_persist_delta`
 /// for the authoritative description of how the delta is assembled.
 ///
@@ -1099,9 +1139,20 @@ fn persist_delta_via_cache_inner(
             )
         })?;
     }
+    for delegation_id in &delta.removed_delegation_ids {
+        tx.execute(
+            "DELETE FROM delegations WHERE id = ?1",
+            rusqlite::params![delegation_id],
+        )
+        .with_context(|| {
+            format!(
+                "failed to remove delegation `{}` from `{}`",
+                delegation_id,
+                path.display()
+            )
+        })?;
+    }
     if let Some(delegations) = &delta.changed_delegations {
-        tx.execute("DELETE FROM delegations", [])
-            .with_context(|| format!("failed to replace delegations in `{}`", path.display()))?;
         for delegation in delegations {
             let delegation_json = serde_json::to_string(delegation)
                 .context("failed to serialize persisted delegation")?;

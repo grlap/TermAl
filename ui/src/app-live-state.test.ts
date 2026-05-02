@@ -11,6 +11,7 @@ import {
   type UseAppLiveStateParams,
   type UseAppLiveStateReturn,
 } from "./app-live-state";
+import { RECONNECT_STATE_RESYNC_DELAY_MS } from "./app-shell-internals";
 import {
   classifyFetchedSessionAdoption,
   hydrationRetainedMessagesMatch,
@@ -32,6 +33,7 @@ class EventSourceMock {
 
   onerror: ((event: Event) => void) | null = null;
   onopen: ((event: Event) => void) | null = null;
+  readyState?: number;
 
   private listeners = new Map<
     string,
@@ -58,6 +60,15 @@ class EventSourceMock {
   }
 
   close() {}
+
+  dispatchOpen() {
+    this.readyState = 1;
+    this.onopen?.(new Event("open"));
+  }
+
+  dispatchError() {
+    this.onerror?.(new Event("error"));
+  }
 
   dispatchNamedEvent(type: string, data: unknown) {
     const payload = typeof data === "string" ? data : JSON.stringify(data);
@@ -882,6 +893,110 @@ describe("delegation delta repair", () => {
       ),
     );
     expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(3);
+  });
+
+  it("keeps reconnect recovery armed after delegation repair until a later live event", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    const session = makeSession({
+      messagesLoaded: true,
+      messageCount: 1,
+      sessionMutationStamp: 2,
+    });
+    const repairedState = {
+      ...makeStateResponse(session, 3),
+      projects: [
+        {
+          id: "project-after-delegation-repair",
+          name: "Project After Delegation Repair",
+          rootPath: "C:/workspace",
+        },
+      ],
+      delegations: [
+        makeDelegationSummary({
+          parentSessionId: session.id,
+        }),
+      ],
+    };
+    const laterRepairedState = {
+      ...repairedState,
+      revision: 4,
+      delegations: [
+        makeDelegationSummary({
+          parentSessionId: session.id,
+        }),
+      ],
+    };
+    const fetchState = vi
+      .spyOn(api, "fetchState")
+      .mockResolvedValueOnce(repairedState)
+      .mockResolvedValueOnce(repairedState)
+      .mockResolvedValue(laterRepairedState);
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const params = makeLiveStateParams(session);
+    params.adoptionRefs.latestStateRevisionRef.current = 2;
+    params.adoptionRefs.sessionsRef.current = [session];
+
+    renderLiveStateHarness(params, () => {});
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      eventSource?.dispatchError();
+      eventSource?.dispatchOpen();
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "delegationCreated",
+        revision: 3,
+        delegation: makeDelegationSummary({
+          parentSessionId: session.id,
+        }),
+      });
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchState).toHaveBeenCalledTimes(1);
+    expect(params.adoptionRefs.projectsRef.current[0]?.id).toBe(
+      "project-after-delegation-repair",
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchState).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "delegationUpdated",
+        revision: 4,
+        delegationId: "delegation-1",
+        status: "running",
+        updatedAt: "10:02",
+      });
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchState).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchState).toHaveBeenCalledTimes(3);
+    expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(4);
   });
 });
 

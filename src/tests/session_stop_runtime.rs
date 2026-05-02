@@ -25,6 +25,21 @@
 
 use super::*;
 
+fn seed_runtime_exit_active_turn_file_change(state: &AppState, session_id: &str) {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(session_id)
+        .expect("session should exist");
+    let record = inner
+        .session_mut_by_index(index)
+        .expect("session index should be valid");
+    record.active_turn_start_message_count = Some(record.session.messages.len());
+    record.active_turn_file_changes.insert(
+        "src/runtime.rs".to_owned(),
+        WorkspaceFileChangeKind::Modified,
+    );
+}
+
 // pins shared-runtime reuse: a second codex session started against the same
 // already-running sharedcodexruntime attaches to the identical helper process
 // and input channel rather than spawning a second codex app-server. guards
@@ -874,6 +889,58 @@ fn fail_turn_if_runtime_matches_publishes_error_state_when_persist_fails() {
     assert!(!published_session.messages_loaded);
     assert!(published_session.messages.is_empty());
     assert_eq!(published_session.message_count, session.message_count);
+
+    let _ = fs::remove_dir_all(failing_persistence_path);
+}
+
+#[test]
+fn runtime_exit_restores_active_turn_file_tracking_when_persist_fails() {
+    let mut state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, _input_rx) =
+        test_claude_runtime_handle("claude-runtime-exit-active-turn-rollback");
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+    let failing_persistence_path = std::env::temp_dir().join(format!(
+        "termal-runtime-exit-active-turn-rollback-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("failing persistence directory should exist");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+    }
+    seed_runtime_exit_active_turn_file_change(&state, &session_id);
+
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+    state.persist_tx = mpsc::channel().0;
+
+    let error = state
+        .handle_runtime_exit_if_matches(&session_id, &runtime_token, Some("runtime crashed"))
+        .expect_err("runtime exit should report persistence failure");
+    assert!(
+        format!("{error:#}").contains("failed"),
+        "unexpected runtime-exit error: {error:#}",
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert_eq!(record.active_turn_start_message_count, Some(0));
+    assert_eq!(
+        record.active_turn_file_changes.get("src/runtime.rs"),
+        Some(&WorkspaceFileChangeKind::Modified)
+    );
+    drop(inner);
 
     let _ = fs::remove_dir_all(failing_persistence_path);
 }

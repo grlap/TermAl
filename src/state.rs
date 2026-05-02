@@ -226,9 +226,7 @@ impl RemoteDeltaReplayCache {
 /// thread's watermark; `removed_session_ids` is the union of explicit
 /// removals and sessions that flipped to hidden since the last
 /// persist. The persist thread then writes the delta to SQLite with
-/// a targeted `INSERT OR UPDATE` per changed session, a targeted
-/// `DELETE WHERE id = ?` per removed id, and a full delegation-table
-/// rewrite only when delegation state changed. `drained_explicit_tombstones`
+/// targeted session/delegation upserts and deletes. `drained_explicit_tombstones`
 /// keeps only the tombstones drained from state so a failed write can restore
 /// those without duplicating hidden-session deletes synthesized from
 /// still-hidden records.
@@ -238,6 +236,8 @@ struct PersistDelta {
     changed_sessions: Vec<PersistedSessionRecord>,
     removed_session_ids: Vec<String>,
     changed_delegations: Option<Vec<DelegationRecord>>,
+    removed_delegation_ids: Vec<String>,
+    drained_delegation_tombstones: BTreeMap<String, u64>,
     drained_explicit_tombstones: Vec<String>,
     watermark: u64,
 }
@@ -612,10 +612,13 @@ struct StateInner {
     orchestrator_instances: Vec<OrchestratorInstance>,
     /// Durable parent-child delegation links for ordinary sessions.
     delegations: Vec<DelegationRecord>,
-    /// Mutation stamp for the delegation collection. The background persist
-    /// worker uses this to rewrite delegation rows only when delegation state
-    /// changes, not on every metadata-only commit.
-    delegation_mutation_stamp: u64,
+    /// Runtime-only mutation stamps for delegation rows. The background persist
+    /// worker compares these with its watermark to upsert only delegation rows
+    /// that changed since the last successful write.
+    delegation_mutation_stamps: BTreeMap<String, u64>,
+    /// Runtime-only delegation tombstones drained by the persist thread and
+    /// restored on write failure, mirroring session tombstone retry behavior.
+    removed_delegation_ids: BTreeMap<String, u64>,
     /// Indexes currently running read-only delegation records by `delegations` index.
     running_read_only_delegations: BTreeSet<usize>,
     /// Server-backed workspace documents keyed by workspace id.
@@ -653,7 +656,8 @@ impl StateInner {
             sessions: Vec::new(),
             orchestrator_instances: Vec::new(),
             delegations: Vec::new(),
-            delegation_mutation_stamp: 0,
+            delegation_mutation_stamps: BTreeMap::new(),
+            removed_delegation_ids: BTreeMap::new(),
             running_read_only_delegations: BTreeSet::new(),
             workspace_layouts: BTreeMap::new(),
             last_mutation_stamp: 0,

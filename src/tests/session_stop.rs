@@ -557,6 +557,66 @@ fn successful_stop_discards_deferred_callbacks() {
 }
 
 #[test]
+fn stop_session_restores_active_turn_file_tracking_when_persist_fails() {
+    let mut state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-persist-active-turn-rollback".to_owned(),
+        input_tx,
+        process: process.clone(),
+    };
+    let failing_persistence_path = std::env::temp_dir().join(format!(
+        "termal-stop-active-turn-rollback-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("failing persistence directory should exist");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+    }
+    seed_active_turn_file_change(&state, &session_id);
+
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+    state.persist_tx = mpsc::channel().0;
+
+    let error = match state.stop_session(&session_id) {
+        Ok(_) => panic!("stop_session should report persistence failure"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        error.message.contains("failed to persist session state"),
+        "unexpected stop error: {}",
+        error.message,
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert_eq!(record.active_turn_start_message_count, Some(0));
+    assert_eq!(
+        record.active_turn_file_changes.get("src/main.rs"),
+        Some(&WorkspaceFileChangeKind::Modified)
+    );
+    drop(inner);
+
+    process.wait().unwrap();
+    let _ = fs::remove_dir_all(failing_persistence_path);
+}
+
+#[test]
 fn stop_session_publishes_message_updated_for_canceled_pending_interactions() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);

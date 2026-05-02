@@ -370,7 +370,7 @@ impl AppState {
         };
         let delegation_index = inner.delegations.len();
         inner.delegations.push(record.clone());
-        inner.mark_delegations_mutated();
+        inner.mark_delegation_mutated(delegation_index);
         inner.sync_running_read_only_delegation_index(delegation_index);
         let parent_card_delta = add_parent_delegation_card_locked(&mut inner, &record);
         let revision = self
@@ -1152,7 +1152,7 @@ fn refresh_delegation_from_child_locked(
                 record.status = DelegationStatus::Running;
                 record.started_at.get_or_insert_with(|| updated_at.clone());
                 inner.sync_running_read_only_delegation_index(delegation_index);
-                inner.mark_delegations_mutated();
+                inner.mark_delegation_mutated(delegation_index);
                 let parent_card_delta = update_parent_delegation_card_locked(
                     inner,
                     &delegation,
@@ -1188,7 +1188,7 @@ fn refresh_delegation_from_child_locked(
             record.completed_at = Some(completed_at.clone());
             record.result = Some(result.clone());
             inner.sync_running_read_only_delegation_index(delegation_index);
-            inner.mark_delegations_mutated();
+            inner.mark_delegation_mutated(delegation_index);
             clear_delegation_child_queue_locked(inner, &delegation.child_session_id);
             let parent_card_delta = update_parent_delegation_card_locked(
                 inner,
@@ -1313,7 +1313,7 @@ fn mark_delegation_failed_locked(
     record.completed_at = Some(completed_at.clone());
     record.result = Some(result.clone());
     inner.sync_running_read_only_delegation_index(delegation_index);
-    inner.mark_delegations_mutated();
+    inner.mark_delegation_mutated(delegation_index);
     clear_delegation_child_queue_locked(inner, &delegation.child_session_id);
     if let Some(child_index) = inner.find_session_index(&delegation.child_session_id) {
         let child = inner
@@ -1363,7 +1363,7 @@ fn mark_delegation_canceled_locked(
     record.completed_at = Some(canceled_at.clone());
     record.result = Some(result);
     inner.sync_running_read_only_delegation_index(delegation_index);
-    inner.mark_delegations_mutated();
+    inner.mark_delegation_mutated(delegation_index);
     clear_delegation_child_queue_locked(inner, &delegation.child_session_id);
     if let Some(child_index) = inner.find_session_index(&delegation.child_session_id) {
         let child = inner

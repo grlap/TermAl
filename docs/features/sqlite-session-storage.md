@@ -160,7 +160,10 @@ CREATE INDEX idx_sessions_updated_at_ms
   ON sessions(updated_at_ms);
 ```
 
-`meta.schema_version` is `1`.
+`meta.schema_version` is `1`. TermAl does not run compatibility migrations for
+older local development schemas; a binary that opens an existing database with a
+different schema version refuses to start instead of rewriting data with an
+unknown layout.
 
 ## API Shape
 

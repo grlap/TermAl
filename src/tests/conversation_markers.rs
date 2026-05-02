@@ -74,6 +74,17 @@ fn test_marker(
     }
 }
 
+fn marker_session_stamps(state: &AppState, session_id: &str) -> (u64, u64) {
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(session_id)
+        .expect("session should exist");
+    (
+        inner.last_mutation_stamp,
+        inner.sessions[index].mutation_stamp,
+    )
+}
+
 fn remote_proxy_session_with_message(state: &AppState, remote: &RemoteConfig) -> String {
     let local_project_id = create_test_remote_project(
         state,
@@ -114,6 +125,55 @@ fn remote_proxy_session_with_message(state: &AppState, remote: &RemoteConfig) ->
         .commit_locked(&mut inner)
         .expect("remote proxy session should persist");
     local_session_id
+}
+
+fn spawn_remote_marker_proxy_server(
+    expected_request_prefix: &'static str,
+    response_status: StatusCode,
+    response_body: String,
+) -> (
+    u16,
+    Arc<Mutex<Vec<(String, String)>>>,
+    std::thread::JoinHandle<()>,
+) {
+    let requests = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+    let requests_for_server = requests.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_test_connection(&listener, "remote marker proxy listener");
+            let request = read_test_http_request(&mut stream);
+            requests_for_server
+                .lock()
+                .expect("requests mutex poisoned")
+                .push((request.request_line.clone(), request.body.clone()));
+
+            if request.request_line.starts_with("GET /api/health ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    r#"{"ok":true}"#,
+                );
+                continue;
+            }
+
+            if request.request_line.starts_with(expected_request_prefix) {
+                write_test_http_response(
+                    &mut stream,
+                    response_status,
+                    "application/json",
+                    &response_body,
+                );
+                continue;
+            }
+
+            panic!("unexpected request: {}", request.request_line);
+        }
+    });
+
+    (port, requests, server)
 }
 
 fn spawn_remote_marker_create_server(
@@ -388,16 +448,7 @@ fn conversation_marker_validation_errors_do_not_bump_mutation_stamp() {
     let state = test_app_state();
     let session_id = test_session_with_two_messages(&state);
 
-    let (before_last_stamp, before_session_stamp) = {
-        let inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(&session_id)
-            .expect("session should exist");
-        (
-            inner.last_mutation_stamp,
-            inner.sessions[index].mutation_stamp,
-        )
-    };
+    let (before_last_stamp, before_session_stamp) = marker_session_stamps(&state, &session_id);
 
     let err = state
         .create_conversation_marker(
@@ -414,18 +465,52 @@ fn conversation_marker_validation_errors_do_not_bump_mutation_stamp() {
         .expect_err("missing message anchor should be rejected");
     assert_eq!(err.status, StatusCode::BAD_REQUEST);
 
-    let (after_last_stamp, after_session_stamp) = {
-        let inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(&session_id)
-            .expect("session should exist");
-        (
-            inner.last_mutation_stamp,
-            inner.sessions[index].mutation_stamp,
-        )
-    };
+    let (after_last_stamp, after_session_stamp) = marker_session_stamps(&state, &session_id);
     assert_eq!(after_last_stamp, before_last_stamp);
     assert_eq!(after_session_stamp, before_session_stamp);
+}
+
+#[test]
+fn conversation_marker_update_and_delete_errors_do_not_bump_mutation_stamp() {
+    let state = test_app_state();
+    let session_id = test_session_with_two_messages(&state);
+    let created = state
+        .create_conversation_marker(
+            &session_id,
+            CreateConversationMarkerRequest {
+                kind: ConversationMarkerKind::Decision,
+                name: "Decision point".to_owned(),
+                body: None,
+                color: "#3b82f6".to_owned(),
+                message_id: "message-1".to_owned(),
+                end_message_id: None,
+            },
+        )
+        .expect("marker should create");
+    let baseline_stamps = marker_session_stamps(&state, &session_id);
+
+    let err = state
+        .update_conversation_marker(
+            &session_id,
+            &created.marker.id,
+            UpdateConversationMarkerRequest {
+                kind: None,
+                name: None,
+                body: None,
+                color: None,
+                message_id: Some("missing-message".to_owned()),
+                end_message_id: None,
+            },
+        )
+        .expect_err("missing update anchor should be rejected");
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert_eq!(marker_session_stamps(&state, &session_id), baseline_stamps);
+
+    let err = state
+        .delete_conversation_marker(&session_id, "marker-missing")
+        .expect_err("missing marker delete should be rejected");
+    assert_eq!(err.status, StatusCode::NOT_FOUND);
+    assert_eq!(marker_session_stamps(&state, &session_id), baseline_stamps);
 }
 
 #[test]
@@ -548,6 +633,161 @@ fn remote_backed_marker_create_proxies_to_owner_and_localizes_response() {
     join_test_server(server);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_backed_marker_update_proxies_patch_and_localizes_response() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_session_id = remote_proxy_session_with_message(&state, &remote);
+    let mut remote_marker = test_marker(
+        "marker-remote-1",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Bug,
+    );
+    remote_marker.name = "Updated marker".to_owned();
+    remote_marker.body = None;
+    let response_body =
+        serde_json::to_string(&test_marker_response(remote_marker, 8)).expect("response encodes");
+    let (port, requests, server) = spawn_remote_marker_proxy_server(
+        "PATCH /api/sessions/remote-session-1/markers/marker-remote-1 ",
+        StatusCode::OK,
+        response_body,
+    );
+    insert_test_remote_connection(&state, &remote, port);
+
+    let response = state
+        .update_conversation_marker(
+            &local_session_id,
+            "marker-remote-1",
+            UpdateConversationMarkerRequest {
+                kind: Some(ConversationMarkerKind::Bug),
+                name: Some(" Updated marker ".to_owned()),
+                body: Some(None),
+                color: Some("#ef4444".to_owned()),
+                message_id: None,
+                end_message_id: Some(None),
+            },
+        )
+        .expect("remote marker update should proxy");
+
+    assert_eq!(response.marker.session_id, local_session_id);
+    assert_eq!(response.marker.id, "marker-remote-1");
+    assert_eq!(response.marker.name, "Updated marker");
+    let local_markers = state
+        .list_conversation_markers(&local_session_id)
+        .expect("local marker list should read");
+    assert_eq!(local_markers.markers.len(), 1);
+    assert_eq!(local_markers.markers[0].session_id, local_session_id);
+
+    let requests = requests.lock().expect("requests mutex poisoned").clone();
+    let patch = requests
+        .iter()
+        .find(|(line, _)| {
+            line.starts_with("PATCH /api/sessions/remote-session-1/markers/marker-remote-1 ")
+        })
+        .unwrap_or_else(|| panic!("expected remote marker PATCH request, saw {requests:?}"));
+    let body: Value = serde_json::from_str(&patch.1).expect("PATCH body should decode");
+    assert_eq!(body["kind"], "bug");
+    assert_eq!(body["name"], " Updated marker ");
+    assert_eq!(body["body"], Value::Null);
+    assert_eq!(body["endMessageId"], Value::Null);
+    join_test_server(server);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_backed_marker_delete_proxies_delete_and_localizes_response() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_session_id = remote_proxy_session_with_message(&state, &remote);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerCreated {
+                revision: 7,
+                session_id: "remote-session-1".to_owned(),
+                marker: test_marker(
+                    "marker-remote-1",
+                    "remote-session-1",
+                    "remote-message-1",
+                    ConversationMarkerKind::Checkpoint,
+                ),
+                session_mutation_stamp: Some(11),
+            },
+        )
+        .expect("remote marker create should seed local marker");
+    let response_body = serde_json::to_string(&DeleteConversationMarkerResponse {
+        marker_id: "marker-remote-1".to_owned(),
+        revision: 8,
+        server_instance_id: "remote-instance".to_owned(),
+        session_mutation_stamp: Some(12),
+    })
+    .expect("response encodes");
+    let (port, requests, server) = spawn_remote_marker_proxy_server(
+        "DELETE /api/sessions/remote-session-1/markers/marker-remote-1 ",
+        StatusCode::OK,
+        response_body,
+    );
+    insert_test_remote_connection(&state, &remote, port);
+
+    let response = state
+        .delete_conversation_marker(&local_session_id, "marker-remote-1")
+        .expect("remote marker delete should proxy");
+
+    assert_eq!(response.marker_id, "marker-remote-1");
+    assert!(response.session_mutation_stamp.is_some());
+    let local_markers = state
+        .list_conversation_markers(&local_session_id)
+        .expect("local marker list should read");
+    assert!(local_markers.markers.is_empty());
+
+    let requests = requests.lock().expect("requests mutex poisoned").clone();
+    let delete = requests
+        .iter()
+        .find(|(line, _)| {
+            line.starts_with("DELETE /api/sessions/remote-session-1/markers/marker-remote-1 ")
+        })
+        .unwrap_or_else(|| panic!("expected remote marker DELETE request, saw {requests:?}"));
+    assert!(
+        delete.1.is_empty(),
+        "DELETE request should not carry a body"
+    );
+    join_test_server(server);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn marker_patch_request_deserialization_rejects_unknown_kind_typos() {
+    let err = serde_json::from_value::<UpdateConversationMarkerRequest>(json!({
+        "kind": "decison"
+    }))
+    .expect_err("unknown marker kind should be rejected");
+
+    assert!(
+        err.to_string()
+            .contains("unsupported conversation marker kind `decison`"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
@@ -752,6 +992,71 @@ fn remote_marker_update_response_rejects_mismatched_marker_id() {
         .list_conversation_markers(&local_session_id)
         .expect("localized markers should list");
     assert!(markers.markers.is_empty());
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_marker_update_proxy_rejects_mismatched_marker_id() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_session_id = remote_proxy_session_with_message(&state, &remote);
+    let remote_marker = test_marker(
+        "marker-other",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Checkpoint,
+    );
+    let response_body =
+        serde_json::to_string(&test_marker_response(remote_marker, 9)).expect("response encodes");
+    let (port, requests, server) = spawn_remote_marker_proxy_server(
+        "PATCH /api/sessions/remote-session-1/markers/marker-expected ",
+        StatusCode::OK,
+        response_body,
+    );
+    insert_test_remote_connection(&state, &remote, port);
+
+    let err = state
+        .update_conversation_marker(
+            &local_session_id,
+            "marker-expected",
+            UpdateConversationMarkerRequest {
+                kind: Some(ConversationMarkerKind::Checkpoint),
+                name: None,
+                body: None,
+                color: None,
+                message_id: None,
+                end_message_id: None,
+            },
+        )
+        .expect_err("mismatched remote marker id should be rejected");
+    assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+    assert!(
+        err.message.contains("did not match requested marker"),
+        "unexpected error: {}",
+        err.message
+    );
+
+    let requests = requests.lock().expect("requests mutex poisoned").clone();
+    assert!(
+        requests.iter().any(|(line, _)| {
+            line.starts_with("PATCH /api/sessions/remote-session-1/markers/marker-expected ")
+        }),
+        "expected remote marker PATCH request, saw {requests:?}"
+    );
+    let markers = state
+        .list_conversation_markers(&local_session_id)
+        .expect("localized markers should list");
+    assert!(markers.markers.is_empty());
+    join_test_server(server);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
@@ -966,6 +1271,52 @@ async fn marker_json_rejection_uses_api_error_envelope() {
         response["error"]
             .as_str()
             .is_some_and(|error| error.contains("invalid conversation marker request JSON")),
+        "unexpected response: {response}"
+    );
+}
+
+#[tokio::test]
+async fn marker_patch_json_rejection_uses_api_error_envelope() {
+    let state = test_app_state();
+    let (status, response): (StatusCode, Value) = request_json(
+        &app_router(state),
+        Request::builder()
+            .method("PATCH")
+            .uri("/api/sessions/session-1/markers/marker-1")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{"))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        response["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("invalid conversation marker request JSON")),
+        "unexpected response: {response}"
+    );
+}
+
+#[tokio::test]
+async fn marker_patch_unknown_kind_rejection_uses_api_error_envelope() {
+    let state = test_app_state();
+    let (status, response): (StatusCode, Value) = request_json(
+        &app_router(state),
+        Request::builder()
+            .method("PATCH")
+            .uri("/api/sessions/session-1/markers/marker-1")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"kind":"decison"}"#))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        response["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("unsupported conversation marker kind `decison`")),
         "unexpected response: {response}"
     );
 }

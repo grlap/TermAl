@@ -354,6 +354,10 @@ impl AppState {
             let message_id = inner.next_message_id();
             let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
                 .then(|| inner.next_message_id());
+            let active_turn_start_message_count_before_commit =
+                inner.sessions[index].active_turn_start_message_count;
+            let active_turn_file_changes_before_commit =
+                inner.sessions[index].active_turn_file_changes.clone();
             let mut thread_id_to_suppress = None;
             let (pending_interaction_updates, created_messages) = {
                 let record = inner
@@ -443,10 +447,13 @@ impl AppState {
                                 .retain(|candidate| candidate != session_id);
                         }
                     }
-                    inner
+                    let record = inner
                         .session_mut_by_index(index)
-                        .expect("session index should be valid")
-                        .orchestrator_auto_dispatch_blocked = true;
+                        .expect("session index should be valid");
+                    record.orchestrator_auto_dispatch_blocked = true;
+                    record.active_turn_start_message_count =
+                        active_turn_start_message_count_before_commit;
+                    record.active_turn_file_changes = active_turn_file_changes_before_commit;
                     return Err(ApiError::internal(format!(
                         "failed to persist session state: {err:#}"
                     )));

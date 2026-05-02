@@ -7,6 +7,66 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Commit-failure rollback can leave terminal sessions marked as active turns
+
+**Severity:** Medium - idle or error sessions can keep collecting active-turn file changes after persistence failure.
+
+`src/session_lifecycle.rs:454` and `src/turn_lifecycle.rs:459` restore `active_turn_start_message_count` after the session has already been moved to a terminal `Idle` or `Error` state. `record_active_turn_file_changes` treats that field as the active-turn marker, so the rollback can leave terminal sessions collecting workspace changes as if a turn were still running.
+
+**Current behavior:**
+- Stop and runtime-failure paths finish active-turn tracking before `commit_locked()`.
+- On commit failure, the rollback restores active-turn markers but keeps the terminal session state.
+- Later workspace file-change recording can attach changes to a non-active session.
+
+**Proposal:**
+- Either roll back the whole terminal mutation on commit failure, or keep the terminal in-memory state and leave active-turn tracking cleared.
+- Keep `active_turn_start_message_count`, `active_turn_file_changes`, and `active_turn_file_change_grace_deadline` consistent with the session lifecycle state.
+
+## Marker navigation cache is cleared after initial refs populate
+
+**Severity:** Low - initial marker jumps bypass the intended slot cache and rely on DOM fallback lookup.
+
+`ui/src/panels/AgentSessionPanel.tsx:668` clears `messageSlotNodesRef` in a passive effect keyed by session id. Initial visible message refs register during commit, then the effect clears the map, so marker jumps for already-mounted rows fall through to `findMountedConversationMessageSlot`.
+
+**Current behavior:**
+- Initial visible message slot refs are inserted into `messageSlotNodesRef`.
+- The session-id effect clears the map after those refs register.
+- Marker navigation still works through fallback DOM lookup, but the cache is effectively disabled for initially mounted rows.
+
+**Proposal:**
+- Key cached slots by session id, or clear before new refs register.
+- Add regression coverage for duplicate panes and session-switching with overlapping message ids.
+
+## Marker navigation fixes lack wrong-pane and session-switch regression coverage
+
+**Severity:** Medium - the tests do not pin the behaviors fixed by the scoped lookup and session-id cache reset.
+
+The current marker tests render only one panel and do not rerender the same panel across sessions with overlapping message ids. A future change could return to global slot lookup or stale `messageSlotNodesRef` entries while the existing tests still pass.
+
+**Current behavior:**
+- Marker navigation coverage does not include duplicate panels with the same message id.
+- Coverage does not rerender the same component from one session to another with overlapping ids.
+- Wrong-pane or stale-session scrolling could regress unnoticed.
+
+**Proposal:**
+- Add React Testing Library cases for duplicate panels where only the target panel scrolls.
+- Add a same-component session-switch case that proves stale slot refs are not reused.
+
+## Mermaid fallback test does not assert the fallback bundle URL
+
+**Severity:** Low - a broken Mermaid fallback script source can pass the current test.
+
+`ui/src/MarkdownContent.mermaid-fallback.test.tsx:43` mocks `document.head.appendChild`, installs `window.mermaid`, and calls `onload` for any appended script. The test then asserts only that an `HTMLScriptElement` was appended, so an incorrect fallback bundle URL can still pass.
+
+**Current behavior:**
+- The fallback test auto-loads any appended script element.
+- It does not assert `script.src` before simulating load.
+- A wrong CDN or bundle path can pass the regression test.
+
+**Proposal:**
+- Capture the appended script element and assert its `src` is the expected Mermaid bundle URL.
+- Simulate `onload` only after the URL assertion passes.
+
 ## Marker navigator logic is embedded in AgentSessionPanel
 
 **Severity:** Low - marker grouping, sorting, DOM lookup, navigation state, and chip rendering are growing an already large panel component.
@@ -21,21 +81,6 @@ the Implementation Tasks section.
 **Proposal:**
 - Extract a focused conversation-marker panel/helper module.
 - Move marker-specific tests next to that module while leaving `AgentSessionPanel` to wire data and callbacks.
-
-## Mermaid dynamic import fallback lacks import-failure coverage
-
-**Severity:** Medium - the first fallback branch can regress when the optimized Mermaid module chunk fails to load.
-
-`ui/src/message-cards.tsx:230` catches dynamic `import("mermaid")` failures and falls back to the bundled script path. Current coverage exercises fallback after the module import succeeds and rendering fails, but not the branch where the dynamic import itself rejects.
-
-**Current behavior:**
-- Render-failure fallback after a successful Mermaid import is covered.
-- Dynamic import fetch failure is not forced in tests.
-- A broken first fallback branch could pass the current test suite.
-
-**Proposal:**
-- Add an isolated Vitest case that forces `import("mermaid")` to reject with a dynamic import fetch error.
-- Assert the bundled script path renders successfully.
 
 ## Conversation overview segment cap does not bound homogeneous runs
 
@@ -976,8 +1021,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   re-render the parent with a smaller `regions`/`segments` array while `currentChangeIndex`/`currentRegionIndex` points past the new end and assert the counter snaps to "Change/Region 1 of N" while prev/next still wrap correctly. Today the existing prev/next tests only exercise wrap-around at full length; the `current >= changeCount/regionCount` clamp branch in the `useEffect` is unexercised.
 - [ ] P2: Add rendered diff render-budget coverage:
   create many Mermaid/math rendered regions and assert the preview applies the same document-level caps as a single `MarkdownContent` document.
-- [ ] P2: Add Mermaid dynamic import fallback coverage:
-  force `import("mermaid")` to reject with a dynamic module fetch error and assert the bundled fallback script path renders successfully.
 - [ ] P2: Add single-target rendered diff navigation coverage:
   assert prev/next scrolls the only Markdown diff change and the only rendered diff region even though the selected index does not change.
 - [ ] P2: Route the new lagged-recovery reconnect test through the textDelta fast-path it documents:
@@ -986,35 +1029,15 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `ui/src/backend-connection.test.tsx:1225-1261` co-fires the stale `delta` and the `workspaceFilesChanged` event in one `act()`. The assertion `countStateFetches() === hydratedStateFetchCount` is satisfied if either side skips confirmation, so the test cannot pinpoint which side regressed. Dispatch `workspaceFilesChanged` alone first and assert no fetch fired; then add the stale delta separately and re-assert.
 - [ ] P2: Add frontend stop/failure delta-before-snapshot terminal-message coverage:
   dispatch cancellation/update deltas before the same-revision snapshot and assert appended stop/failure terminal messages remain rendered without relying on a later unrelated refresh.
-- [ ] P2: Add delegation EventSource recovery timing coverage:
-  drive delegation repair through `EventSource.onerror`/`onopen` and assert reconnect recovery remains armed until live SSE data resumes after snapshot repair.
-- [ ] P2: Add delegation persist-delta transition coverage:
-  assert running, failed, and canceled delegation transitions mark delegation state as mutated and persist through the delta path, not only create/completion updates.
+- [ ] P2: Add active-turn commit-failure rollback coverage:
+  force `commit_locked()` to fail after stop/runtime terminalization and assert terminal sessions do not retain active-turn file-change tracking markers.
 - [ ] P2: Add homogeneous conversation-overview segment cap coverage:
   build a long same-kind message run with `maxItemsPerSegment` set and assert the segment policy is either capped or explicitly documented as a mixed-run-only cap.
-- [ ] P2: Scope marker slot lookup to the panel root in `ui/src/panels/AgentSessionPanel.tsx:921-931`:
-  `findMountedConversationMessageSlot` does a global `document.querySelectorAll("[data-session-search-item-key]")` and returns the first match by `messageId`. When the same session is rendered in two workspace panes, this can scroll the wrong pane's slot when the in-page `messageSlotNodesRef` cache misses (e.g. after a remount). Scope to the panel root via the `scrollContainerRef` parent or include a pane id in the selector.
-- [ ] P2: Reset `messageSlotNodesRef` on session change in `ui/src/panels/AgentSessionPanel.tsx:666-692`:
-  ref keys by `messageId` only and is never cleared. If `SessionConversationPage` is reused for a different session (page is keyed by session id higher up, but if memoization changes), stale message-id keys could persist across sessions. Add `useEffect(() => messageSlotNodesRef.current.clear(), [session.id])` to harden.
-- [ ] P2: Add remote marker update/delete proxy coverage:
-  cover the remote-backed PATCH and DELETE marker proxy branches, including request method/path/body, nullable PATCH serialization, delete response id checks, and localized response application.
-- [ ] P2: Drive marker id-mismatch coverage through the actual remote PATCH proxy:
-  have the production update path or PATCH route call a fake remote that returns a different marker id, then assert the proxy rejects it and does not upsert locally.
-- [ ] P2: Extend marker mutation-stamp regression coverage to update/delete failures:
-  add rejected update and delete cases, such as missing marker or bad anchor, and assert both `inner.last_mutation_stamp` and the session mutation stamp remain unchanged.
-- [ ] P2: Add PATCH-specific marker request rejection tests:
-  cover malformed PATCH JSON and an update payload with an unknown marker kind, pinning the `update_session_marker` rejection path and strict update DTO deserialization.
+- [ ] P2: Add marker navigation duplicate-pane and session-switch regressions:
+  render duplicate panels with overlapping message ids and rerender one panel across sessions, then assert marker jumps scroll only the intended panel and stale slot refs are not reused.
+- [ ] P2: Assert the Mermaid fallback bundle URL in the fallback test:
+  capture the appended script before simulating load and require its `src` to match the expected Mermaid bundle URL.
 - [ ] P2: Make marker hover toolbar reachable on touch-only devices (`ui/src/styles.css:3920-3935`):
   toolbar is `pointer-events: none` until hover/focus-within. Touch-only devices without a hover state cannot reveal the "Add checkpoint marker" button. Toolbar can be tab-reached after the user lands on something focusable inside the message; flag if Phase 1 wants touch parity. Add a long-press or always-visible mode for touch.
-- [ ] P2: Switch delegation persistence from rewrite-all to row-level upsert + tombstones in `src/persist.rs:1104-1123`:
-  the new `delegations` SQLite table uses `DELETE FROM delegations` then re-insert every row on any single-row change. Session table uses targeted upserts/deletes, but delegations rewrite the whole table per delta tick. With long delegation history this regresses to the same pattern the SQLite split set out to avoid. Add per-row insert/update + tombstone tracking matching the session pattern, OR document why wholesale rewrite is acceptable for delegation cardinality.
-- [ ] P2: Add stored-version guard to SQLite schema migration in `src/persist.rs:638-665`:
-  `SQLITE_SCHEMA_VERSION` was bumped to `"2"` but `ensure_sqlite_state_schema` ignores the existing value and unconditionally writes `"2"`. A downgrade to a v1 binary would silently lose dedicated `delegations` rows after the v2 binary cleared the embedded JSON copy from `app_state`. Add a stored-version check (read the `meta` row first, refuse downgrade or run a one-time legacy-to-table migration), and document the no-downgrade contract in `docs/features/sqlite-session-storage.md`.
 - [ ] P2: Add `shouldApplyMarkerMutationResponse` call sites for update + delete in `ui/src/app-session-actions.ts:653-684`:
   the helper is helpfully extracted but only consumed by `handleCreateConversationMarker`. There is no `handleUpdateConversationMarker`/`handleDeleteConversationMarker` in this file (only `api.ts` exposes those). When marker update/delete UI is wired in, the gating helper exists but the new entry points must remember to use it. Add a TODO comment near the helper, or land the update/delete handlers immediately so the gate is applied uniformly.
-- [ ] P2: Add a pure-delegation-update regression test in `src/tests/delegations.rs`:
-  `delegation_mutation_stamp` is now a second top-level mutation watermark next to `last_mutation_stamp`. Both new round-32 tests stage a delegation create which incidentally bumps a session via the parent card. Add a targeted regression for "pure delegation update produces a delta": `state.collect_persist_delta(0)` after modifying *only* delegation fields (no session push) should emit `changed_delegations` with the right ids.
-- [ ] P2: Document the empty-delegations upgrade edge case in `src/persisted_state.rs:122`:
-  `has_persisted_delegations = !self.delegations.is_empty()` means a load with zero delegations does not seed `delegation_mutation_stamp`, so the legacy embedded delegations payload never gets cleared from the metadata JSON if all delegations were removed before the v2 upgrade. Practically harmless (an empty `delegations: []` is small) but the comment "rewrites the metadata row without any legacy embedded delegation payload" is conditional on `delegations` being non-empty at upgrade time. Add a Note in the comment, or unconditionally seed the watermark.
-- [ ] P2: Restore `active_turn_*` fields on commit failure in `src/session_lifecycle.rs:398, src/turn_lifecycle.rs:442`:
-  `finish_active_turn_file_change_tracking(record)` was relocated inside the closure, ahead of `commit_locked`. On commit failure (the explicit Err arm at `session_lifecycle.rs:438`), the in-memory record now leaves the active-turn tracking already finished/cleared while no rollback restores `active_turn_start_message_count` or `active_turn_file_changes`. Previously the call ran after a successful commit. Not catastrophic (these fields aren't persisted, and the next stop attempt re-triggers), but a small fidelity regression in the commit-failure rollback path. Roll back on commit failure or document the intentional drop with a brief comment.
