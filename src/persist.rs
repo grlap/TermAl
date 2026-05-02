@@ -18,7 +18,6 @@ fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir).join("termal.sqlite")
 }
 
-#[cfg(not(test))]
 const SQLITE_SCHEMA_VERSION: &str = "1";
 #[cfg(not(test))]
 const SQLITE_LEGACY_STATE_KEY: &str = "persistedState";
@@ -636,7 +635,6 @@ fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
     load_state_from_sqlite(path)
 }
 
-#[cfg(not(test))]
 fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
     connection
         .execute_batch(
@@ -694,6 +692,49 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
         )
         .context("failed to record SQLite state schema version")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod sqlite_schema_tests {
+    use super::*;
+
+    #[test]
+    fn sqlite_schema_guard_rejects_unsupported_version_before_creating_state_tables() {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE meta (
+                  key TEXT PRIMARY KEY,
+                  value TEXT NOT NULL
+                );
+                INSERT INTO meta(key, value) VALUES('schema_version', '0');
+                ",
+            )
+            .expect("seed unsupported schema version");
+
+        let error = ensure_sqlite_state_schema(&connection)
+            .expect_err("unsupported schema version should be rejected");
+
+        assert!(
+            format!("{error:#}").contains("unsupported SQLite state schema version `0`"),
+            "{error:#}"
+        );
+        let state_table_count: u32 = connection
+            .query_row(
+                "
+                SELECT COUNT(*)
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name IN ('app_state', 'sessions', 'delegations')
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .expect("state table count should be queryable");
+        assert_eq!(state_table_count, 0);
+    }
 }
 
 #[cfg(not(test))]

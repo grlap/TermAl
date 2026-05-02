@@ -998,6 +998,95 @@ describe("delegation delta repair", () => {
     expect(fetchState).toHaveBeenCalledTimes(3);
     expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(4);
   });
+
+  it("confirms bad-live-event recovery after delegation repair and later delegation traffic", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    const session = makeSession({
+      messagesLoaded: true,
+      messageCount: 1,
+      sessionMutationStamp: 2,
+    });
+    const repairedState = {
+      ...makeStateResponse(session, 3),
+      delegations: [
+        makeDelegationSummary({
+          parentSessionId: session.id,
+        }),
+      ],
+    };
+    const laterRepairedState = {
+      ...repairedState,
+      revision: 4,
+    };
+    const fetchState = vi
+      .spyOn(api, "fetchState")
+      .mockResolvedValueOnce(repairedState)
+      .mockResolvedValue(laterRepairedState);
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const params = makeLiveStateParams(session);
+    const setBackendConnectionState = vi.fn();
+    params.stateSetters.setBackendConnectionState = setBackendConnectionState;
+    params.adoptionRefs.latestStateRevisionRef.current = 2;
+    params.adoptionRefs.sessionsRef.current = [session];
+
+    renderLiveStateHarness(params, () => {});
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      eventSource?.dispatchError();
+      eventSource?.dispatchOpen();
+      eventSource?.dispatchNamedEvent("delta", "{");
+    });
+    expect(setBackendConnectionState).toHaveBeenCalledWith("reconnecting");
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "delegationCreated",
+        revision: 3,
+        delegation: makeDelegationSummary({
+          parentSessionId: session.id,
+        }),
+      });
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchState).toHaveBeenCalledTimes(1);
+    expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(3);
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "delegationUpdated",
+        revision: 4,
+        delegationId: "delegation-1",
+        status: "running",
+        updatedAt: "10:02",
+      });
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchState).toHaveBeenCalledTimes(2);
+    expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(4);
+    expect(setBackendConnectionState).toHaveBeenLastCalledWith("connected");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS * 4);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchState).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("hydration mismatch recovery gate", () => {

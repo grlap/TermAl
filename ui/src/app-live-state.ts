@@ -1740,14 +1740,19 @@ export function useAppLiveState(
       resetReconnectStateResyncBackoff();
     }
 
+    function clearDelegationRepairReconnectProof() {
+      delegationRepairAdoptedSinceLastReconnectError = false;
+      lastDelegationRepairRequestedRevision = null;
+    }
+
     function confirmReconnectRecoveryFromLiveEvent({
       allowWithoutConfirmedOpen = false,
-    }: { allowWithoutConfirmedOpen?: boolean } = {}) {
+    }: { allowWithoutConfirmedOpen?: boolean } = {}): boolean {
       const canConfirmWithoutOpen =
         allowWithoutConfirmedOpen &&
         allowReconnectRecoveryWithoutExplicitOpen;
       if (!sawReconnectOpenSinceLastError && !canConfirmWithoutOpen) {
-        return;
+        return false;
       }
 
       clearReconnectStateResyncTimeoutAfterConfirmedReopen({
@@ -1755,15 +1760,28 @@ export function useAppLiveState(
       });
       pendingBadLiveEventRecovery = false;
       allowReconnectRecoveryWithoutExplicitOpen = false;
+      clearDelegationRepairReconnectProof();
       setBackendConnectionState("connected");
+      return true;
     }
 
     function confirmReconnectRecoveryFromDeltaEvent() {
       const allowWithoutConfirmedOpen =
         allowReconnectRecoveryWithoutExplicitOpen;
-      confirmReconnectRecoveryFromLiveEvent({
+      return confirmReconnectRecoveryFromLiveEvent({
         allowWithoutConfirmedOpen,
       });
+    }
+
+    function beginBadLiveEventRecovery() {
+      pendingBadLiveEventRecovery = true;
+      reconnectRecoveryConfirmedSinceLastError = false;
+      allowReconnectRecoveryWithoutExplicitOpen = false;
+      clearDelegationRepairReconnectProof();
+      setBackendConnectionState("reconnecting");
+      if (reconnectStateResyncTimeoutId === null) {
+        scheduleReconnectStateResync();
+      }
     }
 
     /**
@@ -2078,6 +2096,7 @@ export function useAppLiveState(
                 );
                 if (
                   !confirmReconnectRecoveryOnAdoption &&
+                  !reconnectRecoveryConfirmedSinceLastError &&
                   lastDelegationRepairRequestedRevision !== null &&
                   forceAdoptEqualOrNewerRevision !== null &&
                   state.revision >= lastDelegationRepairRequestedRevision
@@ -2551,13 +2570,7 @@ export function useAppLiveState(
           // retry affordance stays available (onopen already set "connected"),
           // and re-arm fallback polling so recovery continues via /api/state.
           if (sawReconnectOpenSinceLastError) {
-            pendingBadLiveEventRecovery = true;
-            reconnectRecoveryConfirmedSinceLastError = false;
-            allowReconnectRecoveryWithoutExplicitOpen = false;
-            setBackendConnectionState("reconnecting");
-            if (reconnectStateResyncTimeoutId === null) {
-              scheduleReconnectStateResync();
-            }
+            beginBadLiveEventRecovery();
           }
         }
       } finally {
@@ -2582,13 +2595,8 @@ export function useAppLiveState(
         const currentRevision = latestStateRevisionRef.current;
         if (isDelegationDeltaEvent(delta)) {
           if (currentRevision === null || delta.revision >= currentRevision) {
-            if (
-              delegationRepairAdoptedSinceLastReconnectError &&
-              !pendingBadLiveEventRecovery
-            ) {
+            if (delegationRepairAdoptedSinceLastReconnectError) {
               confirmReconnectRecoveryFromDeltaEvent();
-              delegationRepairAdoptedSinceLastReconnectError = false;
-              lastDelegationRepairRequestedRevision = null;
             }
             lastDelegationRepairRequestedRevision = delta.revision;
             requestStateResync({
@@ -2874,13 +2882,7 @@ export function useAppLiveState(
         // Parse or reducer failure — restore reconnecting state so the retry
         // affordance stays available, and re-arm polling.
         if (sawReconnectOpenSinceLastError) {
-          pendingBadLiveEventRecovery = true;
-          reconnectRecoveryConfirmedSinceLastError = false;
-          allowReconnectRecoveryWithoutExplicitOpen = false;
-          setBackendConnectionState("reconnecting");
-          if (reconnectStateResyncTimeoutId === null) {
-            scheduleReconnectStateResync();
-          }
+          beginBadLiveEventRecovery();
         } else {
           requestStateResync({ rearmOnFailure: true });
         }
@@ -2964,8 +2966,7 @@ export function useAppLiveState(
       reconnectRecoveryConfirmedSinceLastError = false;
       pendingBadLiveEventRecovery = false;
       allowReconnectRecoveryWithoutExplicitOpen = false;
-      delegationRepairAdoptedSinceLastReconnectError = false;
-      lastDelegationRepairRequestedRevision = null;
+      clearDelegationRepairReconnectProof();
       clearForceAdoptNextStateEvent();
       const isOnline = readNavigatorOnline();
       const hasHydratedState = latestStateRevisionRef.current !== null;

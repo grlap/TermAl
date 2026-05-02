@@ -19,6 +19,7 @@ import {
   compactCodexThread,
   createConversationMarker,
   createProject,
+  deleteConversationMarker,
   createSession,
   fetchAgentCommands,
   fetchState,
@@ -35,8 +36,10 @@ import {
   submitMcpElicitation,
   submitUserInput,
   unarchiveCodexThread,
+  updateConversationMarker,
   updateSessionSettings,
   type StateResponse,
+  type UpdateConversationMarkerRequest,
 } from "./api";
 import type { AdoptStateOptions, UseAppLiveStateReturn } from "./app-live-state";
 import { startActivePromptPoll } from "./active-prompt-poll";
@@ -314,6 +317,15 @@ export type UseAppSessionActionsReturn = {
   handleCreateConversationMarker: (
     sessionId: string,
     messageId: string,
+  ) => Promise<boolean>;
+  handleUpdateConversationMarker: (
+    sessionId: string,
+    markerId: string,
+    payload: UpdateConversationMarkerRequest,
+  ) => Promise<boolean>;
+  handleDeleteConversationMarker: (
+    sessionId: string,
+    markerId: string,
   ) => Promise<boolean>;
 };
 
@@ -650,15 +662,37 @@ export function useAppSessionActions(
     };
   }
 
+  function deleteConversationMarkerLocally(
+    session: Session,
+    markerId: string,
+    sessionMutationStamp?: number | null,
+  ): Session {
+    const nextMarkers = (session.markers ?? []).filter(
+      (marker) => marker.id !== markerId,
+    );
+    return {
+      ...session,
+      markers: nextMarkers,
+      ...(sessionMutationStamp !== undefined ? { sessionMutationStamp } : {}),
+    };
+  }
+
   function shouldApplyMarkerMutationResponse(
     sessionId: string,
     response: {
       revision: number;
       serverInstanceId: string;
-      marker: NonNullable<Session["markers"]>[number];
+      marker?: NonNullable<Session["markers"]>[number];
+      markerId?: string;
       sessionMutationStamp?: number | null;
     },
+    options: { deleted?: boolean } = {},
   ): "apply" | "stale-success" | "deferred" {
+    const markerId = response.marker?.id ?? response.markerId;
+    if (!markerId) {
+      return "deferred";
+    }
+
     if (
       isServerInstanceMismatch(
         lastSeenServerInstanceIdRef.current,
@@ -684,12 +718,16 @@ export function useAppSessionActions(
       const currentSession =
         sessionsRef.current.find((session) => session.id === sessionId) ?? null;
       const currentMarker = currentSession?.markers?.find(
-        (marker) => marker.id === response.marker.id,
+        (marker) => marker.id === markerId,
       );
       const responseMutationStamp = response.sessionMutationStamp ?? null;
       const currentMutationStamp = currentSession?.sessionMutationStamp ?? null;
+      const targetStateMatches = options.deleted
+        ? currentMarker === undefined
+        : currentMarker !== undefined;
       const hasTargetEvidence =
-        currentMarker !== undefined &&
+        currentSession !== null &&
+        targetStateMatches &&
         (responseMutationStamp === null ||
           (currentMutationStamp !== null &&
             currentMutationStamp >= responseMutationStamp));
@@ -2182,6 +2220,112 @@ export function useAppSessionActions(
     }
   }
 
+  async function handleUpdateConversationMarker(
+    sessionId: string,
+    markerId: string,
+    payload: UpdateConversationMarkerRequest,
+  ) {
+    const session = sessionLookup.get(sessionId);
+    if (!session?.markers?.some((marker) => marker.id === markerId)) {
+      return false;
+    }
+
+    setUpdatingSessionIds((current) =>
+      setSessionFlag(current, sessionId, true),
+    );
+    try {
+      const response = await updateConversationMarker(sessionId, markerId, payload);
+      if (!isMountedRef.current) {
+        return false;
+      }
+
+      const responseOutcome = shouldApplyMarkerMutationResponse(sessionId, response);
+      if (responseOutcome === "deferred") {
+        return false;
+      }
+      if (responseOutcome === "apply") {
+        updateSessionLocally(sessionId, (currentSession) =>
+          upsertConversationMarkerLocally(
+            currentSession,
+            response.marker,
+            response.sessionMutationStamp,
+          ),
+        );
+      }
+      setRequestError(null);
+      return true;
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return false;
+      }
+      reportRequestError(error);
+      return false;
+    } finally {
+      if (isMountedRef.current) {
+        setUpdatingSessionIds((current) =>
+          setSessionFlag(current, sessionId, false),
+        );
+      }
+    }
+  }
+
+  async function handleDeleteConversationMarker(
+    sessionId: string,
+    markerId: string,
+  ) {
+    const session = sessionLookup.get(sessionId);
+    if (!session?.markers?.some((marker) => marker.id === markerId)) {
+      return false;
+    }
+
+    setUpdatingSessionIds((current) =>
+      setSessionFlag(current, sessionId, true),
+    );
+    try {
+      const response = await deleteConversationMarker(sessionId, markerId);
+      if (!isMountedRef.current) {
+        return false;
+      }
+
+      const responseOutcome = shouldApplyMarkerMutationResponse(
+        sessionId,
+        {
+          revision: response.revision,
+          serverInstanceId: response.serverInstanceId,
+          markerId: response.markerId,
+          sessionMutationStamp: response.sessionMutationStamp,
+        },
+        { deleted: true },
+      );
+      if (responseOutcome === "deferred") {
+        return false;
+      }
+      if (responseOutcome === "apply") {
+        updateSessionLocally(sessionId, (currentSession) =>
+          deleteConversationMarkerLocally(
+            currentSession,
+            response.markerId,
+            response.sessionMutationStamp,
+          ),
+        );
+      }
+      setRequestError(null);
+      return true;
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return false;
+      }
+      reportRequestError(error);
+      return false;
+    } finally {
+      if (isMountedRef.current) {
+        setUpdatingSessionIds((current) =>
+          setSessionFlag(current, sessionId, false),
+        );
+      }
+    }
+  }
+
   return {
     handleSend,
     handleDraftAttachmentsAdd,
@@ -2207,5 +2351,7 @@ export function useAppSessionActions(
     handleRollbackCodexThread,
     handleRefreshAgentCommands,
     handleCreateConversationMarker,
+    handleUpdateConversationMarker,
+    handleDeleteConversationMarker,
   };
 }

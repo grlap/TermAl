@@ -317,7 +317,7 @@ impl StateInner {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     fn remove_delegation_at(&mut self, index: usize) -> DelegationRecord {
         let record = self.delegations.remove(index);
         self.record_removed_delegation(record.id.clone());

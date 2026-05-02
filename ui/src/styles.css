@@ -3951,6 +3951,13 @@ textarea {
   pointer-events: auto;
 }
 
+@media (hover: none), (pointer: coarse) {
+  .conversation-message-marker-toolbar {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 .conversation-message-marker-add-button {
   display: inline-flex;
   align-items: center;

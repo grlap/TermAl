@@ -43,6 +43,27 @@ function makeStateResponse(revision: number): StateResponse {
   } as StateResponse;
 }
 
+function makeConversationMarker(
+  overrides: Partial<ConversationMarker> = {},
+): ConversationMarker {
+  return {
+    id: "marker-1",
+    sessionId: "session-1",
+    kind: "checkpoint",
+    name: "Checkpoint",
+    body: null,
+    color: "#3b82f6",
+    messageId: "message-1",
+    messageIndexHint: 0,
+    endMessageId: null,
+    endMessageIndexHint: null,
+    createdAt: "2026-05-01 10:00:00",
+    updatedAt: "2026-05-01 10:00:00",
+    createdBy: "user",
+    ...overrides,
+  };
+}
+
 function makeWorkspace(): WorkspaceState {
   return {
     root: {
@@ -636,6 +657,188 @@ describe("useAppSessionActions", () => {
     });
     expect(params.forceSseReconnect).toHaveBeenCalledTimes(1);
     expect(params.refs.sessionsRef.current[0].markers).toEqual([]);
+    expect(params.setters.setRequestError).not.toHaveBeenCalledWith(null);
+  });
+
+  it("updates conversation markers through the guarded marker response path", async () => {
+    const marker = makeConversationMarker();
+    const updatedMarker = makeConversationMarker({
+      kind: "bug",
+      name: "Bug marker",
+      color: "#ef4444",
+      updatedAt: "2026-05-01 10:01:00",
+    });
+    const session = makeSession("session-1", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          text: "Decision point",
+          timestamp: "10:00",
+        },
+      ],
+      markers: [marker],
+      sessionMutationStamp: 5,
+    });
+    const updateConversationMarkerSpy = vi
+      .spyOn(api, "updateConversationMarker")
+      .mockResolvedValue({
+        marker: updatedMarker,
+        revision: 6,
+        serverInstanceId: "server-a",
+        sessionMutationStamp: 6,
+      });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[session.id, session]]);
+    params.refs.sessionsRef.current = [session];
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleUpdateConversationMarker("session-1", "marker-1", {
+        kind: "bug",
+        name: "Bug marker",
+        color: "#ef4444",
+      }),
+    ).resolves.toBe(true);
+
+    expect(updateConversationMarkerSpy).toHaveBeenCalledWith(
+      "session-1",
+      "marker-1",
+      {
+        kind: "bug",
+        name: "Bug marker",
+        color: "#ef4444",
+      },
+    );
+    expect(params.refs.sessionsRef.current[0].markers).toEqual([updatedMarker]);
+    expect(params.refs.sessionsRef.current[0].sessionMutationStamp).toBe(6);
+    expect(params.refs.latestStateRevisionRef.current).toBe(6);
+    expect(params.setters.setRequestError).toHaveBeenCalledWith(null);
+  });
+
+  it("deletes conversation markers through the guarded marker response path", async () => {
+    const marker = makeConversationMarker();
+    const session = makeSession("session-1", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          text: "Decision point",
+          timestamp: "10:00",
+        },
+      ],
+      markers: [marker],
+      sessionMutationStamp: 5,
+    });
+    const deleteConversationMarkerSpy = vi
+      .spyOn(api, "deleteConversationMarker")
+      .mockResolvedValue({
+        markerId: "marker-1",
+        revision: 6,
+        serverInstanceId: "server-a",
+        sessionMutationStamp: 6,
+      });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[session.id, session]]);
+    params.refs.sessionsRef.current = [session];
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleDeleteConversationMarker("session-1", "marker-1"),
+    ).resolves.toBe(true);
+
+    expect(deleteConversationMarkerSpy).toHaveBeenCalledWith(
+      "session-1",
+      "marker-1",
+    );
+    expect(params.refs.sessionsRef.current[0].markers).toEqual([]);
+    expect(params.refs.sessionsRef.current[0].sessionMutationStamp).toBe(6);
+    expect(params.refs.latestStateRevisionRef.current).toBe(6);
+    expect(params.setters.setRequestError).toHaveBeenCalledWith(null);
+  });
+
+  it("treats stale same-instance marker delete success as a no-op when already absent", async () => {
+    const marker = makeConversationMarker();
+    const sessionAtClick = makeSession("session-1", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          text: "Decision point",
+          timestamp: "10:00",
+        },
+      ],
+      markers: [marker],
+      sessionMutationStamp: 5,
+    });
+    const liveSession = {
+      ...sessionAtClick,
+      markers: [],
+      sessionMutationStamp: 7,
+    };
+    vi.spyOn(api, "deleteConversationMarker").mockResolvedValue({
+      markerId: "marker-1",
+      revision: 6,
+      serverInstanceId: "server-a",
+      sessionMutationStamp: 6,
+    });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[sessionAtClick.id, sessionAtClick]]);
+    params.refs.sessionsRef.current = [liveSession];
+    params.refs.latestStateRevisionRef.current = 7;
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleDeleteConversationMarker("session-1", "marker-1"),
+    ).resolves.toBe(true);
+
+    expect(params.refs.sessionsRef.current[0].markers).toEqual([]);
+    expect(params.refs.sessionsRef.current[0].sessionMutationStamp).toBe(7);
+    expect(params.refs.latestStateRevisionRef.current).toBe(7);
+    expect(params.requestActionRecoveryResync).not.toHaveBeenCalled();
+    expect(params.forceSseReconnect).not.toHaveBeenCalled();
+    expect(params.setters.setRequestError).toHaveBeenCalledWith(null);
+  });
+
+  it("forces SSE reconnect when marker delete success comes from a new server instance", async () => {
+    const marker = makeConversationMarker();
+    const session = makeSession("session-1", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          text: "Decision point",
+          timestamp: "10:00",
+        },
+      ],
+      markers: [marker],
+    });
+    vi.spyOn(api, "deleteConversationMarker").mockResolvedValue({
+      markerId: "marker-1",
+      revision: 6,
+      serverInstanceId: "server-b",
+      sessionMutationStamp: 6,
+    });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[session.id, session]]);
+    params.refs.sessionsRef.current = [session];
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleDeleteConversationMarker("session-1", "marker-1"),
+    ).resolves.toBe(false);
+
+    expect(params.requestActionRecoveryResync).toHaveBeenCalledWith({
+      openSessionId: "session-1",
+      paneId: null,
+      allowUnknownServerInstance: true,
+    });
+    expect(params.forceSseReconnect).toHaveBeenCalledTimes(1);
+    expect(params.refs.sessionsRef.current[0].markers).toEqual([marker]);
     expect(params.setters.setRequestError).not.toHaveBeenCalledWith(null);
   });
 
