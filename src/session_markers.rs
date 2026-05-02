@@ -74,6 +74,7 @@ impl AppState {
             marker,
             revision,
             server_instance_id: self.server_instance_id.clone(),
+            session_mutation_stamp: Some(session_mutation_stamp),
         })
     }
 
@@ -142,6 +143,7 @@ impl AppState {
             marker,
             revision,
             server_instance_id: self.server_instance_id.clone(),
+            session_mutation_stamp: Some(session_mutation_stamp),
         })
     }
 
@@ -203,6 +205,7 @@ impl AppState {
             marker_id,
             revision,
             server_instance_id: self.server_instance_id.clone(),
+            session_mutation_stamp: Some(session_mutation_stamp),
         })
     }
 
@@ -226,7 +229,7 @@ impl AppState {
                 ApiError::internal(format!("failed to encode marker create request: {err}"))
             })?),
         )?;
-        self.apply_remote_marker_response(target, remote_response, true)
+        self.apply_remote_marker_response(target, remote_response, true, None)
     }
 
     fn proxy_remote_update_conversation_marker(
@@ -251,7 +254,7 @@ impl AppState {
                 ApiError::internal(format!("failed to encode marker update request: {err}"))
             })?),
         )?;
-        self.apply_remote_marker_response(target, remote_response, false)
+        self.apply_remote_marker_response(target, remote_response, false, Some(marker_id))
     }
 
     fn proxy_remote_delete_conversation_marker(
@@ -287,6 +290,7 @@ impl AppState {
         target: RemoteSessionTarget,
         remote_response: ConversationMarkerResponse,
         created: bool,
+        expected_marker_id: Option<&str>,
     ) -> Result<ConversationMarkerResponse, ApiError> {
         if remote_response.marker.session_id != target.remote_session_id {
             return Err(ApiError::bad_gateway(format!(
@@ -294,21 +298,32 @@ impl AppState {
                 remote_response.marker.session_id, target.remote_session_id
             )));
         }
+        // Create responses carry a remote-assigned marker id. Only update
+        // responses must match the path-bound marker id.
+        if let Some(expected_marker_id) = expected_marker_id {
+            if remote_response.marker.id != expected_marker_id {
+                return Err(ApiError::bad_gateway(format!(
+                    "remote updated marker id `{}` did not match requested marker `{expected_marker_id}`",
+                    remote_response.marker.id
+                )));
+            }
+        }
         let remote_revision = remote_response.revision;
+        let remote_session_mutation_stamp = remote_response.session_mutation_stamp;
         let marker_id = remote_response.marker.id.clone();
         let event = if created {
             DeltaEvent::ConversationMarkerCreated {
                 revision: remote_revision,
                 session_id: target.remote_session_id.clone(),
                 marker: remote_response.marker,
-                session_mutation_stamp: None,
+                session_mutation_stamp: remote_session_mutation_stamp,
             }
         } else {
             DeltaEvent::ConversationMarkerUpdated {
                 revision: remote_revision,
                 session_id: target.remote_session_id.clone(),
                 marker: remote_response.marker,
-                session_mutation_stamp: None,
+                session_mutation_stamp: remote_session_mutation_stamp,
             }
         };
         self.apply_remote_delta_event(&target.remote.id, event)
@@ -334,6 +349,7 @@ impl AppState {
             marker,
             revision: inner.revision,
             server_instance_id: self.server_instance_id.clone(),
+            session_mutation_stamp: Some(record.mutation_stamp),
         })
     }
 
@@ -343,23 +359,27 @@ impl AppState {
         remote_response: DeleteConversationMarkerResponse,
     ) -> Result<DeleteConversationMarkerResponse, ApiError> {
         let marker_id = remote_response.marker_id.clone();
-        self.apply_remote_delta_event(
-            &target.remote.id,
-            DeltaEvent::ConversationMarkerDeleted {
-                revision: remote_response.revision,
-                session_id: target.remote_session_id,
-                marker_id: marker_id.clone(),
-                session_mutation_stamp: None,
-            },
-        )
-        .map_err(|err| {
+        let remote_session_mutation_stamp = remote_response.session_mutation_stamp;
+        let remote_revision = remote_response.revision;
+        let event = DeltaEvent::ConversationMarkerDeleted {
+            revision: remote_revision,
+            session_id: target.remote_session_id.clone(),
+            marker_id: marker_id.clone(),
+            session_mutation_stamp: remote_session_mutation_stamp,
+        };
+        self.apply_remote_delta_event(&target.remote.id, event).map_err(|err| {
             ApiError::bad_gateway(format!("failed to apply remote marker delete response: {err:#}"))
         })?;
         let inner = self.inner.lock().expect("state mutex poisoned");
+        let session_mutation_stamp = inner
+            .find_session_index(&target.local_session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .map(|record| record.mutation_stamp);
         Ok(DeleteConversationMarkerResponse {
             marker_id,
             revision: inner.revision,
             server_instance_id: self.server_instance_id.clone(),
+            session_mutation_stamp,
         })
     }
 }

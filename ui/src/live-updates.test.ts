@@ -1144,6 +1144,127 @@ describe("applyDeltaToSessions", () => {
     });
   });
 
+  it("accepts a progressive created-message replay after a final metadata snapshot", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 3,
+        sessionMutationStamp: 101,
+        messages: [
+          {
+            id: "message-existing",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Previous answer.",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "message-stop",
+      messageIndex: 1,
+      messageCount: 2,
+      message: {
+        id: "message-stop",
+        type: "text",
+        timestamp: "10:01",
+        author: "assistant",
+        text: "Session stopped.",
+      },
+      preview: "Changed files.",
+      status: "idle",
+      sessionMutationStamp: 101,
+    };
+
+    const firstResult = applyDeltaToSessions(sessions, delta);
+
+    expect(firstResult.kind).toBe("applied");
+    if (firstResult.kind !== "applied") {
+      throw new Error("expected replayed created message to apply");
+    }
+    expect(firstResult.sessions[0].messagesLoaded).toBe(false);
+    expect(firstResult.sessions[0].messageCount).toBe(3);
+    expect(firstResult.sessions[0].sessionMutationStamp).toBe(101);
+    expect(
+      firstResult.sessions[0].messages.map((message) => message.id),
+    ).toEqual(["message-existing", "message-stop"]);
+
+    const secondResult = applyDeltaToSessions(firstResult.sessions, {
+      ...delta,
+      messageId: "message-files",
+      messageIndex: 2,
+      messageCount: 3,
+      message: {
+        id: "message-files",
+        type: "text",
+        timestamp: "10:01",
+        author: "assistant",
+        text: "Changed files.",
+      },
+    });
+
+    expect(secondResult.kind).toBe("applied");
+    if (secondResult.kind !== "applied") {
+      throw new Error("expected second replayed created message to apply");
+    }
+    expect(secondResult.sessions[0].messagesLoaded).toBe(true);
+    expect(secondResult.sessions[0].messageCount).toBe(3);
+    expect(
+      secondResult.sessions[0].messages.map((message) => message.id),
+    ).toEqual(["message-existing", "message-stop", "message-files"]);
+  });
+
+  it("does not let an older created-message replay overwrite current content", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: true,
+        messageCount: 1,
+        preview: "Current preview",
+        status: "idle",
+        sessionMutationStamp: 200,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Current answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "message-1",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "message-1",
+        type: "text",
+        timestamp: "09:59",
+        author: "assistant",
+        text: "Stale answer",
+      },
+      preview: "Stale preview",
+      status: "active",
+      sessionMutationStamp: 199,
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected stale replay to be ignored");
+    }
+    expect(result.sessions[0]).toEqual(sessions[0]);
+  });
+
   it("does not duplicate a replayed prompt delta while retaining an unhydrated transcript", () => {
     const sessions = [
       makeSession("session-a", {

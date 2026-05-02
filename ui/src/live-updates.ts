@@ -230,19 +230,35 @@ function messageCreatedDeltaHasProtocolViolation(
     return true;
   }
 
-  const knownMessageCount = Math.max(
-    session.messageCount ?? 0,
-    session.messages.length,
-  );
-  if (delta.messageCount < knownMessageCount) {
-    return true;
-  }
-
   const existingMessageIndex = findMessageIndex(
     session.messages,
     delta.messageId,
     delta.messageIndex,
   );
+  const knownMessageCount = Math.max(
+    session.messageCount ?? 0,
+    session.messages.length,
+  );
+  if (delta.messageCount < knownMessageCount) {
+    const currentStamp = session.sessionMutationStamp;
+    const deltaStamp = delta.sessionMutationStamp;
+    const isSameRevisionProgressiveSuffixCreate =
+      existingMessageIndex === -1 &&
+      typeof currentStamp === "number" &&
+      typeof deltaStamp === "number" &&
+      currentStamp === deltaStamp &&
+      delta.messageIndex === session.messages.length &&
+      delta.messageCount === delta.messageIndex + 1;
+    const isReplayOfKnownMessage =
+      existingMessageIndex !== -1 &&
+      typeof currentStamp === "number" &&
+      typeof deltaStamp === "number" &&
+      currentStamp >= deltaStamp;
+    if (!isSameRevisionProgressiveSuffixCreate && !isReplayOfKnownMessage) {
+      return true;
+    }
+  }
+
   return (
     existingMessageIndex === -1 &&
     delta.messageCount <= session.messages.length
@@ -279,6 +295,15 @@ function applyMessageCreatedDeltaToRetainedTranscript(
     delta.messageIndex,
   );
   if (existingMessageIndex !== -1) {
+    const currentStamp = session.sessionMutationStamp;
+    const deltaStamp = delta.sessionMutationStamp;
+    if (
+      typeof currentStamp === "number" &&
+      typeof deltaStamp === "number" &&
+      deltaStamp < currentStamp
+    ) {
+      return session;
+    }
     updatedMessages.splice(existingMessageIndex, 1);
   }
   if (delta.messageIndex > updatedMessages.length) {
@@ -295,14 +320,20 @@ function applyMessageCreatedDeltaToRetainedTranscript(
     delta.messageId,
   );
 
+  const nextMessageCount = Math.max(
+    session.messageCount ?? 0,
+    updatedMessages.length,
+    delta.messageCount,
+  );
+
   return {
     ...session,
     messages: updatedMessages,
     messagesLoaded:
-      updatedMessages.length === delta.messageCount
+      updatedMessages.length >= nextMessageCount
         ? true
-        : session.messagesLoaded,
-    messageCount: delta.messageCount,
+        : false,
+    messageCount: nextMessageCount,
     pendingPrompts,
     preview: delta.preview,
     status: delta.status,
@@ -383,7 +414,7 @@ export function applyDeltaToSessions(
         applyMessageCreatedDeltaToRetainedTranscript(session, delta);
       if (
         !retainedTranscriptUpdate ||
-        retainedTranscriptUpdate.messages.length !== delta.messageCount
+        retainedTranscriptUpdate.messages.length < delta.messageCount
       ) {
         return { kind: "needsResync" };
       }

@@ -461,6 +461,8 @@ struct ConversationMarkerResponse {
     marker: ConversationMarker,
     revision: u64,
     server_instance_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_mutation_stamp: Option<u64>,
 }
 
 /// Response containing one deleted conversation marker mutation.
@@ -470,6 +472,8 @@ struct DeleteConversationMarkerResponse {
     marker_id: String,
     revision: u64,
     server_instance_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_mutation_stamp: Option<u64>,
 }
 
 /// Represents session.

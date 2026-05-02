@@ -128,12 +128,14 @@ export type ConversationMarkerResponse = {
   marker: ConversationMarker;
   revision: number;
   serverInstanceId: string;
+  sessionMutationStamp?: number | null;
 };
 
 export type DeleteConversationMarkerResponse = {
   markerId: string;
   revision: number;
   serverInstanceId: string;
+  sessionMutationStamp?: number | null;
 };
 
 export type CreateConversationMarkerRequest = {

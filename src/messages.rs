@@ -191,19 +191,43 @@ fn message_created_delta_parts_for_indices(
     message_indices: Vec<usize>,
 ) -> Vec<MessageCreatedDeltaParts> {
     let session_id = record.session.id.clone();
-    let message_count = session_message_count(record);
+    let created_count = message_indices.len();
+    let indices_fit = created_count <= record.session.messages.len();
+    debug_assert!(
+        indices_fit,
+        "created-message delta indices cannot exceed the transcript length"
+    );
+    // Contract: callers pass exactly the newly appended message suffix, in
+    // append order. The progressive message counts below rely on that shape.
+    let first_created_index = record.session.messages.len().saturating_sub(created_count);
+    let is_created_suffix = message_indices
+        .iter()
+        .copied()
+        .eq(first_created_index..record.session.messages.len());
+    debug_assert!(
+        is_created_suffix,
+        "created-message delta indices must be the newly appended suffix in append order"
+    );
+    if !indices_fit || !is_created_suffix {
+        return Vec::new();
+    }
+    let final_message_count = session_message_count(record);
+    let initial_message_count = final_message_count.saturating_sub(created_count as u32);
     let preview = record.session.preview.clone();
     let status = record.session.status;
     let session_mutation_stamp = record.mutation_stamp;
     message_indices
         .into_iter()
-        .filter_map(|message_index| {
+        .enumerate()
+        .filter_map(|(created_offset, message_index)| {
+            // Release-mode safeguard; debug assertions above prove this is
+            // `Some` for every current caller's same-lock created suffix.
             let message = record.session.messages.get(message_index)?.clone();
             Some(MessageCreatedDeltaParts {
                 session_id: session_id.clone(),
                 message_id: message.id().to_owned(),
                 message_index,
-                message_count,
+                message_count: initial_message_count + created_offset as u32 + 1,
                 message,
                 preview: preview.clone(),
                 status,

@@ -439,17 +439,13 @@ impl AppState {
                         created_message_indices.push(file_change_message_index);
                     }
                 }
+                finish_active_turn_file_change_tracking(record);
                 (
                     !record.queued_prompts.is_empty(),
                     message_updated_delta_parts_for_indices(record, pending_interaction_indices),
                     message_created_delta_parts_for_indices(record, created_message_indices),
                 )
             };
-            finish_active_turn_file_change_tracking(
-                inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid"),
-            );
             let revision = self.commit_locked(&mut inner)?;
             (
                 has_queued_prompts,
@@ -458,8 +454,8 @@ impl AppState {
                 revision,
             )
         };
-        self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
         self.publish_message_created_delta_parts(revision, created_messages);
+        self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
 
         if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
             eprintln!("state warning> failed to refresh delegation after runtime exit: {err:#}");

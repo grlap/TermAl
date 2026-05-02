@@ -395,6 +395,7 @@ impl AppState {
                         created_message_indices.push(file_change_message_index);
                     }
                 }
+                finish_active_turn_file_change_tracking(record);
                 (
                     message_updated_delta_parts_for_indices(record, pending_interaction_indices),
                     message_created_delta_parts_for_indices(record, created_message_indices),
@@ -409,11 +410,6 @@ impl AppState {
                 inner.ignore_discovered_codex_thread(Some(thread_id));
             }
 
-            finish_active_turn_file_change_tracking(
-                inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid"),
-            );
             let mut stopped_orchestrator_instance_index = None;
             let mut added_stopped_session_id = false;
             if let Some(orchestrator_instance_id) = orchestrator_stop_instance_id.as_deref() {
@@ -463,8 +459,8 @@ impl AppState {
                 revision,
             )
         };
-        self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
         self.publish_message_created_delta_parts(revision, created_messages);
+        self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
 
         if let Some(orchestrator_instance_id) = orchestrator_stop_instance_id.as_deref() {
             self.note_stopped_orchestrator_session(orchestrator_instance_id, session_id);

@@ -75,6 +75,30 @@ fn drain_delta_events(delta_events: &mut broadcast::Receiver<String>) -> Vec<Del
     events
 }
 
+fn seed_active_turn_file_change(state: &AppState, session_id: &str) {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(session_id)
+        .expect("session should exist");
+    let record = inner
+        .session_mut_by_index(index)
+        .expect("session index should be valid");
+    record.active_turn_start_message_count = Some(record.session.messages.len());
+    record
+        .active_turn_file_changes
+        .insert("src/main.rs".to_owned(), WorkspaceFileChangeKind::Modified);
+}
+
+fn session_mutation_stamp(state: &AppState, session_id: &str) -> u64 {
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .map(|record| record.mutation_stamp)
+        .expect("session should exist")
+}
+
 // pins the coarse scope of the stdin watchdog: a stall on the shared codex
 // writer clears the whole runtime (not just the stalled session) and marks
 // the affected session as error with the generic "agent communication timed
@@ -351,6 +375,131 @@ fn runtime_exit_publishes_message_created_for_terminal_failure_after_pending_can
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+#[test]
+fn runtime_exit_file_change_created_deltas_are_replayable_and_final_stamped() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-runtime-exit-file-change-created".to_owned(),
+        input_tx,
+        process: process.clone(),
+    };
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Approval;
+        inner.sessions[index].session.preview = "Waiting for approval...".to_owned();
+    }
+    let approval_message_id = push_pending_approval_message(&state, &session_id);
+    seed_active_turn_file_change(&state, &session_id);
+    let initial_message_count = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .map(|record| record.session.messages.len() as u32)
+            .expect("session should exist")
+    };
+    let mut delta_events = state.subscribe_delta_events();
+
+    state
+        .handle_runtime_exit_if_matches(&session_id, &runtime_token, Some("runtime exited"))
+        .expect("handle_runtime_exit_if_matches should succeed");
+
+    let revision = state.snapshot().revision;
+    let final_stamp = session_mutation_stamp(&state, &session_id);
+    let events = drain_delta_events(&mut delta_events);
+    let created = events
+        .iter()
+        .filter_map(|event| match event {
+            DeltaEvent::MessageCreated {
+                revision: event_revision,
+                session_id: delta_session_id,
+                message_index,
+                message_count,
+                message,
+                session_mutation_stamp: Some(stamp),
+                ..
+            } if *event_revision == revision && delta_session_id == &session_id => {
+                Some((*message_index, *message_count, message, *stamp))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(created.len(), 2);
+    assert!(matches!(
+        created[0].2,
+        Message::Text { text, .. } if text == "Turn failed: runtime exited"
+    ));
+    assert_eq!(created[0].1, initial_message_count + 1);
+    assert_eq!(created[0].3, final_stamp);
+    assert!(matches!(created[1].2, Message::FileChanges { .. }));
+    assert_eq!(created[1].1, initial_message_count + 2);
+    assert_eq!(created[1].3, final_stamp);
+
+    let approval_updates = events
+        .iter()
+        .filter_map(|event| match event {
+            DeltaEvent::MessageUpdated {
+                message_id,
+                message_count,
+                session_mutation_stamp: Some(stamp),
+                ..
+            } if message_id == &approval_message_id => Some((*message_count, *stamp)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        approval_updates,
+        vec![(initial_message_count + 2, final_stamp)]
+    );
+
+    let first_created_position = events
+        .iter()
+        .position(|event| matches!(event, DeltaEvent::MessageCreated { .. }))
+        .expect("created delta should be present");
+    let last_created_position = events
+        .iter()
+        .rposition(|event| matches!(event, DeltaEvent::MessageCreated { .. }))
+        .expect("created delta should be present");
+    let approval_update_position = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                DeltaEvent::MessageUpdated {
+                    message_id,
+                    message: Message::Approval {
+                        decision: ApprovalDecision::Rejected,
+                        ..
+                    },
+                    ..
+                } if message_id == &approval_message_id
+            )
+        })
+        .expect("pending approval update should be present");
+    assert!(
+        first_created_position < approval_update_position,
+        "at least one created delta must precede the same-revision update"
+    );
+    assert!(
+        last_created_position < approval_update_position,
+        "all created deltas must advance messageCount before same-revision updates advertise the final count"
+    );
+
+    let _ = process.kill();
+    let _ = process.wait();
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // pins the successful-stop path: when stop_session drives the dedicated kill
 // to completion, any buffered deferred_stop_callbacks are dropped, the
 // runtime detaches, and the session settles to idle with "turn stopped by
@@ -511,6 +660,129 @@ fn stop_session_publishes_message_created_for_terminal_stop_after_pending_cancel
             )
         }),
         "stop_session must delta-encode the appended terminal stop message"
+    );
+
+    let _ = process.wait();
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn stop_session_file_change_created_deltas_are_replayable_and_final_stamped() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime = ClaudeRuntimeHandle {
+        runtime_id: "claude-stop-file-change-created".to_owned(),
+        input_tx,
+        process: process.clone(),
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Approval;
+        inner.sessions[index].session.preview = "Waiting for approval...".to_owned();
+    }
+    let approval_message_id = push_pending_approval_message(&state, &session_id);
+    seed_active_turn_file_change(&state, &session_id);
+    let initial_message_count = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .map(|record| record.session.messages.len() as u32)
+            .expect("session should exist")
+    };
+    let mut delta_events = state.subscribe_delta_events();
+
+    state
+        .stop_session(&session_id)
+        .expect("stop_session should succeed");
+
+    let revision = state.snapshot().revision;
+    let final_stamp = session_mutation_stamp(&state, &session_id);
+    let events = drain_delta_events(&mut delta_events);
+    let created = events
+        .iter()
+        .filter_map(|event| match event {
+            DeltaEvent::MessageCreated {
+                revision: event_revision,
+                session_id: delta_session_id,
+                message_index,
+                message_count,
+                message,
+                session_mutation_stamp: Some(stamp),
+                ..
+            } if *event_revision == revision && delta_session_id == &session_id => {
+                Some((*message_index, *message_count, message, *stamp))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(created.len(), 2);
+    assert!(matches!(
+        created[0].2,
+        Message::Text { text, .. } if text == "Turn stopped by user."
+    ));
+    assert_eq!(created[0].1, initial_message_count + 1);
+    assert_eq!(created[0].3, final_stamp);
+    assert!(matches!(created[1].2, Message::FileChanges { .. }));
+    assert_eq!(created[1].1, initial_message_count + 2);
+    assert_eq!(created[1].3, final_stamp);
+
+    let approval_updates = events
+        .iter()
+        .filter_map(|event| match event {
+            DeltaEvent::MessageUpdated {
+                message_id,
+                message_count,
+                session_mutation_stamp: Some(stamp),
+                ..
+            } if message_id == &approval_message_id => Some((*message_count, *stamp)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        approval_updates,
+        vec![(initial_message_count + 2, final_stamp)]
+    );
+
+    let first_created_position = events
+        .iter()
+        .position(|event| matches!(event, DeltaEvent::MessageCreated { .. }))
+        .expect("created delta should be present");
+    let last_created_position = events
+        .iter()
+        .rposition(|event| matches!(event, DeltaEvent::MessageCreated { .. }))
+        .expect("created delta should be present");
+    let approval_update_position = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                DeltaEvent::MessageUpdated {
+                    message_id,
+                    message: Message::Approval {
+                        decision: ApprovalDecision::Rejected,
+                        ..
+                    },
+                    ..
+                } if message_id == &approval_message_id
+            )
+        })
+        .expect("pending approval update should be present");
+    assert!(
+        first_created_position < approval_update_position,
+        "at least one created delta must precede the same-revision update"
+    );
+    assert!(
+        last_created_position < approval_update_position,
+        "all created deltas must advance messageCount before same-revision updates advertise the final count"
     );
 
     let _ = process.wait();

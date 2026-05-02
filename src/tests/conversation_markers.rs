@@ -47,6 +47,7 @@ fn test_marker_response(marker: ConversationMarker, revision: u64) -> Conversati
         marker,
         revision,
         server_instance_id: "remote-instance".to_owned(),
+        session_mutation_stamp: Some(11),
     }
 }
 
@@ -545,6 +546,212 @@ fn remote_backed_marker_create_proxies_to_owner_and_localizes_response() {
         "expected remote marker create request, saw {request_lines:?}"
     );
     join_test_server(server);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_marker_proxy_response_carries_localized_stamp_and_dedupes_replayed_event() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_session_id = remote_proxy_session_with_message(&state, &remote);
+    let target = state
+        .remote_session_target(&local_session_id)
+        .expect("remote target lookup should succeed")
+        .expect("session should be remote-backed");
+    let remote_marker = test_marker(
+        "marker-remote-1",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Checkpoint,
+    );
+    let mut delta_events = state.subscribe_delta_events();
+
+    let response = state
+        .apply_remote_marker_response(
+            target,
+            ConversationMarkerResponse {
+                marker: remote_marker.clone(),
+                revision: 7,
+                server_instance_id: "remote-instance".to_owned(),
+                session_mutation_stamp: Some(9_999),
+            },
+            true,
+            None,
+        )
+        .expect("remote marker response should apply");
+    assert_eq!(response.marker.session_id, local_session_id);
+    assert_ne!(response.session_mutation_stamp, Some(9_999));
+    let published_delta: DeltaEvent = serde_json::from_str(
+        &delta_events
+            .try_recv()
+            .expect("proxy response should publish localized marker delta"),
+    )
+    .expect("localized marker delta should decode");
+    let published_stamp = match published_delta {
+        DeltaEvent::ConversationMarkerCreated {
+            session_mutation_stamp: Some(stamp),
+            ..
+        } => stamp,
+        _ => panic!("expected localized marker create delta"),
+    };
+    assert_eq!(response.session_mutation_stamp, Some(published_stamp));
+
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerCreated {
+                revision: 7,
+                session_id: "remote-session-1".to_owned(),
+                marker: remote_marker,
+                session_mutation_stamp: Some(9_999),
+            },
+        )
+        .expect("matching remote SSE replay should be skipped");
+    assert!(
+        delta_events.try_recv().is_err(),
+        "matching remote SSE replay should not publish a duplicate local delta"
+    );
+    let markers = state
+        .list_conversation_markers(&local_session_id)
+        .expect("localized markers should list");
+    assert_eq!(markers.markers.len(), 1);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_marker_proxy_response_returns_current_marker_after_stale_skip() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_session_id = remote_proxy_session_with_message(&state, &remote);
+    let target = state
+        .remote_session_target(&local_session_id)
+        .expect("remote target lookup should succeed")
+        .expect("session should be remote-backed");
+    let mut newer_marker = test_marker(
+        "marker-remote-1",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Checkpoint,
+    );
+    newer_marker.name = "Newer remote marker".to_owned();
+    newer_marker.updated_at = "2026-05-01 10:02:00".to_owned();
+    let mut delta_events = state.subscribe_delta_events();
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerCreated {
+                revision: 8,
+                session_id: "remote-session-1".to_owned(),
+                marker: newer_marker,
+                session_mutation_stamp: Some(12),
+            },
+        )
+        .expect("newer remote marker delta should apply");
+    let _ = delta_events
+        .try_recv()
+        .expect("newer marker delta should publish locally");
+
+    let mut stale_marker = test_marker(
+        "marker-remote-1",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Checkpoint,
+    );
+    stale_marker.name = "Stale remote marker".to_owned();
+    stale_marker.updated_at = "2026-05-01 10:01:00".to_owned();
+    let response = state
+        .apply_remote_marker_response(
+            target,
+            ConversationMarkerResponse {
+                marker: stale_marker,
+                revision: 7,
+                server_instance_id: "remote-instance".to_owned(),
+                session_mutation_stamp: Some(11),
+            },
+            true,
+            None,
+        )
+        .expect("stale skipped marker response should return current local marker");
+
+    assert_eq!(response.marker.session_id, local_session_id);
+    assert_eq!(response.marker.name, "Newer remote marker");
+    let markers = state
+        .list_conversation_markers(&local_session_id)
+        .expect("localized markers should list");
+    assert_eq!(markers.markers.len(), 1);
+    assert_eq!(markers.markers[0].name, "Newer remote marker");
+    assert!(
+        delta_events.try_recv().is_err(),
+        "stale skipped response should not publish another local delta"
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_marker_update_response_rejects_mismatched_marker_id() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_session_id = remote_proxy_session_with_message(&state, &remote);
+    let target = state
+        .remote_session_target(&local_session_id)
+        .expect("remote target lookup should succeed")
+        .expect("session should be remote-backed");
+    let remote_marker = test_marker(
+        "marker-other",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Checkpoint,
+    );
+
+    let err = state
+        .apply_remote_marker_response(
+            target,
+            ConversationMarkerResponse {
+                marker: remote_marker,
+                revision: 7,
+                server_instance_id: "remote-instance".to_owned(),
+                session_mutation_stamp: Some(11),
+            },
+            false,
+            Some("marker-expected"),
+        )
+        .expect_err("mismatched remote marker id should be rejected");
+    assert!(
+        err.message.contains("did not match requested marker"),
+        "unexpected error: {}",
+        err.message
+    );
+    let markers = state
+        .list_conversation_markers(&local_session_id)
+        .expect("localized markers should list");
+    assert!(markers.markers.is_empty());
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }

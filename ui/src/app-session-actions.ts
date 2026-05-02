@@ -629,6 +629,7 @@ export function useAppSessionActions(
   function upsertConversationMarkerLocally(
     session: Session,
     marker: NonNullable<Session["markers"]>[number],
+    sessionMutationStamp?: number | null,
   ): Session {
     const markers = session.markers ?? [];
     const markerIndex = markers.findIndex((entry) => entry.id === marker.id);
@@ -636,6 +637,7 @@ export function useAppSessionActions(
       return {
         ...session,
         markers: [...markers, marker],
+        ...(sessionMutationStamp !== undefined ? { sessionMutationStamp } : {}),
       };
     }
 
@@ -644,7 +646,67 @@ export function useAppSessionActions(
     return {
       ...session,
       markers: updatedMarkers,
+      ...(sessionMutationStamp !== undefined ? { sessionMutationStamp } : {}),
     };
+  }
+
+  function shouldApplyMarkerMutationResponse(
+    sessionId: string,
+    response: {
+      revision: number;
+      serverInstanceId: string;
+      marker: NonNullable<Session["markers"]>[number];
+      sessionMutationStamp?: number | null;
+    },
+  ): "apply" | "stale-success" | "deferred" {
+    if (
+      isServerInstanceMismatch(
+        lastSeenServerInstanceIdRef.current,
+        response.serverInstanceId,
+      )
+    ) {
+      // A server-instance mismatch means this response came from a restarted
+      // backend. Do not optimistically apply its marker; let recovery adopt
+      // the authoritative snapshot from the new instance.
+      requestActionRecoveryResync({
+        openSessionId: sessionId,
+        paneId: findWorkspacePaneIdForSession(workspace, sessionId),
+        allowUnknownServerInstance: true,
+      });
+      forceSseReconnect();
+      return "deferred";
+    }
+
+    if (
+      latestStateRevisionRef.current !== null &&
+      response.revision <= latestStateRevisionRef.current
+    ) {
+      const currentSession =
+        sessionsRef.current.find((session) => session.id === sessionId) ?? null;
+      const currentMarker = currentSession?.markers?.find(
+        (marker) => marker.id === response.marker.id,
+      );
+      const responseMutationStamp = response.sessionMutationStamp ?? null;
+      const currentMutationStamp = currentSession?.sessionMutationStamp ?? null;
+      const hasTargetEvidence =
+        currentMarker !== undefined &&
+        (responseMutationStamp === null ||
+          (currentMutationStamp !== null &&
+            currentMutationStamp >= responseMutationStamp));
+      if (hasTargetEvidence) {
+        return "stale-success";
+      }
+
+      requestActionRecoveryResync({
+        openSessionId: sessionId,
+        paneId: findWorkspacePaneIdForSession(workspace, sessionId),
+        allowUnknownServerInstance: true,
+      });
+      return "deferred";
+    }
+
+    latestStateRevisionRef.current = response.revision;
+    return "apply";
   }
 
   function buildOptimisticSessionSettingsUpdate(
@@ -2090,26 +2152,18 @@ export function useAppSessionActions(
         return false;
       }
 
-      updateSessionLocally(sessionId, (currentSession) =>
-        upsertConversationMarkerLocally(currentSession, response.marker),
-      );
-      if (
-        isServerInstanceMismatch(
-          lastSeenServerInstanceIdRef.current,
-          response.serverInstanceId,
-        )
-      ) {
-        requestActionRecoveryResync({
-          openSessionId: sessionId,
-          paneId: findWorkspacePaneIdForSession(workspace, sessionId),
-          allowUnknownServerInstance: true,
-        });
-        forceSseReconnect();
-      } else if (
-        latestStateRevisionRef.current === null ||
-        response.revision > latestStateRevisionRef.current
-      ) {
-        latestStateRevisionRef.current = response.revision;
+      const responseOutcome = shouldApplyMarkerMutationResponse(sessionId, response);
+      if (responseOutcome === "deferred") {
+        return false;
+      }
+      if (responseOutcome === "apply") {
+        updateSessionLocally(sessionId, (currentSession) =>
+          upsertConversationMarkerLocally(
+            currentSession,
+            response.marker,
+            response.sessionMutationStamp,
+          ),
+        );
       }
       setRequestError(null);
       return true;

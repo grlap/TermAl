@@ -7,87 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Batched stop/failure message-created deltas are not replayable
-
-**Severity:** High - stop/runtime-exit paths can still hide terminal messages when a file-change summary is appended in the same revision.
-
-`src/session_lifecycle.rs` and `src/turn_lifecycle.rs` can append both a terminal stop/failure message and an active-turn file-change summary before publishing same-revision `MessageCreated` deltas. `src/messages.rs` builds every created-message delta with the final transcript `messageCount`, so a hydrated frontend that applies the first created delta still has one fewer message than the advertised count and requests repair instead of replaying the delta.
-
-**Current behavior:**
-- Stop/runtime-exit with active file changes appends two messages in one revision.
-- Each `MessageCreated` delta carries the same final `messageCount`.
-- Hydrated clients reject the first created delta as incomplete.
-- The terminal stop/failure message can still depend on later snapshot repair.
-
-**Proposal:**
-- Emit progressive message counts for sibling `MessageCreated` deltas, or replace them with a batch-created delta that is replay-equivalent.
-- Add coverage that seeds `active_turn_file_changes`, triggers stop and runtime-exit failure, and asserts hydrated clients can replay all created messages without a snapshot fallback.
-
-## Terminal-message deltas can carry stale session mutation stamps
-
-**Severity:** Medium - same-revision terminal-message deltas can describe an older session mutation than the committed snapshot.
-
-`src/session_lifecycle.rs` and `src/turn_lifecycle.rs` build terminal-message delta parts before later `session_mut_by_index` calls used for file-change tracking cleanup. That accessor advances the session mutation stamp, so the committed snapshot can publish a newer `sessionMutationStamp` than the deltas for the same revision.
-
-**Current behavior:**
-- Stop/runtime-exit paths capture terminal-message delta parts.
-- File-change cleanup later re-borrows the session mutably and advances its mutation stamp.
-- Published deltas can carry the pre-cleanup stamp while the snapshot carries the post-cleanup stamp.
-
-**Proposal:**
-- Build terminal-message delta parts after the final stamped session mutation.
-- Or avoid advancing the user-visible session mutation stamp for runtime-only file-change cleanup.
-- Add coverage that compares terminal-message delta stamps to the committed session stamp when file-change cleanup runs.
-
-## Remote marker proxy writes can replay as duplicate remote deltas
-
-**Severity:** Medium - proxy-created marker deltas are not replay-equivalent to the remote SSE events they trigger.
-
-`src/session_markers.rs:300` and `src/session_markers.rs:307` synthesize local marker created/updated deltas from remote HTTP responses with `session_mutation_stamp: None`. The remote replay key in `src/remote_routes.rs:655` includes `session_mutation_stamp`, so the later remote SSE event for the same write can arrive with `Some(stamp)` and fail to match the already-applied proxy event.
-
-**Current behavior:**
-- Remote marker proxy writes apply a local delta immediately.
-- The synthesized delta omits the remote session mutation stamp.
-- The real remote SSE delta can use a different replay key and apply again.
-- Local revision/mutation stamps and marker deltas can be duplicated.
-
-**Proposal:**
-- Include the remote session mutation stamp in marker mutation responses.
-- Or make proxy application and remote replay use a shared semantic identity for the same event.
-- Add coverage that performs a remote marker proxy write and then replays the matching remote SSE delta without duplicating the local marker event.
-
-## Marker REST responses mutate local state before revision gating
-
-**Severity:** Medium - stale marker HTTP responses can overwrite newer marker state after SSE or state repair has advanced the client.
-
-`ui/src/app-session-actions.ts:2093` applies `response.marker` locally before checking `response.revision` and `response.serverInstanceId`. If a newer SSE event or repair snapshot has already moved `latestStateRevisionRef.current` forward, the older HTTP response can still resurrect or overwrite marker state.
-
-**Current behavior:**
-- Marker create/update action handlers upsert the response marker first.
-- Revision and server-instance checks happen after the local mutation.
-- Stale same-instance responses are not treated as no-op successes.
-
-**Proposal:**
-- Gate marker REST responses by server instance and revision before `updateSessionLocally`.
-- Treat stale same-instance responses as successful no-ops and rely on the newer state already present.
-- Add action-level coverage where a marker HTTP response resolves after a newer SSE/state repair and must not overwrite marker state.
-
-## Remote marker PATCH can accept a different marker id
-
-**Severity:** Medium - a remote PATCH response can upsert a marker whose id differs from the id in the PATCH path.
-
-`src/session_markers.rs:254` applies the marker returned by a remote `PATCH /markers/{id}` response. `apply_remote_marker_response` validates the session id at `src/session_markers.rs:291`, but it does not mirror the delete-side marker-id check before applying the update response.
-
-**Current behavior:**
-- The proxy sends a specific marker id in the remote PATCH path.
-- The response marker id is not checked against the requested marker id.
-- A skewed remote can cause a successful PATCH to upsert a different marker.
-
-**Proposal:**
-- Validate the response marker id before applying remote update responses.
-- Return an error if the remote response marker id does not match the requested marker id.
-- Add a remote update regression that returns a different marker id and asserts the proxy rejects it.
-
 ## Marker navigator logic is embedded in AgentSessionPanel
 
 **Severity:** Low - marker grouping, sorting, DOM lookup, navigation state, and chip rendering are growing an already large panel component.
@@ -1065,8 +984,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   the new `App.live-state.reconnect.test.tsx` test exercises the revision-gap branch (the `messageCreated` delta omits `sessionMutationStamp` so it falls into the resync fallback). Add `sessionMutationStamp` so the delta routes through the matched-stamp fast-path that the surrounding `handleDeltaEvent` comment is most concerned about, OR rename the test to clarify it covers the revision-gap branch specifically and add a sibling test for the textDelta fast-path.
 - [ ] P2: Split the bad-live-event + workspaceFilesChanged test into isolated arrange-act-assert phases:
   `ui/src/backend-connection.test.tsx:1225-1261` co-fires the stale `delta` and the `workspaceFilesChanged` event in one `act()`. The assertion `countStateFetches() === hydratedStateFetchCount` is satisfied if either side skips confirmation, so the test cannot pinpoint which side regressed. Dispatch `workspaceFilesChanged` alone first and assert no fetch fired; then add the stale delta separately and re-assert.
-- [ ] P2: Add multi-message stop/failure delta replay coverage:
-  seed `active_turn_file_changes`, trigger stop and runtime-exit failure paths, and assert all same-revision `MessageCreated` deltas carry replayable counts and matching session mutation stamps.
 - [ ] P2: Add frontend stop/failure delta-before-snapshot terminal-message coverage:
   dispatch cancellation/update deltas before the same-revision snapshot and assert appended stop/failure terminal messages remain rendered without relying on a later unrelated refresh.
 - [ ] P2: Add delegation EventSource recovery timing coverage:
@@ -1079,31 +996,25 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `findMountedConversationMessageSlot` does a global `document.querySelectorAll("[data-session-search-item-key]")` and returns the first match by `messageId`. When the same session is rendered in two workspace panes, this can scroll the wrong pane's slot when the in-page `messageSlotNodesRef` cache misses (e.g. after a remount). Scope to the panel root via the `scrollContainerRef` parent or include a pane id in the selector.
 - [ ] P2: Reset `messageSlotNodesRef` on session change in `ui/src/panels/AgentSessionPanel.tsx:666-692`:
   ref keys by `messageId` only and is never cleared. If `SessionConversationPage` is reused for a different session (page is keyed by session id higher up, but if memoization changes), stale message-id keys could persist across sessions. Add `useEffect(() => messageSlotNodesRef.current.clear(), [session.id])` to harden.
-- [ ] P2: Add marker REST stale-response gating coverage:
-  resolve marker create/update HTTP responses after a newer SSE or state repair and assert stale same-instance responses do not overwrite local marker state.
-- [ ] P2: Add remote marker proxy replay-equivalence coverage:
-  perform a remote marker proxy write, then replay the matching remote SSE delta and assert the local revision/mutation state and marker delta are not duplicated.
-- [ ] P2: Add remote marker update id-mismatch coverage:
-  have a remote PATCH response return a different marker id and assert the proxy rejects it instead of upserting the wrong marker.
 - [ ] P2: Add remote marker update/delete proxy coverage:
   cover the remote-backed PATCH and DELETE marker proxy branches, including request method/path/body, nullable PATCH serialization, delete response id checks, and localized response application.
+- [ ] P2: Drive marker id-mismatch coverage through the actual remote PATCH proxy:
+  have the production update path or PATCH route call a fake remote that returns a different marker id, then assert the proxy rejects it and does not upsert locally.
 - [ ] P2: Extend marker mutation-stamp regression coverage to update/delete failures:
   add rejected update and delete cases, such as missing marker or bad anchor, and assert both `inner.last_mutation_stamp` and the session mutation stamp remain unchanged.
 - [ ] P2: Add PATCH-specific marker request rejection tests:
   cover malformed PATCH JSON and an update payload with an unknown marker kind, pinning the `update_session_marker` rejection path and strict update DTO deserialization.
-- [ ] P2: Tighten `apply_remote_marker_response` stale-skip semantics in `src/session_markers.rs:285-338`:
-  after `apply_remote_delta_event` succeeds, the function re-reads the local marker. If the remote revision was already observed via SSE (`should_skip_remote_applied_delta_revision`), the apply is a no-op and the local marker may be stale or absent for that id, causing a `not_found` response to a successful remote create. In practice the SSE applied the same payload so the read finds a marker — but not the one the apply step "intended." Either return the localized marker built before the apply call, or assert the local read matches `marker_id`+`updated_at` from the remote response. Same concern at `apply_remote_marker_delete_response:357-364`.
-- [ ] P2: Add server-instance mismatch resync coverage to `app-session-actions.test.ts`:
-  current tests cover the happy path of `handleCreateConversationMarker` (local upsert + revision advance) but not the `isServerInstanceMismatch` resync branch. A regression that dropped the resync would not fail any test today.
 - [ ] P2: Make marker hover toolbar reachable on touch-only devices (`ui/src/styles.css:3920-3935`):
   toolbar is `pointer-events: none` until hover/focus-within. Touch-only devices without a hover state cannot reveal the "Add checkpoint marker" button. Toolbar can be tab-reached after the user lands on something focusable inside the message; flag if Phase 1 wants touch parity. Add a long-press or always-visible mode for touch.
 - [ ] P2: Switch delegation persistence from rewrite-all to row-level upsert + tombstones in `src/persist.rs:1104-1123`:
   the new `delegations` SQLite table uses `DELETE FROM delegations` then re-insert every row on any single-row change. Session table uses targeted upserts/deletes, but delegations rewrite the whole table per delta tick. With long delegation history this regresses to the same pattern the SQLite split set out to avoid. Add per-row insert/update + tombstone tracking matching the session pattern, OR document why wholesale rewrite is acceptable for delegation cardinality.
 - [ ] P2: Add stored-version guard to SQLite schema migration in `src/persist.rs:638-665`:
   `SQLITE_SCHEMA_VERSION` was bumped to `"2"` but `ensure_sqlite_state_schema` ignores the existing value and unconditionally writes `"2"`. A downgrade to a v1 binary would silently lose dedicated `delegations` rows after the v2 binary cleared the embedded JSON copy from `app_state`. Add a stored-version check (read the `meta` row first, refuse downgrade or run a one-time legacy-to-table migration), and document the no-downgrade contract in `docs/features/sqlite-session-storage.md`.
-- [ ] P2: Document or fix the batched `message_count` semantic in `src/messages.rs:189-214`:
-  `message_created_delta_parts_for_indices` snapshots `message_count` once for the whole batch. When `stop_session` fires both terminal + file-changes deltas, the first delta reports `message_count = N+2` even though only one new message has been delivered. UI's `messageCreatedDeltaHasProtocolViolation` accepts this (`messageIndex < messageCount`), but the per-event `message_count` is no longer "count after this message is appended". Either re-read length per index, or document the all-deltas-from-same-commit semantic in the helper's doc comment so future readers understand the contract.
+- [ ] P2: Add `shouldApplyMarkerMutationResponse` call sites for update + delete in `ui/src/app-session-actions.ts:653-684`:
+  the helper is helpfully extracted but only consumed by `handleCreateConversationMarker`. There is no `handleUpdateConversationMarker`/`handleDeleteConversationMarker` in this file (only `api.ts` exposes those). When marker update/delete UI is wired in, the gating helper exists but the new entry points must remember to use it. Add a TODO comment near the helper, or land the update/delete handlers immediately so the gate is applied uniformly.
 - [ ] P2: Add a pure-delegation-update regression test in `src/tests/delegations.rs`:
   `delegation_mutation_stamp` is now a second top-level mutation watermark next to `last_mutation_stamp`. Both new round-32 tests stage a delegation create which incidentally bumps a session via the parent card. Add a targeted regression for "pure delegation update produces a delta": `state.collect_persist_delta(0)` after modifying *only* delegation fields (no session push) should emit `changed_delegations` with the right ids.
 - [ ] P2: Document the empty-delegations upgrade edge case in `src/persisted_state.rs:122`:
   `has_persisted_delegations = !self.delegations.is_empty()` means a load with zero delegations does not seed `delegation_mutation_stamp`, so the legacy embedded delegations payload never gets cleared from the metadata JSON if all delegations were removed before the v2 upgrade. Practically harmless (an empty `delegations: []` is small) but the comment "rewrites the metadata row without any legacy embedded delegation payload" is conditional on `delegations` being non-empty at upgrade time. Add a Note in the comment, or unconditionally seed the watermark.
+- [ ] P2: Restore `active_turn_*` fields on commit failure in `src/session_lifecycle.rs:398, src/turn_lifecycle.rs:442`:
+  `finish_active_turn_file_change_tracking(record)` was relocated inside the closure, ahead of `commit_locked`. On commit failure (the explicit Err arm at `session_lifecycle.rs:438`), the in-memory record now leaves the active-turn tracking already finished/cleared while no rollback restores `active_turn_start_message_count` or `active_turn_file_changes`. Previously the call ran after a successful commit. Not catastrophic (these fields aren't persisted, and the next stop attempt re-triggers), but a small fidelity regression in the commit-failure rollback path. Roll back on commit failure or document the intentional drop with a brief comment.

@@ -4245,7 +4245,11 @@ textarea {
 .new-response-indicator {
   display: block;
   width: fit-content;
-  margin: 0 auto var(--space-xl);
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 3;
+  margin: 0;
   border: 0;
   border-radius: var(--control-radius-button);
   padding: calc(0.62rem * var(--density-scale)) calc(0.95rem * var(--density-scale));
@@ -4254,11 +4258,12 @@ textarea {
   color: white;
   cursor: pointer;
   font-weight: 600;
+  transform: translate(-50%, calc(-100% - 0.5rem));
   white-space: nowrap;
 }
 
 .new-response-indicator:hover {
-  transform: translateY(-1px);
+  transform: translate(-50%, calc(-100% - 0.5rem - 1px));
 }
 
 .thread-notice,
@@ -8000,6 +8005,7 @@ textarea {
 
 .composer {
   flex: none;
+  position: relative;
   padding: 1rem 1.35rem 1.3rem;
   border-top: 1px solid var(--line);
   background: var(--surface-composer);
