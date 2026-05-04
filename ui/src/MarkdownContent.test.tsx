@@ -301,6 +301,19 @@ describe("MarkdownContent Mermaid diagrams", () => {
     });
   });
 
+  it("keeps bare Mermaid-like text as prose outside fences", () => {
+    render(
+      <MarkdownContent
+        markdown={["# Notes", "", "a=>b", "", "A --> B inline."].join("\n")}
+      />,
+    );
+
+    expect(screen.getByText("a=>b")).toBeInTheDocument();
+    expect(screen.getByText("A --> B inline.")).toBeInTheDocument();
+    expect(screen.queryByTestId("mermaid-frame")).not.toBeInTheDocument();
+    expect(mermaidRenderMock).not.toHaveBeenCalled();
+  });
+
   it("renders Mermaid fenced blocks as diagrams", async () => {
     render(
       <MarkdownContent
@@ -547,25 +560,25 @@ describe("MarkdownContent Mermaid diagrams", () => {
     const widthPx = Number.parseInt(frame.style.width, 10);
     expect(widthPx).toBeGreaterThan(0);
     expect(widthPx).toBeLessThanOrEqual(4096);
-    expect(frame.style.height).toBe("4096px");
-    expect(frame.style.aspectRatio).toBe("");
+    expect(frame.style.height).toBe("auto");
+    expect(frame.style.aspectRatio).toBe("4096 / 4096");
     expect(frame.style.maxWidth).toBe("100%");
-    // The inline width/height cap is the primary guard; also confirm the
-    // container did not propagate the runaway SVG dimensions.
+    // The inline width/aspect-ratio cap is the primary guard; also confirm
+    // the container did not propagate the runaway SVG dimensions.
     expect(container.querySelector(".mermaid-diagram-frame")).toBe(frame);
   });
 
-  it("encodes 24-px vertical slack in the Mermaid iframe height", async () => {
+  it("encodes 24-px vertical slack in the Mermaid iframe aspect ratio", async () => {
     // The iframe srcDoc CSS uses `overflow-x: auto; overflow-y: hidden`
     // so wide diagrams can scroll horizontally inside the iframe, but
     // the horizontal scrollbar eats ~16 px at the bottom of the frame.
-    // The production code in `getMermaidDiagramFrameStyle` reserves
-    // `Math.ceil(dimensions.height) + 24` to prevent the scrollbar
-    // chrome from clipping the last row (and to absorb a few pixels
-    // of render drift from the temp-DOM's font metrics). An earlier
-    // version used `+ 8`; this test pins the `+ 24` contract so a
-    // regression back to `+ 8` fails here instead of silently shipping
-    // a diagram that looks one row short.
+    // The production code in `getMermaidDiagramFrameStyle` includes
+    // `Math.ceil(dimensions.height) + 24` in the aspect-ratio height
+    // component to prevent the scrollbar chrome from clipping the last
+    // row (and to absorb a few pixels of render drift from the temp-DOM's
+    // font metrics). An earlier version used `+ 8`; this test pins the
+    // `+ 24` contract so a regression back to `+ 8` fails here instead
+    // of silently shipping a diagram that looks one row short.
     mermaidRenderMock.mockResolvedValueOnce({
       diagramType: "flowchart",
       svg: '<svg data-testid="mermaid-svg" viewBox="0 0 300 80"><text>ok</text></svg>',
@@ -581,13 +594,13 @@ describe("MarkdownContent Mermaid diagrams", () => {
     const widthPx = Number.parseInt(frame.style.width, 10);
     // viewBox width 300 + 2 = 302; within [180, 4096] so not clamped.
     expect(widthPx).toBe(302);
-    // viewBox height 80 + 24 slack = 104; kept as explicit iframe height
-    // because wide diagrams scroll at intrinsic SVG size inside the frame.
-    expect(frame.style.height).toBe("104px");
-    expect(frame.style.aspectRatio).toBe("");
+    // viewBox height 80 + 24 slack = 104; encoded into aspect-ratio so
+    // constrained wide frames do not keep a stale fixed height.
+    expect(frame.style.height).toBe("auto");
+    expect(frame.style.aspectRatio).toBe("302 / 104");
   });
 
-  it("keeps wide Mermaid iframe height intrinsic when max-width constrains the frame", async () => {
+  it("scales wide Mermaid iframe height when max-width constrains the frame", async () => {
     mermaidRenderMock.mockResolvedValueOnce({
       diagramType: "er",
       svg: '<svg data-testid="mermaid-svg" viewBox="0 0 2340.4453125 926.6875"><text>wide er</text></svg>',
@@ -612,8 +625,8 @@ describe("MarkdownContent Mermaid diagrams", () => {
     expect(screen.getByTestId("narrow-mermaid-parent")).toHaveStyle({ width: "400px" });
     expect(frame.style.width).toBe("2343px");
     expect(frame.style.maxWidth).toBe("100%");
-    expect(frame.style.height).toBe("951px");
-    expect(frame.style.aspectRatio).toBe("");
+    expect(frame.style.height).toBe("auto");
+    expect(frame.style.aspectRatio).toBe("2343 / 951");
     expect((frame as HTMLIFrameElement).srcdoc).toContain(
       "svg{display:block;max-width:none;height:auto",
     );
@@ -640,8 +653,8 @@ describe("MarkdownContent Mermaid diagrams", () => {
     const frame = await screen.findByTestId("mermaid-frame");
     const widthPx = Number.parseInt(frame.style.width, 10);
     expect(widthPx).toBe(180);
-    expect(frame.style.height).toBe("60px");
-    expect(frame.style.aspectRatio).toBe("");
+    expect(frame.style.height).toBe("auto");
+    expect(frame.style.aspectRatio).toBe("180 / 60");
   });
 
   it("clamps Mermaid iframe dimensions up to the lower bound when the viewBox is zero", async () => {
@@ -664,8 +677,8 @@ describe("MarkdownContent Mermaid diagrams", () => {
     const frame = await screen.findByTestId("mermaid-frame");
     const widthPx = Number.parseInt(frame.style.width, 10);
     expect(widthPx).toBe(180);
-    expect(frame.style.height).toBe("60px");
-    expect(frame.style.aspectRatio).toBe("");
+    expect(frame.style.height).toBe("auto");
+    expect(frame.style.aspectRatio).toBe("180 / 60");
   });
 });
 
@@ -1440,11 +1453,35 @@ describe("MarkdownContent", () => {
       ).toBe(markdown);
     });
 
-    it("snaps to a full <table> once a trailing blank line settles the block", () => {
+    it("keeps a streaming table deferred even when a trailing blank line would otherwise close it", () => {
+      // Earlier revisions snapped a `header + separator + body row +
+      // trailing newline` table to a real `<table>` mid-stream because
+      // the splitter treated the trailing blank line as closing the
+      // pipe-table tracker. That produced a visible MD ↔ ASCII flicker
+      // when streaming chunks landed on those exact boundaries: the
+      // bubble would render the partial table as MD for one chunk,
+      // then revert to the ASCII placeholder for the next chunk's
+      // updated content. The streaming pipeline now sets
+      // `deferAllBlocks: true` so any table/fence/math block stays in
+      // the streaming-fragment placeholder for the entire duration of
+      // `isStreaming`. The full `<table>` render happens only when
+      // `isStreaming` flips false at turn-end (covered by the settled
+      // counterpart "wraps markdown tables in a scroll container").
       const markdown = "| Col A | Col B |\n| --- | --- |\n| 1 | 2 |\n";
-      const { container } = render(
+      const { container, rerender } = render(
         <MarkdownContent isStreaming markdown={markdown} />,
       );
+      // Mid-stream: table stays in the placeholder, no `<table>` yet.
+      expect(container.querySelector(".markdown-table-scroll")).toBeNull();
+      expect(
+        container.querySelector(".markdown-streaming-fragment")?.textContent,
+      ).toBe(markdown);
+
+      // Turn end: rerender without `isStreaming`. The splitter is
+      // bypassed, react-markdown sees the full settled text, and the
+      // table snaps to a real `<table>` for the first time. The
+      // ASCII placeholder is gone.
+      rerender(<MarkdownContent markdown={markdown} />);
       const tableScroll = container.querySelector(".markdown-table-scroll");
       expect(tableScroll).not.toBeNull();
       expect(tableScroll?.querySelector("table")).not.toBeNull();

@@ -358,43 +358,37 @@ export const MessageCard = memo(
             : null;
         // Three possible render paths for an assistant message text:
         //
-        //   1. Plain `<p>` shell (`StreamingAssistantTextShell`) —
-        //      cheapest. Used for streaming assistant text that has
-        //      not yet shown any Markdown structure. Survives
-        //      `textDelta` chunks with no DOM rebuild.
-        //   2. `<MarkdownContent isStreaming />` — full pipeline
-        //      with partial-block deferral. Used when the streaming
-        //      message has accrued Markdown structure that benefits
-        //      visibly from GFM rendering. The splitter routes any
-        //      in-flight trailing pipe-table / fence / `$$` block
-        //      through `<pre class="markdown-streaming-fragment">`
-        //      until it settles. See
-        //      `docs/features/streaming-markdown.md`.
-        //   3. `<DeferredMarkdownContent />` (which wraps
-        //      `<MarkdownContent isStreaming={false} />`) — full
-        //      pipeline with no deferral, plus the deferred-render
-        //      cooldown gate. Used for settled history bubbles, and
-        //      for assistant messages whose host opted out of the
-        //      streaming fast path or that currently have an active
-        //      search query (which forces full-fidelity rendering so
-        //      the highlighted matches are correct).
+        // Assistant text always renders through `<DeferredMarkdownContent>`
+        // (which itself always wraps `<MarkdownContent>`), regardless of
+        // whether the message is streaming or settled, has Markdown
+        // structure or is plain prose. Earlier revisions chose between
+        // a bare `<p>` shell (`StreamingAssistantTextShell`), a direct
+        // `<MarkdownContent isStreaming />`, and a wrapped
+        // `<DeferredMarkdownContent />` based on per-message structure
+        // detection (`hasRenderableStreamingMarkdown`) and a host fast-
+        // path flag — but each transition between the three was a React
+        // component-type change at the same JSX position, so React
+        // tore down and re-mounted the rendered subtree. That caused
+        // visible flicker mid-stream (the moment the first `**`, `# `,
+        // `- `, etc. appeared) and again at turn end (full subtree
+        // re-mount with Mermaid/KaTeX/code re-renders).
+        //
+        // The cost of always running the Markdown pipeline (splitter +
+        // react-markdown) for plain-prose streaming chunks is small —
+        // typical chunks are short, the splitter is O(n) over text
+        // already accumulated, and react-markdown is fast for prose
+        // without block constructs. The `isStreaming` flag is still
+        // honored: it gates the partial-block deferral splitter and
+        // forces the heavy-content activation gate off so streaming
+        // content always renders immediately.
         //
         // Non-assistant messages (user, system) skip this branch
         // entirely and render as plain text (see the `:` arm of the
         // outer ternary further below).
-        //
-        // The fast-path gate itself comes from the host
-        // (`preferStreamingPlainTextRender`); per-message structure
-        // detection is `hasRenderableStreamingMarkdown`.
-        const shouldUseStreamingAssistantFastPath =
+        const isStreamingAssistantMessage =
           preferStreamingPlainTextRender &&
           message.author === "assistant" &&
           searchQuery.trim().length === 0;
-        const shouldRenderStreamingMarkdown =
-          shouldUseStreamingAssistantFastPath &&
-          hasRenderableStreamingMarkdown(message.text);
-        const shouldPreferStreamingPlainTextRender =
-          shouldUseStreamingAssistantFastPath && !shouldRenderStreamingMarkdown;
 
         if (connectionRetryNotice) {
           const retryDisplayState =
@@ -430,29 +424,16 @@ export const MessageCard = memo(
               />
             ) : null}
             {message.author === "assistant" ? (
-              shouldPreferStreamingPlainTextRender ? (
-                <StreamingAssistantTextShell text={message.text} />
-              ) : shouldRenderStreamingMarkdown ? (
-                <MarkdownContent
-                  appearance={appearance}
-                  isStreaming
-                  markdown={message.text}
-                  onOpenSourceLink={onOpenSourceLink}
-                  searchQuery={searchQuery}
-                  searchHighlightTone={searchHighlightTone}
-                  workspaceRoot={workspaceRoot}
-                />
-              ) : (
-                <DeferredMarkdownContent
-                  appearance={appearance}
-                  markdown={message.text}
-                  onOpenSourceLink={onOpenSourceLink}
-                  preferImmediateRender={preferImmediateHeavyRender}
-                  searchQuery={searchQuery}
-                  searchHighlightTone={searchHighlightTone}
-                  workspaceRoot={workspaceRoot}
-                />
-              )
+              <DeferredMarkdownContent
+                appearance={appearance}
+                isStreaming={isStreamingAssistantMessage}
+                markdown={message.text}
+                onOpenSourceLink={onOpenSourceLink}
+                preferImmediateRender={preferImmediateHeavyRender}
+                searchQuery={searchQuery}
+                searchHighlightTone={searchHighlightTone}
+                workspaceRoot={workspaceRoot}
+              />
             ) : message.text ? (
               <>
                 <p className="plain-text-copy">
@@ -616,57 +597,6 @@ export const MessageCard = memo(
 
 function promptCommandMetaLabel(text: string, expandedText?: string | null) {
   return expandedText && text.trim().startsWith("/") ? "Command" : null;
-}
-
-/**
- * Cheapest possible render path for streaming assistant replies that
- * have not yet shown any sign of Markdown structure. A bare `<p>`
- * survives `textDelta` chunks with no DOM rebuild, no GFM/Mermaid/
- * KaTeX work, and no streaming-split cost. Once `MessageCard`
- * detects Markdown structure (see `hasRenderableStreamingMarkdown`)
- * it switches to `<MarkdownContent isStreaming />`, which does the
- * partial-block deferral described in
- * `docs/features/streaming-markdown.md`.
- */
-function StreamingAssistantTextShell({ text }: { text: string }) {
-  return <p className="plain-text-copy">{text}</p>;
-}
-
-/**
- * Decides whether a streaming assistant message has accrued enough
- * Markdown structure to be worth routing through `MarkdownContent`
- * (with `isStreaming` set, so partial blocks defer cleanly to the
- * `markdown-streaming-fragment` placeholder). Returns `false` for
- * messages that still look like plain prose, in which case
- * `StreamingAssistantTextShell` is the fast path.
- *
- * Detected constructs (the pragmatic subset that benefits visibly
- * from full GFM rendering even mid-stream):
- *   - Headings (`# ` … `###### `)
- *   - Lists (unordered: `-`/`*`/`+`; ordered: `1.`)
- *   - Blockquotes (`> `)
- *   - Fenced code blocks (` ``` ` / `~~~`) — opener alone is enough; the
- *     streaming splitter handles the unclosed-fence case.
- *   - Pipe-table rows (`| Col |`)
- *   - Standalone display-math openers (`$$`)
- *   - Inline code spans (`` `…` ``)
- *   - Bold (`**…**`, `__…__`)
- *   - Markdown links (`[text](url)`)
- */
-function hasRenderableStreamingMarkdown(text: string) {
-  return (
-    /(^|\n)\s{0,3}#{1,6}\s+\S/.test(text) ||
-    /(^|\n)\s*[-*+]\s+\S/.test(text) ||
-    /(^|\n)\s*\d+\.\s+\S/.test(text) ||
-    /(^|\n)\s{0,3}>\s+\S/.test(text) ||
-    /(^|\n)\s*(```|~~~)/.test(text) ||
-    /(^|\n)\s*\|[^\n]*\|/.test(text) ||
-    /(^|\n)\s*\$\$\s*(?=\n|$)/.test(text) ||
-    /`[^`\n]+`/.test(text) ||
-    /\*\*[^*\n][\s\S]*?\*\*/.test(text) ||
-    /__[^_\n][\s\S]*?__/.test(text) ||
-    /\[[^\]\n]+\]\([^)]+\)/.test(text)
-  );
 }
 
 function ConnectionRetryCard({
@@ -1013,9 +943,37 @@ function DeferredHighlightedCodeBlock({
   );
 }
 
+/*
+ * Streaming-stable assistant markdown wrapper.
+ *
+ * Always returns the same JSX shape — `<DeferredHeavyContent>` wrapping
+ * `<MarkdownContent>` — regardless of whether the message is mid-stream
+ * or settled, light or heavy, has a search match or not. This is what
+ * gives `<MarkdownContent>` a stable React tree position across the
+ * streaming → settled transition and prevents the full subtree remount
+ * that previously caused visible flicker (Mermaid diagrams re-rendering,
+ * KaTeX nodes re-mounting, code blocks losing scroll position, tables
+ * blinking) the moment a turn ended.
+ *
+ * `isStreaming` is honored two ways:
+ *   - It is passed through to `MarkdownContent`, which uses it to gate
+ *     the partial-block deferral splitter (`markdown-streaming-split.ts`).
+ *   - It forces `preferImmediateRender = true` on the outer
+ *     `DeferredHeavyContent`, so streaming content never goes behind
+ *     the heavy-content activation gate. The placeholder (used by the
+ *     gate when `shouldGate` is true) is correspondingly elided so it
+ *     can never appear during streaming.
+ *
+ * `DeferredHeavyContent`'s `isActivated` state is monotonic (only flips
+ * from false → true), so when a heavy message transitions out of
+ * streaming, the wrapper stays activated and content stays visible —
+ * the parent's `preferImmediateRender` only matters for the initial
+ * mount of a settled heavy bubble.
+ */
 function DeferredMarkdownContent({
   appearance = "dark",
   documentPath = null,
+  isStreaming = false,
   markdown,
   onOpenSourceLink,
   preferImmediateRender = false,
@@ -1025,6 +983,7 @@ function DeferredMarkdownContent({
 }: {
   appearance?: MonacoAppearance;
   documentPath?: string | null;
+  isStreaming?: boolean;
   markdown: string;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   preferImmediateRender?: boolean;
@@ -1034,40 +993,37 @@ function DeferredMarkdownContent({
 }) {
   const metrics = useMemo(() => measureTextBlock(markdown), [markdown]);
   const showSearchHighlight = containsSearchMatch(markdown, searchQuery);
-  const shouldDefer =
+  // Heavy-content activation gate: only engages for settled, large,
+  // non-search bubbles. Streaming content always renders immediately
+  // (the user is watching it being authored). Search results always
+  // render immediately (the highlighted match must be visible).
+  const shouldGate =
+    !isStreaming &&
     !showSearchHighlight &&
     (metrics.lineCount >= HEAVY_MARKDOWN_LINE_THRESHOLD ||
       markdown.length >= HEAVY_MARKDOWN_CHARACTER_THRESHOLD);
-
-  if (!shouldDefer) {
-    return (
-      <MarkdownContent
-        appearance={appearance}
-        documentPath={documentPath}
-        markdown={markdown}
-        onOpenSourceLink={onOpenSourceLink}
-        searchQuery={searchQuery}
-        searchHighlightTone={searchHighlightTone}
-        workspaceRoot={workspaceRoot}
-      />
-    );
-  }
+  const effectivePreferImmediateRender = !shouldGate || preferImmediateRender;
 
   return (
     <DeferredHeavyContent
-      estimatedHeight={estimateMarkdownBlockHeight(metrics.lineCount)}
-      preferImmediateRender={preferImmediateRender}
+      estimatedHeight={
+        shouldGate ? estimateMarkdownBlockHeight(metrics.lineCount) : 0
+      }
+      preferImmediateRender={effectivePreferImmediateRender}
       placeholder={
-        <div className="markdown-copy deferred-markdown-placeholder">
-          <p className="plain-text-copy">
-            {buildMarkdownPreviewText(markdown)}
-          </p>
-        </div>
+        shouldGate ? (
+          <div className="markdown-copy deferred-markdown-placeholder">
+            <p className="plain-text-copy">
+              {buildMarkdownPreviewText(markdown)}
+            </p>
+          </div>
+        ) : null
       }
     >
       <MarkdownContent
         appearance={appearance}
         documentPath={documentPath}
+        isStreaming={isStreaming}
         markdown={markdown}
         onOpenSourceLink={onOpenSourceLink}
         searchQuery={searchQuery}
@@ -3523,10 +3479,23 @@ export function MarkdownContent({
   // downstream memos (mermaid count, math count, ReactMarkdown tree)
   // cache-stable. See `ui/src/markdown-streaming-split.ts` and
   // `docs/features/streaming-markdown.md`.
+  //
+  // `deferAllBlocks: true` forces the splitter to defer every
+  // table/fence/math block (and everything after it) for the entire
+  // streaming duration, even if the block looks "closed" at a chunk
+  // boundary. Without this, a chunk that lands at "header +
+  // separator" arrives looking settled, react-markdown renders it
+  // as a pipe-paragraph, the next chunk's body row reverts the
+  // splitter to pending, and the bubble flickers MD → ASCII → MD.
+  // With `deferAllBlocks: true` the user sees one transition at
+  // turn end (when `isStreaming` flips false and the splitter is
+  // bypassed) instead of a flicker per chunk boundary.
   const { settled: settledMarkdown, pending: pendingMarkdown } = useMemo(
     () =>
       isStreaming
-        ? splitStreamingMarkdownForRendering(markdown)
+        ? splitStreamingMarkdownForRendering(markdown, {
+            deferAllBlocks: true,
+          })
         : { settled: markdown, pending: "" },
     [isStreaming, markdown],
   );

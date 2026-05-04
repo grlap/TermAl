@@ -418,11 +418,17 @@ type CreateSessionRequest = {
 
 export type CreateDelegationRequest = {
   prompt: string;
+  /** Defaults to a backend-generated title when omitted. */
   title?: string;
+  /** Defaults to the parent session working directory when omitted. */
   cwd?: string;
+  /** Defaults to the parent session agent when omitted. */
   agent?: AgentType;
+  /** Defaults to the selected agent's default model when omitted or blank. */
   model?: string;
+  /** Defaults to reviewer mode when omitted. */
   mode?: "reviewer" | "explorer" | "worker";
+  /** Defaults to read-only delegation when omitted. */
   writePolicy?:
     | { kind: "readOnly" }
     | { kind: "sharedWorktree"; ownedPaths: string[] }
@@ -431,6 +437,10 @@ export type CreateDelegationRequest = {
         ownedPaths: string[];
         worktreePath: string;
       };
+};
+
+export type AbortableRequestOptions = {
+  signal?: AbortSignal;
 };
 
 type CreateProjectRequest = {
@@ -628,11 +638,13 @@ export function createDelegation(
 export function fetchDelegationStatus(
   parentSessionId: string,
   delegationId: string,
+  options?: AbortableRequestOptions,
 ) {
   const parent = encodeURIComponent(parentSessionId);
   const delegation = encodeURIComponent(delegationId);
   return request<DelegationStatusResponse>(
     `/api/sessions/${parent}/delegations/${delegation}`,
+    options?.signal ? { signal: options.signal } : undefined,
   );
 }
 

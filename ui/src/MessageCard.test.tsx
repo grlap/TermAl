@@ -242,7 +242,18 @@ describe("MessageCard", () => {
     ).toBe("$$\n\\sum_{i=1}^n i");
   });
 
-  it("uses a plain-text shell for active streaming assistant prose without markdown", () => {
+  it("renders streaming assistant prose without markdown through the unified Markdown pipeline", () => {
+    // Earlier revisions used a bare-`<p>` `StreamingAssistantTextShell`
+    // fast path for streaming assistant text that had not yet accrued
+    // Markdown structure. That fast path has been removed so the
+    // rendered React subtree stays stable across the moment when the
+    // first `**`, `# `, `- `, etc. arrives mid-stream — preventing the
+    // visible flicker of unmounting the shell `<p>` and mounting the
+    // full Markdown subtree at the same JSX position. Plain prose now
+    // renders through `<MarkdownContent>` (which itself produces a
+    // `<p>` for prose), so the assistant's text appears inside the
+    // canonical `.markdown-copy` wrapper instead of a separate
+    // `.plain-text-copy` element.
     const message: TextMessage = {
       id: "message-streaming-plain",
       type: "text",
@@ -260,9 +271,16 @@ describe("MessageCard", () => {
       />,
     );
 
-    expect(container.querySelector(".plain-text-copy")?.textContent).toBe(
+    const markdownCopy = container.querySelector(".markdown-copy");
+    expect(markdownCopy).not.toBeNull();
+    expect(markdownCopy?.querySelector("p")?.textContent).toBe(
       "Checking the workspace and waiting for the next chunk of output.",
     );
+    // Confirm the bare-`<p>` shell is gone: no `.plain-text-copy` is
+    // emitted for an assistant message whose body is plain prose.
+    expect(
+      container.querySelector("article.bubble-assistant .plain-text-copy"),
+    ).toBeNull();
   });
 
   it("keeps full markdown rendering for settled assistant text", async () => {

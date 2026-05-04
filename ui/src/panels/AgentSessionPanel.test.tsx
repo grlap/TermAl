@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { useLayoutEffect, type RefObject } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -114,19 +121,24 @@ const EMPTY_AGENT_COMMANDS: {
   argumentHint?: string | null;
 }[] = [];
 const formatFooterByteSize = (byteSize: number) => `${byteSize} B`;
+type AgentSessionPanelProps = Parameters<typeof AgentSessionPanel>[0];
 
-function renderSessionPanelWithDefaults(
-  props: Partial<Parameters<typeof AgentSessionPanel>[0]> & {
+function createAgentSessionPanelHarness(
+  props: Partial<AgentSessionPanelProps> & {
     activeSession?: Session | null;
-  },
+  } = {},
 ) {
   const { activeSession = null, ...panelProps } = props;
+  const scrollContainerRef = { current: document.createElement("section") };
+  const conversationSearchMatchedItemKeys = new Set<string>();
+
   syncComposerSessionsStore({
     sessions: activeSession ? [activeSession] : [],
     draftsBySessionId: {},
     draftAttachmentsBySessionId: {},
   });
-  return render(
+
+  return (overrides: Partial<AgentSessionPanelProps> = {}) => (
     <AgentSessionPanel
       paneId="pane-1"
       viewMode="session"
@@ -137,7 +149,7 @@ function renderSessionPanelWithDefaults(
       waitingIndicatorPrompt={null}
       commandMessages={[]}
       diffMessages={[]}
-      scrollContainerRef={{ current: document.createElement("section") }}
+      scrollContainerRef={scrollContainerRef}
       onApprovalDecision={() => {}}
       onUserInputSubmit={() => {}}
       onMcpElicitationSubmit={() => {}}
@@ -145,7 +157,7 @@ function renderSessionPanelWithDefaults(
       onCancelQueuedPrompt={() => {}}
       onSessionSettingsChange={() => {}}
       conversationSearchQuery=""
-      conversationSearchMatchedItemKeys={new Set()}
+      conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
       conversationSearchActiveItemKey={null}
       onConversationSearchItemMount={() => {}}
       renderCommandCard={() => null}
@@ -155,8 +167,17 @@ function renderSessionPanelWithDefaults(
       )}
       renderPromptSettings={() => null}
       {...panelProps}
-    />,
+      {...overrides}
+    />
   );
+}
+
+function renderSessionPanelWithDefaults(
+  props: Partial<AgentSessionPanelProps> & {
+    activeSession?: Session | null;
+  },
+) {
+  return render(createAgentSessionPanelHarness(props)());
 }
 
 afterEach(() => {
@@ -347,28 +368,30 @@ describe("AgentSessionPanel conversation caching", () => {
     try {
       renderSessionPanelWithDefaults({ activeSession });
 
-      expect(
-        screen.getByRole("navigation", { name: "Conversation markers" }),
-      ).toBeInTheDocument();
+      const markerNavigator = screen.getByRole("navigation", {
+        name: "Conversation markers",
+      });
+      expect(markerNavigator).toBeInTheDocument();
+      const markerNavigatorQueries = within(markerNavigator);
       expect(screen.getByText("Markers")).toBeInTheDocument();
       expect(screen.getByText("2")).toBeInTheDocument();
       expect(
-        screen.getAllByRole("button", {
+        markerNavigatorQueries.getByRole("button", {
           name: "Jump to Decision marker Accepted direction",
         }),
-      ).toHaveLength(2);
+      ).toBeInTheDocument();
       expect(
-        screen.getAllByRole("button", {
+        markerNavigatorQueries.getByRole("button", {
           name: "Jump to Bug marker Later issue",
         }),
-      ).toHaveLength(2);
+      ).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Next marker" }));
 
       expect(
-        screen.getAllByRole("button", {
+        markerNavigatorQueries.getByRole("button", {
           name: "Jump to Decision marker Accepted direction",
-        })[0],
+        }),
       ).toHaveClass("is-active");
     } finally {
       if (originalScrollIntoView) {
@@ -410,9 +433,11 @@ describe("AgentSessionPanel conversation caching", () => {
       );
 
       fireEvent.click(
-        screen.getAllByRole("button", {
+        within(
+          screen.getByRole("navigation", { name: "Conversation markers" }),
+        ).getByRole("button", {
           name: "Jump to Decision marker Cached target",
-        })[0],
+        }),
       );
 
       const node = scrolledNode as unknown;
@@ -529,13 +554,18 @@ describe("AgentSessionPanel conversation caching", () => {
       );
 
       fireEvent.click(
-        screen.getAllByRole("button", {
+        within(
+          screen.getByRole("navigation", { name: "Conversation markers" }),
+        ).getByRole("button", {
           name: "Jump to Decision marker Session B marker",
-        })[0],
+        }),
       );
 
       expect(scrolledText).toContain("Session B message");
     } finally {
+      act(() => {
+        resetSessionStoreForTesting();
+      });
       if (originalScrollIntoView) {
         HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
       } else {
@@ -777,59 +807,15 @@ describe("AgentSessionPanel conversation caching", () => {
       agent: "Codex",
       model: "gpt-5.4",
     });
-    act(() => {
-      syncComposerSessionsStore({
-        sessions: [activeSession],
-        draftsBySessionId: {},
-        draftAttachmentsBySessionId: {},
-      });
+
+    const renderPanelWithDefaults = createAgentSessionPanelHarness({
+      activeSession,
+      viewMode: "prompt",
     });
-
-    const scrollContainerRef = { current: document.createElement("section") };
-    const matchedItemKeys = new Set<string>();
-    const noopApproval = () => {};
-    const noopUserInput = () => {};
-    const noopElicitation = () => {};
-    const noopAppRequest = () => {};
-    const noopCancel = () => {};
-    const noopSettingsChange = () => {};
-    const noopSearchMount = () => {};
-    const renderCommandCard = () => null;
-    const renderDiffCard = () => null;
-    const renderMessageCard = (message: Message) => (
-      <article className="message-card">{message.id}</article>
-    );
-
-    const renderPanel = (
-      promptLabel: string,
-    ) => (
-      <AgentSessionPanel
-        paneId="pane-1"
-        viewMode="prompt"
-        activeSessionId={activeSession.id}
-        isLoading={false}
-        isUpdating={false}
-        showWaitingIndicator={false}
-        waitingIndicatorPrompt={null}
-        commandMessages={[]}
-        diffMessages={[]}
-        scrollContainerRef={scrollContainerRef}
-        onApprovalDecision={noopApproval}
-        onUserInputSubmit={noopUserInput}
-        onMcpElicitationSubmit={noopElicitation}
-        onCodexAppRequestSubmit={noopAppRequest}
-        onCancelQueuedPrompt={noopCancel}
-        onSessionSettingsChange={noopSettingsChange}
-        conversationSearchQuery=""
-        conversationSearchMatchedItemKeys={matchedItemKeys}
-        conversationSearchActiveItemKey={null}
-        onConversationSearchItemMount={noopSearchMount}
-        renderCommandCard={renderCommandCard}
-        renderDiffCard={renderDiffCard}
-        renderMessageCard={renderMessageCard}
-        renderPromptSettings={() => <p>{promptLabel}</p>}
-      />
-    );
+    const renderPanel = (promptLabel: string) =>
+      renderPanelWithDefaults({
+        renderPromptSettings: () => <p>{promptLabel}</p>,
+      });
 
     const { rerender } = render(renderPanel("Initial prompt renderer"));
     expect(screen.getByText("Initial prompt renderer")).toBeInTheDocument();
@@ -845,60 +831,19 @@ describe("AgentSessionPanel conversation caching", () => {
 
   it("refreshes command cards when only the command renderer changes", async () => {
     const activeSession = makeSession("session-a");
-    act(() => {
-      syncComposerSessionsStore({
-        sessions: [activeSession],
-        draftsBySessionId: {},
-        draftAttachmentsBySessionId: {},
-      });
-    });
-
     const commandMessages = makeCommandMessages(1);
-    const scrollContainerRef = { current: document.createElement("section") };
-    const matchedItemKeys = new Set<string>();
-    const noopApproval = () => {};
-    const noopUserInput = () => {};
-    const noopElicitation = () => {};
-    const noopAppRequest = () => {};
-    const noopCancel = () => {};
-    const noopSettingsChange = () => {};
-    const noopSearchMount = () => {};
-    const renderDiffCard = () => null;
-    const renderMessageCard = (message: Message) => (
-      <article className="message-card">{message.id}</article>
-    );
-    const renderPromptSettings = () => null;
 
-    const renderPanel = (label: string) => (
-      <AgentSessionPanel
-        paneId="pane-1"
-        viewMode="commands"
-        activeSessionId={activeSession.id}
-        isLoading={false}
-        isUpdating={false}
-        showWaitingIndicator={false}
-        waitingIndicatorPrompt={null}
-        commandMessages={commandMessages}
-        diffMessages={[]}
-        scrollContainerRef={scrollContainerRef}
-        onApprovalDecision={noopApproval}
-        onUserInputSubmit={noopUserInput}
-        onMcpElicitationSubmit={noopElicitation}
-        onCodexAppRequestSubmit={noopAppRequest}
-        onCancelQueuedPrompt={noopCancel}
-        onSessionSettingsChange={noopSettingsChange}
-        conversationSearchQuery=""
-        conversationSearchMatchedItemKeys={matchedItemKeys}
-        conversationSearchActiveItemKey={null}
-        onConversationSearchItemMount={noopSearchMount}
-        renderCommandCard={(message) => (
+    const renderPanelWithDefaults = createAgentSessionPanelHarness({
+      activeSession,
+      viewMode: "commands",
+      commandMessages,
+    });
+    const renderPanel = (label: string) =>
+      renderPanelWithDefaults({
+        renderCommandCard: (message) => (
           <article>{`${label}: ${message.id}`}</article>
-        )}
-        renderDiffCard={renderDiffCard}
-        renderMessageCard={renderMessageCard}
-        renderPromptSettings={renderPromptSettings}
-      />
-    );
+        ),
+      });
 
     const { rerender } = render(renderPanel("Initial command renderer"));
     expect(screen.getByText("Initial command renderer: command-1")).toBeInTheDocument();
@@ -914,60 +859,19 @@ describe("AgentSessionPanel conversation caching", () => {
 
   it("refreshes diff cards when only the diff renderer changes", async () => {
     const activeSession = makeSession("session-a");
-    act(() => {
-      syncComposerSessionsStore({
-        sessions: [activeSession],
-        draftsBySessionId: {},
-        draftAttachmentsBySessionId: {},
-      });
-    });
-
     const diffMessages = makeDiffMessages(1);
-    const scrollContainerRef = { current: document.createElement("section") };
-    const matchedItemKeys = new Set<string>();
-    const noopApproval = () => {};
-    const noopUserInput = () => {};
-    const noopElicitation = () => {};
-    const noopAppRequest = () => {};
-    const noopCancel = () => {};
-    const noopSettingsChange = () => {};
-    const noopSearchMount = () => {};
-    const renderCommandCard = () => null;
-    const renderMessageCard = (message: Message) => (
-      <article className="message-card">{message.id}</article>
-    );
-    const renderPromptSettings = () => null;
 
-    const renderPanel = (label: string) => (
-      <AgentSessionPanel
-        paneId="pane-1"
-        viewMode="diffs"
-        activeSessionId={activeSession.id}
-        isLoading={false}
-        isUpdating={false}
-        showWaitingIndicator={false}
-        waitingIndicatorPrompt={null}
-        commandMessages={[]}
-        diffMessages={diffMessages}
-        scrollContainerRef={scrollContainerRef}
-        onApprovalDecision={noopApproval}
-        onUserInputSubmit={noopUserInput}
-        onMcpElicitationSubmit={noopElicitation}
-        onCodexAppRequestSubmit={noopAppRequest}
-        onCancelQueuedPrompt={noopCancel}
-        onSessionSettingsChange={noopSettingsChange}
-        conversationSearchQuery=""
-        conversationSearchMatchedItemKeys={matchedItemKeys}
-        conversationSearchActiveItemKey={null}
-        onConversationSearchItemMount={noopSearchMount}
-        renderCommandCard={renderCommandCard}
-        renderDiffCard={(message) => (
+    const renderPanelWithDefaults = createAgentSessionPanelHarness({
+      activeSession,
+      viewMode: "diffs",
+      diffMessages,
+    });
+    const renderPanel = (label: string) =>
+      renderPanelWithDefaults({
+        renderDiffCard: (message) => (
           <article>{`${label}: ${message.id}`}</article>
-        )}
-        renderMessageCard={renderMessageCard}
-        renderPromptSettings={renderPromptSettings}
-      />
-    );
+        ),
+      });
 
     const { rerender } = render(renderPanel("Initial diff renderer"));
     expect(screen.getByText("Initial diff renderer: diff-1")).toBeInTheDocument();

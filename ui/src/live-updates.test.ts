@@ -1918,27 +1918,20 @@ describe("applyDeltaToSessions", () => {
     expect(result.sessions[0].sessionMutationStamp).toBe(777);
   });
 
-  it("applies retained non-created deltas while the transcript is marked unhydrated", () => {
-    const approvalResult = applyDeltaToSessions(
-      [
-        makeSession("session-a", {
-          messagesLoaded: false,
-          messageCount: 1,
-          messages: [
-            {
-              id: "approval-1",
-              type: "approval",
-              timestamp: "10:00",
-              author: "assistant",
-              title: "Run command?",
-              command: "cargo check",
-              detail: "Allow this command",
-              decision: "pending",
-            },
-          ],
-        }),
-      ],
-      {
+  it.each([
+    {
+      label: "messageUpdated",
+      makeMessage: () => ({
+        id: "approval-1",
+        type: "approval" as const,
+        timestamp: "10:00",
+        author: "assistant" as const,
+        title: "Run command?",
+        command: "cargo check",
+        detail: "Allow this command",
+        decision: "pending" as const,
+      }),
+      makeDelta: (): SessionDeltaEvent => ({
         type: "messageUpdated",
         revision: 4,
         sessionId: "session-a",
@@ -1958,36 +1951,23 @@ describe("applyDeltaToSessions", () => {
         preview: "Approved",
         status: "active",
         sessionMutationStamp: 201,
+      }),
+      expectedMessage: {
+        id: "approval-1",
+        type: "approval",
+        decision: "accepted",
       },
-    );
-    expect(approvalResult.kind).toBe("applied");
-    if (approvalResult.kind !== "applied") {
-      throw new Error("expected message update to apply");
-    }
-    expect(approvalResult.sessions[0].messagesLoaded).toBe(false);
-    expect(approvalResult.sessions[0].messages[0]).toMatchObject({
-      id: "approval-1",
-      type: "approval",
-      decision: "accepted",
-    });
-
-    const textDeltaResult = applyDeltaToSessions(
-      [
-        makeSession("session-a", {
-          messagesLoaded: false,
-          messageCount: 1,
-          messages: [
-            {
-              id: "message-1",
-              type: "text",
-              timestamp: "10:01",
-              author: "assistant",
-              text: "Streaming",
-            },
-          ],
-        }),
-      ],
-      {
+    },
+    {
+      label: "textDelta",
+      makeMessage: () => ({
+        id: "message-1",
+        type: "text" as const,
+        timestamp: "10:01",
+        author: "assistant" as const,
+        text: "Streaming",
+      }),
+      makeDelta: (): SessionDeltaEvent => ({
         type: "textDelta",
         revision: 5,
         sessionId: "session-a",
@@ -1997,36 +1977,23 @@ describe("applyDeltaToSessions", () => {
         delta: " answer",
         preview: "Streaming answer",
         sessionMutationStamp: 202,
+      }),
+      expectedMessage: {
+        id: "message-1",
+        type: "text",
+        text: "Streaming answer",
       },
-    );
-    expect(textDeltaResult.kind).toBe("applied");
-    if (textDeltaResult.kind !== "applied") {
-      throw new Error("expected text delta to apply");
-    }
-    expect(textDeltaResult.sessions[0].messagesLoaded).toBe(false);
-    expect(textDeltaResult.sessions[0].messages[0]).toMatchObject({
-      id: "message-1",
-      type: "text",
-      text: "Streaming answer",
-    });
-
-    const textReplaceResult = applyDeltaToSessions(
-      [
-        makeSession("session-a", {
-          messagesLoaded: false,
-          messageCount: 1,
-          messages: [
-            {
-              id: "message-1",
-              type: "text",
-              timestamp: "10:01",
-              author: "assistant",
-              text: "Draft answer",
-            },
-          ],
-        }),
-      ],
-      {
+    },
+    {
+      label: "textReplace",
+      makeMessage: () => ({
+        id: "message-1",
+        type: "text" as const,
+        timestamp: "10:01",
+        author: "assistant" as const,
+        text: "Draft answer",
+      }),
+      makeDelta: (): SessionDeltaEvent => ({
         type: "textReplace",
         revision: 6,
         sessionId: "session-a",
@@ -2036,38 +2003,25 @@ describe("applyDeltaToSessions", () => {
         text: "Final answer",
         preview: "Final answer",
         sessionMutationStamp: 203,
+      }),
+      expectedMessage: {
+        id: "message-1",
+        type: "text",
+        text: "Final answer",
       },
-    );
-    expect(textReplaceResult.kind).toBe("applied");
-    if (textReplaceResult.kind !== "applied") {
-      throw new Error("expected text replace to apply");
-    }
-    expect(textReplaceResult.sessions[0].messagesLoaded).toBe(false);
-    expect(textReplaceResult.sessions[0].messages[0]).toMatchObject({
-      id: "message-1",
-      type: "text",
-      text: "Final answer",
-    });
-
-    const commandResult = applyDeltaToSessions(
-      [
-        makeSession("session-a", {
-          messagesLoaded: false,
-          messageCount: 1,
-          messages: [
-            {
-              id: "command-1",
-              type: "command",
-              timestamp: "10:02",
-              author: "assistant",
-              command: "pwd",
-              output: "",
-              status: "running",
-            },
-          ],
-        }),
-      ],
-      {
+    },
+    {
+      label: "commandUpdate",
+      makeMessage: () => ({
+        id: "command-1",
+        type: "command" as const,
+        timestamp: "10:02",
+        author: "assistant" as const,
+        command: "pwd",
+        output: "",
+        status: "running" as const,
+      }),
+      makeDelta: (): SessionDeltaEvent => ({
         type: "commandUpdate",
         revision: 7,
         sessionId: "session-a",
@@ -2079,43 +2033,30 @@ describe("applyDeltaToSessions", () => {
         status: "success",
         preview: "/tmp",
         sessionMutationStamp: 204,
+      }),
+      expectedMessage: {
+        id: "command-1",
+        type: "command",
+        output: "/tmp",
+        status: "success",
       },
-    );
-    expect(commandResult.kind).toBe("applied");
-    if (commandResult.kind !== "applied") {
-      throw new Error("expected command update to apply");
-    }
-    expect(commandResult.sessions[0].messagesLoaded).toBe(false);
-    expect(commandResult.sessions[0].messages[0]).toMatchObject({
-      id: "command-1",
-      type: "command",
-      output: "/tmp",
-      status: "success",
-    });
-
-    const parallelResult = applyDeltaToSessions(
-      [
-        makeSession("session-a", {
-          messagesLoaded: false,
-          messageCount: 1,
-          messages: [
-            {
-              id: "parallel-1",
-              type: "parallelAgents",
-              timestamp: "10:03",
-              author: "assistant",
-              agents: [
-                {
-                  id: "reviewer",
-                  title: "Reviewer",
-                  status: "initializing",
-                },
-              ],
-            },
-          ],
-        }),
-      ],
-      {
+    },
+    {
+      label: "parallelAgentsUpdate",
+      makeMessage: () => ({
+        id: "parallel-1",
+        type: "parallelAgents" as const,
+        timestamp: "10:03",
+        author: "assistant" as const,
+        agents: [
+          {
+            id: "reviewer",
+            title: "Reviewer",
+            status: "initializing" as const,
+          },
+        ],
+      }),
+      makeDelta: (): SessionDeltaEvent => ({
         type: "parallelAgentsUpdate",
         revision: 8,
         sessionId: "session-a",
@@ -2132,26 +2073,42 @@ describe("applyDeltaToSessions", () => {
         ],
         preview: "Running reviewer",
         sessionMutationStamp: 205,
+      }),
+      expectedMessage: {
+        id: "parallel-1",
+        type: "parallelAgents",
+        agents: [
+          {
+            id: "reviewer",
+            title: "Reviewer",
+            status: "running",
+            detail: "Checking diffs",
+          },
+        ],
       },
-    );
-    expect(parallelResult.kind).toBe("applied");
-    if (parallelResult.kind !== "applied") {
-      throw new Error("expected parallel-agents update to apply");
-    }
-    expect(parallelResult.sessions[0].messagesLoaded).toBe(false);
-    expect(parallelResult.sessions[0].messages[0]).toMatchObject({
-      id: "parallel-1",
-      type: "parallelAgents",
-      agents: [
-        {
-          id: "reviewer",
-          title: "Reviewer",
-          status: "running",
-          detail: "Checking diffs",
-        },
-      ],
-    });
-  });
+    },
+  ])(
+    "applies retained $label deltas while the transcript is marked unhydrated",
+    ({ label, makeMessage, makeDelta, expectedMessage }) => {
+      const result = applyDeltaToSessions(
+        [
+          makeSession("session-a", {
+            messagesLoaded: false,
+            messageCount: 1,
+            messages: [makeMessage()],
+          }),
+        ],
+        makeDelta(),
+      );
+
+      expect(result.kind).toBe("applied");
+      if (result.kind !== "applied") {
+        throw new Error(`expected ${label} to apply`);
+      }
+      expect(result.sessions[0].messagesLoaded).toBe(false);
+      expect(result.sessions[0].messages[0]).toMatchObject(expectedMessage);
+    },
+  );
 
   it("returns appliedNeedsResync with a metadata-only patch when an unhydrated delta's target message is absent", () => {
     const sessions = [

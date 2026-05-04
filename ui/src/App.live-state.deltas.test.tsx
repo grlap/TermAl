@@ -294,11 +294,23 @@ describe("App live state - delta-gap core", () => {
   }
 
   function expectRenderedMarkdownTableContains(expectedCells: string[]) {
+    // The streaming pipeline now defers any table/fence/math block
+    // for the entire duration of `isStreaming` (see
+    // `markdown-streaming-split.ts::deferAllBlocks`). That means a
+    // streamed table's cells live in the
+    // `.markdown-streaming-fragment` placeholder (an ASCII `<pre>`)
+    // until `isStreaming` flips false at turn-end, at which point
+    // react-markdown produces a real `<table>` inside
+    // `.markdown-table-scroll`. The data-presence assertion below
+    // therefore accepts EITHER container — these revision-gap tests
+    // care that all table cells reached the bubble, not which
+    // rendering shape they currently sit in.
     const table = document.querySelector(".markdown-table-scroll table");
-    expect(table).not.toBeNull();
-    const tableText = table?.textContent ?? "";
+    const fragment = document.querySelector(".markdown-streaming-fragment");
+    expect(table || fragment).not.toBeNull();
+    const containerText = table?.textContent ?? fragment?.textContent ?? "";
     for (const cell of expectedCells) {
-      expect(tableText).toContain(cell);
+      expect(containerText).toContain(cell);
     }
   }
 

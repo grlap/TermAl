@@ -56,16 +56,38 @@
  * code block opened during the table's pending region). The cut
  * line is the *earliest* of the three open-block start positions.
  *
- * Pure: depends only on the input string; safe to memoize on
- * `markdown` identity.
+ * `options.deferAllBlocks` (default `false`) controls a stricter
+ * cut policy used during active streaming. When `true`, the cut
+ * is at the *earliest* block-start position regardless of whether
+ * that block was later "closed" by a blank line or matching
+ * fence/`$$`. The motivation: as a streaming response accrues
+ * chunks, a table can land at a boundary where its header +
+ * separator have arrived but the body row has not. The splitter
+ * with `deferAllBlocks: false` would treat that as settled (the
+ * blank line closed the tracker), so react-markdown renders it as
+ * a pipe-paragraph mid-stream. When the body row arrives in the
+ * next chunk the splitter reverts to pending and the bubble
+ * flickers MD → ASCII → MD again. With `deferAllBlocks: true`
+ * the table stays in `pending` for the entire streaming duration
+ * and only snaps to MD once `isStreaming` flips to false at
+ * turn-end (at which point the splitter is bypassed entirely).
+ * The trade-off is that any prose appearing AFTER the first
+ * block-start also stays as plain text during streaming — that
+ * is intentional: it preserves the "no rendering-mode changes
+ * mid-stream" guarantee.
+ *
+ * Pure: depends only on the input string and the option flag;
+ * safe to memoize on the `(markdown, deferAllBlocks)` pair.
  */
 export function splitStreamingMarkdownForRendering(
   markdown: string,
+  options: { deferAllBlocks?: boolean } = {},
 ): { settled: string; pending: string } {
   if (markdown.length === 0) {
     return { settled: "", pending: "" };
   }
 
+  const deferAllBlocks = options.deferAllBlocks ?? false;
   const lines = markdown.split("\n");
   let inFence = false;
   let fenceOpenLineIndex = -1;
@@ -74,6 +96,16 @@ export function splitStreamingMarkdownForRendering(
   let inMath = false;
   let mathOpenLineIndex = -1;
   let tableStartLineIndex = -1;
+  // Earliest line index where ANY block construct begins, regardless
+  // of whether that construct later closed. Only consulted when
+  // `deferAllBlocks` is true; otherwise the existing
+  // earliest-OPEN-block cut policy applies.
+  let firstBlockStartLineIndex = -1;
+  const noteFirstBlockStart = (i: number) => {
+    if (firstBlockStartLineIndex === -1) {
+      firstBlockStartLineIndex = i;
+    }
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -92,6 +124,7 @@ export function splitStreamingMarkdownForRendering(
           fenceOpenLineIndex = i;
           fenceMarkerChar = markerChar;
           fenceMarkerLength = marker.length;
+          noteFirstBlockStart(i);
           // Opening a fence cancels any in-flight table tracking;
           // the table didn't actually exist (its lines were
           // re-interpreted as something else).
@@ -124,6 +157,7 @@ export function splitStreamingMarkdownForRendering(
       if (!inMath) {
         inMath = true;
         mathOpenLineIndex = i;
+        noteFirstBlockStart(i);
         tableStartLineIndex = -1;
       } else {
         inMath = false;
@@ -154,6 +188,7 @@ export function splitStreamingMarkdownForRendering(
     if (/^\s*\|/.test(line)) {
       if (tableStartLineIndex === -1) {
         tableStartLineIndex = i;
+        noteFirstBlockStart(i);
       }
       continue;
     }
@@ -166,6 +201,10 @@ export function splitStreamingMarkdownForRendering(
 
   // The cut line is the earliest open-block start. Any block that
   // opened and then closed before end-of-input is fully settled.
+  // When `deferAllBlocks` is true the cut also includes the
+  // earliest CLOSED block-start so streaming-mode renders never
+  // momentarily settle a partial table/fence/math at a chunk
+  // boundary.
   let cutLine = lines.length;
   if (inFence && fenceOpenLineIndex !== -1) {
     cutLine = Math.min(cutLine, fenceOpenLineIndex);
@@ -175,6 +214,9 @@ export function splitStreamingMarkdownForRendering(
   }
   if (tableStartLineIndex !== -1) {
     cutLine = Math.min(cutLine, tableStartLineIndex);
+  }
+  if (deferAllBlocks && firstBlockStartLineIndex !== -1) {
+    cutLine = Math.min(cutLine, firstBlockStartLineIndex);
   }
 
   if (cutLine >= lines.length) {

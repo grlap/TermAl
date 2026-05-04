@@ -7,117 +7,461 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Delegation commands are coupled to browser-relative transport
+## Telegram relay loses per-message forwarding progress on mid-batch send error
 
-**Severity:** Medium - the advertised MCP/internal command surface can fail outside the browser UI runtime.
+**Severity:** High - a chunk send failure mid-batch silently discards in-memory state mutations, producing duplicate messages on the next poll plus unrecoverable state until a successful poll iteration commits.
 
-`ui/src/delegation-commands.ts:6` imports the browser `api.ts` transport directly. That transport calls `fetch(path, ...)` with relative `/api/...` URLs, which works in same-origin browser code but not in a Node-based MCP wrapper unless another layer injects a base URL or monkey-patches fetch.
-
-**Current behavior:**
-- The command module comment says UI/MCP wrappers can bind to the delegation commands.
-- The implementation is hard-wired to the browser API client.
-- Non-browser wrappers do not get a transport/base-url boundary.
-
-**Proposal:**
-- Define the command layer over an injected delegation transport or `baseUrl`/`fetch` adapter.
-- Keep the current `api.ts` binding as the browser adapter.
-- Add wrapper/runtime coverage for the non-browser command path.
-
-## Delegation waits do not enforce deadlines while status fetches are in flight
-
-**Severity:** Medium - `wait_delegations` can block past its advertised timeout and create sustained polling load.
-
-`ui/src/delegation-commands.ts:214` awaits `Promise.all(fetchDelegationStatus(...))` before checking `timeoutMs`. If a status request stalls, the wait cannot return `timeout` at the deadline. The same polling shape also lacks an external cancellation or aggregate dedupe/concurrency guard across long-lived wrapper calls.
+`src/telegram.rs:929-947` (`forward_new_assistant_message_if_any`). The loop sets `state.last_forwarded_assistant_message_id` and `state.last_forwarded_assistant_message_text_chars` AFTER each successful `telegram.send_message(...)`, then continues with the next chunk/message via `?`-propagation. If chunk N+1 fails, the function returns `Err(...)`. Both call sites — `sync_telegram_digest` (line 779) and `forward_telegram_text_to_project` (line 732) — match `Err(err) => eprintln!(...)` and DO NOT flip the local `dirty` flag. The run loop's `if dirty { persist_telegram_bot_state(...) }` therefore does not save. The first message's id-mutation lives only in memory; on the next poll iteration the relay re-forwards message 1 (visible Telegram duplicate) AND retries message 2. The doc-comment "Record progress per-message so a mid-batch send failure still preserves the messages that DID make it" describes the intent but the surrounding error-propagation contract silently undoes it.
 
 **Current behavior:**
-- The timeout is checked only after each status batch resolves.
-- A stalled status request can keep a wait alive past `timeoutMs`.
-- Multiple local wrapper calls can start overlapping long-running poll loops.
+- `forward_new_assistant_message_if_any` mutates `state.last_forwarded_assistant_message_id`/`_text_chars` per-message.
+- Mid-batch `telegram.send_message` failure `?`-propagates an `Err(...)`.
+- Both callers swallow the `Err` via `eprintln!` and leave `dirty = false`.
+- Run loop skips `persist_telegram_bot_state(...)`; in-memory progress is lost.
+- Next poll re-forwards already-shipped messages, duplicating them in the chat.
 
 **Proposal:**
-- Thread `AbortSignal` or deadline-aware behavior through the delegation status transport.
-- Race each poll batch against the remaining timeout and return `timeout` when the deadline wins.
-- Add wrapper-level cancellation, dedupe, or concurrency limits; consider a batched backend status endpoint.
+- Persist `state` immediately after each successful `send_message` (or have the helper return `Ok(true)` + the partial state on `Err`, so the run loop persists before logging).
+- Or have callers set `dirty = true` even on `Err` (the helper documents that it may have mutated state before failing).
+- Add coverage that fails the second `send_message` and asserts `state.last_forwarded_assistant_message_id` reflects the first message's id on the next poll cycle.
 
-## Marker stale-response guard uses non-monotonic time strings
+## `position_of_last` lookup ignores `author` while `needs_resend_truncated` gates on it
 
-**Severity:** Medium - stale marker mutation recovery can suppress a needed repair across midnight.
+**Severity:** Medium - a stale state file or future id-format change with `last_forwarded_assistant_message_id` matching a non-assistant text message produces silent skipping or replay.
 
-`ui/src/app-session-actions.ts:710` treats `current.updatedAt.localeCompare(response.updatedAt) > 0` as evidence that the current marker is newer than a stale mutation response. Backend marker timestamps are production-shaped `HH:MM:SS` strings rather than date-bearing monotonic versions, so `23:59:59` sorts after `00:01:00` even when it is older.
+`src/telegram.rs:846-856`. The position lookup uses `matches!(message, TelegramSessionFetchMessage::Text { id, .. } if id == tracked)` and does NOT restrict to `author == "assistant"`. The companion `needs_resend_truncated` check at lines 864-876 DOES gate on `author == "assistant"`, so the asymmetry is real: if the tracked id maps to a user text message, position_of_last returns `Some(pos)`, needs_resend_truncated returns `None`, needs_baseline is `false`, and `start_index = pos + 1` skips messages that should have been forwarded.
 
 **Current behavior:**
-- Exact marker equality is accepted as stale-success.
-- A lexically greater `updatedAt` string is also accepted as stale-success.
-- Across midnight, older marker state can look newer and block recovery.
+- `position_of_last` matches by `id` alone, accepting any `Text` author.
+- `needs_resend_truncated` matches `id` AND `author == "assistant"`.
+- A non-assistant id collision (today rare, but defensively undefined) silently skews `start_index`.
 
 **Proposal:**
-- Do not use `updatedAt` as a version for stale-response gating.
-- Require exact marker equality for stale success, or add a monotonic marker version/full timestamp contract.
-- Add coverage with production-shaped `HH:MM:SS` timestamps across midnight.
+- Add `author == "assistant"` to the `position_of_last` `matches!` filter so the lookup pins to the same family the rest of the function considers.
+- Add coverage with a stale state id that maps to a user message; assert the relay re-baselines instead of skipping.
 
-## Marker slot cache is cleared during render
+## `telegram_error_is_message_not_modified` substring match against an unstable error format
 
-**Severity:** Low - render-phase ref mutation can affect the committed marker navigation cache under interrupted renders.
+**Severity:** Medium - Telegram's localized or reworded `description` either over-matches a different 400 (silent edit-failure swallow) or under-matches (sends duplicate digests). Structured `error_code` is discarded by `TelegramApiEnvelope`.
 
-`ui/src/panels/AgentSessionPanel.tsx:675` clears `messageSlotNodesRef` during render when `session.id` changes. React refs are mutable, so an interrupted concurrent render can mutate the cache used by the currently committed tree. Fallback DOM lookup masks many cases, but the cache exists specifically to keep marker jumps scoped and stable.
+`src/telegram.rs:685-687, 344-353`. The check is `err.to_string().contains("message is not modified")`. `request_json` formats errors using only `envelope.description` — `error_code: 400` is parsed away. A future Telegram change like "Bad Request: message previously not modified, retry" or a localization tweak either over-matches (a different 400 silently treated as no-op) or under-matches (canonical English text changes → duplicate digest spam). The fix's pre-existing baseline behavior is the under-match path so the over-match risk is the real concern.
 
 **Current behavior:**
-- Session-id changes clear the marker slot map during render.
-- The committed tree can observe a cache mutation from an interrupted render.
-- DOM fallback often hides the issue but weakens the cache contract.
+- `TelegramApiEnvelope` parses `description` only; `error_code` is dropped.
+- `bail!` formats the description as part of the error chain.
+- Substring match `contains("message is not modified")` over-matches any future 400 with that substring.
 
 **Proposal:**
-- Key cached slots by session id, or replace the cache in commit-phase logic.
-- Guard message-slot ref callbacks by session id so stale registrations cannot leak across sessions.
+- Surface `error_code: Option<i64>` from `TelegramApiEnvelope` and bubble it through a typed Telegram error (e.g., `TelegramApiError { code, description }`).
+- Match on `error_code == 400 && description.contains("message is not modified")` or anchor with `starts_with`.
+- Add a unit test that pins the canonical error string and another that pins the `error_code == 400` path.
 
-## Blank delegation ids look like successful empty waits
+## `forward_telegram_text_to_project` has asymmetric error handling between digest API and inner forward
 
-**Severity:** Low - wrapper input mistakes can be reported as successful no-op waits.
+**Severity:** Medium - same network-class failure produces different lifecycle outcomes depending on which call hit it first.
 
-`ui/src/delegation-commands.ts:197` returns a completed empty result when normalization removes every delegation id. The single-id path calls the same helper, so `waitDelegationCommand(parent, " ")` can resolve as `{ outcome: "completed", delegations: [] }` instead of rejecting invalid input.
+`src/telegram.rs:705-717`. `?` propagates errors from `termal.send_session_message`, the immediate digest fetch, and `send_fresh_telegram_digest_from_response`, but the inner `forward_new_assistant_message_if_any` failure is swallowed via `eprintln!`. Both error categories represent "transient HTTPS/transport hiccup". The outer call site (`handle_telegram_update`) already logs and continues on any returned `Err`, so the asymmetry is a policy choice without a documented rationale.
 
 **Current behavior:**
-- Blank ids are trimmed away by normalization.
-- An all-empty wait returns `completed`.
-- Tool or wrapper input mistakes can look successful.
+- Digest-fetch and digest-send errors abort the user's text-forward acknowledgment path.
+- Session-fetch / session-forward errors get logged to stderr and the function continues.
+- No comment captures why the boundary lives here.
 
 **Proposal:**
-- Reject blank ids in the single-id wait command.
-- Reject all-empty batches for `waitDelegationsCommand`.
-- Add input-validation coverage for blank and all-empty id lists.
+- When the planned "category-only logging" Step 2 of `telegram-ui-integration.md` lands, document the policy at the top of the function: "Inner forward errors are non-fatal because the digest-with-buttons already shipped; outer errors abort because we have nothing to acknowledge yet."
+- Or hoist the inner forward outside the chain.
+- Either way, capture the rationale in source.
 
-## Delegation status commands expose full records
+## `docs/features/telegram-ui-integration.md` REST surface and security-model gaps
 
-**Severity:** Low - future wrapper surfaces can expose more delegation data than status/cancel/wait callers need.
+**Severity:** Medium - the design brief proposes endpoints that submit free-form prompts to the agent runtime without origin/loopback enforcement, and the link-code linking flow has spec inconsistencies.
 
-`ui/src/delegation-commands.ts:37` returns full `DelegationRecord` objects from status-style command results. Those records include prompt, cwd, and result fields. Status, cancel, and wait callers usually need summary-safe metadata, while full result details can remain behind `get_delegation_result`.
+`docs/features/telegram-ui-integration.md:213-242`. (a) Brief proposes `POST /api/telegram/start-link` (returns `{ link_code, expires_at }`) but no `POST /api/telegram/link/cancel` or `GET /api/telegram/link/status` — lifecycle uses polling on `GET /api/telegram/status`. (b) No `POST /api/telegram/relay/start|stop`; single `POST /api/telegram/config` with `enabled` does dual duty (token + lifecycle). A user wanting to update the token AND turn the relay off in two steps repeats the token in the second request body. (c) No CSRF / origin / loopback-only enforcement notes — Phase-1 single-user, but the localhost endpoint is reachable from any process on the machine, including a malicious browser tab targeting `127.0.0.1:8787`. The relay endpoints submit free-form prompts to the agent runtime, so they need at minimum origin enforcement. (d) Link code: brief example `tA9k-7Zq2e` is 9 chars, doc says "8 chars base32"; doc never specifies single-use vs TTL-only-expiry semantics; an attacker probing for codes gets a "right format, wrong value" oracle from the rejection response.
 
 **Current behavior:**
-- Status, cancel, and wait command results include full delegation records.
-- Future MCP wrappers would expose prompt/cwd/result data through broad status paths.
-- There is no redacted status-specific result shape.
+- REST surface in the brief does not match the build-sequence's lifecycle model.
+- Token storage and runtime lifecycle share one endpoint.
+- No origin/loopback security-model section.
+- Link-code length spec inconsistent between text and example; single-use vs TTL semantics undocumented.
 
 **Proposal:**
-- Return command-specific redacted summaries for status, cancel, and wait.
-- Keep full details behind `get_delegation_result`.
-- Add coverage proving status-style command packets omit sensitive/full-result fields.
+- Add `POST /api/telegram/link/cancel` + `GET /api/telegram/link/status` + `POST /api/telegram/relay/start|stop`; split token vs runtime endpoints.
+- Add a "Security model" subsection covering Origin-header enforcement, loopback-only listener confirmation, and a token-rotation note.
+- Pin link-code spec (length, alphabet, single-use semantics, idempotent already-bound replay, per-chat rate-limit on invalid attempts).
 
-## Delegation `failedChecks` allow-list does not match the backend's `CommandStatus` vocabulary
+## Bare-Mermaid-error visualization detection has no direct test coverage
 
-**Severity:** High - a `running` command captured at result-fetch time is silently bucketed into `failedChecks`, and four of the five "passing" labels never appear from the producer.
+**Severity:** Low - a future Mermaid version that changes the syntax-error SVG markers silently re-introduces the red bomb visualization in the iframe.
 
-`ui/src/delegation-commands.ts:323-329` (`isFailedDelegationCheck`) treats any status outside `["ok", "pass", "passed", "success", "successful"]` as a failed check. The backend `CommandStatus` enum (`src/wire.rs:730-743`) has only three variants — `Running`, `Success`, `Error` — serialized as `"running"`, `"success"`, `"error"`. `src/delegations.rs:1911` writes `status.label().to_owned()` directly into `DelegationCommandResult.status`. So `"success"` is the only overlap; `"running"` is misclassified as a failed check, and `"ok"`/`"pass"`/`"passed"`/`"successful"` are dead allow-list entries that never appear from the producer. Test fixtures (`"passed"` / `"failed"`) hide the mismatch.
+`ui/src/mermaid-render.ts:380-385, 395-435` (`isMermaidErrorVisualizationSvg`). The new path detects Mermaid 11.x's "syntax error" SVG and rethrows so `MermaidDiagram`'s clean error fallback can take over. Detection uses substring match on three patterns (`aria-roledescription="error"`, `Syntax error in text`, `class="error-icon"`). The third pattern is the weakest signal and could false-positive on a legitimate user diagram styling its own `error-icon` class. No test in `MarkdownContent.test.tsx`, `MessageCard.test.tsx`, `MarkdownContent.mermaid-fallback.test.tsx`, or a (nonexistent) `mermaid-render.test.ts` mocks `mermaidRenderMock.mockResolvedValueOnce` with a syntax-error SVG and asserts the fallback path engages.
 
 **Current behavior:**
-- Backend can emit `"running"`, `"success"`, `"error"` only.
-- Frontend allow-list overlaps only on `"success"`.
-- `"running"` commands captured at result-fetch time are reported as failed.
-- Tests use `"passed"` / `"failed"` strings the backend never emits.
+- `isMermaidErrorVisualizationSvg` is exported but never directly exercised.
+- No assertion that mocked syntax-error SVG output flows to the diagram-error fallback (one-line message + source) instead of the iframe.
+- Three substring checks; the `class="error-icon"` pattern is the weakest.
 
 **Proposal:**
-- Either align the frontend allow-list with the backend's actual `CommandStatus::label` set (`"success"` only) and explicitly handle `"running"` as in-progress.
-- Or have the backend emit a structured `passed: bool` next to the status string so the wrapper does not maintain a string-matching policy that drifts from the producer.
-- Update the test fixtures to use realistic backend labels.
+- Add a test mocking `mermaid.render` to return a syntax-error SVG; assert `MermaidDiagram` shows the source-as-code fallback.
+- Tighten the `class="error-icon"` check to require it alongside `aria-roledescription="error"` (or scope to `<g class="error-icon">` inside `<svg aria-roledescription="error">`).
+
+## App.live-state.reconnect "fallback-only-hidden" test phases 1-3 are tautological
+
+**Severity:** Low - the "keeps fallback-only assistant text hidden until a fresh SSE state confirms it" test does not put the assistant message in the fallback or resync payload it claims to gate on; only Phase 4 has teeth.
+
+`ui/src/App.live-state.reconnect.test.tsx:1270-1411`. The new test dispatches an `_sseFallback: true` event with the user-only message, then resolves the resync deferred with revision 2 also containing only the user message. Both "hidden" assertions in Phases 1-3 are tautological — a snapshot without the assistant message obviously doesn't render it. The interesting regression — a fallback or resync payload that DOES contain unconfirmed assistant text being incorrectly exposed — is not exercised. A future regression where the fallback adoption path leaks unconfirmed assistant text would still pass this test.
+
+**Current behavior:**
+- Phase 1: dispatches user-only opened state; asserts assistant text not visible.
+- Phase 2: dispatches `_sseFallback: true` with user-only state; asserts assistant text not visible.
+- Phase 3: resolves resync with user-only state; asserts assistant text not visible.
+- Phase 4: dispatches fresh SSE state at revision 3 with assistant text; asserts visible.
+- Only Phase 4 actually pins behavior; phases 1-3 cannot fail because no test payload ever contains the assistant text those assertions guard.
+
+**Proposal:**
+- Add an unconfirmed assistant message to the `_sseFallback` payload in Phase 2 (and/or to the resolved resync state in Phase 3); assert it remains hidden.
+- Phase 4 still confirms visibility once a fresh non-fallback SSE state arrives.
+
+## `times out at the deadline while a status fetch is still in flight` test conflates poll-interval with timeout
+
+**Severity:** Low - the deadline-first ordering invariant is not actually pinned by the test; a future reorder of the deadline/poll-interval check would not regress visibly.
+
+`ui/src/delegation-commands.test.ts:751-797`. The test sets `pollIntervalMs == timeoutMs == MIN_DELEGATION_WAIT_INTERVAL_MS` (500ms) and advances by exactly that amount. With these equal values the deadline triggers in the same window as the first poll-interval check, so the test cannot distinguish "deadline beat poll interval" from "poll interval naturally expired". The previously-tracked bug was specifically about the wait blocking past `timeoutMs` when a status request stalls; pinning the deadline-first ordering requires `timeoutMs > pollIntervalMs`.
+
+**Current behavior:**
+- `pollIntervalMs == timeoutMs == MIN_DELEGATION_WAIT_INTERVAL_MS`.
+- Single timer advance equals both values.
+- A reorder of the deadline check after `pollIntervalMs` would still appear to pass.
+
+**Proposal:**
+- Set `pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS`, `timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 2 - 1` so the deadline must fire mid-stall before the next poll boundary.
+- Or capture `Date.now()` before/after to assert the wait returned closer to `timeoutMs` than to `pollIntervalMs * 2`.
+
+## Telegram relay first-touch chat binding gives effective shell access if the bot token leaks
+
+**Severity:** High - any Telegram chat that can reach the bot will be silently linked on the first `/start`/`/help` and can then drive the local agent (full FS/shell access) through `send_session_message`.
+
+`src/telegram.rs:605-647, 696-714`. `effective_telegram_chat_id(...).is_none()` is enough for any reachable chat to claim the binding (`state.chat_id = Some(chat_id)` at line 615), and once linked, free text from that chat is forwarded directly into the local TermAl session via `termal.send_session_message`, which dispatches to the agent runtime. `TERMAL_TELEGRAM_CHAT_ID` is documented as optional and the README presents the link-on-first-start flow as the expected setup. Bot tokens have realistic leak vectors (logs, shell history, shared screen, accidental commit) — anyone who recovers a leaked token plus an unset chat id has effective shell access to the local machine.
+
+**Current behavior:**
+- The first message into an unlinked relay binds that chat permanently to `~/.termal/telegram-bot.json`.
+- After binding, free text from the linked chat is forwarded into the active project session as a prompt.
+- Prompts dispatched through this path inherit the agent runtime's full filesystem and shell capabilities.
+- `TERMAL_TELEGRAM_CHAT_ID` exists but is optional.
+
+**Proposal:**
+- Default-deny first-touch linking unless a binding has been pre-declared via `TERMAL_TELEGRAM_CHAT_ID` or a relay-side `/api/telegram/link` admin call.
+- Or: require a shared secret / passphrase as the first argument to `/start`, validated against an env-supplied value before persisting `chat_id`.
+- Document the threat model in `README.md` so operators understand a leaked token plus an empty chat-id is shell-equivalent.
+
+## Fresh Telegram assistant replies can be consumed as a baseline instead of forwarded
+
+**Severity:** High - the first assistant reply after a Telegram-originated prompt can be silently dropped for fresh or switched relay sessions.
+
+`src/telegram.rs:714, 887-902`. A Telegram text prompt is forwarded through `send_session_message`, then the immediate assistant-forward attempt usually sees the session as active and returns without forwarding. When the turn later settles, `last_forwarded_assistant_message_id` can still be `None`; the baseline branch records the newest assistant message id and returns `Ok(changed)` without sending the text to Telegram. The same shape can happen after switching the primary session or after a relay state reset.
+
+**Current behavior:**
+- Fresh relay/session state has no assistant forwarding cursor.
+- The first settled assistant reply is treated as old history to baseline rather than a new Telegram reply.
+- Telegram users can see their prompt accepted but never receive the first assistant response.
+
+**Proposal:**
+- Establish an explicit assistant baseline before dispatching Telegram-originated text, then forward the first post-dispatch assistant message.
+- Or track Telegram-initiated turns/sessions separately from cold-start history suppression so the baseline path cannot swallow new replies.
+- Add coverage for a session with no prior assistant baseline.
+
+## Telegram bot token and backend error details can leak through stderr
+
+**Severity:** High - Telegram request URLs include `/bot{token}` and error chains are printed with expanded `{err:#}` logging.
+
+`src/telegram.rs:230, 340-346, 444-453, 51, 67, 74, 733, 783`. `TelegramApiClient` stores the bot token inside `api_base_url`, and reqwest error chains can include the failing URL. The same relay also lifts Telegram descriptions and TermAl non-JSON error bodies into errors that are later formatted with `{err:#}`. On shared dev machines, stderr is often piped to logs, terminal recording, or CI output; a network/proxy/TLS failure can therefore expose the Telegram bot token, and backend error bodies can expose paths or prompt fragments.
+
+**Current behavior:**
+- Telegram API URLs embed the bot token.
+- Telegram and TermAl error responses are forwarded into stderr lines without truncation or sanitization.
+- Expanded error formatting can include URLs, paths, prompt fragments, or token-bearing diagnostics.
+
+**Proposal:**
+- Redact bot tokens and URLs before logging Telegram/reqwest errors.
+- Truncate non-JSON backend error payloads to a small fixed length and prefer structured `error.error` fields.
+- Replace `{err:#}` with category-only log lines unless a local debug flag is enabled.
+
+## Telegram-forwarded text has no length cap before reaching the local backend
+
+**Severity:** Medium - any linked chat (or any chat that captured the binding via the first-touch hazard above) can submit prompts up to the 10 MB Axum body limit straight into the agent.
+
+`src/telegram.rs:407-416, 605, 714`. `handle_telegram_message` only checks `is_empty()` before calling `forward_telegram_text_to_project`, which forwards verbatim through `termal.send_session_message`. The new MCP-style delegation surface enforces `MAX_DELEGATION_PROMPT_CHARS = 256 * 1024` and rejects oversize prompts; the Telegram path is the equivalent escalation channel and ships without the same guard.
+
+**Current behavior:**
+- Telegram payloads of any size below the Axum 10 MB body limit are forwarded unchanged.
+- Prompt-injection content lands directly in the agent's turn dispatch with full tool access.
+- No per-minute prompt-rate cap.
+
+**Proposal:**
+- Apply a per-message char limit (consistent with `MAX_DELEGATION_PROMPT_CHARS`) on the Telegram side and reply with a Telegram error message when exceeded.
+- Add a per-minute / per-chat prompt-rate cap so an attacker that captured the chat binding cannot fan out N HTTP calls per second.
+
+## Telegram relay forwards full assistant text to Telegram by default
+
+**Severity:** Medium - assistant replies can include code, local file paths, file contents, or secrets and are sent to a third-party service without an explicit opt-in.
+
+`src/telegram.rs:936-938`. The relay chunks and forwards the full settled assistant message body to Telegram once the session is no longer active. This goes beyond the compact project digest and sends arbitrary model output off-machine by default.
+
+**Current behavior:**
+- The Telegram digest path is compact, but settled assistant messages are forwarded in full.
+- Assistant text may contain local workspace details or user-provided secrets.
+- Users enabling the relay do not get a separate opt-in for full-content forwarding.
+
+**Proposal:**
+- Make full assistant text forwarding an explicit opt-in setting.
+- Keep digest-only forwarding as the default for Telegram integrations.
+- Document the third-party content exposure and add any practical redaction/truncation before full forwarding.
+
+## Telegram `getUpdates` batch processing is unbounded and re-runs on poll-iteration panic
+
+**Severity:** Medium - a Telegram update burst (real attack, retry storm, or accidental flood) becomes a multiplicative wave of HTTP calls into the local backend, and a panic mid-batch re-runs the same updates on the next poll.
+
+`src/telegram.rs:48, 65-69, 78`. The relay accepts the entire `Vec<TelegramUpdate>` Telegram returns and walks each update through `handle_telegram_update`, which can issue multiple outbound HTTP calls per update (digest fetch, send_message, action dispatch, session fetch). State is persisted once at the end of the iteration; a panic mid-batch leaves `next_update_id` un-advanced and Telegram resends the same batch on the next poll, amplifying the effect.
+
+**Current behavior:**
+- `getUpdates` does not pass an explicit `limit`, so Telegram returns up to its server-side default (100).
+- A 100-update batch can fan out to several hundred backend HTTP calls.
+- Mid-batch panic loses all per-update state (including advanced `next_update_id`), and Telegram replays.
+
+**Proposal:**
+- Cap `getUpdates` `limit` (e.g., 25) on the request side.
+- Persist `next_update_id` per update inside the batch loop rather than once at the end.
+- Add a per-iteration backoff after errors so a sustained failure does not tight-loop.
+
+## Telegram forwarder is gated inside the digest-hash-changed branch
+
+**Severity:** Medium - new assistant text whose digest preview hashes identically to the previous one is silently never forwarded to Telegram.
+
+`src/telegram.rs:752-786`. `sync_telegram_digest` wraps both the digest re-render AND the assistant-text forward inside one `if state.last_digest_hash != ...` guard. The digest's `done_summary` is built from a truncated preview (~80 chars); a long assistant message whose first ~80 chars match the previous preview hashes the same as the previous digest, so the guard short-circuits and `forward_new_assistant_message_if_any` is never called. The forwarder already self-dedupes via `last_forwarded_assistant_message_id` + `last_forwarded_assistant_message_text_chars`, so coupling it to the digest-hash check buys nothing and creates a real silent-drop hazard.
+
+**Current behavior:**
+- The assistant-text forward only runs when the digest hash changed.
+- A new assistant message that does not move the truncated preview hash never reaches Telegram.
+
+**Proposal:**
+- Decouple the forward from the digest-hash check — invoke `forward_new_assistant_message_if_any` unconditionally each poll iteration; rely on its existing per-id + per-char-count dedupe.
+- Or: hash the latest assistant message id+chars separately from the digest text+actions and gate on either changing.
+
+## `last_forwarded_assistant_message_text_chars` doc comment promises self-healing the code does not deliver
+
+**Severity:** Medium - the legacy-state contract documented on the field claims a one-time re-forward when a state file lacks the new field, but the actual code maps `None => None` and never triggers re-forwarding.
+
+`src/telegram.rs:165-170, 869-871`. The field's doc comment promises "older state files (which lack `last_forwarded_assistant_message_text_chars`, deserialized as `None`) trigger a one-time re-forward when the latest message is next observed (acceptable cost for self-healing)". The `needs_resend_truncated` computation maps `last_chars: None` to `Some(pos) if current > prev | _ => None`, which always falls through to `None`. Pre-upgrade users whose previous build truncated a forward mid-stream will not see the unforwarded tail.
+
+**Current behavior:**
+- Old state file (`last_forwarded_assistant_message_id` set, `last_forwarded_assistant_message_text_chars` absent → `None`).
+- `needs_resend_truncated = None`, `needs_baseline = false`, `start_index = pos + 1`.
+- The truncated message is skipped and only strictly newer messages are forwarded.
+
+**Proposal:**
+- Either change the inner match arm to `None => Some(pos)` so unknown char count triggers a one-time re-forward (matches the comment).
+- Or update the doc comment to describe the actual "trust the old id; only forward strictly newer messages" behavior so future readers do not assume self-healing.
+
+## `TelegramSessionFetchSession.status` is stringly-typed against a closed backend enum
+
+**Severity:** Medium - the active-stream gate that prevents mid-stream forwards is the only safeguard against shipping truncated assistant text; it is currently a `==` against a `String`.
+
+`src/telegram.rs:540-544, 840`. `TelegramSessionFetchSession::status: String` defaults to `""` and is compared via `response.session.status == "active"`. The backend `SessionStatus` enum (`src/wire.rs:712`) is a closed set of `Active | Idle | Approval | Error`. A future variant addition (e.g., `Pending`, `Stopping`) would silently bypass the gate (treated as not-active → forward proceeds despite a still-streaming agent). The dedupe-by-id-and-char-count fallback might paper over the mistake but only after a truncated forward has already shipped to the user's chat.
+
+**Current behavior:**
+- Status is parsed as a free-form `String`.
+- `== "active"` is the only gate against forwarding mid-stream content.
+- A new active-equivalent backend variant would be silently misclassified as settled.
+
+**Proposal:**
+- Model the field as a typed enum with `#[serde(rename_all = "lowercase")]` and `#[serde(other)] Unknown`.
+- Decide the policy explicitly for the `Unknown` arm — treat it as "active" (safe but pessimistic) or trigger a refresh of the wire-projection assumptions.
+
+## UI delegation prompt cap (256k chars) does not match backend cap (64k bytes)
+
+**Severity:** Medium - prompts between 64K and 256K characters pass UI validation, then get rejected by the backend with a generic error.
+
+`ui/src/delegation-commands.ts:34` (`MAX_DELEGATION_PROMPT_CHARS = 256 * 1024`) vs `src/delegations.rs:9` (`MAX_DELEGATION_PROMPT_BYTES = 64 * 1024`). UI counts JS code units; backend counts bytes. For ASCII the UI cap is 4× the backend cap; for multi-byte content the divergence is larger. The user sees "delegation prompt must be at most 65536 bytes" instead of the friendly UI error from `normalizeDelegationPrompt`.
+
+**Current behavior:**
+- UI validation accepts up to 256K-char prompts.
+- Backend rejects anything over 64K bytes.
+- Prompts in the 64K–256K range produce a backend rejection bubble in the UI rather than the curated UI error.
+
+**Proposal:**
+- Lower the UI cap to align with the backend (`64 * 1024` chars is a guaranteed-safe ASCII upper bound; tighter for non-ASCII), or
+- Expose `MAX_DELEGATION_PROMPT_BYTES` via a discovery endpoint and have the UI mirror it.
+
+## `spawn_delegation` returns full `DelegationRecord` while status/cancel/wait return redacted `DelegationSummary`
+
+**Severity:** Medium - asymmetric command-surface contract makes a future MCP wrapper easy to misuse.
+
+`ui/src/delegation-commands.ts:79, 89` — `SpawnDelegationCommandResult.delegation: DelegationRecord` (full record with `prompt`, `cwd`, `findings`, `changedFiles`, `commandsRun`, `notes`) while `DelegationStatusCommandResult.delegation: DelegationSummary` (redacted). Tests pin the redaction for status / cancel / wait responses (`expectRedactedDelegationSummary` helper) but spawn intentionally returns the full record. For an MCP wrapper that exposes these commands to untrusted callers, the asymmetry means the wrapper must remember to redact spawn responses but trust the others — easy to get wrong.
+
+**Current behavior:**
+- `spawn_delegation` returns the full `DelegationRecord` including prompt/cwd/result.
+- `status_delegation`, `cancel_delegation`, `wait_delegations` return `DelegationSummary` (redacted).
+
+**Proposal:**
+- Return `DelegationSummary` from spawn as well (the caller already has the prompt they sent in).
+- Or: document the asymmetry on `SpawnDelegationCommandResult` so wrapper authors see it before running.
+
+## `applyStatusBatchResponses` mixed-instance error suppresses real fetch failures and drops same-instance records
+
+**Severity:** Medium - error-kind discrimination is the public surface of the wait outcome, and a fetch-failure batch with sibling instance-mismatch reports the wrong cause AND loses partial state.
+
+`ui/src/delegation-commands.ts:364-378, 660-668`. When `batch.kind === "error"` AND the partial responses also contain a `serverInstanceId !== lastServerInstanceId`, two regressions compound: (1) `applyStatusBatchResponses` returns `mixed-server-instance` instead of the real `status-fetch-failed`, masking the network-layer cause; (2) `recordsById` is not updated with same-instance responses from the failing batch — partial state from delegations that completed on the still-current instance is silently discarded. Two consumers diagnosing "why did this wait fail?" will get different stories depending on which sibling validation fired first.
+
+**Current behavior:**
+- `applyStatusBatchResponses` is called against partial-success responses BEFORE the batch-level `kind === "error"` check.
+- A mid-batch fetch failure with a sibling instance mismatch surfaces as `mixed-server-instance`.
+- Same-instance responses from the failed batch are not applied.
+
+**Proposal:**
+- When `batch.kind === "error"`, return the `status-fetch-failed` packet first.
+- Apply same-instance responses to `recordsById` BEFORE returning any sibling-validation error so partial state is preserved across the failure.
+
+## `StatusBatchResult` `as` cast bypasses discriminated-union safety
+
+**Severity:** Medium - a type assertion silences exhaustiveness checking on the wait result; future variant additions will silently compile.
+
+`ui/src/delegation-commands.ts:611`. `resolve({ ...result, responses: [...responses] } as StatusBatchResult)` defeats the variant check the discriminated-union type was designed to provide. A new `StatusBatchFinish` variant added later would also need a corresponding `StatusBatchResult` arm; the cast hides the missing wiring.
+
+**Current behavior:**
+- The spread + cast satisfies `tsc` even when the result shape diverges from any declared `StatusBatchResult` variant.
+- A future producer-side change can yield a malformed runtime result.
+
+**Proposal:**
+- Build each variant explicitly: `if (result.kind === "error") resolve({ kind: "error", error: result.error, responses: [...responses] }); else resolve({ kind: result.kind, responses: [...responses] });`
+- Or: restructure as `StatusBatchResult = StatusBatchFinish & { responses: StatusBatchResponse[] }` so the union arms compose by intersection.
+
+## `fetchStatusBatchWithDeadline` per-batch deadline starves later iterations under slow fetches
+
+**Severity:** Medium - a single slow fetch eats most of `remainingMs`, forcing the next iteration to abort almost immediately even when the wall-clock budget would have allowed real work.
+
+`ui/src/delegation-commands.ts:421` and surrounding loop. `waitMs` is computed as `min(pollIntervalMs, deadlineAt - Date.now())` and shared as both the per-batch timeout AND the overall remaining budget. A wait command that waits the maximum allowed window can return `timeout` after a single slow fetch when the caller-supplied `timeoutMs` had plenty of budget remaining.
+
+**Current behavior:**
+- All status fetches in a batch share one `controller`; one slow fetch eats `remainingMs` so the next iteration's `fetchStatusBatchWithDeadline` aborts almost immediately.
+- The wait surfaces `timeout` despite there being headroom.
+
+**Proposal:**
+- Pass a separate per-batch deadline (e.g., `min(pollIntervalMs * 2, remainingMs)`) so a slow fetch does not starve subsequent iterations.
+- Surface `timeout` only at the actual wall-clock deadline.
+
+## `statusFetchErrorPacket` forwards `ApiRequestError.message` verbatim from any source
+
+**Severity:** Medium - the redaction policy depends on every `ApiRequestError` constructor call site to sanitize ahead of time, an invariant the type does not enforce.
+
+`ui/src/delegation-commands.ts:686-702`. For an `ApiRequestError`, `.message` is forwarded to the wait error packet without sanitization. For non-`ApiRequestError` errors, the message is replaced with a redacted generic. The `request()` helper's error classification produces sanitized messages today, but custom transports (an MCP wrapper, a plugin) that construct `ApiRequestError` directly with sensitive content will leak that content through the wait packet.
+
+**Current behavior:**
+- `ApiRequestError.message` is trusted to be safe by any consumer of `WaitDelegationErrorPacket`.
+- `Error.message` from non-`ApiRequestError` is replaced with a generic redacted string.
+
+**Proposal:**
+- Sanitize unconditionally in `statusFetchErrorPacket` regardless of error class.
+- Or: document the contract that `ApiRequestError.message` MUST be pre-sanitized at construction; add a constructor invariant or a Zod-style validator.
+
+## `preferStreamingPlainTextRender` prop name and "Three render paths" comment are stale after the unified-render refactor
+
+**Severity:** Medium - public-shaped prop semantics drift silently from a removed implementation; future readers see a name describing code that no longer exists.
+
+`ui/src/message-cards.tsx:311, 327, 359-388`. The `StreamingAssistantTextShell` render path was removed; the prop now functionally means "this is the live-streaming assistant message". The leading comment block ("Three possible render paths...") describes the old three-path implementation, contradicted by the next paragraph saying "always renders through `<DeferredMarkdownContent>`". Test names and the prop signature carry the old name.
+
+**Current behavior:**
+- `preferStreamingPlainTextRender` is the only render-path discriminator but its name suggests a removed plain-text shell.
+- The leading comment describes three paths; only one survives.
+
+**Proposal:**
+- Rename to `isStreamingAssistantTextMessage` (matching the local `isStreamingAssistantMessage` variable already used inside `MessageCardImpl`).
+- Replace the "Three possible render paths" sentence with the current single-path explanation.
+- Pure refactor, no behavior change.
+
+## `AgentSessionPanel.jumpToMarker` bypasses the cache-reset guard
+
+**Severity:** Medium - the diff moved the marker-cache reset out of render-phase ref mutation into `useLayoutEffect`, but `jumpToMarker` still reads `messageSlotNodesRef.current` directly without going through `ensureMessageSlotCacheForCurrentSession`.
+
+`ui/src/panels/AgentSessionPanel.tsx:683-685, 717-738`. Between a session-id change and the layout effect firing (e.g., a marker click handler triggered by a synchronous focus/keyboard event during the same tick that switched sessions), `jumpToMarker` can read the previous session's cached map. With React 18 concurrent rendering the layout effect can run after a paint that already included a different `session.id`. The diff's stated intent is to make the cache reset commit-phase safe; leaving one read site that bypasses the guard re-introduces the same per-session-leak shape on a narrower path.
+
+**Current behavior:**
+- Writes go through `ensureMessageSlotCacheForCurrentSession` (correct).
+- `jumpToMarker` reads `messageSlotNodesRef.current` directly.
+
+**Proposal:**
+- Have `jumpToMarker` call `ensureMessageSlotCacheForCurrentSession()` for its slot-cache lookup so the cache-reset invariant holds at every read site, not just the write site.
+
+## CSS bubble `width: fit-content` transition causes horizontal layout reflow at turn end
+
+**Severity:** Medium - the "stable component subtree across stream → settle" goal is partially undermined by a CSS-driven layout jump.
+
+`ui/src/styles.css:4448-4452`. `:has(.markdown-table-scroll)` applies `width: fit-content; max-width: min(96rem, 96%)` to the bubble. With the new `deferAllBlocks: true` policy a streaming bubble has NO `.markdown-table-scroll` until the turn settles (the table sits in `.markdown-streaming-fragment` instead). When streaming ends, the bubble's effective `max-width` jumps from default `42rem` to `96rem` AND its `width` switches to `fit-content` — the bubble grows wider, producing a visible horizontal reflow at the same moment the React subtree was supposed to be stable.
+
+**Current behavior:**
+- During streaming the bubble follows the prose-default sizing (`42rem` cap).
+- On settle the `:has(.markdown-table-scroll)` selector engages and the bubble jumps to `fit-content` / 96rem cap.
+
+**Proposal:**
+- Anticipate `width: fit-content` while streaming if a `|`-line has been seen (e.g., a class on the streaming-fragment placeholder that triggers the same selector).
+- Or: document the layout shift as accepted and add a regression that asserts bubble width remains stable across the stream→settle transition so any future drift is visible in tests.
+
+## Mermaid aspect-ratio sizing can clip constrained diagrams
+
+**Severity:** Medium - constrained Mermaid iframes can hide diagram content instead of only removing blank frame space.
+
+`ui/src/mermaid-render.ts:134-152` sizes Mermaid iframes with `aspectRatio: ${frameWidth} / ${frameHeight}` + `height: auto`. The change fixes the wide-blank-frame regression, but the iframe document still keeps the SVG at intrinsic width while hiding vertical overflow. When `max-width: 100%` constrains the iframe, the frame height can shrink without the inner SVG scaling with it, so wide or tall diagrams can lose bottom content instead of simply removing unused whitespace.
+
+**Current behavior:**
+- The outer iframe height is driven by CSS `aspect-ratio` and constrained width.
+- The inner Mermaid SVG can remain at intrinsic dimensions.
+- The iframe hides vertical overflow, so constrained diagrams can be clipped at the bottom.
+
+**Proposal:**
+- Keep explicit intrinsic height for horizontally-scrollable diagrams, or make the inner SVG scale with the iframe width before using aspect-ratio sizing.
+- Add visual/regression coverage for constrained wide and tall diagrams.
+
+## Mermaid error-SVG detection can treat valid diagram text as a render failure
+
+**Severity:** Low - a valid diagram containing the phrase "Syntax error in text" can be routed to the fallback instead of rendered.
+
+`ui/src/mermaid-render.ts:424-430` returns true if the SVG contains the literal phrase "Syntax error in text". Mermaid's canonical error SVG contains that phrase, but valid diagrams can also include it as a label, note, or text node. That makes the detection too broad when the stronger root-level error markers are absent.
+
+**Current behavior:**
+- `aria-roledescription="error"`, `class="error-icon"`, or the plain phrase all independently classify the SVG as an error visualization.
+- The plain phrase alone can appear in legitimate diagram content.
+- A false positive causes `renderTermalMermaidDiagram` to throw and display the clean fallback instead of the diagram.
+
+**Proposal:**
+- Require the stronger root error signal, or require multiple Mermaid-error markers before throwing.
+- Add negative coverage with a valid SVG/diagram label containing "Syntax error in text".
+
+## Telegram REST integration brief uses snake_case payload keys
+
+**Severity:** Low - proposed API shapes in the Telegram UI brief do not follow TermAl's camelCase JSON convention.
+
+`docs/features/telegram-ui-integration.md:278` proposes `{ link_code, expires_at }` for `POST /api/telegram/start-link`. The API protocol convention is camelCase for JSON keys, and adopting the brief as written would create a new endpoint family that drifts from existing frontend/backend API shape expectations.
+
+**Current behavior:**
+- The brief proposes snake_case response keys for a REST endpoint.
+- Nearby proposed names also use shapes like `project_id`.
+- Future implementation could copy the brief into code and ship inconsistent API payloads.
+
+**Proposal:**
+- Use `linkCode`, `expiresAt`, `projectId`, and other camelCase keys for REST request/response payloads.
+- Keep snake_case only for internal persisted files if needed.
+
+## Delegation feature docs still mention removed `failedChecks` output
+
+**Severity:** Low - the delegation feature brief can teach MCP/tool schema authors to expect a field the command contract no longer returns.
+
+`docs/features/agent-delegation-sessions.md:251` still lists "failed checks" as part of the delegation command output. The current `DelegationResultPacket` contract no longer returns `failedChecks`, so external wrapper documentation built from the brief would be stale.
+
+**Current behavior:**
+- The feature doc lists `failed checks` as a delegation output.
+- The command result contract omits `failedChecks`.
+- MCP/tool consumers can implement against a non-existent field.
+
+**Proposal:**
+- Remove `failed checks` from the brief, or reintroduce a server-owned field with a documented stable policy.
 
 ## Asymmetric `orchestrator_auto_dispatch_blocked` between two persist-failure rollback sites
 
@@ -135,128 +479,6 @@ the Implementation Tasks section.
 - Either mirror the `session_lifecycle.rs` defensive set (`true`) in `turn_lifecycle.rs`, or document why the asymmetry is intentional.
 - Tighten the persist-failure tests to also pin `orchestrator_auto_dispatch_blocked`, `runtime`, `runtime_stop_in_progress`, and the "stopped/failed" message presence.
 
-## Delegation `failedChecks` derivation is client-side only and will drift between wrapper releases
-
-**Severity:** Medium - the `failedChecks` field is part of the public `DelegationResultPacket` but the backend never produced or owned it.
-
-`ui/src/delegation-commands.ts:46-58, 301-319` derives `failedChecks` from `commandsRun` via `isFailedDelegationCheck`. When this surface ships as MCP, the tool schema will document `failedChecks` as a returned field equal in stature to `commandsRun`, but two consumers using different wrapper releases will compute differently. If the backend later adds new status labels (e.g., `"warning"`, `"skipped"`), the policy silently drifts between releases without backend support.
-
-**Current behavior:**
-- `failedChecks` is computed in the frontend wrapper.
-- The wire shape (`DelegationResult.commands_run`) does not carry it.
-- Two wrapper versions can compute different `failedChecks` for the same backend response.
-
-**Proposal:**
-- Move the `failedChecks` derivation to the backend (`DelegationResult` in `src/wire.rs`) so the wire shape carries it directly.
-- Or remove `failedChecks` from `DelegationResultPacket` and let MCP callers do their own filtering against a documented status vocabulary.
-- Do not ship a derived field that the producer does not own.
-
-## `waitDelegationsCommand` JSDoc enumerates only one of four reject paths
-
-**Severity:** Medium - MCP wrappers writing JSON-RPC error translation will miss two named throw paths.
-
-`ui/src/delegation-commands.ts:1297-1303` documents only "Status fetch errors reject the promise" but `waitDelegationsCommand` actually rejects through four distinct paths: `RangeError` (validation block), `MismatchedDelegationIdError` (id-mismatch defensive guard), `MixedDelegationServerInstanceError` (server-instance change mid-wait), and the underlying `ApiRequestError` from `fetchDelegationStatus`. The named errors are exported and presumably stable, but the JSDoc does not mention them by name.
-
-**Current behavior:**
-- The JSDoc covers one of four reject paths.
-- Two exported error classes with stable shape are part of the public surface but unmentioned in the JSDoc.
-- MCP wrapper authors writing the JSON-RPC error translation table will need to read the source.
-
-**Proposal:**
-- Expand the JSDoc above `waitDelegationsCommand` to enumerate every reject path with a one-sentence description and the error class name.
-- Cross-reference the named errors so MCP wrappers know which fields are stable.
-
-## `WaitDelegationsOutcome` discards partial state when reject paths fire mid-poll
-
-**Severity:** Medium - `recordsById` already accumulates partial state at throw time; an `"error"` outcome would let callers surface useful state instead of re-wrapping.
-
-`ui/src/delegation-commands.ts:60-69, 1304-1418` declares `WaitDelegationsOutcome = "completed" | "timeout"` but the function has four other reject paths. When a fetch fails mid-loop, the partial `delegations` / `completed` / `pending` lists already accumulated in `recordsById` are discarded with the throw. Callers wanting partial-state recovery must wrap the call themselves; documentation says exactly that, but it forces every MCP integrator into the same wrapping shape.
-
-**Current behavior:**
-- Mid-poll fetch failure rejects the promise with the partial state lost.
-- Outcome union does not model the partial-error case.
-- Every consumer must wrap the call to preserve partial state.
-
-**Proposal:**
-- Add a third outcome variant (e.g., `"error"` with an `error: { name, message }` field plus the partial `delegations`/`completed`/`pending` lists already accumulated) and convert the polling-loop throws into outcome returns.
-- Keep `RangeError` validation throws as throws — they fire before any partial state exists.
-
-## `MixedDelegationServerInstanceError` direction labels can lie about which is current
-
-**Severity:** Medium - the "expected" / "received" labels reflect `Promise.all` arrival order, not revision causality, so a stale-then-current batch reverses the labels.
-
-`ui/src/delegation-commands.ts:226-238` updates `lastServerInstanceId` only when `response.revision > lastRevision`, but the mismatch check runs against every response. If the first response in a batch is stale (`server-b` at revision 3) and the second is current (`server-a` at revision 5), the loop sets `lastServerInstanceId = "server-b"` first and then throws `MixedDelegationServerInstanceError("server-b", "server-a")`. The error message reads "server instance changed during wait: server-b -> server-a" — the opposite direction from reality. An MCP wrapper translating this into a JSON-RPC response would tell the agent the server changed FROM the current instance TO the stale one.
-
-**Current behavior:**
-- `lastServerInstanceId` is the first response's instance id when revisions arrive out-of-order.
-- Mismatch error message claims a directional transition that may be the reverse of the truth.
-- Within a single concurrent `Promise.all` batch there is no causal ordering anyway.
-
-**Proposal:**
-- Pre-pass the responses to find the highest-revision `serverInstanceId` and use that as the canonical baseline before checking for mixed batches.
-- Or reword the error as "batch contained both X and Y" without claiming a direction.
-
-## Marker compare helpers re-allocate per render inside `useAppSessionActions`
-
-**Severity:** Low - `conversationMarkerExactlyMatches` and `conversationMarkerSatisfiesResponse` close over no hook state but live inside the hook body.
-
-`ui/src/app-session-actions.ts:680-713` defines two new pure helpers nested inside `useAppSessionActions`. They have no dependency on hook scope (closure-free), so the only effect of their inner placement is per-render reallocation and a small cohesion-with-hook signal that misleads readers into assuming they need the closure. The file is already 2392 lines and module-scope pure helpers are the standard "this carries no closure state" idiom.
-
-**Current behavior:**
-- Both helpers re-allocate on every render of every consumer of `useAppSessionActions`.
-- No identity stability is required by call sites today; no rendering bug.
-
-**Proposal:**
-- Move both helpers to module scope above `useAppSessionActions`.
-- Pure code move, no signature change, identical call sites.
-
-## Delegation wait error classes lack discriminated union for callers
-
-**Severity:** Low - `MismatchedDelegationIdError` and `MixedDelegationServerInstanceError` force callers into `instanceof` chains or `name` string-matching.
-
-`ui/src/delegation-commands.ts:76-97` exports two error classes that capture distinct, recoverable conditions (delegation id swap vs server restart mid-wait). Callers wanting to distinguish them must either `instanceof`-check on each class (cross-module coupling) or match `error.name` strings. A tagged union or shared base class with a `kind: "mismatched-id" | "mixed-instance"` discriminator would compose better with `WaitDelegationsResult.outcome`.
-
-**Current behavior:**
-- Two exported classes; no shared discriminator.
-- Callers learn two error-handling shapes for the same operation.
-- The throw-vs-result split forces consumers to maintain two separate error-handling paths for one logical surface.
-
-**Proposal:**
-- Introduce a `DelegationWaitError` base class with a `kind` discriminator field, or expose a tagged union type (`WaitDelegationError = { kind: "mismatched-id"; ... } | { kind: "mixed-instance"; ... }`).
-- Or fold these conditions into `WaitDelegationsOutcome` variants and stop throwing at the boundary.
-- Defer until the first real consumer exists.
-
-## Delegation error classes lack `Object.setPrototypeOf` for cross-realm `instanceof`
-
-**Severity:** Low - the new error classes do not call `Object.setPrototypeOf(this, new.target.prototype)` like sibling `ApiRequestError` does.
-
-`ui/src/delegation-commands.ts:76-98` defines `MismatchedDelegationIdError` and `MixedDelegationServerInstanceError` without the prototype-restore pattern that `ApiRequestError` in `api.ts:471` uses. For an MCP wrapper boundary that re-instantiates objects across transports/realms (e.g., a JSON-RPC payload that reconstructs Error subclasses on the other side), `instanceof` checks may be unreliable. The structured fields (`requestedId`, `receivedId`, `expectedServerInstanceId`, `receivedServerInstanceId`) ARE own enumerable properties and JSON-serialize correctly, but `instanceof` at the catch site can fail.
-
-**Current behavior:**
-- Constructors do not restore `new.target.prototype`.
-- `ApiRequestError` (`api.ts:471`) uses the standard pattern.
-- Cross-realm `instanceof MismatchedDelegationIdError` may be unreliable when the wrapper bridges runtimes.
-
-**Proposal:**
-- Add `Object.setPrototypeOf(this, new.target.prototype)` to both constructors.
-- Document the JSON-serialized field shape so MCP integrators know what survives the transport.
-
-## Composed wait-command rate limits allow ~200 RPS for 30 minutes per call
-
-**Severity:** Low - `MAX_IDS=20 × (1000ms / MIN_INTERVAL_100ms) = 200 fetches/sec` for `MAX_TIMEOUT=30 min = 360,000 fetches per wait call`.
-
-`ui/src/delegation-commands.ts:24-26` defines `MIN_DELEGATION_WAIT_INTERVAL_MS = 100`, `MAX_DELEGATION_WAIT_TIMEOUT_MS = 30 * 60 * 1000`, `MAX_DELEGATION_WAIT_IDS = 20`. The values are reasonable individually but their composition is not — a single caller can sustain ~200 RPS for 30 minutes. There is no per-process concurrency cap on outstanding wait calls. Phase-1 single-user is fine, but the file's header explicitly stages this surface for an external MCP wrapper, where these limits become attacker-relevant.
-
-**Current behavior:**
-- No documentation of the composed budget.
-- No per-process concurrency limit on outstanding wait calls.
-- MCP wrapper exposing this would let external callers sustain ~200 RPS / call.
-
-**Proposal:**
-- Document the budget composition near the constants.
-- When the MCP wrapper lands, gate this surface behind a per-process concurrency limit and/or a higher minimum interval for non-UI callers.
-- Consider a server-side rate limit on the status endpoint.
-
 ## `marker.color` is written to a CSS custom property without client-side validation
 
 **Severity:** Low - React's `setProperty` for CSS variables bypasses normal style sanitization; persisted color drift could become a vector for resource interpolation.
@@ -271,52 +493,6 @@ the Implementation Tasks section.
 **Proposal:**
 - Validate `marker.color` against a CSS hex/rgb/named-color allow-list at the persistence boundary (server) and ideally also at SSE-adoption (client).
 - Apply the same allow-list when comparing markers so a tampered color normalizes rather than driving a `false` equality result.
-
-## `wait_delegation` vs `wait_delegations` MCP-surface naming asymmetry
-
-**Severity:** Low - `delegationCommands` exposes both as snake_case keys; calling agents will see two near-identical-named tools and have to disambiguate.
-
-`ui/src/delegation-commands.ts:280-287` exposes `spawn_delegation`, `get_delegation_status`, `get_delegation_result`, `cancel_delegation` (all singular), plus `wait_delegation` (singular wrapper) AND `wait_delegations` (batch). MCP tool surfaces tend to favor consistent verb-noun naming. If both end up exposed as separate MCP tools, calling agents see two near-identical tools.
-
-**Current behavior:**
-- `wait_delegation` is a one-line passthrough to `wait_delegations` with a single id.
-- Both are exposed in the public `delegationCommands` table.
-- An MCP wrapper binding both would offer near-identical tools to calling agents.
-
-**Proposal:**
-- Decide whether the singular wrapper actually needs to be a separate MCP tool, or if it's a TS convenience that should not be in `delegationCommands`.
-- If both must be MCP tools, give them distinguishable names (e.g., `wait_for_delegation` / `wait_for_all_delegations`).
-- Defer until the MCP wrapper landing decides which surface to bind.
-
-## `CreateDelegationRequest` optional fields silently accept undefined
-
-**Severity:** Low - the type is now exported and used by the future MCP tool's argument shape; defaults need JSDoc.
-
-`ui/src/api.ts:419-434` exports `CreateDelegationRequest` with `prompt: string` plus several optional fields (`title`, `cwd`, `agent`, `model`, `mode`, `writePolicy`). Several have meaningful backend defaults (e.g., `agent` defaults to parent session's agent, `mode` defaults to `"reviewer"`). MCP tool descriptions need to advertise these defaults; today the type signature is silent.
-
-**Current behavior:**
-- Optional fields silently accept undefined.
-- The MCP tool's argument-shape advertisement will be missing default semantics.
-- A misbehaving caller passing `agent: null` (legal JSON, not undefined) may produce a backend request body containing `"agent": null`.
-
-**Proposal:**
-- Document each optional field's default behavior in JSDoc on `CreateDelegationRequest`.
-- Either tighten the type to forbid `null` (not just `undefined`) or add a runtime guard in `spawnDelegationCommand` that strips `undefined` keys before sending.
-
-## Mermaid fallback test does not assert the fallback bundle URL
-
-**Severity:** Low - a broken Mermaid fallback script source can pass the current test.
-
-`ui/src/MarkdownContent.mermaid-fallback.test.tsx:43` mocks `document.head.appendChild`, installs `window.mermaid`, and calls `onload` for any appended script. The test then asserts only that an `HTMLScriptElement` was appended, so an incorrect fallback bundle URL can still pass.
-
-**Current behavior:**
-- The fallback test auto-loads any appended script element.
-- It does not assert `script.src` before simulating load.
-- A wrong CDN or bundle path can pass the regression test.
-
-**Proposal:**
-- Capture the appended script element and assert its `src` is the expected Mermaid bundle URL.
-- Simulate `onload` only after the URL assertion passes.
 
 ## Conversation overview segment cap does not bound homogeneous runs
 
@@ -711,20 +887,6 @@ A future fourth recovery branch would need to update three sites; collapsing int
 **Proposal:**
 - Open the directory with `O_DIRECTORY | O_NOFOLLOW`, then `fchmod` on the resulting fd; or use `fchmodat(AT_FDCWD, path, mode, AT_SYMLINK_NOFOLLOW)`.
 
-## `AgentSessionPanel.test.tsx` new tests duplicate ~70 lines of harness setup
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:369-505`. The new "refreshes command/diff cards when only the renderer changes" tests replicate ~70 lines of harness setup each. Boilerplate increases drift risk.
-
-**Proposal:**
-- Extract a `renderAgentSessionPanelHarness` helper that takes only the props that vary (viewMode, message arrays, renderer overrides) and supplies the noop defaults internally.
-
-## `App.live-state.reconnect.test.tsx` does not pin the "latest assistant message stays hidden until another action" invariant
-
-**Severity:** Low - The closest coverage at lines 1505 and 1582 pins reconnect polling/disarm timing, but does not assert the visibility side. A regression that exposes the latest assistant message before SSE confirms could slip in.
-
-**Proposal:**
-- Add a test that dispatches a fallback `_sseFallback` snapshot containing only the user prompt (no assistant reply yet), confirms the assistant message is not shown, then either adopts a fresh SSE state event with the assistant text or simulates "another action" and asserts visibility.
-
 ## Non-optimistic user-prompt display causes 100-300ms felt lag on every Send
 
 **Severity:** Medium - `ui/src/app-session-actions.ts:851-895` and `ui/src/app-live-state.ts:1283-1385`. The composer is non-optimistic: clicking Send clears the textarea, fires `await sendMessage(...)`, and then runs `adoptState(state)` against the full `StateResponse` returned by the POST. The "you said X" card only appears after the round-trip plus the heavy `adoptState` walk completes.
@@ -755,18 +917,6 @@ The lag compounds with two existing tracked bugs ("Focused live sessions monopol
 **Proposal:**
 - Extract a `tryApplyMetadataOnlyFallbackForMissingTarget(session, sessionIndex, sessions, delta)` helper (or similar) that centralizes the missing-target/unhydrated decision so each delta type calls a single helper instead of inlining the same branch.
 - Defer to a dedicated pure-code-move commit per CLAUDE.md.
-
-## `live-updates.test.ts` "applies retained non-created deltas" bundles five delta types into one `it()` block
-
-**Severity:** Low - `ui/src/live-updates.test.ts:1655-1888`. The new "applies retained non-created deltas while the transcript is marked unhydrated" test covers `messageUpdated`, `textDelta`, `textReplace`, `commandUpdate`, and `parallelAgentsUpdate` serially within a single `it(...)`. If an early assertion fails, downstream cases never run and the failure trace doesn't pinpoint which delta type regressed.
-
-**Current behavior:**
-- Five distinct scenarios share one `it` block with sequential `expect` blocks.
-- The companion metadata-only-fallback test at lines 1890-1929 covers only `textDelta` for the missing-target path (already tracked as a P2 backlog item).
-
-**Proposal:**
-- Split into five `it(...)` blocks (one per delta type) or use `it.each(...)` with a table that mirrors the existing P2 missing-target task.
-- Pure mechanical change.
 
 ## Production SQLite persistence is bypassed in the test build
 
@@ -1214,18 +1364,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Add delegation command transport-adapter coverage:
-  exercise the command layer through an injected absolute-url or mock transport path so future MCP/internal wrappers are not coupled to browser-relative `/api` fetches.
-- [ ] P2: Add deadline and cancellation coverage for delegation waits:
-  simulate a stalled status fetch and assert the wait returns `timeout` at the advertised deadline; also cover cancellation or dedupe behavior for overlapping waits.
-- [ ] P2: Add marker stale-response timestamp coverage:
-  use production-shaped `HH:MM:SS` marker timestamps around midnight and assert stale mutation responses cannot suppress a needed marker repair.
-- [ ] P2: Add marker cache commit-phase regression coverage:
-  cover session switching or interrupted-render-like cache replacement so marker slot registrations cannot mutate the committed session's cache during render.
-- [ ] P2: Add blank delegation id validation coverage:
-  assert single-id blank waits and all-empty wait batches reject invalid input instead of returning a completed empty result.
-- [ ] P2: Add delegation status redaction coverage:
-  assert status, cancel, and wait command results return summary-safe delegation fields and reserve full prompt/cwd/result details for `get_delegation_result`.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
 - [ ] P2: Add equal-revision gap repair snapshot adoption coverage:
@@ -1272,23 +1410,41 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   dispatch cancellation/update deltas before the same-revision snapshot and assert appended stop/failure terminal messages remain rendered without relying on a later unrelated refresh.
 - [ ] P2: Add homogeneous conversation-overview segment cap coverage:
   build a long same-kind message run with `maxItemsPerSegment` set and assert the segment policy is either capped or explicitly documented as a mixed-run-only cap.
-- [ ] P2: Assert the Mermaid fallback bundle URL in the fallback test:
-  capture the appended script before simulating load and require its `src` to match the expected Mermaid bundle URL.
-- [ ] P2: Replace exact-error-string assertions in `delegation-commands.test.ts` with type/property assertions:
-  `delegation-commands.test.ts:991-1009, 1018-1031, 1046, 1077` use full-string substring matches against the typed errors' message templates. Use `.rejects.toBeInstanceOf(MismatchedDelegationIdError)` plus `.requestedId`/`.receivedId` assertions; for `RangeError`s, prefer prefix-matching regex so wording polish does not break the suite.
 - [ ] P2: Replace `function scrollIntoView() { ... = this; }` capture pattern in `AgentSessionPanel.test.tsx`:
   `AgentSessionPanel.test.tsx:1515, 1568, 1680` rely on `this`-binding inside a method-form function. Future swc/esbuild config that arrow-rewrites methods or any "use strict" tightening would silently break the capture. Use `vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) { scrolledNode = this; })` and rely on `mockRestore()` to clean up.
 - [ ] P2: Tighten `expectRequestErrorDeferredUpdatesOnly` to assert deferred-update payloads:
   `app-session-actions.test.ts:158-172` checks shape (every call is a function, never null) but never invokes the deferred functions. A regression where the deferred function returns a stale or `null` next state would still pass. Invoke each captured updater with a fixed `prev` and assert the resulting next state.
-- [ ] P2: Scope marker-chip clicks via `within(navigator | messageCard)` instead of `getAllByRole(...)[0]`:
-  `AgentSessionPanel.test.tsx:412-416, 531-535` couple the click target to chip-render order across rail and per-message duplicates. Use `within(...)` to pin which chip dispatches the jump.
-- [ ] P2: Reset the composer-store explicitly in the session-switch marker test:
-  the new `keeps marker jumps working after switching sessions with the same message ids` test calls `syncComposerSessionsStore` with `[secondSession]` and never resets it. Add a `finally`-block reset (or assert the file's existing `afterEach` already does so) so a later test in the same file cannot observe `[secondSession]` from this test.
-- [ ] P2: Replace `timeoutMs: 1` in the `times out without canceling` delegation test:
-  `delegation-commands.test.ts:953-984` uses a 1ms timeout coupled tightly to internal `delay()` arithmetic. A future `Math.max(remainingMs, somePositiveFloor)` would silently turn timeout into completion. Use a more representative timeout (e.g., `MIN_DELEGATION_WAIT_INTERVAL_MS * 3`) and have the responses keep returning `running` while advancing timers in steps until the deadline elapses.
 - [ ] P2: Add doc-comment to `clear_active_turn_file_change_tracking` enumerating callers and intent:
   the helper is now shared across normal-completion sites (`src/session_interaction.rs`, `src/state_accessors.rs`, etc.) and the two new persist-failure rollback sites (`src/session_lifecycle.rs:450`, `src/turn_lifecycle.rs:455`). A future "preserve grace deadline" tweak motivated by one purpose would silently change the other. Document the unconditional-wipe contract so readers see both intents.
-- [ ] P2: Add direct unit coverage for unscoped-root behavior of `findMountedConversationMessageSlot`:
-  `conversation-markers.test.ts:54-77` proves root-scoped lookup but does not assert the default-root (`document`) call. Add a third assertion exercising `findMountedConversationMessageSlot("message-1")` with no root argument to pin the document-scoped contract.
 - [ ] P2: Add Rust persist-failure rollback negative-coverage tests:
   `src/tests/session_stop.rs:560`, `src/tests/session_stop_runtime.rs:897` only cover the failure path. Add a sibling test that runs the same setup with succeeding persistence and asserts the post-stop record retains its expected (non-cleared) fields, proving the cleanup is gated on the failure branch and that the helper is not unconditionally clearing on every commit.
+- [ ] P1: Add Telegram-relay unit tests for the pure helpers introduced in `src/telegram.rs`:
+  cover `chunk_telegram_message_text` (empty, exact-3500-char, under-limit, no-newline-in-window hard-split, newline-in-window soft-split, multi-byte / emoji char-vs-UTF16-unit, trailing-newline preservation), `telegram_turn_settled_footer` for `idle` / `approval` / `error` / unknown-status arms, `telegram_error_is_message_not_modified` against the Telegram error wording, and a serde-decode round-trip for `TelegramUpdate` / `TelegramChatMessage` against a real-shape `getUpdates` JSON snapshot to pin the snake_case contract.
+- [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:
+  refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
+- [ ] P1: Add direct splitter tests for `splitStreamingMarkdownForRendering(text, { deferAllBlocks: true })`:
+  `ui/src/markdown-streaming-split.test.ts` currently has zero direct coverage for `deferAllBlocks`. Cover closed pipe-table followed by prose, closed fence followed by prose, closed math followed by prose, multiple closed blocks (cut at the earliest), nested constructs, and identity behavior on inputs containing no block constructs.
+- [ ] P2: Add Mermaid error-SVG detector coverage:
+  cover `isMermaidErrorVisualizationSvg` positive cases for `aria-roledescription="error"` and `class="error-icon"`, the "Syntax error in text" behavior, a valid-SVG negative case, and `renderTermalMermaidDiagram` throwing while resetting Mermaid config.
+- [ ] P1: Pin the "no remount across streaming → settled transition" claim with DOM-identity assertions:
+  `ui/src/MarkdownContent.test.tsx:1456` and `ui/src/MessageCard.test.tsx:245-285` assert the rendered shape but do not assert that React preserved the same DOM nodes across the rerender. Capture a stable child DOM node (e.g., a paragraph from the settled prefix) before flipping `isStreaming` to false, then assert `container.contains(savedNode)` and reference equality after the rerender.
+- [ ] P2: Restore discrimination in `expectRenderedMarkdownTableContains`:
+  `ui/src/App.live-state.deltas.test.tsx:296-315` was relaxed to accept either `.markdown-table-scroll table` or `.markdown-streaming-fragment` after `deferAllBlocks: true` shipped. The relaxation silently passes if a streaming table never settles. Split into two helpers (`expectStreamingTableFragmentContains` for active-streaming phase, `expectSettledTableContains` for after-turn-end) called at the right phases, or advance the test through whatever signal flips `isStreaming` to false before the assertion.
+- [ ] P2: Tighten the unsafe-transport-id rejection test:
+  `ui/src/delegation-commands.test.ts:692-708` only covers `parent/1` and `delegation#1`. The `UNSAFE_TRANSPORT_ID_PATTERN` also blocks `?`, control characters U+0000-U+001F, and DEL U+007F. A future regex change that drops control-character handling would silently pass. Add `it.each(...)` cases for the four character categories.
+- [ ] P2: Replace `(capturedSignal as unknown as AbortSignal).aborted` with optional-chain assertion:
+  `ui/src/delegation-commands.test.ts:760-797` discards the type guard via the cast. Use `expect(capturedSignal?.aborted).toBe(true)` so a regression that fails to capture the signal fails loudly with a clear message.
+- [ ] P2: Rewrite the delegation network-error test to throw from the injected transport:
+  `ui/src/delegation-commands.test.ts:951-1001` mocks the second `fetch` with `new Error("network down")` and relies on `request()`'s error classification to produce `apiErrorKind: "backend-unavailable"`. This couples the wait-loop's error packetization to `request()`'s classification logic. Use the injected `DelegationCommandTransport` to throw an `ApiRequestError` directly with the desired shape.
+- [ ] P2: Move the Mermaid bundle-URL assertion out of the `appendChild` spy:
+  `ui/src/MarkdownContent.mermaid-fallback.test.tsx:54` asserts inside the mock implementation; failure traces point at the spy rather than the test body. The post-render assertions at lines 77-78 (`expect(appendedScripts).toHaveLength(1); expect(appendedScripts[0]?.src).toBe(expectedBundleSrc);`) already pin the contract; delete the inline `expect()`.
+- [ ] P2: Add presence-of-fields assertions to `expectRedactedDelegationSummary`:
+  `ui/src/delegation-commands.test.ts` only checks for the absence of redacted fields. A regression that returned an empty `{}` for each delegation summary would still pass. Extend the helper to also assert `id`, `parentSessionId`, `childSessionId`, `mode`, `status`, `title`, `agent`, `model`, `writePolicy`, `createdAt`, `startedAt`, `completedAt` are present.
+- [ ] P2: Pin the new delegation rate-limit constants with explicit assertions:
+  `MIN_DELEGATION_WAIT_INTERVAL_MS` (raised 100→500) and `MAX_DELEGATION_WAIT_IDS` (lowered 20→10) are public-shaped contracts but no test asserts their numeric values. Add `expect(MIN_DELEGATION_WAIT_INTERVAL_MS).toBe(500); expect(MAX_DELEGATION_WAIT_IDS).toBe(10);` in `delegation-commands.test.ts` so future tweaks fail loudly.
+- [ ] P2: Add a sibling test for `agent: None` parent-agent fallback in delegations:
+  `src/tests/delegations.rs:4378-4407` only asserts the positive branch (`agent: Some(Codex)` uses Codex's default model). Add a sibling positive test for the `agent: None` arm asserting the child uses the parent's agent's default model. Two tests together pin both branches of the agent-selection conditional.
+- [ ] P2: Pin the heavy-content gate is bypassed during streaming:
+  `ui/src/MessageCard.test.tsx:245-284` confirms shape but does not assert `.deferred-markdown-placeholder` is absent during streaming. Add an assertion for an `isStreaming` assistant message regardless of size, and pair with a long-enough streaming message (over the heavy threshold) confirming the gate stays bypassed.
+- [ ] P2: Add a wire-projection round-trip test for `TelegramSessionFetchMessage`:
+  the parallel narrow projection of `Message` in `src/telegram.rs:481-515` will silently desync if `wire_messages.rs` renames the discriminator or the `Text` variant fields — serde will deserialize into `Other` and the relay will go silent on text messages. Round-trip a representative `Message::Text` payload through `TelegramSessionFetchMessage` and assert the `Text` arm matched.

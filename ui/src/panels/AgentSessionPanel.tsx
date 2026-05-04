@@ -672,10 +672,17 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const messageSlotNodesRef = useRef<Map<string, HTMLElement>>(new Map());
   const messageSlotNodesSessionIdRef = useRef(session.id);
 
-  if (messageSlotNodesSessionIdRef.current !== session.id) {
-    messageSlotNodesRef.current.clear();
-    messageSlotNodesSessionIdRef.current = session.id;
-  }
+  const ensureMessageSlotCacheForCurrentSession = useCallback(() => {
+    if (messageSlotNodesSessionIdRef.current !== session.id) {
+      messageSlotNodesRef.current = new Map();
+      messageSlotNodesSessionIdRef.current = session.id;
+    }
+    return messageSlotNodesRef.current;
+  }, [session.id]);
+
+  useLayoutEffect(() => {
+    ensureMessageSlotCacheForCurrentSession();
+  }, [ensureMessageSlotCacheForCurrentSession]);
 
   useEffect(() => {
     if (
@@ -686,21 +693,25 @@ const SessionConversationPage = memo(function SessionConversationPage({
     }
   }, [activeMarkerId, visibleMarkers]);
 
+  // Re-creating this ref callback on session changes is intentional: React
+  // detaches and re-attaches mounted message slots, repopulating the per-session
+  // marker jump cache after the layout-effect reset.
   const handleConversationItemMount = useCallback(
     (itemKey: string, node: HTMLElement | null) => {
       const messageId = itemKey.startsWith("message:")
         ? itemKey.slice("message:".length)
         : null;
       if (messageId) {
+        const messageSlotNodes = ensureMessageSlotCacheForCurrentSession();
         if (node) {
-          messageSlotNodesRef.current.set(messageId, node);
+          messageSlotNodes.set(messageId, node);
         } else {
-          messageSlotNodesRef.current.delete(messageId);
+          messageSlotNodes.delete(messageId);
         }
       }
       onConversationSearchItemMount(itemKey, node);
     },
-    [onConversationSearchItemMount],
+    [ensureMessageSlotCacheForCurrentSession, onConversationSearchItemMount],
   );
 
   const jumpToMarker = useCallback(

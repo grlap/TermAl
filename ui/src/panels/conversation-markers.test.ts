@@ -76,6 +76,23 @@ describe("conversation marker helpers", () => {
     }
   });
 
+  it("uses the document as the default mounted-slot lookup root", () => {
+    const matching = document.createElement("article");
+    const unrelated = document.createElement("article");
+    matching.dataset.sessionSearchItemKey = "message:message-1";
+    unrelated.dataset.sessionSearchItemKey = "message:message-2";
+    document.body.append(unrelated, matching);
+
+    try {
+      expect(findMountedConversationMessageSlot("message-1")).toBe(matching);
+      expect(findMountedConversationMessageSlot("message-2")).toBe(unrelated);
+      expect(findMountedConversationMessageSlot("missing")).toBeNull();
+    } finally {
+      matching.remove();
+      unrelated.remove();
+    }
+  });
+
   it("sorts markers by mounted message order before persisted index hints", () => {
     const messages = [makeMessage("message-1"), makeMessage("message-2")];
     const later = makeMarker("marker-1", {

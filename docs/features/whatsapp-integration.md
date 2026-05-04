@@ -5,10 +5,20 @@ layer for TermAl, replacing the earlier WhatsApp-only proposal.
 
 Backlog source: [`docs/bugs.md`](../bugs.md)
 
+Related briefs:
+- [`telegram-ui-integration.md`](./telegram-ui-integration.md) — Phase 1
+  Telegram relay specifics: UI configuration panel, in-process tokio
+  supervisor, code-based linking flow, REST API surface, build sequence,
+  open questions.
+
 ## Status
 
-Not implemented. This is a proposed mobile relay layer on top of existing
-project, session, and approval flows.
+Phase 1 (Telegram bot adapter) ships as a separate `cargo run -- telegram`
+process configured by env vars; UI-driven configuration and in-process
+lifecycle are designed in [`telegram-ui-integration.md`](./telegram-ui-integration.md)
+and not yet implemented. Phase 0 (PWA push), Phase 2 (deterministic digest
+builder beyond the current hand-rolled rules), and Phase 3 (WhatsApp) are not
+implemented.
 
 ## Problem
 

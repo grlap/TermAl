@@ -132,6 +132,22 @@ describe("delegation API helpers", () => {
     );
   });
 
+  it("forwards AbortSignal to delegation status requests", async () => {
+    const fetchMock = stubJsonFetch();
+    const controller = new AbortController();
+
+    await fetchDelegationStatus("parent-1", "delegation-1", {
+      signal: controller.signal,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/parent-1/delegations/delegation-1",
+      expect.objectContaining({
+        signal: controller.signal,
+      }),
+    );
+  });
+
   it("builds parent-scoped result URLs with encoded path segments", async () => {
     const fetchMock = stubJsonFetch();
 

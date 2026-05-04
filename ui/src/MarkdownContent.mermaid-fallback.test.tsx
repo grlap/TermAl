@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { MermaidModule } from "./mermaid-render";
@@ -39,11 +40,18 @@ describe("MarkdownContent Mermaid dynamic import fallback", () => {
       render: fallbackRender,
     } as unknown as MermaidModule;
     const appendChild = document.head.appendChild.bind(document.head);
+    const expectedBundleSrc = new URL(
+      mermaidBundleUrl,
+      window.location.href,
+    ).href;
+    const appendedScripts: HTMLScriptElement[] = [];
     const appendChildSpy = vi
       .spyOn(document.head, "appendChild")
       .mockImplementation((node) => {
         const result = appendChild(node);
         if (node instanceof HTMLScriptElement) {
+          appendedScripts.push(node);
+          expect(node.src).toBe(expectedBundleSrc);
           queueMicrotask(() => {
             mermaidWindow.mermaid = fallbackMermaid;
             node.onload?.(new Event("load"));
@@ -66,6 +74,8 @@ describe("MarkdownContent Mermaid dynamic import fallback", () => {
 
       expect(await screen.findByTestId("mermaid-frame")).toBeInTheDocument();
       expect(appendChildSpy).toHaveBeenCalledWith(expect.any(HTMLScriptElement));
+      expect(appendedScripts).toHaveLength(1);
+      expect(appendedScripts[0]?.src).toBe(expectedBundleSrc);
       expect(fallbackRender).toHaveBeenCalledWith(
         expect.stringMatching(/^termal-mermaid-\d+$/),
         "flowchart TD\n  A --> B",

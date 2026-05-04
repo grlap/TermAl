@@ -7,9 +7,10 @@
 //     zeroes body descenders / scroll-root overflow so the iframe
 //     can be sized off the SVG viewBox.
 //   - `getMermaidDiagramFrameStyle` — reads the SVG's viewBox and
-//     returns `{ height, width, maxWidth }` css for the iframe,
-//     clamped against upper/lower bounds that protect the layout
-//     from pathologically large diagrams.
+//     returns constrained `{ aspectRatio, height: "auto", width,
+//     maxWidth }` CSS for the iframe. Wide diagrams keep their
+//     intrinsic scrollable width while the used height scales down
+//     when `max-width: 100%` constrains the frame.
 //   - `clampMermaidDiagramExtent`, `readMermaidSvgDimensions` —
 //     the clamp math and the viewBox parser that back the frame-
 //     style helper.
@@ -134,15 +135,21 @@ export function getMermaidDiagramFrameStyle(svg: string): CSSProperties {
   );
 
   return {
-    // The srcdoc keeps the SVG at intrinsic width (`max-width: none`)
-    // and lets wide diagrams scroll horizontally inside the iframe.
-    // Do not use CSS aspect-ratio here: `max-width: 100%` can shrink
-    // the iframe's used width without shrinking the SVG inside it,
-    // which scales the iframe height down and clips the diagram.
+    // `max-width: 100%` can shrink a wide iframe below `frameWidth`.
+    // If height stays fixed, the SVG scales down horizontally while
+    // the iframe keeps the old unscaled height, leaving a large blank
+    // area below wide ER diagrams. Use CSS aspect-ratio so the used
+    // height scales with the constrained width.
     //
-    // `frameHeight` includes the historical 24px vertical slack for
-    // scrollbar chrome / Mermaid temp-DOM text-measurement drift.
-    height: `${frameHeight}px`,
+    // Trade-off: very tall, narrow diagrams in narrow columns can be
+    // clipped at the bottom because the srcdoc intentionally keeps
+    // vertical overflow hidden. That keeps wide diagrams tight instead
+    // of restoring the old fixed-height blank-frame behavior.
+    //
+    // `frameHeight` still includes the historical 24px vertical slack
+    // for scrollbar chrome / Mermaid temp-DOM text-measurement drift.
+    aspectRatio: `${frameWidth} / ${frameHeight}`,
+    height: "auto",
     width: `${frameWidth}px`,
     maxWidth: "100%",
   };
@@ -362,7 +369,21 @@ export function renderTermalMermaidDiagram(
     // into each other or into future Mermaid consumers in this tab.
     mermaid.initialize(config);
     try {
-      return await mermaid.render(diagramId, renderSource);
+      const result = await mermaid.render(diagramId, renderSource);
+      // Mermaid 11.x does not always THROW on syntax errors — for
+      // some malformed diagrams it returns a "syntax error" SVG
+      // containing the red bomb icon plus "Syntax error in text"
+      // and "mermaid version X.Y.Z" footer text. Sandboxed into our
+      // iframe that visualization renders as a jarring red bomb in
+      // the middle of the document, bypassing `MermaidDiagram`'s
+      // own clean error fallback (which shows a one-line message
+      // and the diagram source highlighted as code). Detect the
+      // error SVG and throw so the caller routes through that
+      // fallback path instead.
+      if (isMermaidErrorVisualizationSvg(result.svg)) {
+        throw new Error("Mermaid syntax error");
+      }
+      return result;
     } finally {
       mermaid.initialize(TERMAL_MERMAID_BASE_CONFIG);
     }
@@ -372,6 +393,45 @@ export function renderTermalMermaidDiagram(
     () => undefined,
   );
   return renderJob;
+}
+
+/**
+ * Returns `true` when `svg` is the "syntax error" visualization
+ * Mermaid 11.x produces in place of a real diagram render. Mermaid
+ * does not always throw on parse failures — for several malformed-
+ * diagram shapes (especially flowchart/sequenceDiagram label/edge
+ * grammar errors) it instead resolves the `render()` promise with
+ * an SVG containing the red bomb icon and a "Syntax error in text"
+ * message. That SVG must not be piped into the diagram iframe;
+ * `renderTermalMermaidDiagram` re-throws when this returns `true`
+ * so the caller's existing error-state branch can show the diagram
+ * source + a clean one-line message instead.
+ *
+ * Detection is intentionally cheap and defensive: any of the
+ * following patterns flips it to `true`. They all appear together
+ * in the canonical 11.x error SVG; matching any one of them tolerates
+ * minor cross-version differences without regressing on legitimate
+ * diagrams (none of these strings appear in well-formed Mermaid
+ * output):
+ *
+ *   - `aria-roledescription="error"` on the root `<svg>` element
+ *     (the strongest signal in 11.x).
+ *   - The literal text "Syntax error in text" inside an SVG `<text>`
+ *     node (the user-visible error string Mermaid renders).
+ *   - `class="error-icon"` (the bomb-icon group; older versions and
+ *     a fallback for any future SVG that drops the aria-role).
+ */
+export function isMermaidErrorVisualizationSvg(svg: string): boolean {
+  if (svg.includes('aria-roledescription="error"')) {
+    return true;
+  }
+  if (svg.includes("Syntax error in text")) {
+    return true;
+  }
+  if (svg.includes('class="error-icon"')) {
+    return true;
+  }
+  return false;
 }
 
 export function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidConfigInput {

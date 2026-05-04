@@ -114,6 +114,12 @@ const RECONNECT_STATE_RESYNC_TEST_BUFFER_MS = Math.max(
   Math.min(100, Math.floor(RECONNECT_STATE_RESYNC_DELAY_MS / 4)),
 );
 
+function hasRenderedMessageCardText(text: string) {
+  return Array.from(document.querySelectorAll(".message-card")).some((card) =>
+    card.textContent?.includes(text),
+  );
+}
+
 vi.mock("./MonacoDiffEditor", () => ({
   MonacoDiffEditor: forwardRef(function MonacoDiffEditorMock(
     {
@@ -1254,6 +1260,150 @@ describe("App live state — reconnect", () => {
           expect(
             within(sessionList).queryByText("Original preview"),
           ).not.toBeInTheDocument();
+        });
+      } finally {
+        fetchStateSpy.mockRestore();
+      }
+    });
+  });
+
+  it("keeps fallback-only assistant text hidden until a fresh SSE state confirms it", async () => {
+    await withSuppressedActWarnings(async () => {
+      const resyncStateDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(
+        async () => resyncStateDeferred.promise,
+      );
+      const userMessage = {
+        id: "message-user-1",
+        type: "text" as const,
+        timestamp: "10:00",
+        author: "you" as const,
+        text: "test",
+      };
+
+      try {
+        await withFallbackStateHarness(async ({ eventSource, sessionList }) => {
+          await dispatchOpenedStateEvent(
+            eventSource,
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Codex Session",
+                  status: "active",
+                  preview: "test",
+                  messageCount: 1,
+                  messagesLoaded: true,
+                  messages: [userMessage],
+                }),
+              ],
+            }),
+          );
+          await within(sessionList).findByText("Codex Session");
+
+          const sessionRowButton =
+            within(sessionList).getByText("Codex Session").closest("button");
+          if (!sessionRowButton) {
+            throw new Error("Session row button not found");
+          }
+          await clickAndSettle(sessionRowButton);
+          expect(hasRenderedMessageCardText("test")).toBe(true);
+          expect(hasRenderedMessageCardText("Fresh SSE assistant body.")).toBe(
+            false,
+          );
+
+          await dispatchStateEvent(
+            eventSource,
+            {
+              ...makeStateResponse({
+                revision: 2,
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [
+                  makeSession("session-1", {
+                    name: "Codex Session",
+                    status: "active",
+                    preview: "test",
+                    messageCount: 1,
+                    messagesLoaded: true,
+                    messages: [userMessage],
+                  }),
+                ],
+              }),
+              _sseFallback: true,
+            },
+          );
+
+          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+          expect(hasRenderedMessageCardText("Fresh SSE assistant body.")).toBe(
+            false,
+          );
+
+          await act(async () => {
+            resyncStateDeferred.resolve(
+              makeStateResponse({
+                revision: 2,
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [
+                  makeSession("session-1", {
+                    name: "Codex Session",
+                    status: "active",
+                    preview: "test",
+                    messageCount: 1,
+                    messagesLoaded: true,
+                    messages: [userMessage],
+                  }),
+                ],
+              }),
+            );
+            await flushUiWork();
+          });
+          await settleAsyncUi();
+          expect(hasRenderedMessageCardText("Fresh SSE assistant body.")).toBe(
+            false,
+          );
+
+          await dispatchStateEvent(
+            eventSource,
+            makeStateResponse({
+              revision: 3,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Codex Session",
+                  status: "idle",
+                  preview: "Fresh SSE assistant body.",
+                  messageCount: 2,
+                  messagesLoaded: true,
+                  messages: [
+                    userMessage,
+                    {
+                      id: "message-assistant-1",
+                      type: "text",
+                      timestamp: "10:01",
+                      author: "assistant",
+                      text: "Fresh SSE assistant body.",
+                    },
+                  ],
+                }),
+              ],
+            }),
+          );
+
+          await waitFor(() => {
+            expect(
+              hasRenderedMessageCardText("Fresh SSE assistant body."),
+            ).toBe(true);
+          });
         });
       } finally {
         fetchStateSpy.mockRestore();

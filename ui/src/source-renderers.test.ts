@@ -145,6 +145,19 @@ describe("detectRenderableRegions: Markdown files", () => {
     expect(hasRenderableRegions(markdownContext("# Heading\n\nJust prose here."))).toBe(false);
   });
 
+  it("returns nothing for bare Mermaid-like prose outside fences", () => {
+    const markdown = [
+      "# Notes",
+      "",
+      "a=>b",
+      "",
+      "This sentence mentions A --> B inline.",
+    ].join("\n");
+
+    expect(detectRenderableRegions(markdownContext(markdown))).toEqual([]);
+    expect(hasRenderableRegions(markdownContext(markdown))).toBe(false);
+  });
+
   it("locates Mermaid fences with 1-based source line ranges", () => {
     const md = [
       "# Title", // line 1

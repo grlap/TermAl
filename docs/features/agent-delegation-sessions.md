@@ -142,7 +142,7 @@ When a child finishes, TermAl records a compact result packet:
   "commandsRun": [
     {
       "command": "npx vitest run src/panels/VirtualizedConversationMessageList.test.tsx",
-      "status": "passed"
+      "status": "success"
     }
   ],
   "notes": []
@@ -150,7 +150,8 @@ When a child finishes, TermAl records a compact result packet:
 ```
 
 The packet is a summary for resumption, not a replacement for the child
-transcript.
+transcript. Command status labels use the backend vocabulary: `running`,
+`success`, or `error`.
 
 ## Lifecycle
 
@@ -222,6 +223,7 @@ spawn_delegation(parentSessionId, request) -> DelegationRecord
 get_delegation_status(parentSessionId, delegationId) -> DelegationStatus
 get_delegation_result(parentSessionId, delegationId) -> DelegationResult
 cancel_delegation(parentSessionId, delegationId) -> DelegationStatus
+wait_delegations(parentSessionId, delegationIds, options?) -> WaitDelegationsResult
 ```
 
 ### MCP Tools
@@ -581,7 +583,7 @@ Isolation:
 ## Open Questions
 
 - Should the first MCP surface be available to agents only, humans only, or both?
-- Should `wait_delegation` stream incremental status or return only final state?
+- Should `wait_delegations` stream incremental status or return only final state?
 - Should result extraction be purely prompt-convention based in v1, or should
   the backend ask the child agent for a structured final packet?
 - How much of isolated worktree setup should TermAl own versus delegating to the

@@ -4378,6 +4378,35 @@ fn delegation_empty_model_uses_agent_default() {
 }
 
 #[test]
+fn delegation_omitted_model_uses_selected_agent_default_not_parent_model() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Claude);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Use the selected agent default model.".to_owned(),
+                title: Some("Selected Agent Default Model".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+
+    assert_eq!(created.child_session.agent, Agent::Codex);
+    assert_eq!(created.child_session.model, Agent::Codex.default_model());
+    assert_eq!(
+        created.delegation.model.as_deref(),
+        Some(Agent::Codex.default_model())
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn delegation_write_policy_accepts_legacy_snake_case_discriminators() {
     let read_only: DelegationWritePolicy =
         serde_json::from_value(json!({ "kind": "read_only" })).expect("read_only alias");

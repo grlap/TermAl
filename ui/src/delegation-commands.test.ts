@@ -1,16 +1,22 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
+import { ApiRequestError } from "./api";
 import {
   cancelDelegationCommand,
+  createDelegationCommands,
   delegationCommands,
   getDelegationResultCommand,
   getDelegationStatusCommand,
   spawnDelegationCommand,
   waitDelegationCommand,
   waitDelegationsCommand,
+  MAX_DELEGATION_PROMPT_CHARS,
   MAX_DELEGATION_WAIT_IDS,
   MAX_DELEGATION_WAIT_TIMEOUT_MS,
   MIN_DELEGATION_WAIT_INTERVAL_MS,
+  type DelegationCommandTransport,
+  type WaitDelegationErrorPacket,
+  type WaitDelegationsResult,
 } from "./delegation-commands";
 import type { DelegationRecord, DelegationResult, Session } from "./types";
 
@@ -61,7 +67,7 @@ function makeResult(overrides: Partial<DelegationResult> = {}): DelegationResult
     summary: "No issues found.",
     findings: [],
     changedFiles: [],
-    commandsRun: [{ command: "npx tsc --noEmit", status: "passed" }],
+    commandsRun: [{ command: "npx tsc --noEmit", status: "success" }],
     notes: ["Reviewed staged changes."],
     ...overrides,
   };
@@ -89,6 +95,18 @@ function stubFetchResponses(...bodies: unknown[]) {
   return fetchMock;
 }
 
+function expectRedactedDelegationSummary(delegation: object) {
+  expect(delegation).not.toHaveProperty("prompt");
+  expect(delegation).not.toHaveProperty("cwd");
+  const maybeResult = (delegation as { result?: object | null }).result;
+  if (maybeResult) {
+    expect(maybeResult).not.toHaveProperty("findings");
+    expect(maybeResult).not.toHaveProperty("changedFiles");
+    expect(maybeResult).not.toHaveProperty("commandsRun");
+    expect(maybeResult).not.toHaveProperty("notes");
+  }
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -97,14 +115,29 @@ afterEach(() => {
 
 describe("delegation command surface", () => {
   it("exports tool-style command names for MCP wrappers", () => {
-    expect(delegationCommands).toMatchObject({
-      spawn_delegation: spawnDelegationCommand,
-      get_delegation_status: getDelegationStatusCommand,
-      get_delegation_result: getDelegationResultCommand,
-      cancel_delegation: cancelDelegationCommand,
-    });
-    expect(delegationCommands.wait_delegation).toBeTypeOf("function");
+    expect(delegationCommands.spawn_delegation).toBeTypeOf("function");
+    expect(delegationCommands.get_delegation_status).toBeTypeOf("function");
+    expect(delegationCommands.get_delegation_result).toBeTypeOf("function");
+    expect(delegationCommands.cancel_delegation).toBeTypeOf("function");
     expect(delegationCommands.wait_delegations).toBeTypeOf("function");
+    expect(delegationCommands).not.toHaveProperty("wait_delegation");
+  });
+
+  it("keeps wait results discriminated by outcome", () => {
+    type ErrorResult = Extract<WaitDelegationsResult, { outcome: "error" }>;
+    type NonErrorResult = Extract<
+      WaitDelegationsResult,
+      { outcome: "completed" | "timeout" }
+    >;
+
+    expectTypeOf<ErrorResult>().toMatchTypeOf<{
+      outcome: "error";
+      error: WaitDelegationErrorPacket;
+    }>();
+    expectTypeOf<NonErrorResult>().toMatchTypeOf<{
+      outcome: "completed" | "timeout";
+      error?: never;
+    }>();
   });
 
   it("spawns a delegation and returns compact child/delegation ids with the child session", async () => {
@@ -141,6 +174,131 @@ describe("delegation command surface", () => {
     );
   });
 
+  it("trims spawn prompts and parent ids before dispatch", async () => {
+    const delegation = makeDelegation();
+    const childSession = makeSession();
+    const fetchMock = stubFetchResponses({
+      revision: 2,
+      serverInstanceId: "server-a",
+      delegation,
+      childSession,
+    });
+
+    await spawnDelegationCommand(" parent-1 ", {
+      prompt: "  Review this change.  ",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/parent-1/delegations",
+      expect.objectContaining({
+        body: JSON.stringify({
+          prompt: "Review this change.",
+        }),
+      }),
+    );
+  });
+
+  it("rejects invalid spawn prompt and null optional fields before dispatch", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      spawnDelegationCommand("parent-1", { prompt: "   " }),
+    ).rejects.toThrow(/^prompt must be non-empty/);
+    await expect(
+      spawnDelegationCommand("parent-1", {
+        prompt: "x".repeat(MAX_DELEGATION_PROMPT_CHARS + 1),
+      }),
+    ).rejects.toThrow(
+      new RegExp(
+        `^prompt must be no longer than ${MAX_DELEGATION_PROMPT_CHARS} characters`,
+      ),
+    );
+    await expect(
+      spawnDelegationCommand("parent-1", {
+        prompt: "Review this change.",
+        title: null as never,
+      }),
+    ).rejects.toThrow(/^title must be omitted instead of null/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("can run through an injected transport without browser-relative fetch", async () => {
+    const delegation = makeDelegation();
+    const childSession = makeSession();
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(async (_parentSessionId, request) => ({
+        revision: 2,
+        serverInstanceId: "server-a",
+        delegation,
+        childSession,
+      })),
+      fetchDelegationStatus: vi.fn(async () => ({
+        revision: 3,
+        serverInstanceId: "server-a",
+        delegation: makeDelegation({ status: "completed" }),
+      })),
+      fetchDelegationResult: vi.fn(async () => ({
+        revision: 4,
+        serverInstanceId: "server-a",
+        result: makeResult(),
+      })),
+      cancelDelegation: vi.fn(async () => ({
+        revision: 5,
+        serverInstanceId: "server-a",
+        delegation,
+      })),
+    };
+    const commands = createDelegationCommands(transport);
+
+    await expect(
+      commands.spawn_delegation("parent-1", {
+        prompt: "Review this change.",
+        title: "Review",
+      }),
+    ).resolves.toMatchObject({
+      delegationId: "delegation-1",
+      childSession,
+    });
+    expect(transport.createDelegation).toHaveBeenCalledWith("parent-1", {
+      prompt: "Review this change.",
+      title: "Review",
+    });
+    await expect(
+      commands.wait_delegations("parent-1", ["delegation-1"], {
+        pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+        timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
+      }),
+    ).resolves.toMatchObject({
+      outcome: "completed",
+      completed: [{ id: "delegation-1" }],
+    });
+    await expect(
+      commands.get_delegation_status("parent-1", "delegation-1"),
+    ).resolves.toMatchObject({
+      delegationId: "delegation-1",
+      status: "completed",
+    });
+    await expect(
+      commands.get_delegation_result("parent-1", "delegation-1"),
+    ).resolves.toMatchObject({
+      delegationId: "delegation-1",
+      summary: "No issues found.",
+    });
+    await expect(
+      commands.cancel_delegation("parent-1", "delegation-1"),
+    ).resolves.toMatchObject({
+      delegationId: "delegation-1",
+      status: "running",
+    });
+    expect(transport.fetchDelegationStatus).toHaveBeenCalledTimes(2);
+    expect(transport.fetchDelegationResult).toHaveBeenCalledTimes(1);
+    expect(transport.cancelDelegation).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("returns status, result, and cancel command packets", async () => {
     const completed = makeDelegation({
       status: "completed",
@@ -165,12 +323,22 @@ describe("delegation command surface", () => {
       },
     );
 
-    await expect(
-      getDelegationStatusCommand("parent-1", "delegation-1"),
-    ).resolves.toMatchObject({
+    const statusResult = await getDelegationStatusCommand(
+      "parent-1",
+      "delegation-1",
+    );
+    expect(statusResult).toMatchObject({
       delegationId: "delegation-1",
       childSessionId: "child-1",
       status: "completed",
+      delegation: {
+        result: {
+          delegationId: "delegation-1",
+          childSessionId: "child-1",
+          status: "completed",
+          summary: "No issues found.",
+        },
+      },
       revision: 3,
     });
     await expect(
@@ -182,18 +350,21 @@ describe("delegation command surface", () => {
       summary: "No issues found.",
       findings: [],
       changedFiles: [],
-      commandsRun: [{ command: "npx tsc --noEmit", status: "passed" }],
-      failedChecks: [],
+      commandsRun: [{ command: "npx tsc --noEmit", status: "success" }],
       notes: ["Reviewed staged changes."],
       revision: 4,
     });
-    await expect(
-      cancelDelegationCommand("parent-1", "delegation-1"),
-    ).resolves.toMatchObject({
+    const cancelResult = await cancelDelegationCommand(
+      "parent-1",
+      "delegation-1",
+    );
+    expect(cancelResult).toMatchObject({
       delegationId: "delegation-1",
       status: "completed",
       revision: 5,
     });
+    expectRedactedDelegationSummary(statusResult.delegation);
+    expectRedactedDelegationSummary(cancelResult.delegation);
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
@@ -207,7 +378,7 @@ describe("delegation command surface", () => {
     );
   });
 
-  it("normalizes compact result packets and derives failed checks", async () => {
+  it("normalizes compact result packets without deriving failed checks", async () => {
     stubFetchResponses({
       revision: 4,
       serverInstanceId: "server-a",
@@ -215,26 +386,27 @@ describe("delegation command surface", () => {
         findings: undefined,
         changedFiles: undefined,
         commandsRun: [
-          { command: "cargo check", status: "passed" },
-          { command: "npx vitest run", status: "failed" },
+          { command: "cargo check", status: "success" },
+          { command: "npx vitest run", status: "error" },
+          { command: "slow smoke test", status: "running" },
         ],
         notes: undefined,
       }),
     });
 
-    await expect(
-      getDelegationResultCommand("parent-1", "delegation-1"),
-    ).resolves.toMatchObject({
+    const result = await getDelegationResultCommand("parent-1", "delegation-1");
+    expect(result).toMatchObject({
       findings: [],
       changedFiles: [],
       commandsRun: [
-        { command: "cargo check", status: "passed" },
-        { command: "npx vitest run", status: "failed" },
+        { command: "cargo check", status: "success" },
+        { command: "npx vitest run", status: "error" },
+        { command: "slow smoke test", status: "running" },
       ],
-      failedChecks: [{ command: "npx vitest run", status: "failed" }],
       notes: [],
       revision: 4,
     });
+    expect(result).not.toHaveProperty("failedChecks");
   });
 
   it("waits for multiple delegations and returns when all are terminal", async () => {
@@ -291,7 +463,10 @@ describe("delegation command surface", () => {
         timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 10,
       },
     );
-    const assertion = expect(wait).resolves.toMatchObject({
+    await vi.advanceTimersByTimeAsync(MIN_DELEGATION_WAIT_INTERVAL_MS * 5);
+
+    const result = await wait;
+    expect(result).toMatchObject({
       outcome: "completed",
       revision: 4,
       serverInstanceId: "server-a",
@@ -301,10 +476,8 @@ describe("delegation command surface", () => {
       ],
       pending: [],
     });
-
-    await vi.advanceTimersByTimeAsync(MIN_DELEGATION_WAIT_INTERVAL_MS * 5);
-
-    await assertion;
+    result.delegations.forEach(expectRedactedDelegationSummary);
+    result.completed.forEach(expectRedactedDelegationSummary);
   });
 
   it("waits for one delegation through the single-id wrapper", async () => {
@@ -381,7 +554,18 @@ describe("delegation command surface", () => {
 
   it("times out without canceling pending delegations", async () => {
     vi.useFakeTimers();
+    const timeoutMs = MIN_DELEGATION_WAIT_INTERVAL_MS * 3;
     const fetchMock = stubFetchResponses(
+      {
+        revision: 2,
+        serverInstanceId: "server-a",
+        delegation: makeDelegation({ status: "running" }),
+      },
+      {
+        revision: 2,
+        serverInstanceId: "server-a",
+        delegation: makeDelegation({ status: "running" }),
+      },
       {
         revision: 2,
         serverInstanceId: "server-a",
@@ -396,7 +580,7 @@ describe("delegation command surface", () => {
 
     const wait = waitDelegationsCommand("parent-1", ["delegation-1"], {
       pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
-      timeoutMs: 1,
+      timeoutMs,
     });
 
     const assertion = expect(wait).resolves.toMatchObject({
@@ -405,7 +589,7 @@ describe("delegation command surface", () => {
       pending: [{ id: "delegation-1", status: "running" }],
     });
 
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(timeoutMs);
 
     await assertion;
     const requestedUrls = fetchMock.mock.calls.map(([url]) => String(url));
@@ -417,7 +601,7 @@ describe("delegation command surface", () => {
       waitDelegationsCommand("parent-1", ["delegation-1"], {
         pollIntervalMs: 0,
       }),
-    ).rejects.toThrow("pollIntervalMs must be a finite positive duration");
+    ).rejects.toThrow(/^pollIntervalMs must be a finite positive duration/);
   });
 
   it("rejects timeout zero with the same positive-duration contract", async () => {
@@ -425,7 +609,7 @@ describe("delegation command surface", () => {
       waitDelegationsCommand("parent-1", ["delegation-1"], {
         timeoutMs: 0,
       }),
-    ).rejects.toThrow("timeoutMs must be a finite positive duration");
+    ).rejects.toThrow(/^timeoutMs must be a finite positive duration/);
   });
 
   it("rejects polling below the minimum interval", async () => {
@@ -434,7 +618,9 @@ describe("delegation command surface", () => {
         pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS - 1,
       }),
     ).rejects.toThrow(
-      `pollIntervalMs must be at least ${MIN_DELEGATION_WAIT_INTERVAL_MS}ms`,
+      new RegExp(
+        `^pollIntervalMs must be at least ${MIN_DELEGATION_WAIT_INTERVAL_MS}ms`,
+      ),
     );
   });
 
@@ -444,7 +630,9 @@ describe("delegation command surface", () => {
         timeoutMs: MAX_DELEGATION_WAIT_TIMEOUT_MS + 1,
       }),
     ).rejects.toThrow(
-      `timeoutMs must be no greater than ${MAX_DELEGATION_WAIT_TIMEOUT_MS}ms`,
+      new RegExp(
+        `^timeoutMs must be no greater than ${MAX_DELEGATION_WAIT_TIMEOUT_MS}ms`,
+      ),
     );
 
     await expect(
@@ -456,11 +644,58 @@ describe("delegation command surface", () => {
         ),
       ),
     ).rejects.toThrow(
-      `wait_delegations accepts at most ${MAX_DELEGATION_WAIT_IDS} ids`,
+      new RegExp(
+        `^wait_delegations accepts at most ${MAX_DELEGATION_WAIT_IDS} ids`,
+      ),
     );
   });
 
-  it("rejects mismatched delegation ids instead of waiting until timeout", async () => {
+  it("rejects blank delegation ids instead of returning an empty success", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      waitDelegationCommand("parent-1", " ", {
+        pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+        timeoutMs: 100,
+      }),
+    ).rejects.toThrow(/^delegation id must be non-empty/);
+    await expect(
+      waitDelegationsCommand("parent-1", [" ", "\t"], {
+        pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+        timeoutMs: 100,
+      }),
+    ).rejects.toThrow(/^delegation id must be non-empty/);
+    await expect(
+      waitDelegationsCommand("parent-1", [], {
+        pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+        timeoutMs: 100,
+      }),
+    ).rejects.toThrow(/^wait_delegations requires at least one delegation id/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsafe transport ids before dispatch", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getDelegationStatusCommand("parent/1", "delegation-1"),
+    ).rejects.toThrow(
+      /^parent session id must not contain \/, \?, #, or control characters/,
+    );
+    await expect(
+      waitDelegationsCommand("parent-1", ["delegation#1"], {
+        pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+        timeoutMs: 100,
+      }),
+    ).rejects.toThrow(
+      /^delegation id must not contain \/, \?, #, or control characters/,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns an error outcome for mismatched delegation ids", async () => {
     stubFetchResponses({
       revision: 2,
       serverInstanceId: "server-a",
@@ -472,12 +707,21 @@ describe("delegation command surface", () => {
         pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
         timeoutMs: 100,
       }),
-    ).rejects.toThrow(
-      "delegation status id mismatch: requested delegation-1, received other-delegation",
-    );
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "mismatched-delegation-id",
+        name: "MismatchedDelegationIdError",
+        requestedId: "delegation-1",
+        receivedId: "other-delegation",
+      },
+      delegations: [],
+      completed: [],
+      pending: [],
+    });
   });
 
-  it("rejects mixed server-instance status batches", async () => {
+  it("returns an error outcome for mixed server-instance status batches", async () => {
     stubFetchResponses(
       {
         revision: 2,
@@ -503,9 +747,193 @@ describe("delegation command surface", () => {
         pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
         timeoutMs: 100,
       }),
-    ).rejects.toThrow(
-      "delegation status server instance changed during wait: server-a -> server-b",
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "mixed-server-instance",
+        name: "MixedDelegationServerInstanceError",
+        serverInstanceIds: ["server-a", "server-b"],
+      },
+    });
+  });
+
+  it("times out at the deadline while a status fetch is still in flight", async () => {
+    vi.useFakeTimers();
+    let capturedSignal: AbortSignal | null = null;
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(),
+      fetchDelegationStatus: vi.fn((_parentSessionId, _delegationId, options) => {
+        capturedSignal = options?.signal ?? null;
+        return new Promise<never>((_resolve, reject) => {
+          capturedSignal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        });
+      }),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    const commands = createDelegationCommands(transport);
+    const wait = commands.wait_delegations(
+      "parent-1",
+      ["delegation-1"],
+      {
+        pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+        timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+      },
     );
+
+    await vi.advanceTimersByTimeAsync(MIN_DELEGATION_WAIT_INTERVAL_MS);
+
+    await expect(wait).resolves.toMatchObject({
+      outcome: "timeout",
+      delegations: [],
+      completed: [],
+      pending: [],
+    });
+    expect(capturedSignal).not.toBeNull();
+    expect((capturedSignal as unknown as AbortSignal).aborted).toBe(true);
+  });
+
+  it("keeps fulfilled batch responses and aborts siblings when one status fetch fails", async () => {
+    type DelegationStatusTransportResponse = Awaited<
+      ReturnType<DelegationCommandTransport["fetchDelegationStatus"]>
+    >;
+    let resolveFirst:
+      | ((response: DelegationStatusTransportResponse) => void)
+      | undefined;
+    let rejectSecond: ((error: unknown) => void) | undefined;
+    let thirdSignal: AbortSignal | null = null;
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(),
+      fetchDelegationStatus: vi.fn<
+        DelegationCommandTransport["fetchDelegationStatus"]
+      >((_parentSessionId, delegationId, options) => {
+        if (delegationId === "delegation-1") {
+          return new Promise<DelegationStatusTransportResponse>((resolve) => {
+            resolveFirst = resolve;
+          });
+        }
+        if (delegationId === "delegation-2") {
+          return new Promise<DelegationStatusTransportResponse>(
+            (_resolve, reject) => {
+              rejectSecond = reject;
+            },
+          );
+        }
+        thirdSignal = options?.signal ?? null;
+        return new Promise<never>((_resolve, reject) => {
+          thirdSignal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        });
+      }),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    const commands = createDelegationCommands(transport);
+    const wait = commands.wait_delegations(
+      "parent-1",
+      ["delegation-1", "delegation-2", "delegation-3"],
+      {
+        pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+        timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
+      },
+    );
+
+    resolveFirst?.({
+      revision: 2,
+      serverInstanceId: "server-a",
+      delegation: makeDelegation({
+        id: "delegation-1",
+        status: "completed",
+      }),
+    });
+    await Promise.resolve();
+    rejectSecond?.(
+      new ApiRequestError("request-failed", "backend rejected delegation", {
+        status: 409,
+      }),
+    );
+
+    await expect(wait).resolves.toMatchObject({
+      outcome: "error",
+      completed: [{ id: "delegation-1", status: "completed" }],
+      pending: [],
+      error: {
+        kind: "status-fetch-failed",
+        name: "ApiRequestError",
+        message: "backend rejected delegation",
+        apiErrorKind: "request-failed",
+        status: 409,
+        restartRequired: false,
+      },
+    });
+    expect(thirdSignal).not.toBeNull();
+    expect((thirdSignal as unknown as AbortSignal).aborted).toBe(true);
+  });
+
+  it("redacts unknown transport failure messages from wait error packets", async () => {
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(),
+      fetchDelegationStatus: vi.fn(async () => {
+        throw new Error("token=secret C:/internal/backend.log");
+      }),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).wait_delegations(
+        "parent-1",
+        ["delegation-1"],
+        {
+          pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+          timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
+        },
+      ),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "status-fetch-failed",
+        name: "Error",
+        message: "Delegation status fetch failed.",
+      },
+    });
+  });
+
+  it("reports mixed server instances across polling cycles", async () => {
+    vi.useFakeTimers();
+    stubFetchResponses(
+      {
+        revision: 2,
+        serverInstanceId: "server-a",
+        delegation: makeDelegation({ status: "running" }),
+      },
+      {
+        revision: 3,
+        serverInstanceId: "server-b",
+        delegation: makeDelegation({ status: "completed" }),
+      },
+    );
+
+    const wait = waitDelegationsCommand("parent-1", ["delegation-1"], {
+      pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+      timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
+    });
+
+    await vi.advanceTimersByTimeAsync(MIN_DELEGATION_WAIT_INTERVAL_MS);
+
+    await expect(wait).resolves.toMatchObject({
+      outcome: "error",
+      pending: [{ id: "delegation-1", status: "running" }],
+      error: {
+        kind: "mixed-server-instance",
+        serverInstanceIds: ["server-a", "server-b"],
+      },
+    });
   });
 
   it("uses global timers rather than the browser window object", async () => {
@@ -526,7 +954,7 @@ describe("delegation command surface", () => {
 
     const wait = waitDelegationsCommand("parent-1", ["delegation-1"], {
       pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
-      timeoutMs: 100,
+      timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
     });
 
     await vi.advanceTimersByTimeAsync(MIN_DELEGATION_WAIT_INTERVAL_MS);
@@ -537,7 +965,7 @@ describe("delegation command surface", () => {
     });
   });
 
-  it("rejects status fetch failures and leaves partial-state handling to callers", async () => {
+  it("returns partial state when a later status fetch fails", async () => {
     vi.useFakeTimers();
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -553,14 +981,22 @@ describe("delegation command surface", () => {
 
     const wait = waitDelegationsCommand("parent-1", ["delegation-1"], {
       pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
-      timeoutMs: 100,
+      timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
     });
-    const rejection = expect(wait).rejects.toThrow(
-      "The TermAl backend is unavailable.",
-    );
 
     await vi.advanceTimersByTimeAsync(MIN_DELEGATION_WAIT_INTERVAL_MS);
 
-    await rejection;
+    await expect(wait).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "status-fetch-failed",
+        name: "ApiRequestError",
+        message: "The TermAl backend is unavailable.",
+        apiErrorKind: "backend-unavailable",
+        status: null,
+        restartRequired: false,
+      },
+      pending: [{ id: "delegation-1", status: "running" }],
+    });
   });
 });

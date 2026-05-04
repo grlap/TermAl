@@ -4429,11 +4429,26 @@ textarea {
 }
 
 @supports selector(:has(*)) {
+  /*
+   * Code-block bubbles cap at ~64rem so long lines wrap (or scroll
+   * horizontally as a fallback) before the surrounding chat layout
+   * gets pushed around.
+   *
+   * Table bubbles use `width: fit-content` so the bubble shrinks to
+   * fit just the table's intrinsic content width — a small 3-column
+   * table no longer pads the bubble out to ~1536px of empty space
+   * on wide screens. The `min(96rem, 96%)` cap still bounds the
+   * upper end so a wide table (long file paths, many columns) is
+   * given room to breathe but never goes edge to edge.
+   */
   .bubble-assistant:has(.markdown-copy pre),
-  .bubble-assistant:has(.markdown-table-scroll),
-  .markdown-card:has(.markdown-copy pre),
-  .markdown-card:has(.markdown-table-scroll) {
+  .markdown-card:has(.markdown-copy pre) {
     max-width: min(64rem, 96%);
+  }
+  .bubble-assistant:has(.markdown-table-scroll),
+  .markdown-card:has(.markdown-table-scroll) {
+    width: fit-content;
+    max-width: min(96rem, 96%);
   }
 }
 
@@ -7564,25 +7579,30 @@ textarea {
 }
 
 /*
- * Table sizing policy: prefer wrapping over horizontal scroll.
+ * Table sizing policy: size to content, cap at container width,
+ * wrap rather than horizontal-scroll when the cap engages.
  *
- * `width: 100%; max-width: 100%; table-layout: auto` lets the browser
- * distribute column widths from cell content but caps the table at the
- * container width, so the existing `overflow-wrap: anywhere` on cells
- * (below) actually engages on prose tables. The previous policy
- * (`width: max-content; min-width: 100%`) sized the table to fit every
- * cell on a single line, which made the wrapper's `overflow-x: auto`
- * fire even when cells could have wrapped — clipping the rightmost
- * column behind a horizontal scrollbar for ordinary prose tables.
+ * `width: fit-content; max-width: 100%; table-layout: auto` lets the
+ * table size to its intrinsic content width — a small table with
+ * three short-text columns lays out at ~600px instead of stretching
+ * to fill the (now also fit-content) bubble. Long-content tables
+ * (many columns, long file paths) want to be wider than the
+ * container; `max-width: 100%` clamps them, and the existing
+ * `overflow-wrap: break-word` on cells (below) handles the wrap.
  *
  * The `.markdown-table-scroll` wrapper still has `overflow-x: auto`,
  * so a row that genuinely cannot wrap (e.g., a single unbreakable
  * token wider than the container) still falls back to a scrollbar
  * instead of overflowing the bubble.
+ *
+ * The previous policy (`width: 100%; max-width: 100%`) forced every
+ * table to fill the bubble even when its content needed less room,
+ * leaving short tables with empty whitespace stretching far to the
+ * right of the data on wide screens.
  */
 .markdown-table-scroll > table,
 .markdown-copy table {
-  width: 100%;
+  width: fit-content;
   max-width: 100%;
   table-layout: auto;
   border-collapse: collapse;

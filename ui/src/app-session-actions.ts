@@ -329,6 +329,42 @@ export type UseAppSessionActionsReturn = {
   ) => Promise<boolean>;
 };
 
+type ConversationMarkerRecord = NonNullable<Session["markers"]>[number];
+
+function conversationMarkerExactlyMatches(
+  current: ConversationMarkerRecord,
+  response: ConversationMarkerRecord,
+) {
+  return (
+    current.id === response.id &&
+    current.sessionId === response.sessionId &&
+    current.kind === response.kind &&
+    current.name === response.name &&
+    (current.body ?? null) === (response.body ?? null) &&
+    current.color === response.color &&
+    current.messageId === response.messageId &&
+    current.messageIndexHint === response.messageIndexHint &&
+    (current.endMessageId ?? null) === (response.endMessageId ?? null) &&
+    (current.endMessageIndexHint ?? null) ===
+      (response.endMessageIndexHint ?? null) &&
+    current.createdAt === response.createdAt &&
+    current.updatedAt === response.updatedAt &&
+    current.createdBy === response.createdBy
+  );
+}
+
+function conversationMarkerSatisfiesResponse(
+  current: ConversationMarkerRecord | undefined,
+  response: ConversationMarkerRecord | undefined,
+) {
+  return (
+    current !== undefined &&
+    response !== undefined &&
+    current.id === response.id &&
+    conversationMarkerExactlyMatches(current, response)
+  );
+}
+
 export function useAppSessionActions(
   params: UseAppSessionActionsParams,
 ): UseAppSessionActionsReturn {
@@ -675,41 +711,6 @@ export function useAppSessionActions(
       markers: nextMarkers,
       ...(sessionMutationStamp !== undefined ? { sessionMutationStamp } : {}),
     };
-  }
-
-  function conversationMarkerExactlyMatches(
-    current: NonNullable<Session["markers"]>[number],
-    response: NonNullable<Session["markers"]>[number],
-  ) {
-    return (
-      current.id === response.id &&
-      current.sessionId === response.sessionId &&
-      current.kind === response.kind &&
-      current.name === response.name &&
-      (current.body ?? null) === (response.body ?? null) &&
-      current.color === response.color &&
-      current.messageId === response.messageId &&
-      current.messageIndexHint === response.messageIndexHint &&
-      (current.endMessageId ?? null) === (response.endMessageId ?? null) &&
-      (current.endMessageIndexHint ?? null) ===
-        (response.endMessageIndexHint ?? null) &&
-      current.createdAt === response.createdAt &&
-      current.updatedAt === response.updatedAt &&
-      current.createdBy === response.createdBy
-    );
-  }
-
-  function conversationMarkerSatisfiesResponse(
-    current: NonNullable<Session["markers"]>[number] | undefined,
-    response: NonNullable<Session["markers"]>[number] | undefined,
-  ) {
-    if (!current || !response || current.id !== response.id) {
-      return false;
-    }
-    return (
-      conversationMarkerExactlyMatches(current, response) ||
-      current.updatedAt.localeCompare(response.updatedAt) > 0
-    );
   }
 
   function shouldApplyMarkerMutationResponse(

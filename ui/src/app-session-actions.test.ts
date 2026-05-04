@@ -449,26 +449,8 @@ describe("useAppSessionActions", () => {
   });
 
   it("treats stale same-instance marker success as a no-op", async () => {
-    const staleMarker: ConversationMarker = {
-      id: "marker-1",
-      sessionId: "session-1",
-      kind: "checkpoint",
-      name: "Stale checkpoint",
-      body: null,
-      color: "#3b82f6",
-      messageId: "message-1",
-      messageIndexHint: 0,
-      endMessageId: null,
-      endMessageIndexHint: null,
-      createdAt: "2026-05-01 10:00:00",
-      updatedAt: "2026-05-01 10:00:00",
-      createdBy: "user",
-    };
-    const newerMarker: ConversationMarker = {
-      ...staleMarker,
-      name: "Newer checkpoint",
-      updatedAt: "2026-05-01 10:01:00",
-    };
+    const currentMarker = makeConversationMarker();
+    const responseMarker = { ...currentMarker };
     const session = makeSession("session-1", {
       messages: [
         {
@@ -479,11 +461,11 @@ describe("useAppSessionActions", () => {
           timestamp: "10:00",
         },
       ],
-      markers: [newerMarker],
+      markers: [currentMarker],
       sessionMutationStamp: 7,
     });
     vi.spyOn(api, "createConversationMarker").mockResolvedValue({
-      marker: staleMarker,
+      marker: responseMarker,
       revision: 6,
       serverInstanceId: "server-a",
       sessionMutationStamp: 6,
@@ -498,12 +480,62 @@ describe("useAppSessionActions", () => {
       actions.handleCreateConversationMarker("session-1", "message-1"),
     ).resolves.toBe(true);
 
-    expect(params.refs.sessionsRef.current[0].markers).toEqual([newerMarker]);
+    expect(params.refs.sessionsRef.current[0].markers).toEqual([currentMarker]);
     expect(params.refs.sessionsRef.current[0].sessionMutationStamp).toBe(7);
     expect(params.refs.latestStateRevisionRef.current).toBe(7);
     expect(params.requestActionRecoveryResync).not.toHaveBeenCalled();
     expect(params.forceSseReconnect).not.toHaveBeenCalled();
     expect(params.setters.setRequestError).toHaveBeenCalledWith(null);
+  });
+
+  it("recovers stale marker success instead of trusting clock-only timestamp order", async () => {
+    const currentMarker = makeConversationMarker({
+      name: "Before midnight",
+      updatedAt: "23:59:59",
+    });
+    const responseMarker = makeConversationMarker({
+      name: "After midnight",
+      updatedAt: "00:01:00",
+    });
+    const session = makeSession("session-1", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          text: "Decision point",
+          timestamp: "23:59",
+        },
+      ],
+      markers: [currentMarker],
+      sessionMutationStamp: 7,
+    });
+    vi.spyOn(api, "createConversationMarker").mockResolvedValue({
+      marker: responseMarker,
+      revision: 6,
+      serverInstanceId: "server-a",
+      sessionMutationStamp: 6,
+    });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[session.id, session]]);
+    params.refs.sessionsRef.current = [session];
+    params.refs.latestStateRevisionRef.current = 7;
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleCreateConversationMarker("session-1", "message-1"),
+    ).resolves.toBe(false);
+
+    expect(params.refs.sessionsRef.current[0].markers).toEqual([currentMarker]);
+    expect(params.refs.sessionsRef.current[0].sessionMutationStamp).toBe(7);
+    expect(params.refs.latestStateRevisionRef.current).toBe(7);
+    expect(params.requestActionRecoveryResync).toHaveBeenCalledWith({
+      openSessionId: "session-1",
+      paneId: null,
+      allowUnknownServerInstance: true,
+    });
+    expect(params.forceSseReconnect).not.toHaveBeenCalled();
+    expectRequestErrorDeferredUpdatesOnly(params.setters.setRequestError);
   });
 
   it("recovers stale same-instance marker success when the marker is absent locally", async () => {
