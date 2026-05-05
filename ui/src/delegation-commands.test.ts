@@ -96,6 +96,7 @@ function stubFetchResponses(...bodies: unknown[]) {
 }
 
 function expectRedactedDelegationSummary(delegation: object) {
+  const record = delegation as Record<string, unknown>;
   expect(delegation).toMatchObject({
     id: expect.any(String),
     parentSessionId: expect.any(String),
@@ -107,9 +108,9 @@ function expectRedactedDelegationSummary(delegation: object) {
     writePolicy: expect.any(Object),
     createdAt: expect.any(String),
   });
-  expect(delegation).toHaveProperty("model");
-  expect(delegation).toHaveProperty("startedAt");
-  expect(delegation).toHaveProperty("completedAt");
+  expectOwnNullableStringProperty(record, "model");
+  expectOwnNullableStringProperty(record, "startedAt");
+  expectOwnNullableStringProperty(record, "completedAt");
   expect(delegation).not.toHaveProperty("prompt");
   expect(delegation).not.toHaveProperty("cwd");
   const maybeResult = (delegation as { result?: object | null }).result;
@@ -121,10 +122,37 @@ function expectRedactedDelegationSummary(delegation: object) {
   }
 }
 
+function expectOwnNullableStringProperty(
+  record: Record<string, unknown>,
+  property: string,
+) {
+  expect(Object.prototype.hasOwnProperty.call(record, property)).toBe(true);
+  expect(record[property] === null || typeof record[property] === "string").toBe(
+    true,
+  );
+}
+
+function expectRedactedChildSessionSummary(childSession: object) {
+  expect(childSession).toMatchObject({
+    id: expect.any(String),
+    name: expect.any(String),
+    emoji: expect.any(String),
+    agent: expect.any(String),
+    model: expect.any(String),
+    status: expect.any(String),
+  });
+  expect(childSession).toHaveProperty("parentDelegationId");
+  expect(childSession).not.toHaveProperty("workdir");
+  expect(childSession).not.toHaveProperty("messages");
+  expect(childSession).not.toHaveProperty("pendingPrompts");
+  expect(childSession).not.toHaveProperty("preview");
+}
+
 function expectCapturedAbortSignal(
   signal: AbortSignal | null,
 ): asserts signal is AbortSignal {
   expect(signal).not.toBeNull();
+  expect(signal).toBeInstanceOf(AbortSignal);
 }
 
 afterEach(() => {
@@ -166,9 +194,14 @@ describe("delegation command surface", () => {
     }>();
   });
 
-  it("spawns a delegation and returns compact child/delegation ids with the child session", async () => {
+  it("spawns a delegation and returns redacted child/delegation summaries", async () => {
     const delegation = makeDelegation();
-    const childSession = makeSession();
+    const childSession = makeSession({
+      parentDelegationId: "delegation-1",
+      preview: "Review this change.",
+      messages: [{ text: "Review this change." } as never],
+      pendingPrompts: [{ prompt: "Review this change." } as never],
+    });
     const fetchMock = stubFetchResponses({
       revision: 2,
       serverInstanceId: "server-a",
@@ -184,11 +217,20 @@ describe("delegation command surface", () => {
     expect(result).toMatchObject({
       delegationId: "delegation-1",
       childSessionId: "child-1",
-      childSession,
+      childSession: {
+        id: "child-1",
+        name: "Review",
+        emoji: "AI",
+        agent: "Codex",
+        model: "codex",
+        status: "active",
+        parentDelegationId: "delegation-1",
+      },
       revision: 2,
       serverInstanceId: "server-a",
     });
     expectRedactedDelegationSummary(result.delegation);
+    expectRedactedChildSessionSummary(result.childSession);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/sessions/parent-1/delegations",
       expect.objectContaining({
@@ -289,15 +331,19 @@ describe("delegation command surface", () => {
     };
     const commands = createDelegationCommands(transport);
 
-    await expect(
-      commands.spawn_delegation("parent-1", {
-        prompt: "Review this change.",
-        title: "Review",
-      }),
-    ).resolves.toMatchObject({
-      delegationId: "delegation-1",
-      childSession,
+    const spawnResult = await commands.spawn_delegation("parent-1", {
+      prompt: "Review this change.",
+      title: "Review",
     });
+    expect(spawnResult).toMatchObject({
+      delegationId: "delegation-1",
+      childSession: {
+        id: "child-1",
+        agent: "Codex",
+        model: "codex",
+      },
+    });
+    expectRedactedChildSessionSummary(spawnResult.childSession);
     expect(transport.createDelegation).toHaveBeenCalledWith("parent-1", {
       prompt: "Review this change.",
       title: "Review",
@@ -837,6 +883,7 @@ describe("delegation command surface", () => {
   it("continues polling after a per-batch status timeout when the overall wait has budget", async () => {
     vi.useFakeTimers();
     let callCount = 0;
+    let firstBatchAbortedAt: number | null = null;
     const transport: DelegationCommandTransport = {
       createDelegation: vi.fn(),
       fetchDelegationStatus: vi.fn((_parentSessionId, _delegationId, options) => {
@@ -844,6 +891,7 @@ describe("delegation command surface", () => {
         if (callCount === 1) {
           return new Promise<never>((_resolve, reject) => {
             options?.signal?.addEventListener("abort", () => {
+              firstBatchAbortedAt = Date.now();
               reject(new DOMException("Aborted", "AbortError"));
             });
           });
@@ -858,6 +906,7 @@ describe("delegation command surface", () => {
       cancelDelegation: vi.fn(),
     };
 
+    const startedAt = Date.now();
     const wait = createDelegationCommands(transport).wait_delegations(
       "parent-1",
       ["delegation-1"],
@@ -867,7 +916,16 @@ describe("delegation command surface", () => {
       },
     );
 
-    await vi.advanceTimersByTimeAsync(MIN_DELEGATION_WAIT_INTERVAL_MS * 3);
+    await vi.advanceTimersByTimeAsync(MIN_DELEGATION_WAIT_INTERVAL_MS * 2 - 1);
+    expect(transport.fetchDelegationStatus).toHaveBeenCalledTimes(1);
+    expect(firstBatchAbortedAt).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(firstBatchAbortedAt).toBe(
+      startedAt + MIN_DELEGATION_WAIT_INTERVAL_MS * 2,
+    );
+
+    await vi.advanceTimersByTimeAsync(MIN_DELEGATION_WAIT_INTERVAL_MS);
 
     await expect(wait).resolves.toMatchObject({
       outcome: "completed",
@@ -945,7 +1003,7 @@ describe("delegation command surface", () => {
       error: {
         kind: "status-fetch-failed",
         name: "ApiRequestError",
-        message: "backend rejected delegation",
+        message: "Delegation status fetch failed.",
         apiErrorKind: "request-failed",
         status: 409,
         restartRequired: false,
@@ -1018,7 +1076,9 @@ describe("delegation command surface", () => {
 
     await vi.advanceTimersByTimeAsync(MIN_DELEGATION_WAIT_INTERVAL_MS);
     await Promise.resolve();
-    rejectThirdSecondBatch?.(
+    const rejectThirdStatusFetch = rejectThirdSecondBatch;
+    expect(rejectThirdStatusFetch).toBeDefined();
+    rejectThirdStatusFetch!(
       new ApiRequestError("backend-unavailable", "The TermAl backend is unavailable."),
     );
 
@@ -1068,15 +1128,59 @@ describe("delegation command surface", () => {
     });
   });
 
-  it("redacts sensitive ApiRequestError messages from wait error packets", async () => {
+  it.each([
+    ["token assignment", "token=secret C:/internal/backend.log"],
+    ["bearer token", "Authorization: Bearer secret-token"],
+    ["env var", "OPENAI_API_KEY=secret-value"],
+    ["raw token prefix", "sk-proj-secret-value"],
+    ["UNC path", "\\\\server\\share\\backend.log"],
+    ["home path", "could not write /home/admin/.config/termal"],
+    ["URL", "failed at https://internal.example/log"],
+  ])(
+    "redacts sensitive ApiRequestError messages from wait error packets: %s",
+    async (_caseName, message) => {
+      const transport: DelegationCommandTransport = {
+        createDelegation: vi.fn(),
+        fetchDelegationStatus: vi.fn(async () => {
+          throw new ApiRequestError("request-failed", message, { status: 500 });
+        }),
+        fetchDelegationResult: vi.fn(),
+        cancelDelegation: vi.fn(),
+      };
+
+      await expect(
+        createDelegationCommands(transport).wait_delegations(
+          "parent-1",
+          ["delegation-1"],
+          {
+            pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+            timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
+          },
+        ),
+      ).resolves.toMatchObject({
+        outcome: "error",
+        error: {
+          kind: "status-fetch-failed",
+          name: "ApiRequestError",
+          message: "Delegation status fetch failed.",
+          apiErrorKind: "request-failed",
+          status: 500,
+        },
+      });
+    },
+  );
+
+  it.each([
+    ["backend unavailable", "The TermAl backend is unavailable."],
+    ["generic status", "Request failed with status 500."],
+  ])("passes through allowlisted ApiRequestError messages: %s", async (
+    _caseName,
+    message,
+  ) => {
     const transport: DelegationCommandTransport = {
       createDelegation: vi.fn(),
       fetchDelegationStatus: vi.fn(async () => {
-        throw new ApiRequestError(
-          "request-failed",
-          "token=secret C:/internal/backend.log",
-          { status: 500 },
-        );
+        throw new ApiRequestError("request-failed", message, { status: 500 });
       }),
       fetchDelegationResult: vi.fn(),
       cancelDelegation: vi.fn(),
@@ -1096,7 +1200,7 @@ describe("delegation command surface", () => {
       error: {
         kind: "status-fetch-failed",
         name: "ApiRequestError",
-        message: "Delegation status fetch failed.",
+        message,
         apiErrorKind: "request-failed",
         status: 500,
       },

@@ -219,7 +219,7 @@ TermAl should expose internal commands that can be used from the UI and from an
 MCP wrapper:
 
 ```text
-spawn_delegation(parentSessionId, request) -> DelegationRecord
+spawn_delegation(parentSessionId, request) -> SpawnDelegationCommandResult
 get_delegation_status(parentSessionId, delegationId) -> DelegationStatus
 get_delegation_result(parentSessionId, delegationId) -> DelegationResult
 cancel_delegation(parentSessionId, delegationId) -> DelegationStatus
@@ -370,6 +370,25 @@ type DelegationResultSummary = {
 
 type DelegationSummary = Omit<DelegationRecord, "prompt" | "cwd" | "result"> & {
   result?: DelegationResultSummary | null;
+};
+
+type DelegationChildSessionSummary = {
+  id: string;
+  name: string;
+  emoji: string;
+  agent: string;
+  model: string;
+  status: string;
+  parentDelegationId: string | null;
+};
+
+type SpawnDelegationCommandResult = {
+  delegationId: string;
+  childSessionId: string;
+  delegation: DelegationSummary;
+  childSession: DelegationChildSessionSummary;
+  revision: number;
+  serverInstanceId: string;
 };
 ```
 

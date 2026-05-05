@@ -509,6 +509,65 @@ describe("conversation overview map", () => {
     expect(findConversationOverviewItemAtY(projection, 7.55)?.messageId).toBe("m76");
   });
 
+  it("caps homogeneous visual segments by maxItemsPerSegment", () => {
+    const messages = Array.from({ length: 45 }, (_, index) =>
+      textMessage(`m${index + 1}`, {
+        author: "assistant",
+        text: `assistant message ${index + 1}`,
+      }),
+    );
+    const layoutSnapshot: VirtualizedConversationLayoutSnapshot = {
+      sessionId: "session-1",
+      messageCount: messages.length,
+      estimatedTotalHeightPx: messages.length,
+      viewportTopPx: 0,
+      viewportHeightPx: 1,
+      viewportWidthPx: 800,
+      isActive: true,
+      visiblePageRange: {
+        startIndex: 0,
+        endIndex: 1,
+      },
+      mountedPageRange: {
+        startIndex: 0,
+        endIndex: 1,
+      },
+      messages: messages.map((message, index) => ({
+        messageId: message.id,
+        messageIndex: index,
+        pageIndex: index,
+        type: message.type,
+        author: message.author,
+        estimatedTopPx: index,
+        estimatedHeightPx: 1,
+        measuredPageHeightPx: null,
+      })),
+    };
+
+    const projection = buildConversationOverviewProjection({
+      layoutSnapshot,
+      maxHeightPx: 12,
+      messages,
+      minItemHeightPx: 2,
+    });
+    const segments = buildConversationOverviewSegments(projection, {
+      maxItemsPerSegment: 20,
+    });
+
+    expect(
+      segments.map((segment) => ({
+        count: segment.itemCount,
+        end: segment.endMessageIndex,
+        kind: segment.kind,
+        start: segment.startMessageIndex,
+      })),
+    ).toEqual([
+      { count: 20, end: 19, kind: "assistant_text", start: 0 },
+      { count: 20, end: 39, kind: "assistant_text", start: 20 },
+      { count: 5, end: 44, kind: "assistant_text", start: 40 },
+    ]);
+  });
+
   it("keeps marker, error, and live-turn landmarks as standalone visual segments", () => {
     const messages: Message[] = [
       textMessage("m1", { text: "first" }),

@@ -179,7 +179,60 @@ describe("reconcileSessions", () => {
     expect(merged[0].markers).toEqual(next[0].markers);
   });
 
-  it("normalizes marker colors before comparing summary session snapshots", () => {
+  it("reuses marker state when only valid color casing changed", () => {
+    const marker = {
+      id: "marker-1",
+      sessionId: "session-a",
+      kind: "decision" as const,
+      name: "Decision",
+      color: "#3B82F6",
+      messageId: "message-1",
+      messageIndexHint: 0,
+      createdAt: "10:00:00",
+      updatedAt: "10:00:00",
+      createdBy: "user" as const,
+    };
+    const previous = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Hello",
+          },
+        ],
+        markers: [marker],
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Hello",
+          },
+        ],
+        markers: [
+          {
+            ...marker,
+            color: "#3b82f6",
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).toBe(previous);
+    expect(merged[0].markers).toBe(previous[0].markers);
+  });
+
+  it("adopts authoritative marker state when local color is invalid", () => {
     const marker = {
       id: "marker-1",
       sessionId: "session-a",
@@ -220,7 +273,7 @@ describe("reconcileSessions", () => {
         markers: [
           {
             ...marker,
-            color: "#3B82F6",
+            color: "#3b82f6",
           },
         ],
       }),
@@ -228,8 +281,8 @@ describe("reconcileSessions", () => {
 
     const merged = reconcileSessions(previous, next);
 
-    expect(merged).toBe(previous);
-    expect(merged[0].markers).toBe(previous[0].markers);
+    expect(merged).not.toBe(previous);
+    expect(merged[0].markers).toEqual(next[0].markers);
   });
 
   it("reuses the existing session object when the mutation stamp matches", () => {

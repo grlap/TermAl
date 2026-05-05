@@ -32,10 +32,16 @@ export const DEFAULT_DELEGATION_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
 export const MIN_DELEGATION_WAIT_INTERVAL_MS = 500;
 export const MAX_DELEGATION_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 export const MAX_DELEGATION_WAIT_IDS = 10;
+// Keep in sync with `MAX_DELEGATION_PROMPT_BYTES` in `src/delegations.rs`.
 export const MAX_DELEGATION_PROMPT_BYTES = 64 * 1024;
 const UNSAFE_TRANSPORT_ID_PATTERN = /[/?#\u0000-\u001f\u007f]/u;
-const SENSITIVE_ERROR_DETAIL_PATTERN =
-  /(?:\b(?:token|secret|password|api[_-]?key)\b\s*[:=]|[a-z]:[\\/]|https?:\/\/|\/(?:users|home|tmp|var|etc)\b)/iu;
+const GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE =
+  "Delegation status fetch failed.";
+const SAFE_DELEGATION_STATUS_FETCH_MESSAGES = new Set([
+  "The TermAl backend is unavailable.",
+]);
+const SAFE_DELEGATION_STATUS_FETCH_STATUS_PATTERN =
+  /^Request failed with status \d+\.$/u;
 
 // These limits compose to at most 20 status requests/sec per wait call. The MCP
 // wrapper should still add a process-level concurrency cap before exposing this
@@ -80,9 +86,19 @@ export type SpawnDelegationCommandResult = {
   delegationId: string;
   childSessionId: string;
   delegation: DelegationSummary;
-  childSession: Session;
+  childSession: DelegationChildSessionSummary;
   revision: number;
   serverInstanceId: string;
+};
+
+export type DelegationChildSessionSummary = {
+  id: string;
+  name: string;
+  emoji: string;
+  agent: Session["agent"];
+  model: string;
+  status: Session["status"];
+  parentDelegationId: string | null;
 };
 
 export type DelegationStatusCommandResult = {
@@ -193,7 +209,7 @@ async function spawnDelegationWithTransport(
     delegationId: response.delegation.id,
     childSessionId: response.delegation.childSessionId,
     delegation: delegationSummary(response.delegation),
-    childSession: response.childSession,
+    childSession: delegationChildSessionSummary(response.childSession),
     revision: response.revision,
     serverInstanceId: response.serverInstanceId,
   };
@@ -542,11 +558,12 @@ function delegationSummary(record: DelegationRecord): DelegationSummary {
     status: record.status,
     title: record.title,
     agent: record.agent,
-    model: record.model,
+    model: record.model ?? null,
     writePolicy: record.writePolicy,
     createdAt: record.createdAt,
-    startedAt: record.startedAt,
-    completedAt: record.completedAt,
+    startedAt: record.startedAt ?? null,
+    completedAt: record.completedAt ?? null,
+    result: null,
   };
   if (record.result) {
     summary.result = {
@@ -557,6 +574,20 @@ function delegationSummary(record: DelegationRecord): DelegationSummary {
     };
   }
   return summary;
+}
+
+function delegationChildSessionSummary(
+  session: Session,
+): DelegationChildSessionSummary {
+  return {
+    id: session.id,
+    name: session.name,
+    emoji: session.emoji,
+    agent: session.agent,
+    model: session.model,
+    status: session.status,
+    parentDelegationId: session.parentDelegationId ?? null,
+  };
 }
 
 function waitDelegationsResult(
@@ -811,16 +842,19 @@ function statusFetchErrorPacket(error: unknown): WaitDelegationErrorPacket {
   return {
     kind: "status-fetch-failed",
     name,
-    message: "Delegation status fetch failed.",
+    message: GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE,
   };
 }
 
 function safeDelegationStatusFetchMessage(message: string) {
   const sanitized = sanitizeUserFacingErrorMessage(message);
-  if (SENSITIVE_ERROR_DETAIL_PATTERN.test(sanitized)) {
-    return "Delegation status fetch failed.";
+  if (
+    SAFE_DELEGATION_STATUS_FETCH_MESSAGES.has(sanitized) ||
+    SAFE_DELEGATION_STATUS_FETCH_STATUS_PATTERN.test(sanitized)
+  ) {
+    return sanitized;
   }
-  return sanitized;
+  return GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE;
 }
 
 function mismatchedDelegationIdErrorPacket(

@@ -418,15 +418,15 @@ function canMergeConversationOverviewSegmentItem({
   ) {
     return false;
   }
+  const itemCount = itemIndex - startItemIndex + 1;
+  if (itemCount > maxItemsPerSegment) {
+    return false;
+  }
+
   const sameVisualClass =
     currentItem.kind === nextItem.kind && currentItem.status === nextItem.status;
   if (sameVisualClass) {
     return true;
-  }
-
-  const itemCount = itemIndex - startItemIndex + 1;
-  if (itemCount > maxItemsPerSegment) {
-    return false;
   }
 
   const currentHeightPx = getConversationOverviewSegmentTrueHeightPx(

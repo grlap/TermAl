@@ -67,7 +67,7 @@ import {
   syncComposerDraftForSession,
   upsertSessionStoreSession,
 } from "./session-store";
-import { normalizeConversationMarkerColor } from "./conversation-marker-colors";
+import { conversationMarkerColorsMatchForState } from "./conversation-marker-colors";
 import {
   findWorkspacePaneIdForSession,
   openSessionInWorkspaceState,
@@ -342,8 +342,7 @@ function conversationMarkerExactlyMatches(
     current.kind === response.kind &&
     current.name === response.name &&
     (current.body ?? null) === (response.body ?? null) &&
-    normalizeConversationMarkerColor(current.color) ===
-      normalizeConversationMarkerColor(response.color) &&
+    conversationMarkerColorsMatchForState(current.color, response.color) &&
     current.messageId === response.messageId &&
     current.messageIndexHint === response.messageIndexHint &&
     (current.endMessageId ?? null) === (response.endMessageId ?? null) &&

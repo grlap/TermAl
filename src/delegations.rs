@@ -6,6 +6,8 @@
 // worker policies yet.
 
 // Keep prompts bounded because they are embedded into child-agent startup input.
+// Keep in sync with `MAX_DELEGATION_PROMPT_BYTES` in
+// `ui/src/delegation-commands.ts`.
 const MAX_DELEGATION_PROMPT_BYTES: usize = 64 * 1024;
 // Public summaries ride in `/api/state`; full summaries stay behind result reads.
 const MAX_DELEGATION_PUBLIC_SUMMARY_CHARS: usize = 1000;
