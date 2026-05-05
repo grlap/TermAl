@@ -6,6 +6,7 @@
 import type { CSSProperties } from "react";
 
 import { DiffNavArrow } from "./DiffPanelIcons";
+import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
 import type { ConversationMarker, Message } from "../types";
 
 export function groupConversationMarkersByMessageId(
@@ -168,7 +169,9 @@ function ConversationMarkerChip({
       type="button"
       className={`conversation-marker-chip${isActive ? " is-active" : ""}`}
       style={{
-        "--conversation-marker-color": marker.color,
+        "--conversation-marker-color": normalizeConversationMarkerColor(
+          marker.color,
+        ),
       } as CSSProperties}
       title={marker.body ?? marker.name}
       aria-label={`Jump to ${formatConversationMarkerKind(marker.kind)} marker ${marker.name}`}

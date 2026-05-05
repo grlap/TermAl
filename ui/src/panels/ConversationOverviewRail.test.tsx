@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ConversationOverviewRail } from "./ConversationOverviewRail";
 import type { VirtualizedConversationLayoutSnapshot } from "./VirtualizedConversationMessageList";
+import { DEFAULT_CONVERSATION_MARKER_COLOR } from "../conversation-marker-colors";
 import type { Message } from "../types";
 
 function textMessages(count: number): Message[] {
@@ -95,10 +96,43 @@ describe("ConversationOverviewRail", () => {
     expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
     expect(screen.getByLabelText(/User prompt 1/)).toBeInTheDocument();
     expect(screen.getByLabelText("Important section")).toBeInTheDocument();
+    expect(
+      screen
+        .getByLabelText("Important section")
+        .style.getPropertyValue("--conversation-overview-marker-color"),
+    ).toBe("#38bdf8");
     expect(screen.getByTestId("conversation-overview-viewport")).toHaveStyle({
       top: "100px",
       height: "150px",
     });
+  });
+
+  it("sanitizes marker pin colors before assigning CSS custom properties", () => {
+    const messages = textMessages(5);
+
+    render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={layoutSnapshot(messages)}
+        markers={[
+          {
+            id: "marker-1",
+            messageId: "message-3",
+            name: "Tampered section",
+            color: "url(https://example.test/marker)",
+          },
+        ]}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(
+      screen
+        .getByLabelText("Tampered section")
+        .style.getPropertyValue("--conversation-overview-marker-color"),
+    ).toBe(DEFAULT_CONVERSATION_MARKER_COLOR);
   });
 
   it("renders long same-kind runs as a single clumped visual segment", () => {

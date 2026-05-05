@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { render } from "@testing-library/react";
+import { createElement } from "react";
 
 import {
+  ConversationMarkerNavigator,
   findMountedConversationMessageSlot,
   groupConversationMarkersByMessageId,
   sortConversationMarkersForNavigation,
 } from "./conversation-markers";
+import { DEFAULT_CONVERSATION_MARKER_COLOR } from "../conversation-marker-colors";
 import type { ConversationMarker, Message } from "../types";
 
 function makeMessage(id: string): Message {
@@ -137,5 +141,29 @@ describe("conversation marker helpers", () => {
         [],
       ),
     ).toEqual([earliestHint, oldestById, oldestByIdAfter, newest]);
+  });
+
+  it("normalizes chip colors before assigning CSS custom properties", () => {
+    const marker = makeMarker("marker-1", {
+      color: "url(https://example.test/marker)",
+    });
+    const { container } = render(
+      createElement(ConversationMarkerNavigator, {
+        markers: [marker],
+        activeMarkerId: null,
+        onJump: () => {},
+        onNavigatePrevious: () => {},
+        onNavigateNext: () => {},
+      }),
+    );
+
+    const chip = container.querySelector<HTMLElement>(
+      ".conversation-marker-chip",
+    );
+
+    expect(chip).not.toBeNull();
+    expect(chip?.style.getPropertyValue("--conversation-marker-color")).toBe(
+      DEFAULT_CONVERSATION_MARKER_COLOR,
+    );
   });
 });

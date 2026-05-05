@@ -18,6 +18,7 @@ import type {
   UserInputQuestion,
   UserInputRequestMessage,
 } from "./types";
+import { normalizeConversationMarkerColor } from "./conversation-marker-colors";
 
 type ReconcileSessionsOptions = {
   disableMutationStampFastPath?: boolean;
@@ -259,7 +260,8 @@ function sameConversationMarkers(
       nextMarker.kind === marker.kind &&
       nextMarker.name === marker.name &&
       (nextMarker.body ?? null) === (marker.body ?? null) &&
-      nextMarker.color === marker.color &&
+      normalizeConversationMarkerColor(nextMarker.color) ===
+        normalizeConversationMarkerColor(marker.color) &&
       nextMarker.messageId === marker.messageId &&
       nextMarker.messageIndexHint === marker.messageIndexHint &&
       (nextMarker.endMessageId ?? null) === (marker.endMessageId ?? null) &&

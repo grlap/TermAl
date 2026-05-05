@@ -565,6 +565,29 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
 
+      // No-op short-circuit: when the delta's text/preview/mutation-stamp/
+      // count all match what the session already has, return the original
+      // `sessions` array (preserving identity). Callers can detect this
+      // case via `result.sessions === input` and skip downstream churn
+      // (transport-activity marking, watchdog baseline reset, re-render).
+      // This prevents stale stream replays at the same revision — the
+      // server re-emitting a textReplace whose content is already on the
+      // client — from masking a stalled active session and stopping the
+      // watchdog from firing.
+      const previewIfApplied = delta.preview ?? session.preview;
+      const stampIfApplied = resolveSessionMutationStamp(
+        session,
+        delta.sessionMutationStamp,
+      );
+      if (
+        message.text === delta.text &&
+        previewIfApplied === session.preview &&
+        stampIfApplied === (session.sessionMutationStamp ?? null) &&
+        delta.messageCount === session.messageCount
+      ) {
+        return { kind: "applied", sessions };
+      }
+
       const updatedMessage: TextMessage = {
         ...message,
         text: delta.text,

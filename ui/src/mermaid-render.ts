@@ -386,6 +386,20 @@ export function renderTermalMermaidDiagram(
       return result;
     } finally {
       mermaid.initialize(TERMAL_MERMAID_BASE_CONFIG);
+      // Mermaid 11.x renders into a temp container parented in
+      // `document.body` (id `d${diagramId}` containing an `<svg>`
+      // whose id is `${diagramId}`). On throw paths — including
+      // every parse error, draw error, or `isMermaidErrorVisualizationSvg`
+      // re-throw above — the container survives in the page DOM
+      // with an embedded bomb-icon error visualization. Without
+      // explicit cleanup, the user sees a jarring red bomb floating
+      // outside our `MermaidDiagram` iframe even though the
+      // component-level error fallback rendered correctly. Remove
+      // the temp container here so it cannot leak past the catch
+      // boundary. Idempotent: `getElementById` returns null when
+      // Mermaid has already cleaned up after a successful render,
+      // and `removeChild` is gated on `parentElement`.
+      cleanupMermaidTempContainer(diagramId);
     }
   });
   mermaidRenderQueue = renderJob.then(
@@ -421,6 +435,35 @@ export function renderTermalMermaidDiagram(
  *   - `class="error-icon"` (the bomb-icon group; older versions and
  *     a fallback for any future SVG that drops the aria-role).
  */
+/**
+ * Removes Mermaid 11.x's temp render container from `document.body`.
+ * The container is created lazily by `mermaid.render(diagramId, ...)`
+ * with id `d${diagramId}` (a `<div>` wrapping the `<svg id={diagramId}>`
+ * Mermaid was building). On every throw path the container survives,
+ * with an embedded bomb-icon error visualization that renders to the
+ * page outside our intended `MermaidDiagram` iframe. Calling this in
+ * a `finally` block guarantees we do not leak the artifact regardless
+ * of which error mode Mermaid hit (parser, draw, post-detection
+ * re-throw, etc.). Idempotent — when Mermaid cleans up itself on the
+ * happy path the lookups simply miss.
+ */
+function cleanupMermaidTempContainer(diagramId: string): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const wrapper = document.getElementById(`d${diagramId}`);
+  if (wrapper?.parentElement) {
+    wrapper.parentElement.removeChild(wrapper);
+  }
+  // Defensive: if Mermaid ever skips the wrapping `<div>` (e.g.,
+  // certain renderer paths inject the SVG directly), prune the SVG
+  // by id too.
+  const orphanSvg = document.getElementById(diagramId);
+  if (orphanSvg?.parentElement) {
+    orphanSvg.parentElement.removeChild(orphanSvg);
+  }
+}
+
 export function isMermaidErrorVisualizationSvg(svg: string): boolean {
   if (svg.includes('aria-roledescription="error"')) {
     return true;

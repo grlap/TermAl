@@ -16,6 +16,7 @@ import {
   type DelegationResultResponse,
   type DelegationStatusResponse,
 } from "./api";
+import { sanitizeUserFacingErrorMessage } from "./error-messages";
 import type {
   DelegationCommandResult,
   DelegationFinding,
@@ -31,8 +32,10 @@ export const DEFAULT_DELEGATION_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
 export const MIN_DELEGATION_WAIT_INTERVAL_MS = 500;
 export const MAX_DELEGATION_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 export const MAX_DELEGATION_WAIT_IDS = 10;
-export const MAX_DELEGATION_PROMPT_CHARS = 256 * 1024;
+export const MAX_DELEGATION_PROMPT_BYTES = 64 * 1024;
 const UNSAFE_TRANSPORT_ID_PATTERN = /[/?#\u0000-\u001f\u007f]/u;
+const SENSITIVE_ERROR_DETAIL_PATTERN =
+  /(?:\b(?:token|secret|password|api[_-]?key)\b\s*[:=]|[a-z]:[\\/]|https?:\/\/|\/(?:users|home|tmp|var|etc)\b)/iu;
 
 // These limits compose to at most 20 status requests/sec per wait call. The MCP
 // wrapper should still add a process-level concurrency cap before exposing this
@@ -76,7 +79,7 @@ export const browserDelegationCommandTransport: DelegationCommandTransport = {
 export type SpawnDelegationCommandResult = {
   delegationId: string;
   childSessionId: string;
-  delegation: DelegationRecord;
+  delegation: DelegationSummary;
   childSession: Session;
   revision: number;
   serverInstanceId: string;
@@ -189,7 +192,7 @@ async function spawnDelegationWithTransport(
   return {
     delegationId: response.delegation.id,
     childSessionId: response.delegation.childSessionId,
-    delegation: response.delegation,
+    delegation: delegationSummary(response.delegation),
     childSession: response.childSession,
     revision: response.revision,
     serverInstanceId: response.serverInstanceId,
@@ -354,35 +357,7 @@ async function waitDelegationsWithTransport(
     });
 
     const remainingMs = deadlineAt - Date.now();
-    const batch = await fetchStatusBatchWithDeadline(
-      transport,
-      normalizedParentSessionId,
-      pendingIds,
-      remainingMs,
-    );
-
-    const responseError = applyStatusBatchResponses(
-      batch.responses,
-      recordsById,
-      lastServerInstanceId,
-    );
-    if (responseError) {
-      return waitDelegationsResult(
-        "error",
-        ids,
-        recordsById,
-        lastRevision,
-        lastServerInstanceId,
-        responseError,
-      );
-    }
-    for (const { response } of batch.responses) {
-      if (lastRevision === null || response.revision > lastRevision) {
-        lastRevision = response.revision;
-        lastServerInstanceId = response.serverInstanceId;
-      }
-    }
-    if (batch.kind === "timeout") {
+    if (remainingMs <= 0) {
       return waitDelegationsResult(
         "timeout",
         ids,
@@ -391,14 +366,78 @@ async function waitDelegationsWithTransport(
         lastServerInstanceId,
       );
     }
+    const batchTimeoutMs = Math.min(pollIntervalMs * 2, remainingMs);
+    const batch = await fetchStatusBatchWithDeadline(
+      transport,
+      normalizedParentSessionId,
+      pendingIds,
+      batchTimeoutMs,
+    );
+
     if (batch.kind === "error") {
+      const appliedResponses = applyCurrentInstanceStatusBatchResponses(
+        batch.responses,
+        recordsById,
+        lastServerInstanceId,
+      );
+      const metadata = newestStatusMetadata(
+        appliedResponses,
+        lastRevision,
+        lastServerInstanceId,
+      );
+      return waitDelegationsResult(
+        "error",
+        ids,
+        recordsById,
+        metadata.revision,
+        metadata.serverInstanceId,
+        statusFetchErrorPacket(batch.error),
+      );
+    }
+
+    const applyResult = applyStatusBatchResponses(
+      batch.responses,
+      recordsById,
+      lastServerInstanceId,
+    );
+    if (applyResult.error) {
       return waitDelegationsResult(
         "error",
         ids,
         recordsById,
         lastRevision,
         lastServerInstanceId,
-        statusFetchErrorPacket(batch.error),
+        applyResult.error,
+      );
+    }
+    const metadata = newestStatusMetadata(
+      applyResult.appliedResponses,
+      lastRevision,
+      lastServerInstanceId,
+    );
+    lastRevision = metadata.revision;
+    lastServerInstanceId = metadata.serverInstanceId;
+
+    if (batch.kind === "timeout") {
+      if (deadlineAt - Date.now() <= 0) {
+        return waitDelegationsResult(
+          "timeout",
+          ids,
+          recordsById,
+          lastRevision,
+          lastServerInstanceId,
+        );
+      }
+      await delay(Math.min(pollIntervalMs, deadlineAt - Date.now()));
+      continue;
+    }
+    if (batch.kind === "responses" && batch.responses.length === 0) {
+      return waitDelegationsResult(
+        "completed",
+        ids,
+        recordsById,
+        lastRevision,
+        lastServerInstanceId,
       );
     }
 
@@ -578,6 +617,11 @@ type StatusBatchFinish =
   | { kind: "timeout" }
   | { kind: "error"; error: unknown };
 
+type StatusBatchApplyResult = {
+  appliedResponses: StatusBatchResponse[];
+  error: WaitDelegationErrorPacket | null;
+};
+
 async function fetchStatusBatchWithDeadline(
   transport: DelegationCommandTransport,
   parentSessionId: string,
@@ -608,7 +652,16 @@ async function fetchStatusBatchWithDeadline(
       if (options.abortPending) {
         controller.abort();
       }
-      resolve({ ...result, responses: [...responses] } as StatusBatchResult);
+      const responseSnapshot = [...responses];
+      if (result.kind === "error") {
+        resolve({
+          kind: "error",
+          error: result.error,
+          responses: responseSnapshot,
+        });
+        return;
+      }
+      resolve({ kind: result.kind, responses: responseSnapshot });
     };
 
     if (pendingIds.length === 0) {
@@ -648,25 +701,85 @@ function applyStatusBatchResponses(
   responses: readonly StatusBatchResponse[],
   recordsById: Map<string, DelegationRecord>,
   previousServerInstanceId: string | null,
-): WaitDelegationErrorPacket | null {
+): StatusBatchApplyResult {
+  for (const { requestedId, response } of responses) {
+    if (response.delegation.id !== requestedId) {
+      return {
+        appliedResponses: [],
+        error: mismatchedDelegationIdErrorPacket(
+          requestedId,
+          response.delegation.id,
+        ),
+      };
+    }
+  }
+
   const serverInstanceIds = mixedServerInstanceIds(
     responses.map(({ response }) => response),
     previousServerInstanceId,
   );
   if (serverInstanceIds.length > 1) {
-    return mixedServerInstanceErrorPacket(serverInstanceIds);
+    return {
+      appliedResponses: [],
+      error: mixedServerInstanceErrorPacket(serverInstanceIds),
+    };
   }
 
   for (const { requestedId, response } of responses) {
-    if (response.delegation.id !== requestedId) {
-      return mismatchedDelegationIdErrorPacket(
-        requestedId,
-        response.delegation.id,
-      );
-    }
     recordsById.set(requestedId, response.delegation);
   }
-  return null;
+  return {
+    appliedResponses: [...responses],
+    error: null,
+  };
+}
+
+function applyCurrentInstanceStatusBatchResponses(
+  responses: readonly StatusBatchResponse[],
+  recordsById: Map<string, DelegationRecord>,
+  previousServerInstanceId: string | null,
+) {
+  const referenceServerInstanceId =
+    previousServerInstanceId ?? singleServerInstanceId(responses);
+  if (!referenceServerInstanceId) {
+    return [];
+  }
+
+  const appliedResponses: StatusBatchResponse[] = [];
+  for (const response of responses) {
+    if (
+      response.response.serverInstanceId !== referenceServerInstanceId ||
+      response.response.delegation.id !== response.requestedId
+    ) {
+      continue;
+    }
+    recordsById.set(response.requestedId, response.response.delegation);
+    appliedResponses.push(response);
+  }
+  return appliedResponses;
+}
+
+function singleServerInstanceId(responses: readonly StatusBatchResponse[]) {
+  const serverInstanceIds = new Set(
+    responses.map(({ response }) => response.serverInstanceId),
+  );
+  return serverInstanceIds.size === 1 ? [...serverInstanceIds][0] : null;
+}
+
+function newestStatusMetadata(
+  responses: readonly StatusBatchResponse[],
+  previousRevision: number | null,
+  previousServerInstanceId: string | null,
+) {
+  let revision = previousRevision;
+  let serverInstanceId = previousServerInstanceId;
+  for (const { response } of responses) {
+    if (revision === null || response.revision > revision) {
+      revision = response.revision;
+      serverInstanceId = response.serverInstanceId;
+    }
+  }
+  return { revision, serverInstanceId };
 }
 
 function mixedServerInstanceIds(
@@ -688,7 +801,7 @@ function statusFetchErrorPacket(error: unknown): WaitDelegationErrorPacket {
     return {
       kind: "status-fetch-failed",
       name: error.name,
-      message: error.message,
+      message: safeDelegationStatusFetchMessage(error.message),
       apiErrorKind: error.kind,
       status: error.status,
       restartRequired: error.restartRequired,
@@ -700,6 +813,14 @@ function statusFetchErrorPacket(error: unknown): WaitDelegationErrorPacket {
     name,
     message: "Delegation status fetch failed.",
   };
+}
+
+function safeDelegationStatusFetchMessage(message: string) {
+  const sanitized = sanitizeUserFacingErrorMessage(message);
+  if (SENSITIVE_ERROR_DETAIL_PATTERN.test(sanitized)) {
+    return "Delegation status fetch failed.";
+  }
+  return sanitized;
 }
 
 function mismatchedDelegationIdErrorPacket(
@@ -795,9 +916,10 @@ function normalizeDelegationPrompt(prompt: string) {
   if (!normalizedPrompt) {
     throw new RangeError("prompt must be non-empty");
   }
-  if (normalizedPrompt.length > MAX_DELEGATION_PROMPT_CHARS) {
+  const promptByteLength = new TextEncoder().encode(normalizedPrompt).byteLength;
+  if (promptByteLength > MAX_DELEGATION_PROMPT_BYTES) {
     throw new RangeError(
-      `prompt must be no longer than ${MAX_DELEGATION_PROMPT_CHARS} characters`,
+      `prompt must be no larger than ${MAX_DELEGATION_PROMPT_BYTES} bytes`,
     );
   }
   return normalizedPrompt;

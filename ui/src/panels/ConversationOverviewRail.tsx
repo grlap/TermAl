@@ -20,6 +20,7 @@ import type {
   VirtualizedConversationLayoutSnapshot,
   VirtualizedConversationViewportSnapshot,
 } from "./VirtualizedConversationMessageList";
+import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
 import type { Message } from "../types";
 
 export const CONVERSATION_OVERVIEW_MIN_MESSAGES = 80;
@@ -227,7 +228,7 @@ export function ConversationOverviewRail({
             {
               top: `${marker.mapTopPx}px`,
               "--conversation-overview-marker-color":
-                marker.color || "var(--signal-blue)",
+                normalizeConversationMarkerColor(marker.color),
             } as CSSProperties
           }
         />

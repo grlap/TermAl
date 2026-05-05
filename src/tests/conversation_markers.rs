@@ -1253,6 +1253,85 @@ fn remote_marker_delta_rejects_mismatched_marker_session_id() {
 }
 
 #[tokio::test]
+async fn marker_create_rejects_unsupported_color_values() {
+    let state = test_app_state();
+    let session_id = test_session_with_two_messages(&state);
+    let encoded_session_id = encode_uri_component(&session_id);
+    let (status, response): (StatusCode, Value) = request_json(
+        &app_router(state),
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{encoded_session_id}/markers"))
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "kind": "decision",
+                    "name": "Unsafe color",
+                    "color": "url(https://example.test/marker)",
+                    "messageId": "message-1"
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        response["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("conversation marker color")),
+        "unexpected response: {response}"
+    );
+}
+
+#[tokio::test]
+async fn marker_patch_rejects_unsupported_color_values() {
+    let state = test_app_state();
+    let session_id = test_session_with_two_messages(&state);
+    let created = state
+        .create_conversation_marker(
+            &session_id,
+            CreateConversationMarkerRequest {
+                kind: ConversationMarkerKind::Decision,
+                name: "Safe color".to_owned(),
+                body: None,
+                color: "#3b82f6".to_owned(),
+                message_id: "message-1".to_owned(),
+                end_message_id: None,
+            },
+        )
+        .expect("marker should be created");
+    let encoded_session_id = encode_uri_component(&session_id);
+    let encoded_marker_id = encode_uri_component(&created.marker.id);
+    let (status, response): (StatusCode, Value) = request_json(
+        &app_router(state),
+        Request::builder()
+            .method("PATCH")
+            .uri(format!(
+                "/api/sessions/{encoded_session_id}/markers/{encoded_marker_id}"
+            ))
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "color": "var(--signal-blue)"
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        response["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("conversation marker color")),
+        "unexpected response: {response}"
+    );
+}
+
+#[tokio::test]
 async fn marker_json_rejection_uses_api_error_envelope() {
     let state = test_app_state();
     let (status, response): (StatusCode, Value) = request_json(

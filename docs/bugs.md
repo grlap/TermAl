@@ -7,6 +7,302 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## `DeltaApplyResult.kind === "applied"` no longer guarantees a fresh sessions array
+
+**Severity:** Medium - the type contract that callers historically relied on ("applied implies new array") was silently weakened by the textReplace no-op short-circuit; only one of three production callers has been retrofitted to know about the new semantics.
+
+`ui/src/live-updates.ts:568-589, 109-122`. The new no-op path inside the `textReplace` arm of `applyDeltaToSessions` returns the original `sessions` array reference (preserving identity) when the delta's `text`/`preview`/`sessionMutationStamp`/`messageCount` all match the session. The single caller at `ui/src/app-live-state.ts:2629-2634` was updated to detect this via `result.sessions !== sessionsRef.current`, but the type definition still describes `kind: "applied"` as the "mutation happened" signal. Two other production callers (`app-live-state.ts:2736`, `:2838`) still treat any `"applied"` as material and unconditionally re-render / mark transport activity. A future caller (or a future refactor that adds an identity-preserving fast path to other delta arms) will silently reintroduce the watchdog-masking bug because the contract change lives only in the one consumer that knows about it, not in the producer's type.
+
+**Current behavior:**
+- `applyDeltaToSessions` in the `textReplace` arm can return `{ kind: "applied", sessions: input }` (identity-preserved) when nothing actually changed.
+- `DeltaApplyResult` (line 109-122) declares `applied`/`appliedNeedsResync`/`needsResync` without distinguishing material apply from no-op.
+- The same-revision-replayable branch in `app-live-state.ts:2629` reads `result.sessions !== sessionsRef.current` to gate transport-activity / watchdog marking; other callers don't.
+
+**Proposal:**
+- Encode the no-op signal at the type level: introduce a `kind: "appliedNoOp"` variant (or `materialApply: boolean` flag) so the contract is explicit, and update every consumer's exhaustive switch / branch.
+- Alternatively (lower-friction): add a JSDoc note on `DeltaApplyResult` documenting the identity-preservation invariant, plus paired comments at every "applied" return site so a future maintainer who adds a similar short-circuit knows to keep the consumers' identity-equality check in sync.
+
+## Same-revision-replayable no-op short-circuit covers only `textReplace`, leaving `messageUpdated` / `commandUpdate` / `parallelAgentsUpdate` watchdog-maskable
+
+**Severity:** Medium - the watchdog-mask fix landed for textReplace but not for the other replayable session-delta types; a server re-emitting an identical-content `commandUpdate` (or any non-textReplace replayable delta) at the same revision still resets the watchdog.
+
+`ui/src/live-updates.ts:568-589` (textReplace short-circuit) versus `messageUpdated` (line 432), `commandUpdate` (line 613), `parallelAgentsUpdate` (line 672), `conversationMarkerCreated/Updated/Deleted` (lines 726, 750). `isSameRevisionReplayableSessionDelta` (line 211) excludes only `textDelta`, so all of the above flow through the same `revisionAction === "ignore"` + replayable branch in `app-live-state.ts:2629`. They unconditionally call `replaceSession`, producing a fresh `sessions` array reference even when content matches. The call site's `result.sessions !== sessionsRef.current` check classifies them as material applies, marks `markLiveTransportActivity` + `markLiveSessionResumeWatchdogBaseline`, and resets the watchdog. The bug fixed for `textReplace` is still present for the other delta types.
+
+**Current behavior:**
+- The textReplace path correctly preserves array identity on no-op.
+- All other replayable session-delta arms produce a fresh `sessions` array regardless of content equality.
+- The watchdog still gets masked when the server re-emits an identical-content `commandUpdate` / `messageUpdated` / `parallelAgentsUpdate` at the same revision.
+
+**Proposal:**
+- Extract a shared helper (e.g., `isContentIdenticalSessionDelta(session, delta)`) that all replayable arms can short-circuit on, OR move the equality detection into the call site (deep-compare relevant fields of the affected session pre/post). The shared helper option is cleaner; the call-site option avoids touching every reducer arm but is more expensive at runtime.
+- Add parallel watchdog-mask tests in `App.live-state.deltas.test.tsx` for `commandUpdate`, `messageUpdated`, `parallelAgentsUpdate` mirroring the existing textReplace test at line 2976.
+
+## Same-revision unknown-session resync removed without an explicit protocol-contract reference
+
+**Severity:** Medium - the new fall-through trades a bounded `/api/state` resync for a "next state event will reconcile" assumption; the implicit backend contract that justifies the change isn't documented anywhere, and no test pins the backstop reconciliation path.
+
+`ui/src/app-live-state.ts:2666-2687`. The previous behavior fired `requestStateResync({forceAdoptEqualOrNewerRevision})` + `startSessionHydration(delta.sessionId)` when a same-revision delta arrived for a session the client didn't know about. The new fall-through skips both. The justifying comment claims "the next authoritative state event will reconcile any real divergence" — but this rests on an implicit backend contract that "session creation always advances the revision counter" (currently true: see `src/sse_broadcast.rs` and `src/remote_create_proxies.rs:198-207` which suppress no-change `SessionCreated` deltas). Neither `docs/architecture.md` nor any test pins this contract. A future backend change that emits a same-revision delta for a genuinely new session (e.g., a delegated child session, a remote bridge re-emission, a backfill flow) would silently leave the client out-of-sync until something else triggers reconciliation.
+
+**Current behavior:**
+- Same-revision delta with `kind: "needsResync"` (unknown sessionId) falls through to the generic ignored-delta confirmation block.
+- No `/api/state` resync is fired.
+- The backstop reconciliation path (the next genuine state event or watchdog tick) is not covered by any test for the genuine-divergence case.
+
+**Proposal:**
+- Add a one-line protocol-contract note to `docs/architecture.md` §"Real-time Updates" — "session creation always advances the revision counter; same-revision deltas only target sessions the client already knows about" — and cross-link from the comment block at `app-live-state.ts:2666-2687`.
+- Add a coverage test that simulates a genuinely-new same-revision session (rare but worth pinning) and asserts the next state event reconciles the divergence within a bounded window.
+
+## Remote marker ingestion bypasses the hex-only color validator
+
+**Severity:** Medium - remote marker snapshots and deltas can still persist and rebroadcast invalid CSS-like color values even though local marker routes reject them.
+
+`src/remote_routes.rs:2008`. Local create/patch paths normalize marker colors through the backend validator, but remote marker localization assigns the incoming `marker.color` directly after only rewriting the `session_id`. The same concern applies to remote marker created/updated delta ingestion: a remote payload can carry `url(...)`, `var(...)`, or other unsupported strings into local state and SSE broadcasts.
+
+**Current behavior:**
+- Local marker create/update rejects unsupported color values.
+- Remote full-session localization and marker deltas store remote marker colors unchanged.
+- Invalid remote marker colors can enter persisted/client-visible state despite the new local-route tests.
+
+**Proposal:**
+- Run remote marker colors through the same validator/normalizer used by local marker routes.
+- Reject bad remote payloads as bad gateway, or skip/log invalid remote markers consistently.
+- Add remote snapshot and remote delta tests with invalid marker colors.
+
+## `spawn_delegation` still returns the full child session
+
+**Severity:** Medium - redacting the returned delegation summary does not fully protect the command surface because `childSession` still carries prompt-bearing fields.
+
+`ui/src/delegation-commands.ts:192-197`. The command now returns `delegation: DelegationSummary`, but it still returns `childSession: response.childSession`. A full `Session` can include `workdir`, messages, pending prompts, and the generated delegation prompt, which includes the original task and resolved working directory.
+
+**Current behavior:**
+- `spawn_delegation` returns a redacted delegation summary.
+- The same result still includes the full child session object.
+- MCP/tool callers can receive fields that the summary redaction was meant to avoid exposing.
+
+**Proposal:**
+- Return a minimal child-session summary from wrapper-facing command results.
+- Or split internal UI command results from MCP/public wrapper command results.
+- Add coverage proving spawn results do not expose `childSession.messages`, `workdir`, or prompt-bearing fields.
+
+## Status-fetch error redaction misses common secret formats
+
+**Severity:** Medium - wait error packets can still expose credentials when the blocklist does not recognize a secret-bearing message.
+
+`ui/src/delegation-commands.ts:37-38`. `safeDelegationStatusFetchMessage` relies on a sensitive-detail regex and returns the original `ApiRequestError.message` when the pattern misses. Common strings such as `Authorization: Bearer ...`, `OPENAI_API_KEY=...`, raw token prefixes, UNC paths, or home-directory paths can evade the current pattern and be surfaced through `WaitDelegationErrorPacket.message`.
+
+**Current behavior:**
+- Some token/path/url shapes are redacted to a generic message.
+- Other common secret formats can pass through unchanged.
+- Custom transports can construct `ApiRequestError` messages with sensitive text that the command packet returns to callers.
+
+**Proposal:**
+- Prefer an allowlist of safe status-fetch messages and generic output by default.
+- If regex redaction remains, expand coverage for bearer tokens, prefixed env vars, raw token prefixes, UNC paths, and home-directory variants.
+
+## `conversation-marker-colors.ts` lacks header comment and module-placement rationale
+
+**Severity:** Low - the new module is consumed by five callers but ships without the CLAUDE.md split-file convention header.
+
+`ui/src/conversation-marker-colors.ts:1-15`. CLAUDE.md requires "(1) what it owns, (2) what it deliberately does not own, (3) the file it was split out of (or new-module rationale)". Both touched companions in this round (`panels/conversation-markers.tsx`, `delegation-commands.ts`) follow that pattern; this new module does not. Five call sites (`ConversationOverviewRail.tsx`, `panels/conversation-markers.tsx`, `app-session-actions.ts`, `session-reconcile.ts`, plus the test) depend on the contract: hex-only allow-list, `#3b82f6` fallback, mirrors backend validator. None of that is documented at the source. Module placement (`ui/src/` top-level vs `ui/src/panels/`) is correct (callers span panels/ and non-panels) but the rationale is implicit.
+
+**Current behavior:**
+- The new module has no file-level header.
+- Top-level placement vs `panels/` is undocumented.
+- Callers depend on the implicit "hex-only, with default fallback" contract.
+
+**Proposal:**
+- Add a 4-6 line header explaining ownership ("hex-color allow-list + default for marker chip / overview-rail CSS custom properties; mirrors the server-side validator in `src/session_markers.rs:560-565`"), what it does not own (server persistence rejection, cross-marker color comparison policy), and the new-module rationale + top-level placement reason.
+
+## `MAX_DELEGATION_PROMPT_BYTES` and other delegation limits duplicated from backend without parity enforcement
+
+**Severity:** Low - the round-44 prompt-cap divergence (UI 256k chars vs backend 64k bytes) could silently re-emerge if either side drifts.
+
+`ui/src/delegation-commands.ts:34-37`. `MAX_DELEGATION_PROMPT_BYTES = 64 * 1024`, `MIN_DELEGATION_WAIT_INTERVAL_MS = 500`, `MAX_DELEGATION_WAIT_IDS = 10`, `MAX_DELEGATION_WAIT_TIMEOUT_MS = 30 * 60 * 1000` are duplicated from `src/delegations.rs:9` (and adjacent constants). The new test pins the UI-side numeric values (`expect(MAX_DELEGATION_PROMPT_BYTES).toBe(64 * 1024)`) but no mechanism enforces backend parity. A backend-side change would silently re-introduce divergence.
+
+**Current behavior:**
+- UI constants are pinned by tests but only against their own literal values.
+- Backend constants in `src/delegations.rs` have separate definitions with no cross-reference.
+- A change on either side passes both sides' tests.
+
+**Proposal:**
+- Add cross-referencing comments at both definitions (`// keep in sync with src/delegations.rs:9`).
+- Or expose the limits via a backend discovery endpoint and have the UI mirror the served value at startup (eliminates duplication entirely).
+- Add a parity test if either side becomes critical.
+
+## `delegation-commands.ts` size growth lacks a tracking entry
+
+**Severity:** Low - the file is at 932 lines (below the §9 ~1500-line threshold) but growing without the per-cluster tracking that sibling files have.
+
+`ui/src/delegation-commands.ts`. Started at ~360 lines at round 41, grew to ~700 at round 43, ~810 at round 44, now 932 after this round (+~194 net). Two new concern clusters added this round: error-packet sanitizer (`safeDelegationStatusFetchMessage` + `SENSITIVE_ERROR_DETAIL_PATTERN`) and partial-state preservation (`applyCurrentInstanceStatusBatchResponses`, `singleServerInstanceId`, `newestStatusMetadata`). No current bugs.md tracking entry for this file's size, unlike `app-live-state.ts` and `app-session-actions.ts` which have explicit "past §9 threshold" entries. Two natural extraction boundaries visible: `delegation-error-packets.ts` (sanitizer + regex + packet builders) and `delegation-wait-loop.ts` (scheduling + batch deadline algebra).
+
+**Current behavior:**
+- File hosts spawn validation, transport-id safety, wait-loop scheduling, batched fetch deadline, partial-state preservation, error-message redaction.
+- No tracked size entry.
+- Each new round adds ~150-200 net lines.
+
+**Proposal:**
+- Add a Phase-2 tracking entry to `docs/bugs.md` matching the existing template: cite current line count, the specific clusters that have grown, and the candidate extraction boundary names.
+- Defer extraction until either the §9 threshold is breached or the next material cluster lands.
+
+## `useLayoutEffect` calling `ensureMessageSlotCacheForCurrentSession()` is now redundant in `AgentSessionPanel.tsx`
+
+**Severity:** Low - dead code that confuses future readers; functional correctness is unchanged.
+
+`ui/src/panels/AgentSessionPanel.tsx:683-685`. Now that every read site (`jumpToMarker` line 728, `handleConversationItemMount`) routes through `ensureMessageSlotCacheForCurrentSession()` and the helper lazily resets the cache when `messageSlotNodesSessionIdRef.current !== session.id`, the layout effect's eager `ensureMessageSlotCacheForCurrentSession()` call has no observable effect. It only mattered before this round when `jumpToMarker` read `messageSlotNodesRef.current` directly — that path was closed by this round's fix.
+
+**Current behavior:**
+- The `useLayoutEffect` calls the helper for its side effect.
+- Every read site now self-corrects via the helper.
+- The layout effect provides no additional safety.
+
+**Proposal:**
+- Remove the `useLayoutEffect` (every read site self-corrects).
+- Or add a one-line comment explaining it serves as eager initialization for the next-render baseline (debatable value).
+
+## Backend marker color rejection tests cover only 2 dangerous inputs and use brittle substring assertions
+
+**Severity:** Low - the tests pin the contract for `url(...)` and `var(...)` but don't cover the broader attack surface the validator handles.
+
+`src/tests/conversation_markers.rs:1252-1331`. The validator at `src/session_markers.rs:560-565` is a strict allow-list (`#` prefix + 3/4/6/8 hex digits), so structurally `expression(...)`, `linear-gradient(...)`, `<script>`, named colors (`red`, `transparent`), CSS escapes (`\75 rl(...)`), JS injection attempts, malformed hex with non-hex digits, odd-length hex, empty / whitespace-only are all rejected. Only `url(...)` and `var(...)` are pinned. Assertions check `error.contains("conversation marker color")` (substring) — brittle to wording changes in either direction.
+
+**Current behavior:**
+- Two dangerous inputs pinned (POST: `url(...)`, PATCH: `var(...)`).
+- Substring assertion: `error.contains("conversation marker color")`.
+- A future validator relaxation (e.g., accepting named colors) would not regress the tests because none of those inputs are tested.
+- A future error wording change ("marker color must be a hex value") would silently pass even though the contract changed.
+
+**Proposal:**
+- Convert to a parameterized loop covering broader attack surface: `expression(...)`, `<script>`, `linear-gradient(...)`, `red`, `transparent`, `#xyz`, `#12345`, `#1234567`, empty.
+- Pin the full literal error message (`assert_eq!`) so wording drift fails loudly.
+- Or extract the message as a `pub(crate) const` and reference both in handler and test.
+
+## `conversation-marker-colors.test.ts` skips boundary-length and dirty-input cases
+
+**Severity:** Low - 2 `it()` blocks across 8 inputs; a future regex relaxation to `{3,8}` would still pass.
+
+`ui/src/conversation-marker-colors.test.ts:8-30`. The regex enforces 3, 4, 6, or 8 hex digits. The test pins one too-short case (`#12`) and the canonical happy paths but never asserts that 5 (`#12345`) and 7 (`#1234567`) are rejected. Only one whitespace case (leading + trailing) on lowercase 3-digit input. Embedded-newline case absent.
+
+**Current behavior:**
+- Boundary lengths 5 and 7 hex digits not exercised.
+- Uppercase-with-leading-whitespace not exercised.
+- Embedded-whitespace not exercised.
+
+**Proposal:**
+- Convert to `it.each(...)` covering: `#12345` rejected, `#1234567` rejected, `"  #ABCDEF  "` normalized, `"\n#abcdef\n"` normalized.
+- Add explicit `#FFFFFFFF` test alongside `#fff` to pin both the 8-digit alpha path and the 3-digit short form.
+
+## `session-reconcile.test.ts` lacks a sibling test for genuine color changes producing a fresh array
+
+**Severity:** Low - new test pins identity preservation but a regression that always returned the default would silently drop real edits.
+
+`ui/src/session-reconcile.test.ts:182-233`. The new test asserts `merged === previous` when only color casing differs (both inputs normalize to the same value by design). A regression where `normalizeConversationMarkerColor` always returned the default fallback would still produce `merged === previous` — both sides would normalize to `#3b82f6`. The contract being tested is "case-insensitive comparison preserves identity"; the contract NOT being tested is "semantic color changes break identity".
+
+**Current behavior:**
+- Identity-preservation test exists.
+- No test asserts a real color edit produces a fresh array.
+
+**Proposal:**
+- Add a sibling test where `previous.markers[0].color === "#3b82f6"` and `next.markers[0].color === "#ef4444"`, asserting `merged !== previous` and `merged[0].markers[0].color === "#ef4444"`.
+- Pair with an `url(...) → #3b82f6` case (default fallback adopted), so both legs of normalize-then-compare are pinned.
+
+## "prioritizes fetch failure" delegation test uses fragile optional-chain dispatch that can hang silently
+
+**Severity:** Low - a deterministic-dispatch regression would hang the test instead of failing loudly.
+
+`ui/src/delegation-commands.test.ts:958-1040`. `rejectThirdSecondBatch?.()` swallows the assignment-failure case — if the closure was never assigned (timing regression where `vi.advanceTimersByTimeAsync(MIN)` + single `Promise.resolve()` doesn't flush enough microtasks to dispatch the third fetch), the test hangs on the wait promise. Optional chaining masks the diagnostic.
+
+**Current behavior:**
+- `rejectThirdSecondBatch?.()` proceeds silently if undefined.
+- Single `await Promise.resolve()` may not flush enough microtasks under future per-id throttling or sequential awaits.
+- A regression manifests as a hang, not a failure.
+
+**Proposal:**
+- Replace with `expect(rejectThirdSecondBatch).toBeDefined(); rejectThirdSecondBatch!(...)` so a regression fails loudly.
+- Flush more aggressively via `vi.runOnlyPendingTimersAsync()` or repeated `Promise.resolve()` to ensure deterministic dispatch.
+
+## "redacts sensitive ApiRequestError" test covers only 2 of 4 sensitive-pattern arms
+
+**Severity:** Low - a regex consolidation that accidentally drops the `https?://` or `/users|home|tmp|var|etc` arm would not regress this test.
+
+`ui/src/delegation-commands.test.ts:1071-1104`. Input `"token=secret C:/internal/backend.log"` matches arms 1 (`token=`) and 2 (`C:/`) of `SENSITIVE_ERROR_DETAIL_PATTERN`, leaving arms 3 (URL pattern) and 4 (POSIX root paths) untested.
+
+**Current behavior:**
+- Single test input covers two arms.
+- Arms 3 and 4 untested.
+- A regex refactor that consolidated and dropped one arm would not regress.
+
+**Proposal:**
+- Convert to `it.each(...)` with one input per arm: `"failed at https://internal.host/log"`, `"could not write /var/log/file"`, `"see /home/admin/.config"`, plus the existing two-arm hybrid.
+- Add a benign-message negative case (`"timed out after 5s"`) confirming unchanged passthrough.
+
+## `expectCapturedAbortSignal` only narrows nullability, not AbortSignal shape
+
+**Severity:** Low - the typed assertion replaces the `as unknown as` cast but doesn't validate the runtime shape.
+
+`ui/src/delegation-commands.test.ts:124-128`. A regression where the transport was passed an arbitrary object as `signal` would not be caught — the assertion narrows to `AbortSignal` and `expect(signal.aborted).toBe(true)` would access `undefined`, fail with a misleading message, but not at the assertion boundary.
+
+**Current behavior:**
+- `expectCapturedAbortSignal` asserts `signal !== null` and narrows the type via `asserts`.
+- It does not validate that the value implements `.aborted`, `.addEventListener`, etc.
+
+**Proposal:**
+- Add `expect(signal).toBeInstanceOf(AbortSignal)` inside the helper.
+
+## `expectRedactedDelegationSummary` `toHaveProperty` accepts `undefined` as present
+
+**Severity:** Low - a future refactor that conditionally omits an optional field would silently break the helper's presence assertion.
+
+`ui/src/delegation-commands.test.ts:98-122`. The helper uses `toMatchObject` for required fields and `toHaveProperty` for nullable fields (`model`, `startedAt`, `completedAt`). `toHaveProperty` returns true for `{ field: undefined }` if the property was explicitly assigned. Today `delegationSummary()` spreads `record.model` directly (correct shape). A future refactor like `if (record.model) summary.model = record.model` would silently break — the property would no longer be assigned at all but `toHaveProperty("model")` should fail.
+
+**Current behavior:**
+- `toHaveProperty("model")` accepts `{ model: undefined }`.
+- Test passes for both `{ model: "x" }`, `{ model: null }`, and `{ model: undefined }`.
+
+**Proposal:**
+- Use `expect(delegation).toHaveProperty("model", expect.toBeOneOf([expect.any(String), null]))` to pin presence + type.
+
+## Marker color sanitization tests use single dangerous-input case in two pin locations
+
+**Severity:** Low - both `ConversationOverviewRail.test.tsx` and `panels/conversation-markers.test.ts` test only `url(...)`.
+
+A regression where the normalizer was inadvertently bypassed for some dangerous values (e.g., a refactor that only handled `var(...)` but not `url(...)`) would only be caught for one path. Mirror the backend test concern: broader input coverage would surface bypasses for any single dangerous shape.
+
+**Current behavior:**
+- Both pin tests use `url(https://example.test/marker)`.
+- `var(--signal-blue)` and other dangerous shapes not exercised at the render boundary.
+
+**Proposal:**
+- Convert both pin/chip tests to `it.each([["url", "url(https://example.test/x)"], ["var", "var(--signal-blue)"], ["named", "red"], ["empty", ""]])`.
+
+## "continues polling after per-batch timeout" test doesn't assert observable timing characteristics
+
+**Severity:** Low - the deadline-starvation fix is pinned by call count but not by the per-batch timeout boundary.
+
+`ui/src/delegation-commands.test.ts:837-877`. The fix limits `batchTimeoutMs = Math.min(pollIntervalMs * 2, remainingMs)`. The test pins call count = 2 but doesn't observe that the per-batch timeout actually fired at `pollIntervalMs * 2` (vs `pollIntervalMs * 5 = remainingMs`). A regression that silently set `batchTimeoutMs = remainingMs` would still pass — the second resolved fetch returns synchronously regardless of the timeout window.
+
+**Current behavior:**
+- Test pins `expect(transport.fetchDelegationStatus).toHaveBeenCalledTimes(2)`.
+- Doesn't pin the timing boundary at which the per-batch deadline fires.
+
+**Proposal:**
+- Capture `Date.now()` between the abort signal firing on call #1 and resolution of call #2 to pin the per-batch deadline at the expected boundary.
+- Or assert outstanding-timer counts via `vi.getTimerCount()` between phases.
+
+## `delta.messageCount === session.messageCount` asymmetric when `session.messageCount` is `null`/`undefined`
+
+**Severity:** Low - a missed-optimization corner case in the textReplace no-op short-circuit; the conservative fall-through is safe but the asymmetry will mislead a future polarity-flip refactor.
+
+`ui/src/live-updates.ts:586`. The strict-equality check `delta.messageCount === session.messageCount` against a `number | null | undefined` field means a session whose `messageCount` is `undefined` (legacy session, mid-load, or a metadata-only summary that hasn't been fully populated) never satisfies the predicate even when `delta.messageCount` reflects the same effective state. Net effect today: the short-circuit is conservatively skipped (a missed optimization, not a correctness bug). The risk is that a future polarity-flip refactor — e.g., "if either side is nullish, treat as match" — would break the no-op detection asymmetrically across session ages.
+
+**Current behavior:**
+- `delta.messageCount` is always a `number` (per the wire shape).
+- `session.messageCount` may be `null` / `undefined` for legacy or partially-loaded sessions.
+- The strict-equality check fails for these sessions even when content is unchanged, so the short-circuit doesn't fire.
+
+**Proposal:**
+- Add an inline comment noting that the check is intentionally conservative when `session.messageCount` is nullish, OR
+- Normalize both sides to a non-nullish baseline (`(session.messageCount ?? null) === (delta.messageCount ?? null)`) to make the symmetry explicit.
+
 ## Telegram relay loses per-message forwarding progress on mid-batch send error
 
 **Severity:** High - a chunk send failure mid-batch silently discards in-memory state mutations, producing duplicate messages on the next poll plus unrecoverable state until a successful poll iteration commits.
@@ -104,6 +400,65 @@ the Implementation Tasks section.
 - Add a test mocking `mermaid.render` to return a syntax-error SVG; assert `MermaidDiagram` shows the source-as-code fallback.
 - Tighten the `class="error-icon"` check to require it alongside `aria-roledescription="error"` (or scope to `<g class="error-icon">` inside `<svg aria-roledescription="error">`).
 
+## Mermaid temporary render container cleanup has no regression coverage
+
+**Severity:** Low - Mermaid can leave temporary `#d${diagramId}` or `#${diagramId}` nodes in `document.body`, and the cleanup path is not pinned.
+
+`ui/src/mermaid-render.ts:402`. The render wrapper now removes Mermaid's temporary DOM container after render failure/error visualization handling. Existing tests cover fallback rendering but do not simulate Mermaid appending those body nodes and then failing, so a future refactor could drop the cleanup while the visible fallback still passes.
+
+**Current behavior:**
+- Mermaid temp-wrapper cleanup is implemented in the render path.
+- No test appends the temp wrapper/SVG and asserts cleanup after rejection or error-SVG conversion.
+- Orphaned body nodes could accumulate without a failing regression test.
+
+**Proposal:**
+- Add a focused `renderTermalMermaidDiagram` test that mocks `mermaid.render` to append temp nodes, then throws or returns an error visualization.
+- Assert the temp wrapper/SVG is removed from `document.body` afterward.
+
+## Marker color fallback normalization can hide corrupt local marker state during reconciliation
+
+**Severity:** Low - authoritative marker snapshots can be treated as equal to locally corrupt raw marker colors.
+
+`ui/src/session-reconcile.ts:263-264`. Reconciliation compares marker colors with `normalizeConversationMarkerColor`, which falls back unsupported values to a display-safe default. That is correct at render boundaries, but using display fallback equality for state reconciliation can preserve a raw local `url(...)`/invalid color when the authoritative snapshot carries a canonical safe color that normalizes to the same fallback.
+
+**Current behavior:**
+- Marker color equality in reconciliation uses display normalization.
+- Invalid local raw color can compare equal to a canonical authoritative fallback color.
+- The local corrupt value can remain in client state instead of being replaced by authoritative wire data.
+
+**Proposal:**
+- Keep raw/canonical marker equality in reconciliation, or normalize marker colors once at ingestion before storing them in session state.
+- Reserve fallback normalization for render/display-only boundaries.
+
+## Marker stale-response recovery lacks normalized-color branch coverage
+
+**Severity:** Low - the action recovery guard changed behavior for color-normalized marker equality, but the exact branch is not directly tested.
+
+`ui/src/app-session-actions.ts:345-346`. `conversationMarkerExactlyMatches` now normalizes marker colors before comparing stale same-instance responses. Utility and component tests cover marker color normalization, but there is no `app-session-actions` test proving a stale response whose only difference is color case/normalization is accepted without scheduling recovery resync.
+
+**Current behavior:**
+- Stale marker response matching treats normalized color-equivalent markers as exact matches.
+- The action recovery branch is not covered with casing/normalization-only marker color differences.
+
+**Proposal:**
+- Add a stale same-instance marker success/update test where only color casing or normalization differs.
+- Assert no recovery resync is requested.
+
+## Delegation command contract docs still describe full spawn records
+
+**Severity:** Note - the design brief says `spawn_delegation` returns `DelegationRecord`, but implementation now returns a redacted summary.
+
+`docs/features/agent-delegation-sessions.md:222` still documents the internal command contract as `spawn_delegation(...) -> DelegationRecord`. The current command result redacts `delegation` to `DelegationSummary`, so wrapper authors following the brief may expect `prompt`, `cwd`, and full result fields that are intentionally absent.
+
+**Current behavior:**
+- The feature doc advertises a full `DelegationRecord` return.
+- Implementation returns summary-safe delegation data.
+- Full details are available only through explicit result/session reads.
+
+**Proposal:**
+- Update the feature brief to describe the redacted spawn result.
+- Point callers to `get_delegation_result` or explicit session reads for full details.
+
 ## App.live-state.reconnect "fallback-only-hidden" test phases 1-3 are tautological
 
 **Severity:** Low - the "keeps fallback-only assistant text hidden until a fresh SSE state confirms it" test does not put the assistant message in the fallback or resync payload it claims to gate on; only Phase 4 has teeth.
@@ -120,21 +475,6 @@ the Implementation Tasks section.
 **Proposal:**
 - Add an unconfirmed assistant message to the `_sseFallback` payload in Phase 2 (and/or to the resolved resync state in Phase 3); assert it remains hidden.
 - Phase 4 still confirms visibility once a fresh non-fallback SSE state arrives.
-
-## `times out at the deadline while a status fetch is still in flight` test conflates poll-interval with timeout
-
-**Severity:** Low - the deadline-first ordering invariant is not actually pinned by the test; a future reorder of the deadline/poll-interval check would not regress visibly.
-
-`ui/src/delegation-commands.test.ts:751-797`. The test sets `pollIntervalMs == timeoutMs == MIN_DELEGATION_WAIT_INTERVAL_MS` (500ms) and advances by exactly that amount. With these equal values the deadline triggers in the same window as the first poll-interval check, so the test cannot distinguish "deadline beat poll interval" from "poll interval naturally expired". The previously-tracked bug was specifically about the wait blocking past `timeoutMs` when a status request stalls; pinning the deadline-first ordering requires `timeoutMs > pollIntervalMs`.
-
-**Current behavior:**
-- `pollIntervalMs == timeoutMs == MIN_DELEGATION_WAIT_INTERVAL_MS`.
-- Single timer advance equals both values.
-- A reorder of the deadline check after `pollIntervalMs` would still appear to pass.
-
-**Proposal:**
-- Set `pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS`, `timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 2 - 1` so the deadline must fire mid-stall before the next poll boundary.
-- Or capture `Date.now()` before/after to assert the wait returned closer to `timeoutMs` than to `pollIntervalMs * 2`.
 
 ## Telegram relay first-touch chat binding gives effective shell access if the bot token leaks
 
@@ -189,7 +529,7 @@ the Implementation Tasks section.
 
 **Severity:** Medium - any linked chat (or any chat that captured the binding via the first-touch hazard above) can submit prompts up to the 10 MB Axum body limit straight into the agent.
 
-`src/telegram.rs:407-416, 605, 714`. `handle_telegram_message` only checks `is_empty()` before calling `forward_telegram_text_to_project`, which forwards verbatim through `termal.send_session_message`. The new MCP-style delegation surface enforces `MAX_DELEGATION_PROMPT_CHARS = 256 * 1024` and rejects oversize prompts; the Telegram path is the equivalent escalation channel and ships without the same guard.
+`src/telegram.rs:407-416, 605, 714`. `handle_telegram_message` only checks `is_empty()` before calling `forward_telegram_text_to_project`, which forwards verbatim through `termal.send_session_message`. The new MCP-style delegation surface enforces `MAX_DELEGATION_PROMPT_BYTES = 64 * 1024` and rejects oversize prompts by UTF-8 byte length; the Telegram path is the equivalent escalation channel and ships without the same guard.
 
 **Current behavior:**
 - Telegram payloads of any size below the Axum 10 MB body limit are forwarded unchanged.
@@ -197,7 +537,7 @@ the Implementation Tasks section.
 - No per-minute prompt-rate cap.
 
 **Proposal:**
-- Apply a per-message char limit (consistent with `MAX_DELEGATION_PROMPT_CHARS`) on the Telegram side and reply with a Telegram error message when exceeded.
+- Apply a per-message UTF-8 byte limit (consistent with `MAX_DELEGATION_PROMPT_BYTES`) on the Telegram side and reply with a Telegram error message when exceeded.
 - Add a per-minute / per-chat prompt-rate cap so an attacker that captured the chat binding cannot fan out N HTTP calls per second.
 
 ## Telegram relay forwards full assistant text to Telegram by default
@@ -276,92 +616,6 @@ the Implementation Tasks section.
 - Model the field as a typed enum with `#[serde(rename_all = "lowercase")]` and `#[serde(other)] Unknown`.
 - Decide the policy explicitly for the `Unknown` arm — treat it as "active" (safe but pessimistic) or trigger a refresh of the wire-projection assumptions.
 
-## UI delegation prompt cap (256k chars) does not match backend cap (64k bytes)
-
-**Severity:** Medium - prompts between 64K and 256K characters pass UI validation, then get rejected by the backend with a generic error.
-
-`ui/src/delegation-commands.ts:34` (`MAX_DELEGATION_PROMPT_CHARS = 256 * 1024`) vs `src/delegations.rs:9` (`MAX_DELEGATION_PROMPT_BYTES = 64 * 1024`). UI counts JS code units; backend counts bytes. For ASCII the UI cap is 4× the backend cap; for multi-byte content the divergence is larger. The user sees "delegation prompt must be at most 65536 bytes" instead of the friendly UI error from `normalizeDelegationPrompt`.
-
-**Current behavior:**
-- UI validation accepts up to 256K-char prompts.
-- Backend rejects anything over 64K bytes.
-- Prompts in the 64K–256K range produce a backend rejection bubble in the UI rather than the curated UI error.
-
-**Proposal:**
-- Lower the UI cap to align with the backend (`64 * 1024` chars is a guaranteed-safe ASCII upper bound; tighter for non-ASCII), or
-- Expose `MAX_DELEGATION_PROMPT_BYTES` via a discovery endpoint and have the UI mirror it.
-
-## `spawn_delegation` returns full `DelegationRecord` while status/cancel/wait return redacted `DelegationSummary`
-
-**Severity:** Medium - asymmetric command-surface contract makes a future MCP wrapper easy to misuse.
-
-`ui/src/delegation-commands.ts:79, 89` — `SpawnDelegationCommandResult.delegation: DelegationRecord` (full record with `prompt`, `cwd`, `findings`, `changedFiles`, `commandsRun`, `notes`) while `DelegationStatusCommandResult.delegation: DelegationSummary` (redacted). Tests pin the redaction for status / cancel / wait responses (`expectRedactedDelegationSummary` helper) but spawn intentionally returns the full record. For an MCP wrapper that exposes these commands to untrusted callers, the asymmetry means the wrapper must remember to redact spawn responses but trust the others — easy to get wrong.
-
-**Current behavior:**
-- `spawn_delegation` returns the full `DelegationRecord` including prompt/cwd/result.
-- `status_delegation`, `cancel_delegation`, `wait_delegations` return `DelegationSummary` (redacted).
-
-**Proposal:**
-- Return `DelegationSummary` from spawn as well (the caller already has the prompt they sent in).
-- Or: document the asymmetry on `SpawnDelegationCommandResult` so wrapper authors see it before running.
-
-## `applyStatusBatchResponses` mixed-instance error suppresses real fetch failures and drops same-instance records
-
-**Severity:** Medium - error-kind discrimination is the public surface of the wait outcome, and a fetch-failure batch with sibling instance-mismatch reports the wrong cause AND loses partial state.
-
-`ui/src/delegation-commands.ts:364-378, 660-668`. When `batch.kind === "error"` AND the partial responses also contain a `serverInstanceId !== lastServerInstanceId`, two regressions compound: (1) `applyStatusBatchResponses` returns `mixed-server-instance` instead of the real `status-fetch-failed`, masking the network-layer cause; (2) `recordsById` is not updated with same-instance responses from the failing batch — partial state from delegations that completed on the still-current instance is silently discarded. Two consumers diagnosing "why did this wait fail?" will get different stories depending on which sibling validation fired first.
-
-**Current behavior:**
-- `applyStatusBatchResponses` is called against partial-success responses BEFORE the batch-level `kind === "error"` check.
-- A mid-batch fetch failure with a sibling instance mismatch surfaces as `mixed-server-instance`.
-- Same-instance responses from the failed batch are not applied.
-
-**Proposal:**
-- When `batch.kind === "error"`, return the `status-fetch-failed` packet first.
-- Apply same-instance responses to `recordsById` BEFORE returning any sibling-validation error so partial state is preserved across the failure.
-
-## `StatusBatchResult` `as` cast bypasses discriminated-union safety
-
-**Severity:** Medium - a type assertion silences exhaustiveness checking on the wait result; future variant additions will silently compile.
-
-`ui/src/delegation-commands.ts:611`. `resolve({ ...result, responses: [...responses] } as StatusBatchResult)` defeats the variant check the discriminated-union type was designed to provide. A new `StatusBatchFinish` variant added later would also need a corresponding `StatusBatchResult` arm; the cast hides the missing wiring.
-
-**Current behavior:**
-- The spread + cast satisfies `tsc` even when the result shape diverges from any declared `StatusBatchResult` variant.
-- A future producer-side change can yield a malformed runtime result.
-
-**Proposal:**
-- Build each variant explicitly: `if (result.kind === "error") resolve({ kind: "error", error: result.error, responses: [...responses] }); else resolve({ kind: result.kind, responses: [...responses] });`
-- Or: restructure as `StatusBatchResult = StatusBatchFinish & { responses: StatusBatchResponse[] }` so the union arms compose by intersection.
-
-## `fetchStatusBatchWithDeadline` per-batch deadline starves later iterations under slow fetches
-
-**Severity:** Medium - a single slow fetch eats most of `remainingMs`, forcing the next iteration to abort almost immediately even when the wall-clock budget would have allowed real work.
-
-`ui/src/delegation-commands.ts:421` and surrounding loop. `waitMs` is computed as `min(pollIntervalMs, deadlineAt - Date.now())` and shared as both the per-batch timeout AND the overall remaining budget. A wait command that waits the maximum allowed window can return `timeout` after a single slow fetch when the caller-supplied `timeoutMs` had plenty of budget remaining.
-
-**Current behavior:**
-- All status fetches in a batch share one `controller`; one slow fetch eats `remainingMs` so the next iteration's `fetchStatusBatchWithDeadline` aborts almost immediately.
-- The wait surfaces `timeout` despite there being headroom.
-
-**Proposal:**
-- Pass a separate per-batch deadline (e.g., `min(pollIntervalMs * 2, remainingMs)`) so a slow fetch does not starve subsequent iterations.
-- Surface `timeout` only at the actual wall-clock deadline.
-
-## `statusFetchErrorPacket` forwards `ApiRequestError.message` verbatim from any source
-
-**Severity:** Medium - the redaction policy depends on every `ApiRequestError` constructor call site to sanitize ahead of time, an invariant the type does not enforce.
-
-`ui/src/delegation-commands.ts:686-702`. For an `ApiRequestError`, `.message` is forwarded to the wait error packet without sanitization. For non-`ApiRequestError` errors, the message is replaced with a redacted generic. The `request()` helper's error classification produces sanitized messages today, but custom transports (an MCP wrapper, a plugin) that construct `ApiRequestError` directly with sensitive content will leak that content through the wait packet.
-
-**Current behavior:**
-- `ApiRequestError.message` is trusted to be safe by any consumer of `WaitDelegationErrorPacket`.
-- `Error.message` from non-`ApiRequestError` is replaced with a generic redacted string.
-
-**Proposal:**
-- Sanitize unconditionally in `statusFetchErrorPacket` regardless of error class.
-- Or: document the contract that `ApiRequestError.message` MUST be pre-sanitized at construction; add a constructor invariant or a Zod-style validator.
-
 ## `preferStreamingPlainTextRender` prop name and "Three render paths" comment are stale after the unified-render refactor
 
 **Severity:** Medium - public-shaped prop semantics drift silently from a removed implementation; future readers see a name describing code that no longer exists.
@@ -376,19 +630,6 @@ the Implementation Tasks section.
 - Rename to `isStreamingAssistantTextMessage` (matching the local `isStreamingAssistantMessage` variable already used inside `MessageCardImpl`).
 - Replace the "Three possible render paths" sentence with the current single-path explanation.
 - Pure refactor, no behavior change.
-
-## `AgentSessionPanel.jumpToMarker` bypasses the cache-reset guard
-
-**Severity:** Medium - the diff moved the marker-cache reset out of render-phase ref mutation into `useLayoutEffect`, but `jumpToMarker` still reads `messageSlotNodesRef.current` directly without going through `ensureMessageSlotCacheForCurrentSession`.
-
-`ui/src/panels/AgentSessionPanel.tsx:683-685, 717-738`. Between a session-id change and the layout effect firing (e.g., a marker click handler triggered by a synchronous focus/keyboard event during the same tick that switched sessions), `jumpToMarker` can read the previous session's cached map. With React 18 concurrent rendering the layout effect can run after a paint that already included a different `session.id`. The diff's stated intent is to make the cache reset commit-phase safe; leaving one read site that bypasses the guard re-introduces the same per-session-leak shape on a narrower path.
-
-**Current behavior:**
-- Writes go through `ensureMessageSlotCacheForCurrentSession` (correct).
-- `jumpToMarker` reads `messageSlotNodesRef.current` directly.
-
-**Proposal:**
-- Have `jumpToMarker` call `ensureMessageSlotCacheForCurrentSession()` for its slot-cache lookup so the cache-reset invariant holds at every read site, not just the write site.
 
 ## CSS bubble `width: fit-content` transition causes horizontal layout reflow at turn end
 
@@ -449,20 +690,6 @@ the Implementation Tasks section.
 - Use `linkCode`, `expiresAt`, `projectId`, and other camelCase keys for REST request/response payloads.
 - Keep snake_case only for internal persisted files if needed.
 
-## Delegation feature docs still mention removed `failedChecks` output
-
-**Severity:** Low - the delegation feature brief can teach MCP/tool schema authors to expect a field the command contract no longer returns.
-
-`docs/features/agent-delegation-sessions.md:251` still lists "failed checks" as part of the delegation command output. The current `DelegationResultPacket` contract no longer returns `failedChecks`, so external wrapper documentation built from the brief would be stale.
-
-**Current behavior:**
-- The feature doc lists `failed checks` as a delegation output.
-- The command result contract omits `failedChecks`.
-- MCP/tool consumers can implement against a non-existent field.
-
-**Proposal:**
-- Remove `failed checks` from the brief, or reintroduce a server-owned field with a documented stable policy.
-
 ## Asymmetric `orchestrator_auto_dispatch_blocked` between two persist-failure rollback sites
 
 **Severity:** Medium - an Error session can remain auto-dispatch-eligible after a runtime-exit commit failure while disk and memory disagree.
@@ -478,21 +705,6 @@ the Implementation Tasks section.
 **Proposal:**
 - Either mirror the `session_lifecycle.rs` defensive set (`true`) in `turn_lifecycle.rs`, or document why the asymmetry is intentional.
 - Tighten the persist-failure tests to also pin `orchestrator_auto_dispatch_blocked`, `runtime`, `runtime_stop_in_progress`, and the "stopped/failed" message presence.
-
-## `marker.color` is written to a CSS custom property without client-side validation
-
-**Severity:** Low - React's `setProperty` for CSS variables bypasses normal style sanitization; persisted color drift could become a vector for resource interpolation.
-
-`ui/src/panels/conversation-markers.tsx:171` does `style={{"--conversation-marker-color": marker.color} as CSSProperties}`. React forwards CSS custom properties via `el.style.setProperty`, which (unlike standard style sanitization) accepts arbitrary strings. Today the variable is consumed only for chip swatch fill (browser silently drops malformed values), but if any future consumer interpolates it into `background-image: url(var(--conversation-marker-color))` the channel becomes a vector. Marker colors are persisted in `~/.termal/sessions.json` (plain editable file) and broadcast in SSE deltas — currently single-user, but the field is also part of `conversationMarkerExactlyMatches` (which compares them strictly) so a tampered color causes spurious "differs" results.
-
-**Current behavior:**
-- `marker.color` flows into a CSS custom property without an allow-list.
-- Today's CSS consumer is benign (chip fill).
-- Persisted file tampering or future cross-tenant use would pass through unchecked.
-
-**Proposal:**
-- Validate `marker.color` against a CSS hex/rgb/named-color allow-list at the persistence boundary (server) and ideally also at SSE-adoption (client).
-- Apply the same allow-list when comparing markers so a tampered color normalizes rather than driving a `false` equality result.
 
 ## Conversation overview segment cap does not bound homogeneous runs
 
@@ -1426,25 +1638,35 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `ui/src/markdown-streaming-split.test.ts` currently has zero direct coverage for `deferAllBlocks`. Cover closed pipe-table followed by prose, closed fence followed by prose, closed math followed by prose, multiple closed blocks (cut at the earliest), nested constructs, and identity behavior on inputs containing no block constructs.
 - [ ] P2: Add Mermaid error-SVG detector coverage:
   cover `isMermaidErrorVisualizationSvg` positive cases for `aria-roledescription="error"` and `class="error-icon"`, the "Syntax error in text" behavior, a valid-SVG negative case, and `renderTermalMermaidDiagram` throwing while resetting Mermaid config.
+- [ ] P2: Add Mermaid temporary DOM cleanup coverage:
+  mock `mermaid.render` so it appends `#d${diagramId}` / `#${diagramId}` nodes to `document.body`, then rejects or returns an error visualization; assert `renderTermalMermaidDiagram` removes the temporary nodes.
+- [ ] P2: Add remote marker color validation coverage:
+  cover remote full-session localization and `ConversationMarkerCreated` / `ConversationMarkerUpdated` remote deltas with invalid colors, asserting they are rejected, skipped, or normalized consistently with local marker routes.
+- [ ] P2: Add delegation spawn redaction coverage for child sessions:
+  assert wrapper-facing `spawn_delegation` results do not expose `childSession.messages`, `workdir`, pending prompts, or other prompt-bearing fields when delegation summaries are redacted.
+- [ ] P2: Expand delegation status-fetch redaction coverage:
+  cover bearer tokens, prefixed env vars such as `OPENAI_API_KEY=...`, raw token prefixes, UNC paths, and home-directory paths so `WaitDelegationErrorPacket.message` defaults to safe generic output.
+- [ ] P2: Add marker reconciliation color-integrity coverage:
+  reconcile a local marker with an invalid raw color against an authoritative safe marker and assert client state adopts the authoritative value rather than preserving the corrupt local raw value through display fallback equality.
+- [ ] P2: Add stale marker response normalized-color coverage:
+  in `app-session-actions.test.ts`, return a stale same-instance marker response whose only difference is color casing/normalization and assert the guarded recovery path accepts it without requesting a resync.
 - [ ] P1: Pin the "no remount across streaming → settled transition" claim with DOM-identity assertions:
   `ui/src/MarkdownContent.test.tsx:1456` and `ui/src/MessageCard.test.tsx:245-285` assert the rendered shape but do not assert that React preserved the same DOM nodes across the rerender. Capture a stable child DOM node (e.g., a paragraph from the settled prefix) before flipping `isStreaming` to false, then assert `container.contains(savedNode)` and reference equality after the rerender.
 - [ ] P2: Restore discrimination in `expectRenderedMarkdownTableContains`:
   `ui/src/App.live-state.deltas.test.tsx:296-315` was relaxed to accept either `.markdown-table-scroll table` or `.markdown-streaming-fragment` after `deferAllBlocks: true` shipped. The relaxation silently passes if a streaming table never settles. Split into two helpers (`expectStreamingTableFragmentContains` for active-streaming phase, `expectSettledTableContains` for after-turn-end) called at the right phases, or advance the test through whatever signal flips `isStreaming` to false before the assertion.
-- [ ] P2: Tighten the unsafe-transport-id rejection test:
-  `ui/src/delegation-commands.test.ts:692-708` only covers `parent/1` and `delegation#1`. The `UNSAFE_TRANSPORT_ID_PATTERN` also blocks `?`, control characters U+0000-U+001F, and DEL U+007F. A future regex change that drops control-character handling would silently pass. Add `it.each(...)` cases for the four character categories.
-- [ ] P2: Replace `(capturedSignal as unknown as AbortSignal).aborted` with optional-chain assertion:
-  `ui/src/delegation-commands.test.ts:760-797` discards the type guard via the cast. Use `expect(capturedSignal?.aborted).toBe(true)` so a regression that fails to capture the signal fails loudly with a clear message.
-- [ ] P2: Rewrite the delegation network-error test to throw from the injected transport:
-  `ui/src/delegation-commands.test.ts:951-1001` mocks the second `fetch` with `new Error("network down")` and relies on `request()`'s error classification to produce `apiErrorKind: "backend-unavailable"`. This couples the wait-loop's error packetization to `request()`'s classification logic. Use the injected `DelegationCommandTransport` to throw an `ApiRequestError` directly with the desired shape.
 - [ ] P2: Move the Mermaid bundle-URL assertion out of the `appendChild` spy:
   `ui/src/MarkdownContent.mermaid-fallback.test.tsx:54` asserts inside the mock implementation; failure traces point at the spy rather than the test body. The post-render assertions at lines 77-78 (`expect(appendedScripts).toHaveLength(1); expect(appendedScripts[0]?.src).toBe(expectedBundleSrc);`) already pin the contract; delete the inline `expect()`.
-- [ ] P2: Add presence-of-fields assertions to `expectRedactedDelegationSummary`:
-  `ui/src/delegation-commands.test.ts` only checks for the absence of redacted fields. A regression that returned an empty `{}` for each delegation summary would still pass. Extend the helper to also assert `id`, `parentSessionId`, `childSessionId`, `mode`, `status`, `title`, `agent`, `model`, `writePolicy`, `createdAt`, `startedAt`, `completedAt` are present.
-- [ ] P2: Pin the new delegation rate-limit constants with explicit assertions:
-  `MIN_DELEGATION_WAIT_INTERVAL_MS` (raised 100→500) and `MAX_DELEGATION_WAIT_IDS` (lowered 20→10) are public-shaped contracts but no test asserts their numeric values. Add `expect(MIN_DELEGATION_WAIT_INTERVAL_MS).toBe(500); expect(MAX_DELEGATION_WAIT_IDS).toBe(10);` in `delegation-commands.test.ts` so future tweaks fail loudly.
 - [ ] P2: Add a sibling test for `agent: None` parent-agent fallback in delegations:
   `src/tests/delegations.rs:4378-4407` only asserts the positive branch (`agent: Some(Codex)` uses Codex's default model). Add a sibling positive test for the `agent: None` arm asserting the child uses the parent's agent's default model. Two tests together pin both branches of the agent-selection conditional.
 - [ ] P2: Pin the heavy-content gate is bypassed during streaming:
   `ui/src/MessageCard.test.tsx:245-284` confirms shape but does not assert `.deferred-markdown-placeholder` is absent during streaming. Add an assertion for an `isStreaming` assistant message regardless of size, and pair with a long-enough streaming message (over the heavy threshold) confirming the gate stays bypassed.
 - [ ] P2: Add a wire-projection round-trip test for `TelegramSessionFetchMessage`:
   the parallel narrow projection of `Message` in `src/telegram.rs:481-515` will silently desync if `wire_messages.rs` renames the discriminator or the `Text` variant fields — serde will deserialize into `Other` and the relay will go silent on text messages. Round-trip a representative `Message::Text` payload through `TelegramSessionFetchMessage` and assert the `Text` arm matched.
+- [ ] P2: Pin the textReplace no-op short-circuit's identity-preservation contract directly:
+  `ui/src/live-updates.test.ts` (no test today). Add a `describe("textReplace no-op short-circuit")` block asserting `expect(result.sessions).toBe(sessions)` (toBe identity, not toEqual) when the delta's `text`/`preview`/`sessionMutationStamp`/`messageCount` all match the session, plus a negative case (text differs by one character) asserting `result.sessions !== sessions`. The 3 fixed integration tests pin only end-state behavior; without a direct unit test, a future refactor of `textReplace` (e.g., always producing a fresh array for hygienic immutability) would silently break the call-site's `result.sessions !== sessionsRef.current` identity check and re-introduce the watchdog-masking regression with no test failure.
+- [ ] P2: Add boundary tests for the textReplace no-op 4-field equality predicate:
+  `ui/src/live-updates.ts:568-589` checks four equalities (`text`, derived `previewIfApplied`, derived `stampIfApplied`, `messageCount`). Add an `it.each(...)` block in `live-updates.test.ts` covering each equality being violated independently — `delta.preview` undefined vs. defined-and-different, `delta.sessionMutationStamp` undefined / older / newer, `delta.messageCount` differing while text matches — asserting `result.sessions !== sessions` for each violation, plus an all-equal case asserting identity preservation.
+- [ ] P2: Add watchdog-mask coverage for non-`textReplace` replayable session-delta types:
+  `App.live-state.deltas.test.tsx:2976` covers the textReplace flavor of "watchdog-resyncs when repeated ignored deltas arrive for an active session". Add three sibling tests using `commandUpdate`, `messageUpdated`, and `parallelAgentsUpdate` with the same active-session/no-progress setup. Each should assert the watchdog fires within `LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 3000` ms despite repeated identical-content replays. Today the no-op short-circuit only exists for `textReplace`; these tests will fail until the short-circuit is generalized (see "Same-revision-replayable no-op short-circuit covers only `textReplace`" entry above).
+- [ ] P2: Add genuine-divergence reconciliation coverage for same-revision unknown-session deltas:
+  `ui/src/app-live-state.ts:2666-2687` removed the `requestStateResync` + `startSessionHydration` for `kind: "needsResync"` at the same revision. The justifying comment relies on "the next authoritative state event will reconcile any real divergence" but no test pins this. Add a coverage test that (a) sets the client up with a session list missing `session-X`, (b) dispatches a same-revision session delta for `session-X` (where `latestStateRevisionRef.current === delta.revision`) — asserting NO immediate `/api/state` fetch, then (c) dispatches the next authoritative `state` event including `session-X` and asserts it adopts cleanly. If no backstop exists today, the test will document the gap and force a decision (re-add the resync, or add a deferred reconciliation path).

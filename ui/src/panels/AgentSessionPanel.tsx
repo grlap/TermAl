@@ -725,8 +725,9 @@ const SessionConversationPage = memo(function SessionConversationPage({
       if (jumpedWithVirtualizer) {
         return;
       }
+      const messageSlotNodes = ensureMessageSlotCacheForCurrentSession();
       (
-        messageSlotNodesRef.current.get(marker.messageId) ??
+        messageSlotNodes.get(marker.messageId) ??
         findMountedConversationMessageSlot(
           marker.messageId,
           scrollContainerRef.current ?? document,
@@ -734,7 +735,11 @@ const SessionConversationPage = memo(function SessionConversationPage({
       )
         ?.scrollIntoView?.({ block: "center", behavior: "smooth" });
     },
-    [conversationOverview.virtualizerHandleRef, scrollContainerRef],
+    [
+      conversationOverview.virtualizerHandleRef,
+      ensureMessageSlotCacheForCurrentSession,
+      scrollContainerRef,
+    ],
   );
 
   const navigateMarkerByOffset = useCallback(

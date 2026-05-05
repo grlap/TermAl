@@ -248,7 +248,6 @@ without opening the child transcript:
 - findings
 - changed files
 - commands run
-- failed checks
 - links or identifiers for diff/review artifacts
 
 Safety limits for agent-facing tools:
