@@ -45,7 +45,9 @@ import {
   MarkerPlusIcon,
   findMountedConversationMessageSlot,
   groupConversationMarkersByMessageId,
+  shouldOpenConversationMarkerContextMenu,
   sortConversationMarkersForNavigation,
+  useConversationMarkerContextMenu,
 } from "./conversation-markers";
 import {
   renderHighlightedText,
@@ -94,12 +96,6 @@ const EMPTY_PENDING_PROMPTS: readonly PendingPrompt[] = [];
 const EMPTY_CONVERSATION_MARKERS: readonly ConversationMarker[] = [];
 const NOOP_CREATE_CONVERSATION_MARKER = () => {};
 const NOOP_DELETE_CONVERSATION_MARKER = () => {};
-
-type ConversationMarkerContextMenuState = {
-  messageId: string;
-  clientX: number;
-  clientY: number;
-};
 
 type SessionSettingsField =
   | "model"
@@ -688,9 +684,21 @@ const SessionConversationPage = memo(function SessionConversationPage({
     () => sortConversationMarkersForNavigation(visibleMarkers, visibleMessages),
     [visibleMarkers, visibleMessages],
   );
+  const visibleMessageIds = useMemo(
+    () => new Set(visibleMessages.map((message) => message.id)),
+    [visibleMessages],
+  );
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
-  const [markerContextMenu, setMarkerContextMenu] =
-    useState<ConversationMarkerContextMenuState | null>(null);
+  const {
+    contextMenuNode: markerContextMenuNode,
+    openContextMenu: openMarkerContextMenu,
+  } = useConversationMarkerContextMenu({
+    markersByMessageId,
+    onCreateConversationMarker,
+    onDeleteConversationMarker,
+    sessionId: session.id,
+    visibleMessageIds,
+  });
   const messageSlotNodesRef = useRef<Map<string, HTMLElement>>(new Map());
   const messageSlotNodesSessionIdRef = useRef(session.id);
 
@@ -710,52 +718,6 @@ const SessionConversationPage = memo(function SessionConversationPage({
       setActiveMarkerId(null);
     }
   }, [activeMarkerId, visibleMarkers]);
-
-  useEffect(() => {
-    setMarkerContextMenu(null);
-  }, [session.id]);
-
-  useEffect(() => {
-    if (!markerContextMenu) {
-      return;
-    }
-    if (!visibleMessages.some((message) => message.id === markerContextMenu.messageId)) {
-      setMarkerContextMenu(null);
-    }
-  }, [markerContextMenu, visibleMessages]);
-
-  useEffect(() => {
-    if (!markerContextMenu) {
-      return;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (
-        event.target instanceof Element &&
-        event.target.closest(".conversation-marker-context-menu")
-      ) {
-        return;
-      }
-      setMarkerContextMenu(null);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setMarkerContextMenu(null);
-      }
-    };
-    const handleScroll = () => {
-      setMarkerContextMenu(null);
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("scroll", handleScroll, true);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("scroll", handleScroll, true);
-    };
-  }, [markerContextMenu]);
 
   // Re-creating this ref callback on session changes is intentional: React
   // detaches and re-attaches mounted message slots, repopulating the per-session
@@ -849,19 +811,24 @@ const SessionConversationPage = memo(function SessionConversationPage({
       }
       const canOpenMarkerMenu = message.author === "assistant";
       const handleMarkerContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
-        if (!canOpenMarkerMenu) {
+        if (
+          !canOpenMarkerMenu ||
+          !shouldOpenConversationMarkerContextMenu(event)
+        ) {
           return;
         }
         event.preventDefault();
-        setMarkerContextMenu({
+        openMarkerContextMenu({
           messageId: message.id,
           clientX: event.clientX,
           clientY: event.clientY,
+          trigger: event.currentTarget,
         });
       };
       return (
         <div
           className={`conversation-message-marker-shell${canOpenMarkerMenu ? " can-open-marker-menu" : ""}`}
+          tabIndex={canOpenMarkerMenu ? -1 : undefined}
           onContextMenu={handleMarkerContextMenu}
         >
           <div className="conversation-message-marker-toolbar">
@@ -891,6 +858,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       jumpToMarker,
       markersByMessageId,
       onCreateConversationMarker,
+      openMarkerContextMenu,
       renderMessageCard,
       session.id,
     ],
@@ -965,53 +933,6 @@ const SessionConversationPage = memo(function SessionConversationPage({
       onNavigateNext={() => navigateMarkerByOffset(1)}
     />
   ) : null;
-  const markerContextMenuMarkers = markerContextMenu
-    ? markersByMessageId.get(markerContextMenu.messageId) ?? []
-    : [];
-  const markerContextMenuNode = markerContextMenu ? (
-    <div
-      className="conversation-marker-context-menu"
-      role="menu"
-      aria-label="Conversation marker actions"
-      style={{
-        left: markerContextMenu.clientX,
-        top: markerContextMenu.clientY,
-      }}
-      onContextMenu={(event) => event.preventDefault()}
-    >
-      <button
-        type="button"
-        role="menuitem"
-        className="conversation-marker-context-menu-item"
-        onClick={() => {
-          onCreateConversationMarker(session.id, markerContextMenu.messageId);
-          setMarkerContextMenu(null);
-        }}
-      >
-        Add checkpoint marker
-      </button>
-      {markerContextMenuMarkers.length > 0 ? (
-        <>
-          <div className="conversation-marker-context-menu-separator" role="separator" />
-          {markerContextMenuMarkers.map((marker) => (
-            <button
-              key={marker.id}
-              type="button"
-              role="menuitem"
-              className="conversation-marker-context-menu-item conversation-marker-context-menu-item-danger"
-              onClick={() => {
-                onDeleteConversationMarker(session.id, marker.id);
-                setMarkerContextMenu(null);
-              }}
-            >
-              Remove {marker.name || "marker"}
-            </button>
-          ))}
-        </>
-      ) : null}
-    </div>
-  ) : null;
-
   const conversationContent = (
     <>
       {markerNavigation}
@@ -1025,7 +946,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
 
   return (
     <div className={`session-conversation-page${isActive ? " is-active" : ""}`} hidden={!isActive}>
-      {conversationOverview.shouldRender ? (
+      {conversationOverview.shouldRenderRail ? (
         <div className="conversation-with-overview">
           <div className="conversation-overview-content">
             {conversationContent}

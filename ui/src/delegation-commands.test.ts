@@ -7,6 +7,7 @@ import {
   delegationCommands,
   getDelegationResultCommand,
   getDelegationStatusCommand,
+  MAX_REVIEWER_BATCH_SIZE,
   spawnDelegationCommand,
   waitDelegationCommand,
   waitDelegationsCommand,
@@ -21,6 +22,10 @@ import {
   type WaitDelegationsResult,
 } from "./delegation-commands";
 import type { DelegationRecord, DelegationResult, Session } from "./types";
+
+type CreateDelegationTransportResponse = Awaited<
+  ReturnType<DelegationCommandTransport["createDelegation"]>
+>;
 
 function makeDelegation(
   overrides: Partial<DelegationRecord> = {},
@@ -95,6 +100,16 @@ function stubFetchResponses(...bodies: unknown[]) {
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 function expectRedactedDelegationSummary(delegation: object) {
@@ -190,10 +205,12 @@ describe("delegation command surface", () => {
     expect(MAX_DELEGATION_PROMPT_BYTES).toBe(64 * 1024);
     expect(MAX_DELEGATION_TITLE_CHARS).toBe(200);
     expect(MAX_DELEGATION_MODEL_CHARS).toBe(200);
+    expect(MAX_REVIEWER_BATCH_SIZE).toBe(4);
   });
 
   it("exports tool-style command names for MCP wrappers", () => {
     expect(delegationCommands.spawn_delegation).toBeTypeOf("function");
+    expect(delegationCommands.spawn_reviewer_batch).toBeTypeOf("function");
     expect(delegationCommands.get_delegation_status).toBeTypeOf("function");
     expect(delegationCommands.get_delegation_result).toBeTypeOf("function");
     expect(delegationCommands.cancel_delegation).toBeTypeOf("function");
@@ -381,6 +398,174 @@ describe("delegation command surface", () => {
         }),
       }),
     );
+  });
+
+  it("spawns reviewer batches in parallel and forces read-only reviewer requests", async () => {
+    const first = deferred<CreateDelegationTransportResponse>();
+    const second = deferred<CreateDelegationTransportResponse>();
+    const pending = [first.promise, second.promise];
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn((_parentSessionId, _request) => {
+        const promise = pending.shift();
+        if (!promise) {
+          throw new Error("unexpected createDelegation call");
+        }
+        return promise;
+      }),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+    const commands = createDelegationCommands(transport);
+
+    const batch = commands.spawn_reviewer_batch(" parent-1 ", [
+      {
+        prompt: "  Review React changes.  ",
+        title: " React review ",
+      },
+      {
+        prompt: "Review Rust changes.",
+        title: "Rust review",
+        mode: "worker",
+        writePolicy: { kind: "sharedWorktree", ownedPaths: ["src"] },
+      } as never,
+    ]);
+
+    await Promise.resolve();
+    expect(transport.createDelegation).toHaveBeenCalledTimes(2);
+    expect(transport.createDelegation).toHaveBeenNthCalledWith(1, "parent-1", {
+      prompt: "Review React changes.",
+      title: " React review ",
+      mode: "reviewer",
+      writePolicy: { kind: "readOnly" },
+    });
+    expect(transport.createDelegation).toHaveBeenNthCalledWith(2, "parent-1", {
+      prompt: "Review Rust changes.",
+      title: "Rust review",
+      mode: "reviewer",
+      writePolicy: { kind: "readOnly" },
+    });
+
+    second.resolve({
+      revision: 4,
+      serverInstanceId: "server-a",
+      delegation: makeDelegation({
+        id: "delegation-2",
+        childSessionId: "child-2",
+        title: "Rust review",
+      }),
+      childSession: makeSession({
+        id: "child-2",
+        name: "Rust review",
+        parentDelegationId: "delegation-2",
+      }),
+    });
+    first.resolve({
+      revision: 3,
+      serverInstanceId: "server-a",
+      delegation: makeDelegation({
+        id: "delegation-1",
+        childSessionId: "child-1",
+        title: "React review",
+      }),
+      childSession: makeSession({
+        id: "child-1",
+        name: "React review",
+        parentDelegationId: "delegation-1",
+      }),
+    });
+
+    await expect(batch).resolves.toMatchObject({
+      outcome: "completed",
+      delegationIds: ["delegation-1", "delegation-2"],
+      childSessionIds: ["child-1", "child-2"],
+      spawned: [
+        { delegationId: "delegation-1", childSessionId: "child-1" },
+        { delegationId: "delegation-2", childSessionId: "child-2" },
+      ],
+      failed: [],
+      revision: 4,
+      serverInstanceId: "server-a",
+    });
+  });
+
+  it("returns partial reviewer batch failures without hiding successful spawns", async () => {
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(async (_parentSessionId, request) => {
+        if (request.title === "Rust review") {
+          throw new Error("parent session already has 4 active delegations");
+        }
+        return {
+          revision: 3,
+          serverInstanceId: "server-a",
+          delegation: makeDelegation({
+            id: "delegation-1",
+            childSessionId: "child-1",
+            title: "React review",
+          }),
+          childSession: makeSession({
+            id: "child-1",
+            name: "React review",
+            parentDelegationId: "delegation-1",
+          }),
+        };
+      }),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).spawn_reviewer_batch("parent-1", [
+        { prompt: "Review React.", title: "React review" },
+        { prompt: "Review Rust.", title: "Rust review" },
+      ]),
+    ).resolves.toMatchObject({
+      outcome: "partial",
+      delegationIds: ["delegation-1"],
+      failed: [
+        {
+          index: 1,
+          title: "Rust review",
+          message: "parent session already has 4 active delegations",
+        },
+      ],
+      revision: 3,
+      serverInstanceId: "server-a",
+    });
+  });
+
+  it("rejects invalid reviewer batches before dispatch", async () => {
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+    const commands = createDelegationCommands(transport);
+
+    await expect(commands.spawn_reviewer_batch("parent-1", [])).rejects.toThrow(
+      /^spawn_reviewer_batch requires at least one reviewer/,
+    );
+    await expect(
+      commands.spawn_reviewer_batch(
+        "parent-1",
+        Array.from({ length: MAX_REVIEWER_BATCH_SIZE + 1 }, (_, index) => ({
+          prompt: `Review ${index + 1}.`,
+          title: `Reviewer ${index + 1}`,
+        })),
+      ),
+    ).rejects.toThrow(
+      new RegExp(
+        `^spawn_reviewer_batch accepts at most ${MAX_REVIEWER_BATCH_SIZE} reviewers`,
+      ),
+    );
+    await expect(
+      commands.spawn_reviewer_batch("parent-1", [
+        { prompt: "   ", title: "Empty prompt" },
+      ]),
+    ).rejects.toThrow(/^prompt must be non-empty/);
+    expect(transport.createDelegation).not.toHaveBeenCalled();
   });
 
   it("can run through an injected transport without browser-relative fetch", async () => {

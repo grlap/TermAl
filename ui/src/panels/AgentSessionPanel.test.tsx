@@ -643,7 +643,7 @@ describe("AgentSessionPanel conversation caching", () => {
     );
   });
 
-  it("adds and removes message markers from the assistant response context menu", () => {
+  it("adds and removes message markers from the assistant response context menu", async () => {
     const onCreateConversationMarker = vi.fn();
     const onDeleteConversationMarker = vi.fn();
     const activeSession = makeSession("session-1", {
@@ -669,11 +669,41 @@ describe("AgentSessionPanel conversation caching", () => {
     ).not.toBeInTheDocument();
 
     fireEvent.contextMenu(screen.getByText("message-2"));
+    const assistantShell = screen
+      .getByText("message-2")
+      .closest(".conversation-message-marker-shell") as HTMLElement;
     const addMenu = screen.getByRole("menu", {
       name: "Conversation marker actions",
     });
+    const addMenuItem = within(addMenu).getByRole("menuitem", {
+      name: "Add checkpoint marker",
+    });
+    await waitFor(() => {
+      expect(addMenuItem).toHaveFocus();
+    });
+    fireEvent.scroll(window);
+    expect(addMenu).toBeInTheDocument();
+    fireEvent.keyDown(addMenuItem, { key: "ArrowDown" });
+    expect(
+      within(addMenu).getByRole("menuitem", { name: "Remove Review point" }),
+    ).toHaveFocus();
+    fireEvent.keyDown(
+      within(addMenu).getByRole("menuitem", { name: "Remove Review point" }),
+      { key: "Escape" },
+    );
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(assistantShell).toHaveFocus();
+    });
+
+    fireEvent.contextMenu(screen.getByText("message-2"));
+    const reopenedAddMenu = screen.getByRole("menu", {
+      name: "Conversation marker actions",
+    });
     fireEvent.click(
-      within(addMenu).getByRole("menuitem", { name: "Add checkpoint marker" }),
+      within(reopenedAddMenu).getByRole("menuitem", { name: "Add checkpoint marker" }),
     );
 
     expect(onCreateConversationMarker).toHaveBeenCalledWith(
@@ -692,6 +722,66 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(onDeleteConversationMarker).toHaveBeenCalledWith(
       "session-1",
       "marker-1",
+    );
+  });
+
+  it("preserves native context menu behavior for selected text, links, and code", () => {
+    const onCreateConversationMarker = vi.fn();
+    const activeSession = makeSession("session-1", {
+      messages: [
+        {
+          author: "assistant",
+          id: "message-1",
+          text: "Assistant output",
+          timestamp: "10:00",
+          type: "text",
+        },
+      ],
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      onCreateConversationMarker,
+      renderMessageCard: () => (
+        <article className="message-card">
+          <a href="https://example.test">native link</a>
+          <code>native code</code>
+          <span>plain assistant text</span>
+        </article>
+      ),
+    });
+
+    fireEvent.contextMenu(screen.getByText("native link"));
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByText("native code"));
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+
+    const plainText = screen.getByText("plain assistant text");
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(plainText);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    fireEvent.contextMenu(plainText);
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+
+    selection?.removeAllRanges();
+    fireEvent.contextMenu(plainText);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+
+    expect(onCreateConversationMarker).toHaveBeenCalledWith(
+      "session-1",
+      "message-1",
     );
   });
 
@@ -1266,7 +1356,7 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(screen.getByText(activeSession.messages[0]?.id ?? "")).toBeInTheDocument();
   });
 
-  it("renders a conversation overview rail for long active sessions", () => {
+  it("renders a conversation overview rail for long active sessions after the initial transcript paint", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
 
     class ResizeObserverMock {
@@ -1285,8 +1375,10 @@ describe("AgentSessionPanel conversation caching", () => {
         waitingIndicatorPrompt: "run the build",
       });
 
+      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
+
+      const rail = await screen.findByLabelText("Conversation overview");
       expect(screen.getAllByLabelText("Conversation overview")).toHaveLength(1);
-      const rail = screen.getByLabelText("Conversation overview");
       expect(rail).toBeInTheDocument();
       expect(
         rail.closest(".conversation-with-overview")?.querySelector(".activity-card-live"),

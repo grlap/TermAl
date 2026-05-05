@@ -7,7 +7,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -30,6 +29,63 @@ const CONVERSATION_OVERVIEW_LIVE_TURN_HEIGHT_PX = 108;
 const CONVERSATION_OVERVIEW_FALLBACK_MAX_HEIGHT_PX = 520;
 const CONVERSATION_OVERVIEW_MIN_HEIGHT_PX = 160;
 const CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX = 24;
+
+type ConversationOverviewRailBuildTask = {
+  id: number;
+  run: () => void;
+};
+
+let nextConversationOverviewRailBuildTaskId = 1;
+let conversationOverviewRailBuildFrameId: number | null = null;
+const pendingConversationOverviewRailBuildTasks: ConversationOverviewRailBuildTask[] =
+  [];
+
+function scheduleConversationOverviewRailBuild(run: () => void) {
+  const task: ConversationOverviewRailBuildTask = {
+    id: nextConversationOverviewRailBuildTaskId,
+    run,
+  };
+  nextConversationOverviewRailBuildTaskId += 1;
+  pendingConversationOverviewRailBuildTasks.push(task);
+  scheduleConversationOverviewRailBuildDrain();
+  return () => {
+    const taskIndex = pendingConversationOverviewRailBuildTasks.findIndex(
+      (candidate) => candidate.id === task.id,
+    );
+    if (taskIndex !== -1) {
+      pendingConversationOverviewRailBuildTasks.splice(taskIndex, 1);
+    }
+    if (
+      pendingConversationOverviewRailBuildTasks.length === 0 &&
+      conversationOverviewRailBuildFrameId !== null
+    ) {
+      window.cancelAnimationFrame(conversationOverviewRailBuildFrameId);
+      conversationOverviewRailBuildFrameId = null;
+    }
+  };
+}
+
+function scheduleConversationOverviewRailBuildDrain() {
+  if (conversationOverviewRailBuildFrameId !== null) {
+    return;
+  }
+  let ranSynchronously = false;
+  const frameId = window.requestAnimationFrame(() => {
+    if (conversationOverviewRailBuildFrameId === null) {
+      ranSynchronously = true;
+    } else {
+      conversationOverviewRailBuildFrameId = null;
+    }
+    const task = pendingConversationOverviewRailBuildTasks.shift();
+    if (task) {
+      task.run();
+    }
+    if (pendingConversationOverviewRailBuildTasks.length > 0) {
+      scheduleConversationOverviewRailBuildDrain();
+    }
+  });
+  conversationOverviewRailBuildFrameId = ranSynchronously ? null : frameId;
+}
 
 export function useConversationOverviewController({
   agent,
@@ -61,6 +117,7 @@ export function useConversationOverviewController({
   const shouldRender = messageCount >= CONVERSATION_OVERVIEW_MIN_MESSAGES;
   const virtualizerHandleRef =
     useRef<VirtualizedConversationMessageListHandle | null>(null);
+  const [isRailReady, setIsRailReady] = useState(false);
   const [layoutSnapshot, setLayoutSnapshot] =
     useState<VirtualizedConversationLayoutSnapshot | null>(null);
   const [viewportSnapshot, setViewportSnapshot] =
@@ -174,8 +231,9 @@ export function useConversationOverviewController({
     shouldRender,
   ]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!isActive || !shouldRender) {
+      setIsRailReady(false);
       setLayoutSnapshot((previousSnapshot) =>
         previousSnapshot === null ? previousSnapshot : null,
       );
@@ -184,11 +242,42 @@ export function useConversationOverviewController({
       );
       return;
     }
-    refreshLayoutSnapshot();
-  }, [isActive, messageCount, refreshLayoutSnapshot, sessionId, shouldRender]);
+
+    setIsRailReady(false);
+    const expectedSessionId = sessionId;
+    let firstFrameId: number | null = null;
+    let secondFrameId: number | null = null;
+    let cancelQueuedActivation: (() => void) | null = null;
+    let cancelled = false;
+    const activate = () => {
+      if (cancelled || overviewSessionIdRef.current !== expectedSessionId) {
+        return;
+      }
+      refreshLayoutSnapshot();
+      setIsRailReady(true);
+    };
+    firstFrameId = window.requestAnimationFrame(() => {
+      firstFrameId = null;
+      secondFrameId = window.requestAnimationFrame(() => {
+        secondFrameId = null;
+        cancelQueuedActivation = scheduleConversationOverviewRailBuild(activate);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      cancelQueuedActivation?.();
+      if (firstFrameId !== null) {
+        window.cancelAnimationFrame(firstFrameId);
+      }
+      if (secondFrameId !== null) {
+        window.cancelAnimationFrame(secondFrameId);
+      }
+    };
+  }, [isActive, refreshLayoutSnapshot, sessionId, shouldRender]);
 
   useEffect(() => {
-    if (!isActive || !shouldRender) {
+    if (!isActive || !shouldRender || !isRailReady) {
       return undefined;
     }
     const scrollNode = scrollContainerRef.current;
@@ -241,6 +330,7 @@ export function useConversationOverviewController({
     };
   }, [
     isActive,
+    isRailReady,
     refreshLayoutSnapshot,
     refreshViewportSnapshot,
     scrollContainerRef,
@@ -257,9 +347,11 @@ export function useConversationOverviewController({
       : CONVERSATION_OVERVIEW_FALLBACK_MAX_HEIGHT_PX;
 
   return {
+    isRailReady,
     layoutSnapshot,
     maxHeightPx,
     navigate,
+    shouldRenderRail: shouldRender && isRailReady && layoutSnapshot !== null,
     shouldRender,
     tailItems,
     viewportSnapshot,

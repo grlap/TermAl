@@ -223,11 +223,17 @@ sanitization lives in `ui/src/delegation-error-packets.ts`.
 
 ```text
 spawn_delegation(parentSessionId, request) -> SpawnDelegationCommandResult
+spawn_reviewer_batch(parentSessionId, requests) -> SpawnReviewerBatchCommandResult
 get_delegation_status(parentSessionId, delegationId) -> DelegationStatusCommandResult
 get_delegation_result(parentSessionId, delegationId) -> DelegationResultPacket
 cancel_delegation(parentSessionId, delegationId) -> DelegationStatusCommandResult
 wait_delegations(parentSessionId, delegationIds, options?) -> WaitDelegationsResult
 ```
+
+`spawn_reviewer_batch` is the first Phase 3 helper. It fans out several
+read-only reviewer spawns in parallel through the same Phase 1 REST create route
+and returns successful child ids plus per-item failures. Grouped parent-card UI
+and result consolidation remain separate Phase 3 work.
 
 ### MCP Tools
 

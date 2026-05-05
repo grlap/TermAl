@@ -2232,13 +2232,34 @@ export function VirtualizedConversationMessageList({
           );
           if (scrollDelta >= 0 && isScrollContainerNearBottom(node)) {
             // The user just scrolled DOWN to (or stayed at) the
-            // bottom. Mirror what the programmatic-scroll branch at
-            // `syncProgrammaticScrollWrite`'s near-bottom landing does:
-            // re-enter bottom-follow mode and clear stale user-scroll
-            // cooldown state. Without the full reset, a larger streamed
-            // growth can still be classified as user-detached even though
-            // the user visibly returned to bottom.
-            enterBottomFollowMode();
+            // bottom. Re-arm the bottom-follow flags so subsequent
+            // layout changes can keep the view pinned, and clear the
+            // user-interaction flag so the auto-scroll layout effect
+            // does not bail when an incoming streamed delta grows
+            // the layout past the near-bottom threshold for one
+            // frame.
+            //
+            // We deliberately do NOT call the full `enterBottomFollowMode()`
+            // helper here. That helper also resets
+            // `lastUserScrollInputTimeRef.current` to NEGATIVE_INFINITY,
+            // which bypasses the user-scroll cooldown that
+            // `handlePageHeightChange` (the page-measure callback)
+            // relies on to suppress its own scroll-write rAF. That
+            // handler is a SEPARATE scroll path from the auto-scroll
+            // layout effect — it only checks the user-scroll cooldown
+            // (`VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS`), not
+            // `pendingProgrammaticBottomFollowUntilRef`. Clearing the
+            // user-scroll input time here makes a subsequent page
+            // remeasure (e.g., a ResizeObserver firing after the user
+            // briefly inertial-scrolled past the bottom-follow target)
+            // race the bottom-follow cooldown and write scrollTop —
+            // which is what the
+            // `does not let bottom-follow recapture later inertial
+            // native scroll ticks` regression in
+            // `panels/AgentSessionPanel.test.tsx` pins.
+            isDetachedFromBottomRef.current = false;
+            shouldKeepBottomAfterLayoutRef.current = true;
+            setHasUserScrollInteraction(false);
             clearPendingIdleCompactionTimer();
           }
         }

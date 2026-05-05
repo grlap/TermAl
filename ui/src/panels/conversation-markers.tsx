@@ -1,13 +1,49 @@
-// Owns marker grouping, ordering, mounted-slot lookup, and marker chip/nav
-// rendering for AgentSessionPanel conversations. Does not own marker fetching,
-// mutation requests, overview-rail projection, or transcript virtualization.
+// Owns marker grouping, ordering, mounted-slot lookup, marker chip/nav
+// rendering, and local marker action menus for AgentSessionPanel
+// conversations. Does not own marker fetching, mutation requests,
+// overview-rail projection, or transcript virtualization.
 // Split out of AgentSessionPanel.tsx during the round-39 marker extraction.
 
-import type { CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 
 import { DiffNavArrow } from "./DiffPanelIcons";
 import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
 import type { ConversationMarker, Message } from "../types";
+
+type ConversationMarkerContextMenuState = {
+  messageId: string;
+  clientX: number;
+  clientY: number;
+  trigger: HTMLElement | null;
+};
+
+const NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR = [
+  "a[href]",
+  "button",
+  "input",
+  "textarea",
+  "select",
+  "option",
+  "[contenteditable='true']",
+  "[contenteditable='']",
+  "pre",
+  "code",
+  "img",
+  "picture",
+  "video",
+  "audio",
+  "canvas",
+  "svg",
+  "[data-native-context-menu='true']",
+].join(",");
 
 export function groupConversationMarkersByMessageId(
   markers: readonly ConversationMarker[],
@@ -155,6 +191,188 @@ export function ConversationMessageMarkers({
   );
 }
 
+export function shouldOpenConversationMarkerContextMenu(
+  event: ReactMouseEvent<HTMLElement>,
+) {
+  const root = event.currentTarget;
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  if (hasSelectedTextInside(root)) {
+    return false;
+  }
+  return target.closest(NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR) === null;
+}
+
+export function useConversationMarkerContextMenu({
+  markersByMessageId,
+  onCreateConversationMarker,
+  onDeleteConversationMarker,
+  sessionId,
+  visibleMessageIds,
+}: {
+  markersByMessageId: ReadonlyMap<string, readonly ConversationMarker[]>;
+  onCreateConversationMarker: (sessionId: string, messageId: string) => void;
+  onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
+  sessionId: string;
+  visibleMessageIds: ReadonlySet<string>;
+}) {
+  const [contextMenu, setContextMenu] =
+    useState<ConversationMarkerContextMenuState | null>(null);
+  const contextMenuRef = useRef<ConversationMarkerContextMenuState | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const firstMenuItemRef = useRef<HTMLButtonElement | null>(null);
+  const isContextMenuOpen = contextMenu !== null;
+  contextMenuRef.current = contextMenu;
+
+  const closeContextMenu = useCallback(
+    ({ restoreFocus = false }: { restoreFocus?: boolean } = {}) => {
+      const trigger = contextMenuRef.current?.trigger ?? null;
+      setContextMenu(null);
+      if (restoreFocus && trigger) {
+        window.requestAnimationFrame(() => trigger.focus());
+      }
+    },
+    [],
+  );
+
+  const openContextMenu = useCallback(
+    ({
+      clientX,
+      clientY,
+      messageId,
+      trigger,
+    }: {
+      clientX: number;
+      clientY: number;
+      messageId: string;
+      trigger: HTMLElement | null;
+    }) => {
+      setContextMenu({
+        clientX,
+        clientY,
+        messageId,
+        trigger,
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    closeContextMenu();
+  }, [closeContextMenu, sessionId]);
+
+  useEffect(() => {
+    if (
+      contextMenu &&
+      !visibleMessageIds.has(contextMenu.messageId)
+    ) {
+      closeContextMenu();
+    }
+  }, [closeContextMenu, contextMenu, visibleMessageIds]);
+
+  useEffect(() => {
+    if (!isContextMenuOpen) {
+      return;
+    }
+    const frameId = window.requestAnimationFrame(() => {
+      firstMenuItemRef.current?.focus();
+    });
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [isContextMenuOpen, contextMenu?.messageId]);
+
+  useEffect(() => {
+    if (!isContextMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest(".conversation-marker-context-menu")
+      ) {
+        return;
+      }
+      closeContextMenu();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeContextMenu({ restoreFocus: true });
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [closeContextMenu, isContextMenuOpen]);
+
+  const contextMenuMarkers = contextMenu
+    ? markersByMessageId.get(contextMenu.messageId) ?? []
+    : [];
+  const contextMenuNode = contextMenu ? (
+    <div
+      ref={menuRef}
+      className="conversation-marker-context-menu"
+      role="menu"
+      aria-label="Conversation marker actions"
+      style={{
+        left: contextMenu.clientX,
+        top: contextMenu.clientY,
+      }}
+      onContextMenu={(event) => event.preventDefault()}
+      onKeyDown={(event) =>
+        handleConversationMarkerContextMenuKeyDown(event, menuRef.current, () =>
+          closeContextMenu({ restoreFocus: true }),
+        )
+      }
+    >
+      <button
+        ref={firstMenuItemRef}
+        type="button"
+        role="menuitem"
+        className="conversation-marker-context-menu-item"
+        onClick={() => {
+          onCreateConversationMarker(sessionId, contextMenu.messageId);
+          closeContextMenu();
+        }}
+      >
+        Add checkpoint marker
+      </button>
+      {contextMenuMarkers.length > 0 ? (
+        <>
+          <div className="conversation-marker-context-menu-separator" role="separator" />
+          {contextMenuMarkers.map((marker) => (
+            <button
+              key={marker.id}
+              type="button"
+              role="menuitem"
+              className="conversation-marker-context-menu-item conversation-marker-context-menu-item-danger"
+              onClick={() => {
+                onDeleteConversationMarker(sessionId, marker.id);
+                closeContextMenu();
+              }}
+            >
+              Remove {marker.name || "marker"}
+            </button>
+          ))}
+        </>
+      ) : null}
+    </div>
+  ) : null;
+
+  return {
+    contextMenuNode,
+    openContextMenu,
+  };
+}
+
 function ConversationMarkerChip({
   marker,
   isActive,
@@ -204,4 +422,75 @@ function formatConversationMarkerKind(kind: ConversationMarker["kind"]) {
     default:
       return "Marker";
   }
+}
+
+function hasSelectedTextInside(root: HTMLElement) {
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+    return false;
+  }
+  if (!selection.toString().trim()) {
+    return false;
+  }
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    const range = selection.getRangeAt(index);
+    const ancestor = range.commonAncestorContainer;
+    const ancestorElement =
+      ancestor instanceof Element ? ancestor : ancestor.parentElement;
+    if (ancestorElement && root.contains(ancestorElement)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function handleConversationMarkerContextMenuKeyDown(
+  event: ReactKeyboardEvent<HTMLDivElement>,
+  menu: HTMLDivElement | null,
+  closeMenu: () => void,
+) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeMenu();
+    return;
+  }
+  const menuItems = getConversationMarkerContextMenuItems(menu);
+  if (menuItems.length === 0) {
+    return;
+  }
+  const currentIndex = Math.max(
+    0,
+    menuItems.findIndex((item) => item === document.activeElement),
+  );
+  let nextIndex: number | null = null;
+  switch (event.key) {
+    case "ArrowDown":
+    case "ArrowRight":
+      nextIndex = (currentIndex + 1) % menuItems.length;
+      break;
+    case "ArrowUp":
+    case "ArrowLeft":
+      nextIndex =
+        (currentIndex - 1 + menuItems.length) % menuItems.length;
+      break;
+    case "Home":
+      nextIndex = 0;
+      break;
+    case "End":
+      nextIndex = menuItems.length - 1;
+      break;
+  }
+  if (nextIndex === null) {
+    return;
+  }
+  event.preventDefault();
+  menuItems[nextIndex]?.focus();
+}
+
+function getConversationMarkerContextMenuItems(menu: HTMLDivElement | null) {
+  return Array.from(
+    menu?.querySelectorAll<HTMLButtonElement>(
+      '[role="menuitem"]:not(:disabled)',
+    ) ?? [],
+  );
 }

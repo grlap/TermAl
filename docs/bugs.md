@@ -7,25 +7,473 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## `spawn_reviewer_batch` failure packets expose raw messages and drop structured error metadata
+
+**Severity:** Medium - same disclosure shape that round-47/48 closed off in the wait/status path via `safeDelegationStatusFetchMessage`, plus callers lose the structured status metadata needed to handle expected failures.
+
+`ui/src/delegation-commands.ts:978-987 reviewerBatchFailure`. The helper constructs `SpawnReviewerBatchFailure { index, title, message }` from a thrown `createDelegation` error via `error instanceof Error ? error.message : String(error)` — no allow-list redaction. The `createDelegation` POST goes through `request<DelegationResponse>`; a backend 500 can return `format!("failed to persist delegation: {err:#}")` and similar `internal(format!(...))` paths in `src/delegations.rs:404,432,451,549,608,819`. After `sanitizeUserFacingErrorMessage` (which only scrubs SSH/remote-connection wording), the message can still embed internal filesystem paths, sled/serde error chains, persistence path strings, or cwd/project path fragments and reaches a wrapper caller through the structured `failed[].message` field. The packet also drops `ApiRequestError` metadata such as status, kind, and `restartRequired`, so callers cannot distinguish active-limit conflicts from backend-unavailable or restart-required cases.
+
+**Current behavior:**
+- `reviewerBatchFailure` forwards `error.message` verbatim into the packet.
+- No allow-list or sanitizer redacts internal paths/error chains.
+- `ApiRequestError` status, kind, and restart-required metadata are discarded.
+- The packet is documented as the Phase-3 MCP wrapper surface.
+
+**Proposal:**
+- Introduce a `safeSpawnDelegationFailureMessage` (or extend the existing redactor) that allow-lists the deterministic backend `bad_request` strings the spawn route emits (prompt-empty, prompt-byte-limit, title/model length, cwd validation, write-policy/mode 501, "unknown project", "delegations for remote-backed", parent-not-found, MAX_RUNNING_DELEGATIONS_PER_PARENT) and the safe shapes from round-48 (`"The TermAl backend is unavailable."`, `Request failed with status N.`, the route diagnostic).
+- Anything else collapses to `"Spawn delegation failed."`.
+- Preserve safe structured error fields aligned with the existing delegation status-fetch error packet.
+- Apply the safe packet construction in `reviewerBatchFailure` before populating `failed[]`.
+- Mirror the redaction in `spawn_delegation`'s thrown error if/when that surface is exposed through the same wrapper.
+
+## `spawn_reviewer_batch` can report success across mixed backend instances
+
+**Severity:** Medium - revisions from different backend processes are not comparable, so a completed batch can advertise incoherent metadata after a backend restart during parallel spawns.
+
+`ui/src/delegation-commands.ts:273-287` builds a completed/partial/error result from parallel spawn results and `newestSpawnMetadata`. If all spawns succeed but their `serverInstanceId`s differ, `newestSpawnMetadata` returns the highest numeric revision and `serverInstanceId: null`, while `outcome` remains `"completed"`. The wait path treats mixed server instances as an error because revision numbers cannot be compared across processes.
+
+**Current behavior:**
+- Successful batch items from different backend instances still produce `outcome: "completed"`.
+- The result picks the highest numeric revision across incomparable revision streams.
+- `serverInstanceId` is nulled, but callers receive no error or recovery instruction.
+
+**Proposal:**
+- Detect mixed successful spawn metadata and return a structured error/partial outcome.
+- Or refetch successful delegation statuses from the current backend instance before reporting success.
+- Add coverage for a backend restart between parallel reviewer spawn responses.
+
+## New delegation readiness test mutates process-wide `PATH`
+
+**Severity:** Medium - Rust tests run in parallel, so process-wide `PATH` mutation can make unrelated readiness/session tests nondeterministic on Windows, macOS, and Linux.
+
+`src/tests/delegations.rs:4697` uses `ScopedEnvVar::set_path("PATH", &empty_path)` to force Cursor readiness/setup failure while checking that metadata validation wins first. Other tests can resolve agent CLIs through `PATH` at the same time without holding the same mutex, so they may observe the empty path, fail unexpectedly, or cache bogus readiness state.
+
+**Current behavior:**
+- One test replaces process-wide `PATH` with an empty directory.
+- The Rust test harness can run unrelated tests concurrently.
+- Agent readiness helpers outside this test can observe the temporary empty `PATH`.
+
+**Proposal:**
+- Avoid mutating `PATH` for this ordering test.
+- Use a test-only readiness/setup failure injection point, or another deterministic way to prove metadata validation runs before agent setup.
+
+## `useConversationMarkerContextMenu` focus-restore rAF is not cancelled on hook unmount
+
+**Severity:** Low - the rAF for `trigger.focus()` after Escape may fire after unmount, calling focus on a possibly-detached trigger.
+
+`ui/src/panels/conversation-markers.tsx:229-238 closeContextMenu`. When called with `restoreFocus: true`, the helper schedules `window.requestAnimationFrame(() => trigger.focus())` but never cancels it when the hook unmounts. If the parent panel unmounts (session destroyed, pane closed) between Escape and the next animation frame, the rAF still fires. Today benign — focus on a detached element is a no-op — but if the trigger element is later re-attached in a different context (rare with virtualization), focus could land somewhere unexpected.
+
+**Current behavior:**
+- `restoreFocus: true` schedules an unguarded rAF for `trigger.focus()`.
+- Hook unmount does not cancel that rAF.
+- Trigger may be detached or re-attached when the rAF fires.
+
+**Proposal:**
+- Track an in-flight focus-restore rAF id at hook scope and cancel it from a `useEffect` cleanup on hook unmount.
+- Or guard with a "still mounted" flag set to false in the cleanup.
+
+## Marker menu Escape fires both the document-level and menu-div Escape handlers
+
+**Severity:** Low - `event.preventDefault()` does not stop native propagation to a `document.addEventListener` listener; both `closeContextMenu` calls run on a single Escape press.
+
+`ui/src/panels/conversation-markers.tsx:301-306` (menu div onKeyDown) and the document-level `keydown` listener registered at the same hook. When Escape is pressed inside the menu, both handlers fire; `setContextMenu(null)` runs twice (second is a no-op) and two rAF focus-restore frames are queued.
+
+**Current behavior:**
+- Escape in the menu fires the menu div's `onKeyDown` AND the document `keydown` listener.
+- Both call `closeContextMenu({ restoreFocus: true })`.
+- Two rAF focus-restore frames queued (harmless, but wasted).
+
+**Proposal:**
+- Use native `event.stopPropagation()` (not React's `preventDefault`) inside the menu div's keyDown handler when handling Escape.
+- Or remove the document-level Escape handler when focus is inside the menu.
+
+## `visibleMessageIds` Set is built twice in `AgentSessionPanel.tsx`
+
+**Severity:** Low - duplicated work on every visible-messages change; the round-51 marker hook input could reuse the existing inline `Set`.
+
+`ui/src/panels/AgentSessionPanel.tsx:687-690` (new memoized `visibleMessageIds` for the marker context-menu hook input) and `:659-661` (inline `Set` construction inside `visiblePendingPrompts` useMemo). The new memo can be reused inside `visiblePendingPrompts` to avoid the duplicate `Set` allocation.
+
+**Current behavior:**
+- Two separate `Set` allocations from the same `visibleMessages.map(m => m.id)`.
+
+**Proposal:**
+- Take a dependency on the memoized `visibleMessageIds` from `visiblePendingPrompts` instead of constructing a fresh `Set`.
+
+## Marker menu keyboard nav `Math.max(0, findIndex)` skips item 0 when no menu item has focus
+
+**Severity:** Low - corner case where the user lands on a non-menuitem inside the menu (e.g., the separator `<div>`); ArrowDown would skip item 0.
+
+`ui/src/panels/conversation-markers.tsx:461-464 handleConversationMarkerContextMenuKeyDown`. `Math.max(0, menuItems.findIndex(item => item === document.activeElement))` collapses `findIndex === -1` to `currentIndex = 0`. ArrowDown then computes `nextIndex = 1`, skipping item 0. In normal flow focus is moved to item 0 via the focus-rAF before arrow keys are pressed, so this rarely surfaces — but if focus reaches the separator `<div>` or any non-menuitem inside the menu, the first ArrowDown press skips item 0.
+
+**Current behavior:**
+- `findIndex === -1` → currentIndex = 0.
+- ArrowDown → nextIndex = 1 (skips item 0).
+- ArrowUp → nextIndex = N-1 (last item, skipping item 0).
+
+**Proposal:**
+- Treat `-1` as "before the menu" for ArrowDown (focus item 0) and "after" for ArrowUp (focus item N-1).
+- Or distinguish "no current menu-item focus" from "focus on item 0" with a separate sentinel.
+
+## Marker action menu has no keyboard-reachable trigger
+
+**Severity:** Low - marker removal actions are exposed through a custom menu that keyboard users cannot discover or open.
+
+`ui/src/panels/AgentSessionPanel.tsx:829-832` attaches the marker action menu to the assistant message shell's `contextmenu` handler, while the shell uses `tabIndex={-1}`. The menu itself now supports focus movement and Escape, but opening it still depends on a pointer/right-click path unless the browser sends a context-menu event from a focused shell.
+
+**Current behavior:**
+- Assistant message shells are not reachable through normal tab navigation.
+- The marker action menu opens from the shell context-menu pointer path.
+- Marker deletion is not discoverable as a keyboard action.
+
+**Proposal:**
+- Add a focusable toolbar/menu trigger with `aria-haspopup`, or make a tabbable trigger support ContextMenu/Shift+F10/Enter with deterministic positioning.
+- Keep native context-menu preservation for links, code blocks, images, and selected text.
+
+## `spawn_reviewer_batch` title trim asymmetry between wire request and failure record
+
+**Severity:** Low - callers correlating a partial-failure record with their UI input would see different strings.
+
+`ui/src/delegation-commands.ts:957-970 normalizeReviewerBatchRequests`. The `compactCreateDelegationRequest({...request, mode: "reviewer", writePolicy: { kind: "readOnly" }})` does NOT trim `title` — the wire body sends ` React review ` with surrounding whitespace (per the test at line 437-441). But the failure record is built from `reviewerBatchFailure(index, reviewerBatchItemTitle(compacted), error)`, and `reviewerBatchItemTitle` calls `request.title.trim()`. So the wire request carries ` React review ` while a partial-failure record reports `title: "React review"`.
+
+**Current behavior:**
+- Wire body preserves caller's whitespace in `title`.
+- Failure record trims `title`.
+- Caller correlating UI input vs failure record sees different strings.
+
+**Proposal:**
+- Trim title centrally before both paths (apply trim in `compactCreateDelegationRequest` for the title field — but that would change `spawn_delegation` behavior; consider scope).
+- Or store both raw and trimmed titles on the failure record and document the normalization in JSDoc.
+
+## `spawn_reviewer_batch` result shape is listed but not defined in the delegation docs
+
+**Severity:** Low - wrapper callers do not have a documented contract for batch result nullability, mixed-server behavior, or per-item failure records.
+
+`docs/features/agent-delegation-sessions.md:226-237` adds `spawn_reviewer_batch(parentSessionId, requests) -> SpawnReviewerBatchCommandResult` to the command surface, but the Data Model section does not define `SpawnReviewerBatchItem`, `SpawnReviewerBatchFailure`, or `SpawnReviewerBatchCommandResult`.
+
+**Current behavior:**
+- The command list names `spawn_reviewer_batch`.
+- The response shape and `revision` / `serverInstanceId` nullability are undocumented.
+- Mixed-server and partial/all-failed semantics are not stated.
+
+**Proposal:**
+- Add data-model documentation for the request item, failure packet, and command result.
+- Document completed, partial, error, mixed-server, and backend-restart semantics.
+
+## `useConversationMarkerContextMenu` removed scroll-close behavior — fixed positioning means visible drift on scroll
+
+**Severity:** Note - intentional behavior change; deserves a hook-header comment to prevent re-introducing scroll-close.
+
+`ui/src/panels/conversation-markers.tsx`. The new hook drops the `window.scroll` listener; the menu now stays open during background scroll. The test at AgentSessionPanel.test.tsx:684-685 explicitly asserts this. The menu position is `left: contextMenu.clientX, top: contextMenu.clientY` (viewport coordinates fixed at open). If the page scrolls, the menu visually drifts relative to the trigger.
+
+**Current behavior:**
+- Menu positioned by fixed viewport coordinates at open time.
+- Page scrolls → menu visually drifts.
+- No scroll-close (intentional).
+
+**Proposal:**
+- Add a hook-header comment documenting the trade-off (no scroll-close because programmatic scrolls during streaming would dismiss it; visual drift on user scroll is acceptable).
+- So future readers don't reintroduce a scroll-close that would re-break the streaming case.
+
+## `scheduleConversationOverviewRailBuild` module-level FIFO queue is shared across all controller instances
+
+**Severity:** Note - a slow rail build in pane A delays pane B by one frame; cleanup story across module reloads / HMR is subtle.
+
+`ui/src/panels/conversation-overview-controller.ts:33-87`. The module-level `pendingConversationOverviewRailBuildTasks: ConversationOverviewRailBuildTask[]`, `conversationOverviewRailBuildFrameId: number | null`, and `nextConversationOverviewRailBuildTaskId: number = 1` are shared across all controllers/sessions/panes. Acceptable per the rAF cadence (60Hz = 16ms/frame). The cleanup logic (cancel-on-empty-queue, splice-by-task-id) is correct but the global-state coupling means HMR / module reloads have subtle behavior.
+
+**Current behavior:**
+- All rail builds across all panes serialized through one global FIFO queue.
+- One slow task delays all subsequent panes by one frame.
+- Module-level globals make cleanup-across-HMR subtle.
+
+**Proposal:**
+- Defer (no concrete bug today). Consider in a future round whether per-pane queues would simplify reasoning, especially as multi-pane scenarios become more common.
+
+## `forward_telegram_text_to_project` mutates forwarding state before prompt acceptance
+
+**Severity:** Medium - a failed Telegram prompt submission can still mutate assistant-forwarding cursor state for a prompt the backend never accepted.
+
+`src/telegram.rs:854-857`. `arm_assistant_forwarding_for_telegram_prompt` mutates `state.forward_next_assistant_message_session_id` and may re-baseline `last_forwarded_assistant_message_id` / `_text_chars` before `termal.send_session_message(...)?` succeeds. If the local POST rejects or fails, the handler returns `Err(...)` after mutating state. Because the poll loop has already advanced `next_update_id`, the final persist can save forwarding state for a prompt that never reached the backend; if a later call fails after the POST but before the digest refresh, the relay can also resend the same Telegram prompt on the next poll.
+
+**Current behavior:**
+- `arm_*` mutates forwarding state before `send_session_message` succeeds.
+- The prompt-send failure path does not roll that state back.
+- The outer poll loop may persist the mutated forwarding state because `next_update_id` advanced.
+- A later digest-fetch failure after a successful prompt POST can still replay the Telegram prompt on the next poll.
+
+**Proposal:**
+- Compute the pre-prompt cursor without mutating, then apply forwarding-state changes only after `send_session_message` succeeds.
+- Or snapshot and roll back forwarding state on prompt-send failure.
+- Add send-failure and post-send digest-failure regressions.
+
+## Telegram assistant forwarding can capture a pre-existing active turn
+
+**Severity:** Medium - a Telegram-originated prompt can cause the relay to later forward assistant text from an already-active desktop/local turn.
+
+`src/telegram.rs:854` arms assistant forwarding by fetching the current session and recording the latest assistant text cursor before the Telegram prompt is accepted. If that cursor points at a partially streaming assistant message from an existing local turn, later growth of that message can look like a truncated Telegram-forwarded message and be sent to the linked Telegram chat even though it predates the Telegram prompt.
+
+**Current behavior:**
+- `arm_assistant_forwarding_for_telegram_prompt` baselines the latest assistant text from the current primary session.
+- It can run while the session is already active for a non-Telegram turn.
+- Later growth of that pre-existing assistant text can be treated as reply text to forward.
+
+**Proposal:**
+- Only baseline settled assistant text, or store an explicit pre-prompt boundary that skips the currently active turn without enabling truncated-resend forwarding.
+- Add coverage where a desktop/local turn is already streaming before a Telegram prompt is forwarded.
+
+## Telegram assistant forwarding drains only the digest primary session
+
+**Severity:** Medium - forwarding is armed for a specific session, but polling only checks whichever session is currently primary in the project digest.
+
+`src/telegram.rs:854` records `forward_next_assistant_message_session_id`, but `sync_telegram_digest` forwards assistant text only for `digest.primary_session_id` at `src/telegram.rs:914`. If the digest primary moves before the Telegram-originated turn settles, the armed session may never be drained. The cursor is also global, so polling another primary can overwrite the baseline and cause the original reply to be skipped.
+
+**Current behavior:**
+- Telegram prompt forwarding arms one session id.
+- Regular digest sync only polls the digest primary session.
+- Assistant forwarding cursor state is global rather than per session.
+
+**Proposal:**
+- Track assistant-forwarding cursors per session.
+- Or have `sync_telegram_digest` process `forward_next_assistant_message_session_id` in addition to the digest primary before any cross-session baseline update.
+
+## Telegram long-message forwarding loses chunk-level progress on failure
+
+**Severity:** Medium - a failure after one chunk of a long assistant message causes the next retry to resend already-delivered chunks.
+
+`src/telegram.rs:1151-1160` sends all chunks for a message before recording `last_forwarded_assistant_message_id` and `last_forwarded_assistant_message_text_chars`. If chunk 2 fails after chunk 1 was sent, the cursor is not advanced to reflect the partial chunk success. The next poll retries the same message from the beginning, duplicating chunk 1 in Telegram.
+
+**Current behavior:**
+- Progress is recorded per assistant message, after all chunks for that message are sent.
+- A mid-message chunk failure loses the already-sent chunk position.
+- Retrying the same long message resends earlier chunks.
+
+**Proposal:**
+- Track chunk-level progress for in-flight long messages, or restructure forwarding so successful chunks can be resumed without replaying already-sent chunks.
+- Add emoji/long-message retry coverage that fails a later chunk and proves the earlier chunk is not duplicated.
+
+## Telegram chunking counts Rust chars instead of Telegram UTF-16 units
+
+**Severity:** Medium - emoji-heavy messages can exceed Telegram's sendMessage limit even when they pass the relay's chunk-size check.
+
+`src/telegram.rs:1221` documents that Telegram rejects bodies over 4096 UTF-16 code units, but `chunk_telegram_message_text` enforces `TELEGRAM_MESSAGE_CHUNK_CHARS` using Rust `char` count. Surrogate-pair-heavy text can stay under 3500 Unicode scalar values while exceeding Telegram's UTF-16-unit limit, causing send failures and repeated retries.
+
+**Current behavior:**
+- Chunk size is measured with `text.chars()`.
+- The comment claims this keeps multi-byte text under Telegram's UTF-16-unit limit.
+- Emoji-heavy content can still produce chunks above Telegram's actual limit.
+
+**Proposal:**
+- Chunk by UTF-16 code units while preserving valid character boundaries.
+- Add tests for emoji/surrogate-pair-heavy messages.
+
+## CSS context-menu pattern duplicated between pane-tab and conversation-marker variants
+
+**Severity:** Low - two near-third "context menu" features now share ~80% of the same CSS shell; the third copy will be the trigger for extraction but it should be promoted to a `.context-menu` family before then.
+
+`ui/src/styles.css:3981-4023` (new `.conversation-marker-context-menu*`) and `:2506-2546` (existing `.pane-tab-context-menu*`). Same `position: fixed`, z-index ordering, `color-mix(in srgb, var(--surface-white) ...)` background pattern, `box-shadow: 0 20px 40px color-mix(in srgb, var(--ink) 14%, transparent)`, hover/focus blue mix, `*-item-danger` red. Differences are only `min-width`, `border-radius` (custom 1rem vs `var(--control-radius)`), padding values, and `border: 1px solid var(--line)` vs unbordered. The pattern is reusable as a `.context-menu` / `.context-menu-item` / `.context-menu-item-danger` family.
+
+**Current behavior:**
+- Two near-duplicate context-menu CSS blocks.
+- Small variations are unique-to-call-site.
+- Future third instance would copy a third near-duplicate.
+
+**Proposal:**
+- Promote the shared shell + item rules into a base `.context-menu` set.
+- Let `.pane-tab-context-menu` and `.conversation-marker-context-menu` carry only their unique tweaks (`min-width`, `border-radius`, `border`, separator).
+- Defer if the variations are deliberately divergent — but mark this as a known cluster so the third instance triggers extraction.
+
+## `SessionPaneView.tsx` near-bottom early-out is captured at `isSending` flip, not reactive
+
+**Severity:** Low - the catchup branch never schedules for the started-near-bottom-then-scrolled-away case, contrary to what the comment promises.
+
+`ui/src/SessionPaneView.tsx:2024`. The effect has dependency array `[isSending, pane.viewMode, scrollStateKey]`, and `isMessageStackNearBottom()` reads from `messageStackRef.current` (not reactive). The effect's near-bottom decision is therefore evaluated only at the moment `isSending` flips true. If the user starts the send near bottom but scrolls away while the request is in flight, the catchup branch (`scheduleSettledScrollToBottom` via `followLatestMessageForPromptSend`) never schedules.
+
+**Current behavior:**
+- Near-bottom snapshot captured only at `isSending` true→false transition.
+- User scrolling away during the in-flight request bypasses catchup.
+- Comment overstates the guarantee ("schedule the settled-poll catchup here to bring the user's prompt into view once it lands").
+
+**Proposal:**
+- Add a reactive signal (e.g., a derived `nearBottomAtSendStart` captured into the effect's deps via a ref-based subscription).
+- Or update the comment to match the actual behavior ("when the user is near bottom AT THE TIME isSending toggled, defer entirely to the post-message-land effect").
+
+## Marker context-menu close-on-document-pointerdown re-registers listeners per state value change
+
+**Severity:** Low - rapid right-click switches between messages cause attach/detach churn.
+
+`ui/src/panels/AgentSessionPanel.tsx:751-757`. The effect re-registers listeners every time `markerContextMenu` changes (since the dep is the entire state value, not just a boolean). For a single open/close cycle this is fine; but rapid right-click switches between messages cause attach/detach churn.
+
+**Current behavior:**
+- Effect dep is the full marker-context-menu state object.
+- Each open/move/close event re-registers `pointerdown`/`keydown`/`scroll` listeners.
+
+**Proposal:**
+- Gate the dep on `markerContextMenu === null` so listeners attach once when the menu opens and detach once when it closes.
+
+## `src/tests/telegram.rs` header documents fewer pinned axes than the file currently covers
+
+**Severity:** Note - test ownership header is stale relative to the +285-line additions.
+
+`src/tests/telegram.rs:1-12` describes test ownership as "pin two pieces of that adapter: `parse_telegram_command` ... and `render_telegram_digest` / `build_telegram_digest_keyboard`". The +285-line additions now cover assistant-forwarding partial-progress, no-baseline forwarding, unknown char-count re-forwarding, unknown-session-status gating, error classification, log sanitization, and prompt byte-limit — these go beyond what the header claims.
+
+**Current behavior:**
+- Header at lines 1-12 covers two pinned axes.
+- File now pins many additional axes.
+
+**Proposal:**
+- Update the header to enumerate the additional pinned axes (or summarize as "Telegram relay test surface: command parsing, digest rendering, assistant forwarding, error classification, log sanitization, prompt limits").
+- Or split the file if the assistant-forwarding family becomes its own pinned axis.
+
+## Delayed overview readiness remounts the conversation subtree
+
+**Severity:** Medium - the long-session transcript can lose scroll, virtualizer measurements, text selection, and message-card local state when the rail flips from pending to ready.
+
+`ui/src/panels/AgentSessionPanel.tsx:949` renders bare `conversationContent` until `conversationOverview.shouldRenderRail` becomes true, then wraps that same subtree in `.conversation-with-overview`. React treats the changed parent structure as a different tree, so `ConversationMessageList` and its message cards can remount at the readiness boundary.
+
+**Current behavior:**
+- Long sessions initially render the conversation without the overview wrapper.
+- After delayed rail activation, the same conversation subtree is reparented under `.conversation-with-overview`.
+- The readiness flip can discard transcript DOM, virtualizer refs, measured layout, text selection, and per-card local state.
+
+**Proposal:**
+- Keep the wrapper stable whenever `conversationOverview.shouldRender` is true.
+- Gate only the rail node or readiness styling inside the stable wrapper.
+- Add DOM-identity coverage proving the message list does not remount when the rail becomes ready.
+
+## Conversation overview rail snapshots can go stale after transcript growth
+
+**Severity:** Medium - once the delayed overview rail is ready, new messages can leave overview layout and viewport state based on the old transcript until a scroll or resize occurs.
+
+`ui/src/panels/conversation-overview-controller.ts:277-338` delays the initial rail activation, but the activation effect no longer depends on `messageCount` and the steady-state effect refreshes layout on initial ready, scroll, or resize rather than transcript growth. Appending messages to an already-long transcript can therefore leave overview proportions, marker placement, and viewport projection stale during live streaming.
+
+**Current behavior:**
+- Initial overview rail activation waits for the transcript paint.
+- After the rail is ready, layout refreshes are event-driven by scroll/resize.
+- Message growth alone does not refresh layout snapshots.
+
+**Proposal:**
+- Keep the initial double-RAF delay, but add a separate ready-state refresh keyed on transcript growth that calls `refreshLayoutSnapshot()` without hiding the rail.
+- Add coverage for appending messages to an already rail-ready long transcript.
+
+## `messageCreatedDeltaIsNoOp` lacks semantic-change negative coverage
+
+**Severity:** Medium - the identical-replay tests do not prove the no-op predicate still material-applies when the message payload changes while metadata stays equal.
+
+`ui/src/live-updates.ts:320` compares the existing message payload and metadata to decide whether a `messageCreated` replay is no-op. Current tests cover identical duplicate replay behavior, but do not keep id/index/preview/count/stamp the same while changing a semantic message payload field. An over-broad predicate could drop a real `messageCreated` update while the current tests still pass.
+
+**Current behavior:**
+- Duplicate identical `messageCreated` replay coverage exists.
+- Semantic-change negative cases are missing for same id/index/metadata.
+- Same-id pending prompt cleanup interaction is not directly pinned.
+
+**Proposal:**
+- Add negative cases in `live-updates.test.ts` for same id/index/metadata with changed message payload.
+- Add coverage for same-id pending prompt cleanup so no-op detection cannot skip required prompt removal.
+
+## Near-bottom prompt-send early return lacks direct scroll coverage
+
+**Severity:** Medium - the prompt-send stutter fix is not directly pinned by a near-bottom pending-POST test.
+
+`ui/src/SessionPaneView.tsx:2024` returns early when the message stack is already near bottom so the old-bottom smooth scroll does not race the later post-message scroll. Existing scroll coverage pins the far-from-bottom catch-up path, but not this near-bottom skip. A regression could reintroduce the old-target smooth scroll and visible stutter without failing the current suite.
+
+**Current behavior:**
+- Near-bottom sends skip the old-bottom smooth-scroll effect.
+- Far-from-bottom prompt catch-up is covered.
+- No test starts near bottom, keeps the POST pending, grows `scrollHeight`, and asserts no old-target smooth scroll fires before the prompt lands.
+
+**Proposal:**
+- Add an `App.scroll-behavior.test.tsx` case that starts near bottom, sends with a pending POST, grows `scrollHeight`, and asserts no old-target smooth scroll occurs before the prompt lands.
+
+## Deferred overview rail activation lacks cancellation coverage
+
+**Severity:** Low - the double-requestAnimationFrame activation guard has stale-session and cancellation logic that is not directly tested.
+
+`ui/src/panels/conversation-overview-controller.ts:189` queues two animation frames before activating the overview rail. The effect cancels queued frames and checks the expected session id, but the tests cover only the happy path where the rail eventually appears. Switching sessions or dropping below the overview threshold before queued frames drain could regress without test failure.
+
+**Current behavior:**
+- Rail activation is delayed by two animation frames.
+- Cleanup cancels queued frame ids and guards against stale session ids.
+- No test drains mocked frames after a session switch or threshold drop to prove no stale rail appears.
+
+**Proposal:**
+- Add a mocked-RAF test that switches sessions or drops below the overview threshold before queued frames drain, then asserts no stale overview rail appears.
+
+## Returning to bottom leaves stale virtualized scroll-kind classification
+
+**Severity:** Low - cancelling idle compaction on bottom re-entry leaves `lastUserScrollKindRef.current` unchanged.
+
+`ui/src/panels/VirtualizedConversationMessageList.tsx:2263` clears the idle compaction timer after a native downward scroll returns near bottom. That timer is normally the path that expires the cached wheel/touch/key scroll-kind classification. If it is cancelled without clearing `lastUserScrollKindRef`, a later native scroll with no input prelude, such as scrollbar-thumb movement, can reuse stale `"incremental"` / `"seek"` classification.
+
+**Current behavior:**
+- Returning to bottom clears the idle compaction timer.
+- The cached last user scroll kind is not cleared at the same boundary.
+- Later native scrolls without a preceding input event can inherit stale classification.
+
+**Proposal:**
+- Preserve the cooldown timestamp, but clear or separately expire `lastUserScrollKindRef` when cancelling idle compaction on bottom re-entry.
+
+## Telegram command suffix parsing ignores the actual bot username
+
+**Severity:** Low - commands addressed to another bot can be treated as TermAl commands in a linked group chat.
+
+`src/telegram.rs:1487` strips anything after `@` in the command name without checking whether the suffix matches the TermAl bot username. In a shared or group chat, a delivered `/stop@other_bot` style command is parsed as `/stop` and can trigger TermAl behavior.
+
+**Current behavior:**
+- `parse_telegram_command` uses `raw_name.split('@').next()`.
+- Any bot suffix is ignored.
+- Commands intended for another bot can match TermAl command names.
+
+**Proposal:**
+- Resolve/cache this bot's username via `getMe` and reject non-matching suffixes.
+- Or restrict the relay to private chats by default.
+
+## Telegram startup output still advertises first-touch `/start` linking
+
+**Severity:** Low - runtime setup instructions conflict with the new trusted-chat binding requirement.
+
+`src/telegram.rs:44` still prints `chat: not linked; send /start to the bot to link it` when no chat binding exists. The README and handler behavior now require `TERMAL_TELEGRAM_CHAT_ID` or an existing trusted `telegram-bot.json` binding for fresh relays, so the startup output points operators at a flow that no longer establishes trust.
+
+**Current behavior:**
+- Fresh relays no longer bind the first chat that sends `/start`.
+- Startup output still says `/start` is the linking path.
+- Operators can follow the printed instruction and remain unlinked.
+
+**Proposal:**
+- Update the startup message to point at `TERMAL_TELEGRAM_CHAT_ID` or an existing trusted state-file binding.
+
+## Telegram JSON parsing paths lack sample-shape coverage
+
+**Severity:** Low - error envelope and session-status serde behavior can regress while current tests that construct internal structs still pass.
+
+`src/telegram.rs:567` and related Telegram/TermAl response parsing now include behavior for Telegram error envelopes and `TelegramSessionStatus` values. The tests mostly construct internal Rust structs directly, so sample JSON with `error_code`, unknown status, or missing status can drift from the actual API shapes without being caught.
+
+**Current behavior:**
+- Classifier/status tests mostly use constructed Rust values.
+- Telegram error-envelope JSON parsing is not pinned with sample payloads.
+- TermAl session status parsing for unknown/missing status is not pinned with sample payloads.
+
+**Proposal:**
+- Add sample JSON deserialization tests for Telegram error envelopes.
+- Add TermAl session status sample JSON tests for known, unknown, and missing status values.
+
 ## Telegram-forwarded text has no per-chat rate cap
 
 **Severity:** Medium - any linked chat can still fan out prompt submissions quickly enough to create a burst of local backend and agent work.
 
-`src/telegram.rs` now rejects Telegram prompts above `MAX_DELEGATION_PROMPT_BYTES = 64 * 1024` before calling `forward_telegram_text_to_project`, but accepted prompts are still not rate-limited per chat. A linked chat can submit many below-limit prompts in quick succession, each becoming a local backend request and possible agent turn.
+`src/telegram.rs:775-787` now rejects Telegram prompts above `MAX_DELEGATION_PROMPT_BYTES = 64 * 1024` before calling `forward_telegram_text_to_project`, but accepted prompts are still not rate-limited per chat. A linked chat can submit many below-limit prompts or action commands in quick succession, each becoming local backend work and possibly an agent turn.
 
 **Current behavior:**
 - Oversized Telegram prompts are rejected by UTF-8 byte length.
-- Below-limit prompts are forwarded unchanged.
-- No per-minute or burst cap exists per linked chat.
+- Below-limit prompts and action commands are forwarded unchanged.
+- No per-minute or burst cap exists per linked chat before backend work starts.
 
 **Proposal:**
-- Add a per-minute / per-chat prompt-rate cap so a linked chat cannot fan out N HTTP calls per second.
+- Add a per-minute / per-chat prompt and action-command rate cap so a linked chat cannot fan out N HTTP calls per second.
 
 ## Telegram relay forwards full assistant text to Telegram by default
 
 **Severity:** Medium - assistant replies can include code, local file paths, file contents, or secrets and are sent to a third-party service without an explicit opt-in.
 
-`src/telegram.rs:936-938`. The relay chunks and forwards the full settled assistant message body to Telegram once the session is no longer active. This goes beyond the compact project digest and sends arbitrary model output off-machine by default.
+`src/telegram.rs:1151-1160`. The relay chunks and forwards the full settled assistant message body to Telegram once the session is no longer active. This goes beyond the compact project digest and sends arbitrary model output off-machine by default.
 
 **Current behavior:**
 - The Telegram digest path is compact, but settled assistant messages are forwarded in full.
@@ -41,7 +489,7 @@ the Implementation Tasks section.
 
 **Severity:** Medium - a Telegram update burst (real attack, retry storm, or accidental flood) becomes a multiplicative wave of HTTP calls into the local backend, and a panic mid-batch re-runs the same updates on the next poll.
 
-`src/telegram.rs:48, 65-69, 78`. The relay accepts the entire `Vec<TelegramUpdate>` Telegram returns and walks each update through `handle_telegram_update`, which can issue multiple outbound HTTP calls per update (digest fetch, send_message, action dispatch, session fetch). State is persisted once at the end of the iteration; a panic mid-batch leaves `next_update_id` un-advanced and Telegram resends the same batch on the next poll, amplifying the effect.
+`src/telegram.rs:44-78` and `src/telegram.rs:304`. The relay accepts the entire `Vec<TelegramUpdate>` Telegram returns and walks each update through `handle_telegram_update`, which can issue multiple outbound HTTP calls per update (digest fetch, send_message, action dispatch, session fetch). State is persisted once at the end of the iteration; a panic mid-batch leaves `next_update_id` un-advanced and Telegram resends the same batch on the next poll, amplifying the effect.
 
 **Current behavior:**
 - `getUpdates` does not pass an explicit `limit`, so Telegram returns up to its server-side default (100).
@@ -969,6 +1417,26 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
+- [ ] P2: Add reviewer-batch command error-contract regressions:
+  cover mixed successful `serverInstanceId` responses, all-items-fail `outcome: "error"` output with null metadata, safe spawn-failure redaction, and preserved structured error metadata for expected `ApiRequestError` cases.
+- [ ] P2: Add Telegram assistant-forwarding ownership/order regressions:
+  cover an already-active non-Telegram turn before a Telegram prompt, prompt POST failure after forwarding state is prepared, post-send digest failure, and a digest primary-session switch before the armed Telegram reply settles.
+- [ ] P2: Add Telegram long-message chunk retry and UTF-16 chunking coverage:
+  fail a later chunk after an earlier chunk is sent and assert retry does not duplicate it; add emoji/surrogate-pair-heavy text proving chunks respect Telegram's UTF-16 code-unit limit.
+- [ ] P2: Add marker context-menu interaction and accessibility coverage:
+  dispatch cancelable `contextmenu` events and assert links/code/selected assistant text do not set `defaultPrevented`, assert the plain assistant-text marker-menu path does set it, and cover a keyboard-reachable marker action trigger plus focus/escape behavior.
+- [ ] P2: Add overview rail growth and cancellation coverage:
+  after the delayed rail is ready, append messages and assert layout/viewport snapshots refresh; also switch sessions or drop below threshold before queued animation frames drain and assert no stale rail appears, and assert the conversation list DOM does not remount when rail readiness flips.
+- [ ] P2: Add `messageCreatedDeltaIsNoOp` semantic-change negatives:
+  keep id/index/preview/count/stamp equal while changing message payload and assert a material apply; include same-id pending prompt cleanup coverage.
+- [ ] P2: Add near-bottom prompt-send early-return scroll coverage:
+  start near bottom, send with a pending POST, grow `scrollHeight`, and assert no old-target smooth scroll fires before the prompt lands.
+- [ ] P2: Add virtualized bottom re-entry scroll-kind expiry coverage:
+  return to bottom, cancel idle compaction, then issue a native scroll without wheel/touch/key prelude and assert stale `lastUserScrollKindRef` classification cannot leak.
+- [ ] P2: Add Telegram command suffix and startup-message coverage:
+  reject `/command@other_bot` once a bot username is known or private-chat-only mode is chosen, and assert the no-chat startup message points to `TERMAL_TELEGRAM_CHAT_ID` / trusted state binding rather than first-touch `/start`.
+- [ ] P2: Add Telegram JSON sample deserialization coverage:
+  parse Telegram error envelopes with `error_code`, and TermAl session responses with known, unknown, and missing statuses.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
 - [ ] P2: Add equal-revision gap repair snapshot adoption coverage:
@@ -1027,8 +1495,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
 - [ ] P1: Add direct splitter tests for `splitStreamingMarkdownForRendering(text, { deferAllBlocks: true })`:
   `ui/src/markdown-streaming-split.test.ts` currently has zero direct coverage for `deferAllBlocks`. Cover closed pipe-table followed by prose, closed fence followed by prose, closed math followed by prose, multiple closed blocks (cut at the earliest), nested constructs, and identity behavior on inputs containing no block constructs.
-- [ ] P2: Add delegation metadata validation-before-readiness coverage:
-  force an unavailable-agent setup and send oversized title/model metadata, then assert the deterministic 400 metadata validation error wins over readiness/setup errors.
 - [ ] P1: Pin the "no remount across streaming → settled transition" claim with DOM-identity assertions:
   `ui/src/MarkdownContent.test.tsx:1456` and `ui/src/MessageCard.test.tsx:245-285` assert the rendered shape but do not assert that React preserved the same DOM nodes across the rerender. Capture a stable child DOM node (e.g., a paragraph from the settled prefix) before flipping `isStreaming` to false, then assert `container.contains(savedNode)` and reference equality after the rerender.
 - [ ] P2: Restore discrimination in `expectRenderedMarkdownTableContains`:

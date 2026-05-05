@@ -1,7 +1,7 @@
-// Owns the Phase 2 delegation command surface that UI/MCP wrappers can bind to:
-// spawn, status, result, cancel, and polling wait helpers. Does not own route
-// transport, live SSE adoption, or backend delegation lifecycle rules. New
-// module staged ahead of the TermAl MCP wrapper integration.
+// Owns the Phase 2/3 delegation command surface that UI/MCP wrappers can bind
+// to: spawn, reviewer batches, status, result, cancel, and polling wait helpers.
+// Does not own route transport, live SSE adoption, or backend delegation
+// lifecycle rules. New module staged ahead of the TermAl MCP wrapper integration.
 
 import {
   cancelDelegation,
@@ -51,6 +51,10 @@ export const MAX_DELEGATION_TITLE_CHARS = 200;
 // prompt payloads. Keep in sync with `MAX_DELEGATION_MODEL_CHARS` in
 // `src/delegations.rs`.
 export const MAX_DELEGATION_MODEL_CHARS = 200;
+// Keep in sync with `MAX_RUNNING_DELEGATIONS_PER_PARENT` in
+// `src/delegations.rs`. The backend remains authoritative when a parent already
+// has active delegations; this only caps one helper call.
+export const MAX_REVIEWER_BATCH_SIZE = 4;
 const UNSAFE_TRANSPORT_ID_PATTERN = /[/?#\u0000-\u001f\u007f]/u;
 
 // These client-side wait limits compose to at most 20 status requests/sec per
@@ -111,6 +115,29 @@ export type SpawnDelegationCommandResult = {
   childSession: DelegationChildSessionSummary;
   revision: number;
   serverInstanceId: string;
+};
+
+export type SpawnReviewerBatchItem = Omit<
+  CreateDelegationRequest,
+  "mode" | "writePolicy"
+>;
+
+export type SpawnReviewerBatchFailure = {
+  index: number;
+  title: string | null;
+  message: string;
+};
+
+export type SpawnReviewerBatchOutcome = "completed" | "partial" | "error";
+
+export type SpawnReviewerBatchCommandResult = {
+  outcome: SpawnReviewerBatchOutcome;
+  spawned: SpawnDelegationCommandResult[];
+  failed: SpawnReviewerBatchFailure[];
+  delegationIds: string[];
+  childSessionIds: string[];
+  revision: number | null;
+  serverInstanceId: string | null;
 };
 
 export type DelegationStatusCommandResult = {
@@ -192,6 +219,77 @@ async function spawnDelegationWithTransport(
     normalizedParentSessionId,
     compactCreateDelegationRequest(request),
   );
+  return spawnDelegationCommandResult(response);
+}
+
+export async function spawnReviewerBatchCommand(
+  parentSessionId: string,
+  requests: readonly SpawnReviewerBatchItem[],
+): Promise<SpawnReviewerBatchCommandResult> {
+  return spawnReviewerBatchWithTransport(
+    browserDelegationCommandTransport,
+    parentSessionId,
+    requests,
+  );
+}
+
+async function spawnReviewerBatchWithTransport(
+  transport: DelegationCommandTransport,
+  parentSessionId: string,
+  requests: readonly SpawnReviewerBatchItem[],
+): Promise<SpawnReviewerBatchCommandResult> {
+  const normalizedParentSessionId = normalizeTransportId(
+    parentSessionId,
+    "parent session id",
+  );
+  const normalizedRequests = normalizeReviewerBatchRequests(requests);
+  const settled = await Promise.all(
+    normalizedRequests.map(({ request, title }, index) =>
+      transport
+        .createDelegation(normalizedParentSessionId, request)
+        .then(
+          (response) =>
+            ({
+              kind: "spawned",
+              result: spawnDelegationCommandResult(response),
+            }) as const,
+          (error: unknown) =>
+            ({
+              kind: "failed",
+              failure: reviewerBatchFailure(index, title, error),
+            }) as const,
+        ),
+    ),
+  );
+  const spawned: SpawnDelegationCommandResult[] = [];
+  const failed: SpawnReviewerBatchFailure[] = [];
+  settled.forEach((entry) => {
+    if (entry.kind === "spawned") {
+      spawned.push(entry.result);
+    } else {
+      failed.push(entry.failure);
+    }
+  });
+  const metadata = newestSpawnMetadata(spawned);
+  return {
+    outcome:
+      failed.length === 0
+        ? "completed"
+        : spawned.length > 0
+          ? "partial"
+          : "error",
+    spawned,
+    failed,
+    delegationIds: spawned.map((result) => result.delegationId),
+    childSessionIds: spawned.map((result) => result.childSessionId),
+    revision: metadata.revision,
+    serverInstanceId: metadata.serverInstanceId,
+  };
+}
+
+function spawnDelegationCommandResult(
+  response: DelegationResponse,
+): SpawnDelegationCommandResult {
   return {
     delegationId: response.delegation.id,
     childSessionId: response.delegation.childSessionId,
@@ -484,6 +582,10 @@ export function createDelegationCommands(
   return {
     spawn_delegation: (parentSessionId: string, request: CreateDelegationRequest) =>
       spawnDelegationWithTransport(transport, parentSessionId, request),
+    spawn_reviewer_batch: (
+      parentSessionId: string,
+      requests: readonly SpawnReviewerBatchItem[],
+    ) => spawnReviewerBatchWithTransport(transport, parentSessionId, requests),
     get_delegation_status: (parentSessionId: string, delegationId: string) =>
       getDelegationStatusWithTransport(transport, parentSessionId, delegationId),
     get_delegation_result: (parentSessionId: string, delegationId: string) =>
@@ -836,6 +938,69 @@ function normalizeDelegationIds(delegationIds: readonly string[]) {
     }
   }
   return normalizedIds;
+}
+
+function normalizeReviewerBatchRequests(
+  requests: readonly SpawnReviewerBatchItem[],
+) {
+  if (!Array.isArray(requests)) {
+    throw new TypeError("spawn_reviewer_batch requests must be an array");
+  }
+  if (requests.length === 0) {
+    throw new RangeError("spawn_reviewer_batch requires at least one reviewer");
+  }
+  if (requests.length > MAX_REVIEWER_BATCH_SIZE) {
+    throw new RangeError(
+      `spawn_reviewer_batch accepts at most ${MAX_REVIEWER_BATCH_SIZE} reviewers`,
+    );
+  }
+  return requests.map((request, index) => {
+    if (request === null || typeof request !== "object") {
+      throw new TypeError(`reviewer request ${index + 1} must be an object`);
+    }
+    const compacted = compactCreateDelegationRequest({
+      ...request,
+      mode: "reviewer",
+      writePolicy: { kind: "readOnly" },
+    });
+    return {
+      request: compacted,
+      title: reviewerBatchItemTitle(compacted),
+    };
+  });
+}
+
+function reviewerBatchItemTitle(request: CreateDelegationRequest) {
+  const title = typeof request.title === "string" ? request.title.trim() : "";
+  return title.length > 0 ? title : null;
+}
+
+function reviewerBatchFailure(
+  index: number,
+  title: string | null,
+  error: unknown,
+): SpawnReviewerBatchFailure {
+  return {
+    index,
+    title,
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+function newestSpawnMetadata(spawned: readonly SpawnDelegationCommandResult[]) {
+  let revision: number | null = null;
+  const serverInstanceIds = new Set<string>();
+  for (const result of spawned) {
+    if (revision === null || result.revision > revision) {
+      revision = result.revision;
+    }
+    serverInstanceIds.add(result.serverInstanceId);
+  }
+  return {
+    revision,
+    serverInstanceId:
+      serverInstanceIds.size === 1 ? [...serverInstanceIds][0] : null,
+  };
 }
 
 function normalizedFinitePositiveDuration(
