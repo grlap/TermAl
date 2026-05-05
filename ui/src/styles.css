@@ -3974,6 +3974,53 @@ textarea {
   height: var(--icon-size-sm);
 }
 
+.conversation-message-marker-shell.can-open-marker-menu {
+  cursor: context-menu;
+}
+
+.conversation-marker-context-menu {
+  position: fixed;
+  z-index: 28;
+  min-width: 13.5rem;
+  max-width: min(18rem, calc(100vw - 1rem));
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: color-mix(in srgb, var(--surface-white) 92%, white 8%);
+  box-shadow: 0 20px 40px color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+.conversation-marker-context-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0.62rem 0.72rem;
+  border: 0;
+  border-radius: calc(var(--control-radius) - 2px);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.conversation-marker-context-menu-item:hover,
+.conversation-marker-context-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--accent-blue-bg) 58%, var(--surface-white));
+  outline: none;
+}
+
+.conversation-marker-context-menu-item-danger {
+  color: var(--signal-red);
+}
+
+.conversation-marker-context-menu-separator {
+  height: 1px;
+  margin: 0.28rem 0;
+  background: var(--line);
+}
+
 .conversation-marker-chip {
   --conversation-marker-color: var(--signal-blue);
 

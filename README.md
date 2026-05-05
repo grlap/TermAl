@@ -255,17 +255,18 @@ Run the backend first, then start the Telegram relay in a separate terminal:
 ```bash
 TERMAL_TELEGRAM_BOT_TOKEN=... \
 TERMAL_TELEGRAM_PROJECT_ID=project-1 \
+TERMAL_TELEGRAM_CHAT_ID=123456789 \
 cargo run -- telegram
 ```
 
-Optional environment variables:
+Environment variables:
 
-- `TERMAL_TELEGRAM_CHAT_ID` — lock the relay to one Telegram chat ID
+- `TERMAL_TELEGRAM_CHAT_ID` — required for new setups unless `~/.termal/telegram-bot.json` already contains a trusted binding; locks the relay to one Telegram chat ID
 - `TERMAL_TELEGRAM_API_BASE_URL` — override the local TermAl backend URL (default `http://127.0.0.1:8787`)
 - `TERMAL_TELEGRAM_PUBLIC_BASE_URL` — public URL used for `Review in TermAl` deep links
 - `TERMAL_TELEGRAM_POLL_TIMEOUT_SECS` — long-poll timeout for Telegram Bot API requests
 
-If `TERMAL_TELEGRAM_CHAT_ID` is not set, the first `/start` message links the bot to one chat and that binding is persisted in `~/.termal/telegram-bot.json`.
+Fresh relays no longer bind the first chat that sends `/start`. If no trusted binding exists, `/start` replies with setup instructions and no chat ID is persisted.
 
 ## Project structure
 

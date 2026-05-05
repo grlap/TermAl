@@ -2973,6 +2973,150 @@ describe("App live state - delta-gap core", () => {
     });
   });
 
+  it("advances revision for forward appliedNoOp deltas without resyncing", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const initialSession = makeSession("session-1", {
+        name: "Codex Session",
+        status: "active",
+        preview: "Stable answer",
+        messagesLoaded: true,
+        messageCount: 2,
+        messages: [
+          {
+            id: "message-user-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "you",
+            text: "test",
+          },
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Stable answer",
+          },
+        ],
+      });
+      let stateRequestCount = 0;
+      let sessionFetchCount = 0;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          stateRequestCount += 1;
+          return jsonResponse(
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [initialSession],
+            }),
+          );
+        }
+        if (requestUrl.pathname === "/api/sessions/session-1") {
+          sessionFetchCount += 1;
+          return jsonResponse({
+            revision: 1,
+            serverInstanceId: "test-instance",
+            session: initialSession,
+          });
+        }
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/tmp",
+            upstream: "origin/main",
+            workdir: "/tmp",
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [initialSession],
+          }),
+        );
+        await openSessionByName("Codex Session");
+        expect(screen.getAllByText("Stable answer").length).toBeGreaterThan(0);
+
+        stateRequestCount = 0;
+        sessionFetchCount = 0;
+        fetchMock.mockClear();
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "textReplace",
+            revision: 2,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 1,
+            messageCount: 2,
+            text: "Stable answer",
+            preview: "Stable answer",
+          });
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        expect(stateRequestCount).toBe(0);
+        expect(sessionFetchCount).toBe(0);
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "textDelta",
+            revision: 3,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 1,
+            messageCount: 2,
+            delta: " continued",
+            preview: "Stable answer continued",
+          });
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        expect(stateRequestCount).toBe(0);
+        expect(sessionFetchCount).toBe(0);
+        expect(
+          screen.getAllByText("Stable answer continued").length,
+        ).toBeGreaterThan(0);
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("watchdog-resyncs when repeated ignored deltas arrive for an active session", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
@@ -3112,6 +3256,153 @@ describe("App live state - delta-gap core", () => {
       expect(watchdogTriggered).toBe(true);
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Here after ignored deltas.")).toHaveLength(2);
+      expect(
+        screen.queryByText("Waiting for the next chunk of output..."),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      setDocumentVisibilityState(originalVisibilityState);
+      scrollIntoViewSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("watchdog-resyncs when repeated duplicate messageCreated replays arrive for an active session", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalVisibilityState = document.visibilityState;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-02T09:00:00.000Z"));
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        stateRequestCount += 1;
+        return jsonResponse({
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "idle",
+              preview: "Here after duplicate messageCreated deltas.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Here after duplicate messageCreated deltas.",
+                },
+              ],
+            }),
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const scrollIntoViewSpy = stubScrollIntoView();
+    const stateFetchCallCount = () => stateRequestCount;
+    setDocumentVisibilityState("visible");
+    try {
+      await renderApp();
+      const eventSource = latestEventSource();
+      const duplicateMessage = {
+        id: "message-assistant-1",
+        type: "text",
+        timestamp: "10:01",
+        author: "assistant",
+        text: "Partial output.",
+      } as const;
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "Partial output.",
+              messageCount: 2,
+              sessionMutationStamp: 41,
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                duplicateMessage,
+              ],
+            }),
+          ],
+        });
+      });
+      await settleAsyncUi();
+
+      await openSessionByName("Codex Session");
+      expect(
+        screen.getByText("Waiting for the next chunk of output..."),
+      ).toBeInTheDocument();
+      fetchMock.mockClear();
+      stateRequestCount = 0;
+
+      let watchdogTriggered = false;
+      for (
+        let elapsed = 0;
+        elapsed < LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 3000;
+        elapsed += 1000
+      ) {
+        act(() => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "messageCreated",
+            revision: 1,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 1,
+            messageCount: 2,
+            message: duplicateMessage,
+            preview: "Partial output.",
+            status: "active",
+            sessionMutationStamp: 41,
+          });
+        });
+        await advanceTimers(1000);
+        if (stateFetchCallCount() > 0) {
+          watchdogTriggered = true;
+          break;
+        }
+      }
+
+      await settleAsyncUi();
+
+      expect(watchdogTriggered).toBe(true);
+      expect(stateFetchCallCount()).toBe(1);
+      expect(
+        screen.getAllByText("Here after duplicate messageCreated deltas."),
+      ).toHaveLength(2);
       expect(
         screen.queryByText("Waiting for the next chunk of output..."),
       ).not.toBeInTheDocument();

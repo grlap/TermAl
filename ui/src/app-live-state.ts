@@ -2835,6 +2835,15 @@ export function useAppLiveState(
         // Non-session deltas such as codexUpdated/orchestratorsUpdated are handled above; the
         // session reducer only accepts deltas that carry a concrete sessionId.
         const result = applyDeltaToSessions(sessionsRef.current, delta);
+        if (result.kind === "appliedNoOp") {
+          confirmReconnectRecoveryFromDeltaEvent();
+          cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
+          latestStateRevisionRef.current = delta.revision;
+          sessionsRef.current = result.sessions;
+          setBackendConnectionIssueDetail(null);
+          clearRecoveredBackendRequestError();
+          return;
+        }
         if (
           result.kind === "applied" ||
           result.kind === "appliedNeedsResync"
@@ -2878,7 +2887,6 @@ export function useAppLiveState(
           }
           return;
         }
-
         // Reducer rejected the delta as out-of-sync (missing target on a
         // hydrated session, type/id mismatch, count regression, …). Schedule
         // the authoritative state resync as before AND force a per-session

@@ -543,7 +543,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
-  it("follows streamed growth after the user manually scrolls back to bottom", async () => {
+  it("follows large streamed growth after the user manually scrolls back to bottom", async () => {
     let currentScrollHeight = 500;
     const messages = makeTextMessages(3);
     const harness = renderVirtualizedHarness({
@@ -572,7 +572,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
       harness.scrollWrites.length = 0;
       act(() => {
-        currentScrollHeight = 540;
+        currentScrollHeight = 590;
         harness.rerenderWithMessages([
           ...messages,
           {
@@ -585,7 +585,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
         ]);
       });
 
-      expect(harness.scrollWrites).toContain(440);
+      expect(harness.scrollWrites).toContain(490);
     } finally {
       vi.useRealTimers();
       harness.restore();

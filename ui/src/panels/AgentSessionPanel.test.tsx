@@ -643,6 +643,58 @@ describe("AgentSessionPanel conversation caching", () => {
     );
   });
 
+  it("adds and removes message markers from the assistant response context menu", () => {
+    const onCreateConversationMarker = vi.fn();
+    const onDeleteConversationMarker = vi.fn();
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+      markers: [
+        makeConversationMarker({
+          id: "marker-1",
+          messageId: "message-2",
+          name: "Review point",
+        }),
+      ],
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      onCreateConversationMarker,
+      onDeleteConversationMarker,
+    });
+
+    fireEvent.contextMenu(screen.getByText("message-1"));
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByText("message-2"));
+    const addMenu = screen.getByRole("menu", {
+      name: "Conversation marker actions",
+    });
+    fireEvent.click(
+      within(addMenu).getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+
+    expect(onCreateConversationMarker).toHaveBeenCalledWith(
+      "session-1",
+      "message-2",
+    );
+
+    fireEvent.contextMenu(screen.getByText("message-2"));
+    const removeMenu = screen.getByRole("menu", {
+      name: "Conversation marker actions",
+    });
+    fireEvent.click(
+      within(removeMenu).getByRole("menuitem", { name: "Remove Review point" }),
+    );
+
+    expect(onDeleteConversationMarker).toHaveBeenCalledWith(
+      "session-1",
+      "marker-1",
+    );
+  });
+
   it("dispatches visible message actions through the latest parent callbacks", async () => {
     const initialApproval = vi.fn();
     const latestApproval = vi.fn();

@@ -216,6 +216,9 @@ function applyMetadataOnlySessionDelta(
 }
 
 function serializedValuesMatch(left: unknown, right: unknown) {
+  // Deliberately conservative: JSON.stringify distinguishes null from
+  // missing/undefined object fields. That makes optional wire-shape drift fall
+  // through to a material apply instead of hiding it as a replay no-op.
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
@@ -311,6 +314,34 @@ function messageCreatedDeltaHasProtocolViolation(
   return (
     existingMessageIndex === -1 &&
     delta.messageCount <= session.messages.length
+  );
+}
+
+function messageCreatedDeltaIsNoOp(
+  session: Session,
+  delta: MessageCreatedDelta,
+) {
+  const existingMessageIndex = findMessageIndex(
+    session.messages,
+    delta.messageId,
+    delta.messageIndex,
+  );
+  if (existingMessageIndex !== delta.messageIndex) {
+    return false;
+  }
+
+  // Message payloads are discriminated unions, so compare the full serialized
+  // shape rather than trying to mirror each variant field-by-field here.
+  return (
+    serializedValuesMatch(session.messages[existingMessageIndex], delta.message) &&
+    sessionStatusMetadataUpdateIsNoOp(
+      session,
+      delta.messageCount,
+      delta.preview,
+      delta.status,
+      delta.sessionMutationStamp,
+    ) &&
+    !session.pendingPrompts?.some((prompt) => prompt.id === delta.messageId)
   );
 }
 
@@ -434,6 +465,9 @@ export function applyDeltaToSessions(
       if (messageCreatedDeltaHasProtocolViolation(session, delta)) {
         return { kind: "needsResync" };
       }
+      if (messageCreatedDeltaIsNoOp(session, delta)) {
+        return { kind: "appliedNoOp", sessions };
+      }
 
       if (session.messagesLoaded === false) {
         const retainedTranscriptUpdate =
@@ -506,6 +540,8 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
 
+      // Message payloads are discriminated unions; serialized comparison keeps
+      // the replay shortcut tied to the exact local wire shape.
       if (
         serializedValuesMatch(session.messages[messageIndex], delta.message) &&
         sessionStatusMetadataUpdateIsNoOp(
@@ -704,6 +740,8 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
 
+      // Command updates are flat primitive fields, so field-by-field equality
+      // avoids serializing the whole message object.
       if (
         message.command === delta.command &&
         message.commandLanguage === delta.commandLanguage &&
@@ -779,6 +817,8 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
 
+      // Agent arrays are nested and ordered; serialized comparison keeps the
+      // replay shortcut exact without hand-rolling deep equality.
       if (
         serializedValuesMatch(message.agents, delta.agents) &&
         sessionMetadataUpdateIsNoOp(
@@ -823,6 +863,8 @@ export function applyDeltaToSessions(
       }
       const markers = session.markers ?? [];
       const existingMarker = markers.find((marker) => marker.id === delta.marker.id);
+      // Marker replay no-op requires the complete marker, including timestamp
+      // and index-hint fields, to match the backend's idempotent re-emission.
       if (
         existingMarker &&
         serializedValuesMatch(existingMarker, delta.marker) &&

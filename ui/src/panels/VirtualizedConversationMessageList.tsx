@@ -2234,15 +2234,12 @@ export function VirtualizedConversationMessageList({
             // The user just scrolled DOWN to (or stayed at) the
             // bottom. Mirror what the programmatic-scroll branch at
             // `syncProgrammaticScrollWrite`'s near-bottom landing does:
-            // clear the detached flag AND
-            // re-arm `shouldKeepBottomAfterLayoutRef`. Re-arming is
-            // load-bearing — without it, the auto-scroll layout
-            // effect keyed by `layoutVersion` stays gated on a flag
-            // that was unset earlier when the user scrolled away from
-            // the bottom. Incoming streamed text would then fail to
-            // follow even though the user visibly returned to bottom.
-            isDetachedFromBottomRef.current = false;
-            shouldKeepBottomAfterLayoutRef.current = true;
+            // re-enter bottom-follow mode and clear stale user-scroll
+            // cooldown state. Without the full reset, a larger streamed
+            // growth can still be classified as user-detached even though
+            // the user visibly returned to bottom.
+            enterBottomFollowMode();
+            clearPendingIdleCompactionTimer();
           }
         }
       }

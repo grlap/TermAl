@@ -1379,6 +1379,7 @@ fn remote_marker_deltas_reject_invalid_marker_colors() {
     );
     valid_updated_marker.name = "Remote marker updated".to_owned();
     valid_updated_marker.color = "#EF4444".to_owned();
+    let initial_stamps = marker_session_stamps(&state, &local_session_id);
 
     let err = state
         .apply_remote_delta_event(
@@ -1404,6 +1405,11 @@ fn remote_marker_deltas_reject_invalid_marker_colors() {
             .is_empty(),
         "invalid remote marker create should not be stored"
     );
+    assert_eq!(
+        marker_session_stamps(&state, &local_session_id),
+        initial_stamps,
+        "invalid remote marker create should not stamp the local session"
+    );
 
     let err = state
         .apply_remote_delta_event(
@@ -1428,6 +1434,11 @@ fn remote_marker_deltas_reject_invalid_marker_colors() {
             .markers
             .is_empty(),
         "exact invalid create retry should not be stored"
+    );
+    assert_eq!(
+        marker_session_stamps(&state, &local_session_id),
+        initial_stamps,
+        "exact invalid remote marker create retry should not stamp the local session"
     );
 
     state
@@ -1458,6 +1469,11 @@ fn remote_marker_deltas_reject_invalid_marker_colors() {
         }
         _ => panic!("expected ConversationMarkerCreated delta"),
     }
+    let post_create_stamps = marker_session_stamps(&state, &local_session_id);
+    assert_ne!(
+        post_create_stamps, initial_stamps,
+        "valid remote marker create should stamp the local session"
+    );
 
     let err = state
         .apply_remote_delta_event(
@@ -1483,6 +1499,11 @@ fn remote_marker_deltas_reject_invalid_marker_colors() {
     assert_eq!(markers.markers[0].name, valid_created_marker.name);
     assert_eq!(markers.markers[0].body, valid_created_marker.body);
     assert_eq!(markers.markers[0].color, "#abcdef");
+    assert_eq!(
+        marker_session_stamps(&state, &local_session_id),
+        post_create_stamps,
+        "invalid remote marker update should not stamp the local session"
+    );
 
     let err = state
         .apply_remote_delta_event(
@@ -1508,6 +1529,11 @@ fn remote_marker_deltas_reject_invalid_marker_colors() {
     assert_eq!(markers.markers[0].name, valid_created_marker.name);
     assert_eq!(markers.markers[0].body, valid_created_marker.body);
     assert_eq!(markers.markers[0].color, "#abcdef");
+    assert_eq!(
+        marker_session_stamps(&state, &local_session_id),
+        post_create_stamps,
+        "exact invalid remote marker update retry should not stamp the local session"
+    );
 
     state
         .apply_remote_delta_event(

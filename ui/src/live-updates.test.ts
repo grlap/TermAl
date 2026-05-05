@@ -29,6 +29,18 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
   };
 }
 
+function expectMaterialApply(
+  result: ReturnType<typeof applyDeltaToSessions>,
+  inputSessions: Session[],
+) {
+  expect(result.kind).toBe("applied");
+  if (result.kind !== "applied") {
+    throw new Error("expected delta to apply materially");
+  }
+  expect(result.sessions).not.toBe(inputSessions);
+  return result.sessions;
+}
+
 describe("sessionDeltaAdvancesCurrentMutationStamp", () => {
   const textDelta: SessionDeltaEvent = {
     type: "textDelta",
@@ -2477,6 +2489,69 @@ describe("applyDeltaToSessions", () => {
     expect(deleteResult.sessions).toBe(deletedSessions);
   });
 
+  it("material-applies marker deltas when payload changes but metadata matches", () => {
+    const marker: NonNullable<Session["markers"]>[number] = {
+      id: "marker-1",
+      sessionId: "session-a",
+      kind: "decision",
+      name: "Decision",
+      color: "#3b82f6",
+      messageId: "message-1",
+      messageIndexHint: 0,
+      createdAt: "10:00:00",
+      updatedAt: "10:00:00",
+      createdBy: "user",
+    };
+    const updateSessions = [
+      makeSession("session-a", {
+        sessionMutationStamp: 11,
+        messagesLoaded: true,
+        markers: [marker],
+      }),
+    ];
+
+    const updateSessionsAfter = expectMaterialApply(
+      applyDeltaToSessions(updateSessions, {
+        type: "conversationMarkerUpdated",
+        revision: 11,
+        sessionId: "session-a",
+        marker: { ...marker, color: "#22c55e" },
+        sessionMutationStamp: 11,
+      }),
+      updateSessions,
+    );
+    expect(updateSessionsAfter[0].markers?.[0].color).toBe("#22c55e");
+
+    const deleteSessions = [
+      makeSession("session-a", {
+        sessionMutationStamp: 12,
+        messagesLoaded: true,
+        markers: [
+          marker,
+          {
+            ...marker,
+            id: "marker-2",
+            name: "Second decision",
+          },
+        ],
+      }),
+    ];
+
+    const deleteSessionsAfter = expectMaterialApply(
+      applyDeltaToSessions(deleteSessions, {
+        type: "conversationMarkerDeleted",
+        revision: 12,
+        sessionId: "session-a",
+        markerId: "marker-2",
+        sessionMutationStamp: 12,
+      }),
+      deleteSessions,
+    );
+    expect(deleteSessionsAfter[0].markers?.map((entry) => entry.id)).toEqual([
+      "marker-1",
+    ]);
+  });
+
   it("requests resync for marker deltas against summary or inconsistent sessions", () => {
     const marker = {
       id: "marker-1",
@@ -2657,6 +2732,44 @@ describe("applyDeltaToSessions", () => {
     );
   });
 
+  it("returns appliedNoOp for an identical messageCreated replay at the same index", () => {
+    const message = {
+      id: "message-1",
+      type: "text",
+      timestamp: "10:00",
+      author: "assistant",
+      text: "Stable answer",
+    } as const;
+    const sessions = [
+      makeSession("session-a", {
+        preview: "Stable answer",
+        status: "idle",
+        messageCount: 1,
+        sessionMutationStamp: 41,
+        messages: [message],
+      }),
+    ];
+
+    const result = applyDeltaToSessions(sessions, {
+      type: "messageCreated",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "message-1",
+      messageIndex: 0,
+      messageCount: 1,
+      message: { ...message },
+      preview: "Stable answer",
+      status: "idle",
+      sessionMutationStamp: 41,
+    });
+
+    expect(result.kind).toBe("appliedNoOp");
+    if (result.kind !== "appliedNoOp") {
+      throw new Error("expected identical messageCreated to short-circuit");
+    }
+    expect(result.sessions).toBe(sessions);
+  });
+
   it("returns appliedNoOp for an identical messageUpdated replay", () => {
     const message = {
       id: "message-1",
@@ -2784,6 +2897,139 @@ describe("applyDeltaToSessions", () => {
       );
     }
     expect(result.sessions).toBe(sessions);
+  });
+
+  it("material-applies non-text message deltas when payload changes but metadata matches", () => {
+    const message = {
+      id: "message-1",
+      type: "text",
+      timestamp: "10:00",
+      author: "assistant",
+      text: "Stable answer",
+    } as const;
+    const messageSessions = [
+      makeSession("session-a", {
+        preview: "Stable answer",
+        status: "idle",
+        messageCount: 1,
+        sessionMutationStamp: 41,
+        messages: [message],
+      }),
+    ];
+
+    const messageSessionsAfter = expectMaterialApply(
+      applyDeltaToSessions(messageSessions, {
+        type: "messageUpdated",
+        revision: 3,
+        sessionId: "session-a",
+        messageId: "message-1",
+        messageIndex: 0,
+        messageCount: 1,
+        message: { ...message, text: "Changed answer" },
+        preview: "Stable answer",
+        status: "idle",
+        sessionMutationStamp: 41,
+      }),
+      messageSessions,
+    );
+    expect(messageSessionsAfter[0].messages[0]).toMatchObject({
+      text: "Changed answer",
+    });
+
+    const commandSessions = [
+      makeSession("session-a", {
+        preview: "/tmp",
+        messageCount: 1,
+        sessionMutationStamp: 41,
+        messages: [
+          {
+            id: "command-1",
+            type: "command",
+            timestamp: "10:05",
+            author: "assistant",
+            command: "pwd",
+            commandLanguage: "powershell",
+            output: "/tmp",
+            outputLanguage: "text",
+            status: "success",
+          },
+        ],
+      }),
+    ];
+
+    const commandSessionsAfter = expectMaterialApply(
+      applyDeltaToSessions(commandSessions, {
+        type: "commandUpdate",
+        revision: 3,
+        sessionId: "session-a",
+        messageId: "command-1",
+        messageIndex: 0,
+        messageCount: 1,
+        command: "pwd",
+        commandLanguage: "powershell",
+        output: "/work",
+        outputLanguage: "text",
+        status: "success",
+        preview: "/tmp",
+        sessionMutationStamp: 41,
+      }),
+      commandSessions,
+    );
+    expect(commandSessionsAfter[0].messages[0]).toMatchObject({
+      output: "/work",
+    });
+
+    const agents = [
+      {
+        id: "reviewer",
+        title: "Reviewer",
+        status: "running",
+        detail: "Checking diffs",
+      },
+    ] as const;
+    const parallelSessions = [
+      makeSession("session-a", {
+        preview: "Running reviewer",
+        messageCount: 1,
+        sessionMutationStamp: 41,
+        messages: [
+          {
+            id: "parallel-1",
+            type: "parallelAgents",
+            timestamp: "10:06",
+            author: "assistant",
+            agents: [...agents],
+          },
+        ],
+      }),
+    ];
+
+    const parallelSessionsAfter = expectMaterialApply(
+      applyDeltaToSessions(parallelSessions, {
+        type: "parallelAgentsUpdate",
+        revision: 3,
+        sessionId: "session-a",
+        messageId: "parallel-1",
+        messageIndex: 0,
+        messageCount: 1,
+        agents: [
+          {
+            ...agents[0],
+            detail: "Found an issue",
+          },
+        ],
+        preview: "Running reviewer",
+        sessionMutationStamp: 41,
+      }),
+      parallelSessions,
+    );
+    expect(parallelSessionsAfter[0].messages[0]).toMatchObject({
+      agents: [
+        expect.objectContaining({
+          detail: "Found an issue",
+        }),
+      ],
+    });
   });
 
   it("applies text deltas when the message exists at a different index", () => {

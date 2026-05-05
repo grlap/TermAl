@@ -244,6 +244,7 @@ export function SessionPaneView({
   onRefreshSessionModelOptions,
   onRefreshAgentCommands,
   onCreateConversationMarker,
+  onDeleteConversationMarker,
   onRollbackCodexThread,
   onUnarchiveCodexThread,
   onOrchestratorStateUpdated,
@@ -430,6 +431,10 @@ export function SessionPaneView({
   onCreateConversationMarker: (
     sessionId: string,
     messageId: string,
+  ) => void;
+  onDeleteConversationMarker: (
+    sessionId: string,
+    markerId: string,
   ) => void;
   onRollbackCodexThread: (sessionId: string, numTurns: number) => void;
   onUnarchiveCodexThread: (sessionId: string) => void;
@@ -1997,6 +2002,29 @@ export function SessionPaneView({
       return;
     }
 
+    // When the user is already near the bottom on send, skip the
+    // smooth-scroll here. The user prompt is non-optimistic (it
+    // lands only after the POST returns), so this effect would
+    // otherwise smooth-scroll to the OLD bottom while the
+    // visibleContentSignature effect a few frames later
+    // smooth-scrolls to the NEW (taller) bottom — the second
+    // scrollTo cancels the first mid-animation, restarting the
+    // easing curve from the current position to a new target,
+    // which the user perceives as a stutter / "not smooth"
+    // motion. Letting the post-message-land effect drive the
+    // single smooth-scroll keeps the animation linear.
+    //
+    // For the far-from-bottom case the auto-scroll layout effect
+    // is gated off (the user explicitly scrolled away), so we
+    // still schedule the settled-poll catchup here to bring the
+    // user's prompt into view once it lands. The
+    // `App.scroll-behavior.test.tsx::"follows the latest user
+    // prompt immediately while a send is in flight"` regression
+    // pins this exact behavior.
+    if (isMessageStackNearBottom()) {
+      return;
+    }
+
     let cleanup: (() => void) | undefined;
     const frameId = window.requestAnimationFrame(() => {
       cleanup = followLatestMessageForPromptSend();
@@ -3134,6 +3162,7 @@ export function SessionPaneView({
             onCodexAppRequestSubmit={onCodexAppRequestSubmit}
             onCancelQueuedPrompt={onCancelQueuedPrompt}
             onCreateConversationMarker={onCreateConversationMarker}
+            onDeleteConversationMarker={onDeleteConversationMarker}
             onSessionSettingsChange={onSessionSettingsChange}
             conversationSearchQuery={
               hasSessionFindQuery ? sessionFindQuery : ""

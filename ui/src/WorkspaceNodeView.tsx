@@ -151,6 +151,7 @@ export function WorkspaceNodeView({
   onRefreshSessionModelOptions,
   onRefreshAgentCommands,
   onCreateConversationMarker,
+  onDeleteConversationMarker,
   onRollbackCodexThread,
   onUnarchiveCodexThread,
   onOrchestratorStateUpdated,
@@ -343,6 +344,10 @@ export function WorkspaceNodeView({
     sessionId: string,
     messageId: string,
   ) => void;
+  onDeleteConversationMarker: (
+    sessionId: string,
+    markerId: string,
+  ) => void;
   onRollbackCodexThread: (sessionId: string, numTurns: number) => void;
   onUnarchiveCodexThread: (sessionId: string) => void;
   onOrchestratorStateUpdated: (state: StateResponse) => void;
@@ -485,6 +490,7 @@ export function WorkspaceNodeView({
         onRefreshSessionModelOptions={onRefreshSessionModelOptions}
         onRefreshAgentCommands={onRefreshAgentCommands}
         onCreateConversationMarker={onCreateConversationMarker}
+        onDeleteConversationMarker={onDeleteConversationMarker}
         onRollbackCodexThread={onRollbackCodexThread}
         onUnarchiveCodexThread={onUnarchiveCodexThread}
         onOrchestratorStateUpdated={onOrchestratorStateUpdated}
@@ -612,6 +618,7 @@ export function WorkspaceNodeView({
           onRefreshSessionModelOptions={onRefreshSessionModelOptions}
           onRefreshAgentCommands={onRefreshAgentCommands}
           onCreateConversationMarker={onCreateConversationMarker}
+          onDeleteConversationMarker={onDeleteConversationMarker}
           onRollbackCodexThread={onRollbackCodexThread}
           onUnarchiveCodexThread={onUnarchiveCodexThread}
           onOrchestratorStateUpdated={onOrchestratorStateUpdated}
@@ -705,6 +712,7 @@ export function WorkspaceNodeView({
           onRefreshSessionModelOptions={onRefreshSessionModelOptions}
           onRefreshAgentCommands={onRefreshAgentCommands}
           onCreateConversationMarker={onCreateConversationMarker}
+          onDeleteConversationMarker={onDeleteConversationMarker}
           onRollbackCodexThread={onRollbackCodexThread}
           onUnarchiveCodexThread={onUnarchiveCodexThread}
           onOrchestratorStateUpdated={onOrchestratorStateUpdated}

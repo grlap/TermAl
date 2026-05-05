@@ -421,19 +421,15 @@ export function renderTermalMermaidDiagram(
  * so the caller's existing error-state branch can show the diagram
  * source + a clean one-line message instead.
  *
- * Detection is intentionally cheap and defensive: any of the
- * following patterns flips it to `true`. They all appear together
- * in the canonical 11.x error SVG; matching any one of them tolerates
- * minor cross-version differences without regressing on legitimate
- * diagrams (none of these strings appear in well-formed Mermaid
- * output):
+ * Detection is intentionally cheap and defensive. Root-level
+ * `aria-roledescription="error"` is enough by itself; otherwise require
+ * multiple weaker Mermaid-error markers so a valid diagram containing
+ * "Syntax error in text" as a label does not false-positive.
  *
  *   - `aria-roledescription="error"` on the root `<svg>` element
  *     (the strongest signal in 11.x).
- *   - The literal text "Syntax error in text" inside an SVG `<text>`
- *     node (the user-visible error string Mermaid renders).
- *   - `class="error-icon"` (the bomb-icon group; older versions and
- *     a fallback for any future SVG that drops the aria-role).
+ *   - The literal text "Syntax error in text" together with
+ *     `class="error-icon"` (the bomb-icon group).
  */
 /**
  * Removes Mermaid 11.x's temp render container from `document.body`.
@@ -465,16 +461,15 @@ function cleanupMermaidTempContainer(diagramId: string): void {
 }
 
 export function isMermaidErrorVisualizationSvg(svg: string): boolean {
-  if (svg.includes('aria-roledescription="error"')) {
+  const hasRootErrorRole =
+    /<svg\b[^>]*\baria-roledescription=["']error["'][^>]*>/i.test(svg);
+  if (hasRootErrorRole) {
     return true;
   }
-  if (svg.includes("Syntax error in text")) {
-    return true;
-  }
-  if (svg.includes('class="error-icon"')) {
-    return true;
-  }
-  return false;
+  const hasSyntaxText = svg.includes("Syntax error in text");
+  const hasErrorIconClass =
+    /\bclass=["'][^"']*\berror-icon\b[^"']*["']/i.test(svg);
+  return hasSyntaxText && hasErrorIconClass;
 }
 
 export function buildTermalMermaidConfig(appearance: MonacoAppearance): MermaidConfigInput {

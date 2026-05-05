@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type ClipboardEvent as ReactClipboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -92,6 +93,13 @@ type PromptHistoryState = {
 const EMPTY_PENDING_PROMPTS: readonly PendingPrompt[] = [];
 const EMPTY_CONVERSATION_MARKERS: readonly ConversationMarker[] = [];
 const NOOP_CREATE_CONVERSATION_MARKER = () => {};
+const NOOP_DELETE_CONVERSATION_MARKER = () => {};
+
+type ConversationMarkerContextMenuState = {
+  messageId: string;
+  clientX: number;
+  clientY: number;
+};
 
 type SessionSettingsField =
   | "model"
@@ -197,6 +205,7 @@ export function AgentSessionPanel({
   onCodexAppRequestSubmit,
   onCancelQueuedPrompt,
   onCreateConversationMarker = NOOP_CREATE_CONVERSATION_MARKER,
+  onDeleteConversationMarker = NOOP_DELETE_CONVERSATION_MARKER,
   onSessionSettingsChange,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
@@ -223,6 +232,7 @@ export function AgentSessionPanel({
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
   onCreateConversationMarker?: (sessionId: string, messageId: string) => void;
+  onDeleteConversationMarker?: (sessionId: string, markerId: string) => void;
   onSessionSettingsChange: (
       sessionId: string,
       field: SessionSettingsField,
@@ -256,6 +266,9 @@ export function AgentSessionPanel({
   const stableOnCreateConversationMarker = useStableEvent(
     onCreateConversationMarker,
   );
+  const stableOnDeleteConversationMarker = useStableEvent(
+    onDeleteConversationMarker,
+  );
   const stableOnSessionSettingsChange = useStableEvent(onSessionSettingsChange);
 
   return (
@@ -276,6 +289,7 @@ export function AgentSessionPanel({
       onCodexAppRequestSubmit={stableOnCodexAppRequestSubmit}
       onCancelQueuedPrompt={stableOnCancelQueuedPrompt}
       onCreateConversationMarker={stableOnCreateConversationMarker}
+      onDeleteConversationMarker={stableOnDeleteConversationMarker}
       onSessionSettingsChange={stableOnSessionSettingsChange}
       conversationSearchQuery={conversationSearchQuery}
       conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
@@ -405,6 +419,7 @@ const SessionBody = memo(function SessionBody({
   onCodexAppRequestSubmit,
   onCancelQueuedPrompt,
   onCreateConversationMarker,
+  onDeleteConversationMarker,
   onSessionSettingsChange,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
@@ -431,6 +446,7 @@ const SessionBody = memo(function SessionBody({
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
   onCreateConversationMarker: (sessionId: string, messageId: string) => void;
+  onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -504,6 +520,7 @@ const SessionBody = memo(function SessionBody({
           onCodexAppRequestSubmit={onCodexAppRequestSubmit}
           onCancelQueuedPrompt={onCancelQueuedPrompt}
           onCreateConversationMarker={onCreateConversationMarker}
+          onDeleteConversationMarker={onDeleteConversationMarker}
           conversationSearchQuery={conversationSearchQuery}
           conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
           conversationSearchActiveItemKey={conversationSearchActiveItemKey}
@@ -570,6 +587,7 @@ const SessionBody = memo(function SessionBody({
   previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
   previous.onCancelQueuedPrompt === next.onCancelQueuedPrompt &&
   previous.onCreateConversationMarker === next.onCreateConversationMarker &&
+  previous.onDeleteConversationMarker === next.onDeleteConversationMarker &&
   previous.onSessionSettingsChange === next.onSessionSettingsChange &&
   previous.conversationSearchQuery === next.conversationSearchQuery &&
   previous.conversationSearchMatchedItemKeys === next.conversationSearchMatchedItemKeys &&
@@ -605,6 +623,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   onCodexAppRequestSubmit,
   onCancelQueuedPrompt,
   onCreateConversationMarker,
+  onDeleteConversationMarker,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
   conversationSearchActiveItemKey,
@@ -623,6 +642,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
   onCreateConversationMarker: (sessionId: string, messageId: string) => void;
+  onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
   conversationSearchQuery: string;
   conversationSearchMatchedItemKeys: ReadonlySet<string>;
   conversationSearchActiveItemKey: string | null;
@@ -669,6 +689,8 @@ const SessionConversationPage = memo(function SessionConversationPage({
     [visibleMarkers, visibleMessages],
   );
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
+  const [markerContextMenu, setMarkerContextMenu] =
+    useState<ConversationMarkerContextMenuState | null>(null);
   const messageSlotNodesRef = useRef<Map<string, HTMLElement>>(new Map());
   const messageSlotNodesSessionIdRef = useRef(session.id);
 
@@ -688,6 +710,52 @@ const SessionConversationPage = memo(function SessionConversationPage({
       setActiveMarkerId(null);
     }
   }, [activeMarkerId, visibleMarkers]);
+
+  useEffect(() => {
+    setMarkerContextMenu(null);
+  }, [session.id]);
+
+  useEffect(() => {
+    if (!markerContextMenu) {
+      return;
+    }
+    if (!visibleMessages.some((message) => message.id === markerContextMenu.messageId)) {
+      setMarkerContextMenu(null);
+    }
+  }, [markerContextMenu, visibleMessages]);
+
+  useEffect(() => {
+    if (!markerContextMenu) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest(".conversation-marker-context-menu")
+      ) {
+        return;
+      }
+      setMarkerContextMenu(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMarkerContextMenu(null);
+      }
+    };
+    const handleScroll = () => {
+      setMarkerContextMenu(null);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("scroll", handleScroll, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("scroll", handleScroll, true);
+    };
+  }, [markerContextMenu]);
 
   // Re-creating this ref callback on session changes is intentional: React
   // detaches and re-attaches mounted message slots, repopulating the per-session
@@ -779,8 +847,23 @@ const SessionConversationPage = memo(function SessionConversationPage({
       if (!rendered) {
         return null;
       }
+      const canOpenMarkerMenu = message.author === "assistant";
+      const handleMarkerContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+        if (!canOpenMarkerMenu) {
+          return;
+        }
+        event.preventDefault();
+        setMarkerContextMenu({
+          messageId: message.id,
+          clientX: event.clientX,
+          clientY: event.clientY,
+        });
+      };
       return (
-        <div className="conversation-message-marker-shell">
+        <div
+          className={`conversation-message-marker-shell${canOpenMarkerMenu ? " can-open-marker-menu" : ""}`}
+          onContextMenu={handleMarkerContextMenu}
+        >
           <div className="conversation-message-marker-toolbar">
             <button
               type="button"
@@ -882,11 +965,58 @@ const SessionConversationPage = memo(function SessionConversationPage({
       onNavigateNext={() => navigateMarkerByOffset(1)}
     />
   ) : null;
+  const markerContextMenuMarkers = markerContextMenu
+    ? markersByMessageId.get(markerContextMenu.messageId) ?? []
+    : [];
+  const markerContextMenuNode = markerContextMenu ? (
+    <div
+      className="conversation-marker-context-menu"
+      role="menu"
+      aria-label="Conversation marker actions"
+      style={{
+        left: markerContextMenu.clientX,
+        top: markerContextMenu.clientY,
+      }}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        className="conversation-marker-context-menu-item"
+        onClick={() => {
+          onCreateConversationMarker(session.id, markerContextMenu.messageId);
+          setMarkerContextMenu(null);
+        }}
+      >
+        Add checkpoint marker
+      </button>
+      {markerContextMenuMarkers.length > 0 ? (
+        <>
+          <div className="conversation-marker-context-menu-separator" role="separator" />
+          {markerContextMenuMarkers.map((marker) => (
+            <button
+              key={marker.id}
+              type="button"
+              role="menuitem"
+              className="conversation-marker-context-menu-item conversation-marker-context-menu-item-danger"
+              onClick={() => {
+                onDeleteConversationMarker(session.id, marker.id);
+                setMarkerContextMenu(null);
+              }}
+            >
+              Remove {marker.name || "marker"}
+            </button>
+          ))}
+        </>
+      ) : null}
+    </div>
+  ) : null;
 
   const conversationContent = (
     <>
       {markerNavigation}
       {conversationMessages}
+      {markerContextMenuNode}
       {liveTurnCard}
       {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
       {pendingPromptCards}
@@ -926,6 +1056,8 @@ const SessionConversationPage = memo(function SessionConversationPage({
   previous.onUserInputSubmit === next.onUserInputSubmit &&
   previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
   previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
+  previous.onCreateConversationMarker === next.onCreateConversationMarker &&
+  previous.onDeleteConversationMarker === next.onDeleteConversationMarker &&
   previous.conversationSearchQuery === next.conversationSearchQuery &&
   previous.conversationSearchMatchedItemKeys === next.conversationSearchMatchedItemKeys &&
   previous.conversationSearchActiveItemKey === next.conversationSearchActiveItemKey &&

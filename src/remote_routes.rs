@@ -2005,16 +2005,15 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let (local_session_id, localized_marker, session_mutation_stamp) = {
+                    let local_session_id = inner.sessions[index].session.id.clone();
+                    let localized_marker =
+                        localize_remote_conversation_marker(marker, &local_session_id).map_err(
+                            |err| anyhow!("remote marker color was invalid: {}", err.message),
+                        )?;
+                    let session_mutation_stamp = {
                         let record = inner
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
-                        let local_session_id = record.session.id.clone();
-                        let localized_marker =
-                            localize_remote_conversation_marker(marker, &local_session_id)
-                                .map_err(|err| {
-                                    anyhow!("remote marker color was invalid: {}", err.message)
-                                })?;
                         if let Some(existing_index) = record
                             .session
                             .markers
@@ -2028,7 +2027,7 @@ impl AppState {
                         if remote_session_mutation_stamp.is_some() {
                             record.session.session_mutation_stamp = remote_session_mutation_stamp;
                         }
-                        (local_session_id, localized_marker, record.mutation_stamp)
+                        record.mutation_stamp
                     };
                     let revision = self.commit_persisted_delta_locked(&mut inner)?;
                     inner.note_remote_applied_revision(remote_id, remote_revision);
@@ -2071,16 +2070,15 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let (local_session_id, localized_marker, session_mutation_stamp) = {
+                    let local_session_id = inner.sessions[index].session.id.clone();
+                    let localized_marker =
+                        localize_remote_conversation_marker(marker, &local_session_id).map_err(
+                            |err| anyhow!("remote marker color was invalid: {}", err.message),
+                        )?;
+                    let session_mutation_stamp = {
                         let record = inner
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
-                        let local_session_id = record.session.id.clone();
-                        let localized_marker =
-                            localize_remote_conversation_marker(marker, &local_session_id)
-                                .map_err(|err| {
-                                    anyhow!("remote marker color was invalid: {}", err.message)
-                                })?;
                         if let Some(existing_index) = record
                             .session
                             .markers
@@ -2094,7 +2092,7 @@ impl AppState {
                         if remote_session_mutation_stamp.is_some() {
                             record.session.session_mutation_stamp = remote_session_mutation_stamp;
                         }
-                        (local_session_id, localized_marker, record.mutation_stamp)
+                        record.mutation_stamp
                     };
                     let revision = self.commit_persisted_delta_locked(&mut inner)?;
                     inner.note_remote_applied_revision(remote_id, remote_revision);

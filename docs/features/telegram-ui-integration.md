@@ -89,7 +89,7 @@ A new "Mobile / Telegram" section in Settings:
 │  ┌─ Linking wizard (modal) ────────────────────┐ │
 │  │ 1. Open @termal_user_bot in Telegram        │ │
 │  │ 2. Send this exact message:                 │ │
-│  │      /start tA9k-7Zq2e                      │ │
+│  │      /start TA9K-7ZQ2                       │ │
 │  │ 3. Waiting for link...  (polling)           │ │
 │  └─────────────────────────────────────────────┘ │
 │                                                  │
@@ -209,33 +209,53 @@ to:
 
 1. User clicks "Link your chat" in the UI.
 2. UI calls `POST /api/telegram/start-link` → backend generates a random
-   `link_code` (8 chars, base32 alphabet, with a dash for readability:
-   `tA9k-7Zq2e`) and stores it in memory with a 5-minute TTL.
-3. UI shows the code: *"Send `/start tA9k-7Zq2e` to your bot."*
+   `linkCode` (8 chars, Crockford base32 alphabet, displayed as `TA9K-7ZQ2`)
+   and stores only its server-side record in memory with a 5-minute TTL.
+3. UI shows the code: *"Send `/start TA9K-7ZQ2` to your bot."*
 4. Relay's `/start` handler:
-   - With code, code matches, code not expired → bind chat, clear code, send
-     welcome digest.
+   - With code, code matches, code not expired, code unused → bind chat, clear
+     code, send welcome digest.
    - With code, code mismatch or expired → reply *"Invalid or expired link
      code. Generate a new one in TermAl."*
    - Without code (and no chat is bound yet) → reply with instructions to
      start the link from TermAl (no auto-bind).
    - Without code, chat is already bound → ignore (treat as a re-greeting).
-5. UI polls `GET /api/telegram/status` every ~1s during the wizard; flips to
-   "Linked" once `binding.chat_id` is populated.
-6. Code expires automatically after 5 minutes.
+5. UI polls `GET /api/telegram/link/status` every ~1s during the wizard; flips
+   to "Linked" once `binding.chatId` is populated.
+6. Code expires automatically after 5 minutes. Invalid attempts are rate-limited
+   per chat and receive the same generic failure text so the relay does not leak
+   "right format, wrong value" details.
 
 This kills the first-touch hazard. A leaked token without a paired live link
 code can no longer attach a chat.
+
+### Security model
+
+- The in-process REST surface is local-admin only. The backend confirms it is
+  listening on loopback for `/api/telegram/*` mutations and rejects mutating
+  Telegram requests from non-loopback listeners.
+- Browser-originated Telegram mutations require the expected TermAl Origin
+  header. Missing or foreign origins are rejected before token, prompt, or link
+  code validation runs.
+- Token updates are write-only: request bodies may include `botToken`, but
+  responses only return the redacted suffix and never echo the full token.
+- Link codes are single-use, 8-character Crockford base32 values with a
+  5-minute TTL. Already-bound replay is idempotent for the linked chat and
+  rejected generically for any other chat.
 
 ## API additions
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/telegram/status` | Current relay state (configured, enabled, running, linked chat id, last poll, last error, counters) |
-| POST | `/api/telegram/config` | Update token, project id, enabled — body validated, token never echoed back |
+| POST | `/api/telegram/config` | Update token and project id — body validated, token never echoed back |
+| POST | `/api/telegram/relay/start` | Start the configured relay loop |
+| POST | `/api/telegram/relay/stop` | Stop the relay loop without repeating the token in the request body |
 | POST | `/api/telegram/test` | Validate the supplied token by calling Telegram `getMe` and return `{ botName, botUsername }` |
-| POST | `/api/telegram/start-link` | Generate a one-time link code with 5-minute TTL |
-| POST | `/api/telegram/unlink` | Clear `binding.chat_id` |
+| POST | `/api/telegram/start-link` | Generate `{ linkCode, expiresAt }` for a one-time link code with 5-minute TTL |
+| GET | `/api/telegram/link/status` | Poll the active link attempt (`pending`, `linked`, `expired`, `none`) |
+| POST | `/api/telegram/link/cancel` | Cancel the active link attempt and invalidate its code |
+| POST | `/api/telegram/unlink` | Clear `binding.chatId` |
 | POST | `/api/telegram/test-send` | Send a one-line digest to the linked chat to verify end-to-end delivery |
 
 All routes return JSON; all errors return `ApiError` with appropriate status
@@ -266,7 +286,9 @@ codes (400 for validation, 502 for upstream Telegram failures, etc.).
 
 ### Step 3 — Config endpoints + UI panel
 
-- `POST /api/telegram/config` (token, project_id, enabled).
+- `POST /api/telegram/config` (token, projectId).
+- `POST /api/telegram/relay/start|stop` controls runtime lifecycle without
+  repeating the token in request bodies.
 - `POST /api/telegram/test` (calls `getMe` against the supplied token; returns
   bot username so the UI can show *"✓ termal_user_bot"*).
 - New "Mobile / Telegram" section in Settings: token field, project dropdown,
@@ -275,10 +297,12 @@ codes (400 for validation, 502 for upstream Telegram failures, etc.).
 
 ### Step 4 — Code-based linking wizard
 
-- `POST /api/telegram/start-link` → returns `{ link_code, expires_at }`.
+- `POST /api/telegram/start-link` → returns `{ linkCode, expiresAt }`.
+- `GET /api/telegram/link/status` polls the active linking attempt.
+- `POST /api/telegram/link/cancel` invalidates the active link code.
 - Relay's `/start` handler validates against the active code; rejects free
   binding.
-- UI modal shows code + polls `GET /api/telegram/status` until linked.
+- UI modal shows code + polls `GET /api/telegram/link/status` until linked.
 - Closes the **first-touch chat-binding** security finding.
 
 ### Step 5 — Polish + remaining review fixes
@@ -345,7 +369,7 @@ changes are rare.
 
 ### 5. Project switching
 
-If the user changes the `project_id` in the config while the chat is
+If the user changes the `projectId` in the config while the chat is
 already linked, do we (a) keep the chat bound and just retarget action
 dispatches to the new project, or (b) require re-linking? (a) is friendlier
 but means the chat history in Telegram now spans two projects without a

@@ -48,7 +48,7 @@ fn run_telegram_bot() -> Result<()> {
         let updates = match telegram.get_updates(state.next_update_id, config.poll_timeout_secs) {
             Ok(updates) => updates,
             Err(err) => {
-                eprintln!("telegram> failed to poll updates: {err:#}");
+                log_telegram_error("failed to poll updates", &err);
                 std::thread::sleep(TELEGRAM_ERROR_RETRY_DELAY);
                 continue;
             }
@@ -64,14 +64,14 @@ fn run_telegram_bot() -> Result<()> {
 
             match handle_telegram_update(&telegram, &termal, &config, &mut state, update) {
                 Ok(changed) => dirty |= changed,
-                Err(err) => eprintln!("telegram> failed to handle update: {err:#}"),
+                Err(err) => log_telegram_error("failed to handle update", &err),
             }
         }
 
         if let Some(chat_id) = effective_telegram_chat_id(&config, &state) {
             match sync_telegram_digest(&telegram, &termal, &config, &mut state, chat_id) {
                 Ok(changed) => dirty |= changed,
-                Err(err) => eprintln!("telegram> failed to sync digest: {err:#}"),
+                Err(err) => log_telegram_error("failed to sync digest", &err),
             }
         }
 
@@ -168,6 +168,11 @@ struct TelegramBotState {
     /// next observed (acceptable cost for self-healing).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_forwarded_assistant_message_text_chars: Option<usize>,
+    /// Session id whose next settled assistant text should be forwarded even
+    /// when there was no previous assistant message to baseline against. Set
+    /// immediately before accepting a Telegram-originated prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    forward_next_assistant_message_session_id: Option<String>,
 }
 
 /// Loads Telegram bot state.
@@ -198,18 +203,76 @@ fn effective_telegram_chat_id(config: &TelegramBotConfig, state: &TelegramBotSta
     config.chat_id.or(state.chat_id)
 }
 
+fn log_telegram_error(context: &str, err: &anyhow::Error) {
+    eprintln!("telegram> {context}: {}", sanitize_telegram_log_detail(&err.to_string()));
+}
+
+fn sanitize_telegram_log_detail(detail: &str) -> String {
+    const MAX_LOG_DETAIL_CHARS: usize = 256;
+    let redacted = redact_telegram_bot_tokens(detail);
+    let mut chars = redacted.chars();
+    let truncated: String = chars.by_ref().take(MAX_LOG_DETAIL_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
+}
+
+fn redact_telegram_bot_tokens(detail: &str) -> String {
+    let mut output = String::with_capacity(detail.len());
+    let mut remainder = detail;
+    while let Some(index) = remainder.find("/bot") {
+        let (before, after_marker) = remainder.split_at(index + "/bot".len());
+        output.push_str(before);
+        let token_end = after_marker.find('/').unwrap_or(after_marker.len());
+        output.push_str("<redacted>");
+        remainder = &after_marker[token_end..];
+    }
+    output.push_str(remainder);
+    output
+}
+
+fn telegram_prompt_exceeds_byte_limit(text: &str) -> bool {
+    text.len() > MAX_DELEGATION_PROMPT_BYTES
+}
+
+#[derive(Debug)]
+struct TelegramApiError {
+    method: String,
+    status: StatusCode,
+    error_code: Option<i64>,
+    description: String,
+}
+
+impl std::fmt::Display for TelegramApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Telegram `{}` failed", self.method)?;
+        if let Some(error_code) = self.error_code {
+            write!(f, " with API code {error_code}")?;
+        } else {
+            write!(f, " with HTTP {}", self.status.as_u16())?;
+        }
+        write!(f, ": {}", self.description)
+    }
+}
+
+impl std::error::Error for TelegramApiError {}
+
 /// Returns `true` when an `editMessageText` error is Telegram's
 /// "message is not modified" rejection — a benign no-op response we
 /// see whenever the digest re-sync loop tries to edit a message whose
 /// text + reply_markup are byte-identical to what the chat already
-/// shows. The string-match hook is the standard idiom for detecting
-/// this since Telegram does not return a structured error code for
-/// it; if the wording ever changes upstream, the relay simply
-/// reverts to the pre-fix behavior of falling back to `send_message`,
-/// which is benign (a duplicate digest message is annoying but not
-/// data-loss).
+/// shows.
 fn telegram_error_is_message_not_modified(err: &anyhow::Error) -> bool {
-    err.to_string().contains("message is not modified")
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<TelegramApiError>()
+            .is_some_and(|error| {
+                error.error_code == Some(400)
+                    && error.description.contains("message is not modified")
+            })
+    })
 }
 
 /// Represents Telegram API client.
@@ -341,7 +404,7 @@ impl TelegramApiClient {
         let envelope: TelegramApiEnvelope<T> = serde_json::from_slice(&payload)
             .with_context(|| format!("failed to decode Telegram `{method}` response"))?;
         if !status.is_success() || !envelope.ok {
-            let detail = envelope
+            let description = envelope
                 .description
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or_else(|| {
@@ -350,11 +413,37 @@ impl TelegramApiClient {
                         status.as_u16()
                     )
                 });
-            bail!("{detail}");
+            return Err(TelegramApiError {
+                method: method.to_owned(),
+                status,
+                error_code: envelope.error_code,
+                description,
+            }
+            .into());
         }
         envelope.result.ok_or_else(|| {
             anyhow!("Telegram `{method}` succeeded without returning a result payload")
         })
+    }
+}
+
+trait TelegramMessageSender {
+    fn send_message(
+        &self,
+        chat_id: i64,
+        text: &str,
+        reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+    ) -> Result<TelegramChatMessage>;
+}
+
+impl TelegramMessageSender for TelegramApiClient {
+    fn send_message(
+        &self,
+        chat_id: i64,
+        text: &str,
+        reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+    ) -> Result<TelegramChatMessage> {
+        TelegramApiClient::send_message(self, chat_id, text, reply_markup)
     }
 }
 
@@ -463,11 +552,23 @@ impl TermalApiClient {
     }
 }
 
+trait TelegramSessionReader {
+    fn get_session(&self, session_id: &str) -> Result<TelegramSessionFetchResponse>;
+}
+
+impl TelegramSessionReader for TermalApiClient {
+    fn get_session(&self, session_id: &str) -> Result<TelegramSessionFetchResponse> {
+        TermalApiClient::get_session(self, session_id)
+    }
+}
+
 /// Represents Telegram API envelope.
 #[derive(Deserialize)]
 struct TelegramApiEnvelope<T> {
     ok: bool,
     result: Option<T>,
+    #[serde(default)]
+    error_code: Option<i64>,
     description: Option<String>,
 }
 
@@ -524,6 +625,29 @@ struct TelegramSessionFetchResponse {
     session: TelegramSessionFetchSession,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum TelegramSessionStatus {
+    Active,
+    Idle,
+    Approval,
+    Error,
+    #[serde(other)]
+    Unknown,
+}
+
+impl Default for TelegramSessionStatus {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+impl TelegramSessionStatus {
+    fn can_forward_settled_assistant_text(&self) -> bool {
+        matches!(self, Self::Idle | Self::Approval | Self::Error)
+    }
+}
+
 /// Inner session record subset (see `TelegramSessionFetchResponse`).
 ///
 /// The `status` field is consulted before any forwarding so the
@@ -532,13 +656,13 @@ struct TelegramSessionFetchResponse {
 /// message id stays stable while the text grows). If the relay
 /// forwarded mid-stream, the dedupe-by-id contract would mark a
 /// truncated snapshot as "already delivered" and the rest of the
-/// reply would silently never reach Telegram. Gating on
-/// `status != "active"` avoids that — we wait for the turn to
-/// settle, then forward the final text in one shot.
+/// reply would silently never reach Telegram. Unknown future
+/// statuses are treated as not safe to forward; the next poll can
+/// retry once the backend reports a known settled state.
 #[derive(Clone, Debug, Deserialize)]
 struct TelegramSessionFetchSession {
     #[serde(default)]
-    status: String,
+    status: TelegramSessionStatus,
     #[serde(default)]
     messages: Vec<TelegramSessionFetchMessage>,
 }
@@ -612,9 +736,13 @@ fn handle_telegram_message(
             parse_telegram_command(text).map(|command| command.command),
             Some(TelegramIncomingCommand::Start | TelegramIncomingCommand::Help)
         ) {
-            state.chat_id = Some(chat_id);
-            telegram.send_message(chat_id, &telegram_help_text(config), None)?;
-            return send_fresh_telegram_digest(telegram, termal, config, state, chat_id);
+            telegram.send_message(
+                chat_id,
+                &format!(
+                    "This TermAl relay is not linked. Set TERMAL_TELEGRAM_CHAT_ID={chat_id} before starting the relay."
+                ),
+                None,
+            )?;
         }
         return Ok(false);
     }
@@ -642,6 +770,18 @@ fn handle_telegram_message(
                 send_fresh_telegram_digest_from_response(telegram, config, state, chat_id, &digest)
             }
         };
+    }
+
+    if telegram_prompt_exceeds_byte_limit(text) {
+        telegram.send_message(
+            chat_id,
+            &format!(
+                "That prompt is too large for TermAl. Keep Telegram prompts at or below {} bytes.",
+                MAX_DELEGATION_PROMPT_BYTES
+            ),
+            None,
+        )?;
+        return Ok(false);
     }
 
     forward_telegram_text_to_project(telegram, termal, config, state, chat_id, text)
@@ -711,9 +851,12 @@ fn forward_telegram_text_to_project(
         return Ok(false);
     };
 
+    let assistant_forwarding_baseline_changed =
+        arm_assistant_forwarding_for_telegram_prompt(termal, state, session_id)?;
     let _ = termal.send_session_message(session_id, text)?;
     let next_digest = termal.get_project_digest(&config.project_id)?;
-    let mut dirty =
+    let mut dirty = assistant_forwarding_baseline_changed;
+    dirty |=
         send_fresh_telegram_digest_from_response(telegram, config, state, chat_id, &next_digest)?;
     // The agent's reply usually hasn't landed by the time this
     // immediate digest fetch fires (the agent is still working), so
@@ -724,15 +867,13 @@ fn forward_telegram_text_to_project(
     // forward-once contract centralized at the few places digests
     // are sent.
     if let Some(session_id) = next_digest.primary_session_id.as_deref() {
-        match forward_new_assistant_message_if_any(
-            telegram, termal, state, chat_id, session_id,
-        ) {
-            Ok(true) => dirty = true,
-            Ok(false) => {}
-            Err(err) => {
-                eprintln!("telegram> failed to forward assistant message: {err:#}");
-            }
-        }
+        // Non-fatal here: the digest/action message already shipped, and the
+        // next poll can retry assistant forwarding. The merge helper still
+        // marks state dirty on partial-progress failures so cursors persist.
+        merge_assistant_forward_result(
+            &mut dirty,
+            forward_new_assistant_message_if_any(telegram, termal, state, chat_id, session_id),
+        );
     }
     Ok(dirty)
 }
@@ -765,27 +906,97 @@ fn sync_telegram_digest(
         )? {
             dirty = true;
         }
-        // Forward the latest assistant text message after each digest
-        // change. The dedupe is handled inside the helper via
-        // `state.last_forwarded_assistant_message_id`, so a digest
-        // that changed for non-message reasons (git status, queued
-        // prompts, etc.) won't re-forward the same assistant reply.
-        if let Some(session_id) = digest.primary_session_id.as_deref() {
-            match forward_new_assistant_message_if_any(
-                telegram, termal, state, chat_id, session_id,
-            ) {
-                Ok(true) => dirty = true,
-                Ok(false) => {}
-                Err(err) => {
-                    eprintln!(
-                        "telegram> failed to forward assistant message: {err:#}"
-                    );
-                }
-            }
-        }
+    }
+
+    // Forward assistant text on every poll, not only when the compact digest
+    // changes. The forwarder has its own id+char-count dedupe, so this catches
+    // fresh replies whose truncated digest preview stayed byte-identical.
+    if let Some(session_id) = digest.primary_session_id.as_deref() {
+        // Non-fatal here: digest sync should not fail just because the
+        // follow-up assistant forward hit a transient send/read error.
+        // Partial progress is still persisted via the merge helper.
+        merge_assistant_forward_result(
+            &mut dirty,
+            forward_new_assistant_message_if_any(telegram, termal, state, chat_id, session_id),
+        );
     }
 
     Ok(dirty)
+}
+
+fn merge_assistant_forward_result(dirty: &mut bool, result: Result<bool>) {
+    match result {
+        Ok(changed) => *dirty |= changed,
+        Err(err) => {
+            // `forward_new_assistant_message_if_any` records progress after each
+            // successful message send. A later send can fail after mutating the
+            // cursor, so persist the partial progress instead of replaying it.
+            *dirty = true;
+            log_telegram_error("failed to forward assistant message", &err);
+        }
+    }
+}
+
+fn latest_assistant_text_cursor(
+    messages: &[TelegramSessionFetchMessage],
+) -> Option<(String, usize)> {
+    messages.iter().rev().find_map(|message| match message {
+        TelegramSessionFetchMessage::Text { id, author, text } if author == "assistant" => {
+            Some((id.clone(), text.chars().count()))
+        }
+        _ => None,
+    })
+}
+
+fn clear_forward_next_assistant_message_session_id(
+    state: &mut TelegramBotState,
+    session_id: &str,
+) -> bool {
+    if state.forward_next_assistant_message_session_id.as_deref() == Some(session_id) {
+        state.forward_next_assistant_message_session_id = None;
+        return true;
+    }
+    false
+}
+
+fn arm_assistant_forwarding_for_telegram_prompt(
+    termal: &impl TelegramSessionReader,
+    state: &mut TelegramBotState,
+    session_id: &str,
+) -> Result<bool> {
+    let response = termal.get_session(session_id)?;
+    let latest = latest_assistant_text_cursor(&response.session.messages);
+    let mut changed = false;
+
+    if let Some((id, char_count)) = latest {
+        if state.last_forwarded_assistant_message_id.as_deref() != Some(id.as_str()) {
+            state.last_forwarded_assistant_message_id = Some(id);
+            changed = true;
+        }
+        if state.last_forwarded_assistant_message_text_chars != Some(char_count) {
+            state.last_forwarded_assistant_message_text_chars = Some(char_count);
+            changed = true;
+        }
+        changed |= clear_forward_next_assistant_message_session_id(state, session_id);
+        return Ok(changed);
+    }
+
+    if state.last_forwarded_assistant_message_id.take().is_some() {
+        changed = true;
+    }
+    if state
+        .last_forwarded_assistant_message_text_chars
+        .take()
+        .is_some()
+    {
+        changed = true;
+    }
+    if state.forward_next_assistant_message_session_id.as_deref() != Some(session_id) {
+        state.forward_next_assistant_message_session_id = Some(session_id.to_owned());
+        changed = true;
+    }
+
+    Ok(changed)
 }
 
 /// Forwards every assistant `Text` message that has appeared since
@@ -821,8 +1032,8 @@ fn sync_telegram_digest(
 /// forward (Telegram is the wrong format for those); only `Text`
 /// messages from `assistant` are forwarded.
 fn forward_new_assistant_message_if_any(
-    telegram: &TelegramApiClient,
-    termal: &TermalApiClient,
+    telegram: &impl TelegramMessageSender,
+    termal: &impl TelegramSessionReader,
     state: &mut TelegramBotState,
     chat_id: i64,
     session_id: &str,
@@ -837,11 +1048,14 @@ fn forward_new_assistant_message_if_any(
     // rest of the reply would silently never reach Telegram. Wait
     // for the turn to finish (status flips to `idle`/`approval`/
     // `error`) and forward the settled text on the next sync.
-    if response.session.status == "active" {
+    if !response.session.status.can_forward_settled_assistant_text() {
         return Ok(false);
     }
 
     let messages = &response.session.messages;
+
+    let forward_without_existing_baseline =
+        state.forward_next_assistant_message_session_id.as_deref() == Some(session_id);
 
     let position_of_last = state
         .last_forwarded_assistant_message_id
@@ -850,7 +1064,8 @@ fn forward_new_assistant_message_if_any(
             messages.iter().position(|message| {
                 matches!(
                     message,
-                    TelegramSessionFetchMessage::Text { id, .. } if id == tracked
+                    TelegramSessionFetchMessage::Text { id, author, .. }
+                        if id == tracked && author == "assistant"
                 )
             })
         });
@@ -867,7 +1082,7 @@ fn forward_new_assistant_message_if_any(
                 let last_chars = state.last_forwarded_assistant_message_text_chars;
                 let current_chars = text.chars().count();
                 match last_chars {
-                    None => None,
+                    None => Some(pos),
                     Some(prev) if current_chars > prev => Some(pos),
                     _ => None,
                 }
@@ -884,22 +1099,19 @@ fn forward_new_assistant_message_if_any(
         state.last_forwarded_assistant_message_id.as_deref(),
         position_of_last,
     ) {
+        (_, None) if forward_without_existing_baseline => false,
         (None, _) => true,
         (Some(_), None) => true,
         (Some(_), Some(_)) => false,
     };
     if needs_baseline {
-        let latest = messages.iter().rev().find_map(|message| match message {
-            TelegramSessionFetchMessage::Text { id, author, text } if author == "assistant" => {
-                Some((id.clone(), text.chars().count()))
-            }
-            _ => None,
-        });
+        let latest = latest_assistant_text_cursor(messages);
         let changed = state.last_forwarded_assistant_message_id
             != latest.as_ref().map(|(id, _)| id.clone());
         state.last_forwarded_assistant_message_id = latest.as_ref().map(|(id, _)| id.clone());
         state.last_forwarded_assistant_message_text_chars = latest.map(|(_, len)| len);
-        return Ok(changed);
+        let cleared = clear_forward_next_assistant_message_session_id(state, session_id);
+        return Ok(changed || cleared);
     }
 
     // If the prior forward was truncated, restart at that
@@ -908,6 +1120,8 @@ fn forward_new_assistant_message_if_any(
     // message.
     let start_index = if let Some(pos) = needs_resend_truncated {
         pos
+    } else if forward_without_existing_baseline && position_of_last.is_none() {
+        0
     } else {
         position_of_last.expect("position_of_last is Some when not baselining") + 1
     };
@@ -927,6 +1141,7 @@ fn forward_new_assistant_message_if_any(
     }
 
     let mut sent_visible_content = false;
+    let mut changed = false;
     for (id, text) in &to_forward {
         let trimmed = text.trim();
         // Empty messages still bump the baseline so the next sync
@@ -944,6 +1159,8 @@ fn forward_new_assistant_message_if_any(
         // settled re-send can be detected by length growth.
         state.last_forwarded_assistant_message_id = Some(id.clone());
         state.last_forwarded_assistant_message_text_chars = Some(text.chars().count());
+        changed = true;
+        changed |= clear_forward_next_assistant_message_session_id(state, session_id);
     }
 
     // Footer separator: a short marker line that visually closes
@@ -969,7 +1186,7 @@ fn forward_new_assistant_message_if_any(
         )?;
     }
 
-    Ok(true)
+    Ok(changed)
 }
 
 /// Returns the footer line shown after a settled assistant-message
@@ -989,15 +1206,14 @@ fn forward_new_assistant_message_if_any(
 ///   generic "turn complete" so the user still gets a closing
 ///   marker rather than nothing.
 ///
-/// `active` is intentionally NOT handled here — the caller gates
-/// on `status != "active"` before invoking this function, so this
-/// arm should be unreachable in practice; we map it to the same
-/// fallback footer for safety.
-fn telegram_turn_settled_footer(status: &str) -> &'static str {
+/// `active` and `unknown` are intentionally NOT handled here — the caller
+/// gates on known settled statuses before invoking this function, so these
+/// arms should be unreachable in practice; we map them to the same fallback
+/// footer for safety.
+fn telegram_turn_settled_footer(status: &TelegramSessionStatus) -> &'static str {
     match status {
-        "idle" => "─────────── ✓ turn complete ───────────",
-        "approval" => "─────────── ⏸ approval needed ───────────",
-        "error" => "─────────── ⚠ stopped on error ───────────",
+        TelegramSessionStatus::Approval => "─────────── ⏸ approval needed ───────────",
+        TelegramSessionStatus::Error => "─────────── ⚠ stopped on error ───────────",
         _ => "─────────── ✓ turn complete ───────────",
     }
 }
@@ -1114,7 +1330,7 @@ fn edit_or_send_telegram_digest(
         match telegram.edit_message(chat_id, message_id, &text, keyboard.as_ref()) {
             Ok(message_id) => return Ok(message_id),
             Err(err) => {
-                eprintln!("telegram> failed to edit digest message: {err:#}");
+                log_telegram_error("failed to edit digest message", &err);
             }
         }
     }

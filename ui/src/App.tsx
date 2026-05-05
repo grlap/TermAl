@@ -857,6 +857,7 @@ export default function App() {
     handleRollbackCodexThread,
     handleRefreshAgentCommands,
     handleCreateConversationMarker,
+    handleDeleteConversationMarker,
   } = useAppSessionActions({
     lookups: {
       sessionLookup,
@@ -2011,6 +2012,7 @@ export default function App() {
               onRefreshSessionModelOptions={handleRefreshSessionModelOptions}
               onRefreshAgentCommands={handleRefreshAgentCommands}
               onCreateConversationMarker={handleCreateConversationMarker}
+              onDeleteConversationMarker={handleDeleteConversationMarker}
               onRollbackCodexThread={handleRollbackCodexThread}
               onUnarchiveCodexThread={handleUnarchiveCodexThread}
               onOrchestratorStateUpdated={handleOrchestratorStateUpdated}

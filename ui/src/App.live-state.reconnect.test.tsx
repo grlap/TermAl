@@ -1281,6 +1281,13 @@ describe("App live state — reconnect", () => {
         author: "you" as const,
         text: "test",
       };
+      const fallbackOnlyAssistantMessage = {
+        id: "message-assistant-1",
+        type: "text" as const,
+        timestamp: "10:01",
+        author: "assistant" as const,
+        text: "Fresh SSE assistant body.",
+      };
 
       try {
         await withFallbackStateHarness(async ({ eventSource, sessionList }) => {
@@ -1327,11 +1334,11 @@ describe("App live state — reconnect", () => {
                 sessions: [
                   makeSession("session-1", {
                     name: "Codex Session",
-                    status: "active",
-                    preview: "test",
-                    messageCount: 1,
+                    status: "idle",
+                    preview: "Fresh SSE assistant body.",
+                    messageCount: 2,
                     messagesLoaded: true,
-                    messages: [userMessage],
+                    messages: [userMessage, fallbackOnlyAssistantMessage],
                   }),
                 ],
               }),
