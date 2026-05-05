@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   canonicalConversationMarkerColor,
-  conversationMarkerColorsMatchForState,
   DEFAULT_CONVERSATION_MARKER_COLOR,
   normalizeConversationMarkerColor,
 } from "./conversation-marker-colors";
@@ -13,6 +12,7 @@ describe("normalizeConversationMarkerColor", () => {
     expect(normalizeConversationMarkerColor("#ABC8")).toBe("#abc8");
     expect(normalizeConversationMarkerColor("#3B82F6")).toBe("#3b82f6");
     expect(normalizeConversationMarkerColor("#3B82F6AA")).toBe("#3b82f6aa");
+    expect(normalizeConversationMarkerColor(" \t#ABCDEF\n")).toBe("#abcdef");
   });
 
   it("falls back for non-hex CSS values before they reach custom properties", () => {
@@ -25,6 +25,18 @@ describe("normalizeConversationMarkerColor", () => {
     expect(normalizeConversationMarkerColor("#12")).toBe(
       DEFAULT_CONVERSATION_MARKER_COLOR,
     );
+    expect(normalizeConversationMarkerColor("#12345")).toBe(
+      DEFAULT_CONVERSATION_MARKER_COLOR,
+    );
+    expect(normalizeConversationMarkerColor("#1234567")).toBe(
+      DEFAULT_CONVERSATION_MARKER_COLOR,
+    );
+    expect(normalizeConversationMarkerColor("#12g")).toBe(
+      DEFAULT_CONVERSATION_MARKER_COLOR,
+    );
+    expect(normalizeConversationMarkerColor("#12\n3456")).toBe(
+      DEFAULT_CONVERSATION_MARKER_COLOR,
+    );
     expect(normalizeConversationMarkerColor(null)).toBe(
       DEFAULT_CONVERSATION_MARKER_COLOR,
     );
@@ -33,23 +45,5 @@ describe("normalizeConversationMarkerColor", () => {
   it("exposes canonical validity separately from display fallback", () => {
     expect(canonicalConversationMarkerColor("#3B82F6")).toBe("#3b82f6");
     expect(canonicalConversationMarkerColor("url(https://example.test/x)")).toBeNull();
-  });
-
-  it("matches state colors by canonical hex without equating invalid values to fallback", () => {
-    expect(conversationMarkerColorsMatchForState("#3B82F6", "#3b82f6")).toBe(
-      true,
-    );
-    expect(
-      conversationMarkerColorsMatchForState(
-        "url(https://example.test/x)",
-        DEFAULT_CONVERSATION_MARKER_COLOR,
-      ),
-    ).toBe(false);
-    expect(
-      conversationMarkerColorsMatchForState(
-        "url(https://example.test/x)",
-        "url(https://example.test/x)",
-      ),
-    ).toBe(true);
   });
 });

@@ -218,11 +218,13 @@ card should preserve partial transcript access and any partial result summary.
 TermAl should expose internal commands that can be used from the UI and from an
 MCP wrapper:
 
+Implementation: `ui/src/delegation-commands.ts`.
+
 ```text
 spawn_delegation(parentSessionId, request) -> SpawnDelegationCommandResult
-get_delegation_status(parentSessionId, delegationId) -> DelegationStatus
-get_delegation_result(parentSessionId, delegationId) -> DelegationResult
-cancel_delegation(parentSessionId, delegationId) -> DelegationStatus
+get_delegation_status(parentSessionId, delegationId) -> DelegationStatusCommandResult
+get_delegation_result(parentSessionId, delegationId) -> DelegationResultPacket
+cancel_delegation(parentSessionId, delegationId) -> DelegationStatusCommandResult
 wait_delegations(parentSessionId, delegationIds, options?) -> WaitDelegationsResult
 ```
 
@@ -256,6 +258,8 @@ Safety limits for agent-facing tools:
 - default spawn permission is read-only
 - per-parent concurrency and nesting-depth limits prevent unbounded process
   spawning
+- delegation titles are capped at 200 characters so redacted child-session
+  names stay metadata-sized and are not a prompt-sized side channel
 - every spawn, cancel, timeout, and result-read emits an auditable event
 - child sessions cannot commit or push through TermAl-mediated commands unless
   the human explicitly approves that operation
@@ -307,6 +311,10 @@ lifecycle deltas after reconnect.
 ## Data Model
 
 ```typescript
+type AgentType = "Claude" | "Codex" | "Cursor" | "Gemini";
+type SessionStatus = "active" | "idle" | "approval" | "error";
+type ApiRequestErrorKind = "backend-unavailable" | "request-failed";
+
 type DelegationMode = "reviewer" | "explorer" | "worker";
 type DelegationStatus =
   | "queued"
@@ -329,7 +337,7 @@ type DelegationRecord = {
   title: string;
   prompt: string;
   cwd: string;
-  agent: string;
+  agent: AgentType;
   model?: string | null;
   writePolicy: DelegationWritePolicy;
   createdAt: string;
@@ -376,9 +384,9 @@ type DelegationChildSessionSummary = {
   id: string;
   name: string;
   emoji: string;
-  agent: string;
+  agent: AgentType;
   model: string;
-  status: string;
+  status: SessionStatus;
   parentDelegationId: string | null;
 };
 
@@ -389,6 +397,61 @@ type SpawnDelegationCommandResult = {
   childSession: DelegationChildSessionSummary;
   revision: number;
   serverInstanceId: string;
+};
+
+type DelegationStatusCommandResult = {
+  delegationId: string;
+  childSessionId: string;
+  status: DelegationStatus;
+  delegation: DelegationSummary;
+  revision: number;
+  serverInstanceId: string;
+};
+
+type DelegationResultPacket = {
+  delegationId: string;
+  childSessionId: string;
+  status: DelegationStatus;
+  summary: string;
+  findings: DelegationFinding[];
+  changedFiles: string[];
+  commandsRun: DelegationCommandResult[];
+  notes: string[];
+  revision: number;
+  serverInstanceId: string;
+};
+
+type WaitDelegationErrorPacket =
+  | {
+      kind: "mismatched-delegation-id";
+      name: string;
+      message: string;
+      requestedId: string;
+      receivedId: string;
+    }
+  | {
+      kind: "mixed-server-instance";
+      name: string;
+      message: string;
+      serverInstanceIds: string[];
+    }
+  | {
+      kind: "status-fetch-failed";
+      name: string;
+      message: string;
+      apiErrorKind: ApiRequestErrorKind | null;
+      status: number | null;
+      restartRequired: boolean | null;
+    };
+
+type WaitDelegationsResult = {
+  outcome: "completed" | "timeout" | "error";
+  delegations: DelegationSummary[];
+  completed: DelegationSummary[];
+  pending: DelegationSummary[];
+  revision: number | null;
+  serverInstanceId: string | null;
+  error?: WaitDelegationErrorPacket;
 };
 ```
 

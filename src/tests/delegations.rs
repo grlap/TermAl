@@ -4436,6 +4436,35 @@ fn delegation_omitted_agent_and_model_use_parent_agent_default_model() {
 }
 
 #[test]
+fn delegation_explicit_model_is_preserved_verbatim() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Use the requested model.".to_owned(),
+                title: Some("Explicit Model".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: Some("custom-model-string".to_owned()),
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+
+    assert_eq!(created.child_session.agent, Agent::Codex);
+    assert_eq!(created.child_session.model, "custom-model-string");
+    assert_eq!(
+        created.delegation.model.as_deref(),
+        Some("custom-model-string")
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn delegation_write_policy_accepts_legacy_snake_case_discriminators() {
     let read_only: DelegationWritePolicy =
         serde_json::from_value(json!({ "kind": "read_only" })).expect("read_only alias");
@@ -4490,6 +4519,34 @@ fn delegation_prompt_size_is_capped() {
     };
 
     assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(err.message.contains("at most"));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn delegation_title_size_is_capped() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let oversized_title = "x".repeat(MAX_DELEGATION_TITLE_CHARS + 1);
+    let err = match state.create_read_only_delegation(
+        &parent_session_id,
+        CreateDelegationRequest {
+            prompt: "Review this change.".to_owned(),
+            title: Some(oversized_title),
+            cwd: None,
+            agent: Some(Agent::Codex),
+            model: None,
+            mode: Some(DelegationMode::Reviewer),
+            write_policy: Some(DelegationWritePolicy::ReadOnly),
+        },
+    ) {
+        Ok(_) => panic!("oversized title should be rejected"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(err.message.contains("title"));
     assert!(err.message.contains("at most"));
 
     let _ = fs::remove_file(state.persistence_path.as_path());

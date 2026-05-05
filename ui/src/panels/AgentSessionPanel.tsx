@@ -680,10 +680,6 @@ const SessionConversationPage = memo(function SessionConversationPage({
     return messageSlotNodesRef.current;
   }, [session.id]);
 
-  useLayoutEffect(() => {
-    ensureMessageSlotCacheForCurrentSession();
-  }, [ensureMessageSlotCacheForCurrentSession]);
-
   useEffect(() => {
     if (
       activeMarkerId &&

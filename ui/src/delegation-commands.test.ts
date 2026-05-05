@@ -10,6 +10,7 @@ import {
   spawnDelegationCommand,
   waitDelegationCommand,
   waitDelegationsCommand,
+  MAX_DELEGATION_TITLE_CHARS,
   MAX_DELEGATION_PROMPT_BYTES,
   MAX_DELEGATION_WAIT_IDS,
   MAX_DELEGATION_WAIT_TIMEOUT_MS,
@@ -108,9 +109,9 @@ function expectRedactedDelegationSummary(delegation: object) {
     writePolicy: expect.any(Object),
     createdAt: expect.any(String),
   });
-  expectOwnNullableStringProperty(record, "model");
-  expectOwnNullableStringProperty(record, "startedAt");
-  expectOwnNullableStringProperty(record, "completedAt");
+  expectOwnNullableModelProperty(record);
+  expectOwnNullableTimestampProperty(record, "startedAt");
+  expectOwnNullableTimestampProperty(record, "completedAt");
   expect(delegation).not.toHaveProperty("prompt");
   expect(delegation).not.toHaveProperty("cwd");
   const maybeResult = (delegation as { result?: object | null }).result;
@@ -122,14 +123,25 @@ function expectRedactedDelegationSummary(delegation: object) {
   }
 }
 
-function expectOwnNullableStringProperty(
-  record: Record<string, unknown>,
-  property: string,
-) {
-  expect(Object.prototype.hasOwnProperty.call(record, property)).toBe(true);
-  expect(record[property] === null || typeof record[property] === "string").toBe(
+function expectOwnNullableModelProperty(record: Record<string, unknown>) {
+  expect(Object.prototype.hasOwnProperty.call(record, "model")).toBe(true);
+  const value = record.model;
+  expect(value === null || (typeof value === "string" && value.length > 0)).toBe(
     true,
   );
+}
+
+function expectOwnNullableTimestampProperty(
+  record: Record<string, unknown>,
+  property: "startedAt" | "completedAt",
+) {
+  expect(Object.prototype.hasOwnProperty.call(record, property)).toBe(true);
+  const value = record[property];
+  expect(
+    value === null ||
+      (typeof value === "string" &&
+        /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)),
+  ).toBe(true);
 }
 
 function expectRedactedChildSessionSummary(childSession: object) {
@@ -166,6 +178,7 @@ describe("delegation command surface", () => {
     expect(MIN_DELEGATION_WAIT_INTERVAL_MS).toBe(500);
     expect(MAX_DELEGATION_WAIT_IDS).toBe(10);
     expect(MAX_DELEGATION_PROMPT_BYTES).toBe(64 * 1024);
+    expect(MAX_DELEGATION_TITLE_CHARS).toBe(200);
   });
 
   it("exports tool-style command names for MCP wrappers", () => {
@@ -230,6 +243,7 @@ describe("delegation command surface", () => {
       serverInstanceId: "server-a",
     });
     expectRedactedDelegationSummary(result.delegation);
+    expect(result.delegation).not.toHaveProperty("result");
     expectRedactedChildSessionSummary(result.childSession);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/sessions/parent-1/delegations",
@@ -290,6 +304,16 @@ describe("delegation command surface", () => {
     ).rejects.toThrow(
       new RegExp(
         `^prompt must be no larger than ${MAX_DELEGATION_PROMPT_BYTES} bytes`,
+      ),
+    );
+    await expect(
+      spawnDelegationCommand("parent-1", {
+        prompt: "Review this change.",
+        title: "x".repeat(MAX_DELEGATION_TITLE_CHARS + 1),
+      }),
+    ).rejects.toThrow(
+      new RegExp(
+        `^title must be no longer than ${MAX_DELEGATION_TITLE_CHARS} characters`,
       ),
     );
     await expect(
@@ -981,7 +1005,9 @@ describe("delegation command surface", () => {
       },
     );
 
-    resolveFirst?.({
+    const resolveFirstStatusFetch = resolveFirst;
+    expect(resolveFirstStatusFetch).toBeDefined();
+    resolveFirstStatusFetch!({
       revision: 2,
       serverInstanceId: "server-a",
       delegation: makeDelegation({
@@ -990,7 +1016,9 @@ describe("delegation command surface", () => {
       }),
     });
     await Promise.resolve();
-    rejectSecond?.(
+    const rejectSecondStatusFetch = rejectSecond;
+    expect(rejectSecondStatusFetch).toBeDefined();
+    rejectSecondStatusFetch!(
       new ApiRequestError("request-failed", "backend rejected delegation", {
         status: 409,
       }),
@@ -1009,8 +1037,9 @@ describe("delegation command surface", () => {
         restartRequired: false,
       },
     });
-    expect(thirdSignal).not.toBeNull();
-    expect((thirdSignal as unknown as AbortSignal).aborted).toBe(true);
+    const capturedThirdSignal = thirdSignal as AbortSignal | null;
+    expectCapturedAbortSignal(capturedThirdSignal);
+    expect(capturedThirdSignal.aborted).toBe(true);
   });
 
   it("prioritizes fetch failure while preserving same-instance batch responses", async () => {
@@ -1124,6 +1153,9 @@ describe("delegation command surface", () => {
         kind: "status-fetch-failed",
         name: "Error",
         message: "Delegation status fetch failed.",
+        apiErrorKind: null,
+        status: null,
+        restartRequired: null,
       },
     });
   });
@@ -1133,6 +1165,8 @@ describe("delegation command surface", () => {
     ["bearer token", "Authorization: Bearer secret-token"],
     ["env var", "OPENAI_API_KEY=secret-value"],
     ["raw token prefix", "sk-proj-secret-value"],
+    ["JWT token", "Authorization: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature"],
+    ["GitHub PAT", "X-GitHub-Token: ghp_someTokenValue123"],
     ["UNC path", "\\\\server\\share\\backend.log"],
     ["home path", "could not write /home/admin/.config/termal"],
     ["URL", "failed at https://internal.example/log"],
@@ -1203,6 +1237,43 @@ describe("delegation command surface", () => {
         message,
         apiErrorKind: "request-failed",
         status: 500,
+      },
+    });
+  });
+
+  it("passes through restart-required backend route diagnostics", async () => {
+    const message =
+      "The running backend does not expose /api/sessions/parent-1/delegations/delegation-1 (HTTP 404). Restart TermAl so the latest API routes are loaded.";
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(),
+      fetchDelegationStatus: vi.fn(async () => {
+        throw new ApiRequestError("backend-unavailable", message, {
+          status: 404,
+          restartRequired: true,
+        });
+      }),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).wait_delegations(
+        "parent-1",
+        ["delegation-1"],
+        {
+          pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+          timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
+        },
+      ),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "status-fetch-failed",
+        name: "ApiRequestError",
+        message,
+        apiErrorKind: "backend-unavailable",
+        status: 404,
+        restartRequired: true,
       },
     });
   });

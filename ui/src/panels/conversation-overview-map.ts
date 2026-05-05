@@ -419,6 +419,9 @@ function canMergeConversationOverviewSegmentItem({
     return false;
   }
   const itemCount = itemIndex - startItemIndex + 1;
+  // The item cap intentionally dominates the same-visual-class fast path.
+  // Dense homogeneous transcripts still need visual chunks for keyboard and
+  // overview navigation; callers can pass Infinity for unbounded clumping.
   if (itemCount > maxItemsPerSegment) {
     return false;
   }

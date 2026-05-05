@@ -39,6 +39,49 @@ function commandMessage(
   };
 }
 
+function denseAssistantOverviewProjection(messageCount: number) {
+  const messages = Array.from({ length: messageCount }, (_, index) =>
+    textMessage(`m${index + 1}`, {
+      author: "assistant",
+      text: `assistant message ${index + 1}`,
+    }),
+  );
+  const layoutSnapshot: VirtualizedConversationLayoutSnapshot = {
+    sessionId: "session-1",
+    messageCount: messages.length,
+    estimatedTotalHeightPx: messages.length,
+    viewportTopPx: 0,
+    viewportHeightPx: 1,
+    viewportWidthPx: 800,
+    isActive: true,
+    visiblePageRange: {
+      startIndex: 0,
+      endIndex: Math.min(1, messages.length - 1),
+    },
+    mountedPageRange: {
+      startIndex: 0,
+      endIndex: Math.min(1, messages.length - 1),
+    },
+    messages: messages.map((message, index) => ({
+      messageId: message.id,
+      messageIndex: index,
+      pageIndex: index,
+      type: message.type,
+      author: message.author,
+      estimatedTopPx: index,
+      estimatedHeightPx: 1,
+      measuredPageHeightPx: null,
+    })),
+  };
+
+  return buildConversationOverviewProjection({
+    layoutSnapshot,
+    maxHeightPx: 12,
+    messages,
+    minItemHeightPx: 2,
+  });
+}
+
 describe("conversation overview map", () => {
   it("classifies loaded transcript messages and projects marker pins", () => {
     const messages: Message[] = [
@@ -510,46 +553,7 @@ describe("conversation overview map", () => {
   });
 
   it("caps homogeneous visual segments by maxItemsPerSegment", () => {
-    const messages = Array.from({ length: 45 }, (_, index) =>
-      textMessage(`m${index + 1}`, {
-        author: "assistant",
-        text: `assistant message ${index + 1}`,
-      }),
-    );
-    const layoutSnapshot: VirtualizedConversationLayoutSnapshot = {
-      sessionId: "session-1",
-      messageCount: messages.length,
-      estimatedTotalHeightPx: messages.length,
-      viewportTopPx: 0,
-      viewportHeightPx: 1,
-      viewportWidthPx: 800,
-      isActive: true,
-      visiblePageRange: {
-        startIndex: 0,
-        endIndex: 1,
-      },
-      mountedPageRange: {
-        startIndex: 0,
-        endIndex: 1,
-      },
-      messages: messages.map((message, index) => ({
-        messageId: message.id,
-        messageIndex: index,
-        pageIndex: index,
-        type: message.type,
-        author: message.author,
-        estimatedTopPx: index,
-        estimatedHeightPx: 1,
-        measuredPageHeightPx: null,
-      })),
-    };
-
-    const projection = buildConversationOverviewProjection({
-      layoutSnapshot,
-      maxHeightPx: 12,
-      messages,
-      minItemHeightPx: 2,
-    });
+    const projection = denseAssistantOverviewProjection(45);
     const segments = buildConversationOverviewSegments(projection, {
       maxItemsPerSegment: 20,
     });
@@ -565,6 +569,35 @@ describe("conversation overview map", () => {
       { count: 20, end: 19, kind: "assistant_text", start: 0 },
       { count: 20, end: 39, kind: "assistant_text", start: 20 },
       { count: 5, end: 44, kind: "assistant_text", start: 40 },
+    ]);
+  });
+
+  it("keeps exactly maxItemsPerSegment homogeneous items in one segment", () => {
+    const projection = denseAssistantOverviewProjection(20);
+    const segments = buildConversationOverviewSegments(projection, {
+      maxItemsPerSegment: 20,
+    });
+
+    expect(segments.map((segment) => segment.itemCount)).toEqual([20]);
+  });
+
+  it("supports one-item homogeneous segment caps", () => {
+    const projection = denseAssistantOverviewProjection(4);
+    const segments = buildConversationOverviewSegments(projection, {
+      maxItemsPerSegment: 1,
+    });
+
+    expect(
+      segments.map((segment) => ({
+        count: segment.itemCount,
+        end: segment.endMessageIndex,
+        start: segment.startMessageIndex,
+      })),
+    ).toEqual([
+      { count: 1, end: 0, start: 0 },
+      { count: 1, end: 1, start: 1 },
+      { count: 1, end: 2, start: 2 },
+      { count: 1, end: 3, start: 3 },
     ]);
   });
 

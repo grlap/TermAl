@@ -33,19 +33,29 @@ export const MIN_DELEGATION_WAIT_INTERVAL_MS = 500;
 export const MAX_DELEGATION_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 export const MAX_DELEGATION_WAIT_IDS = 10;
 // Keep in sync with `MAX_DELEGATION_PROMPT_BYTES` in `src/delegations.rs`.
+// If this changes, update the parity-pin test in `delegation-commands.test.ts`.
 export const MAX_DELEGATION_PROMPT_BYTES = 64 * 1024;
+// Child session names are exposed through redacted delegation summaries; cap
+// caller-supplied titles as metadata, not prompt-sized payloads. Keep in sync
+// with `MAX_DELEGATION_TITLE_CHARS` in `src/delegations.rs`.
+export const MAX_DELEGATION_TITLE_CHARS = 200;
 const UNSAFE_TRANSPORT_ID_PATTERN = /[/?#\u0000-\u001f\u007f]/u;
 const GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE =
   "Delegation status fetch failed.";
+// Audit boundary: every message allowed here is forwarded to wrapper callers.
+// New entries require reviewing every ApiRequestError constructor that can emit
+// that message family.
 const SAFE_DELEGATION_STATUS_FETCH_MESSAGES = new Set([
   "The TermAl backend is unavailable.",
 ]);
 const SAFE_DELEGATION_STATUS_FETCH_STATUS_PATTERN =
   /^Request failed with status \d+\.$/u;
 
-// These limits compose to at most 20 status requests/sec per wait call. The MCP
-// wrapper should still add a process-level concurrency cap before exposing this
-// surface to untrusted callers.
+// These client-side wait limits compose to at most 20 status requests/sec per
+// wait call. They intentionally do not mirror backend delegation fan-out limits;
+// the backend remains authoritative and the MCP wrapper should still add a
+// process-level concurrency cap before exposing this surface to untrusted
+// callers.
 
 /**
  * Route binding for delegation commands.
@@ -82,15 +92,6 @@ export const browserDelegationCommandTransport: DelegationCommandTransport = {
   cancelDelegation,
 };
 
-export type SpawnDelegationCommandResult = {
-  delegationId: string;
-  childSessionId: string;
-  delegation: DelegationSummary;
-  childSession: DelegationChildSessionSummary;
-  revision: number;
-  serverInstanceId: string;
-};
-
 export type DelegationChildSessionSummary = {
   id: string;
   name: string;
@@ -99,6 +100,15 @@ export type DelegationChildSessionSummary = {
   model: string;
   status: Session["status"];
   parentDelegationId: string | null;
+};
+
+export type SpawnDelegationCommandResult = {
+  delegationId: string;
+  childSessionId: string;
+  delegation: DelegationSummary;
+  childSession: DelegationChildSessionSummary;
+  revision: number;
+  serverInstanceId: string;
 };
 
 export type DelegationStatusCommandResult = {
@@ -141,9 +151,9 @@ export type WaitDelegationErrorPacket =
       kind: "status-fetch-failed";
       name: string;
       message: string;
-      apiErrorKind?: ApiRequestErrorKind;
-      status?: number | null;
-      restartRequired?: boolean;
+      apiErrorKind: ApiRequestErrorKind | null;
+      status: number | null;
+      restartRequired: boolean | null;
     };
 
 export type WaitDelegationErrorKind = WaitDelegationErrorPacket["kind"];
@@ -563,7 +573,6 @@ function delegationSummary(record: DelegationRecord): DelegationSummary {
     createdAt: record.createdAt,
     startedAt: record.startedAt ?? null,
     completedAt: record.completedAt ?? null,
-    result: null,
   };
   if (record.result) {
     summary.result = {
@@ -832,7 +841,7 @@ function statusFetchErrorPacket(error: unknown): WaitDelegationErrorPacket {
     return {
       kind: "status-fetch-failed",
       name: error.name,
-      message: safeDelegationStatusFetchMessage(error.message),
+      message: safeDelegationStatusFetchMessage(error.message, error.kind),
       apiErrorKind: error.kind,
       status: error.status,
       restartRequired: error.restartRequired,
@@ -843,11 +852,20 @@ function statusFetchErrorPacket(error: unknown): WaitDelegationErrorPacket {
     kind: "status-fetch-failed",
     name,
     message: GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE,
+    apiErrorKind: null,
+    status: null,
+    restartRequired: null,
   };
 }
 
-function safeDelegationStatusFetchMessage(message: string) {
+function safeDelegationStatusFetchMessage(
+  message: string,
+  apiErrorKind?: ApiRequestErrorKind,
+) {
   const sanitized = sanitizeUserFacingErrorMessage(message);
+  if (apiErrorKind === "backend-unavailable") {
+    return sanitized;
+  }
   if (
     SAFE_DELEGATION_STATUS_FETCH_MESSAGES.has(sanitized) ||
     SAFE_DELEGATION_STATUS_FETCH_STATUS_PATTERN.test(sanitized)
@@ -937,9 +955,21 @@ function compactCreateDelegationRequest(
     if (value === null) {
       throw new TypeError(`${key} must be omitted instead of null`);
     }
+    if (key === "title" && typeof value === "string") {
+      validateDelegationTitle(value);
+    }
     payload[key] = value;
   }
   return payload as CreateDelegationRequest;
+}
+
+function validateDelegationTitle(title: string) {
+  const titleLength = Array.from(title.trim()).length;
+  if (titleLength > MAX_DELEGATION_TITLE_CHARS) {
+    throw new RangeError(
+      `title must be no longer than ${MAX_DELEGATION_TITLE_CHARS} characters`,
+    );
+  }
 }
 
 function normalizeDelegationPrompt(prompt: string) {

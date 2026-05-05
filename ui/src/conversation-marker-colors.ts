@@ -1,3 +1,9 @@
+// Owns conversation-marker color parsing for browser render boundaries.
+// Mirrors the backend hex-only marker color validator in src/session_markers.rs
+// and provides the display fallback used by marker chips and the overview rail.
+// Does not own marker state reconciliation policy; callers that compare marker
+// records should use conversation-marker-state-equality.ts.
+
 export const DEFAULT_CONVERSATION_MARKER_COLOR = "#3b82f6";
 
 const CONVERSATION_MARKER_HEX_COLOR_PATTERN =
@@ -18,16 +24,4 @@ export function canonicalConversationMarkerColor(value: unknown) {
     return null;
   }
   return trimmed.toLowerCase();
-}
-
-export function conversationMarkerColorsMatchForState(
-  left: unknown,
-  right: unknown,
-) {
-  const leftCanonical = canonicalConversationMarkerColor(left);
-  const rightCanonical = canonicalConversationMarkerColor(right);
-  if (leftCanonical !== null && rightCanonical !== null) {
-    return leftCanonical === rightCanonical;
-  }
-  return left === right;
 }

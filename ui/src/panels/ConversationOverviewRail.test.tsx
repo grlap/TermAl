@@ -107,7 +107,13 @@ describe("ConversationOverviewRail", () => {
     });
   });
 
-  it("sanitizes marker pin colors before assigning CSS custom properties", () => {
+  it.each([
+    "url(https://example.test/marker)",
+    "var(--signal-blue)",
+    "linear-gradient(red, blue)",
+  ])(
+    "sanitizes marker pin color %s before assigning CSS custom properties",
+    (color) => {
     const messages = textMessages(5);
 
     render(
@@ -119,7 +125,7 @@ describe("ConversationOverviewRail", () => {
             id: "marker-1",
             messageId: "message-3",
             name: "Tampered section",
-            color: "url(https://example.test/marker)",
+            color,
           },
         ]}
         minMessages={4}
@@ -133,9 +139,10 @@ describe("ConversationOverviewRail", () => {
         .getByLabelText("Tampered section")
         .style.getPropertyValue("--conversation-overview-marker-color"),
     ).toBe(DEFAULT_CONVERSATION_MARKER_COLOR);
-  });
+    },
+  );
 
-  it("renders long same-kind runs as a single clumped visual segment", () => {
+  it("renders long same-kind runs as capped visual segments", () => {
     const messages = assistantTextMessages(100);
     const onNavigate = vi.fn();
     const { container } = render(
@@ -150,9 +157,12 @@ describe("ConversationOverviewRail", () => {
 
     const segments = container.querySelectorAll(".conversation-overview-segment");
 
-    expect(segments).toHaveLength(1);
+    expect(segments).toHaveLength(2);
     expect(
-      screen.getByLabelText(/Assistant responses 1-100 \(100 messages\)/),
+      screen.getByLabelText(/Assistant responses 1-64 \(64 messages\)/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText(/Assistant responses 65-100 \(36 messages\)/),
     ).toBeInTheDocument();
 
     fireEvent.click(segments[0]);

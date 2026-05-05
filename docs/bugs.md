@@ -7,237 +7,37 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## `SAFE_DELEGATION_STATUS_FETCH_MESSAGES` allow-list over-redacts the `formatUnavailableApiMessage` family
+## `backend-unavailable` delegation status errors bypass the safe-message allow-list
 
-**Severity:** Medium - a benign, useful `kind: "backend-unavailable"` diagnostic is silently collapsed to the generic packet message, losing the "restart TermAl" signal that distinguishes a stale backend from a transient 5xx.
+**Severity:** Medium - wrapper-facing wait packets can expose arbitrary custom-transport error text when the error is tagged as `backend-unavailable`.
 
-`ui/src/delegation-commands.ts:849-858`. The new allow-list inversion is a sound direction (closes the round-45 deny-list gap), but it's too narrow: `api.ts:1649-1653 formatUnavailableApiMessage()` builds messages like `"The running backend does not expose /api/sessions/.../delegations/... (HTTP 404). Restart TermAl so the latest API routes are loaded."` via `createBackendUnavailableError` (the same constructor as the allowed `"The TermAl backend is unavailable."`). These messages contain the request path including the parent session id and delegation id — both of which are caller-supplied, already present elsewhere in the packet (`delegationId`, mismatched-id packets), AND carry the load-bearing `restartRequired: true` signal. The current redaction strips the human-readable diagnostic to the generic `"Delegation status fetch failed."` even though the structured `apiErrorKind` and `restartRequired` fields are still preserved on the packet — the wrapper UI loses the message and only knows "something failed at status N".
-
-**Current behavior:**
-- Both `"The TermAl backend is unavailable."` and the longer `"The running backend does not expose ..."` are produced by `kind: "backend-unavailable"` ApiRequestErrors.
-- Only the short message is allow-listed; the long message gets the generic redaction.
-- Wrappers see the generic packet and have to reconstruct the restart-required diagnostic from `apiErrorKind`/`status` alone.
-
-**Proposal:**
-- Either extend the allow-list with a pattern keyed off `"The running backend does not expose"` (or a stricter shape match including the HTTP status component).
-- Or redact by `apiErrorKind`: pass through verbatim when `apiErrorKind === "backend-unavailable"` (which only emits two well-known message families, neither of which contains user-supplied secrets), and apply allow-list redaction only to `apiErrorKind === "request-failed"` where backend payloads can be arbitrary.
-
-## `WaitDelegationErrorPacket` field shape varies by branch but the doc shape doesn't reflect
-
-**Severity:** Low - MCP wrappers writing typed projections cannot tell from the doc whether `apiErrorKind`/`status`/`restartRequired` are always present.
-
-`ui/src/delegation-commands.ts:828-846` and `docs/features/agent-delegation-sessions.md`. `apiErrorKind`, `status`, `restartRequired` are populated only when the underlying error is `ApiRequestError` (line 828-840 branch). The `else` branch (line 841-846) sets `name = error.name` for arbitrary thrown values without those fields. Wrapper authors who key off `name === "ApiRequestError"` to predict field presence will be surprised by the unprefixed branch shape.
+`ui/src/delegation-commands.ts:861-875`. The status-fetch packet now calls `safeDelegationStatusFetchMessage(error.message, error.kind)`, and the helper returns every sanitized message when `apiErrorKind === "backend-unavailable"`. That is broader than the safe-message audit boundary: `createDelegationCommands()` accepts custom transports, so `ApiRequestError("backend-unavailable", arbitraryMessage)` is not limited to the two audited messages from `api.ts`. `sanitizeUserFacingErrorMessage` normalizes some known user-facing forms but is not a secret/path redactor.
 
 **Current behavior:**
-- `apiErrorKind`/`status`/`restartRequired` only present in `ApiRequestError` branch.
-- `else` branch ships `kind: "status-fetch-failed"` + `name` only.
-- Doc shape doesn't distinguish the two cases.
+- Known stale-backend route diagnostics pass through, which preserves the useful restart signal.
+- Any other `backend-unavailable` message also passes through.
+- Sensitive URLs, paths, tokens, or stack-like details in a custom transport's `backend-unavailable` error can reach wrapper callers.
 
 **Proposal:**
-- Either narrow the union in the doc shape (`WaitDelegationErrorPacket = ApiErrorPacket | UnknownErrorPacket`).
-- Or always populate `apiErrorKind: null, status: null, restartRequired: null` for non-`ApiRequestError` branches so the field set is uniform.
+- Keep pass-through tied to explicit audited message shapes: the fixed backend-unavailable string, the known status pattern, and a strict `formatUnavailableApiMessage` route-diagnostic pattern.
+- Fall back to `Delegation status fetch failed.` for any other `backend-unavailable` message.
+- Add a negative test for a sensitive `backend-unavailable` `ApiRequestError`.
 
-## `agent` and `status` typed as bare `string` in `agent-delegation-sessions.md` but typed enums in source
+## Explicit delegation `model` metadata has no size cap
 
-**Severity:** Low - MCP wrapper authors generating a TS shim from the brief land on a strictly-broader type than the runtime contract.
+**Severity:** Medium - caller-supplied model text can bypass prompt/title limits and bloat persisted state, SSE deltas, `/api/state`, and parent delegation card metadata.
 
-`docs/features/agent-delegation-sessions.md:373-386`. The brief documents `agent: string` and `status: string`. `ui/src/delegation-commands.ts:84-92` declares them as `Session["agent"]` and `Session["status"]` (typed enums). Consumers that downstream `switch` on the value will not get exhaustiveness narrowing, and a future enum addition will not surface in wrapper schemas.
+`src/delegations.rs:310-315`. The explicit `model` field is trimmed and preserved verbatim with no character or byte cap. Later, the model is included in delegation summaries and interpolated into parent-card progress details (`src/delegations.rs:1071-1080`). If a caller supplies a very large model string, the value is persisted and broadcast as metadata even though the prompt and title now have explicit size boundaries.
 
 **Current behavior:**
-- Doc types `agent`/`status` as bare `string`.
-- TS source uses typed enum unions.
-- Wrappers built from the doc are strictly broader than runtime.
+- Prompt text is capped by byte length.
+- Delegation title is capped by character count.
+- Explicit model metadata is accepted at arbitrary length after trimming.
 
 **Proposal:**
-- Inline the agent/status enum unions in the doc (e.g., `agent: "Codex" | "Claude" | "Gemini" | ...`).
-- Or add a one-line note pointing readers at the canonical TS source for the precise enum.
-
-## `delegationSummary` always-present `result: null` is a wire-shape change vs prior optional omission
-
-**Severity:** Low - same nominal type, slightly different wire JSON; downstream `result === undefined` checks would silently flip.
-
-`ui/src/delegation-commands.ts:558-577`. Round-46 changed `delegationSummary` to set `result: null` unconditionally before the `if (record.result)` block (then conditionally overwriting), in support of the new `expectOwnNullableStringProperty` shape pinning. The doc shape `result?: DelegationResultSummary | null` allows both `undefined` (key omitted) and `null` (key present), so this is not a contract break — but downstream `result === undefined` checks (none currently in-tree, but plausible in a future MCP wrapper) would silently break.
-
-**Current behavior:**
-- `summary.result` is always own-property-present, either `null` or `DelegationResultSummary`.
-- Previous shape could omit the key entirely.
-- `JSON.stringify(summary)` now emits `"result": null` instead of omitting.
-
-**Proposal:**
-- Either keep the prior shape (omit when absent) and tighten the test instead via `toHaveProperty`.
-- Or update the doc to commit to the always-present-as-null shape so wrappers don't have to test both.
-
-## `conversationMarkerColorsMatchForState` is reconciler policy in a colors module
-
-**Severity:** Low - state-comparison helper lives in a module whose name suggests render-time concerns.
-
-`ui/src/conversation-marker-colors.ts:23-33`. Both call sites of `conversationMarkerColorsMatchForState` (`app-session-actions.ts:345`, `session-reconcile.ts:263`) are state-equality decisions for marker reconciliation. Render-path consumers (`ConversationOverviewRail.tsx`, `panels/conversation-markers.tsx`) only use `normalizeConversationMarkerColor`. The colors module now mixes "what color to paint" and "are these two markers logically the same for state-reuse decisions" — the canonical-equality + reference-fallback rule is reconciliation policy, not color policy.
-
-**Current behavior:**
-- Module exposes 1 constant + 3 functions (`canonical…`, `normalize…`, `…MatchForState`).
-- Two callers use the state-matcher; two use the normalizer.
-- Module-name implies presentation-only concerns.
-
-**Proposal:**
-- Either keep the helper here and document the colocation rationale in the file header (canonical equality is owned here so callers don't reimplement the three-level model).
-- Or move `conversationMarkerColorsMatchForState` to a small `marker-state-equality.ts` (or co-locate with one of the two consumers) and import only the canonical primitive.
-
-## `agent-delegation-sessions.md` lacks an implementation cross-link to `delegation-commands.ts`
-
-**Severity:** Low - the brief embeds source-level type definitions without naming the source.
-
-`docs/features/agent-delegation-sessions.md:222, 375-393`. The doc now matches the implementation accurately for `SpawnDelegationCommandResult` and `DelegationChildSessionSummary`, but never references `ui/src/delegation-commands.ts`. The "Related" block at the top references peer feature docs but never points to the actual TypeScript module that owns the command surface. CLAUDE.md says "Cross-link them both ways when a new doc references an existing one"; embedding type definitions without naming the source is exactly the drift vector that one-line cross-references prevent.
-
-**Current behavior:**
-- The brief embeds `SpawnDelegationCommandResult`/`DelegationChildSessionSummary` definitions inline.
-- No reference to `ui/src/delegation-commands.ts`.
-- Only the directional `// Keep in sync with src/delegations.rs` constant comment provides any source pointer.
-
-**Proposal:**
-- Add an "Implementation: `ui/src/delegation-commands.ts`" line to the §Internal Commands or §Data Model section.
-- Or add a one-line note next to the `SpawnDelegationCommandResult` definition citing where it lives in source.
-
-## `agent-delegation-sessions.md` internal-command return types still use pre-packet shapes
-
-**Severity:** Low - MCP wrapper authors following the feature brief miss the revision, server-instance, and redacted-summary packet fields that the implemented command surface now returns.
-
-`docs/features/agent-delegation-sessions.md:221-226`. The internal-command block still documents `get_delegation_status(...) -> DelegationStatus`, `get_delegation_result(...) -> DelegationResult`, and `cancel_delegation(...) -> DelegationStatus`. The implementation returns packet wrappers: `DelegationStatusCommandResult` for status/cancel and `DelegationResultPacket` for result. Those wrappers carry `revision`, `serverInstanceId`, and the redacted summary/result projection used by the current UI and wrapper contract.
-
-**Current behavior:**
-- Spawn is documented as returning `SpawnDelegationCommandResult`.
-- Status/cancel/result are documented as returning raw/simple delegation objects.
-- Wrapper authors reading the doc miss packet fields and may build a narrower contract than runtime.
-
-**Proposal:**
-- Update the command block to list `DelegationStatusCommandResult` and `DelegationResultPacket`.
-- Add the missing packet shapes alongside `SpawnDelegationCommandResult`, including `revision`, `serverInstanceId`, and summary redaction details.
-
-## `conversation-overview-map.ts` cap-vs-fast-path ordering change lacks rationale comment
-
-**Severity:** Low - a 10-line refactor that flips homogeneous-run merging from "unbounded" to "capped at `maxItemsPerSegment`" without an inline note.
-
-`ui/src/panels/conversation-overview-map.ts:421-430`. The change moves the `itemCount > maxItemsPerSegment` check above the `sameVisualClass` fast-path return. Semantically: previously same-class items merged unboundedly; now cap is dominant. The new test pins 45 same-class assistant messages → [20, 20, 5]. A reader sees the new ordering with no comment explaining "we deliberately let the cap dominate the same-class fast path so dense homogeneous regions get visual chunking." If a future caller passes `maxItemsPerSegment: Infinity` to recover the prior unbounded behavior, the escape hatch should be visible from source.
-
-**Current behavior:**
-- Cap check now dominates the same-visual-class fast path.
-- Behavior change framed as "minor refactor" in the ledger churn.
-- No inline comment explains the dominance.
-
-**Proposal:**
-- Add a 2-3 line comment above `canMergeConversationOverviewSegmentItem` (or above the relocated cap check) explaining the cap-dominates-fast-path policy and citing the test as the contract pin.
-
-## `SpawnDelegationCommandResult` declared before `DelegationChildSessionSummary` in `delegation-commands.ts`
-
-**Severity:** Low - readers scanning top-to-bottom encounter `childSession: DelegationChildSessionSummary` before learning what fields it carries.
-
-`ui/src/delegation-commands.ts:85-102`. `SpawnDelegationCommandResult` references `DelegationChildSessionSummary` on line 89 but the type is declared on line 94, after the consumer. TypeScript hoists types so this compiles, but other public types in the file (`DelegationStatusCommandResult`, `DelegationResultPacket`) follow declaration-then-use ordering. Pure ordering hygiene fix — readers most likely to read this section are MCP wrapper authors.
-
-**Current behavior:**
-- `SpawnDelegationCommandResult` references `DelegationChildSessionSummary` before declaration.
-- TS hoisting makes this compile.
-- Inconsistent with the file's other public-type ordering.
-
-**Proposal:**
-- Hoist `DelegationChildSessionSummary` above `SpawnDelegationCommandResult`. Pure ordering move, no semantic change.
-
-## Explicit non-default delegation `model` preservation branch is not pinned by any positive test
-
-**Severity:** Low - the third meaningful branch of `(agent, model)` selection is not exercised by any positive assertion.
-
-`src/tests/delegations.rs`. The new `delegation_omitted_agent_and_model_use_parent_agent_default_model` (round 46) and the round-45 `delegation_omitted_model_uses_selected_agent_default_not_parent_model` together pin `agent: None, model: None` (parent default) and `agent: Some(Codex), model: None` (selected default). The third branch — `agent: Some(Agent), model: Some("custom-model-string")` flowing verbatim into `child_session.model` and `delegation.model` — is exercised only obliquely by `delegation_empty_model_uses_agent_default` (which tests the whitespace branch, not the verbatim-string branch) and a cancellation test that happens to pass the agent's own default. A refactor that accidentally always defaulted (e.g., `Some(agent.default_model())` substituting the request unconditionally) would not regress current tests.
-
-**Current behavior:**
-- Two of three meaningful `(agent, model)` branches pinned.
-- The verbatim non-default model preservation branch is not pinned.
-- A regression that always defaulted would silently pass.
-
-**Proposal:**
-- Add a positive test `delegation_explicit_model_is_preserved_verbatim` passing `agent: Some(Codex), model: Some("custom-model-string")` and asserting both `created.child_session.model == "custom-model-string"` and `created.delegation.model.as_deref() == Some("custom-model-string")`.
-
-## `MAX_DELEGATION_PROMPT_BYTES` cross-reference comment lacks parity-test mention
-
-**Severity:** Low - the round-46 partial fix mentions only the file name, not the parity-pin test that closes the verification loop.
-
-`src/delegations.rs:8-9` and `ui/src/delegation-commands.ts:35`. The new `// Keep in sync with` comments name the mirror file but do not reference the parity-pin test (`delegation-commands.test.ts`'s `expect(MAX_DELEGATION_PROMPT_BYTES).toBe(64 * 1024)`). A future contributor changing one side must (a) discover the mirror, then (b) discover and update the parity test. The round-45 finding "no mechanism enforces backend parity" is half-closed.
-
-**Current behavior:**
-- Both sides have one-line cross-reference comments.
-- Neither comment names the parity test.
-- A one-sided edit that updates the value but forgets the test would silently pass on each side independently.
-
-**Proposal:**
-- Expand the comment on both sides to include "and update the parity-pin test in `delegation-commands.test.ts`".
-- Or add a backend-side test that re-asserts the literal value (mirroring the UI-side assertion) so a one-sided edit fails CI immediately.
-
-## `conversation-marker-colors.test.ts` missing `url(a)` vs `url(b)` arm
-
-**Severity:** Low - the fall-through `left === right` path with two distinct invalid strings is the most likely refactor target and is not pinned.
-
-`ui/src/conversation-marker-colors.test.ts:38-54`. The new test arms cover canonical-canonical match, invalid+default mismatch, and identical-invalid match (`url(...) === url(...)`), but do not cover the most fragile case: two distinct invalid strings (e.g., `url(a)` vs `url(b)`). A future refactor that flipped the fall-through to "always treat invalid pair as match" or "always treat invalid pair as mismatch" would pass the existing three arms.
-
-**Current behavior:**
-- Three arms cover the canonical paths and the identical-invalid path.
-- Distinct-invalid path is not pinned.
-
-**Proposal:**
-- Add `expect(matchForState("url(a)", "url(b)")).toBe(false)` arm.
-- Consider an arm for non-string + invalid-string (e.g., `null` vs `"url(...)"`).
-
-## `caps homogeneous visual segments` test missing exact-cap and `cap=1` boundary cases
-
-**Severity:** Low - 45 / 20 = 2.25 segments masks `>` vs `>=` discrimination.
-
-`ui/src/panels/conversation-overview-map.test.ts:512-569`. The new test exercises 45 messages with `maxItemsPerSegment: 20`, expecting [20, 20, 5]. A regression that set `itemCount >= maxItemsPerSegment` (off-by-one) would still produce a viable split because 45 isn't a multiple of 19. Two notable boundaries are not pinned: (a) `itemCount === maxItemsPerSegment` exactly (e.g., 20 messages, expect `[20]` not `[19, 1]`); (b) `maxItemsPerSegment: 1` (each item as its own segment).
-
-**Current behavior:**
-- Single test arm with non-boundary values.
-- Off-by-one regressions in the comparator pass.
-
-**Proposal:**
-- Add an arm with exactly `maxItemsPerSegment` items expecting a single segment.
-- Add an arm with `maxItemsPerSegment: 1` expecting one segment per item.
-
-## `expectOwnNullableStringProperty` doesn't pin per-field shape
-
-**Severity:** Low - accepts both `null` and any `string` for any field; a numeric model id would still pass.
-
-`ui/src/delegation-commands.test.ts:125-133`. The helper closes the round-45 "presence" gap (good) but leaves a "shape" gap: `typeof "x" === "string"` checks the runtime type of whatever the spread produced, not the intended schema. A future refactor that swapped `model: record.model ?? null` for a numeric model id (e.g., `model: record.modelId`) would still pass.
-
-**Current behavior:**
-- Helper checks own-property presence + `null | string` shape, but is field-agnostic.
-- Per-field shape constraints (e.g., `model: string`, `startedAt: ISO timestamp`) are not enforced.
-
-**Proposal:**
-- Per-field helpers with explicit `expect.toBeOneOf([expect.any(String), null])` matchers.
-- Or accept a type validator parameter (`expectOwnPropertyOfShape(record, "model", v => v === null || typeof v === "string")`).
-
-## Sensitive-`ApiRequestError` `it.each` missing JWT and GitHub PAT shapes
-
-**Severity:** Low - the allow-list is now load-bearing; a regression to a regex-based blocklist would silently regress these.
-
-`ui/src/delegation-commands.test.ts:1131-1171`. Seven sensitive shapes covered: token assignment, bearer token, env var, raw token prefix (`sk-proj-`), UNC path, home path, URL. Missing: JWT-style tokens (`eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature`) and GitHub PATs (`X-GitHub-Token: ghp_...`). These are different in shape from the listed `sk-proj-` prefix and would not match a future regex-based blocklist's existing `sk-` prefix arm.
-
-**Current behavior:**
-- Seven sensitive shapes pinned.
-- JWT and GitHub PAT shapes implicitly redacted by allow-list-default-redact, but not pinned.
-
-**Proposal:**
-- Add `["JWT token", "Authorization: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature"]` and `["GitHub PAT", "X-GitHub-Token: ghp_someTokenValue123"]` arms.
-
-## Batch wait failure test invokes captured callbacks through optional chaining
-
-**Severity:** Low - a request-ordering regression would fail late or misleadingly instead of proving the expected dispatch sequence.
-
-`ui/src/delegation-commands.test.ts:984-993`. The batch failure test captures `resolveFirst` and `rejectSecond`, then invokes them with `resolveFirst?.(...)` / `rejectSecond?.(...)`. If the transport stops dispatching requests in the expected order, the optional calls become no-ops and the test failure points at the eventual wait outcome rather than the missing callback capture. The same test casts `thirdSignal` at the assertion site instead of using the local abort-signal assertion helper.
-
-**Current behavior:**
-- Missing first/second callback captures are tolerated until later assertions time out or mismatch.
-- The third request abort signal is asserted through a local cast rather than the shared helper.
-- The test is less diagnostic than the contract it is trying to pin.
-
-**Proposal:**
-- Assert `resolveFirst` and `rejectSecond` are defined before invoking them.
-- Reuse `expectCapturedAbortSignal(thirdSignal)` for the third request signal.
+- Add a backend-enforced model metadata length cap that still allows arbitrary model names within a reasonable bound.
+- Mirror the cap in `ui/src/delegation-commands.ts`.
+- Document the model metadata limit in the delegation feature brief.
 
 ## `app-session-actions.test.ts` casing-only marker test missing genuine-mismatch sibling
 
@@ -253,62 +53,65 @@ the Implementation Tasks section.
 **Proposal:**
 - Add a sibling test where local and response pin different valid-but-not-matching hex (e.g., `#EF4444` vs `#3B82F6`), asserting the same-instance fast-path is NOT taken.
 
-## Delegation child session `name` set verbatim from caller-supplied `title` with no length cap
+## Delegation title validation runs after agent readiness validation
 
-**Severity:** Note - the round-46 redaction trusts that `name` is metadata; a sloppy MCP wrapper that sets `title = prompt.slice(0, N)` would round-trip prompt content through the redacted summary.
+**Severity:** Low - invalid title requests can return machine-dependent agent setup errors instead of the title contract error.
 
-`src/delegations.rs:292-298` (and `src/state_inner.rs:130`). `request.title` flows verbatim into `child_session.name`, which is now exposed via `DelegationChildSessionSummary` to MCP/tool callers. Today the only producer is the caller's `title`, never auto-derived from the prompt server-side, and no codepath under `src/` rewrites `session.name` from prompt content. So a benign caller cannot accidentally leak prompt text. But there is no server-side maximum length on `title`, while the prompt is capped at 64 KiB — a wrapper could push thousands of bytes of prompt text through `title` past the redaction. Functionally this matches the round-45 contract (callers chose what to put in `title`), so it is not a regression — but the redaction's safety assumption ("`name` is metadata") now becomes a wrapper-side responsibility rather than a system invariant.
-
-**Current behavior:**
-- `request.title` flows verbatim into `child_session.name` with no length cap.
-- No server-side validation that `name` excludes prompt content.
-- Prompt is capped at 64 KiB; `title` is unbounded.
-
-**Proposal:**
-- Add a server-side `MAX_DELEGATION_TITLE_CHARS` cap mirroring the existing `MAX_DELEGATION_PUBLIC_SUMMARY_CHARS` pattern.
-- Reject overlong titles at the API layer with parity comment to the UI side.
-
-## Wait-loop limits still independently pinned without parity comments
-
-**Severity:** Note - `MAX_DELEGATION_WAIT_IDS`, `MIN_DELEGATION_WAIT_INTERVAL_MS`, `MAX_DELEGATION_WAIT_TIMEOUT_MS` lack the parity comments that `MAX_DELEGATION_PROMPT_BYTES` got in this round.
-
-`ui/src/delegation-commands.ts:32-34`. Round-46 closed half of the prior parity-drift concern by adding `// Keep in sync with src/delegations.rs` for the prompt-byte cap, but the wait-loop limits are still independently pinned on each side and could drift. Not a confidentiality/integrity issue (these are availability limits) but the partial fix leaves a mixed signal about which constants are parity-critical.
+`src/delegations.rs:292-304`. `spawn_delegation` validates agent runtime setup and refreshes readiness before it trims and checks the delegation title length. On a machine where the selected agent is unavailable, an over-limit title can fail with an environment/readiness error instead of the deterministic title validation error, which makes the REST contract depend on local setup state.
 
 **Current behavior:**
-- `MAX_DELEGATION_PROMPT_BYTES` has bidirectional parity comments.
-- `MAX_DELEGATION_WAIT_IDS`/`MIN_INTERVAL_MS`/`MAX_TIMEOUT_MS` do not.
-- A reader sees mixed convention.
+- Agent setup validation runs before title normalization and length validation.
+- Over-limit titles are rejected only after the readiness path succeeds.
+- The observable error for the same invalid request can vary by host.
 
 **Proposal:**
-- Either extend parity comments to the wait-loop constants too.
-- Or note explicitly that they intentionally do not need parity (the backend enforces the truth and the UI cap is a defensive client-side floor).
+- Normalize and validate the title before agent readiness validation and readiness-cache work.
+- Keep the existing prompt/model/session validation ordering explicit so contract errors remain deterministic.
 
-## `SAFE_DELEGATION_STATUS_FETCH_MESSAGES` allow-list audit boundary undocumented
+## `WaitDelegationsResult` docs do not mirror the source discriminated union
 
-**Severity:** Note - the set is now load-bearing; adding a new entry should be a deliberate audit step.
+**Severity:** Low - wrapper authors following the feature brief lose the guarantee that error packets are present exactly on error outcomes.
 
-`ui/src/delegation-commands.ts:38-44`. The allow-list approach is the right policy for security-by-default, but adding a new entry needs a security review of every call site that constructs an `ApiRequestError` with that message. No comment captures this contract.
+`docs/features/agent-delegation-sessions.md:447-455`. The brief documents `WaitDelegationsResult` as a single broad shape with `outcome: "completed" | "timeout" | "error"` and optional `error?: WaitDelegationErrorPacket`. The implementation exports a discriminated shape where `error` is required for `outcome === "error"` and absent for successful/timeout outcomes. The broad doc type weakens the command contract and forces wrappers to treat error packets as maybe missing even when the outcome is `"error"`.
 
 **Current behavior:**
-- Allow-list has 1 literal + 1 pattern.
-- Adding a new entry has no documented audit checklist.
-- Future contributors might casually expand the set.
+- Source code distinguishes success/timeout and error result shapes.
+- Documentation uses one broad result type with optional `error`.
+- Generated wrapper types from the doc are weaker than runtime.
 
 **Proposal:**
-- One-line comment above `SAFE_DELEGATION_STATUS_FETCH_MESSAGES` explaining that the set is the audit boundary for status-fetch messages forwarded to wrapper callers, and that adding a new entry requires a security review of every callsite that constructs an `ApiRequestError` with that message.
+- Document `WaitDelegationsResult` as `WaitDelegationsSuccessResult | WaitDelegationsErrorResult`.
+- Require `error` only on the `"error"` arm and omit it from non-error arms.
 
-## `conversationMarkerColorsMatchForState` three-mode semantics pinned only by test, not docstring
+## Delegation title cap tests miss the exact-boundary case
 
-**Severity:** Note - the three deliberately-distinct cases (both canonical / mixed / both invalid) are not documented in source.
+**Severity:** Low - an off-by-one regression could reject valid maximum-length titles while the current tests still pass.
 
-`ui/src/conversation-marker-colors.ts:23-33`. The helper has three meaningful behaviors: (1) both canonical → canonical equality, (2) one canonical and one not → false (forces resync to authoritative), (3) neither canonical → raw `===` equality (treat identical garbage as same state). These are pinned by tests in `conversation-marker-colors.test.ts` and `session-reconcile.test.ts`. Future readers / refactorers won't see the rationale unless they read both test files.
+`ui/src/delegation-commands.test.ts:309-318` and `src/tests/delegations.rs:4528`. The new frontend and backend tests prove `MAX_DELEGATION_TITLE_CHARS + 1` is rejected, but they do not prove that exactly `MAX_DELEGATION_TITLE_CHARS` characters is accepted. A future `>=` comparison would reject the boundary value and still pass the over-limit-only assertions.
 
 **Current behavior:**
-- Three-mode behavior is intentional but not documented at source.
-- A future "fix" that always returned false for invalid sides would break the reconciler-policy contract without obvious source-level pushback.
+- Over-limit title rejection is tested.
+- Exact-limit acceptance is not tested.
+- JS/Rust character-count parity for non-ASCII titles is not pinned at the title boundary.
 
 **Proposal:**
-- Add a JSDoc to `conversationMarkerColorsMatchForState` describing the three cases.
+- Add exact-boundary positive tests in frontend and backend.
+- Include trimmed whitespace and a non-ASCII title case to pin character-count behavior consistently.
+
+## `expectRedactedChildSessionSummary` does not pin the exact redacted key set
+
+**Severity:** Low - future child-session summary leaks can pass if they do not use the few forbidden field names currently asserted.
+
+`ui/src/delegation-commands.test.ts:147-161`. The helper checks required summary fields and asserts that `workdir`, `messages`, `pendingPrompts`, and `preview` are absent. It does not assert the exact compact key set. A future refactor could accidentally include other `Session` fields, such as `projectId`, `modelOptions`, approval settings, or `externalSessionId`, and this helper would still pass.
+
+**Current behavior:**
+- The helper pins a few required fields.
+- The helper blocks only four forbidden fields.
+- Other session-only fields could be added to the summary without test failure.
+
+**Proposal:**
+- Assert the exact sorted keys for `DelegationChildSessionSummary`.
+- Build the child-session fixture with representative Session-only fields populated so accidental spread leaks fail loudly.
 
 ## `DeltaApplyResult.kind === "applied"` no longer guarantees a fresh sessions array
 
@@ -371,20 +174,6 @@ the Implementation Tasks section.
 - Reject bad remote payloads as bad gateway, or skip/log invalid remote markers consistently.
 - Add remote snapshot and remote delta tests with invalid marker colors.
 
-## `conversation-marker-colors.ts` lacks header comment and module-placement rationale
-
-**Severity:** Low - the new module is consumed by five callers but ships without the CLAUDE.md split-file convention header.
-
-`ui/src/conversation-marker-colors.ts:1-15`. CLAUDE.md requires "(1) what it owns, (2) what it deliberately does not own, (3) the file it was split out of (or new-module rationale)". Both touched companions in this round (`panels/conversation-markers.tsx`, `delegation-commands.ts`) follow that pattern; this new module does not. Five call sites (`ConversationOverviewRail.tsx`, `panels/conversation-markers.tsx`, `app-session-actions.ts`, `session-reconcile.ts`, plus the test) depend on the contract: hex-only allow-list, `#3b82f6` fallback, mirrors backend validator. None of that is documented at the source. Module placement (`ui/src/` top-level vs `ui/src/panels/`) is correct (callers span panels/ and non-panels) but the rationale is implicit.
-
-**Current behavior:**
-- The new module has no file-level header.
-- Top-level placement vs `panels/` is undocumented.
-- Callers depend on the implicit "hex-only, with default fallback" contract.
-
-**Proposal:**
-- Add a 4-6 line header explaining ownership ("hex-color allow-list + default for marker chip / overview-rail CSS custom properties; mirrors the server-side validator in `src/session_markers.rs:560-565`"), what it does not own (server persistence rejection, cross-marker color comparison policy), and the new-module rationale + top-level placement reason.
-
 ## `delegation-commands.ts` size growth is approaching an extraction boundary
 
 **Severity:** Low - the file is at 966 lines (below the §9 ~1500-line threshold) but has gained several distinct command-surface concerns in a short span.
@@ -399,21 +188,6 @@ the Implementation Tasks section.
 **Proposal:**
 - Defer extraction until either the §9 threshold is breached or the next material cluster lands.
 - If the next delegation batch adds another cluster, split error-packet construction or the wait loop first.
-
-## `useLayoutEffect` calling `ensureMessageSlotCacheForCurrentSession()` is now redundant in `AgentSessionPanel.tsx`
-
-**Severity:** Low - dead code that confuses future readers; functional correctness is unchanged.
-
-`ui/src/panels/AgentSessionPanel.tsx:683-685`. Now that every read site (`jumpToMarker` line 728, `handleConversationItemMount`) routes through `ensureMessageSlotCacheForCurrentSession()` and the helper lazily resets the cache when `messageSlotNodesSessionIdRef.current !== session.id`, the layout effect's eager `ensureMessageSlotCacheForCurrentSession()` call has no observable effect. It only mattered before this round when `jumpToMarker` read `messageSlotNodesRef.current` directly — that path was closed by this round's fix.
-
-**Current behavior:**
-- The `useLayoutEffect` calls the helper for its side effect.
-- Every read site now self-corrects via the helper.
-- The layout effect provides no additional safety.
-
-**Proposal:**
-- Remove the `useLayoutEffect` (every read site self-corrects).
-- Or add a one-line comment explaining it serves as eager initialization for the next-render baseline (debatable value).
 
 ## Backend marker color rejection tests cover only 2 dangerous inputs and use brittle substring assertions
 
@@ -431,34 +205,6 @@ the Implementation Tasks section.
 - Convert to a parameterized loop covering broader attack surface: `expression(...)`, `<script>`, `linear-gradient(...)`, `red`, `transparent`, `#xyz`, `#12345`, `#1234567`, empty.
 - Pin the full literal error message (`assert_eq!`) so wording drift fails loudly.
 - Or extract the message as a `pub(crate) const` and reference both in handler and test.
-
-## `conversation-marker-colors.test.ts` skips boundary-length and dirty-input cases
-
-**Severity:** Low - 2 `it()` blocks across 8 inputs; a future regex relaxation to `{3,8}` would still pass.
-
-`ui/src/conversation-marker-colors.test.ts:8-30`. The regex enforces 3, 4, 6, or 8 hex digits. The test pins one too-short case (`#12`) and the canonical happy paths but never asserts that 5 (`#12345`) and 7 (`#1234567`) are rejected. Only one whitespace case (leading + trailing) on lowercase 3-digit input. Embedded-newline case absent.
-
-**Current behavior:**
-- Boundary lengths 5 and 7 hex digits not exercised.
-- Uppercase-with-leading-whitespace not exercised.
-- Embedded-whitespace not exercised.
-
-**Proposal:**
-- Convert to `it.each(...)` covering: `#12345` rejected, `#1234567` rejected, `"  #ABCDEF  "` normalized, `"\n#abcdef\n"` normalized.
-- Add explicit `#FFFFFFFF` test alongside `#fff` to pin both the 8-digit alpha path and the 3-digit short form.
-
-## Marker color sanitization tests use single dangerous-input case in two pin locations
-
-**Severity:** Low - both `ConversationOverviewRail.test.tsx` and `panels/conversation-markers.test.ts` test only `url(...)`.
-
-A regression where the normalizer was inadvertently bypassed for some dangerous values (e.g., a refactor that only handled `var(...)` but not `url(...)`) would only be caught for one path. Mirror the backend test concern: broader input coverage would surface bypasses for any single dangerous shape.
-
-**Current behavior:**
-- Both pin tests use `url(https://example.test/marker)`.
-- `var(--signal-blue)` and other dangerous shapes not exercised at the render boundary.
-
-**Proposal:**
-- Convert both pin/chip tests to `it.each([["url", "url(https://example.test/x)"], ["var", "var(--signal-blue)"], ["named", "red"], ["empty", ""]])`.
 
 ## `delta.messageCount === session.messageCount` asymmetric when `session.messageCount` is `null`/`undefined`
 
@@ -586,35 +332,6 @@ A regression where the normalizer was inadvertently bypassed for some dangerous 
 **Proposal:**
 - Add a focused `renderTermalMermaidDiagram` test that mocks `mermaid.render` to append temp nodes, then throws or returns an error visualization.
 - Assert the temp wrapper/SVG is removed from `document.body` afterward.
-
-## Marker color fallback normalization can hide corrupt local marker state during reconciliation
-
-**Severity:** Low - authoritative marker snapshots can be treated as equal to locally corrupt raw marker colors.
-
-`ui/src/session-reconcile.ts:263-264`. Reconciliation compares marker colors with `normalizeConversationMarkerColor`, which falls back unsupported values to a display-safe default. That is correct at render boundaries, but using display fallback equality for state reconciliation can preserve a raw local `url(...)`/invalid color when the authoritative snapshot carries a canonical safe color that normalizes to the same fallback.
-
-**Current behavior:**
-- Marker color equality in reconciliation uses display normalization.
-- Invalid local raw color can compare equal to a canonical authoritative fallback color.
-- The local corrupt value can remain in client state instead of being replaced by authoritative wire data.
-
-**Proposal:**
-- Keep raw/canonical marker equality in reconciliation, or normalize marker colors once at ingestion before storing them in session state.
-- Reserve fallback normalization for render/display-only boundaries.
-
-## Marker stale-response recovery lacks normalized-color branch coverage
-
-**Severity:** Low - the action recovery guard changed behavior for color-normalized marker equality, but the exact branch is not directly tested.
-
-`ui/src/app-session-actions.ts:345-346`. `conversationMarkerExactlyMatches` now normalizes marker colors before comparing stale same-instance responses. Utility and component tests cover marker color normalization, but there is no `app-session-actions` test proving a stale response whose only difference is color case/normalization is accepted without scheduling recovery resync.
-
-**Current behavior:**
-- Stale marker response matching treats normalized color-equivalent markers as exact matches.
-- The action recovery branch is not covered with casing/normalization-only marker color differences.
-
-**Proposal:**
-- Add a stale same-instance marker success/update test where only color casing or normalization differs.
-- Assert no recovery resync is requested.
 
 ## App.live-state.reconnect "fallback-only-hidden" test phases 1-3 are tautological
 
@@ -862,20 +579,6 @@ A regression where the normalizer was inadvertently bypassed for some dangerous 
 **Proposal:**
 - Either mirror the `session_lifecycle.rs` defensive set (`true`) in `turn_lifecycle.rs`, or document why the asymmetry is intentional.
 - Tighten the persist-failure tests to also pin `orchestrator_auto_dispatch_blocked`, `runtime`, `runtime_stop_in_progress`, and the "stopped/failed" message presence.
-
-## Conversation overview segment cap does not bound homogeneous runs
-
-**Severity:** Low - `maxItemsPerSegment` reads as a hard cap but same-kind message runs can bypass it.
-
-`ui/src/panels/conversation-overview-map.ts:422` merges same-visual-class messages before enforcing the item cap. Homogeneous transcript runs can therefore collapse into a single unbounded segment, which weakens keyboard and accessibility navigation granularity and makes the option contract misleading.
-
-**Current behavior:**
-- Mixed-kind runs are split according to the configured segment cap.
-- Same-kind runs can exceed `maxItemsPerSegment`.
-
-**Proposal:**
-- Apply the item cap before the same-visual-class fast path, or rename/comment the option as a mixed-run cap.
-- Add focused coverage for a long homogeneous run.
 
 ## Mermaid fallback loader lives in the message card renderer
 
@@ -1777,8 +1480,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `ui/src/backend-connection.test.tsx:1225-1261` co-fires the stale `delta` and the `workspaceFilesChanged` event in one `act()`. The assertion `countStateFetches() === hydratedStateFetchCount` is satisfied if either side skips confirmation, so the test cannot pinpoint which side regressed. Dispatch `workspaceFilesChanged` alone first and assert no fetch fired; then add the stale delta separately and re-assert.
 - [ ] P2: Add frontend stop/failure delta-before-snapshot terminal-message coverage:
   dispatch cancellation/update deltas before the same-revision snapshot and assert appended stop/failure terminal messages remain rendered without relying on a later unrelated refresh.
-- [ ] P2: Add homogeneous conversation-overview segment cap coverage:
-  build a long same-kind message run with `maxItemsPerSegment` set and assert the segment policy is either capped or explicitly documented as a mixed-run-only cap.
 - [ ] P2: Replace `function scrollIntoView() { ... = this; }` capture pattern in `AgentSessionPanel.test.tsx`:
   `AgentSessionPanel.test.tsx:1515, 1568, 1680` rely on `this`-binding inside a method-form function. Future swc/esbuild config that arrow-rewrites methods or any "use strict" tightening would silently break the capture. Use `vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) { scrolledNode = this; })` and rely on `mockRestore()` to clean up.
 - [ ] P2: Tighten `expectRequestErrorDeferredUpdatesOnly` to assert deferred-update payloads:
@@ -1801,10 +1502,12 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   cover remote full-session localization and `ConversationMarkerCreated` / `ConversationMarkerUpdated` remote deltas with invalid colors, asserting they are rejected, skipped, or normalized consistently with local marker routes.
 - [ ] P2: Expand backend marker color rejection coverage:
   parameterize create/patch rejection cases across malformed hex lengths, named colors, gradients, empty/whitespace values, and CSS-like inputs; pin the exact error string or a shared validator error constant.
-- [ ] P2: Add marker reconciliation color-integrity coverage:
-  reconcile a local marker with an invalid raw color against an authoritative safe marker and assert client state adopts the authoritative value rather than preserving the corrupt local raw value through display fallback equality.
-- [ ] P2: Add stale marker response normalized-color coverage:
-  in `app-session-actions.test.ts`, return a stale same-instance marker response whose only difference is color casing/normalization and assert the guarded recovery path accepts it without requesting a resync.
+- [ ] P2: Add sensitive `backend-unavailable` delegation status-fetch coverage:
+  throw a custom-transport `ApiRequestError("backend-unavailable", "...secret/path...")` from `wait_delegations` and assert the wrapper-facing packet uses the generic redacted message unless it matches an audited safe shape.
+- [ ] P2: Add delegation title boundary coverage:
+  assert exactly `MAX_DELEGATION_TITLE_CHARS` characters is accepted in both frontend and backend tests, and include trimmed whitespace plus a non-ASCII title case to pin character-count parity.
+- [ ] P2: Pin the exact redacted child-session summary key set:
+  update `expectRedactedChildSessionSummary` to assert sorted keys and build a fixture with Session-only fields populated, so future accidental summary spreads fail.
 - [ ] P1: Pin the "no remount across streaming → settled transition" claim with DOM-identity assertions:
   `ui/src/MarkdownContent.test.tsx:1456` and `ui/src/MessageCard.test.tsx:245-285` assert the rendered shape but do not assert that React preserved the same DOM nodes across the rerender. Capture a stable child DOM node (e.g., a paragraph from the settled prefix) before flipping `isStreaming` to false, then assert `container.contains(savedNode)` and reference equality after the rerender.
 - [ ] P2: Restore discrimination in `expectRenderedMarkdownTableContains`:
@@ -1823,5 +1526,3 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `App.live-state.deltas.test.tsx:2976` covers the textReplace flavor of "watchdog-resyncs when repeated ignored deltas arrive for an active session". Add three sibling tests using `commandUpdate`, `messageUpdated`, and `parallelAgentsUpdate` with the same active-session/no-progress setup. Each should assert the watchdog fires within `LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 3000` ms despite repeated identical-content replays. Today the no-op short-circuit only exists for `textReplace`; these tests will fail until the short-circuit is generalized (see "Same-revision-replayable no-op short-circuit covers only `textReplace`" entry above).
 - [ ] P2: Add genuine-divergence reconciliation coverage for same-revision unknown-session deltas:
   `ui/src/app-live-state.ts:2666-2687` removed the `requestStateResync` + `startSessionHydration` for `kind: "needsResync"` at the same revision. The justifying comment relies on "the next authoritative state event will reconcile any real divergence" but no test pins this. Add a coverage test that (a) sets the client up with a session list missing `session-X`, (b) dispatches a same-revision session delta for `session-X` (where `latestStateRevisionRef.current === delta.revision`) — asserting NO immediate `/api/state` fetch, then (c) dispatches the next authoritative `state` event including `session-X` and asserts it adopts cleanly. If no backstop exists today, the test will document the gap and force a decision (re-add the resync, or add a deferred reconciliation path).
-- [ ] P2: Tighten the delegation batch failure test's captured callback assertions:
-  in `ui/src/delegation-commands.test.ts`, assert `resolveFirst` and `rejectSecond` are defined before invoking them and use the shared abort-signal helper for `thirdSignal`, so request scheduling regressions fail at the capture point.

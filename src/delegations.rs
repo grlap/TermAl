@@ -7,8 +7,13 @@
 
 // Keep prompts bounded because they are embedded into child-agent startup input.
 // Keep in sync with `MAX_DELEGATION_PROMPT_BYTES` in
-// `ui/src/delegation-commands.ts`.
+// `ui/src/delegation-commands.ts`; if this changes, update the parity-pin test
+// in `ui/src/delegation-commands.test.ts`.
 const MAX_DELEGATION_PROMPT_BYTES: usize = 64 * 1024;
+// Child session names are exposed through redacted delegation summaries; cap
+// caller-supplied titles as metadata, not prompt-sized payloads. Keep in sync
+// with `MAX_DELEGATION_TITLE_CHARS` in `ui/src/delegation-commands.ts`.
+const MAX_DELEGATION_TITLE_CHARS: usize = 200;
 // Public summaries ride in `/api/state`; full summaries stay behind result reads.
 const MAX_DELEGATION_PUBLIC_SUMMARY_CHARS: usize = 1000;
 // Result packets are expected near the end of long assistant output.
@@ -296,6 +301,12 @@ impl AppState {
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
             .unwrap_or_else(|| "Delegated review".to_owned());
+        if title.chars().count() > MAX_DELEGATION_TITLE_CHARS {
+            return Err(ApiError::bad_request(format!(
+                "delegation title must be at most {} characters",
+                MAX_DELEGATION_TITLE_CHARS
+            )));
+        }
         let model = request
             .model
             .as_deref()

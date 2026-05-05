@@ -18,7 +18,7 @@ import type {
   UserInputQuestion,
   UserInputRequestMessage,
 } from "./types";
-import { conversationMarkerColorsMatchForState } from "./conversation-marker-colors";
+import { conversationMarkerColorsMatchForState } from "./conversation-marker-state-equality";
 
 type ReconcileSessionsOptions = {
   disableMutationStampFastPath?: boolean;

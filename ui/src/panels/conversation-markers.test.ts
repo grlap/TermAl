@@ -143,9 +143,13 @@ describe("conversation marker helpers", () => {
     ).toEqual([earliestHint, oldestById, oldestByIdAfter, newest]);
   });
 
-  it("normalizes chip colors before assigning CSS custom properties", () => {
+  it.each([
+    "url(https://example.test/marker)",
+    "var(--signal-blue)",
+    "linear-gradient(red, blue)",
+  ])("normalizes chip color %s before assigning CSS custom properties", (color) => {
     const marker = makeMarker("marker-1", {
-      color: "url(https://example.test/marker)",
+      color,
     });
     const { container } = render(
       createElement(ConversationMarkerNavigator, {

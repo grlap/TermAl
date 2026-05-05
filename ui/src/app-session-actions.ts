@@ -67,7 +67,7 @@ import {
   syncComposerDraftForSession,
   upsertSessionStoreSession,
 } from "./session-store";
-import { conversationMarkerColorsMatchForState } from "./conversation-marker-colors";
+import { conversationMarkerColorsMatchForState } from "./conversation-marker-state-equality";
 import {
   findWorkspacePaneIdForSession,
   openSessionInWorkspaceState,
