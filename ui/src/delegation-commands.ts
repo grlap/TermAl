@@ -394,7 +394,10 @@ async function waitDelegationsWithTransport(
         recordsById,
         metadata.revision,
         metadata.serverInstanceId,
-        statusFetchErrorPacket(batch.error),
+        statusFetchErrorPacket(batch.error, {
+          parentSessionId: normalizedParentSessionId,
+          delegationId: batch.requestedId,
+        }),
       );
     }
 
@@ -627,12 +630,17 @@ type StatusBatchResponse = {
 type StatusBatchResult =
   | { kind: "responses"; responses: StatusBatchResponse[] }
   | { kind: "timeout"; responses: StatusBatchResponse[] }
-  | { kind: "error"; error: unknown; responses: StatusBatchResponse[] };
+  | {
+      kind: "error";
+      error: unknown;
+      requestedId: string;
+      responses: StatusBatchResponse[];
+    };
 
 type StatusBatchFinish =
   | { kind: "responses" }
   | { kind: "timeout" }
-  | { kind: "error"; error: unknown };
+  | { kind: "error"; error: unknown; requestedId: string };
 
 type StatusBatchApplyResult = {
   appliedResponses: StatusBatchResponse[];
@@ -674,6 +682,7 @@ async function fetchStatusBatchWithDeadline(
         resolve({
           kind: "error",
           error: result.error,
+          requestedId: result.requestedId,
           responses: responseSnapshot,
         });
         return;
@@ -707,7 +716,10 @@ async function fetchStatusBatchWithDeadline(
             }
           },
           (error: unknown) => {
-            finish({ kind: "error", error }, { abortPending: true });
+            finish(
+              { kind: "error", error, requestedId },
+              { abortPending: true },
+            );
           },
         );
     }

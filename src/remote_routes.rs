@@ -946,7 +946,12 @@ impl AppState {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
-                apply_remote_session_to_record(record, local_project_id, &remote_response.session);
+                apply_remote_session_to_record(
+                    record,
+                    &target.remote.id,
+                    local_project_id,
+                    &remote_response.session,
+                );
                 Self::wire_session_from_record(record)
             };
             if min_remote_revision.is_none() {

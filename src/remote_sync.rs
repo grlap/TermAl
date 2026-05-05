@@ -260,6 +260,7 @@ fn sync_remote_state_inner(
         };
         apply_remote_session_to_record(
             record,
+            remote_id,
             local_project_id.map(LocalProjectId::into_inner),
             remote_session,
         );
@@ -355,6 +356,7 @@ fn note_remote_applied_state_snapshot_revision(
 /// Applies remote session to record.
 fn apply_remote_session_to_record(
     record: &mut SessionRecord,
+    remote_id: &str,
     local_project_id: Option<String>,
     remote_session: &Session,
 ) {
@@ -363,7 +365,8 @@ fn apply_remote_session_to_record(
         (!remote_session.messages_loaded).then(|| record.session.messages.clone());
     let previous_messages_loaded = record.session.messages_loaded;
     let previous_remote_mutation_stamp = record.session.session_mutation_stamp;
-    record.session = localize_remote_session(&local_session_id, local_project_id, remote_session);
+    record.session =
+        localize_remote_session(remote_id, &local_session_id, local_project_id, remote_session);
     if remote_session.session_mutation_stamp.is_none() {
         record.session.session_mutation_stamp = previous_remote_mutation_stamp;
     }
@@ -428,6 +431,7 @@ fn upsert_remote_proxy_session_record(
             inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid"),
+            remote_id,
             local_project_id,
             remote_session,
         );
@@ -437,7 +441,12 @@ fn upsert_remote_proxy_session_record(
     let number = inner.next_session_number;
     inner.next_session_number += 1;
     let local_session_id = format!("session-{number}");
-    let session = localize_remote_session(&local_session_id, local_project_id, remote_session);
+    let session = localize_remote_session(
+        remote_id,
+        &local_session_id,
+        local_project_id,
+        remote_session,
+    );
     let mut record = SessionRecord {
         active_codex_approval_policy: None,
         active_codex_reasoning_effort: None,
@@ -498,6 +507,7 @@ fn ensure_remote_proxy_session_record(
                 inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid"),
+                remote_id,
                 local_project_id,
                 remote_session,
             );
@@ -513,6 +523,7 @@ fn ensure_remote_proxy_session_record(
 }
 
 fn localize_remote_session(
+    remote_id: &str,
     local_session_id: &str,
     local_project_id: Option<String>,
     remote_session: &Session,
@@ -524,12 +535,16 @@ fn localize_remote_session(
         .markers
         .iter()
         .filter_map(|marker| {
+            // Snapshot sync is best-effort per marker: one bad remote color
+            // should not orphan the whole proxy session. Delta ingestion uses
+            // this same helper but returns the validation error before mutate,
+            // publish, or replay-note work, so bad per-marker events stay retryable.
             match localize_remote_conversation_marker(marker.clone(), local_session_id) {
                 Ok(marker) => Some(marker),
                 Err(err) => {
                     eprintln!(
-                        "backend warning> skipping remote conversation marker `{}` in session `{}`: {}",
-                        marker.id, remote_session.id, err.message
+                        "backend warning> skipping remote conversation marker `{}` from remote `{}` session `{}`: {}",
+                        marker.id, remote_id, remote_session.id, err.message
                     );
                     None
                 }
@@ -542,7 +557,9 @@ fn localize_remote_session(
     session
 }
 
-fn localize_remote_conversation_marker(
+/// Localizes a remote marker and applies the same hex-only color
+/// normalization used by local marker POST/PATCH routes.
+pub(crate) fn localize_remote_conversation_marker(
     mut marker: ConversationMarker,
     local_session_id: &str,
 ) -> Result<ConversationMarker, ApiError> {

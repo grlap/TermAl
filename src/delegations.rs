@@ -214,22 +214,6 @@ impl AppState {
                 MAX_DELEGATION_PROMPT_BYTES
             )));
         }
-        let mode = request.mode.unwrap_or(DelegationMode::Reviewer);
-        if mode == DelegationMode::Worker {
-            return Err(ApiError::from_status(
-                StatusCode::NOT_IMPLEMENTED,
-                "worker delegations are not implemented in Phase 1",
-            ));
-        }
-        let write_policy = request
-            .write_policy
-            .unwrap_or(DelegationWritePolicy::ReadOnly);
-        if write_policy != DelegationWritePolicy::ReadOnly {
-            return Err(ApiError::from_status(
-                StatusCode::NOT_IMPLEMENTED,
-                "only readOnly delegation write policy is implemented in Phase 1",
-            ));
-        }
         let title = request
             .title
             .as_deref()
@@ -257,6 +241,22 @@ impl AppState {
                 "delegation model must be at most {} characters",
                 MAX_DELEGATION_MODEL_CHARS
             )));
+        }
+        let mode = request.mode.unwrap_or(DelegationMode::Reviewer);
+        if mode == DelegationMode::Worker {
+            return Err(ApiError::from_status(
+                StatusCode::NOT_IMPLEMENTED,
+                "worker delegations are not implemented in Phase 1",
+            ));
+        }
+        let write_policy = request
+            .write_policy
+            .unwrap_or(DelegationWritePolicy::ReadOnly);
+        if write_policy != DelegationWritePolicy::ReadOnly {
+            return Err(ApiError::from_status(
+                StatusCode::NOT_IMPLEMENTED,
+                "only readOnly delegation write policy is implemented in Phase 1",
+            ));
         }
 
         let (parent_workdir, parent_project_id, parent_agent, parent_is_remote_backed) = {

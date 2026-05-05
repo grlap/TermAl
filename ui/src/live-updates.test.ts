@@ -2422,6 +2422,61 @@ describe("applyDeltaToSessions", () => {
     expect(deleteResult.sessions[0].sessionMutationStamp).toBe(13);
   });
 
+  it("returns appliedNoOp for identical marker update and repeated marker delete replays", () => {
+    const marker: NonNullable<Session["markers"]>[number] = {
+      id: "marker-1",
+      sessionId: "session-a",
+      kind: "decision",
+      name: "Decision",
+      color: "#3b82f6",
+      messageId: "message-1",
+      messageIndexHint: 0,
+      createdAt: "10:00:00",
+      updatedAt: "10:00:00",
+      createdBy: "user",
+    };
+    const sessions = [
+      makeSession("session-a", {
+        sessionMutationStamp: 11,
+        messagesLoaded: true,
+        markers: [marker],
+      }),
+    ];
+
+    const updateResult = applyDeltaToSessions(sessions, {
+      type: "conversationMarkerUpdated",
+      revision: 11,
+      sessionId: "session-a",
+      marker: { ...marker },
+      sessionMutationStamp: 11,
+    });
+    expect(updateResult.kind).toBe("appliedNoOp");
+    if (updateResult.kind !== "appliedNoOp") {
+      throw new Error("expected identical marker update to short-circuit");
+    }
+    expect(updateResult.sessions).toBe(sessions);
+
+    const deletedSessions = [
+      makeSession("session-a", {
+        sessionMutationStamp: 12,
+        messagesLoaded: true,
+        markers: [],
+      }),
+    ];
+    const deleteResult = applyDeltaToSessions(deletedSessions, {
+      type: "conversationMarkerDeleted",
+      revision: 12,
+      sessionId: "session-a",
+      markerId: "marker-1",
+      sessionMutationStamp: 12,
+    });
+    expect(deleteResult.kind).toBe("appliedNoOp");
+    if (deleteResult.kind !== "appliedNoOp") {
+      throw new Error("expected repeated marker delete to short-circuit");
+    }
+    expect(deleteResult.sessions).toBe(deletedSessions);
+  });
+
   it("requests resync for marker deltas against summary or inconsistent sessions", () => {
     const marker = {
       id: "marker-1",
@@ -2531,6 +2586,204 @@ describe("applyDeltaToSessions", () => {
       text: "Final answer",
       timestamp: "10:00",
     });
+  });
+
+  describe("textReplace no-op short-circuit", () => {
+    function makeTextReplaceNoOpFixture() {
+      const sessions = [
+        makeSession("session-a", {
+          preview: "Final answer",
+          messageCount: 1,
+          sessionMutationStamp: 41,
+          messages: [
+            {
+              id: "message-1",
+              type: "text",
+              timestamp: "10:00",
+              author: "assistant",
+              text: "Final answer",
+            },
+          ],
+        }),
+      ];
+      const delta: DeltaEvent = {
+        type: "textReplace",
+        revision: 2,
+        sessionId: "session-a",
+        messageId: "message-1",
+        messageIndex: 0,
+        messageCount: 1,
+        text: "Final answer",
+        preview: "Final answer",
+        sessionMutationStamp: 41,
+      };
+      return { sessions, delta };
+    }
+
+    it("returns an explicit no-op result and preserves session-array identity when content already matches", () => {
+      const { sessions, delta } = makeTextReplaceNoOpFixture();
+
+      const result = applyDeltaToSessions(sessions, delta);
+
+      expect(result.kind).toBe("appliedNoOp");
+      if (result.kind !== "appliedNoOp") {
+        throw new Error("expected textReplace to short-circuit");
+      }
+      expect(result.sessions).toBe(sessions);
+    });
+
+    it.each([
+      ["text differs", { text: "Final answer!" }],
+      ["preview differs", { preview: "Different preview" }],
+      ["session mutation stamp is older", { sessionMutationStamp: 40 }],
+      ["session mutation stamp is newer", { sessionMutationStamp: 42 }],
+      ["message count differs", { messageCount: 2 }],
+    ] as const)(
+      "returns a material apply when %s",
+      (_label, deltaOverrides) => {
+        const { sessions, delta } = makeTextReplaceNoOpFixture();
+
+        const result = applyDeltaToSessions(sessions, {
+          ...delta,
+          ...deltaOverrides,
+        });
+
+        expect(result.kind).toBe("applied");
+        if (result.kind !== "applied") {
+          throw new Error("expected textReplace to apply materially");
+        }
+        expect(result.sessions).not.toBe(sessions);
+      },
+    );
+  });
+
+  it("returns appliedNoOp for an identical messageUpdated replay", () => {
+    const message = {
+      id: "message-1",
+      type: "text",
+      timestamp: "10:00",
+      author: "assistant",
+      text: "Stable answer",
+    } as const;
+    const sessions = [
+      makeSession("session-a", {
+        preview: "Stable answer",
+        messageCount: 1,
+        sessionMutationStamp: 41,
+        messages: [message],
+      }),
+    ];
+
+    const result = applyDeltaToSessions(sessions, {
+      type: "messageUpdated",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "message-1",
+      messageIndex: 0,
+      messageCount: 1,
+      message: { ...message },
+      preview: "Stable answer",
+      status: "idle",
+      sessionMutationStamp: 41,
+    });
+
+    expect(result.kind).toBe("appliedNoOp");
+    if (result.kind !== "appliedNoOp") {
+      throw new Error("expected identical messageUpdated to short-circuit");
+    }
+    expect(result.sessions).toBe(sessions);
+  });
+
+  it("returns appliedNoOp for an identical commandUpdate replay", () => {
+    const sessions = [
+      makeSession("session-a", {
+        preview: "/tmp",
+        messageCount: 1,
+        sessionMutationStamp: 41,
+        messages: [
+          {
+            id: "command-1",
+            type: "command",
+            timestamp: "10:05",
+            author: "assistant",
+            command: "pwd",
+            commandLanguage: "powershell",
+            output: "/tmp",
+            outputLanguage: "text",
+            status: "success",
+          },
+        ],
+      }),
+    ];
+
+    const result = applyDeltaToSessions(sessions, {
+      type: "commandUpdate",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "command-1",
+      messageIndex: 0,
+      messageCount: 1,
+      command: "pwd",
+      commandLanguage: "powershell",
+      output: "/tmp",
+      outputLanguage: "text",
+      status: "success",
+      preview: "/tmp",
+      sessionMutationStamp: 41,
+    });
+
+    expect(result.kind).toBe("appliedNoOp");
+    if (result.kind !== "appliedNoOp") {
+      throw new Error("expected identical commandUpdate to short-circuit");
+    }
+    expect(result.sessions).toBe(sessions);
+  });
+
+  it("returns appliedNoOp for an identical parallelAgentsUpdate replay", () => {
+    const agents = [
+      {
+        id: "reviewer",
+        title: "Reviewer",
+        status: "running",
+        detail: "Checking diffs",
+      },
+    ] as const;
+    const sessions = [
+      makeSession("session-a", {
+        preview: "Running reviewer",
+        messageCount: 1,
+        sessionMutationStamp: 41,
+        messages: [
+          {
+            id: "parallel-1",
+            type: "parallelAgents",
+            timestamp: "10:06",
+            author: "assistant",
+            agents: [...agents],
+          },
+        ],
+      }),
+    ];
+
+    const result = applyDeltaToSessions(sessions, {
+      type: "parallelAgentsUpdate",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "parallel-1",
+      messageIndex: 0,
+      messageCount: 1,
+      agents: [...agents],
+      preview: "Running reviewer",
+      sessionMutationStamp: 41,
+    });
+
+    expect(result.kind).toBe("appliedNoOp");
+    if (result.kind !== "appliedNoOp") {
+      throw new Error(
+        "expected identical parallelAgentsUpdate to short-circuit",
+      );
+    }
+    expect(result.sessions).toBe(sessions);
   });
 
   it("applies text deltas when the message exists at a different index", () => {

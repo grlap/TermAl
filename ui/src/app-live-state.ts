@@ -2628,9 +2628,8 @@ export function useAppLiveState(
           ) {
             const result = applyDeltaToSessions(sessionsRef.current, delta);
             const replayableMaterialApply =
-              (result.kind === "applied" ||
-                result.kind === "appliedNeedsResync") &&
-              result.sessions !== sessionsRef.current;
+              result.kind === "applied" ||
+              result.kind === "appliedNeedsResync";
             if (replayableMaterialApply) {
               confirmReconnectRecoveryFromDeltaEvent();
               const appliedAt = Date.now();
@@ -2669,16 +2668,16 @@ export function useAppLiveState(
             //      delta, the global revision hasn't advanced, so this is
             //      most likely a stale stream replay (session GC'd / spurious
             //      re-emission); a `/api/state` probe at the SAME revision
-            //      would just return what we already have and the next
-            //      authoritative state event will reconcile any real
-            //      divergence.
-            //   2. `applyDeltaToSessions` returned the original `sessions`
-            //      array unchanged because the delta's content matches what
-            //      the session already has (e.g., a textReplace whose new
-            //      text is identical to the existing message text). Marking
-            //      transport activity / watchdog baseline here would mask a
-            //      stalled active session that happens to be receiving these
-            //      dead-replay deltas and prevent the watchdog from ever
+            //      would just return what we already have. The protocol
+            //      contract in `docs/architecture.md` says session creation
+            //      advances the main revision, so any real divergence is
+            //      reconciled by the next authoritative state event.
+            //   2. `result.kind === "appliedNoOp"` — the delta's content
+            //      matches what the session already has (e.g., a textReplace
+            //      whose new text is identical to the existing message text).
+            //      Marking transport activity / watchdog baseline here would
+            //      mask a stalled active session that happens to be receiving
+            //      these dead-replay deltas and prevent the watchdog from ever
             //      firing.
             // In both cases, fall through to the generic ignored-delta
             // confirmation block so the delta's arrival still serves as

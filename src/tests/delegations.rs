@@ -4636,6 +4636,55 @@ fn delegation_model_size_accepts_trimmed_character_boundary() {
 }
 
 #[test]
+fn delegation_metadata_size_errors_precede_phase_one_feature_gates() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let oversized_title = format!("{}界", "x".repeat(MAX_DELEGATION_TITLE_CHARS));
+    let title_err = match state.create_read_only_delegation(
+        &parent_session_id,
+        CreateDelegationRequest {
+            prompt: "Review this change.".to_owned(),
+            title: Some(oversized_title),
+            cwd: None,
+            agent: Some(Agent::Codex),
+            model: None,
+            mode: Some(DelegationMode::Worker),
+            write_policy: Some(DelegationWritePolicy::ReadOnly),
+        },
+    ) {
+        Ok(_) => panic!("oversized metadata should be rejected before feature gates"),
+        Err(err) => err,
+    };
+
+    assert_eq!(title_err.status, StatusCode::BAD_REQUEST);
+    assert!(title_err.message.contains("title"));
+
+    let oversized_model = format!("{}界", "x".repeat(MAX_DELEGATION_MODEL_CHARS));
+    let model_err = match state.create_read_only_delegation(
+        &parent_session_id,
+        CreateDelegationRequest {
+            prompt: "Review this change.".to_owned(),
+            title: None,
+            cwd: None,
+            agent: Some(Agent::Codex),
+            model: Some(oversized_model),
+            mode: Some(DelegationMode::Reviewer),
+            write_policy: Some(DelegationWritePolicy::SharedWorktree {
+                owned_paths: Vec::new(),
+            }),
+        },
+    ) {
+        Ok(_) => panic!("oversized metadata should be rejected before feature gates"),
+        Err(err) => err,
+    };
+
+    assert_eq!(model_err.status, StatusCode::BAD_REQUEST);
+    assert!(model_err.message.contains("model"));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn delegation_whitespace_prompt_is_rejected() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);

@@ -2230,12 +2230,19 @@ export function VirtualizedConversationMessageList({
             lastUserScrollKindRef.current,
             { flush: isActiveUpwardNativeScroll },
           );
-          if (
-            isDetachedFromBottomRef.current &&
-            scrollDelta >= 0 &&
-            isScrollContainerNearBottom(node)
-          ) {
+          if (scrollDelta >= 0 && isScrollContainerNearBottom(node)) {
+            // The user just scrolled DOWN to (or stayed at) the
+            // bottom. Mirror what the programmatic-scroll branch at
+            // `syncProgrammaticScrollWrite`'s near-bottom landing does:
+            // clear the detached flag AND
+            // re-arm `shouldKeepBottomAfterLayoutRef`. Re-arming is
+            // load-bearing — without it, the auto-scroll layout
+            // effect keyed by `layoutVersion` stays gated on a flag
+            // that was unset earlier when the user scrolled away from
+            // the bottom. Incoming streamed text would then fail to
+            // follow even though the user visibly returned to bottom.
             isDetachedFromBottomRef.current = false;
+            shouldKeepBottomAfterLayoutRef.current = true;
           }
         }
       }

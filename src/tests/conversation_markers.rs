@@ -598,6 +598,7 @@ fn remote_session_snapshot_localizes_marker_session_ids() {
     remote_session.markers = vec![marker];
 
     let session = localize_remote_session(
+        "ssh-lab",
         "local-session-9",
         Some("project-9".to_owned()),
         &remote_session,
@@ -609,7 +610,7 @@ fn remote_session_snapshot_localizes_marker_session_ids() {
 }
 
 #[test]
-fn remote_session_snapshot_skips_invalid_marker_colors() {
+fn remote_session_snapshot_preserves_valid_markers_while_skipping_invalid_marker_colors() {
     let mut remote_session = sample_remote_orchestrator_state(
         "remote-project-1",
         "/remote/repo",
@@ -620,22 +621,45 @@ fn remote_session_snapshot_skips_invalid_marker_colors() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    let mut marker = test_marker(
-        "marker-1",
+    let mut valid_marker = test_marker(
+        "marker-valid",
         "remote-session-1",
         "remote-message-1",
         ConversationMarkerKind::Decision,
     );
-    marker.color = "var(--signal-blue)".to_owned();
-    remote_session.markers = vec![marker];
+    valid_marker.color = "#ABCDEF".to_owned();
+    let mut invalid_marker = test_marker(
+        "marker-invalid",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Decision,
+    );
+    invalid_marker.color = "var(--signal-blue)".to_owned();
+    let mut valid_marker_2 = test_marker(
+        "marker-valid-2",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Checkpoint,
+    );
+    valid_marker_2.color = "#123ABC".to_owned();
+    remote_session.markers = vec![valid_marker, invalid_marker, valid_marker_2];
 
     let session = localize_remote_session(
+        "ssh-lab",
         "local-session-9",
         Some("project-9".to_owned()),
         &remote_session,
     );
 
-    assert!(session.markers.is_empty());
+    assert_eq!(session.markers.len(), 2);
+    assert_eq!(session.markers[0].id, "marker-valid");
+    assert_eq!(session.markers[0].session_id, "local-session-9");
+    assert_eq!(session.markers[0].kind, ConversationMarkerKind::Decision);
+    assert_eq!(session.markers[0].color, "#abcdef");
+    assert_eq!(session.markers[1].id, "marker-valid-2");
+    assert_eq!(session.markers[1].session_id, "local-session-9");
+    assert_eq!(session.markers[1].kind, ConversationMarkerKind::Checkpoint);
+    assert_eq!(session.markers[1].color, "#123abc");
 }
 
 #[test]
@@ -1333,6 +1357,13 @@ fn remote_marker_deltas_reject_invalid_marker_colors() {
         ConversationMarkerKind::Decision,
     );
     created_marker.color = "url(https://example.test/marker)".to_owned();
+    let mut valid_created_marker = test_marker(
+        "marker-remote-1",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Decision,
+    );
+    valid_created_marker.color = "#ABCDEF".to_owned();
     let mut updated_marker = test_marker(
         "marker-remote-1",
         "remote-session-1",
@@ -1340,46 +1371,168 @@ fn remote_marker_deltas_reject_invalid_marker_colors() {
         ConversationMarkerKind::Checkpoint,
     );
     updated_marker.color = "var(--signal-blue)".to_owned();
+    let mut valid_updated_marker = test_marker(
+        "marker-remote-1",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Checkpoint,
+    );
+    valid_updated_marker.name = "Remote marker updated".to_owned();
+    valid_updated_marker.color = "#EF4444".to_owned();
 
-    for (label, delta) in [
-        (
-            "create",
+    let err = state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerCreated {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                marker: created_marker.clone(),
+                session_mutation_stamp: Some(11),
+            },
+        )
+        .expect_err("invalid remote marker create color should fail");
+    assert!(
+        err.to_string().contains(CONVERSATION_MARKER_COLOR_ERROR),
+        "unexpected create error: {err:#}"
+    );
+    assert!(delta_events.try_recv().is_err());
+    assert!(
+        state
+            .list_conversation_markers(&local_session_id)
+            .expect("localized markers should list")
+            .markers
+            .is_empty(),
+        "invalid remote marker create should not be stored"
+    );
+
+    let err = state
+        .apply_remote_delta_event(
+            &remote.id,
             DeltaEvent::ConversationMarkerCreated {
                 revision: 3,
                 session_id: "remote-session-1".to_owned(),
                 marker: created_marker,
                 session_mutation_stamp: Some(11),
             },
-        ),
-        (
-            "update",
+        )
+        .expect_err("exact invalid remote marker create retry should still fail");
+    assert!(
+        err.to_string().contains(CONVERSATION_MARKER_COLOR_ERROR),
+        "unexpected exact create retry error: {err:#}"
+    );
+    assert!(delta_events.try_recv().is_err());
+    assert!(
+        state
+            .list_conversation_markers(&local_session_id)
+            .expect("localized markers should list")
+            .markers
+            .is_empty(),
+        "exact invalid create retry should not be stored"
+    );
+
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerCreated {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                marker: valid_created_marker.clone(),
+                session_mutation_stamp: Some(11),
+            },
+        )
+        .expect("valid retry with the same revision should still apply");
+    let published: DeltaEvent = serde_json::from_str(
+        &delta_events
+            .try_recv()
+            .expect("valid create retry should publish"),
+    )
+    .expect("published create retry should decode");
+    match published {
+        DeltaEvent::ConversationMarkerCreated {
+            session_id, marker, ..
+        } => {
+            assert_eq!(session_id, local_session_id);
+            assert_eq!(marker.session_id, local_session_id);
+            assert_eq!(marker.kind, ConversationMarkerKind::Decision);
+            assert_eq!(marker.color, "#abcdef");
+        }
+        _ => panic!("expected ConversationMarkerCreated delta"),
+    }
+
+    let err = state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerUpdated {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                marker: updated_marker.clone(),
+                session_mutation_stamp: Some(12),
+            },
+        )
+        .expect_err("invalid remote marker update color should fail");
+    assert!(
+        err.to_string().contains(CONVERSATION_MARKER_COLOR_ERROR),
+        "unexpected update error: {err:#}"
+    );
+    assert!(delta_events.try_recv().is_err());
+    let markers = state
+        .list_conversation_markers(&local_session_id)
+        .expect("localized markers should list");
+    assert_eq!(markers.markers.len(), 1);
+    assert_eq!(markers.markers[0].kind, ConversationMarkerKind::Decision);
+    assert_eq!(markers.markers[0].name, valid_created_marker.name);
+    assert_eq!(markers.markers[0].body, valid_created_marker.body);
+    assert_eq!(markers.markers[0].color, "#abcdef");
+
+    let err = state
+        .apply_remote_delta_event(
+            &remote.id,
             DeltaEvent::ConversationMarkerUpdated {
                 revision: 4,
                 session_id: "remote-session-1".to_owned(),
                 marker: updated_marker,
                 session_mutation_stamp: Some(12),
             },
-        ),
-    ] {
-        let err = match state.apply_remote_delta_event(&remote.id, delta) {
-            Err(err) => err,
-            Ok(()) => panic!("invalid remote marker {label} color should fail"),
-        };
-        assert!(
-            err.to_string().contains(CONVERSATION_MARKER_COLOR_ERROR),
-            "unexpected {label} error: {err:#}"
-        );
-        assert!(
-            delta_events.try_recv().is_err(),
-            "invalid remote marker {label} should not publish"
-        );
-        let markers = state
-            .list_conversation_markers(&local_session_id)
-            .expect("localized markers should list");
-        assert!(
-            markers.markers.is_empty(),
-            "invalid remote marker {label} should not be stored"
-        );
+        )
+        .expect_err("exact invalid remote marker update retry should still fail");
+    assert!(
+        err.to_string().contains(CONVERSATION_MARKER_COLOR_ERROR),
+        "unexpected exact update retry error: {err:#}"
+    );
+    assert!(delta_events.try_recv().is_err());
+    let markers = state
+        .list_conversation_markers(&local_session_id)
+        .expect("localized markers should list");
+    assert_eq!(markers.markers.len(), 1);
+    assert_eq!(markers.markers[0].kind, ConversationMarkerKind::Decision);
+    assert_eq!(markers.markers[0].name, valid_created_marker.name);
+    assert_eq!(markers.markers[0].body, valid_created_marker.body);
+    assert_eq!(markers.markers[0].color, "#abcdef");
+
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerUpdated {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                marker: valid_updated_marker,
+                session_mutation_stamp: Some(12),
+            },
+        )
+        .expect("valid update retry with the same revision should still apply");
+    let published: DeltaEvent = serde_json::from_str(
+        &delta_events
+            .try_recv()
+            .expect("valid update retry should publish"),
+    )
+    .expect("published update retry should decode");
+    match published {
+        DeltaEvent::ConversationMarkerUpdated { marker, .. } => {
+            assert_eq!(marker.kind, ConversationMarkerKind::Checkpoint);
+            assert_eq!(marker.name, "Remote marker updated");
+            assert_eq!(marker.color, "#ef4444");
+        }
+        _ => panic!("expected ConversationMarkerUpdated delta"),
     }
 
     let _ = fs::remove_file(state.persistence_path.as_path());

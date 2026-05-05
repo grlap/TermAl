@@ -818,6 +818,13 @@ On mount, the frontend opens an `EventSource` to `/api/events`:
 
 Applied deltas update the specific session/message in-place via `applyDeltaToSessions()`, avoiding full reconciliation.
 
+Session creation always advances the main revision counter before any
+`SessionCreated` delta is published. Same-revision session deltas are therefore
+replay-only frames for sessions the client already knows about; they must not
+introduce a brand-new session id without a later authoritative `state` event
+that advances or repairs the client view. This is the protocol contract behind
+the same-revision ignored delta branch in `ui/src/app-live-state.ts`.
+
 Session creation returns `CreateSessionResponse { sessionId, session, revision, serverInstanceId }`; the frontend adopts the concrete created session immediately and records the response revision without requiring a full state snapshot.
 
 **Server-restart detection** is keyed off `serverInstanceId`. `latestStateRevisionRef` and `lastSeenServerInstanceIdRef` are updated in lockstep on every accepted adoption (state events, `adoptCreatedSessionResponse`, `adoptFetchedSession`). A restart produces a new UUID at `AppState::new_with_paths`; the next snapshot from the restarted server carries that new id, `isServerInstanceMismatch` fires, `shouldAdoptSnapshotRevision` returns `true` regardless of revision ordering, and the client resyncs. This closes the "prompt invisible after server restart" class of bug: without it, a stale browser tab against a freshly started server would reject every snapshot the server sent (because the revision rewound) until the user forced a refresh.

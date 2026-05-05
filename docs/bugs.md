@@ -7,65 +7,126 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## `DeltaApplyResult.kind === "applied"` no longer guarantees a fresh sessions array
+## Forward-advance delta dispatcher does not handle `appliedNoOp` and stalls the revision counter
 
-**Severity:** Medium - the type contract that callers historically relied on ("applied implies new array") was silently weakened by the textReplace no-op short-circuit; only one of three production callers has been retrofitted to know about the new semantics.
+**Severity:** High - the new `kind: "appliedNoOp"` reducer result, introduced by the round-49 generalization of the no-op short-circuit across all replayable session deltas, is only handled by one of three production callers of `applyDeltaToSessions`. The forward-advance path silently mishandles it.
 
-`ui/src/live-updates.ts:568-589, 109-122`. The new no-op path inside the `textReplace` arm of `applyDeltaToSessions` returns the original `sessions` array reference (preserving identity) when the delta's `text`/`preview`/`sessionMutationStamp`/`messageCount` all match the session. The single caller at `ui/src/app-live-state.ts:2629-2634` was updated to detect this via `result.sessions !== sessionsRef.current`, but the type definition still describes `kind: "applied"` as the "mutation happened" signal. Two other production callers (`app-live-state.ts:2736`, `:2838`) still treat any `"applied"` as material and unconditionally re-render / mark transport activity. A future caller (or a future refactor that adds an identity-preserving fast path to other delta arms) will silently reintroduce the watchdog-masking bug because the contract change lives only in the one consumer that knows about it, not in the producer's type.
-
-**Current behavior:**
-- `applyDeltaToSessions` in the `textReplace` arm can return `{ kind: "applied", sessions: input }` (identity-preserved) when nothing actually changed.
-- `DeltaApplyResult` (line 109-122) declares `applied`/`appliedNeedsResync`/`needsResync` without distinguishing material apply from no-op.
-- The same-revision-replayable branch in `app-live-state.ts:2629` reads `result.sessions !== sessionsRef.current` to gate transport-activity / watchdog marking; other callers don't.
-
-**Proposal:**
-- Encode the no-op signal at the type level: introduce a `kind: "appliedNoOp"` variant (or `materialApply: boolean` flag) so the contract is explicit, and update every consumer's exhaustive switch / branch.
-- Alternatively (lower-friction): add a JSDoc note on `DeltaApplyResult` documenting the identity-preservation invariant, plus paired comments at every "applied" return site so a future maintainer who adds a similar short-circuit knows to keep the consumers' identity-equality check in sync.
-
-## Same-revision-replayable no-op short-circuit covers only `textReplace`, leaving `messageUpdated` / `commandUpdate` / `parallelAgentsUpdate` watchdog-maskable
-
-**Severity:** Medium - the watchdog-mask fix landed for textReplace but not for the other replayable session-delta types; a server re-emitting an identical-content `commandUpdate` (or any non-textReplace replayable delta) at the same revision still resets the watchdog.
-
-`ui/src/live-updates.ts:568-589` (textReplace short-circuit) versus `messageUpdated` (line 432), `commandUpdate` (line 613), `parallelAgentsUpdate` (line 672), `conversationMarkerCreated/Updated/Deleted` (lines 726, 750). `isSameRevisionReplayableSessionDelta` (line 211) excludes only `textDelta`, so all of the above flow through the same `revisionAction === "ignore"` + replayable branch in `app-live-state.ts:2629`. They unconditionally call `replaceSession`, producing a fresh `sessions` array reference even when content matches. The call site's `result.sessions !== sessionsRef.current` check classifies them as material applies, marks `markLiveTransportActivity` + `markLiveSessionResumeWatchdogBaseline`, and resets the watchdog. The bug fixed for `textReplace` is still present for the other delta types.
+`ui/src/app-live-state.ts:2837-2895` (default `revisionAction === "apply"` path). The dispatcher branches on `result.kind === "applied" || result.kind === "appliedNeedsResync"`. When the reducer returns `appliedNoOp` for a forward-advancing revision (e.g., when `delta.sessionMutationStamp` is nullish — `sessionMutationStampUpdateIsNoOp` resolves true in that case — or when a state event already applied the same content and a delta arrives at a higher revision carrying matching `text`/`preview`/`messageCount`), the dispatcher falls through to the line-2882 "reducer rejected" arm. That arm fires an unnecessary `requestStateResync({ rearmOnFailure: true })` plus `startSessionHydration(delta.sessionId)`, AND — most critically — never updates `latestStateRevisionRef.current = delta.revision`. The next forward-advance delta will compare against the stale `currentRevision`, classifying a normal `currentRevision + 2` advance as a resync gap. The first caller (line 2629, ignore-replayable path) and second caller (line 2735, resync path under the `sessionDeltaAdvancesCurrentMutationStamp` guard mutually exclusive with appliedNoOp) are both fine; only the advance path is unguarded.
 
 **Current behavior:**
-- The textReplace path correctly preserves array identity on no-op.
-- All other replayable session-delta arms produce a fresh `sessions` array regardless of content equality.
-- The watchdog still gets masked when the server re-emits an identical-content `commandUpdate` / `messageUpdated` / `parallelAgentsUpdate` at the same revision.
+- `applyDeltaToSessions` can return `kind: "appliedNoOp"` for any replayable session delta whose content matches the local state.
+- `app-live-state.ts:2837` only handles `applied` / `appliedNeedsResync`.
+- `appliedNoOp` falls through to the "reducer rejected" arm.
+- That arm fires a spurious `/api/state` resync + per-session hydration AND fails to advance `latestStateRevisionRef.current`.
+- The next forward-advance delta gets misclassified as a gap-resync against the stale revision.
 
 **Proposal:**
-- Extract a shared helper (e.g., `isContentIdenticalSessionDelta(session, delta)`) that all replayable arms can short-circuit on, OR move the equality detection into the call site (deep-compare relevant fields of the affected session pre/post). The shared helper option is cleaner; the call-site option avoids touching every reducer arm but is more expensive at runtime.
-- Add parallel watchdog-mask tests in `App.live-state.deltas.test.tsx` for `commandUpdate`, `messageUpdated`, `parallelAgentsUpdate` mirroring the existing textReplace test at line 2976.
+- Add `result.kind === "appliedNoOp"` as a third accepted variant at line 2837-2841. On that branch, advance `latestStateRevisionRef.current = delta.revision` and update `sessionsRef.current = result.sessions` (identity-preserved under `appliedNoOp`), but skip `markLiveTransportActivity` / `markLiveSessionResumeWatchdogBaseline` — preserving the watchdog-mask fix the `appliedNoOp` kind exists to enable. Mirror the deliberate liveness-marking skip from the line-2629 ignore-replayable path's fall-through.
+- Add an `App.live-state.deltas.test.tsx` regression that dispatches a forward-advancing delta with content identical to local state and asserts (a) no spurious `/api/state` fetch, (b) no `startSessionHydration`, (c) `latestStateRevisionRef.current` correctly advances, (d) the next legitimate forward-advance delta does NOT trigger gap-resync.
 
-## Same-revision unknown-session resync removed without an explicit protocol-contract reference
+## Invalid remote marker deltas can stamp local sessions before validation fails
 
-**Severity:** Medium - the new fall-through trades a bounded `/api/state` resync for a "next state event will reconcile" assumption; the implicit backend contract that justifies the change isn't documented anywhere, and no test pins the backstop reconciliation path.
+**Severity:** Medium - invalid remote marker create/update deltas return an error without publishing or recording replay state, but still advance the local session mutation stamp.
 
-`ui/src/app-live-state.ts:2666-2687`. The previous behavior fired `requestStateResync({forceAdoptEqualOrNewerRevision})` + `startSessionHydration(delta.sessionId)` when a same-revision delta arrived for a session the client didn't know about. The new fall-through skips both. The justifying comment claims "the next authoritative state event will reconcile any real divergence" — but this rests on an implicit backend contract that "session creation always advances the revision counter" (currently true: see `src/sse_broadcast.rs` and `src/remote_create_proxies.rs:198-207` which suppress no-change `SessionCreated` deltas). Neither `docs/architecture.md` nor any test pins this contract. A future backend change that emits a same-revision delta for a genuinely new session (e.g., a delegated child session, a remote bridge re-emission, a backfill flow) would silently leave the client out-of-sync until something else triggers reconciliation.
+`src/remote_routes.rs:2010` and `src/remote_routes.rs:2076` take `session_mut_by_index` before `localize_remote_conversation_marker(...)` validates the marker color. `session_mut_by_index` eagerly advances `record.mutation_stamp` and `last_mutation_stamp`; if color validation fails, the function returns before commit/persist/SSE/replay-note work. That leaves dirty in-memory metadata for a rejected delta and contradicts the intended "validate before mutate" contract for marker deltas.
 
 **Current behavior:**
-- Same-revision delta with `kind: "needsResync"` (unknown sessionId) falls through to the generic ignored-delta confirmation block.
-- No `/api/state` resync is fired.
-- The backstop reconciliation path (the next genuine state event or watchdog tick) is not covered by any test for the genuine-divergence case.
+- Invalid remote marker create/update deltas reject before marker storage, SSE publication, and replay-note recording.
+- The same error path already took a mutation-stamping mutable session borrow.
+- A later state read can expose a newer `sessionMutationStamp` even though the marker delta was rejected and no revision advanced.
 
 **Proposal:**
-- Add a one-line protocol-contract note to `docs/architecture.md` §"Real-time Updates" — "session creation always advances the revision counter; same-revision deltas only target sessions the client already knows about" — and cross-link from the comment block at `app-live-state.ts:2666-2687`.
-- Add a coverage test that simulates a genuinely-new same-revision session (rare but worth pinning) and asserts the next state event reconciles the divergence within a bounded window.
+- Read the local session id through read-only access, validate/localize the marker, then re-borrow mutably with `session_mut_by_index` only after validation succeeds.
+- Add a regression that invalid remote marker create/update deltas leave the session mutation stamp unchanged.
 
-## `delta.messageCount === session.messageCount` asymmetric when `session.messageCount` is `null`/`undefined`
+## Duplicate `messageCreated` replays still material-apply and can mask watchdog recovery
 
-**Severity:** Low - a missed-optimization corner case in the textReplace no-op short-circuit; the conservative fall-through is safe but the asymmetry will mislead a future polarity-flip refactor.
+**Severity:** Medium - the `appliedNoOp` replay fix does not cover `messageCreated`, even though `messageCreated` is same-revision replayable.
 
-`ui/src/live-updates.ts:586`. The strict-equality check `delta.messageCount === session.messageCount` against a `number | null | undefined` field means a session whose `messageCount` is `undefined` (legacy session, mid-load, or a metadata-only summary that hasn't been fully populated) never satisfies the predicate even when `delta.messageCount` reflects the same effective state. Net effect today: the short-circuit is conservatively skipped (a missed optimization, not a correctness bug). The risk is that a future polarity-flip refactor — e.g., "if either side is nullish, treat as match" — would break the no-op detection asymmetrically across session ages.
+`ui/src/live-updates.ts:429-477` routes an already-present identical `messageCreated` replay through `applyMessageCreatedDeltaToRetainedTranscript(...)` and returns `kind: "applied"` with a replaced sessions array. Since `isSameRevisionReplayableSessionDelta` includes `messageCreated`, the same-revision ignored-delta path in `ui/src/app-live-state.ts` treats that duplicate as material activity and refreshes transport/watchdog baselines. A stalled active session can therefore still be masked by repeated duplicate `messageCreated` frames.
 
 **Current behavior:**
-- `delta.messageCount` is always a `number` (per the wire shape).
-- `session.messageCount` may be `null` / `undefined` for legacy or partially-loaded sessions.
-- The strict-equality check fails for these sessions even when content is unchanged, so the short-circuit doesn't fire.
+- Exact duplicate `messageCreated` replays for an already-present message can return `kind: "applied"`.
+- Same-revision replay handling marks live transport activity for that material result.
+- Other replayable duplicate delta types now have explicit `appliedNoOp` reducer coverage.
 
 **Proposal:**
-- Add an inline comment noting that the check is intentionally conservative when `session.messageCount` is nullish, OR
-- Normalize both sides to a non-nullish baseline (`(session.messageCount ?? null) === (delta.messageCount ?? null)`) to make the symmetry explicit.
+- Add an `appliedNoOp` branch for identical existing `messageCreated` payloads while preserving intentional reorder and retained-transcript progressive update behavior.
+- Add app-level watchdog coverage for repeated same-revision duplicate `messageCreated` frames.
+
+## Manual return-to-bottom can still detach on larger streamed growth
+
+**Severity:** Medium - the virtualized transcript re-arms bottom-follow when the user scrolls back down, but stale user-scroll bookkeeping can still block following a larger next chunk.
+
+`ui/src/panels/VirtualizedConversationMessageList.tsx:2233` sets `isDetachedFromBottomRef.current = false` and `shouldKeepBottomAfterLayoutRef.current = true` when a native downward scroll lands near bottom. It does not clear `hasUserScrollInteractionRef` or the cooldown timestamp. If the next streamed layout growth exceeds the near-bottom threshold, later layout/height-change guards can see active user-scroll state, classify the viewport as detached, and skip the scroll-to-bottom write. The new regression uses 40px of growth, below the 72px threshold, so it does not pin this remaining edge.
+
+**Current behavior:**
+- Native downward scroll near bottom re-arms the bottom-follow flag.
+- User-scroll interaction state and cooldown timing remain active.
+- Larger immediate streamed growth can still be treated as user-detached.
+
+**Proposal:**
+- Mirror the full bottom-follow reset used by `enterBottomFollowMode` / programmatic near-bottom writes, including clearing user-scroll state and cooldown bookkeeping.
+- Add coverage where growth after manual return-to-bottom exceeds the near-bottom threshold.
+
+## `appliedNoOp` reducer coverage lacks semantic-change negative cases
+
+**Severity:** Medium - the new no-op tests prove identical replays short-circuit, but not that real payload changes still apply when metadata stays equal.
+
+`ui/src/live-updates.test.ts:2660` adds positive `appliedNoOp` tests for `messageUpdated`, `commandUpdate`, `parallelAgentsUpdate`, and marker deltas. Unlike the `textReplace` boundary table, those cases do not keep preview/count/stamp unchanged while changing one semantic payload field. An over-broad no-op predicate could drop real live updates and still pass the current positive-only tests.
+
+**Current behavior:**
+- Identical replay positives assert `kind: "appliedNoOp"` and preserved sessions array identity.
+- Semantic-change negatives exist for `textReplace` only.
+- Other no-op branches are not pinned against payload-only changes.
+
+**Proposal:**
+- Add table-driven negative cases for `messageUpdated`, `commandUpdate`, `parallelAgentsUpdate`, marker upsert, and marker delete.
+- Keep metadata equal, change one semantic payload field, and assert `kind: "applied"` plus a fresh sessions array.
+
+## `serializedValuesMatch` JSON-stringify equality has null/undefined-vs-missing asymmetries
+
+**Severity:** Low - missed-optimization only today (reducer falls through to a material apply, which is correct), but the boundary is invisible to callers and a future wire-shape refactor could silently flip many no-op cases into material applies, regressing the watchdog-mask fix.
+
+`ui/src/live-updates.ts:218-220 serializedValuesMatch` uses `JSON.stringify(left) === JSON.stringify(right)` for deep equality. The reducer types involved (`TextMessage`, `CommandMessage`, `ParallelAgentsMessage`, `ConversationMarker`) all have nullable optional fields like `endMessageId?: string | null`, `body?: string | null`, `attachments?: ImageAttachment[]`, `expandedText?: string | null`. A wire-shape carrying `endMessageId: null` against a local marker with the field absent (or `undefined`) will not match — `JSON.stringify` keeps `null` keys but skips `undefined`/missing keys. The reducer correctly falls through to a material apply when the comparison is asymmetric, but the boundary is invisible.
+
+**Current behavior:**
+- `JSON.stringify` deep-compares two objects.
+- `null` vs missing-key asymmetry produces non-matching strings even when semantically equivalent.
+- The reducer falls through to a material apply (correct semantically).
+- A future wire-shape refactor that normalizes nulls on the wire could silently flip many no-op cases.
+
+**Proposal:**
+- Normalize both sides through a small helper that sorts keys and coerces `undefined → null` (or vice versa) before stringifying.
+- OR document the asymmetry inline so the next maintainer who sees `JSON.stringify` knows the reducer is intentionally conservative on null/missing-asymmetric optional fields.
+
+## `live-updates.ts` no-op comparison strategy varies across delta arms
+
+**Severity:** Note - acceptable inconsistency given message-shape differences, but a one-line comment per arm explaining the strategy choice would help future readers.
+
+`ui/src/live-updates.ts`. `messageUpdated` (line 506) uses `serializedValuesMatch(session.messages[messageIndex], delta.message)` for the message body; `commandUpdate` (line 700) uses field-by-field primitive equality (`message.command === delta.command && message.commandLanguage === delta.commandLanguage && ...`); `parallelAgentsUpdate` (line 779) uses `serializedValuesMatch(message.agents, delta.agents)`; `conversationMarkerCreated/Updated` (line 824) uses `serializedValuesMatch(existingMarker, delta.marker)`. The inconsistency is acceptable — `CommandMessage` has well-typed primitive leaves while `Message` is a discriminated union — but the strategy choice is invisible at each arm.
+
+**Current behavior:**
+- Each replayable delta arm uses a different equality strategy.
+- The choice depends on the message shape but is not documented.
+
+**Proposal:**
+- Add a one-line comment above each arm's no-op check explaining the equality strategy choice (e.g., "field-by-field primitive equality is faster and avoids JSON.stringify allocation; we use serialized comparison for nested-or-union message shapes").
+
+## `conversationMarkerCreated/Updated` no-op relies on backend not bumping `updatedAt` for idempotent re-emissions
+
+**Severity:** Note - the no-op short-circuit silently degrades for marker arms if the backend ever refreshes timestamps for replayed events, while still firing for textReplace/messageUpdated.
+
+`ui/src/live-updates.ts:824` `conversationMarkerCreated/Updated` no-op uses `serializedValuesMatch(existingMarker, delta.marker)` which compares the entire marker including `createdAt`, `updatedAt`, `messageIndexHint`, `endMessageIndexHint`. If a future backend change refreshes `updatedAt` for idempotent re-emissions (e.g., to track touch timestamps), the no-op fires only when timestamps match exactly. Today's backend doesn't do this, but the marker no-op effectiveness depends on that contract.
+
+**Current behavior:**
+- Marker no-op short-circuit fires only when ALL fields match including timestamps.
+- Today's backend emits idempotent marker events without bumping timestamps.
+- A future "let me make markers replay-safe by bumping updatedAt" backend change would silently degrade the no-op short-circuit.
+
+**Proposal:**
+- Either carve out timestamp fields from the marker no-op comparison if the backend's idempotent-re-emission contract is "identical except for timestamps".
+- OR add a comment naming the marker fields whose equality is required for the no-op to fire so a future backend change knows what to preserve.
 
 ## Telegram relay loses per-message forwarding progress on mid-batch send error
 
@@ -1282,6 +1343,14 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
+- [ ] P2: Add remote marker validation-before-mutation coverage:
+  apply invalid remote marker create/update deltas, then assert no marker is stored, no delta publishes, no replay note is recorded, and the local session mutation stamp is unchanged.
+- [ ] P2: Add duplicate `messageCreated` no-op and watchdog coverage:
+  pin reducer-level `appliedNoOp` for an identical existing `messageCreated` replay, then add an app-level same-revision replay test proving repeated duplicate `messageCreated` frames do not refresh the live-session watchdog baseline.
+- [ ] P2: Add large-growth manual-return-to-bottom coverage:
+  scroll a virtualized active transcript away from bottom, fire a native scroll back near bottom, grow streamed content by more than the near-bottom threshold, and assert bottom-follow still writes the new bottom scroll position.
+- [ ] P2: Add semantic-change negative tests for non-text `appliedNoOp` branches:
+  for `messageUpdated`, `commandUpdate`, `parallelAgentsUpdate`, marker upsert, and marker delete, keep preview/count/stamp equal while changing one payload field and assert a material `applied` result with a fresh sessions array.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
 - [ ] P2: Add equal-revision gap repair snapshot adoption coverage:
@@ -1344,6 +1413,8 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   cover `isMermaidErrorVisualizationSvg` positive cases for `aria-roledescription="error"` and `class="error-icon"`, the "Syntax error in text" behavior, a valid-SVG negative case, and `renderTermalMermaidDiagram` throwing while resetting Mermaid config.
 - [ ] P2: Add Mermaid temporary DOM cleanup coverage:
   mock `mermaid.render` so it appends `#d${diagramId}` / `#${diagramId}` nodes to `document.body`, then rejects or returns an error visualization; assert `renderTermalMermaidDiagram` removes the temporary nodes.
+- [ ] P2: Add delegation metadata validation-before-readiness coverage:
+  force an unavailable-agent setup and send oversized title/model metadata, then assert the deterministic 400 metadata validation error wins over readiness/setup errors.
 - [ ] P1: Pin the "no remount across streaming → settled transition" claim with DOM-identity assertions:
   `ui/src/MarkdownContent.test.tsx:1456` and `ui/src/MessageCard.test.tsx:245-285` assert the rendered shape but do not assert that React preserved the same DOM nodes across the rerender. Capture a stable child DOM node (e.g., a paragraph from the settled prefix) before flipping `isStreaming` to false, then assert `container.contains(savedNode)` and reference equality after the rerender.
 - [ ] P2: Restore discrimination in `expectRenderedMarkdownTableContains`:
@@ -1354,11 +1425,7 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `ui/src/MessageCard.test.tsx:245-284` confirms shape but does not assert `.deferred-markdown-placeholder` is absent during streaming. Add an assertion for an `isStreaming` assistant message regardless of size, and pair with a long-enough streaming message (over the heavy threshold) confirming the gate stays bypassed.
 - [ ] P2: Add a wire-projection round-trip test for `TelegramSessionFetchMessage`:
   the parallel narrow projection of `Message` in `src/telegram.rs:481-515` will silently desync if `wire_messages.rs` renames the discriminator or the `Text` variant fields — serde will deserialize into `Other` and the relay will go silent on text messages. Round-trip a representative `Message::Text` payload through `TelegramSessionFetchMessage` and assert the `Text` arm matched.
-- [ ] P2: Pin the textReplace no-op short-circuit's identity-preservation contract directly:
-  `ui/src/live-updates.test.ts` (no test today). Add a `describe("textReplace no-op short-circuit")` block asserting `expect(result.sessions).toBe(sessions)` (toBe identity, not toEqual) when the delta's `text`/`preview`/`sessionMutationStamp`/`messageCount` all match the session, plus a negative case (text differs by one character) asserting `result.sessions !== sessions`. The 3 fixed integration tests pin only end-state behavior; without a direct unit test, a future refactor of `textReplace` (e.g., always producing a fresh array for hygienic immutability) would silently break the call-site's `result.sessions !== sessionsRef.current` identity check and re-introduce the watchdog-masking regression with no test failure.
-- [ ] P2: Add boundary tests for the textReplace no-op 4-field equality predicate:
-  `ui/src/live-updates.ts:568-589` checks four equalities (`text`, derived `previewIfApplied`, derived `stampIfApplied`, `messageCount`). Add an `it.each(...)` block in `live-updates.test.ts` covering each equality being violated independently — `delta.preview` undefined vs. defined-and-different, `delta.sessionMutationStamp` undefined / older / newer, `delta.messageCount` differing while text matches — asserting `result.sessions !== sessions` for each violation, plus an all-equal case asserting identity preservation.
-- [ ] P2: Add watchdog-mask coverage for non-`textReplace` replayable session-delta types:
-  `App.live-state.deltas.test.tsx:2976` covers the textReplace flavor of "watchdog-resyncs when repeated ignored deltas arrive for an active session". Add three sibling tests using `commandUpdate`, `messageUpdated`, and `parallelAgentsUpdate` with the same active-session/no-progress setup. Each should assert the watchdog fires within `LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 3000` ms despite repeated identical-content replays. Today the no-op short-circuit only exists for `textReplace`; these tests will fail until the short-circuit is generalized (see "Same-revision-replayable no-op short-circuit covers only `textReplace`" entry above).
+- [ ] P2: Add app-level watchdog coverage for replayable appliedNoOp deltas:
+  `ui/src/live-updates.test.ts` now pins reducer-level `appliedNoOp` for `textReplace`, `messageUpdated`, `commandUpdate`, `parallelAgentsUpdate`, and marker replays. Add `App.live-state.deltas.test.tsx` siblings that dispatch repeated same-revision no-op replays for the active session and assert the watchdog still fires within `LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 3000` ms. Include `messageCreated` once duplicate `messageCreated` replays return `appliedNoOp`.
 - [ ] P2: Add genuine-divergence reconciliation coverage for same-revision unknown-session deltas:
-  `ui/src/app-live-state.ts:2666-2687` removed the `requestStateResync` + `startSessionHydration` for `kind: "needsResync"` at the same revision. The justifying comment relies on "the next authoritative state event will reconcile any real divergence" but no test pins this. Add a coverage test that (a) sets the client up with a session list missing `session-X`, (b) dispatches a same-revision session delta for `session-X` (where `latestStateRevisionRef.current === delta.revision`) — asserting NO immediate `/api/state` fetch, then (c) dispatches the next authoritative `state` event including `session-X` and asserts it adopts cleanly. If no backstop exists today, the test will document the gap and force a decision (re-add the resync, or add a deferred reconciliation path).
+  `docs/architecture.md` now documents that session creation advances the main revision, and `ui/src/app-live-state.ts` cross-links that contract. Add a coverage test that (a) sets the client up with a session list missing `session-X`, (b) dispatches a same-revision session delta for `session-X` (where `latestStateRevisionRef.current === delta.revision`) — asserting NO immediate `/api/state` fetch, then (c) dispatches the next authoritative `state` event including `session-X` and asserts it adopts cleanly.

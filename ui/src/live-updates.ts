@@ -108,6 +108,7 @@ type TranscriptDelta = Extract<
 
 export type DeltaApplyResult =
   | { kind: "applied"; sessions: Session[] }
+  | { kind: "appliedNoOp"; sessions: Session[] }
   // Same shape as "applied" but signals that the metadata patch alone is not
   // enough — the caller must also schedule an authoritative state resync. Used
   // when the unhydrated metadata-only fallback fires for a delta whose target
@@ -212,6 +213,54 @@ function applyMetadataOnlySessionDelta(
         preview: delta.preview,
       };
   }
+}
+
+function serializedValuesMatch(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function sessionMutationStampUpdateIsNoOp(
+  session: Session,
+  sessionMutationStamp: number | null | undefined,
+) {
+  return (
+    resolveSessionMutationStamp(session, sessionMutationStamp) ===
+    (session.sessionMutationStamp ?? null)
+  );
+}
+
+function sessionMetadataUpdateIsNoOp(
+  session: Session,
+  messageCount: number,
+  preview: string,
+  sessionMutationStamp: number | null | undefined,
+) {
+  return (
+    preview === session.preview &&
+    sessionMutationStampUpdateIsNoOp(session, sessionMutationStamp) &&
+    // A nullish local count means the retained summary is incomplete; keep
+    // this conservative so stale/incomplete sessions still receive a material
+    // metadata refresh instead of being classified as no-op.
+    messageCount === session.messageCount
+  );
+}
+
+function sessionStatusMetadataUpdateIsNoOp(
+  session: Session,
+  messageCount: number,
+  preview: string,
+  status: Session["status"],
+  sessionMutationStamp: number | null | undefined,
+) {
+  return (
+    status === session.status &&
+    sessionMetadataUpdateIsNoOp(
+      session,
+      messageCount,
+      preview,
+      sessionMutationStamp,
+    )
+  );
 }
 
 // Protocol-shape violations must trigger a full resync before the
@@ -457,6 +506,19 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
 
+      if (
+        serializedValuesMatch(session.messages[messageIndex], delta.message) &&
+        sessionStatusMetadataUpdateIsNoOp(
+          session,
+          delta.messageCount,
+          delta.preview,
+          delta.status,
+          delta.sessionMutationStamp,
+        )
+      ) {
+        return { kind: "appliedNoOp", sessions };
+      }
+
       const updatedMessages = session.messages.slice();
       // In-place replacement only; unlike messageCreated this must not reorder.
       updatedMessages[messageIndex] = delta.message;
@@ -567,25 +629,24 @@ export function applyDeltaToSessions(
 
       // No-op short-circuit: when the delta's text/preview/mutation-stamp/
       // count all match what the session already has, return the original
-      // `sessions` array (preserving identity). Callers can detect this
-      // case via `result.sessions === input` and skip downstream churn
-      // (transport-activity marking, watchdog baseline reset, re-render).
+      // `sessions` array (preserving identity) with a distinct result kind so
+      // callers can skip downstream churn (transport-activity marking,
+      // watchdog baseline reset, re-render).
       // This prevents stale stream replays at the same revision — the
       // server re-emitting a textReplace whose content is already on the
       // client — from masking a stalled active session and stopping the
       // watchdog from firing.
       const previewIfApplied = delta.preview ?? session.preview;
-      const stampIfApplied = resolveSessionMutationStamp(
-        session,
-        delta.sessionMutationStamp,
-      );
       if (
         message.text === delta.text &&
-        previewIfApplied === session.preview &&
-        stampIfApplied === (session.sessionMutationStamp ?? null) &&
-        delta.messageCount === session.messageCount
+        sessionMetadataUpdateIsNoOp(
+          session,
+          delta.messageCount,
+          previewIfApplied,
+          delta.sessionMutationStamp,
+        )
       ) {
-        return { kind: "applied", sessions };
+        return { kind: "appliedNoOp", sessions };
       }
 
       const updatedMessage: TextMessage = {
@@ -641,6 +702,22 @@ export function applyDeltaToSessions(
       }
       if (message.type !== "command") {
         return { kind: "needsResync" };
+      }
+
+      if (
+        message.command === delta.command &&
+        message.commandLanguage === delta.commandLanguage &&
+        message.output === delta.output &&
+        message.outputLanguage === delta.outputLanguage &&
+        message.status === delta.status &&
+        sessionMetadataUpdateIsNoOp(
+          session,
+          delta.messageCount,
+          delta.preview,
+          delta.sessionMutationStamp,
+        )
+      ) {
+        return { kind: "appliedNoOp", sessions };
       }
 
       const updatedMessage: CommandMessage = {
@@ -702,6 +779,18 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
 
+      if (
+        serializedValuesMatch(message.agents, delta.agents) &&
+        sessionMetadataUpdateIsNoOp(
+          session,
+          delta.messageCount,
+          delta.preview,
+          delta.sessionMutationStamp,
+        )
+      ) {
+        return { kind: "appliedNoOp", sessions };
+      }
+
       const updatedMessage: ParallelAgentsMessage = {
         ...message,
         agents: delta.agents,
@@ -732,14 +821,20 @@ export function applyDeltaToSessions(
       if (session.messagesLoaded === false) {
         return { kind: "needsResync" };
       }
+      const markers = session.markers ?? [];
+      const existingMarker = markers.find((marker) => marker.id === delta.marker.id);
+      if (
+        existingMarker &&
+        serializedValuesMatch(existingMarker, delta.marker) &&
+        sessionMutationStampUpdateIsNoOp(session, delta.sessionMutationStamp)
+      ) {
+        return { kind: "appliedNoOp", sessions };
+      }
       return {
         kind: "applied",
         sessions: replaceSession(sessions, sessionIndex, {
           ...session,
-          markers: upsertConversationMarker(
-            session.markers ?? [],
-            delta.marker,
-          ),
+          markers: upsertConversationMarker(markers, delta.marker),
           sessionMutationStamp: resolveSessionMutationStamp(
             session,
             delta.sessionMutationStamp,
@@ -755,13 +850,18 @@ export function applyDeltaToSessions(
       if (session.messagesLoaded === false) {
         return { kind: "needsResync" };
       }
+      const markers = session.markers ?? [];
+      if (
+        !markers.some((marker) => marker.id === delta.markerId) &&
+        sessionMutationStampUpdateIsNoOp(session, delta.sessionMutationStamp)
+      ) {
+        return { kind: "appliedNoOp", sessions };
+      }
       return {
         kind: "applied",
         sessions: replaceSession(sessions, sessionIndex, {
           ...session,
-          markers: (session.markers ?? []).filter(
-            (marker) => marker.id !== delta.markerId,
-          ),
+          markers: markers.filter((marker) => marker.id !== delta.markerId),
           sessionMutationStamp: resolveSessionMutationStamp(
             session,
             delta.sessionMutationStamp,

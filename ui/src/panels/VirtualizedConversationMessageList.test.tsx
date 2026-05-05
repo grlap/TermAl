@@ -543,6 +543,55 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("follows streamed growth after the user manually scrolls back to bottom", async () => {
+    let currentScrollHeight = 500;
+    const messages = makeTextMessages(3);
+    const harness = renderVirtualizedHarness({
+      clientHeight: 100,
+      initialScrollTop: 400,
+      messages,
+      scrollHeight: () => currentScrollHeight,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-1")).toBeInTheDocument();
+      });
+
+      vi.useFakeTimers();
+      act(() => {
+        harness.setScrollTop(240);
+        fireEvent.scroll(harness.scrollNode);
+      });
+      act(() => {
+        harness.setScrollTop(400);
+        fireEvent.scroll(harness.scrollNode);
+      });
+
+      await advanceIdleMountedRangeCompaction();
+
+      harness.scrollWrites.length = 0;
+      act(() => {
+        currentScrollHeight = 540;
+        harness.rerenderWithMessages([
+          ...messages,
+          {
+            id: "message-4",
+            type: "text",
+            timestamp: "10:04",
+            author: "assistant",
+            text: "Message 4",
+          },
+        ]);
+      });
+
+      expect(harness.scrollWrites).toContain(440);
+    } finally {
+      vi.useRealTimers();
+      harness.restore();
+    }
+  });
+
   it("rebuilds the rendered window after manual scroll starts from an active search result", async () => {
     const messages = makeTextMessages(160);
     const matchedKeys = new Set(messages.map((message) => `message:${message.id}`));

@@ -1375,6 +1375,125 @@ describe("delegation command surface", () => {
     });
   });
 
+  it("redacts route-shaped backend-unavailable messages for other delegation ids", async () => {
+    const message =
+      "The running backend does not expose /api/sessions/token=secret/delegations/delegation-1 (HTTP 404). Restart TermAl so the latest API routes are loaded.";
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(),
+      fetchDelegationStatus: vi.fn(async () => {
+        throw new ApiRequestError("backend-unavailable", message, {
+          status: 404,
+          restartRequired: true,
+        });
+      }),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).wait_delegations(
+        "parent-1",
+        ["delegation-1"],
+        {
+          pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+          timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
+        },
+      ),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "status-fetch-failed",
+        name: "ApiRequestError",
+        message: "Delegation status fetch failed.",
+        apiErrorKind: "backend-unavailable",
+        status: 404,
+        restartRequired: true,
+      },
+    });
+  });
+
+  it("redacts route-shaped backend-unavailable messages for wrong delegation ids", async () => {
+    const message =
+      "The running backend does not expose /api/sessions/parent-1/delegations/token=secret (HTTP 404). Restart TermAl so the latest API routes are loaded.";
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(),
+      fetchDelegationStatus: vi.fn(async () => {
+        throw new ApiRequestError("backend-unavailable", message, {
+          status: 404,
+          restartRequired: true,
+        });
+      }),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).wait_delegations(
+        "parent-1",
+        ["delegation-1"],
+        {
+          pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+          timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
+        },
+      ),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "status-fetch-failed",
+        name: "ApiRequestError",
+        message: "Delegation status fetch failed.",
+        apiErrorKind: "backend-unavailable",
+        status: 404,
+        restartRequired: true,
+      },
+    });
+  });
+
+  it("passes through backend route diagnostics for the failed delegation in a batch", async () => {
+    const message =
+      "The running backend does not expose /api/sessions/parent-1/delegations/delegation-2 (HTTP 404). Restart TermAl so the latest API routes are loaded.";
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(),
+      fetchDelegationStatus: vi.fn(async (_parentSessionId, delegationId) => {
+        if (delegationId === "delegation-1") {
+          return {
+            revision: 2,
+            serverInstanceId: "server-a",
+            delegation: makeDelegation({ id: "delegation-1", status: "running" }),
+          };
+        }
+        throw new ApiRequestError("backend-unavailable", message, {
+          status: 404,
+          restartRequired: true,
+        });
+      }),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).wait_delegations(
+        "parent-1",
+        ["delegation-1", "delegation-2"],
+        {
+          pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+          timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
+        },
+      ),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      pending: [{ id: "delegation-1", status: "running" }],
+      error: {
+        kind: "status-fetch-failed",
+        name: "ApiRequestError",
+        message,
+        apiErrorKind: "backend-unavailable",
+        status: 404,
+        restartRequired: true,
+      },
+    });
+  });
+
   it("reports mixed server instances across polling cycles", async () => {
     vi.useFakeTimers();
     stubFetchResponses(
