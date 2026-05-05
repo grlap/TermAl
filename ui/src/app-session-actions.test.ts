@@ -866,6 +866,62 @@ describe("useAppSessionActions", () => {
     expect(params.setters.setRequestError).toHaveBeenCalledWith(null);
   });
 
+  it("recovers stale same-instance marker update when valid colors genuinely differ", async () => {
+    const currentMarker = makeConversationMarker({
+      kind: "bug",
+      name: "Bug marker",
+      color: "#EF4444",
+      updatedAt: "2026-05-01 10:01:00",
+    });
+    const responseMarker = makeConversationMarker({
+      kind: "bug",
+      name: "Bug marker",
+      color: "#3B82F6",
+      updatedAt: "2026-05-01 10:01:00",
+    });
+    const session = makeSession("session-1", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          text: "Decision point",
+          timestamp: "10:00",
+        },
+      ],
+      markers: [currentMarker],
+      sessionMutationStamp: 7,
+    });
+    vi.spyOn(api, "updateConversationMarker").mockResolvedValue({
+      marker: responseMarker,
+      revision: 6,
+      serverInstanceId: "server-a",
+      sessionMutationStamp: 6,
+    });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[session.id, session]]);
+    params.refs.sessionsRef.current = [session];
+    params.refs.latestStateRevisionRef.current = 7;
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleUpdateConversationMarker("session-1", "marker-1", {
+        kind: "bug",
+        name: "Bug marker",
+        color: "#3B82F6",
+      }),
+    ).resolves.toBe(false);
+
+    expect(params.refs.sessionsRef.current[0].markers).toEqual([currentMarker]);
+    expect(params.requestActionRecoveryResync).toHaveBeenCalledWith({
+      openSessionId: "session-1",
+      paneId: null,
+      allowUnknownServerInstance: true,
+    });
+    expect(params.forceSseReconnect).not.toHaveBeenCalled();
+    expectRequestErrorDeferredUpdatesOnly(params.setters.setRequestError);
+  });
+
   it("recovers stale same-instance marker update when local color is invalid", async () => {
     const currentMarker = makeConversationMarker({
       color: "url(https://example.test/marker)",

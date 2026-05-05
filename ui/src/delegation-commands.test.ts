@@ -10,6 +10,7 @@ import {
   spawnDelegationCommand,
   waitDelegationCommand,
   waitDelegationsCommand,
+  MAX_DELEGATION_MODEL_CHARS,
   MAX_DELEGATION_TITLE_CHARS,
   MAX_DELEGATION_PROMPT_BYTES,
   MAX_DELEGATION_WAIT_IDS,
@@ -145,6 +146,15 @@ function expectOwnNullableTimestampProperty(
 }
 
 function expectRedactedChildSessionSummary(childSession: object) {
+  expect(Object.keys(childSession).sort()).toEqual([
+    "agent",
+    "emoji",
+    "id",
+    "model",
+    "name",
+    "parentDelegationId",
+    "status",
+  ]);
   expect(childSession).toMatchObject({
     id: expect.any(String),
     name: expect.any(String),
@@ -179,6 +189,7 @@ describe("delegation command surface", () => {
     expect(MAX_DELEGATION_WAIT_IDS).toBe(10);
     expect(MAX_DELEGATION_PROMPT_BYTES).toBe(64 * 1024);
     expect(MAX_DELEGATION_TITLE_CHARS).toBe(200);
+    expect(MAX_DELEGATION_MODEL_CHARS).toBe(200);
   });
 
   it("exports tool-style command names for MCP wrappers", () => {
@@ -211,9 +222,16 @@ describe("delegation command surface", () => {
     const delegation = makeDelegation();
     const childSession = makeSession({
       parentDelegationId: "delegation-1",
+      projectId: "project-1",
+      externalSessionId: "external-child-1",
+      modelOptions: [{ label: "Codex", value: "codex" }],
+      approvalPolicy: "on-request",
+      agentCommandsRevision: 7,
       preview: "Review this change.",
       messages: [{ text: "Review this change." } as never],
+      messageCount: 1,
       pendingPrompts: [{ prompt: "Review this change." } as never],
+      sessionMutationStamp: 123,
     });
     const fetchMock = stubFetchResponses({
       revision: 2,
@@ -319,10 +337,50 @@ describe("delegation command surface", () => {
     await expect(
       spawnDelegationCommand("parent-1", {
         prompt: "Review this change.",
+        model: "x".repeat(MAX_DELEGATION_MODEL_CHARS + 1),
+      }),
+    ).rejects.toThrow(
+      new RegExp(
+        `^model must be no longer than ${MAX_DELEGATION_MODEL_CHARS} characters`,
+      ),
+    );
+    await expect(
+      spawnDelegationCommand("parent-1", {
+        prompt: "Review this change.",
         title: null as never,
       }),
     ).rejects.toThrow(/^title must be omitted instead of null/);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts spawn metadata exactly at the trimmed character cap", async () => {
+    const delegation = makeDelegation();
+    const childSession = makeSession();
+    const fetchMock = stubFetchResponses({
+      revision: 2,
+      serverInstanceId: "server-a",
+      delegation,
+      childSession,
+    });
+    const title = `  ${"界".repeat(MAX_DELEGATION_TITLE_CHARS)}  `;
+    const model = `  ${"界".repeat(MAX_DELEGATION_MODEL_CHARS)}  `;
+
+    await spawnDelegationCommand("parent-1", {
+      prompt: "Review this change.",
+      title,
+      model,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/parent-1/delegations",
+      expect.objectContaining({
+        body: JSON.stringify({
+          prompt: "Review this change.",
+          title,
+          model,
+        }),
+      }),
+    );
   });
 
   it("can run through an injected transport without browser-relative fetch", async () => {
@@ -1273,6 +1331,45 @@ describe("delegation command surface", () => {
         message,
         apiErrorKind: "backend-unavailable",
         status: 404,
+        restartRequired: true,
+      },
+    });
+  });
+
+  it("redacts backend-unavailable messages outside audited safe shapes", async () => {
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(),
+      fetchDelegationStatus: vi.fn(async () => {
+        throw new ApiRequestError(
+          "backend-unavailable",
+          "proxy failed at https://internal.example/path with token=secret",
+          {
+            status: 503,
+            restartRequired: true,
+          },
+        );
+      }),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).wait_delegations(
+        "parent-1",
+        ["delegation-1"],
+        {
+          pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+          timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
+        },
+      ),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "status-fetch-failed",
+        name: "ApiRequestError",
+        message: "Delegation status fetch failed.",
+        apiErrorKind: "backend-unavailable",
+        status: 503,
         restartRequired: true,
       },
     });

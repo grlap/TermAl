@@ -4,19 +4,22 @@
 // module staged ahead of the TermAl MCP wrapper integration.
 
 import {
-  ApiRequestError,
   cancelDelegation,
   createDelegation,
   fetchDelegationResult,
   fetchDelegationStatus,
   type AbortableRequestOptions,
-  type ApiRequestErrorKind,
   type CreateDelegationRequest,
   type DelegationResponse,
   type DelegationResultResponse,
   type DelegationStatusResponse,
 } from "./api";
-import { sanitizeUserFacingErrorMessage } from "./error-messages";
+import {
+  mismatchedDelegationIdErrorPacket,
+  mixedServerInstanceErrorPacket,
+  statusFetchErrorPacket,
+  type WaitDelegationErrorPacket,
+} from "./delegation-error-packets";
 import type {
   DelegationCommandResult,
   DelegationFinding,
@@ -26,6 +29,11 @@ import type {
   DelegationStatus,
   Session,
 } from "./types";
+
+export type {
+  WaitDelegationErrorKind,
+  WaitDelegationErrorPacket,
+} from "./delegation-error-packets";
 
 export const DEFAULT_DELEGATION_WAIT_INTERVAL_MS = 1000;
 export const DEFAULT_DELEGATION_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -39,17 +47,11 @@ export const MAX_DELEGATION_PROMPT_BYTES = 64 * 1024;
 // caller-supplied titles as metadata, not prompt-sized payloads. Keep in sync
 // with `MAX_DELEGATION_TITLE_CHARS` in `src/delegations.rs`.
 export const MAX_DELEGATION_TITLE_CHARS = 200;
+// Explicit model names are metadata echoed in summaries and child cards, not
+// prompt payloads. Keep in sync with `MAX_DELEGATION_MODEL_CHARS` in
+// `src/delegations.rs`.
+export const MAX_DELEGATION_MODEL_CHARS = 200;
 const UNSAFE_TRANSPORT_ID_PATTERN = /[/?#\u0000-\u001f\u007f]/u;
-const GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE =
-  "Delegation status fetch failed.";
-// Audit boundary: every message allowed here is forwarded to wrapper callers.
-// New entries require reviewing every ApiRequestError constructor that can emit
-// that message family.
-const SAFE_DELEGATION_STATUS_FETCH_MESSAGES = new Set([
-  "The TermAl backend is unavailable.",
-]);
-const SAFE_DELEGATION_STATUS_FETCH_STATUS_PATTERN =
-  /^Request failed with status \d+\.$/u;
 
 // These client-side wait limits compose to at most 20 status requests/sec per
 // wait call. They intentionally do not mirror backend delegation fan-out limits;
@@ -132,31 +134,6 @@ export type DelegationResultPacket = {
   revision: number;
   serverInstanceId: string;
 };
-
-export type WaitDelegationErrorPacket =
-  | {
-      kind: "mismatched-delegation-id";
-      name: string;
-      message: string;
-      requestedId: string;
-      receivedId: string;
-    }
-  | {
-      kind: "mixed-server-instance";
-      name: string;
-      message: string;
-      serverInstanceIds: string[];
-    }
-  | {
-      kind: "status-fetch-failed";
-      name: string;
-      message: string;
-      apiErrorKind: ApiRequestErrorKind | null;
-      status: number | null;
-      restartRequired: boolean | null;
-    };
-
-export type WaitDelegationErrorKind = WaitDelegationErrorPacket["kind"];
 
 export type WaitDelegationsOutcome = "completed" | "timeout" | "error";
 
@@ -836,70 +813,6 @@ function mixedServerInstanceIds(
   return [...serverInstanceIds];
 }
 
-function statusFetchErrorPacket(error: unknown): WaitDelegationErrorPacket {
-  if (error instanceof ApiRequestError) {
-    return {
-      kind: "status-fetch-failed",
-      name: error.name,
-      message: safeDelegationStatusFetchMessage(error.message, error.kind),
-      apiErrorKind: error.kind,
-      status: error.status,
-      restartRequired: error.restartRequired,
-    };
-  }
-  const name = error instanceof Error ? error.name : "Error";
-  return {
-    kind: "status-fetch-failed",
-    name,
-    message: GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE,
-    apiErrorKind: null,
-    status: null,
-    restartRequired: null,
-  };
-}
-
-function safeDelegationStatusFetchMessage(
-  message: string,
-  apiErrorKind?: ApiRequestErrorKind,
-) {
-  const sanitized = sanitizeUserFacingErrorMessage(message);
-  if (apiErrorKind === "backend-unavailable") {
-    return sanitized;
-  }
-  if (
-    SAFE_DELEGATION_STATUS_FETCH_MESSAGES.has(sanitized) ||
-    SAFE_DELEGATION_STATUS_FETCH_STATUS_PATTERN.test(sanitized)
-  ) {
-    return sanitized;
-  }
-  return GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE;
-}
-
-function mismatchedDelegationIdErrorPacket(
-  requestedId: string,
-  receivedId: string,
-): WaitDelegationErrorPacket {
-  return {
-    kind: "mismatched-delegation-id",
-    name: "MismatchedDelegationIdError",
-    message: `delegation status id mismatch: requested ${requestedId}, received ${receivedId}`,
-    requestedId,
-    receivedId,
-  };
-}
-
-function mixedServerInstanceErrorPacket(
-  serverInstanceIds: readonly string[],
-): WaitDelegationErrorPacket {
-  const uniqueServerInstanceIds = [...new Set(serverInstanceIds)].sort();
-  return {
-    kind: "mixed-server-instance",
-    name: "MixedDelegationServerInstanceError",
-    message: `delegation status batch contained multiple server instances: ${uniqueServerInstanceIds.join(", ")}`,
-    serverInstanceIds: uniqueServerInstanceIds,
-  };
-}
-
 function normalizeDelegationIds(delegationIds: readonly string[]) {
   const seen = new Set<string>();
   const normalizedIds: string[] = [];
@@ -956,18 +869,33 @@ function compactCreateDelegationRequest(
       throw new TypeError(`${key} must be omitted instead of null`);
     }
     if (key === "title" && typeof value === "string") {
-      validateDelegationTitle(value);
+      validateDelegationMetadataText(
+        value,
+        "title",
+        MAX_DELEGATION_TITLE_CHARS,
+      );
+    }
+    if (key === "model" && typeof value === "string") {
+      validateDelegationMetadataText(
+        value,
+        "model",
+        MAX_DELEGATION_MODEL_CHARS,
+      );
     }
     payload[key] = value;
   }
   return payload as CreateDelegationRequest;
 }
 
-function validateDelegationTitle(title: string) {
-  const titleLength = Array.from(title.trim()).length;
-  if (titleLength > MAX_DELEGATION_TITLE_CHARS) {
+function validateDelegationMetadataText(
+  value: string,
+  label: string,
+  maxChars: number,
+) {
+  const textLength = Array.from(value.trim()).length;
+  if (textLength > maxChars) {
     throw new RangeError(
-      `title must be no longer than ${MAX_DELEGATION_TITLE_CHARS} characters`,
+      `${label} must be no longer than ${maxChars} characters`,
     );
   }
 }

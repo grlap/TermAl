@@ -14,6 +14,10 @@ const MAX_DELEGATION_PROMPT_BYTES: usize = 64 * 1024;
 // caller-supplied titles as metadata, not prompt-sized payloads. Keep in sync
 // with `MAX_DELEGATION_TITLE_CHARS` in `ui/src/delegation-commands.ts`.
 const MAX_DELEGATION_TITLE_CHARS: usize = 200;
+// Explicit model names are metadata echoed in summaries and child cards, not
+// prompt payloads. Keep in sync with `MAX_DELEGATION_MODEL_CHARS` in
+// `ui/src/delegation-commands.ts`.
+const MAX_DELEGATION_MODEL_CHARS: usize = 200;
 // Public summaries ride in `/api/state`; full summaries stay behind result reads.
 const MAX_DELEGATION_PUBLIC_SUMMARY_CHARS: usize = 1000;
 // Result packets are expected near the end of long assistant output.
@@ -226,6 +230,34 @@ impl AppState {
                 "only readOnly delegation write policy is implemented in Phase 1",
             ));
         }
+        let title = request
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| "Delegated review".to_owned());
+        if title.chars().count() > MAX_DELEGATION_TITLE_CHARS {
+            return Err(ApiError::bad_request(format!(
+                "delegation title must be at most {} characters",
+                MAX_DELEGATION_TITLE_CHARS
+            )));
+        }
+        let model = request
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        if model
+            .as_deref()
+            .is_some_and(|value| value.chars().count() > MAX_DELEGATION_MODEL_CHARS)
+        {
+            return Err(ApiError::bad_request(format!(
+                "delegation model must be at most {} characters",
+                MAX_DELEGATION_MODEL_CHARS
+            )));
+        }
 
         let (parent_workdir, parent_project_id, parent_agent, parent_is_remote_backed) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -294,25 +326,6 @@ impl AppState {
         }
         self.invalidate_agent_readiness_cache();
         let _ = self.agent_readiness_snapshot();
-        let title = request
-            .title
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| "Delegated review".to_owned());
-        if title.chars().count() > MAX_DELEGATION_TITLE_CHARS {
-            return Err(ApiError::bad_request(format!(
-                "delegation title must be at most {} characters",
-                MAX_DELEGATION_TITLE_CHARS
-            )));
-        }
-        let model = request
-            .model
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned);
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         inner

@@ -218,7 +218,8 @@ card should preserve partial transcript access and any partial result summary.
 TermAl should expose internal commands that can be used from the UI and from an
 MCP wrapper:
 
-Implementation: `ui/src/delegation-commands.ts`.
+Implementation: `ui/src/delegation-commands.ts`; wait-error packet
+sanitization lives in `ui/src/delegation-error-packets.ts`.
 
 ```text
 spawn_delegation(parentSessionId, request) -> SpawnDelegationCommandResult
@@ -260,6 +261,8 @@ Safety limits for agent-facing tools:
   spawning
 - delegation titles are capped at 200 characters so redacted child-session
   names stay metadata-sized and are not a prompt-sized side channel
+- explicit delegation model names are capped at 200 characters because they are
+  persisted and echoed in summaries as metadata
 - every spawn, cancel, timeout, and result-read emits an auditable event
 - child sessions cannot commit or push through TermAl-mediated commands unless
   the human explicitly approves that operation
@@ -444,15 +447,27 @@ type WaitDelegationErrorPacket =
       restartRequired: boolean | null;
     };
 
-type WaitDelegationsResult = {
-  outcome: "completed" | "timeout" | "error";
+type WaitDelegationsBaseResult = {
   delegations: DelegationSummary[];
   completed: DelegationSummary[];
   pending: DelegationSummary[];
   revision: number | null;
   serverInstanceId: string | null;
-  error?: WaitDelegationErrorPacket;
 };
+
+type WaitDelegationsSuccessResult = WaitDelegationsBaseResult & {
+  outcome: "completed" | "timeout";
+  error?: never;
+};
+
+type WaitDelegationsErrorResult = WaitDelegationsBaseResult & {
+  outcome: "error";
+  error: WaitDelegationErrorPacket;
+};
+
+type WaitDelegationsResult =
+  | WaitDelegationsSuccessResult
+  | WaitDelegationsErrorResult;
 ```
 
 Persist delegation records alongside sessions. A child session should also carry

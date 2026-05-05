@@ -520,13 +520,35 @@ fn localize_remote_session(
     let mut session = remote_session.clone();
     session.id = local_session_id.to_owned();
     session.project_id = local_project_id;
-    for marker in &mut session.markers {
-        marker.session_id = local_session_id.to_owned();
-    }
+    session.markers = remote_session
+        .markers
+        .iter()
+        .filter_map(|marker| {
+            match localize_remote_conversation_marker(marker.clone(), local_session_id) {
+                Ok(marker) => Some(marker),
+                Err(err) => {
+                    eprintln!(
+                        "backend warning> skipping remote conversation marker `{}` in session `{}`: {}",
+                        marker.id, remote_session.id, err.message
+                    );
+                    None
+                }
+            }
+        })
+        .collect();
     // Delegation records are intentionally not mirrored across remotes in this
     // phase, so a remote child link would be dangling in the local proxy state.
     session.parent_delegation_id = None;
     session
+}
+
+fn localize_remote_conversation_marker(
+    mut marker: ConversationMarker,
+    local_session_id: &str,
+) -> Result<ConversationMarker, ApiError> {
+    marker.session_id = local_session_id.to_owned();
+    marker.color = normalize_conversation_marker_color(&marker.color)?;
+    Ok(marker)
 }
 
 /// Builds the `RemoteProjectId -> LocalProjectId` map for one remote

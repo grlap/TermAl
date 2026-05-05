@@ -2005,8 +2005,11 @@ impl AppState {
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
                         let local_session_id = record.session.id.clone();
-                        let mut localized_marker = marker;
-                        localized_marker.session_id = local_session_id.clone();
+                        let localized_marker =
+                            localize_remote_conversation_marker(marker, &local_session_id)
+                                .map_err(|err| {
+                                    anyhow!("remote marker color was invalid: {}", err.message)
+                                })?;
                         if let Some(existing_index) = record
                             .session
                             .markers
@@ -2068,8 +2071,11 @@ impl AppState {
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
                         let local_session_id = record.session.id.clone();
-                        let mut localized_marker = marker;
-                        localized_marker.session_id = local_session_id.clone();
+                        let localized_marker =
+                            localize_remote_conversation_marker(marker, &local_session_id)
+                                .map_err(|err| {
+                                    anyhow!("remote marker color was invalid: {}", err.message)
+                                })?;
                         if let Some(existing_index) = record
                             .session
                             .markers

@@ -74,6 +74,33 @@ fn test_marker(
     }
 }
 
+const INVALID_CONVERSATION_MARKER_COLORS: &[&str] = &[
+    "url(https://example.test/marker)",
+    "var(--signal-blue)",
+    "expression(alert(1))",
+    "linear-gradient(red, blue)",
+    "<script>alert(1)</script>",
+    "red",
+    "transparent",
+    r"\75 rl(https://example.test/marker)",
+    "javascript:alert(1)",
+    "#xyz",
+    "#12",
+    "#12345",
+    "#1234567",
+    "#123456789",
+    "",
+    "   ",
+];
+
+fn assert_marker_color_error(response: &Value) {
+    assert_eq!(
+        response["error"].as_str(),
+        Some(CONVERSATION_MARKER_COLOR_ERROR),
+        "unexpected response: {response}"
+    );
+}
+
 fn marker_session_stamps(state: &AppState, session_id: &str) -> (u64, u64) {
     let inner = state.inner.lock().expect("state mutex poisoned");
     let index = inner
@@ -561,12 +588,14 @@ fn remote_session_snapshot_localizes_marker_session_ids() {
     .into_iter()
     .find(|session| session.id == "remote-session-1")
     .expect("sample remote session should exist");
-    remote_session.markers = vec![test_marker(
+    let mut marker = test_marker(
         "marker-1",
         "remote-session-1",
         "remote-message-1",
         ConversationMarkerKind::Decision,
-    )];
+    );
+    marker.color = "#ABCDEF".to_owned();
+    remote_session.markers = vec![marker];
 
     let session = localize_remote_session(
         "local-session-9",
@@ -576,6 +605,37 @@ fn remote_session_snapshot_localizes_marker_session_ids() {
 
     assert_eq!(session.id, "local-session-9");
     assert_eq!(session.markers[0].session_id, "local-session-9");
+    assert_eq!(session.markers[0].color, "#abcdef");
+}
+
+#[test]
+fn remote_session_snapshot_skips_invalid_marker_colors() {
+    let mut remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    let mut marker = test_marker(
+        "marker-1",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Decision,
+    );
+    marker.color = "var(--signal-blue)".to_owned();
+    remote_session.markers = vec![marker];
+
+    let session = localize_remote_session(
+        "local-session-9",
+        Some("project-9".to_owned()),
+        &remote_session,
+    );
+
+    assert!(session.markers.is_empty());
 }
 
 #[test]
@@ -1252,83 +1312,152 @@ fn remote_marker_delta_rejects_mismatched_marker_session_id() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+#[test]
+fn remote_marker_deltas_reject_invalid_marker_colors() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_session_id = remote_proxy_session_with_message(&state, &remote);
+    let mut delta_events = state.subscribe_delta_events();
+    let mut created_marker = test_marker(
+        "marker-remote-1",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Decision,
+    );
+    created_marker.color = "url(https://example.test/marker)".to_owned();
+    let mut updated_marker = test_marker(
+        "marker-remote-1",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Checkpoint,
+    );
+    updated_marker.color = "var(--signal-blue)".to_owned();
+
+    for (label, delta) in [
+        (
+            "create",
+            DeltaEvent::ConversationMarkerCreated {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                marker: created_marker,
+                session_mutation_stamp: Some(11),
+            },
+        ),
+        (
+            "update",
+            DeltaEvent::ConversationMarkerUpdated {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                marker: updated_marker,
+                session_mutation_stamp: Some(12),
+            },
+        ),
+    ] {
+        let err = match state.apply_remote_delta_event(&remote.id, delta) {
+            Err(err) => err,
+            Ok(()) => panic!("invalid remote marker {label} color should fail"),
+        };
+        assert!(
+            err.to_string().contains(CONVERSATION_MARKER_COLOR_ERROR),
+            "unexpected {label} error: {err:#}"
+        );
+        assert!(
+            delta_events.try_recv().is_err(),
+            "invalid remote marker {label} should not publish"
+        );
+        let markers = state
+            .list_conversation_markers(&local_session_id)
+            .expect("localized markers should list");
+        assert!(
+            markers.markers.is_empty(),
+            "invalid remote marker {label} should not be stored"
+        );
+    }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 #[tokio::test]
 async fn marker_create_rejects_unsupported_color_values() {
-    let state = test_app_state();
-    let session_id = test_session_with_two_messages(&state);
-    let encoded_session_id = encode_uri_component(&session_id);
-    let (status, response): (StatusCode, Value) = request_json(
-        &app_router(state),
-        Request::builder()
-            .method("POST")
-            .uri(format!("/api/sessions/{encoded_session_id}/markers"))
-            .header(axum::http::header::CONTENT_TYPE, "application/json")
-            .body(Body::from(
-                json!({
-                    "kind": "decision",
-                    "name": "Unsafe color",
-                    "color": "url(https://example.test/marker)",
-                    "messageId": "message-1"
-                })
-                .to_string(),
-            ))
-            .unwrap(),
-    )
-    .await;
+    for color in INVALID_CONVERSATION_MARKER_COLORS {
+        let state = test_app_state();
+        let session_id = test_session_with_two_messages(&state);
+        let encoded_session_id = encode_uri_component(&session_id);
+        let (status, response): (StatusCode, Value) = request_json(
+            &app_router(state.clone()),
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{encoded_session_id}/markers"))
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "kind": "decision",
+                        "name": "Unsafe color",
+                        "color": *color,
+                        "messageId": "message-1"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
 
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        response["error"]
-            .as_str()
-            .is_some_and(|error| error.contains("conversation marker color")),
-        "unexpected response: {response}"
-    );
+        assert_eq!(status, StatusCode::BAD_REQUEST, "color: {color:?}");
+        assert_marker_color_error(&response);
+        let _ = fs::remove_file(state.persistence_path.as_path());
+    }
 }
 
 #[tokio::test]
 async fn marker_patch_rejects_unsupported_color_values() {
-    let state = test_app_state();
-    let session_id = test_session_with_two_messages(&state);
-    let created = state
-        .create_conversation_marker(
-            &session_id,
-            CreateConversationMarkerRequest {
-                kind: ConversationMarkerKind::Decision,
-                name: "Safe color".to_owned(),
-                body: None,
-                color: "#3b82f6".to_owned(),
-                message_id: "message-1".to_owned(),
-                end_message_id: None,
-            },
+    for color in INVALID_CONVERSATION_MARKER_COLORS {
+        let state = test_app_state();
+        let session_id = test_session_with_two_messages(&state);
+        let created = state
+            .create_conversation_marker(
+                &session_id,
+                CreateConversationMarkerRequest {
+                    kind: ConversationMarkerKind::Decision,
+                    name: "Safe color".to_owned(),
+                    body: None,
+                    color: "#3b82f6".to_owned(),
+                    message_id: "message-1".to_owned(),
+                    end_message_id: None,
+                },
+            )
+            .expect("marker should be created");
+        let encoded_session_id = encode_uri_component(&session_id);
+        let encoded_marker_id = encode_uri_component(&created.marker.id);
+        let (status, response): (StatusCode, Value) = request_json(
+            &app_router(state.clone()),
+            Request::builder()
+                .method("PATCH")
+                .uri(format!(
+                    "/api/sessions/{encoded_session_id}/markers/{encoded_marker_id}"
+                ))
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "color": *color
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
         )
-        .expect("marker should be created");
-    let encoded_session_id = encode_uri_component(&session_id);
-    let encoded_marker_id = encode_uri_component(&created.marker.id);
-    let (status, response): (StatusCode, Value) = request_json(
-        &app_router(state),
-        Request::builder()
-            .method("PATCH")
-            .uri(format!(
-                "/api/sessions/{encoded_session_id}/markers/{encoded_marker_id}"
-            ))
-            .header(axum::http::header::CONTENT_TYPE, "application/json")
-            .body(Body::from(
-                json!({
-                    "color": "var(--signal-blue)"
-                })
-                .to_string(),
-            ))
-            .unwrap(),
-    )
-    .await;
+        .await;
 
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        response["error"]
-            .as_str()
-            .is_some_and(|error| error.contains("conversation marker color")),
-        "unexpected response: {response}"
-    );
+        assert_eq!(status, StatusCode::BAD_REQUEST, "color: {color:?}");
+        assert_marker_color_error(&response);
+        let _ = fs::remove_file(state.persistence_path.as_path());
+    }
 }
 
 #[tokio::test]

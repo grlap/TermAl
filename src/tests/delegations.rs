@@ -4553,6 +4553,89 @@ fn delegation_title_size_is_capped() {
 }
 
 #[test]
+fn delegation_title_size_accepts_trimmed_character_boundary() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let boundary_title = "界".repeat(MAX_DELEGATION_TITLE_CHARS);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review this change.".to_owned(),
+                title: Some(format!("  {boundary_title}  ")),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("boundary title should be accepted");
+
+    assert_eq!(created.child_session.name, boundary_title);
+    assert_eq!(created.delegation.title, boundary_title);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn delegation_model_size_is_capped() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let oversized_model = "x".repeat(MAX_DELEGATION_MODEL_CHARS + 1);
+    let err = match state.create_read_only_delegation(
+        &parent_session_id,
+        CreateDelegationRequest {
+            prompt: "Review this change.".to_owned(),
+            title: None,
+            cwd: None,
+            agent: Some(Agent::Codex),
+            model: Some(oversized_model),
+            mode: Some(DelegationMode::Reviewer),
+            write_policy: Some(DelegationWritePolicy::ReadOnly),
+        },
+    ) {
+        Ok(_) => panic!("oversized model should be rejected"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(err.message.contains("model"));
+    assert!(err.message.contains("at most"));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn delegation_model_size_accepts_trimmed_character_boundary() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let boundary_model = "界".repeat(MAX_DELEGATION_MODEL_CHARS);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review this change.".to_owned(),
+                title: None,
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: Some(format!("  {boundary_model}  ")),
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("boundary model should be accepted");
+
+    assert_eq!(created.child_session.model, boundary_model);
+    assert_eq!(
+        created.delegation.model.as_deref(),
+        Some(boundary_model.as_str())
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn delegation_whitespace_prompt_is_rejected() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);

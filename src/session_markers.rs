@@ -547,12 +547,13 @@ fn normalize_conversation_marker_body(value: Option<String>) -> Result<Option<St
     Ok(Some(trimmed.to_owned()))
 }
 
+const CONVERSATION_MARKER_COLOR_ERROR: &str =
+    "conversation marker color must be a 3, 4, 6, or 8 digit hex color";
+
 fn normalize_conversation_marker_color(value: &str) -> Result<String, ApiError> {
     let trimmed = value.trim();
     if !is_valid_conversation_marker_color(trimmed) {
-        return Err(ApiError::bad_request(
-            "conversation marker color must be a 3, 4, 6, or 8 digit hex color",
-        ));
+        return Err(ApiError::bad_request(CONVERSATION_MARKER_COLOR_ERROR));
     }
     Ok(trimmed.to_ascii_lowercase())
 }
