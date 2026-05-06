@@ -973,6 +973,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         state_broadcast_tx: mpsc::channel().0,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),
+        test_agent_setup_failures: Arc::new(Mutex::new(Vec::new())),
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
         agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
         remote_registry: test_remote_registry(),

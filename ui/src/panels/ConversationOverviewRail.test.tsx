@@ -26,6 +26,18 @@ function assistantTextMessages(count: number): Message[] {
   }));
 }
 
+function commandMessages(count: number): Message[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `command-message-${index + 1}`,
+    type: "command",
+    author: "assistant",
+    timestamp: `12:${String(index).padStart(2, "0")}`,
+    command: "npm test",
+    output: "ok",
+    status: index % 2 === 0 ? "error" : "success",
+  }));
+}
+
 function layoutSnapshot(messages: Message[]): VirtualizedConversationLayoutSnapshot {
   return {
     sessionId: "session-1",
@@ -171,6 +183,64 @@ describe("ConversationOverviewRail", () => {
       expect.objectContaining({
         messageId: "assistant-message-1",
         messageIndex: 0,
+      }),
+    );
+  });
+
+  it("uses a compact visual track for dense status-heavy sessions", () => {
+    const messages = commandMessages(220);
+    const onNavigate = vi.fn();
+    const { container } = render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={layoutSnapshot(messages)}
+        minMessages={4}
+        maxHeightPx={1024}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const rail = screen.getByLabelText("Conversation overview");
+    vi.spyOn(rail, "getBoundingClientRect").mockReturnValue({
+      bottom: 1024,
+      height: 1024,
+      left: 0,
+      right: 24,
+      top: 0,
+      width: 24,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    expect(container.querySelectorAll(".conversation-overview-segment")).toHaveLength(
+      0,
+    );
+    expect(screen.getByTestId("conversation-overview-visual-track")).toBeInTheDocument();
+    expect(
+      container.querySelectorAll(".conversation-overview-visual-segment").length,
+    ).toBeLessThanOrEqual(96);
+    expect(rail).toHaveAttribute("tabIndex", "0");
+
+    fireEvent.pointerDown(rail, {
+      button: 0,
+      clientY: 0,
+      pointerId: 11,
+    });
+
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: "command-message-1",
+        messageIndex: 0,
+      }),
+    );
+
+    fireEvent.keyDown(rail, { key: "End" });
+
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageId: "command-message-220",
+        messageIndex: 219,
       }),
     );
   });

@@ -21,6 +21,7 @@ import {
   AppearancePreferencesPanel,
   MarkdownPreferencesPanel,
   RemotePreferencesPanel,
+  TelegramPreferencesPanel,
   ClaudeApprovalsPreferencesPanel,
   CodexPromptPreferencesPanel,
   ThemedCombobox,
@@ -57,6 +58,7 @@ type ThemePanelProps = ComponentProps<typeof ThemePreferencesPanel>;
 type MarkdownPanelProps = ComponentProps<typeof MarkdownPreferencesPanel>;
 type AppearancePanelProps = ComponentProps<typeof AppearancePreferencesPanel>;
 type RemotePanelProps = ComponentProps<typeof RemotePreferencesPanel>;
+type TelegramPanelProps = ComponentProps<typeof TelegramPreferencesPanel>;
 type CodexPromptPanelProps = ComponentProps<typeof CodexPromptPreferencesPanel>;
 type ClaudeApprovalsPanelProps = ComponentProps<typeof ClaudeApprovalsPreferencesPanel>;
 
@@ -153,8 +155,8 @@ type AppDialogsProps = {
   setFontSizePx: (nextValue: number) => void;
   remoteConfigs: RemotePanelProps["remotes"];
   onSaveRemotes: RemotePanelProps["onSaveRemotes"];
-  projects: Project[];
-  sessions: Session[];
+  projects: TelegramPanelProps["projects"];
+  sessions: TelegramPanelProps["sessions"];
   handleOrchestratorStateUpdated: (state: StateResponse) => void;
   defaultCodexApprovalPolicy: ApprovalPolicy;
   defaultCodexSandboxMode: SandboxMode;
@@ -923,6 +925,8 @@ export function AppDialogs({
                 remotes={remoteConfigs}
                 onSaveRemotes={onSaveRemotes}
               />
+            ) : settingsTab === "telegram" ? (
+              <TelegramPreferencesPanel projects={projects} sessions={sessions} />
             ) : settingsTab === "orchestrators" ? (
               <OrchestratorTemplatesPanel
                 projects={projects}

@@ -435,7 +435,7 @@ describe("delegation command surface", () => {
     expect(transport.createDelegation).toHaveBeenCalledTimes(2);
     expect(transport.createDelegation).toHaveBeenNthCalledWith(1, "parent-1", {
       prompt: "Review React changes.",
-      title: " React review ",
+      title: "React review",
       mode: "reviewer",
       writePolicy: { kind: "readOnly" },
     });
@@ -486,6 +486,7 @@ describe("delegation command surface", () => {
       failed: [],
       revision: 4,
       serverInstanceId: "server-a",
+      error: null,
     });
   });
 
@@ -493,7 +494,11 @@ describe("delegation command surface", () => {
     const transport: DelegationCommandTransport = {
       createDelegation: vi.fn(async (_parentSessionId, request) => {
         if (request.title === "Rust review") {
-          throw new Error("parent session already has 4 active delegations");
+          throw new ApiRequestError(
+            "request-failed",
+            "parent session already has 4 active delegations",
+            { status: 409 },
+          );
         }
         return {
           revision: 3,
@@ -528,10 +533,95 @@ describe("delegation command surface", () => {
           index: 1,
           title: "Rust review",
           message: "parent session already has 4 active delegations",
+          name: "ApiRequestError",
+          apiErrorKind: "request-failed",
+          status: 409,
+          restartRequired: false,
         },
       ],
       revision: 3,
       serverInstanceId: "server-a",
+      error: null,
+    });
+  });
+
+  it("redacts unsafe reviewer batch failure messages while preserving metadata", async () => {
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(async () => {
+        throw new ApiRequestError(
+          "request-failed",
+          "failed to persist delegation: C:/Users/example/.termal/state.sqlite",
+          { status: 500 },
+        );
+      }),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).spawn_reviewer_batch("parent-1", [
+        { prompt: "Review React.", title: "React review" },
+      ]),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      spawned: [],
+      failed: [
+        {
+          index: 0,
+          title: "React review",
+          name: "ApiRequestError",
+          message: "Spawn delegation failed.",
+          apiErrorKind: "request-failed",
+          status: 500,
+          restartRequired: false,
+        },
+      ],
+      revision: null,
+      serverInstanceId: null,
+      error: null,
+    });
+  });
+
+  it("returns a batch error when reviewer spawns cross backend instances", async () => {
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(async (_parentSessionId, request) => {
+        const isRust = request.title === "Rust review";
+        return {
+          revision: isRust ? 1 : 8,
+          serverInstanceId: isRust ? "server-b" : "server-a",
+          delegation: makeDelegation({
+            id: isRust ? "delegation-2" : "delegation-1",
+            childSessionId: isRust ? "child-2" : "child-1",
+            title: request.title,
+          }),
+          childSession: makeSession({
+            id: isRust ? "child-2" : "child-1",
+            name: request.title,
+            parentDelegationId: isRust ? "delegation-2" : "delegation-1",
+          }),
+        };
+      }),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).spawn_reviewer_batch("parent-1", [
+        { prompt: "Review React.", title: "React review" },
+        { prompt: "Review Rust.", title: "Rust review" },
+      ]),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      delegationIds: ["delegation-1", "delegation-2"],
+      failed: [],
+      revision: null,
+      serverInstanceId: null,
+      error: {
+        kind: "mixed-server-instance",
+        serverInstanceIds: ["server-a", "server-b"],
+      },
     });
   });
 

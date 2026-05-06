@@ -130,6 +130,75 @@ async fn get_session_route_returns_full_session() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Pins `GET /api/sessions/{id}?tail=N` for tail-first UI hydration: the
+// response carries only the newest messages, keeps the full `messageCount`,
+// and leaves `messagesLoaded=false` so the browser still fetches the full
+// transcript in the background.
+#[tokio::test]
+async fn get_session_route_can_return_tail_only() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let app = app_router(state.clone());
+    let created = state
+        .create_session(CreateSessionRequest {
+            name: Some("Route Session Tail".to_owned()),
+            agent: None,
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("session should be created");
+    let session_id = created.session_id;
+    for index in 1..=5 {
+        let message_id = state.allocate_message_id();
+        state
+            .push_message(
+                &session_id,
+                Message::Text {
+                    attachments: Vec::new(),
+                    id: message_id,
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: format!("Tail message {index}"),
+                    expanded_text: None,
+                },
+            )
+            .expect("message should append");
+    }
+
+    let (status, response): (StatusCode, SessionResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/sessions/{session_id}?tail=3"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response.session.id, session_id);
+    assert_eq!(response.session.message_count, 5);
+    assert!(!response.session.messages_loaded);
+    assert_eq!(response.session.messages.len(), 3);
+    assert!(matches!(
+        response.session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Tail message 3"
+    ));
+    assert!(matches!(
+        response.session.messages.last(),
+        Some(Message::Text { text, .. }) if text == "Tail message 5"
+    ));
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Pins `messageCount` on full snapshot-bearing routes. The count is computed
 // from the transcript at wire-projection time so reconnect/state adoption can
 // keep summary metadata without waiting for the next delta.

@@ -70,6 +70,7 @@ type VirtualizedHarnessOptions = {
   conversationSearchQuery?: string;
   conversationSearchMatchedItemKeys?: ReadonlySet<string>;
   conversationSearchActiveItemKey?: string | null;
+  preferInitialEstimatedBottomViewport?: boolean;
   scrollHeight?: () => number;
   slotRect?: (
     message: Message,
@@ -98,6 +99,7 @@ function renderVirtualizedHarness({
   conversationSearchQuery = "",
   conversationSearchMatchedItemKeys = new Set(),
   conversationSearchActiveItemKey = null,
+  preferInitialEstimatedBottomViewport = false,
   scrollHeight,
   slotRect,
   slotHeight = () => 80,
@@ -231,6 +233,7 @@ function renderVirtualizedHarness({
           ? searchOptions.conversationSearchActiveItemKey
           : conversationSearchActiveItemKey
       }
+      preferInitialEstimatedBottomViewport={preferInitialEstimatedBottomViewport}
       virtualizerHandleRef={virtualizerHandleRef}
     />
   );
@@ -337,6 +340,29 @@ describe("VirtualizedConversationMessageList foundation", () => {
       expect(virtualizerHandleRef.current!.jumpToMessageId("missing-message")).toBe(
         false,
       );
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("mounts a long active transcript from the estimated bottom window", async () => {
+    const messages = makeTextMessages(240);
+    const harness = renderVirtualizedHarness({
+      clientHeight: 500,
+      messages,
+      preferInitialEstimatedBottomViewport: true,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-240")).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+      expect(
+        harness.container.querySelectorAll(".virtualized-message-slot").length,
+      ).toBeLessThanOrEqual(16);
+      expect(harness.scrollTop).toBeGreaterThan(20_000);
     } finally {
       harness.restore();
     }
@@ -538,6 +564,36 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
 
       expect(harness.scrollWrites).toContain(480);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("bottom-pin mounts the bottom range without starting a boundary reveal", async () => {
+    const messages = makeTextMessages(48);
+    const harness = renderVirtualizedHarness({
+      clientHeight: 240,
+      messages,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-48")).toBeInTheDocument();
+      });
+
+      act(() => {
+        harness.setScrollTop(harness.estimatedLayout.totalHeight - 240);
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "bottom_pin",
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("message-48")).toBeInTheDocument();
+      });
+      expect(
+        harness.scrollNode.dataset.virtualizedBottomBoundaryReveal,
+      ).toBeUndefined();
     } finally {
       harness.restore();
     }

@@ -4686,17 +4686,15 @@ fn delegation_metadata_size_errors_precede_phase_one_feature_gates() {
 
 #[test]
 fn delegation_metadata_size_errors_precede_agent_readiness_setup_errors() {
-    let _env_lock = TEST_HOME_ENV_MUTEX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let empty_path = std::env::temp_dir().join(format!(
-        "termal-delegation-empty-path-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&empty_path).expect("empty PATH directory should be created");
-    let _path_env = ScopedEnvVar::set_path("PATH", &empty_path);
-
     let state = test_app_state();
+    state
+        .test_agent_setup_failures
+        .lock()
+        .expect("test agent setup failures mutex poisoned")
+        .push((
+            Agent::Cursor,
+            "forced Cursor setup failure for ordering test".to_owned(),
+        ));
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let oversized_title = "x".repeat(MAX_DELEGATION_TITLE_CHARS + 1);
     let title_err = match state.create_read_only_delegation(
@@ -4748,8 +4746,29 @@ fn delegation_metadata_size_errors_precede_agent_readiness_setup_errors() {
         model_err.message
     );
 
+    let setup_err = match state.create_read_only_delegation(
+        &parent_session_id,
+        CreateDelegationRequest {
+            prompt: "Review this change.".to_owned(),
+            title: Some("Valid metadata".to_owned()),
+            cwd: None,
+            agent: Some(Agent::Cursor),
+            model: None,
+            mode: Some(DelegationMode::Reviewer),
+            write_policy: Some(DelegationWritePolicy::ReadOnly),
+        },
+    ) {
+        Ok(_) => panic!("forced setup failure should reject valid metadata"),
+        Err(err) => err,
+    };
+
+    assert_eq!(setup_err.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        setup_err.message,
+        "forced Cursor setup failure for ordering test"
+    );
+
     let _ = fs::remove_file(state.persistence_path.as_path());
-    let _ = fs::remove_dir_all(empty_path);
 }
 
 #[test]

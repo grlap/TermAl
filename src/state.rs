@@ -327,6 +327,8 @@ struct AppState {
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
     #[cfg(test)]
     test_acp_runtime_overrides: Arc<Mutex<Vec<TestAcpRuntimeOverride>>>,
+    #[cfg(test)]
+    test_agent_setup_failures: Arc<Mutex<Vec<(Agent, String)>>>,
     /// Cached app-level agent readiness lives outside `self.inner` so full
     /// snapshots can clone the latest value without filesystem work under the
     /// main state mutex.

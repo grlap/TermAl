@@ -1183,6 +1183,37 @@ export function SessionPaneView({
     setNewResponseIndicator(scrollStateKey, false);
   }
 
+  function scrollVirtualizedMessageStackToBottom(
+    node: HTMLElement,
+    options: {
+      scrollKind?: Extract<
+        MessageStackScrollWriteKind,
+        "bottom_boundary" | "bottom_pin"
+      >;
+      scrollSource?: "programmatic" | "user";
+    } = {},
+  ) {
+    if (!node.querySelector(".virtualized-message-list")) {
+      return false;
+    }
+
+    const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+    if (Math.abs(node.scrollTop - nextScrollTop) > 0.5) {
+      node.scrollTop = nextScrollTop;
+    }
+    notifyMessageStackScrollWrite(node, {
+      scrollKind: options.scrollKind ?? "bottom_pin",
+      scrollSource: options.scrollSource,
+    });
+    setShouldStickToBottom(true);
+    paneScrollPositions[scrollStateKey] = {
+      top: Number.MAX_SAFE_INTEGER,
+      shouldStick: true,
+    };
+    setNewResponseIndicator(scrollStateKey, false);
+    return true;
+  }
+
   function scrollMessageStackByDelta(
     deltaY: number,
     options: {
@@ -1280,25 +1311,15 @@ export function SessionPaneView({
       cancelPaneProgrammaticBottomFollow();
       const node = messageStackRef.current;
       if (node) {
-        if (node.querySelector(".virtualized-message-list")) {
-          const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-          if (Math.abs(node.scrollTop - nextScrollTop) > 0.5) {
-            node.scrollTop = nextScrollTop;
-          }
-          notifyMessageStackScrollWrite(node, {
+        if (
+          !scrollVirtualizedMessageStackToBottom(node, {
             scrollKind: "bottom_boundary",
             scrollSource: "user",
-          });
-        } else {
+          })
+        ) {
           scrollToLatestMessage("auto", true, "seek");
         }
       }
-      setShouldStickToBottom(true);
-      paneScrollPositions[scrollStateKey] = {
-        top: Number.MAX_SAFE_INTEGER,
-        shouldStick: true,
-      };
-      setNewResponseIndicator(scrollStateKey, false);
       return;
     }
 
@@ -1622,6 +1643,7 @@ export function SessionPaneView({
       maxAttempts?: number;
       minAttempts?: number;
       onComplete?: () => void;
+      preferVirtualizedBoundary?: boolean;
       scrollKind?: MessageStackScrollWriteKind;
     } = {},
   ) {
@@ -1663,6 +1685,14 @@ export function SessionPaneView({
         } else {
           complete();
         }
+        return;
+      }
+
+      if (
+        options.preferVirtualizedBoundary &&
+        scrollVirtualizedMessageStackToBottom(node)
+      ) {
+        complete();
         return;
       }
 
@@ -1774,16 +1804,19 @@ export function SessionPaneView({
       if (saved.shouldStick) {
         restoreCleanup = scheduleSettledScrollToBottom("auto", {
           maxAttempts: 60,
+          preferVirtualizedBoundary: true,
         });
       } else if (!restoreMessageStackScrollTop(saved.top)) {
         setShouldStickToBottom(true);
         restoreCleanup = scheduleSettledScrollToBottom("auto", {
           maxAttempts: 60,
+          preferVirtualizedBoundary: true,
         });
       }
     } else if (defaultScrollToBottom) {
       restoreCleanup = scheduleSettledScrollToBottom("auto", {
         maxAttempts: 60,
+        preferVirtualizedBoundary: true,
       });
       setShouldStickToBottom(true);
       paneScrollPositions[scrollStateKey] = {
@@ -1850,10 +1883,17 @@ export function SessionPaneView({
       return;
     }
 
-    return scheduleSettledScrollToBottom("auto");
+    if (paneScrollPositions[scrollStateKey]?.shouldStick) {
+      return;
+    }
+
+    return scheduleSettledScrollToBottom("auto", {
+      preferVirtualizedBoundary: true,
+    });
   }, [
     activeSession,
     isSessionTabActive,
+    paneScrollPositions,
     pane.viewMode,
     scrollStateKey,
     visitedSessionIds,
@@ -1905,7 +1945,10 @@ export function SessionPaneView({
         return;
       }
       if (getShouldStickToBottom() || saved?.shouldStick) {
-        return scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
+        return scheduleSettledScrollToBottom("auto", {
+          maxAttempts: 60,
+          preferVirtualizedBoundary: true,
+        });
       }
       return;
     }

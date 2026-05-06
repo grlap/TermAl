@@ -23,6 +23,7 @@ export type PreferencesTabId =
   | "markdown"
   | "appearance"
   | "remotes"
+  | "telegram"
   | "orchestrators"
   | "codex-prompts"
   | "claude-approvals";
@@ -35,6 +36,7 @@ export const PREFERENCES_TABS: ReadonlyArray<{
   { id: "markdown", label: "Markdown" },
   { id: "appearance", label: "Editor & UI" },
   { id: "remotes", label: "Remotes" },
+  { id: "telegram", label: "Telegram" },
   { id: "orchestrators", label: "Orchestrators" },
   { id: "codex-prompts", label: "Codex" },
   { id: "claude-approvals", label: "Claude" },

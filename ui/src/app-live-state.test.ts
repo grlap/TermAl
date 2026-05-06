@@ -1486,6 +1486,96 @@ describe("hydration adoption side effects", () => {
       "session-1",
     ]);
   });
+
+  it("adopts a large-session tail before fetching the full transcript", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+
+    const messages: Message[] = Array.from({ length: 150 }, (_, index) => ({
+      id: `message-${index + 1}`,
+      type: "text",
+      author: index % 2 === 0 ? "you" : "assistant",
+      timestamp: `10:${String(index).padStart(2, "0")}`,
+      text: `Message ${index + 1}`,
+    }));
+    const initialSession = makeSession({
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    const tailSession = makeSession({
+      messages: messages.slice(-100),
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    const fullSession = makeSession({
+      messages,
+      messagesLoaded: true,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: tailSession,
+    });
+    let resolveFullHydration!: (
+      response: Awaited<ReturnType<typeof api.fetchSession>>,
+    ) => void;
+    const fullHydration = new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(
+      (resolve) => {
+        resolveFullHydration = resolve;
+      },
+    );
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => fullHydration);
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    renderLiveStateHarness(params, () => {});
+
+    await waitFor(() => expect(api.fetchSessionTail).toHaveBeenCalledTimes(1));
+    expect(api.fetchSessionTail).toHaveBeenCalledWith("session-1", 100);
+    await waitFor(() =>
+      expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toHaveLength(
+        100,
+      ),
+    );
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages[0]?.id).toBe(
+      "message-51",
+    );
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
+      false,
+    );
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveFullHydration({
+        revision: 5,
+        serverInstanceId: "server-a",
+        session: fullSession,
+      });
+      await fullHydration;
+    });
+
+    await waitFor(() =>
+      expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
+        true,
+      ),
+    );
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toHaveLength(
+      150,
+    );
+  });
 });
 
 describe("resolveAdoptStateSessionOptions", () => {

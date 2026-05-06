@@ -524,6 +524,15 @@ export function fetchSession(sessionId: string) {
   );
 }
 
+export function fetchSessionTail(sessionId: string, messageLimit: number) {
+  const query = new URLSearchParams({
+    tail: String(Math.max(0, Math.floor(messageLimit))),
+  });
+  return request<SessionResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}?${query.toString()}`,
+  );
+}
+
 export async function fetchWorkspaceLayout(workspaceId: string) {
   const endpoint = `/api/workspaces/${encodeURIComponent(workspaceId)}`;
   const response = await performRequest(endpoint);
@@ -610,6 +619,49 @@ export function updateAppSettings(payload: {
   remotes?: RemoteConfig[];
 }) {
   return request<StateResponse>("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export type TelegramStatusResponse = {
+  configured: boolean;
+  enabled: boolean;
+  running: boolean;
+  lifecycle: string;
+  linkedChatId?: number | null;
+  botTokenMasked?: string | null;
+  subscribedProjectIds: string[];
+  defaultProjectId?: string | null;
+  defaultSessionId?: string | null;
+};
+
+export type UpdateTelegramConfigPayload = {
+  enabled?: boolean;
+  botToken?: string | null;
+  subscribedProjectIds?: string[];
+  defaultProjectId?: string | null;
+  defaultSessionId?: string | null;
+};
+
+export type TelegramTestResponse = {
+  botName: string;
+  botUsername?: string | null;
+};
+
+export function fetchTelegramStatus() {
+  return request<TelegramStatusResponse>("/api/telegram/status");
+}
+
+export function updateTelegramConfig(payload: UpdateTelegramConfigPayload) {
+  return request<TelegramStatusResponse>("/api/telegram/config", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function testTelegramConnection(payload: { botToken?: string }) {
+  return request<TelegramTestResponse>("/api/telegram/test", {
     method: "POST",
     body: JSON.stringify(payload),
   });

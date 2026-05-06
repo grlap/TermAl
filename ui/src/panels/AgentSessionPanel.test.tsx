@@ -661,20 +661,38 @@ describe("AgentSessionPanel conversation caching", () => {
       activeSession,
       onCreateConversationMarker,
       onDeleteConversationMarker,
+      renderMessageCard: (message) => (
+        <article className="message-card">
+          <div className="message-meta">
+            <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+            <span>{message.timestamp}</span>
+          </div>
+          <p>{`${message.id} body`}</p>
+        </article>
+      ),
     });
 
-    fireEvent.contextMenu(screen.getByText("message-1"));
+    fireEvent.contextMenu(screen.getByText("You message-1"));
     expect(
       screen.queryByRole("menu", { name: "Conversation marker actions" }),
     ).not.toBeInTheDocument();
 
-    fireEvent.contextMenu(screen.getByText("message-2"));
+    fireEvent.contextMenu(screen.getByText("message-2 body"));
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByText("Agent message-2"), {
+      clientX: 123,
+      clientY: 234,
+    });
     const assistantShell = screen
-      .getByText("message-2")
+      .getByText("Agent message-2")
       .closest(".conversation-message-marker-shell") as HTMLElement;
     const addMenu = screen.getByRole("menu", {
       name: "Conversation marker actions",
     });
+    expect(addMenu).toHaveStyle({ left: "123px", top: "234px" });
     const addMenuItem = within(addMenu).getByRole("menuitem", {
       name: "Add checkpoint marker",
     });
@@ -698,7 +716,74 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(assistantShell).toHaveFocus();
     });
 
-    fireEvent.contextMenu(screen.getByText("message-2"));
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function getBoundingClientRect(this: HTMLElement) {
+        if (this.classList.contains("conversation-marker-context-menu")) {
+          return {
+            x: 0,
+            y: 0,
+            width: 180,
+            height: 120,
+            top: 0,
+            right: 180,
+            bottom: 120,
+            left: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return {
+          x: 0,
+          y: 0,
+          width: 0,
+          height: 0,
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      });
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 320,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 260,
+    });
+    try {
+      fireEvent.contextMenu(screen.getByText("Agent message-2"), {
+        clientX: 500,
+        clientY: 500,
+      });
+      const clampedMenu = screen.getByRole("menu", {
+        name: "Conversation marker actions",
+      });
+      await waitFor(() => {
+        expect(clampedMenu).toHaveStyle({ left: "132px", top: "132px" });
+      });
+      fireEvent.keyDown(clampedMenu, { key: "Escape" });
+      await waitFor(() => {
+        expect(
+          screen.queryByRole("menu", { name: "Conversation marker actions" }),
+        ).not.toBeInTheDocument();
+      });
+    } finally {
+      rectSpy.mockRestore();
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+    }
+
+    fireEvent.contextMenu(screen.getByText("Agent message-2"));
     const reopenedAddMenu = screen.getByRole("menu", {
       name: "Conversation marker actions",
     });
@@ -711,7 +796,7 @@ describe("AgentSessionPanel conversation caching", () => {
       "message-2",
     );
 
-    fireEvent.contextMenu(screen.getByText("message-2"));
+    fireEvent.contextMenu(screen.getByText("Agent message-2"));
     const removeMenu = screen.getByRole("menu", {
       name: "Conversation marker actions",
     });
@@ -744,6 +829,10 @@ describe("AgentSessionPanel conversation caching", () => {
       onCreateConversationMarker,
       renderMessageCard: () => (
         <article className="message-card">
+          <div className="message-meta">
+            <span>Agent header</span>
+            <span>10:00</span>
+          </div>
           <a href="https://example.test">native link</a>
           <code>native code</code>
           <span>plain assistant text</span>
@@ -775,6 +864,11 @@ describe("AgentSessionPanel conversation caching", () => {
 
     selection?.removeAllRanges();
     fireEvent.contextMenu(plainText);
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByText("Agent header"));
     fireEvent.click(
       screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
     );
@@ -1393,6 +1487,40 @@ describe("AgentSessionPanel conversation caching", () => {
       ).toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
+    }
+  });
+
+  it("defers full transcript hydration when first opening very long sessions", async () => {
+    vi.useFakeTimers();
+    const OriginalResizeObserver = window.ResizeObserver;
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    try {
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("active-session", {
+          status: "idle",
+          messages: makeTextMessages(600),
+        }),
+      });
+
+      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      vi.useRealTimers();
     }
   });
 

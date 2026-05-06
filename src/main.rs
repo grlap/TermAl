@@ -230,6 +230,9 @@ fn app_router(state: AppState) -> Router {
                 .delete(delete_workspace_layout),
         )
         .route("/api/settings", post(update_app_settings))
+        .route("/api/telegram/status", get(get_telegram_status))
+        .route("/api/telegram/config", post(update_telegram_config))
+        .route("/api/telegram/test", post(test_telegram_connection))
         .route(
             "/api/orchestrators/templates",
             get(list_orchestrator_templates).post(create_orchestrator_template),
@@ -511,6 +514,7 @@ include!("state_inner.rs");
 include!("delegations.rs");
 include!("ids.rs");
 include!("app_boot.rs");
+include!("telegram_settings.rs");
 include!("agent_readiness.rs");
 include!("gemini.rs");
 include!("turns.rs");

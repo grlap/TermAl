@@ -29,14 +29,25 @@ const CONVERSATION_OVERVIEW_LIVE_TURN_HEIGHT_PX = 108;
 const CONVERSATION_OVERVIEW_FALLBACK_MAX_HEIGHT_PX = 520;
 const CONVERSATION_OVERVIEW_MIN_HEIGHT_PX = 160;
 const CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX = 24;
+const CONVERSATION_OVERVIEW_RAIL_BUILD_IDLE_TIMEOUT_MS = 1_500;
+const CONVERSATION_OVERVIEW_RAIL_BUILD_FALLBACK_DELAY_MS = 180;
 
 type ConversationOverviewRailBuildTask = {
   id: number;
   run: () => void;
 };
 
+type ConversationOverviewIdleWindow = Window &
+  typeof globalThis & {
+    requestIdleCallback?: (
+      callback: IdleRequestCallback,
+      options?: IdleRequestOptions,
+    ) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+
 let nextConversationOverviewRailBuildTaskId = 1;
-let conversationOverviewRailBuildFrameId: number | null = null;
+let cancelConversationOverviewRailBuildDrain: (() => void) | null = null;
 const pendingConversationOverviewRailBuildTasks: ConversationOverviewRailBuildTask[] =
   [];
 
@@ -57,34 +68,53 @@ function scheduleConversationOverviewRailBuild(run: () => void) {
     }
     if (
       pendingConversationOverviewRailBuildTasks.length === 0 &&
-      conversationOverviewRailBuildFrameId !== null
+      cancelConversationOverviewRailBuildDrain !== null
     ) {
-      window.cancelAnimationFrame(conversationOverviewRailBuildFrameId);
-      conversationOverviewRailBuildFrameId = null;
+      cancelConversationOverviewRailBuildDrain();
+      cancelConversationOverviewRailBuildDrain = null;
     }
   };
 }
 
 function scheduleConversationOverviewRailBuildDrain() {
-  if (conversationOverviewRailBuildFrameId !== null) {
+  if (cancelConversationOverviewRailBuildDrain !== null) {
     return;
   }
-  let ranSynchronously = false;
-  const frameId = window.requestAnimationFrame(() => {
-    if (conversationOverviewRailBuildFrameId === null) {
-      ranSynchronously = true;
-    } else {
-      conversationOverviewRailBuildFrameId = null;
-    }
-    const task = pendingConversationOverviewRailBuildTasks.shift();
-    if (task) {
-      task.run();
-    }
-    if (pendingConversationOverviewRailBuildTasks.length > 0) {
-      scheduleConversationOverviewRailBuildDrain();
-    }
-  });
-  conversationOverviewRailBuildFrameId = ranSynchronously ? null : frameId;
+  cancelConversationOverviewRailBuildDrain =
+    scheduleConversationOverviewIdleCallback(() => {
+      cancelConversationOverviewRailBuildDrain = null;
+      const task = pendingConversationOverviewRailBuildTasks.shift();
+      if (task) {
+        task.run();
+      }
+      if (pendingConversationOverviewRailBuildTasks.length > 0) {
+        scheduleConversationOverviewRailBuildDrain();
+      }
+    });
+}
+
+function scheduleConversationOverviewIdleCallback(run: () => void) {
+  const idleWindow = window as ConversationOverviewIdleWindow;
+  if (
+    typeof idleWindow.requestIdleCallback === "function" &&
+    typeof idleWindow.cancelIdleCallback === "function"
+  ) {
+    const idleHandle = idleWindow.requestIdleCallback(
+      () => {
+        run();
+      },
+      { timeout: CONVERSATION_OVERVIEW_RAIL_BUILD_IDLE_TIMEOUT_MS },
+    );
+    return () => idleWindow.cancelIdleCallback?.(idleHandle);
+  }
+
+  const timeoutId = window.setTimeout(
+    run,
+    CONVERSATION_OVERVIEW_RAIL_BUILD_FALLBACK_DELAY_MS,
+  );
+  return () => {
+    window.clearTimeout(timeoutId);
+  };
 }
 
 export function useConversationOverviewController({

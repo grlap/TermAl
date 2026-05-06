@@ -1538,6 +1538,111 @@ textarea {
   gap: 0.65rem;
 }
 
+.telegram-settings-card {
+  gap: 1rem;
+}
+
+.telegram-settings-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.telegram-settings-grid {
+  align-items: end;
+}
+
+.telegram-token-group {
+  grid-column: 1 / -1;
+}
+
+.telegram-enable-toggle {
+  min-height: 2.5rem;
+  align-self: end;
+}
+
+.telegram-project-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.telegram-project-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius-large);
+  background: var(--surface-white-soft);
+  color: var(--ink);
+}
+
+.telegram-project-option > span {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.telegram-project-option strong {
+  font-size: 0.9rem;
+}
+
+.telegram-project-option span span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.telegram-settings-actions {
+  align-items: center;
+}
+
+.telegram-setup-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius-large);
+  background: var(--surface-white-soft);
+}
+
+.telegram-setup-panel ol {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+
+.telegram-setup-panel li + li {
+  margin-top: 0.35rem;
+}
+
+.telegram-setup-panel pre {
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--code-bg);
+  color: var(--code-text);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.telegram-setup-panel code {
+  font-family: var(--code-font);
+  font-size: 0.8rem;
+}
+
+.telegram-settings-notice {
+  color: var(--success);
+}
+
+.telegram-settings-error {
+  color: var(--danger);
+}
+
 .settings-tab-panel {
   margin-top: 1rem;
   min-height: 0;
@@ -3974,7 +4079,7 @@ textarea {
   height: var(--icon-size-sm);
 }
 
-.conversation-message-marker-shell.can-open-marker-menu {
+.conversation-message-marker-shell.can-open-marker-menu .message-meta {
   cursor: context-menu;
 }
 
@@ -3986,8 +4091,15 @@ textarea {
   padding: 0.35rem;
   border: 1px solid var(--line);
   border-radius: var(--control-radius);
-  background: color-mix(in srgb, var(--surface-white) 92%, white 8%);
-  box-shadow: 0 20px 40px color-mix(in srgb, var(--ink) 14%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--paper-strong) 92%, var(--surface-white) 8%),
+      var(--paper-strong)
+    );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--surface-white) 18%, transparent),
+    0 20px 40px color-mix(in srgb, var(--shadow-color, black) 34%, transparent);
 }
 
 .conversation-marker-context-menu-item {
@@ -3995,6 +4107,7 @@ textarea {
   width: 100%;
   align-items: center;
   justify-content: flex-start;
+  min-height: 2.15rem;
   padding: 0.62rem 0.72rem;
   border: 0;
   border-radius: calc(var(--control-radius) - 2px);
@@ -4002,6 +4115,7 @@ textarea {
   color: var(--ink);
   cursor: pointer;
   font: inherit;
+  line-height: 1.2;
   text-align: left;
 }
 
@@ -4112,6 +4226,11 @@ textarea {
   cursor: pointer;
 }
 
+.conversation-overview-rail:focus-visible {
+  outline: 1px solid var(--signal-blue);
+  outline-offset: 2px;
+}
+
 .conversation-overview-item {
   position: absolute;
   left: var(--conversation-overview-lane-left);
@@ -4120,7 +4239,7 @@ textarea {
   padding: 0;
   border: 0;
   border-radius: 2px;
-  background: var(--text-muted);
+  background: var(--muted);
   opacity: 0.42;
   cursor: pointer;
 }
@@ -4167,8 +4286,27 @@ textarea {
 }
 
 .conversation-overview-item.is-mixed {
-  background: color-mix(in srgb, var(--text-muted) 72%, var(--signal-blue));
+  background: color-mix(in srgb, var(--muted) 72%, var(--signal-blue));
   opacity: 0.5;
+}
+
+.conversation-overview-visual-track {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--conversation-overview-lane-left);
+  width: var(--conversation-overview-lane-width);
+  border-radius: 2px;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+
+.conversation-overview-visual-segment {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  min-height: 1px;
+  border-radius: 2px;
 }
 
 .conversation-overview-marker {

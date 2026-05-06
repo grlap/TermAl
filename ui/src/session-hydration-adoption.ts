@@ -15,6 +15,7 @@ import type { Session } from "./types";
 
 export type SessionHydrationRequestContext = {
   allowDivergentTextRepairAfterNewerRevision?: boolean;
+  allowPartialTranscript?: boolean;
   messageCount: number | null;
   revision: number | null;
   serverInstanceId: string | null;
@@ -23,6 +24,7 @@ export type SessionHydrationRequestContext = {
 
 export type AdoptFetchedSessionOutcome =
   | "adopted"
+  | "partial"
   | "stale"
   | "stateResync"
   | "restartResync";
@@ -286,6 +288,12 @@ export function classifyFetchedSessionAdoption({
   }
 
   if (responseSession.messagesLoaded !== true) {
+    if (
+      requestContext.allowPartialTranscript === true &&
+      responseSession.messages.length > 0
+    ) {
+      return "partial";
+    }
     return "stale";
   }
 

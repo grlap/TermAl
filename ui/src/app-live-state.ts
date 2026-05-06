@@ -69,6 +69,7 @@ import {
 import {
   ApiRequestError,
   fetchSession,
+  fetchSessionTail,
   fetchState,
   isBackendUnavailableError,
   type CreateSessionResponse,
@@ -268,6 +269,8 @@ const SESSION_HYDRATION_RETRY_DELAYS_MS = [
   1000,
   3000,
 ] as const;
+const SESSION_TAIL_FIRST_HYDRATION_MESSAGE_COUNT = 100;
+const SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101;
 const SLOW_STATE_EVENT_WARNING_MS = 50;
 const STATE_EVENT_METADATA_PEEK_CHARS = 4096;
 
@@ -761,6 +764,24 @@ export function useAppLiveState(
     );
   }
 
+  function shouldStartTailFirstHydration(
+    sessionId: string,
+    options?: { allowDivergentTextRepairAfterNewerRevision?: boolean },
+  ) {
+    if (options?.allowDivergentTextRepairAfterNewerRevision === true) {
+      return false;
+    }
+    const session = sessionsRef.current.find((entry) => entry.id === sessionId);
+    if (!session || session.messagesLoaded !== false || session.messages.length > 0) {
+      return false;
+    }
+    const messageCount =
+      typeof session.messageCount === "number"
+        ? session.messageCount
+        : session.messages.length;
+    return messageCount >= SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES;
+  }
+
   function scheduleHydrationRetry(sessionId: string) {
     if (
       !isMountedRef.current ||
@@ -1205,11 +1226,17 @@ export function useAppLiveState(
       currentServerInstanceId: lastSeenServerInstanceIdRef.current,
       seenServerInstanceIds: seenServerInstanceIdsRef.current,
     });
-    if (adoptOutcome !== "adopted" || latestExistingIndex === -1) {
+    if (
+      (adoptOutcome !== "adopted" && adoptOutcome !== "partial") ||
+      latestExistingIndex === -1
+    ) {
       return adoptOutcome;
     }
 
-    const hydratedSession = { ...session, messagesLoaded: true };
+    const hydratedSession = {
+      ...session,
+      messagesLoaded: adoptOutcome === "adopted",
+    };
     const nextSessions = latestSessions.map((entry, index) =>
       index === latestExistingIndex ? hydratedSession : entry,
     );
@@ -1228,7 +1255,7 @@ export function useAppLiveState(
     flushAndCancelPendingSessionRender(nextSessions);
     setSessions(nextSessions);
     hydrationMismatchSessionIdsRef.current.delete(session.id);
-    return "adopted";
+    return adoptOutcome;
   }
 
   function startSessionHydration(
@@ -1251,6 +1278,65 @@ export function useAppLiveState(
     void (async () => {
       let shouldRetryHydration = false;
       try {
+        let attemptedTailHydration = false;
+        if (shouldStartTailFirstHydration(sessionId, options)) {
+          attemptedTailHydration = true;
+          const tailResponse = await fetchSessionTail(
+            sessionId,
+            SESSION_TAIL_FIRST_HYDRATION_MESSAGE_COUNT,
+          );
+          if (!isMountedRef.current) {
+            return;
+          }
+          if (tailResponse.session.id !== sessionId) {
+            if (!hydrationMismatchSessionIdsRef.current.has(sessionId)) {
+              hydrationMismatchSessionIdsRef.current.add(sessionId);
+              requestActionRecoveryResyncRef.current();
+            }
+            return;
+          }
+
+          const tailAdoptOutcome = adoptFetchedSession(
+            tailResponse.session,
+            tailResponse.revision,
+            tailResponse.serverInstanceId,
+            {
+              ...requestContext,
+              allowPartialTranscript: true,
+            },
+          );
+          switch (tailAdoptOutcome) {
+            case "partial":
+              break;
+            case "adopted":
+              clearHydrationRetry(sessionId);
+              hydratedSessionIdsRef.current.add(sessionId);
+              return;
+            case "restartResync":
+              hydrationRestartResyncPendingRef.current = true;
+              requestActionRecoveryResyncRef.current();
+              return;
+            case "stateResync":
+              requestActionRecoveryResyncRef.current();
+              shouldRetryHydration = true;
+              return;
+            case "stale":
+              break;
+            default: {
+              const _exhaustive: never = tailAdoptOutcome;
+              void _exhaustive;
+              break;
+            }
+          }
+        }
+
+        if (attemptedTailHydration && !sessionStillNeedsHydration(sessionId)) {
+          clearHydrationRetry(sessionId);
+          hydratedSessionIdsRef.current.add(sessionId);
+          return;
+        }
+        const fullRequestContext =
+          captureHydrationRequestContext(sessionId, options) ?? requestContext;
         const response = await fetchSession(sessionId);
         if (!isMountedRef.current) {
           return;
@@ -1268,12 +1354,15 @@ export function useAppLiveState(
           response.session,
           response.revision,
           response.serverInstanceId,
-          requestContext,
+          fullRequestContext,
         );
         switch (adoptOutcome) {
           case "adopted":
             clearHydrationRetry(sessionId);
             hydratedSessionIdsRef.current.add(sessionId);
+            break;
+          case "partial":
+            shouldRetryHydration = true;
             break;
           case "restartResync":
             hydrationRestartResyncPendingRef.current = true;

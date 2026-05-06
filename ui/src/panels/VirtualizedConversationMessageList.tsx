@@ -166,6 +166,7 @@ const IDLE_MOUNTED_COMPACTION_PAGE_HYSTERESIS = 2;
 const ACTIVE_VIEWPORT_STARTUP_RESYNC_FRAMES = 12;
 const BOTTOM_BOUNDARY_REVEAL_SETTLE_FRAMES = 12;
 const BOTTOM_BOUNDARY_REVEAL_DELAY_MS = 220;
+const POST_ACTIVATION_ESTIMATED_BOTTOM_MIN_PAGES = 20;
 const ACTIVE_SCROLL_MOUNTED_RANGE_COLLAPSE_EXTRA_PAGES = 12;
 const ACTIVE_SCROLL_MOUNTED_RANGE_COLLAPSE_MULTIPLIER = 2;
 export const VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS = 200;
@@ -407,6 +408,7 @@ export function VirtualizedConversationMessageList({
   conversationSearchMatchedItemKeys = EMPTY_MATCHED_ITEM_KEYS,
   conversationSearchActiveItemKey = null,
   onConversationSearchItemMount = () => {},
+  preferInitialEstimatedBottomViewport = false,
   virtualizerHandleRef,
   onApprovalDecision,
   onUserInputSubmit,
@@ -422,6 +424,7 @@ export function VirtualizedConversationMessageList({
   conversationSearchMatchedItemKeys?: ReadonlySet<string>;
   conversationSearchActiveItemKey?: string | null;
   onConversationSearchItemMount?: (itemKey: string, node: HTMLElement | null) => void;
+  preferInitialEstimatedBottomViewport?: boolean;
   virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
   onUserInputSubmit: UserInputSubmitHandler;
@@ -828,12 +831,56 @@ export function VirtualizedConversationMessageList({
     [estimateMessageHeight, layoutVersion, pages, viewportWidth],
   );
   const pageLayout = useMemo(() => buildPageLayout(pageHeights), [pageHeights]);
-  const rawViewportScrollTop = activeViewport ? activeViewport.scrollTop : viewport.scrollTop;
+  const estimatedBottomScrollTop = clampVirtualizedViewportScrollTop({
+    scrollTop: pageLayout.totalHeight - viewportHeight,
+    viewportHeight,
+    totalHeight: pageLayout.totalHeight,
+  });
+  const shouldUseEstimatedBottomViewport =
+    preferInitialEstimatedBottomViewport &&
+    isActive &&
+    isMeasuringPostActivation &&
+    pages.length >= POST_ACTIVATION_ESTIMATED_BOTTOM_MIN_PAGES &&
+    !hasConversationSearch &&
+    !hasUserScrollInteraction &&
+    pendingProgrammaticScrollTopRef.current === null &&
+    !isDetachedFromBottomRef.current;
+  const rawViewportScrollTop = shouldUseEstimatedBottomViewport
+    ? estimatedBottomScrollTop
+    : activeViewport
+      ? activeViewport.scrollTop
+      : viewport.scrollTop;
   const viewportScrollTop = clampVirtualizedViewportScrollTop({
     scrollTop: rawViewportScrollTop,
     viewportHeight,
     totalHeight: pageLayout.totalHeight,
   });
+  const resolveEstimatedBottomScrollTop = useCallback(
+    () => estimatedBottomScrollTop,
+    [estimatedBottomScrollTop],
+  );
+  const writeEstimatedScrollTopAndSyncViewport = useCallback(
+    (node: HTMLElement, nextScrollTop: number) => {
+      const targetScrollTop = Number.isFinite(nextScrollTop)
+        ? Math.max(nextScrollTop, 0)
+        : 0;
+      pendingProgrammaticScrollTopRef.current = targetScrollTop;
+      node.scrollTop = targetScrollTop;
+      setViewport((current) => {
+        const nextState = {
+          height: viewportHeight > 0 ? viewportHeight : current.height,
+          scrollTop: targetScrollTop,
+          width: viewportWidth > 0 ? viewportWidth : current.width,
+        };
+        return current.height === nextState.height &&
+          current.scrollTop === nextState.scrollTop &&
+          current.width === nextState.width
+          ? current
+          : nextState;
+      });
+    },
+    [viewportHeight, viewportWidth],
+  );
 
   const visiblePageRange = useMemo(() => {
     if (pages.length === 0) {
@@ -881,14 +928,21 @@ export function VirtualizedConversationMessageList({
     viewportHeight,
   ]);
 
-  const activeMountedBufferAbovePx = Math.max(
-    viewportHeight * ACTIVE_MOUNTED_RESERVE_ABOVE_VIEWPORTS,
-    DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
-  );
-  const activeMountedBufferBelowPx = Math.max(
-    viewportHeight * ACTIVE_MOUNTED_RESERVE_BELOW_VIEWPORTS,
-    DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
-  );
+  const activeMountedBufferAbovePx = shouldUseEstimatedBottomViewport
+    ? 0
+    : Math.max(
+        viewportHeight * ACTIVE_MOUNTED_RESERVE_ABOVE_VIEWPORTS,
+        DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
+      );
+  const activeMountedBufferBelowPx = shouldUseEstimatedBottomViewport
+    ? 0
+    : Math.max(
+        viewportHeight * ACTIVE_MOUNTED_RESERVE_BELOW_VIEWPORTS,
+        DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
+      );
+  const activeMountedExtraPagesBelow = shouldUseEstimatedBottomViewport
+    ? 0
+    : ACTIVE_MOUNTED_EXTRA_PAGES_BELOW;
   // Active scroll keeps a working set around the viewport instead of waiting
   // until the reader is close to a band edge. The reserve is intentionally
   // wider below the viewport because height overestimates show up there as
@@ -914,9 +968,10 @@ export function VirtualizedConversationMessageList({
     // visible blank slab.
     return {
       startIndex: baseRange.startIndex,
-      endIndex: Math.min(baseRange.endIndex + ACTIVE_MOUNTED_EXTRA_PAGES_BELOW, pages.length),
+      endIndex: Math.min(baseRange.endIndex + activeMountedExtraPagesBelow, pages.length),
     };
   }, [
+    activeMountedExtraPagesBelow,
     activeMountedBufferAbovePx,
     activeMountedBufferBelowPx,
     pageHeights,
@@ -2049,8 +2104,15 @@ export function VirtualizedConversationMessageList({
 
     const node = scrollContainerRef.current;
     if (node) {
-      const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-      writeScrollTopAndSyncViewport(node, target);
+      if (pages.length >= POST_ACTIVATION_ESTIMATED_BOTTOM_MIN_PAGES) {
+        writeEstimatedScrollTopAndSyncViewport(
+          node,
+          resolveEstimatedBottomScrollTop(),
+        );
+      } else {
+        const target = Math.max(node.scrollHeight - node.clientHeight, 0);
+        writeScrollTopAndSyncViewport(node, target);
+      }
     }
     if (pendingBottomBoundaryRevealFrameRef.current !== null) {
       return;
@@ -2060,9 +2122,11 @@ export function VirtualizedConversationMessageList({
     isActive,
     isMeasuringPostActivation,
     pages,
+    resolveEstimatedBottomScrollTop,
     scrollContainerRef,
     visiblePageRange.endIndex,
     visiblePageRange.startIndex,
+    writeEstimatedScrollTopAndSyncViewport,
     writeScrollTopAndSyncViewport,
   ]);
 
@@ -2080,23 +2144,37 @@ export function VirtualizedConversationMessageList({
       if (isDetachedFromBottomRef.current) {
         setIsMeasuringPostActivation(false);
         return;
-      }
-      const node = scrollContainerRef.current;
-      if (node) {
+    }
+    const node = scrollContainerRef.current;
+    if (node) {
+      if (pages.length >= POST_ACTIVATION_ESTIMATED_BOTTOM_MIN_PAGES) {
+        writeEstimatedScrollTopAndSyncViewport(
+          node,
+          resolveEstimatedBottomScrollTop(),
+        );
+      } else {
         const target = Math.max(node.scrollHeight - node.clientHeight, 0);
         writeScrollTopAndSyncViewport(node, target);
       }
-      if (pendingBottomBoundaryRevealFrameRef.current !== null) {
-        return;
-      }
-      shouldKeepBottomAfterLayoutRef.current = true;
-      setIsMeasuringPostActivation(false);
+    }
+    if (pendingBottomBoundaryRevealFrameRef.current !== null) {
+      return;
+    }
+    shouldKeepBottomAfterLayoutRef.current = true;
+    setIsMeasuringPostActivation(false);
     }, 150);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [isMeasuringPostActivation, scrollContainerRef, writeScrollTopAndSyncViewport]);
+  }, [
+    isMeasuringPostActivation,
+    pages.length,
+    resolveEstimatedBottomScrollTop,
+    scrollContainerRef,
+    writeEstimatedScrollTopAndSyncViewport,
+    writeScrollTopAndSyncViewport,
+  ]);
 
   useLayoutEffect(() => {
     if (!isActive || !shouldKeepBottomAfterLayoutRef.current || isDetachedFromBottomRef.current) {
@@ -2125,9 +2203,30 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
+    if (
+      isMeasuringPostActivation &&
+      pages.length >= POST_ACTIVATION_ESTIMATED_BOTTOM_MIN_PAGES
+    ) {
+      writeEstimatedScrollTopAndSyncViewport(
+        node,
+        resolveEstimatedBottomScrollTop(),
+      );
+      return;
+    }
+
     const target = Math.max(node.scrollHeight - node.clientHeight, 0);
     writeScrollTopAndSyncViewport(node, target);
-  }, [isActive, layoutVersion, pageLayout.totalHeight, scrollContainerRef, writeScrollTopAndSyncViewport]);
+  }, [
+    isActive,
+    isMeasuringPostActivation,
+    layoutVersion,
+    pageLayout.totalHeight,
+    pages.length,
+    resolveEstimatedBottomScrollTop,
+    scrollContainerRef,
+    writeEstimatedScrollTopAndSyncViewport,
+    writeScrollTopAndSyncViewport,
+  ]);
 
   useLayoutEffect(() => {
     if (!isActive || !pendingBottomBoundarySeekRef.current) {
@@ -2362,10 +2461,12 @@ export function VirtualizedConversationMessageList({
               ?.scrollSource ?? "programmatic")
           : "programmatic";
 
-      if (explicitScrollKind === "bottom_boundary") {
+      if (
+        explicitScrollKind === "bottom_pin" ||
+        explicitScrollKind === "bottom_boundary"
+      ) {
         pendingProgrammaticBottomFollowUntilRef.current =
           Number.NEGATIVE_INFINITY;
-        pendingBottomBoundarySeekRef.current = true;
         pendingProgrammaticScrollTopRef.current = node.scrollTop;
         lastNativeScrollTopRef.current = node.scrollTop;
         shouldKeepBottomAfterLayoutRef.current = true;
@@ -2379,8 +2480,15 @@ export function VirtualizedConversationMessageList({
         clearPendingDeferredLayoutTimer();
         clearPendingIdleCompactionTimer();
         pendingDeferredLayoutAnchorRef.current = null;
-        mountBottomBoundary(node);
-        scheduleBottomBoundaryReveal(node);
+        if (explicitScrollKind === "bottom_boundary") {
+          pendingBottomBoundarySeekRef.current = true;
+          mountBottomBoundary(node);
+          scheduleBottomBoundaryReveal(node);
+        } else {
+          pendingBottomBoundarySeekRef.current = false;
+          applyMountedPageRange(buildBottomMountedRange(node.clientHeight));
+          scheduleProgrammaticViewportSync(node);
+        }
         return;
       }
 

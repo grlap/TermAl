@@ -7,55 +7,838 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## `spawn_reviewer_batch` failure packets expose raw messages and drop structured error metadata
+## Telegram settings updates live outside the app state/revision model
 
-**Severity:** Medium - same disclosure shape that round-47/48 closed off in the wait/status path via `safeDelegationStatusFetchMessage`, plus callers lose the structured status metadata needed to handle expected failures.
+**Severity:** Medium - Telegram settings are user-visible configuration, but saves bypass `StateInner`, `commit_locked()`, snapshots, revisions, and SSE.
 
-`ui/src/delegation-commands.ts:978-987 reviewerBatchFailure`. The helper constructs `SpawnReviewerBatchFailure { index, title, message }` from a thrown `createDelegation` error via `error instanceof Error ? error.message : String(error)` — no allow-list redaction. The `createDelegation` POST goes through `request<DelegationResponse>`; a backend 500 can return `format!("failed to persist delegation: {err:#}")` and similar `internal(format!(...))` paths in `src/delegations.rs:404,432,451,549,608,819`. After `sanitizeUserFacingErrorMessage` (which only scrubs SSH/remote-connection wording), the message can still embed internal filesystem paths, sled/serde error chains, persistence path strings, or cwd/project path fragments and reaches a wrapper caller through the structured `failed[].message` field. The packet also drops `ApiRequestError` metadata such as status, kind, and `restartRequired`, so callers cannot distinguish active-limit conflicts from backend-unavailable or restart-required cases.
-
-**Current behavior:**
-- `reviewerBatchFailure` forwards `error.message` verbatim into the packet.
-- No allow-list or sanitizer redacts internal paths/error chains.
-- `ApiRequestError` status, kind, and restart-required metadata are discarded.
-- The packet is documented as the Phase-3 MCP wrapper surface.
-
-**Proposal:**
-- Introduce a `safeSpawnDelegationFailureMessage` (or extend the existing redactor) that allow-lists the deterministic backend `bad_request` strings the spawn route emits (prompt-empty, prompt-byte-limit, title/model length, cwd validation, write-policy/mode 501, "unknown project", "delegations for remote-backed", parent-not-found, MAX_RUNNING_DELEGATIONS_PER_PARENT) and the safe shapes from round-48 (`"The TermAl backend is unavailable."`, `Request failed with status N.`, the route diagnostic).
-- Anything else collapses to `"Spawn delegation failed."`.
-- Preserve safe structured error fields aligned with the existing delegation status-fetch error packet.
-- Apply the safe packet construction in `reviewerBatchFailure` before populating `failed[]`.
-- Mirror the redaction in `spawn_delegation`'s thrown error if/when that surface is exposed through the same wrapper.
-
-## `spawn_reviewer_batch` can report success across mixed backend instances
-
-**Severity:** Medium - revisions from different backend processes are not comparable, so a completed batch can advertise incoherent metadata after a backend restart during parallel spawns.
-
-`ui/src/delegation-commands.ts:273-287` builds a completed/partial/error result from parallel spawn results and `newestSpawnMetadata`. If all spawns succeed but their `serverInstanceId`s differ, `newestSpawnMetadata` returns the highest numeric revision and `serverInstanceId: null`, while `outcome` remains `"completed"`. The wait path treats mixed server instances as an error because revision numbers cannot be compared across processes.
+`src/telegram_settings.rs:30` updates `~/.termal/telegram-bot.json` directly through the Telegram settings endpoint. That means one browser tab can save config while other tabs keep stale settings until they manually refetch, and future relay lifecycle work will need to reconcile app state with a separate settings file.
 
 **Current behavior:**
-- Successful batch items from different backend instances still produce `outcome: "completed"`.
-- The result picks the highest numeric revision across incomparable revision streams.
-- `serverInstanceId` is nulled, but callers receive no error or recovery instruction.
+- Telegram settings updates do not bump the app revision.
+- `/api/state` and SSE do not carry the changed config.
+- Other open clients cannot observe settings changes through the normal state model.
 
 **Proposal:**
-- Detect mixed successful spawn metadata and return a structured error/partial outcome.
-- Or refetch successful delegation statuses from the current backend instance before reporting success.
-- Add coverage for a backend restart between parallel reviewer spawn responses.
+- Store Telegram UI config in durable app state and mutate it through `commit_locked()`.
+- If `telegram-bot.json` remains necessary for adapter interop, mirror committed state to that file behind a documented boundary.
 
-## New delegation readiness test mutates process-wide `PATH`
+## Telegram settings and relay state can overwrite each other in `telegram-bot.json`
 
-**Severity:** Medium - Rust tests run in parallel, so process-wide `PATH` mutation can make unrelated readiness/session tests nondeterministic on Windows, macOS, and Linux.
+**Severity:** Medium - the UI settings endpoint and Telegram relay both read-modify-write the same JSON file without a shared lock or safe merge protocol.
 
-`src/tests/delegations.rs:4697` uses `ScopedEnvVar::set_path("PATH", &empty_path)` to force Cursor readiness/setup failure while checking that metadata validation wins first. Other tests can resolve agent CLIs through `PATH` at the same time without holding the same mutex, so they may observe the empty path, fail unexpectedly, or cache bogus readiness state.
+`src/telegram_settings.rs:34` and `src/telegram.rs:196` both update `telegram-bot.json`. Concurrent `/api/telegram/config` calls, or a transitional `cargo run -- telegram` relay persisting cursor state while the UI saves config, can lose either UI-owned token/config fields or runtime-owned `chatId` / `nextUpdateId` fields. `persist_telegram_bot_state` also drops read/parse failures with `.ok()`, so a malformed or temporarily unreadable settings file can be treated as default and rewritten without existing config.
 
 **Current behavior:**
-- One test replaces process-wide `PATH` with an empty directory.
-- The Rust test harness can run unrelated tests concurrently.
-- Agent readiness helpers outside this test can observe the temporary empty `PATH`.
+- Settings saves and relay state persistence share one file.
+- Writes are read-modify-write operations without same-process or cross-process serialization.
+- Relay persistence defaults on read/parse failure and can overwrite existing config.
 
 **Proposal:**
-- Avoid mutating `PATH` for this ordering test.
-- Use a test-only readiness/setup failure injection point, or another deterministic way to prove metadata validation runs before agent setup.
+- Split UI config and runtime cursor/chat state into separate files, or guard all writes with a shared lock plus atomic reload-before-merge.
+- Default only on `NotFound`; otherwise propagate/log read/parse failures and avoid rewriting when existing config cannot be safely loaded.
+- Add interleaving coverage proving config and runtime state both survive competing writes.
+
+## Telegram bot token file is written without explicit secret permissions
+
+**Severity:** Medium - the saved Telegram bot token is a durable remote-control credential whose on-disk protection depends on umask or inherited ACLs.
+
+`src/telegram_settings.rs:39` accepts a bot token from the UI and persists it via plain `fs::write` to `~/.termal/telegram-bot.json`. The status response masks the token, but the file itself is not created or updated with explicit user-only permissions.
+
+**Current behavior:**
+- Bot tokens are stored in the local Telegram settings JSON file.
+- Unix file mode depends on process umask.
+- Windows file access depends on inherited directory ACLs.
+
+**Proposal:**
+- Prefer an OS secret store where available.
+- At minimum create/update the file with explicit user-only permissions and document platform fallback behavior.
+- Add a Unix regression that verifies restrictive permissions for the token file.
+
+## Telegram test endpoint maps upstream failures to backend-unavailable
+
+**Severity:** Medium - invalid Telegram tokens and Telegram API failures can surface as "The TermAl backend is unavailable" instead of an actionable Telegram error.
+
+`src/telegram_settings.rs:75` returns `ApiError::bad_gateway` from `/api/telegram/test`, while `ui/src/api.ts:1651` maps all 502/503/504 responses to `backend-unavailable` and discards the server `{ error }` body.
+
+**Current behavior:**
+- Telegram connection-test upstream failures use a 502-style response.
+- The frontend classifies that status family as TermAl backend unavailability.
+- The Telegram-specific failure body is not shown to the user.
+
+**Proposal:**
+- Return a status that the frontend treats as `request-failed`, or make frontend error classification path-aware for `/api/telegram/test`.
+- Add coverage for an invalid-token/upstream-failure response proving the UI shows the Telegram-specific message.
+
+## Telegram preferences panel has no frontend coverage
+
+**Severity:** Medium - the new settings UI owns async behavior and payload normalization without RTL coverage.
+
+`ui/src/preferences-panels.tsx:1214` adds `TelegramPreferencesPanel`, including initial load, save, test-connection, token masking, project/session filtering, default-project auto-subscription, stale default-session clearing, and notice/error states. No frontend tests currently reference `TelegramPreferencesPanel`, `fetchTelegramStatus`, `updateTelegramConfig`, or `testTelegramConnection`.
+
+**Current behavior:**
+- The Telegram tab renders a new stateful settings workflow.
+- Async load/save/test flows are untested.
+- Payload normalization and saved-token behavior are unpinned.
+
+**Proposal:**
+- Add React Testing Library coverage for initial status load, save payload normalization, saved-token test flow, API error display, and the AppDialogs Telegram tab path.
+
+## Telegram settings API leaks local paths in file-error responses
+
+**Severity:** Low - settings read/write failures can expose the user profile path and TermAl data directory through API error messages.
+
+`src/telegram_settings.rs:114` and related helpers include full settings paths in client-visible failures from `/api/telegram/status`, `/api/telegram/config`, and `/api/telegram/test`.
+
+**Current behavior:**
+- File read, parse, create, and write failures can include absolute local paths.
+- The detailed message is returned to the browser/API caller.
+
+**Proposal:**
+- Log detailed filesystem paths server-side.
+- Return generic client messages such as "failed to read Telegram settings" or "failed to save Telegram settings".
+
+## Telegram JSON body rejections bypass the project `ApiError` envelope
+
+**Severity:** Low - malformed Telegram settings request bodies can return Axum's default rejection shape instead of the project's `{ "error": ... }` contract.
+
+`src/telegram_settings.rs:260` and the sibling Telegram JSON body endpoint use direct `Json<T>` extraction. Other request-body endpoints that need consistent API errors accept `Result<Json<_>, JsonRejection>` and convert through `api_json_rejection`.
+
+**Current behavior:**
+- Malformed `/api/telegram/config` or `/api/telegram/test` JSON is handled by Axum extraction rejection.
+- Response shape can differ from the project `ApiError` JSON envelope.
+
+**Proposal:**
+- Mirror the existing `Result<Json<_>, JsonRejection>` pattern and convert malformed JSON through `api_json_rejection`.
+
+## `TelegramStatusResponse.subscribedProjectIds` wire shape does not match TypeScript
+
+**Severity:** Low - frontend callers can trust a required array that Rust omits when it is empty.
+
+`ui/src/api.ts:625` marks `TelegramStatusResponse.subscribedProjectIds` as required, but `src/wire.rs:1041` skips serializing the field when the vector is empty.
+
+**Current behavior:**
+- Rust omits `subscribedProjectIds` for an empty subscription list.
+- TypeScript declares the field as always present.
+- Future callers may crash or skip fallback logic by trusting the type.
+
+**Proposal:**
+- Always serialize an empty array from Rust, or mark the frontend field optional and normalize to `[]` at the API boundary.
+
+## Telegram routes and tail-session hydration are missing from the architecture endpoint table
+
+**Severity:** Low - newly implemented client-visible API behavior is not reflected in the central REST endpoint documentation.
+
+`src/main.rs:233` registers `/api/telegram/status`, `/api/telegram/config`, and `/api/telegram/test`, but `docs/architecture.md` does not list these routes in its endpoint table. The same table still describes `GET /api/sessions/{id}` as a full-session fetch even though the new `?tail=N` query can intentionally return a partial local transcript with `messagesLoaded: false`.
+
+**Current behavior:**
+- The feature brief mentions Telegram endpoints.
+- The architecture REST table omits methods, status/error semantics, and response shapes for the implemented Telegram routes.
+- The session-fetch contract does not document `tail`, the tail cap/semantics, or the partial-response shape.
+
+**Proposal:**
+- Add the Telegram routes to `docs/architecture.md` with methods, request/response shapes, and error semantics.
+- Document `GET /api/sessions/{id}?tail=N`, including when `messagesLoaded` is false and why callers must treat that response as a tail window rather than a full transcript.
+
+## Telegram preferences save/test handlers set state after awaited requests without an unmount guard
+
+**Severity:** Low - closing the settings dialog or switching away while a request is in flight can run React state updates after the panel unmounts.
+
+`ui/src/preferences-panels.tsx:1322` and the test-connection handler update `status`, `draft`, `notice`, `error`, `isSaving`, and `isTesting` after awaited API calls. The initial load effect has a cancellation guard, but the user-triggered save/test flows do not.
+
+**Current behavior:**
+- `handleSave` and `handleTestConnection` await network calls.
+- Post-await state updates are unconditional.
+- The component can unmount while the request is still pending.
+
+**Proposal:**
+- Track mounted state or use abortable requests and guard every post-await state update in both handlers.
+
+## Telegram settings UI belongs behind a focused module boundary
+
+**Severity:** Low - the Telegram panel adds a large independent API workflow to the already broad preferences panel module.
+
+`ui/src/preferences-panels.tsx:1214` adds several hundred lines of Telegram settings state, effects, API calls, payload shaping, and rendering to a file that already owns multiple preferences panels.
+
+**Current behavior:**
+- Telegram settings lifecycle/config UI lives inside `preferences-panels.tsx`.
+- Fetch/save/test behavior and render structure are coupled to the broad preferences module.
+
+**Proposal:**
+- Extract Telegram settings UI and its fetch/save/test hook into a dedicated preferences or telegram-settings module.
+
+## `UpdateTelegramConfigRequest` `Option<Option<String>>` cannot distinguish absent from null without `deserialize_with`
+
+**Severity:** High - bot_token, default_project_id, and default_session_id can never be cleared via `POST /api/telegram/config` because serde collapses both absent fields and `null` to outer `None`.
+
+`src/wire.rs:1052-1058`. The `Option<Option<String>>` shape is meant to express PATCH semantics ("field absent = don't update; field null = clear"), but without `#[serde(default, deserialize_with = "deserialize_nullable_marker_field")]` (the helper used for analogous marker fields at lines 393-401, 421-446 in the same file), serde treats both shapes identically. The backend's `if let Some(bot_token) = request.bot_token { ... }` arm therefore never fires for the clear case. The current Telegram preferences save flow sends `defaultProjectId: null` / `defaultSessionId: null` when clearing those fields (`ui/src/preferences-panels.tsx:1334`), so choosing "No default project/session" can appear to save but leave the old persisted values in place. `UpdateTelegramConfigPayload` in `ui/src/api.ts:632` also documents `botToken?: string | null`, so the same dead-letter path affects future token-clearing UI.
+
+**Current behavior:**
+- `Option<Option<String>>` fields use the default serde derivation.
+- `null` and absent JSON fields both deserialize to outer `None`.
+- The match arm that would clear the stored value never fires.
+- The current UI sends `null` to clear default project/session selections, so those values can remain stuck.
+
+**Proposal:**
+- Add `#[serde(default, deserialize_with = "deserialize_nullable_marker_field")]` to each `Option<Option<T>>` field on `UpdateTelegramConfigRequest`, mirroring `UpdateConversationMarkerRequest`'s `body`/`end_message_id`.
+- Or replace the `Option<Option<_>>` ladder with an explicit discriminated request (`bot_token: Option<TokenUpdate>` where `TokenUpdate::Clear`/`TokenUpdate::Set(String)`).
+- Add coverage where `null` is sent and the persisted value is cleared.
+
+## `src/telegram_settings.rs` ships with zero Rust tests for the validation gatekeeper and read-path sanitizer
+
+**Severity:** High - `validate_telegram_config` (auto-subscribe of `default_project_id`, auto-fill of `default_project_id` from `default_session_id`, cross-project session rejection) and `sanitize_telegram_config_for_current_state` (strip stale references on read) are entirely uncovered.
+
+`src/telegram_settings.rs:138-208 validate_telegram_config` and `:210-248 sanitize_telegram_config_for_current_state`. These are the gatekeepers for every persisted Telegram-relay config and the read-path safety net that protects every UI render against stale references. A subtle regression — flipping a comparison on lines 184-194, dropping the auto-subscribe at line 168, negating the retain check on lines 226-228 — would not be caught. The save flow in `TelegramPreferencesPanel.handleSave` already pre-includes `defaultProjectId` in `nextProjectIds`, so a backend regression that quietly clears subscriptions cannot be observed through UI tests either.
+
+**Current behavior:**
+- `validate_telegram_config` has no tests covering auto-subscribe, auto-fill, unknown project rejection, unknown session rejection, session-belongs-to-different-project rejection, or no-project-on-session rejection.
+- `sanitize_telegram_config_for_current_state` has no tests for the cross-project default-session clearing branch.
+- `mask_telegram_bot_token`, `normalize_project_id_list`, `normalize_optional_id`, `normalize_optional_secret` are all uncovered pure functions.
+- The three HTTP route handlers (`get_telegram_status`, `update_telegram_config`, `test_telegram_connection`) have no router-level integration test.
+
+**Proposal:**
+- Add `src/tests/telegram_settings.rs` with focused cases for each branch in `validate_telegram_config` and `sanitize_telegram_config_for_current_state`.
+- Add unit tests for `mask_telegram_bot_token` (empty, all-whitespace, < 8 chars, unicode, full-length token) and `normalize_project_id_list` (dedup with whitespace, empty filtering).
+- Add a router-level test that hits each new `/api/telegram/...` route and asserts JSON shape.
+
+## Inconsistent mutex error handling in `src/telegram_settings.rs` deviates from project convention
+
+**Severity:** Medium - the new module uses `lock().map_err(|_| ApiError::internal("state lock poisoned"))?` and a silent `let Ok(inner) = ... else { return config; }` while every other file in `src/` (50+ call sites in delegations.rs, app_boot.rs, codex_submissions.rs, paths.rs, etc.) uses the documented `expect("state mutex poisoned")` pattern.
+
+`src/telegram_settings.rs:142 validate_telegram_config` uses `map_err`; `:214 sanitize_telegram_config_for_current_state` uses silent fallback. Project convention (CLAUDE.md, accepted-patterns list) is `expect("state mutex poisoned")` so a poisoned mutex aborts the process and supervision restarts. Catching the poison and returning a 500 means the next request silently sees corrupted state. The two patterns within one module also disagree: a poisoned-mutex event would 500 on `update_telegram_config` but silently return unsanitized config on the read path.
+
+**Current behavior:**
+- `validate_telegram_config` returns `ApiError::internal("state lock poisoned")` on poisoned mutex.
+- `sanitize_telegram_config_for_current_state` silently returns the unmodified config.
+- Both diverge from the project's documented `expect("state mutex poisoned")` pattern.
+
+**Proposal:**
+- Replace both with `let inner = self.inner.lock().expect("state mutex poisoned");` to match project convention.
+- Or document explicitly why this module intentionally diverges.
+
+## `delete_project` does not prune Telegram config; persisted file accumulates stale project/session ids
+
+**Severity:** Medium - when a project is deleted, `subscribed_project_ids` / `default_project_id` / `default_session_id` referencing that project remain in `~/.termal/telegram-bot.json`. The read path masks them via `sanitize_telegram_config_for_current_state`, but the file is never rewritten.
+
+`src/session_crud.rs:478-523 delete_project` and `src/telegram_settings.rs:210-248`. A project re-created later with the same id would silently re-subscribe Telegram. The relay loop in `src/telegram.rs` reads the unsanitized list directly. The masked-on-read approach also produces protocol-level dishonesty: `TelegramStatusResponse.subscribedProjectIds` shown to the client may not match what's in the saved file.
+
+**Current behavior:**
+- Project deletion does not touch `~/.termal/telegram-bot.json`.
+- Read-time `sanitize_telegram_config_for_current_state` masks the stale ids on GET, but persisted state remains stale.
+- Relay loop reads the persisted unsanitized ids.
+
+**Proposal:**
+- `delete_project` should call into the Telegram-settings module to prune the deleted project id (and its sessions) from the saved config so on-disk state stays canonical.
+- Or sanitize and persist on every read (paying an extra write per status fetch).
+- Add coverage proving project deletion prunes Telegram subscriptions on disk.
+
+## `useInitialActiveTranscriptMessages` mutates a ref during render
+
+**Severity:** Medium - the new long-session tail-window hook writes `hydrationRef.current.sessionId` and `hydrationRef.current.hydrated = true` during render, breaking React 18 Strict Mode / concurrent rendering invariants.
+
+`ui/src/panels/AgentSessionPanel.tsx:236-285`. The hook is part of the long-session tail-window path that activates only on transcripts above ~512 messages. Concurrent renders can flip `hydrated: true` before the actual commit, causing the windowing optimization to be skipped on first paint of large sessions. Worse, the second render re-keys the ref, potentially losing the "I started hydrating" intent. Most hooks in `panels/` use `useState` for derived-from-prop state with explicit reset effects.
+
+**Current behavior:**
+- `if (hydrationRef.current.sessionId !== sessionId) { hydrationRef.current = { hydrated: false, sessionId }; }` mutates during render (line 242-247).
+- `if (!isTailEligible && messages.length > INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES) { hydrationRef.current.hydrated = true; }` mutates during render (line 255-257).
+- Strict Mode double-invoke fires the mutation twice without committing.
+
+**Proposal:**
+- Convert to `useState` with `useEffect` reset.
+- Or use the React-docs "derived state" pattern: `const [prevSessionId, setPrev] = useState(sessionId); if (prevSessionId !== sessionId) { setPrev(sessionId); setHydrated(false); }`.
+- Add Strict Mode coverage proving the windowing path still activates after a double-render.
+
+## Active-transcript tail-window hook overlaps with `VirtualizedConversationMessageList`'s bottom-mount path
+
+**Severity:** Medium - two layers (panel + virtualizer) gate "skip work for the tail" with different thresholds and different effects on dependent UI.
+
+`ui/src/panels/AgentSessionPanel.tsx:175-286 useInitialActiveTranscriptMessages` windows messages to the last 96 before passing them to `ConversationMessageList` → `VirtualizedConversationMessageList`. The virtualizer's `preferInitialEstimatedBottomViewport` (round 53 addition) mounts the bottom range without rendering all messages above. The hook drops messages from React's perspective entirely (so `messageCount` becomes 0 → overview rail hides via `messageCount: isInitialTranscriptWindowActive ? 0 : visibleMessages.length` at line 804), while the virtualizer would just not mount unused slabs. A future reader changing the threshold has two places to keep in sync.
+
+**Current behavior:**
+- Hook drops messages above a 512-message session threshold, returning a 96-message tail.
+- Virtualizer mounts only the bottom-of-viewport range via `preferInitialEstimatedBottomViewport`.
+- Overview-rail gating uses `messageCount: 0` when the hook is windowing, hiding the rail.
+
+**Proposal:**
+- Move all "long session initial mount" logic into the virtualizer alone, then drop the hook.
+- Or document the layer split with a header comment naming which problem each layer owns and why two layers exist.
+
+## `update_telegram_config` validation and persist not atomic; concurrent calls produce stale-write last-writer-wins race
+
+**Severity:** Medium - even within the backend process, two concurrent `POST /api/telegram/config` requests can both validate against the same `inner` snapshot, both load the same file copy, both validate independently, and the second write overwrites the first.
+
+`src/telegram_settings.rs:34-56 update_telegram_config`. `validate_telegram_config` takes the state mutex briefly, releases it, then `persist_telegram_bot_file(&file)?` writes. Independent of the cross-process race documented in the existing "Telegram settings and relay state can overwrite each other" entry, this intra-process race can occur even when the standalone CLI relay isn't running. Symptoms: enabled-toggle flapping, subscription-list overwrites, default-project changes silently dropped under concurrent UI saves.
+
+**Current behavior:**
+- `validate_telegram_config` releases the state lock before `persist_telegram_bot_file` runs.
+- Two concurrent HTTP updates can interleave validation and writes.
+- No backend coordination between the two requests.
+
+**Proposal:**
+- Take a process-wide async mutex (e.g., `tokio::sync::Mutex` shared via `AppState`) covering load → mutate → validate → persist.
+- Or acquire a file lock around the read-modify-write window (paired with the cross-process fix).
+- Add coverage that drives two overlapping `update_telegram_config` calls and asserts the second observes the first's write.
+
+## Telegram settings HTTP API split across three routes diverges from `/api/settings` convention
+
+**Severity:** Medium - every other settings surface uses `POST /api/settings` returning `StateResponse` with SSE broadcast; Telegram uses `GET /api/telegram/status` + `POST /api/telegram/config` + `POST /api/telegram/test` returning `TelegramStatusResponse` with no broadcast.
+
+`src/main.rs:233-235`. The `/test` route reasonably stays separate (genuinely a side-effecting outbound call). But splitting the GET/POST status+config into its own route is a divergence from the established pattern. The split also means none of the rest of the codebase's settings infrastructure (revision bumping, SSE broadcast, partial-payload merging via `UpdateAppSettingsRequest`) applies. A future caller scripting via the API has two patterns to learn.
+
+**Current behavior:**
+- Existing settings flow through `POST /api/settings` returning `StateResponse` (broadcast via SSE).
+- Telegram settings use three new routes returning custom `TelegramStatusResponse` (not broadcast).
+- The divergence is unexplained in code or docs.
+
+**Proposal:**
+- Fold the Telegram config bag into `UpdateAppSettingsRequest` with a `telegram: Option<UpdateTelegramConfigRequest>` field, returning `StateResponse` like every other setting.
+- Or document explicitly in `docs/features/` why Telegram is intentionally separated (e.g., "secret tokens kept out of the broadcast snapshot").
+
+## `mask_telegram_bot_token` reveals 8 of ~35-46 chars (~17-23% of secret)
+
+**Severity:** Medium - industry convention (GitHub, Stripe, AWS) is at most 4 chars of suffix. `****<last 8>` is over-disclosed and the masked value renders in DOM as a placeholder, visible to shoulder surfers, screenshots, and screen-share recordings.
+
+`src/telegram_settings.rs:299-308`. Telegram bot tokens are `<bot_id>:<35-char_secret>` (e.g., `1234567890:ABCdefGHIjklMNOpqrstUVwxYZ012345678`). Eight trailing characters cover 8 chars of the secret half. By itself this does not enable token recovery via brute-force, but the masked value is rendered in the preferences panel `<input>` placeholder (`ui/src/preferences-panels.tsx:1391`), making it visible in any screenshot or screen share of the settings dialog.
+
+**Current behavior:**
+- Masking shows `****<last 8 chars>` of the saved token.
+- The masked value is rendered in `<input placeholder>`.
+- Industry practice (GitHub, Stripe, AWS) shows 4 or fewer chars.
+
+**Proposal:**
+- Reduce suffix to 4 characters (`****<last 4>`).
+- Or show only the public `<bot_id>` prefix (the part before `:`) which is non-secret.
+- If "user can verify which token they configured" is the only goal, the last 4 chars are sufficient.
+
+## `POST /api/telegram/test` is non-idempotent, has no rate limit, and falls back to saved-on-disk token
+
+**Severity:** Medium - a script or wrapper can fan out parallel POSTs against api.telegram.org with no concurrency guard or per-token cooldown. The saved-token fallback also enables verify-by-side-effect (200 vs 502) of the saved token without knowing it.
+
+`src/telegram_settings.rs:58-85`. Phase 1 single-user local mitigates the practical risk, but the route is the only Telegram endpoint that can fail with an outbound network error (502 `bad_gateway`), making it the most exposed surface on this endpoint family. The fallback path means a caller who only knows the route URL but not the token can still confirm whether the saved token is valid.
+
+**Current behavior:**
+- No per-process semaphore or token-bucket on the test endpoint.
+- The saved-token fallback fires when no body token is supplied.
+- Repeated calls fan out to api.telegram.org with no rate limit.
+
+**Proposal:**
+- Add a per-process semaphore (one in-flight call at a time, max N per minute).
+- Reduce the saved-token fallback to "only when the request body explicitly opts in" via `useStoredToken: true`.
+- Both are preventive; not blocking for Phase 1.
+
+## `load_telegram_bot_file` silent fallback in `test_telegram_connection` masks parse failures
+
+**Severity:** Medium - a corrupt/unparseable settings file silently degrades the test endpoint to "Telegram bot token is required" rather than surfacing the parse failure. `update_telegram_config` propagates the parse error correctly, so error-disclosure shape differs across two adjacent endpoints.
+
+`src/telegram_settings.rs:62-69`. The `.ok()` swallow of `load_telegram_bot_file` failures means a user who can't run a connection test sees a misleading error. They then try to re-enter the token via `update_telegram_config`, which DOES propagate the parse error, surfacing the underlying issue. Two adjacent endpoints in the same module produce different error-disclosure shapes for the same underlying failure.
+
+**Current behavior:**
+- `test_telegram_connection` calls `load_telegram_bot_file().ok()` and silently treats failures as no-token.
+- `update_telegram_config` propagates parse failures via `?`.
+- Test endpoint surfaces "token is required" even when the saved file is corrupt.
+
+**Proposal:**
+- Propagate the load failure in `test_telegram_connection` (collapse to "could not read Telegram settings" rather than silently falling back).
+- Or document the asymmetric fallback contract in the file header.
+
+## `ConversationOverviewRail` roving tabindex stuck on the first segment
+
+**Severity:** Medium - keyboard focus continuity is broken. `tabIndex={index === 0 ? 0 : -1}` is purely a function of the rendered index, not of "currently focused". After arrow-key navigation focuses a non-first segment, Tab-leaving and Tab-returning resets focus to the first segment.
+
+`ui/src/panels/ConversationOverviewRail.tsx:288`. The standard roving tabindex pattern requires the focused element to carry `tabIndex=0` while all others carry `-1`. As implemented, the rail does not track which segment is focused, so Tab-out-and-back loses position. Combined with the documented arrow-key navigation, this is a regression for keyboard users navigating long transcripts.
+
+**Current behavior:**
+- Only segment index 0 carries `tabIndex=0`; all others carry `-1`.
+- Arrow-key navigation moves focus but doesn't update tabIndex.
+- Tab-out-and-back returns focus to segment 0, not the last interacted segment.
+
+**Proposal:**
+- Track `focusedSegmentIndex` in state, set it on segment focus, render `tabIndex={index === focusedSegmentIndex ? 0 : -1}`.
+- Add coverage that focuses a non-first segment, blurs the rail, refocuses, and asserts focus restores to the previously-interacted segment.
+
+## `ConversationOverviewRail` `event.preventDefault()` in compact-mode pointerdown blocks default focus
+
+**Severity:** Medium - in compact mode the outer rail has `tabIndex={0}` to enable keyboard navigation, but `handleRailPointerDown` calls `event.preventDefault()` unconditionally, suppressing the default focus assignment on pointerdown. Click-then-arrow-keys interaction is broken; the user must Tab to the rail first.
+
+`ui/src/panels/ConversationOverviewRail.tsx:115-131`. The preventDefault is needed to suppress text selection during drag, but it also blocks the browser from moving focus to the rail. Clicking on the compact rail navigates to the chosen segment but leaves focus elsewhere; subsequent arrow keys do not reach `handleCompactRailKeyDown`.
+
+**Current behavior:**
+- Rail has `tabIndex={0}` in compact mode.
+- `handleRailPointerDown` calls `event.preventDefault()` unconditionally.
+- Click does not move focus to the rail; arrow keys after click don't navigate.
+
+**Proposal:**
+- Conditionally call `event.preventDefault()` only when not in compact mode.
+- Or explicitly call `event.currentTarget.focus()` after preventDefault in compact mode.
+- Add coverage that clicks the compact rail and asserts subsequent ArrowDown navigates.
+
+## Compact `ConversationOverviewRail` hides operable semantics behind a navigation landmark
+
+**Severity:** Low - compact mode makes the rail keyboard-focusable and operable, but screen readers only receive a `navigation` landmark with hidden segment semantics.
+
+`ui/src/panels/ConversationOverviewRail.tsx:235`. Once the overview crosses the compact threshold, per-segment buttons collapse into a single focusable rail. Keyboard handlers still make it an interactive control, but the element keeps `role="navigation"` and no equivalent current-position or segment-label semantics are exposed.
+
+**Current behavior:**
+- Compact mode has keyboard behavior on the outer rail.
+- Segment semantics are no longer represented as individual buttons.
+- Assistive tech sees a navigation landmark rather than an operable widget with position/selection state.
+
+**Proposal:**
+- Model compact mode with an appropriate widget role and ARIA state, or preserve accessible reduced segment buttons while using the compact visual track.
+- Add accessibility-focused coverage for compact mode role/name/state.
+
+## `validate_telegram_config` does TOCTOU between in-memory validation and on-disk persistence
+
+**Severity:** Low - the validation reads `inner.projects` and `inner.sessions` while holding the state mutex, releases the lock, then `persist_telegram_bot_file(&file)?` writes. Between release and write, another thread could delete the validated project, leaving a persisted config that references a now-missing project.
+
+`src/telegram_settings.rs:138-208`. The lock is correctly NOT held across I/O — that's the right call — but the TOCTOU window means the next status fetch will silently strip the dropped project ID via `sanitize_telegram_config_for_current_state`, which can be surprising to the user who just clicked Save. The read-time sanitize covers the symptom but not the underlying inconsistency.
+
+**Current behavior:**
+- Validation acquires the mutex briefly, then drops it.
+- Persistence runs without holding the mutex.
+- A concurrent project deletion between validation and persistence persists a stale reference.
+
+**Proposal:**
+- Add a header comment explaining the TOCTOU model and the sanitize-on-read recovery path.
+- Or run `sanitize_telegram_config_for_current_state` after `validate_telegram_config` so the persisted file matches what the next read would return.
+
+## `TelegramPreferencesPanel` does not memoize handlers, diverging from sibling preference panels
+
+**Severity:** Low - `projectOptions` and `sessionOptions` are memoed, but `updateDraft`, `toggleProject`, `handleSave`, `handleTestConnection`, and the inline `onChange` lambdas at lines 1797, 1822, 1834 are recreated on every render. The two `ThemedCombobox` controls receive new function identity on every keystroke. Pattern divergence with `RemotePreferencesPanel` and other sibling panels in the same file.
+
+`ui/src/preferences-panels.tsx:1214-1971`. A future reader copy-pasting from one panel to another now has two patterns to choose from.
+
+**Current behavior:**
+- Handlers are recreated on every render.
+- Sibling preference panels in the same file memoize handlers.
+- ThemedCombobox children receive new identity on every keystroke.
+
+**Proposal:**
+- Stabilize handlers via `useCallback`.
+- Or document explicitly that the panel intentionally avoids memoization. Either is fine; consistency is the architectural goal.
+
+## `UpdateTelegramConfigRequest` `Option<Option<String>>` PATCH-tristate pattern lacks doc comment
+
+**Severity:** Low - the double-Option pattern is non-obvious, load-bearing, and inconsistent with every other PATCH-style endpoint in `wire.rs`.
+
+`src/wire.rs:1052-1058`. The pattern is supposed to distinguish "field absent" from "field null" (see the High-severity entry above for why it doesn't actually work without `deserialize_with`). Even after that fix, a reader scanning the file will see `Option<Option<String>>` without explanation. A reader could simplify to single `Option` and silently break the PATCH semantics.
+
+**Current behavior:**
+- Three fields use `Option<Option<String>>` with no inline doc comment.
+- Every other PATCH endpoint in `wire.rs` uses single `Option`.
+- The pattern's PATCH semantics are not self-documenting.
+
+**Proposal:**
+- Add a `///` comment to each `Option<Option<...>>` field explaining the PATCH semantics.
+- Or define a `PatchField<T>` newtype for clarity.
+
+## `src/telegram_settings.rs` module header doesn't enumerate critical invariants
+
+**Severity:** Low - the header explains the file format transition but does not document the two-writer race, validation TOCTOU, divergent lock-error handling, or sanitize-on-read recovery model.
+
+`src/telegram_settings.rs:1-9`. The header describes "the relay loop still reads the legacy flat runtime fields … the file format below keeps those fields flat and adds a `config` object", but does not document: (a) the two-writer race with the standalone CLI relay, (b) the validation TOCTOU window, (c) why the lock-error handling diverges from project convention, or (d) the sanitize-on-read recovery model. This is the entry point for the next reader who needs to extend the module (e.g., the Phase 1 in-process relay lifecycle).
+
+**Current behavior:**
+- Header enumerates the file-format transition but no invariants.
+- Future readers risk regressing the implicit contracts.
+
+**Proposal:**
+- Extend the header to enumerate (a) what owns what in the file, (b) coordination assumptions between writers, (c) lock-failure / IO-failure recovery model.
+
+## `persist_telegram_bot_state` reads-then-writes the file unconditionally on every state change
+
+**Severity:** Low - the relay polls every `TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS` (5s default) and writes whenever `dirty`. The new logic adds a `fs::read` + `serde_json::from_slice` round-trip on every persist, doubling syscalls.
+
+`src/telegram.rs:190-205`. Modest cost on its own. More concerning: if the file is concurrently being rewritten by the HTTP route, `fs::read` could observe a partial write (since `fs::write` truncates and rewrites without atomicity), and the relay would silently `unwrap_or_default()` — meaning a corrupt-read is treated as "first ever persist" and the next write erases the `config` portion. Pairs with the existing "Telegram settings and relay state can overwrite each other" entry.
+
+**Current behavior:**
+- Each persist does `fs::read` + parse + merge + `fs::write`.
+- A partial-read mid-concurrent-write silently degrades to defaults.
+- The next write erases legitimate config.
+
+**Proposal:**
+- Combine with the atomic-write fix on the existing two-writer-race entry.
+- Distinguish "file does not exist" (legitimate first-run) from "file exists but unparseable mid-write" (warn + retry).
+
+## `validate_telegram_config` mutates `&mut TelegramUiConfig` despite the "validate" name
+
+**Severity:** Low - the function name implies a read-only check, but it auto-fills `default_project_id` from a session and auto-pushes the inferred project id into `subscribed_project_ids`. A reader of the call site `self.validate_telegram_config(&mut file.config)?;` has to remember that it also normalizes/back-fills.
+
+`src/telegram_settings.rs:172-205`. Re-running validation on already-validated data is not idempotent if `default_project_id` was just inferred. Also pairs with the next entry: the inferred `session_project_id` is not re-validated against `known_projects`, so an orphan session record can backfill an orphan project id.
+
+**Current behavior:**
+- `validate_*` name implies pure check, but the function rewrites the config.
+- Auto-subscribe and auto-fill are silent side effects.
+
+**Proposal:**
+- Rename to `validate_and_normalize_telegram_config` (or split into `normalize_telegram_config` + `validate_telegram_config`).
+- Or move auto-push/back-fill into `update_telegram_config` immediately before the validation call, leaving validation read-only.
+
+## `validate_telegram_config` doesn't re-validate auto-filled `session_project_id` against known projects
+
+**Severity:** Low - when a `default_session_id` is set without a `default_project_id`, the auto-filled `session_project_id` is not re-checked against `known_projects` before being assigned to `default_project_id`.
+
+`src/telegram_settings.rs:184-194`. If a session record references a project that has been deleted (e.g., a stale session record where `inner.projects` has lost the entry), the validator silently writes that orphan project id into `config.default_project_id`. The next `sanitize_telegram_config_for_current_state` call (on read) clears it again, so the user sees inconsistent persisted-vs-displayed state.
+
+**Current behavior:**
+- Session lookup returns a `session.project_id`.
+- The id is assigned to `default_project_id` without `known_projects.contains(...)` re-check.
+- `sanitize_*` later strips the orphan on read, masking the inconsistency.
+
+**Proposal:**
+- After resolving `session_project_id`, run the same `known_projects.contains(...)` check before assigning.
+- Or eliminate the auto-fill entirely and reject the request with `default_project_id is required when default_session_id is set` so the UI is in charge of consistency.
+
+## `TelegramUiConfig` derives `Debug` while holding the bot token in plaintext
+
+**Severity:** Low - latent leakage risk. Today no code path Debug-formats a `TelegramUiConfig` value, but anyone who later adds `tracing::debug!("config = {config:?}")` or `.expect(format!("invalid config: {config:?}"))` would silently log the plaintext token.
+
+`src/wire.rs:1014-1027`. The existing `TelegramApiClient` and `TelegramBotConfig` (both in `src/telegram.rs`) deliberately do NOT derive `Debug` for the same reason — this new struct breaks that pattern. The same applies to `TelegramBotFile` in `src/telegram_settings.rs:11-18` which contains `TelegramUiConfig` and would transitively expose it.
+
+**Current behavior:**
+- `TelegramUiConfig` derives `Debug`.
+- Token is held in `bot_token: Option<String>`.
+- Any future Debug-format would log plaintext.
+
+**Proposal:**
+- Remove `Debug` from the derive list.
+- Or implement `Debug` manually with a redacted `bot_token` field (e.g., `f.debug_struct("TelegramUiConfig").field("bot_token", &"<redacted>")...`).
+
+## `redact_telegram_bot_tokens` only matches `/bot<TOKEN>/` URL pattern; future formats slip through
+
+**Severity:** Low - the redactor relies on the literal `/bot` substring followed by `/`. Catches the standard reqwest URL leak but misses any future error format that prints the token in another shape.
+
+`src/telegram.rs:228-240`. Examples of misses: a `Display` impl that quotes the token, an HTTP-redirect chain to a path that doesn't include `/bot`, a debug log of headers if `Authorization`-style headers were ever introduced, or a panic message that includes the constructed `api_base_url` field outside a URL context.
+
+**Current behavior:**
+- Substring filter on `/bot<TOKEN>/` catches reqwest URL leaks.
+- Other token-bearing log paths are not covered.
+- The implementation depends on Telegram tokens never containing `/`.
+
+**Proposal:**
+- Complement with a value-based redactor that strips any substring matching the bot-token regex (`\d+:[A-Za-z0-9_-]{30,}`).
+- Document the contract in a comment so a future reviewer knows the substring filter is the load-bearing leak guard.
+
+## No length validation on `bot_token`, `default_project_id`, `default_session_id`, or `subscribed_project_ids`
+
+**Severity:** Low - a malicious local request could submit `bot_token: "A".repeat(9 * 1024 * 1024)` — under the 10MB body limit but enough to fill `~/.termal/telegram-bot.json` with megabytes of junk.
+
+`src/telegram_settings.rs:30-56` + `src/wire.rs:1012-1029`. Phase 1 single-user trust boundary makes this practically unexploitable, but the absence of any sanity check is worth noting.
+
+**Current behavior:**
+- No `MAX_BOT_TOKEN_LEN`, `MAX_PROJECT_ID_LEN`, or `MAX_SUBSCRIBED_PROJECTS` cap.
+- A multi-MB JSON body is accepted up to the global 10MB limit.
+
+**Proposal:**
+- Add `MAX_BOT_TOKEN_LEN` (256 bytes), `MAX_PROJECT_ID_LEN` (256 bytes), `MAX_SUBSCRIBED_PROJECTS` cap.
+- Reject in `update_telegram_config` with `ApiError::bad_request`.
+
+## `SessionPaneView` `paneScrollPositions` in deps adds no reactivity
+
+**Severity:** Low - the dependency on the dictionary identity is stable across renders for the same `pane.id`; mutations inside the dictionary do not trigger the effect. False reactivity impression for future readers.
+
+`ui/src/SessionPaneView.tsx:1869-1900`. Either drop the dep with an `eslint-disable` comment explaining why, or capture the dependency narrowly (e.g., `paneScrollPositions[scrollStateKey]?.shouldStick`).
+
+**Current behavior:**
+- `paneScrollPositions` dict identity is stable across renders.
+- Mutations inside the dict don't trigger the effect.
+- The dep gives a false impression of reactivity.
+
+**Proposal:**
+- Drop the dep with an `eslint-disable` comment, or narrow to the specific value being read.
+
+## `ConversationOverviewRail` per-segment fresh handlers and aria-label per render
+
+**Severity:** Low - up to 160 segment buttons each get fresh `onClick`/`onKeyDown` arrow functions per render, plus a fresh `aria-label` string from `overviewSegmentLabel(segment, projection.items)` (an O(n) lookup against `projection.items.length`).
+
+`ui/src/panels/ConversationOverviewRail.tsx:267-289`. Acceptable today, but as transcripts grow this is the next hot spot if rail rebuilds churn.
+
+**Current behavior:**
+- Each render creates 160 arrow functions and 160 aria-label strings.
+- aria-label computation is O(n) against `projection.items`.
+
+**Proposal:**
+- Memoize per-segment handlers via a single delegated handler that reads the segment index from `data-conversation-overview-index`.
+- Cache aria-labels alongside the segments.
+
+## `ThemedCombobox` `useEffect` deps include `activeIndex`, tearing down listeners per keystroke
+
+**Severity:** Low - the outside-pointer/keyboard handler effect re-attaches the global `pointerdown`/`keydown` listeners every time `activeIndex` changes (every ArrowUp/ArrowDown).
+
+`ui/src/preferences-panels.tsx:1782-1859`. Functionally correct, but wasteful. If the same keystroke that triggered the change also fires a synthetic `keydown`, ordering between "old listener cleanup" and "new listener registration" is invisible to React.
+
+**Current behavior:**
+- Effect deps `[activeIndex, isOpen, onChange, options]` rebuild listeners per keystroke.
+- Each open menu sees attach/detach churn.
+
+**Proposal:**
+- Move `activeIndex` into a ref synchronized with the state update; drop it from deps.
+- Or split the effect into "attach listeners once when open" + "read activeIndex from a ref".
+
+## `TelegramStatusResponse.lifecycle` is a stringly-typed enum
+
+**Severity:** Low - backend hardcodes `"manual"` for Phase 0; frontend treats it as opaque (`status.lifecycle === "manual"` string compare). When Phase 1 introduces other values, a typo on either side fails silently.
+
+`src/wire.rs:1036` + `ui/src/preferences-panels.tsx:1526`. All other lifecycle-style fields in the codebase (e.g., `SessionStatus`, `CodexThreadState`, `ParallelAgentStatus`) are typed enums with `#[serde(rename_all = "lowercase")]`.
+
+**Current behavior:**
+- `lifecycle: String` on the response.
+- Frontend uses string comparison.
+- No type safety against typos.
+
+**Proposal:**
+- Define a `TelegramLifecycle` enum (`Manual`, plus future variants behind feature flags or `#[serde(other)]`).
+- Frontend gets `lifecycle: "manual" | "supervised" | ...` instead of `string`.
+- Land before Phase 1 introduces new lifecycle values.
+
+## `TelegramTestRequest.bot_token` semantic ambiguity for "use stored token"
+
+**Severity:** Low - `Option<String>` with the implicit "fall back to saved token if absent" rule means there's no way for a caller to test ONLY a draft token without falling back. Asymmetric with `UpdateTelegramConfigRequest::bot_token: Option<Option<String>>`.
+
+`src/wire.rs:1063-1066`. A wrapper that wants to validate a draft token before saving must either accept the fallback or check the response shape.
+
+**Current behavior:**
+- `bot_token: Option<String>`.
+- Absent body falls back to saved token silently.
+- No way to express "test ONLY this token; do not fall back".
+
+**Proposal:**
+- Add an explicit `useStoredToken: bool` flag.
+- Or change the contract so `bot_token: null` means "use stored" and `bot_token: undefined` is rejected.
+- Document the contract in the type comment.
+
+## `spawn_reviewer_batch` mixed-server-instance error orphans spawned children with no caller-recoverable mapping
+
+**Severity:** Medium - when a backend restart between parallel spawns triggers `mixedSpawnServerInstanceError`, the result still publishes `delegationIds`/`childSessionIds`/`spawned[]` arrays from spawns split across two backend instances, but `serverInstanceId: null` and `revision: null`. Wrapper callers cannot route follow-up `wait_delegations` or `cancel_delegation` calls correctly because revision/serverInstance metadata is null and the per-spawn server identity is lost in the per-spawn entries.
+
+`ui/src/delegation-commands.ts:271-300`. The doc update at `docs/features/agent-delegation-sessions.md:236-239` only describes the outcome semantics, not the orphaning concern. A wrapper has no way to issue per-instance follow-ups because the per-spawn `SpawnDelegationCommandResult.serverInstanceId` lives inside `spawned[]` but the top-level `revision`/`serverInstanceId` are nulled.
+
+**Current behavior:**
+- Mixed-instance spawn batch produces `outcome: "error"` with `delegationIds`/`childSessionIds` populated.
+- `revision: null`, `serverInstanceId: null` at the top level.
+- Per-spawn entries inside `spawned[]` retain their original `serverInstanceId`, but wrapper callers must traverse the array to discover it.
+
+**Proposal:**
+- Either (a) include `serverInstanceId` per spawn entry inside the error packet so callers can route follow-ups, (b) auto-cancel the spawned children that came back from non-current instances, or (c) document the orphan-cleanup contract explicitly so wrapper authors know they cannot reliably drive these to completion through this surface.
+- Add coverage for a wrapper caller that observes `error.kind === "mixed-server-instance"` and proves the documented recovery contract.
+
+## `SpawnReviewerBatchCommandResult` shape diverges from `WaitDelegationsResult` discriminated union
+
+**Severity:** Medium - the two wrapper-facing delegation result types use different shapes for the same outcome dimension; wrapper callers cannot symmetrically pattern-match `result.outcome === "error"` to find the failure detail.
+
+`ui/src/delegation-commands.ts:135-144` defines `SpawnReviewerBatchCommandResult` as a flat object with `error: MixedServerInstanceErrorPacket | null` plus `failed: SpawnReviewerBatchFailure[]`. `outcome === "error"` can mean either mixed-server (`error` populated, `failed[]` may be empty) or all-items-fail (`error: null`, `failed[]` populated). The sibling `WaitDelegationsResult` type is a discriminated union: `outcome === "completed" | "timeout"` has `error?: never`, `outcome === "error"` has `error: WaitDelegationErrorPacket`. Wrapper callers must inspect both `error` and `failed[]` for spawn results, but only `error` for wait results.
+
+**Current behavior:**
+- `SpawnReviewerBatchCommandResult` is a flat object with `error` and `failed[]` independently populated.
+- `WaitDelegationsResult` is a discriminated union with `error` exclusive to the `error` outcome.
+- Wrapper callers cannot reuse one error-handling code path across both surfaces.
+
+**Proposal:**
+- Promote `SpawnReviewerBatchCommandResult` to a discriminated union mirroring `WaitDelegationsResult`, OR document the contract divergence with rationale so future MCP-wrapper authors do not assume parity.
+
+## `SAFE_SPAWN_DELEGATION` allow-list omits deterministic `bad_request` and `not_found` strings the spawn route emits
+
+**Severity:** Medium - the audit comment at `delegation-error-packets.ts:48-50` claims allow-listed messages match "deterministic backend bad_request strings the spawn route emits", but several deterministic shapes from `src/delegations.rs` are not present and collapse to `"Spawn delegation failed."`, removing useful structure for wrapper callers.
+
+Missing entries cross-checked against `src/delegations.rs`: `parent session id is required` (line 205), `unknown project \`<id>\`` (line 296, format!-shaped), `delegation cwd \`<X>\` must stay inside project \`<name>\`` (line 304-307, format! with cwd path), and the canonical `session not found` from `local_session_missing` (line 266, 337). The cwd-shape regex pattern only matches the literal "Windows device namespace path" / "drive-relative Windows path" / "UNC path" wording; other cwd-validation strings (project-boundary, must-be-directory) collapse generically.
+
+**Current behavior:**
+- `parent session id is required` collapses to `"Spawn delegation failed."`.
+- `unknown project \`<id>\`` collapses to `"Spawn delegation failed."` (status: 404 still preserved).
+- `delegation cwd \`<X>\` must stay inside project \`<name>\`` collapses (carries cwd path; redaction is defensible but the project-boundary message itself is deterministic and useful to wrapper callers).
+- `session not found` collapses (deterministic 404 shape that callers most plausibly need to discriminate beyond status alone).
+
+**Proposal:**
+- Audit `src/delegations.rs` `bad_request`/`not_found`/`conflict` constructors that the spawn route can emit and either add their literal/regex shapes to the allow-list or document why they collapse.
+- Add per-pattern positive-and-negative unit tests so a regex/string drift cannot silently break the allow-list.
+- Specifically: add `"session not found"` and `"parent session id is required"` to `SAFE_SPAWN_DELEGATION_MESSAGES`; consider a regex for the project-boundary cwd message.
+
+## `mark_delegation_failed_after_start_error` leaks internal `dispatch_turn` error chains via `result.summary`
+
+**Severity:** Medium - the round-52 spawn-failure-packet redactor closes the spawn return path, but the same disclosure shape still rides through `result.summary` populated when `start_delegation_child_turn` fails after a successful spawn record.
+
+`src/delegations.rs:455-460` and `:1340-1349`. When `start_delegation_child_turn` returns `ApiError::internal(format!(...))` (any of the many `dispatch_turn` paths in `src/turn_dispatch.rs` carrying paths/persist/sled chains), the spawn route catches it, builds `format!("failed to start child session: {err.message}")`, and stashes that into `result.summary` via `mark_delegation_failed_locked`. `compact_delegation_public_summary` only line-trims and truncates — no path/error-chain redaction. The summary is forwarded verbatim through `getDelegationResultCommand` (`ui/src/delegation-commands.ts:639-655`) and `DelegationSummary.result.summary` exposed by `delegationSummary`. A wrapper can spawn successfully, then call `get_delegation_result` once the child fails to start, and read paths/error chains under `~/.termal/`.
+
+**Current behavior:**
+- `mark_delegation_failed_after_start_error` accepts the raw `err.message` without sanitization.
+- `compact_delegation_public_summary` does not redact paths, persistence error chains, or sled/serde failure strings.
+- Wrapper callers receive the raw chain through `getDelegationResultCommand` / `wait_delegations` / `DelegationSummary.result.summary`.
+
+**Proposal:**
+- Either (a) sanitize the `detail` before passing to `mark_delegation_failed_after_start_error` (drop the raw `err.message` in favour of a fixed "child session failed to start" plus a structured error code), or (b) introduce a parallel allow-list redactor on the wrapper side for `result.summary` / wait packets, with the same closed-set policy as the spawn-failure-packet redactor.
+- Add coverage where `dispatch_turn` returns `ApiError::internal("...path under ~/.termal/...")` and assert the wrapper-visible `result.summary` is redacted to a generic shape.
+
+## Vestigial `!message.contains("cursor-agent")` assertions no longer prove ordering after PATH-to-injection swap
+
+**Severity:** Medium - round 52's swap of process-wide PATH mutation for `state.test_agent_setup_failures` injection left the original negative assertions in place. They are now trivially true and no longer pin the ordering claim.
+
+`src/tests/delegations.rs:4716-4722, 4743-4747`. The original test (round 51 staged) used `ScopedEnvVar::set_path("PATH", &empty_path)` to force `validate_agent_session_setup` to fail with messages like `cursor-agent CLI not found on PATH`. The negative assertion `!title_err.message.contains("cursor-agent")` then proved metadata validation ran *before* readiness setup. Round 52 swapped the PATH approach for an injected setup failure with the message `"forced Cursor setup failure for ordering test"`. That message doesn't contain "cursor-agent" anyway, so the assertion is now trivially true even if metadata validation had been skipped. The ordering proof for the title and model paths now relies only on the implicit "title vs. injection" message diff.
+
+**Current behavior:**
+- `!title_err.message.contains("cursor-agent")` passes regardless of whether metadata validation actually ran first.
+- `!model_err.message.contains("cursor-agent")` is the same trivial check.
+- The new third assertion (`setup_err`) at lines 4747-4769 proves the injection itself fires, but the title and model halves no longer prove ordering against the injection sentinel.
+
+**Proposal:**
+- Replace `!title_err.message.contains("cursor-agent")` with `!title_err.message.contains("forced Cursor setup failure")` (or assert against the exact injection sentinel) so the negative assertion targets what actually fires when the gate runs.
+- Same for the `model_err` assertion.
+
+## `SpawnDelegationFailurePacket` lacks `kind` discriminator field carried by `WaitDelegationErrorPacket` variants
+
+**Severity:** Low - wrapper callers handling both spawn failures and wait failures must use different strategies to identify the error class.
+
+`ui/src/delegation-error-packets.ts:37-43`. The wait-error precedent (`status-fetch-failed`) has `kind: "status-fetch-failed"` plus `name`/`message`/`apiErrorKind`/`status`/`restartRequired`; the new spawn-failure packet has only the latter five fields. Wrapper code that wants to handle wait/spawn failures uniformly in one switch can use `name === "ApiRequestError"` as a proxy for "structured backend error" but cannot reuse a `kind`-based switch.
+
+**Current behavior:**
+- `WaitDelegationErrorPacket` variants discriminate by `kind`.
+- `SpawnDelegationFailurePacket` (and `SpawnReviewerBatchFailure` extending it) has no discriminator.
+- A future spawn-failure variant (e.g., "validation-rejected" pre-dispatch) requires retrofitting `kind` as a wire-compat change.
+
+**Proposal:**
+- Add `kind: "spawn-failed"` (or similar) to `SpawnDelegationFailurePacket` so it parallels `status-fetch-failed`, OR explicitly document in the data-model brief that spawn failures intentionally omit the `kind` discriminator (and why).
+
+## `mark_delegation_failed_after_start_error` parallel surface: title-trim asymmetry between batch and single spawn
+
+**Severity:** Low - `compactReviewerBatchRequest` (batch path) trims `title`; `compactCreateDelegationRequest` (single-spawn path) does not.
+
+`ui/src/delegation-commands.ts:1004-1018`. Wrapper callers calling `spawn_delegation` directly send untrimmed titles to the wire, while `spawn_reviewer_batch` sends trimmed titles. Wrapper authors who later log/correlate the wire request body with the failure record will see different normalization rules for the two surfaces. The bugs.md proposal in round 51 explicitly noted the scope concern but only resolved it for the batch path.
+
+**Current behavior:**
+- Batch path trims `title` centrally before both wire and failure-record use.
+- Single-spawn path does not trim; the backend's own trim happens server-side.
+- Two parallel command surfaces normalize differently.
+
+**Proposal:**
+- Move title-trim into `compactCreateDelegationRequest` so both surfaces share normalization. The backend already trims so the wire-format change is harmless.
+- Or document the divergence explicitly so wrapper authors do not assume parity.
+
+## `compactReviewerBatchRequest` duplicates `compactCreateDelegationRequest` plus a title-trim shim
+
+**Severity:** Low - two near-identical compact functions are an architecture-layer-boundary smell.
+
+`ui/src/delegation-commands.ts:1004-1018`. The intention is clear (only-batch trim), but the helper inlines reconstruction of the request after stripping `title`. A future change to `compactCreateDelegationRequest` (e.g., trimming `model`, normalizing `cwd`) will not propagate through the batch path automatically.
+
+**Current behavior:**
+- `compactReviewerBatchRequest` reads `compactCreateDelegationRequest`'s output, then re-applies a title-only trim on top.
+- The duplicated structure means future `compactCreateDelegationRequest` changes need to be re-checked against the batch path.
+
+**Proposal:**
+- Either fold trim into `compactCreateDelegationRequest` (preferred — see entry above) or wrap with a clear `withTrimmedTitle(compacted)` helper at the same module level so the layering is visible.
+
+## `shouldOpenConversationMarkerContextMenu` narrowed to `.message-meta` without rationale comment
+
+**Severity:** Low - round 52 narrowed marker-menu trigger from "anywhere on the assistant message shell" to "header only", but the only signal in the code is the constant `CONVERSATION_MARKER_CONTEXT_MENU_HEADER_SELECTOR` and the test that was rewritten to match. A future reader will not see the rationale and may revert it.
+
+`ui/src/panels/conversation-markers.tsx:198-218`. Round-51 allowed right-click anywhere on the assistant shell (not on a code/link/etc.) to open the marker menu. Round-52 narrows this to only header-area right-clicks, preserving native plain-text context menu in the body. The behavior is a deliberate trade-off but no header comment documents it.
+
+**Current behavior:**
+- `shouldOpenConversationMarkerContextMenu` requires `target.closest(".message-meta")` AND `root.contains(header)`.
+- The constant explains the selector but not the trade-off.
+- A future change reverting to the broader selector would not break the existing tests in an obvious way (tests would need to be updated alongside).
+
+**Proposal:**
+- Add a header comment to `shouldOpenConversationMarkerContextMenu` documenting why the menu only opens on the message-meta region (preserves native context menu on plain assistant body text; user opens marker menu intentionally via the timestamp/author header).
+
+## `normalizeReviewerBatchRequests` synchronous throw bypasses the spawn-failure-packet redactor
+
+**Severity:** Low - argument-validation errors propagate out of `spawn_reviewer_batch` as plain JS exceptions, bypassing `reviewerBatchFailure`/`spawnDelegationFailurePacket` entirely.
+
+`ui/src/delegation-commands.ts:957-983`. `validateDelegationMetadataText` `RangeError` (title too long), `TypeError` (malformed item), `RangeError` (prompt empty), and `normalizeTransportId` errors at the parent-session-id boundary all surface as raw thrown exceptions outside the result envelope. The exception messages themselves are deterministic and don't carry paths/secrets, so this is a contract/UX issue rather than an information-disclosure leak. But it complicates the audit story for "every wrapper-facing failure is a redacted packet."
+
+**Current behavior:**
+- Most failures arrive as redacted `SpawnReviewerBatchFailure` packets in `result.failed[]`.
+- A subset surfaces as raw thrown exceptions outside the result envelope.
+- Contract is inconsistent across the same wrapper-facing surface.
+
+**Proposal:**
+- Either (a) catch synchronous validation errors inside `spawnReviewerBatchWithTransport` and emit them as per-item failure packets (with index attribution and a fixed "invalid request" message), or (b) document the synchronous throw boundary explicitly in `delegation-error-packets.ts` so future maintainers don't assume the redactor is the only failure surface.
+
+## Marker context-menu clamping does not re-clamp on viewport resize
+
+**Severity:** Low - the `useLayoutEffect` clamping the menu position depends only on `[contextMenu]`. A viewport resize while the menu is open leaves it at the original clamped position; a sufficiently aggressive resize could leave the menu off-screen.
+
+`ui/src/panels/conversation-markers.tsx:309-327`. Native browser context menus typically close on resize anyway, but this menu does not — it stays open through scroll (intentional, per existing bug entry) and now persists across resizes too (unintentional).
+
+**Current behavior:**
+- Menu clamp recomputes only when `contextMenu` state changes (open/move).
+- Window resize during open menu leaves the position unchanged.
+- A small window after a large initial open can leave the menu partially off-screen.
+
+**Proposal:**
+- Listen for `resize` events on the window while the menu is open and re-run `clampConversationMarkerContextMenuPosition`.
+- Or close the menu on resize (matching the pre-existing scroll-close trade-off but in reverse: scroll is intentional, resize is rare).
+
+## Conversation overview controller activation effect deps drop `messageCount`
+
+**Severity:** Low - pure message-growth above the rail-render threshold without resize/scroll won't refresh the layout snapshot.
+
+`ui/src/panels/conversation-overview-controller.ts:277`. The rail-activation effect deps were trimmed from `[isActive, messageCount, refreshLayoutSnapshot, sessionId, shouldRender]` to `[isActive, refreshLayoutSnapshot, sessionId, shouldRender]`. Since `shouldRender = messageCount >= MIN_MESSAGES`, only the threshold-crossing transition triggers a re-run. If `messageCount` grows substantially while staying above threshold (50 → 500 over a long session), this effect won't re-run. A separate effect at line 279 captures resize/scroll-driven snapshot refreshes, so most cases are covered, but a pure message-count growth without layout change wouldn't refresh the snapshot from this path.
+
+This overlaps with the existing "Conversation overview rail snapshots can go stale after transcript growth" entry but is a narrower, more recent symptom: the effect's deps trimming makes it impossible to recover via this path even if a future fix added `messageCount` back.
+
+**Current behavior:**
+- Activation effect deps no longer include `messageCount`.
+- Threshold-crossing transition triggers re-run.
+- Pure growth above threshold without resize/scroll does not.
+
+**Proposal:**
+- Either add `messageCount` back to deps (cheap re-run when count changes), or document why the upstream layout-refresh path is sufficient.
+
+## Marker-menu clamp fallback path (`rect.width === 0` → `offsetWidth`) is untested
+
+**Severity:** Low - the JSDOM-realistic case where `getBoundingClientRect` returns zeros never exercises the fallback path; production browsers exercise only the rect path.
+
+`ui/src/panels/conversation-markers.tsx:537-570`. `clampConversationMarkerContextMenuPosition` reads `menu.getBoundingClientRect()` and falls back to `menu.offsetWidth/offsetHeight` if width/height are 0. The existing clamp test at `AgentSessionPanel.test.tsx:719-748` mocks `getBoundingClientRect` to return `width: 180`, exercising only the rect path. The fallback (the JSDOM-default case) is never exercised. If a regression broke the fallback (e.g., dropped the `||` guard), the production-realistic path could clamp incorrectly while tests still pass.
+
+**Current behavior:**
+- One clamp test mocks `getBoundingClientRect` to non-zero.
+- The fallback path that runs in JSDOM by default is unexercised.
+- Asymmetric coverage between the two clamp branches.
+
+**Proposal:**
+- Either remove the rectSpy and rely on `Object.defineProperty(HTMLElement.prototype, "offsetWidth", ...)` to seed the fallback, or add a second clamp test that specifically pins the offset-fallback path.
+
+## Assistant message-shell with `tabIndex={-1}` lacks `role`/`aria-label`
+
+**Severity:** Low - restoring focus to an unlabeled focusable container provides poor screen-reader feedback.
+
+`ui/src/panels/AgentSessionPanel.tsx:832`. `tabIndex={canOpenMarkerMenu ? -1 : undefined}` makes the assistant message-shell programmatically focusable so `trigger.focus()` works after Escape. But the shell `<div>` has no `role` or `aria-label` describing what is focused. Screen readers will announce a generic group/region without context, which is a regression in clarity from the previous implementation that didn't restore focus to the shell.
+
+**Current behavior:**
+- Shell is programmatically focusable for marker-menu Escape restore.
+- No `role` or `aria-label` describes the focusable element.
+- Screen readers announce generic content on focus restore.
+
+**Proposal:**
+- Add `aria-label` (e.g., `"Assistant message {message.id}"`) or use `role="group"` with a title.
+- Or restore focus to the assistant message header / `.message-meta` instead of the shell so the focused region carries existing semantics.
+
+## `AgentSessionPanel.tsx` exceeds 2000-line architecture rubric threshold
+
+**Severity:** Low - file remains over the documented TSX file-size budget after round-51/52 hook extractions.
+
+`ui/src/panels/AgentSessionPanel.tsx`. The marker-context-menu hook extraction shrunk this file but it remains over budget. The CLAUDE.md instruction explicitly asks to "Keep new modules small and focused — the project has a few very large files already and we are actively splitting them smaller, not larger." Round 52 added 17 lines to make the `visibleMessageIds` memo explicit but did not trim other surface area.
+
+**Current behavior:**
+- File is 2175 lines after round 52.
+- Architecture rubric §9 sets ~2000-line scrutiny threshold for TSX components.
+- Candidates remain (e.g., `renderMarkedMessageCard` factory, `SessionConversationPage` memo body).
+
+**Proposal:**
+- Track for a future split round; candidates are the `renderMarkedMessageCard` callback factory and the `SessionConversationPage` memo body, both of which could become their own modules.
+
+## `spawn_reviewer_batch` `partial` outcome documentation under-specifies same-instance constraint
+
+**Severity:** Low - the doc prose describes `partial` as "at least one spawn succeeded and at least one item failed", but the implementation also requires that all successful responses share one backend instance for the outcome to be `partial`.
+
+`docs/features/agent-delegation-sessions.md:236-239`. If failures + cross-instance successes coincide, the implementation collapses to `outcome: "error"` with `MixedServerInstanceErrorPacket` regardless of `failed.length`. The doc's prose lists the cross-instance restart case only on the `error` line, obscuring that any cross-instance success during a partial-failure batch also triggers the error path.
+
+**Current behavior:**
+- Doc prose says `partial` = "at least one spawn succeeded AND at least one item failed".
+- Implementation requires all successful responses share one backend instance for `partial`.
+- Wrapper callers reading the brief may write code expecting any non-empty `failed[]` with non-empty `spawned[]` yields `partial`.
+
+**Proposal:**
+- Tighten doc prose to "`partial` means at least one spawn succeeded, at least one item failed, AND every successful response shares one backend instance"; "`error` covers every-item-failed AND any-cross-instance-success cases (the latter additionally sets `error.kind === "mixed-server-instance"` and nulls revision metadata)".
 
 ## `useConversationMarkerContextMenu` focus-restore rAF is not cancelled on hook unmount
 
@@ -129,50 +912,65 @@ the Implementation Tasks section.
 - Add a focusable toolbar/menu trigger with `aria-haspopup`, or make a tabbable trigger support ContextMenu/Shift+F10/Enter with deterministic positioning.
 - Keep native context-menu preservation for links, code blocks, images, and selected text.
 
-## `spawn_reviewer_batch` title trim asymmetry between wire request and failure record
-
-**Severity:** Low - callers correlating a partial-failure record with their UI input would see different strings.
-
-`ui/src/delegation-commands.ts:957-970 normalizeReviewerBatchRequests`. The `compactCreateDelegationRequest({...request, mode: "reviewer", writePolicy: { kind: "readOnly" }})` does NOT trim `title` — the wire body sends ` React review ` with surrounding whitespace (per the test at line 437-441). But the failure record is built from `reviewerBatchFailure(index, reviewerBatchItemTitle(compacted), error)`, and `reviewerBatchItemTitle` calls `request.title.trim()`. So the wire request carries ` React review ` while a partial-failure record reports `title: "React review"`.
-
-**Current behavior:**
-- Wire body preserves caller's whitespace in `title`.
-- Failure record trims `title`.
-- Caller correlating UI input vs failure record sees different strings.
-
-**Proposal:**
-- Trim title centrally before both paths (apply trim in `compactCreateDelegationRequest` for the title field — but that would change `spawn_delegation` behavior; consider scope).
-- Or store both raw and trimmed titles on the failure record and document the normalization in JSDoc.
-
-## `spawn_reviewer_batch` result shape is listed but not defined in the delegation docs
-
-**Severity:** Low - wrapper callers do not have a documented contract for batch result nullability, mixed-server behavior, or per-item failure records.
-
-`docs/features/agent-delegation-sessions.md:226-237` adds `spawn_reviewer_batch(parentSessionId, requests) -> SpawnReviewerBatchCommandResult` to the command surface, but the Data Model section does not define `SpawnReviewerBatchItem`, `SpawnReviewerBatchFailure`, or `SpawnReviewerBatchCommandResult`.
-
-**Current behavior:**
-- The command list names `spawn_reviewer_batch`.
-- The response shape and `revision` / `serverInstanceId` nullability are undocumented.
-- Mixed-server and partial/all-failed semantics are not stated.
-
-**Proposal:**
-- Add data-model documentation for the request item, failure packet, and command result.
-- Document completed, partial, error, mixed-server, and backend-restart semantics.
-
 ## `useConversationMarkerContextMenu` removed scroll-close behavior — fixed positioning means visible drift on scroll
 
-**Severity:** Note - intentional behavior change; deserves a hook-header comment to prevent re-introducing scroll-close.
+**Severity:** Low - the marker menu renders as a fixed body portal, so user scroll or resize can leave actions visibly detached from the message they target.
 
-`ui/src/panels/conversation-markers.tsx`. The new hook drops the `window.scroll` listener; the menu now stays open during background scroll. The test at AgentSessionPanel.test.tsx:684-685 explicitly asserts this. The menu position is `left: contextMenu.clientX, top: contextMenu.clientY` (viewport coordinates fixed at open). If the page scrolls, the menu visually drifts relative to the trigger.
+`ui/src/panels/conversation-markers.tsx:350` renders the menu through a `document.body` portal using viewport coordinates captured at open. The hook no longer closes or repositions the menu on scroll/resize, so the transcript can move while the menu remains at its old viewport position.
 
 **Current behavior:**
-- Menu positioned by fixed viewport coordinates at open time.
-- Page scrolls → menu visually drifts.
-- No scroll-close (intentional).
+- Menu is positioned by fixed viewport coordinates at open time.
+- Page scroll or resize can move the target message without moving the menu.
+- The portal can remain visible while pointing at stale message context.
 
 **Proposal:**
-- Add a hook-header comment documenting the trade-off (no scroll-close because programmatic scrolls during streaming would dismiss it; visual drift on user scroll is acceptable).
-- So future readers don't reintroduce a scroll-close that would re-break the streaming case.
+- Restore scroll/resize dismissal with cleanup, or actively recompute/clamp the menu against the current trigger.
+- Add regression coverage for the chosen behavior so streaming/programmatic scroll concerns remain explicit.
+
+## Marker menu behavior depends on the `.message-meta` styling class
+
+**Severity:** Low - a styling refactor can silently remove or move the behavioral hit target for marker actions.
+
+`ui/src/panels/conversation-markers.tsx:51` makes `.message-meta` the selector for opening the marker context menu. That ties the interaction contract to a CSS class that otherwise reads as presentation-only, so a future message-card restyle can break marker actions without touching the hook or tests.
+
+**Current behavior:**
+- The hook opens only when the context-menu event originates from `.message-meta`.
+- Message-card styling controls whether the behavior is reachable.
+- There is no explicit data attribute or trigger component documenting the behavioral contract.
+
+**Proposal:**
+- Use an explicit data attribute such as `data-conversation-marker-menu-trigger`, or expose a dedicated trigger slot.
+- Keep a focused contract test so presentation-only class changes cannot remove marker actions.
+
+## `spawn_delegation` still exposes raw create-delegation errors
+
+**Severity:** Medium - single-spawn wrapper callers can still receive backend 500 details while batch spawns now return sanitized failure packets.
+
+`ui/src/delegation-commands.ts:221` awaits `transport.createDelegation` and lets failures reject directly. `spawn_reviewer_batch` now converts equivalent failures through `spawnDelegationFailurePacket`, but `spawn_delegation` is also a documented command surface and has no equivalent sanitized result contract.
+
+**Current behavior:**
+- `spawn_reviewer_batch` sanitizes spawn failures before returning structured output.
+- `spawn_delegation` still propagates raw `createDelegation` failures.
+- Wrapper/MCP-facing callers can observe internal diagnostics on the single-spawn path.
+
+**Proposal:**
+- Give `spawn_delegation` the same sanitized failure/result contract as the batch path.
+- Or require the wrapper boundary to route thrown `ApiRequestError` values through `spawnDelegationFailurePacket` before exposing them.
+
+## Mixed-instance delegation packet wording is operation-specific
+
+**Severity:** Low - spawn-batch callers can receive an error message that describes a delegation status batch instead of a spawn operation.
+
+`ui/src/delegation-error-packets.ts:163` builds the mixed-server-instance packet used by delegation command code. The packet is now reused by spawn-batch handling, but its wording still points at a "delegation status batch", which makes wrapper-facing errors harder to interpret.
+
+**Current behavior:**
+- The mixed-instance helper is shared by status and spawn command paths.
+- The user-facing message names only the status-batch operation.
+- Spawn-batch callers can receive a technically correct but misleading diagnostic.
+
+**Proposal:**
+- Make the packet wording operation-neutral.
+- Or accept an operation label so status and spawn callers get accurate diagnostics.
 
 ## `scheduleConversationOverviewRailBuild` module-level FIFO queue is shared across all controller instances
 
@@ -327,7 +1125,7 @@ the Implementation Tasks section.
 
 **Severity:** Medium - the long-session transcript can lose scroll, virtualizer measurements, text selection, and message-card local state when the rail flips from pending to ready.
 
-`ui/src/panels/AgentSessionPanel.tsx:949` renders bare `conversationContent` until `conversationOverview.shouldRenderRail` becomes true, then wraps that same subtree in `.conversation-with-overview`. React treats the changed parent structure as a different tree, so `ConversationMessageList` and its message cards can remount at the readiness boundary.
+`ui/src/panels/AgentSessionPanel.tsx:950` renders bare `conversationContent` until `conversationOverview.shouldRenderRail` becomes true, then wraps that same subtree in `.conversation-with-overview`. React treats the changed parent structure as a different tree, so `ConversationMessageList` and its message cards can remount at the readiness boundary.
 
 **Current behavior:**
 - Long sessions initially render the conversation without the overview wrapper.
@@ -336,14 +1134,14 @@ the Implementation Tasks section.
 
 **Proposal:**
 - Keep the wrapper stable whenever `conversationOverview.shouldRender` is true.
-- Gate only the rail node or readiness styling inside the stable wrapper.
-- Add DOM-identity coverage proving the message list does not remount when the rail becomes ready.
+- Gate only the rail node, readiness styling, or a placeholder inside the stable wrapper.
+- Add DOM-identity and scroll-position coverage proving the message list does not remount when the rail becomes ready.
 
 ## Conversation overview rail snapshots can go stale after transcript growth
 
 **Severity:** Medium - once the delayed overview rail is ready, new messages can leave overview layout and viewport state based on the old transcript until a scroll or resize occurs.
 
-`ui/src/panels/conversation-overview-controller.ts:277-338` delays the initial rail activation, but the activation effect no longer depends on `messageCount` and the steady-state effect refreshes layout on initial ready, scroll, or resize rather than transcript growth. Appending messages to an already-long transcript can therefore leave overview proportions, marker placement, and viewport projection stale during live streaming.
+`ui/src/panels/conversation-overview-controller.ts:277` delays the initial rail activation, but the activation effect no longer depends on `messageCount` and the steady-state effect refreshes layout on initial ready, scroll, or resize rather than transcript growth. Appending messages to an already-long transcript can therefore leave overview proportions, marker placement, and viewport projection stale during live streaming.
 
 **Current behavior:**
 - Initial overview rail activation waits for the transcript paint.
@@ -352,7 +1150,7 @@ the Implementation Tasks section.
 
 **Proposal:**
 - Keep the initial double-RAF delay, but add a separate ready-state refresh keyed on transcript growth that calls `refreshLayoutSnapshot()` without hiding the rail.
-- Add coverage for appending messages to an already rail-ready long transcript.
+- Add coverage for appending or streaming messages into an already rail-ready long transcript.
 
 ## `messageCreatedDeltaIsNoOp` lacks semantic-change negative coverage
 
@@ -1417,16 +2215,22 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Add reviewer-batch command error-contract regressions:
-  cover mixed successful `serverInstanceId` responses, all-items-fail `outcome: "error"` output with null metadata, safe spawn-failure redaction, and preserved structured error metadata for expected `ApiRequestError` cases.
+- [ ] P2: Add Telegram settings API/security regressions:
+  cover nullable `botToken`/`defaultProjectId`/`defaultSessionId` clearing, token-file restrictive permissions on Unix, generic client-facing file errors without absolute paths, reduced token-mask suffix exposure, malformed JSON returning the project `ApiError` envelope, `/api/telegram/test` preserving Telegram upstream error text, explicit saved-token opt-in plus cooldown, and empty `subscribedProjectIds` matching the TypeScript contract.
+- [ ] P2: Add Telegram settings file concurrency regressions:
+  simulate UI config save racing relay state persistence, plus malformed/unreadable existing settings during `persist_telegram_bot_state`, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
+- [ ] P2: Add Telegram preferences panel RTL coverage:
+  cover initial status load, save payload normalization, clearing default project/session values with `null`, saved-token test flow, API error display, stale default-session clearing, default-project auto-subscription, and the AppDialogs Telegram tab path.
+- [ ] P2: Add delegation command error-contract regressions:
+  cover `spawn_delegation` and `spawn_reviewer_batch` backend-unavailable/restart diagnostics, wrong-parent/session redaction, safe spawn-message allowlist patterns, and operation-appropriate mixed-instance packet wording.
 - [ ] P2: Add Telegram assistant-forwarding ownership/order regressions:
   cover an already-active non-Telegram turn before a Telegram prompt, prompt POST failure after forwarding state is prepared, post-send digest failure, and a digest primary-session switch before the armed Telegram reply settles.
 - [ ] P2: Add Telegram long-message chunk retry and UTF-16 chunking coverage:
   fail a later chunk after an earlier chunk is sent and assert retry does not duplicate it; add emoji/surrogate-pair-heavy text proving chunks respect Telegram's UTF-16 code-unit limit.
-- [ ] P2: Add marker context-menu interaction and accessibility coverage:
-  dispatch cancelable `contextmenu` events and assert links/code/selected assistant text do not set `defaultPrevented`, assert the plain assistant-text marker-menu path does set it, and cover a keyboard-reachable marker action trigger plus focus/escape behavior.
-- [ ] P2: Add overview rail growth and cancellation coverage:
-  after the delayed rail is ready, append messages and assert layout/viewport snapshots refresh; also switch sessions or drop below threshold before queued animation frames drain and assert no stale rail appears, and assert the conversation list DOM does not remount when rail readiness flips.
+- [ ] P2: Add marker context-menu interaction and cleanup coverage:
+  cover a keyboard-reachable marker action trigger, focus/Escape propagation, `.message-meta` trigger-contract behavior, portal cleanup when pane/session activity changes, and scroll/resize dismissal or explicit retained-position behavior.
+- [ ] P2: Add overview rail growth, remount, and cancellation coverage:
+  after the delayed rail is ready, append messages and assert layout/viewport snapshots refresh; switch sessions or drop below threshold before queued animation frames drain and assert no stale rail appears; assert the conversation list DOM and scroll position survive rail readiness.
 - [ ] P2: Add `messageCreatedDeltaIsNoOp` semantic-change negatives:
   keep id/index/preview/count/stamp equal while changing message payload and assert a material apply; include same-id pending prompt cleanup coverage.
 - [ ] P2: Add near-bottom prompt-send early-return scroll coverage:
@@ -1509,3 +2313,57 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `ui/src/live-updates.test.ts` now pins reducer-level `appliedNoOp` for `messageCreated`, `textReplace`, `messageUpdated`, `commandUpdate`, `parallelAgentsUpdate`, and marker replays, and `App.live-state.deltas.test.tsx` covers `textReplace` plus duplicate `messageCreated`. Add siblings for the remaining no-op replay types and assert the watchdog still fires within `LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 3000` ms.
 - [ ] P2: Add genuine-divergence reconciliation coverage for same-revision unknown-session deltas:
   `docs/architecture.md` now documents that session creation advances the main revision, and `ui/src/app-live-state.ts` cross-links that contract. Add a coverage test that (a) sets the client up with a session list missing `session-X`, (b) dispatches a same-revision session delta for `session-X` (where `latestStateRevisionRef.current === delta.revision`) — asserting NO immediate `/api/state` fetch, then (c) dispatches the next authoritative `state` event including `session-X` and asserts it adopts cleanly.
+- [ ] P2: Tighten delegation-ordering vestigial assertions:
+  replace `!message.contains("cursor-agent")` with `!message.contains("forced Cursor setup failure")` (or assert the exact unique metadata-validation strings) at `src/tests/delegations.rs:4716-4722, 4743-4747` so the ordering proof targets the active injection sentinel rather than a string that happens to be absent regardless.
+- [ ] P2: Add `spawnDelegationFailurePacket` non-`ApiRequestError` branch coverage:
+  throw `new TypeError("network down: file://internal/path")` from `createDelegation`; assert `failure.name === "TypeError"`, `failure.message === "Spawn delegation failed."`, `apiErrorKind: null`, `status: null`, `restartRequired: null`. Round 51's partial-failure test threw a plain `Error`, but round 52 upgraded that throw to `ApiRequestError`, removing the only assertion exercising the non-ApiRequestError branch.
+- [ ] P2: Add per-pattern coverage for the spawn-failure allow-list:
+  `delegation-error-packets.ts:64-72` defines seven safe regex patterns (prompt-bytes, title-chars, model-chars, parent-active-limit, nesting depth, cwd Windows shapes, request-failed-status) plus six exact-string entries. Only the parent-active-limit pattern is currently exercised. Add `it.each(...)` covering each safe message/pattern with positive (passes) and at least one negative near-miss (collapses to GENERIC) per entry.
+- [ ] P2: Add `restartRequired: true` propagation through the spawn-failure packet:
+  construct an `ApiRequestError("backend-unavailable", ..., { status: 503, restartRequired: true })` and assert `failed[0].restartRequired === true`. Today's tests only build `ApiRequestError` with the default `restartRequired: false`, so a regression that drops the field at the packet boundary would not be caught.
+- [ ] P2: Cover `normalizeReviewerBatchRequests` non-array/null/non-object item rejection:
+  the normalizer throws `TypeError("spawn_reviewer_batch requests must be an array")` on non-array input and `TypeError("reviewer request N must be an object")` on null/primitive items. Neither is currently tested. Extend the existing rejection test with `null` input, `"not-an-array"` input, and `[null]` / `[42]` items.
+- [ ] P2: Make the mixed-server-instance sort assertion load-bearing:
+  the existing batch test happens to feed `"server-a"`, `"server-b"` (alphabetical = insertion order). Use ids whose insertion order differs from sorted order (e.g., `"server-z"` then `"server-a"`) so a refactor that drops `[...new Set(...)].sort()` would fail.
+- [ ] P2: Cover `useConversationMarkerContextMenu` `isActive` close path:
+  open the marker menu in an active panel, then re-render with a different `activeSessionId` (or rerender the parent so `isActive` flips false), and `await waitFor(() => expect(screen.queryByRole("menu", ...)).not.toBeInTheDocument())`. The hook's effect at `conversation-markers.tsx:283-287` is currently uncovered.
+- [ ] P2: Reset module-level rail-build FIFO state between overview controller tests:
+  `pendingConversationOverviewRailBuildTasks`, `nextConversationOverviewRailBuildTaskId`, and `conversationOverviewRailBuildFrameId` persist across Vitest workers. Today only one test exists in `conversation-overview-controller.test.tsx`, but the test is built around tightly-counted frame flushes — order-dependency surface area is real. Either expose a test-only reset or use `vi.resetModules()` at the suite boundary.
+- [ ] P2: Cover overview activation cancellation when the controller unmounts mid-pending:
+  mount an overview-controller harness, flush one or two frames so a queued second-rAF or FIFO task is alive, then unmount and flush the remaining frames asserting that `setIsRailReady(true)` was never observed and the FIFO is empty. The current test never unmounts mid-pending so the rAF cancellation paths and FIFO splice-by-task-id are unexercised.
+- [ ] P2: Split the multi-purpose marker-menu `AgentSessionPanel` test into focused cases:
+  `AgentSessionPanel.test.tsx:646-811` now covers six distinct behaviors (clamp, ArrowDown nav, Escape close, scroll preservation, `.message-meta`-only opening, create/remove). A regression in any earlier step short-circuits later assertions, making failure messages diagnose poorly. Split into focused `it(...)` cases.
+- [ ] P2: Narrow `getBoundingClientRect` global spy in marker-menu clamp test:
+  `AgentSessionPanel.test.tsx:719-748` mocks `HTMLElement.prototype.getBoundingClientRect` for ALL elements (returning width=0 for everything that isn't the menu) for the lifetime of the try block. Future code that reads bounding boxes during the spy window inherits zero rects silently. Either narrow the spy via a refs/selector check, or scope the mock to a smaller window.
+- [ ] P2: Cover the marker-menu clamp offsetWidth/offsetHeight fallback path:
+  `clampConversationMarkerContextMenuPosition` falls back to `menu.offsetWidth/offsetHeight` when `getBoundingClientRect` returns zeros (the JSDOM-default case). The existing clamp test mocks the rect to non-zero, exercising only the rect path. Add a test that seeds `offsetWidth`/`offsetHeight` via `Object.defineProperty(HTMLElement.prototype, ...)` and asserts the fallback clamp produces the same expected position.
+- [ ] P2: Rename or document `delegation_metadata_size_errors_precede_agent_readiness_setup_errors`:
+  with round 52's swap from PATH mutation to `test_agent_setup_failures` injection, the test no longer specifically about *agent readiness setup errors*; it's about "any setup-failure that reaches the bad_request branch after `has_test_runtime_override` is false". Either keep the name and add a comment, or rename to reflect the injected-failure proof, e.g., `delegation_metadata_size_errors_precede_setup_failure_injection`.
+- [ ] P2: Add Rust unit tests for `src/telegram_settings.rs`:
+  cover `validate_telegram_config` (auto-subscribe of `default_project_id`, auto-fill of `default_project_id` from `default_session_id`, unknown project rejection, unknown session rejection, session-belongs-to-different-project rejection, no-project-on-session rejection); cover `sanitize_telegram_config_for_current_state` (cross-project default-session clearing branch); cover `mask_telegram_bot_token` (empty, all-whitespace, < 8 chars, unicode, full-length token); cover `normalize_project_id_list` (dedup with whitespace, empty filtering); add a router-level test that hits each new `/api/telegram/...` route and asserts JSON shape.
+- [ ] P2: Add compact `ConversationOverviewRail` accessibility coverage:
+  assert the compact rail exposes an operable role, accessible name, and current/position state instead of only a `navigation` landmark with hidden segment semantics.
+- [ ] P2: Add `ConversationOverviewRail` compact-mode keyboard navigation coverage:
+  cover `Enter`, `Space`, `ArrowDown`, `ArrowUp`, `Home` in compact mode (the existing `End` test only covers one key path). The `Enter`/`Space` path goes through `navigateToSegmentIndex(currentIndex)` and is meaningfully different from the arrow-key path; the arrow-key path resolves the *current* segment from `viewportProjection.viewportTopPx`. Cover the `viewportProjection.viewportTopPx → currentItem → currentIndex → findOverviewSegmentIndexForItemIndex` chain so a regression that broke it is caught.
+- [ ] P2: Pin the `ConversationOverviewRail` compact-vs-per-segment threshold boundary:
+  the threshold is hard-coded at 160 (`CONVERSATION_OVERVIEW_COMPACT_SEGMENT_THRESHOLD`). The existing test covers `5` segments (per-segment) and `220 commandMessages` (compact), but `buildConversationOverviewSegments` collapses same-kind runs so 220 messages can produce far fewer segments. Construct messages designed to produce exactly 160 vs. 161 distinct segments and assert per-segment vs. compact rendering at the boundary.
+- [ ] P2: Cover the `ConversationOverviewRail` pointer cancellation path:
+  the rail's `pointerdown → pointercancel` sequence is uncovered. `finishRailDrag` resets `suppressNextClickRef = false` for `pointercancel`, but no test exercises the cancel branch. On touch hardware, browsers fire `pointercancel` when a long-press triggers a context menu or scroll gesture; a regression that mishandled cancel would silently swallow the user's next click on a segment.
+- [ ] P2: Cover the `ConversationOverviewRail` zero-height viewport floor:
+  `Math.max(8, viewportProjection.viewportHeightPx)` at line 313 protects the visual indicator from disappearing on extreme zoom. Add a `viewportHeightPx: 0` snapshot rerender and assert `height: "8px"` on the indicator.
+- [ ] P2: Cover the `setTimeout` fallback in `scheduleConversationOverviewIdleCallback`:
+  the existing `conversation-overview-controller.test.tsx` harness installs an idle-callback shim. The new `scheduleConversationOverviewIdleCallback` (`conversation-overview-controller.ts:96-119`) has a `setTimeout` fallback for environments without `requestIdleCallback` (Safari, embedded webviews) that is uncovered. Add a second test that explicitly deletes `window.requestIdleCallback` and `window.cancelIdleCallback` before render, advances `setTimeout` with `vi.useFakeTimers()`, and asserts the rail still becomes ready after the fallback delay.
+- [ ] P2: Tighten the long-active-session `VirtualizedConversationMessageList` test:
+  the new "mounts a long active transcript from the estimated bottom window" test asserts `slot count <= 16`. Add a tighter lower bound (e.g., `>= 4`) or assert `getLayoutSnapshot().mountedPageRange.startIndex > 0` so a regression returning an empty mounted range is caught.
+- [ ] P2: Restructure the `bottom_pin` mount test to exercise unmount→mount transition:
+  the new "bottom-pin mounts the bottom range without starting a boundary reveal" test (`VirtualizedConversationMessageList.test.tsx:572-600`) asserts the bottom message renders, but `getByText("message-48")` was already true before the `notifyMessageStackScrollWrite` because `waitFor` ran first. Restructure: scroll to top so message-48 is unmounted, dispatch `bottom_pin`, then assert message-48 mounts AND the boundary-reveal attribute is absent — exercising both halves of the contract.
+- [ ] P2: Prove deferred-tail-window initial render starts from newest messages:
+  extend `AgentSessionPanel.test.tsx:1493-1525` so the first render includes a newest-tail message and excludes an early message, then assert the early/full transcript appears only after the scheduled hydration delay.
+- [ ] P2: Add intermediate-checkpoint assertion to the deferred-tail-window test:
+  `AgentSessionPanel.test.tsx:1493-1525` asserts only that the rail is absent immediately and present after 1.5s of advanced timers. A regression that made the rail render *immediately* (defeating the deferral) would still pass the post-advance assertion. Add an intermediate `act(() => vi.advanceTimersByTime(100))` checkpoint asserting the rail is *still* absent. Or assert directly on a transcript-hydration symptom (count of mounted message slots is small at t=0 and large at t=1500ms).
+- [ ] P2: Add `api.ts` Telegram client coverage:
+  `fetchTelegramStatus`, `updateTelegramConfig`, `testTelegramConnection` are not exercised by `api.test.ts`. Mirror the existing `createOrchestratorInstance` test pattern to pin URL + method + JSON body for at least `updateTelegramConfig`. Catches typos like `/api/telegram/conifg`.
+- [ ] P2: Add direct test file for `ui/src/delegation-error-packets.ts`:
+  `SAFE_SPAWN_DELEGATION_PATTERNS` regex set is exercised only indirectly through `delegation-commands.test.ts`. A typo in `(?:a drive-relative...|a UNC...|a Windows device namespace...)` would only fail if the integration test happens to surface that specific message. Add `delegation-error-packets.test.ts` with `it.each` over each safe message + each pattern, plus an unsafe-message control case asserting the generic fallback.
+- [ ] P2: Cover roving tabindex update in `ConversationOverviewRail`:
+  the per-segment buttons render with `tabIndex={index === 0 ? 0 : -1}` regardless of focus. Add a test that focuses a non-first segment via keyboard, then blurs and refocuses the rail, and asserts focus restores to the previously-interacted segment (currently fails because tabIndex is purely a function of index).

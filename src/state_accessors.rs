@@ -35,6 +35,7 @@
 const REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT: Duration = Duration::from_millis(100);
 #[cfg(not(test))]
 const REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT: Duration = Duration::from_secs(5);
+const SESSION_TAIL_HYDRATION_MAX_MESSAGES: usize = 500;
 
 /// Returns true for locally-typed remote hydration misses that can fall back to
 /// metadata without hiding local lookup or protocol errors.
@@ -206,6 +207,17 @@ impl AppState {
         session
     }
 
+    fn wire_session_tail_from_record(record: &SessionRecord, message_limit: usize) -> Session {
+        let mut session = Self::wire_session_summary_from_record(record);
+        let retained_message_count =
+            message_limit.min(SESSION_TAIL_HYDRATION_MAX_MESSAGES);
+        let source_messages = &record.session.messages;
+        let start_index = source_messages.len().saturating_sub(retained_message_count);
+        session.messages = source_messages[start_index..].to_vec();
+        session.messages_loaded = record.session.messages_loaded && start_index == 0;
+        session
+    }
+
     fn wire_session_summary_from_record(record: &SessionRecord) -> Session {
         let session = &record.session;
         Session {
@@ -368,6 +380,24 @@ impl AppState {
                 .or_else(|err| self.recover_visible_session_hydration(session_id, err))
             }
         }
+    }
+
+    /// Returns a visible session suffix without marking the transcript fully loaded.
+    fn get_session_tail(
+        &self,
+        session_id: &str,
+        message_limit: usize,
+    ) -> Result<SessionResponse, ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_visible_session_index(session_id)
+            .ok_or_else(ApiError::local_session_missing)?;
+        let record = &inner.sessions[index];
+        Ok(SessionResponse {
+            revision: inner.revision,
+            session: Self::wire_session_tail_from_record(record, message_limit),
+            server_instance_id: self.server_instance_id.clone(),
+        })
     }
 
     /// Recover a visible remote-proxy hydration miss with the best local

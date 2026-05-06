@@ -343,6 +343,8 @@ impl AppState {
             shared_codex_runtime: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),
+            #[cfg(test)]
+            test_agent_setup_failures: Arc::new(Mutex::new(Vec::new())),
             agent_readiness_cache,
             agent_readiness_refresh_lock: Arc::new(Mutex::new(())),
             remote_registry: Arc::new(

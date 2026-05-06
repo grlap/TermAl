@@ -193,8 +193,14 @@ fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result
             .with_context(|| format!("failed to create `{}`", parent.display()))?;
     }
 
+    let mut file = fs::read(path)
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<TelegramBotFile>(&raw).ok())
+        .unwrap_or_default();
+    file.state = state.clone();
+
     let encoded =
-        serde_json::to_vec_pretty(state).context("failed to serialize telegram bot state")?;
+        serde_json::to_vec_pretty(&file).context("failed to serialize telegram bot state")?;
     fs::write(path, encoded).with_context(|| format!("failed to write `{}`", path.display()))
 }
 
@@ -388,6 +394,10 @@ impl TelegramApiClient {
         Ok(())
     }
 
+    fn get_me(&self) -> Result<TelegramBotUser> {
+        self.request_json("getMe", None)
+    }
+
     fn request_json<T: DeserializeOwned>(&self, method: &str, body: Option<Value>) -> Result<T> {
         let url = format!("{}/{}", self.api_base_url, method);
         let request = match body {
@@ -570,6 +580,14 @@ struct TelegramApiEnvelope<T> {
     #[serde(default)]
     error_code: Option<i64>,
     description: Option<String>,
+}
+
+/// Represents Telegram's `getMe` user shape.
+#[derive(Clone, Debug, Deserialize)]
+struct TelegramBotUser {
+    first_name: String,
+    #[serde(default)]
+    username: Option<String>,
 }
 
 /// Represents Telegram update.

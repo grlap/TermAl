@@ -18,6 +18,12 @@ import {
   type ComboboxOption,
 } from "./session-model-utils";
 import {
+  fetchTelegramStatus,
+  testTelegramConnection,
+  updateTelegramConfig,
+  type TelegramStatusResponse,
+} from "./api";
+import {
   DENSITY_STEP_PERCENT,
   DEFAULT_DENSITY_PERCENT,
   DEFAULT_EDITOR_FONT_SIZE_PX,
@@ -52,8 +58,10 @@ import type {
   ClaudeApprovalMode,
   ClaudeEffortLevel,
   CodexReasoningEffort,
+  Project,
   RemoteConfig,
   SandboxMode,
+  Session,
 } from "./types";
 
 export const SANDBOX_MODE_OPTIONS = [
@@ -1164,6 +1172,364 @@ export function RemotePreferencesPanel({
           {validationError ??
             "Remote ids become stable project routing keys. If you rename one later, the backend will reject the change while projects still reference the old id."}
         </p>
+      </article>
+    </section>
+  );
+}
+
+type TelegramSettingsDraft = {
+  enabled: boolean;
+  botToken: string;
+  subscribedProjectIds: string[];
+  defaultProjectId: string;
+  defaultSessionId: string;
+};
+
+function createTelegramDraft(status: TelegramStatusResponse | null): TelegramSettingsDraft {
+  return {
+    enabled: status?.enabled ?? false,
+    botToken: "",
+    subscribedProjectIds: status?.subscribedProjectIds ?? [],
+    defaultProjectId: status?.defaultProjectId ?? "",
+    defaultSessionId: status?.defaultSessionId ?? "",
+  };
+}
+
+function telegramStatusLabel(status: TelegramStatusResponse | null): string {
+  if (!status) {
+    return "Loading";
+  }
+  if (status.running) {
+    return "Polling";
+  }
+  if (status.linkedChatId !== null && status.linkedChatId !== undefined) {
+    return "Linked";
+  }
+  if (status.configured) {
+    return "Configured";
+  }
+  return "Not configured";
+}
+
+export function TelegramPreferencesPanel({
+  projects,
+  sessions,
+}: {
+  projects: Project[];
+  sessions: Session[];
+}) {
+  const [status, setStatus] = useState<TelegramStatusResponse | null>(null);
+  const [draft, setDraft] = useState<TelegramSettingsDraft>(() => createTelegramDraft(null));
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [isSetupOpen, setIsSetupOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    fetchTelegramStatus()
+      .then((nextStatus) => {
+        if (cancelled) {
+          return;
+        }
+        setStatus(nextStatus);
+        setDraft(createTelegramDraft(nextStatus));
+        setError(null);
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "Failed to load Telegram settings.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const projectOptions = useMemo<ComboboxOption[]>(
+    () => [
+      { label: "No default project", value: "" },
+      ...projects.map((project) => ({
+        label: project.name,
+        value: project.id,
+        description: project.rootPath,
+      })),
+    ],
+    [projects],
+  );
+  const defaultProjectSessions = useMemo(
+    () =>
+      sessions.filter(
+        (session) =>
+          draft.defaultProjectId &&
+          session.projectId === draft.defaultProjectId,
+      ),
+    [draft.defaultProjectId, sessions],
+  );
+  const sessionOptions = useMemo<ComboboxOption[]>(
+    () => [
+      { label: "No default session", value: "" },
+      ...defaultProjectSessions.map((session) => ({
+        label: session.name,
+        value: session.id,
+        description: `${session.agent} - ${session.status}`,
+      })),
+    ],
+    [defaultProjectSessions],
+  );
+  const subscribedProjectIds = useMemo(
+    () => new Set(draft.subscribedProjectIds),
+    [draft.subscribedProjectIds],
+  );
+  const selectedDefaultSessionExists =
+    draft.defaultSessionId === "" ||
+    defaultProjectSessions.some((session) => session.id === draft.defaultSessionId);
+  const canTestToken = draft.botToken.trim().length > 0 || Boolean(status?.botTokenMasked);
+  const hasSavedToken = Boolean(status?.botTokenMasked);
+
+  function updateDraft(patch: Partial<TelegramSettingsDraft>) {
+    setDraft((current) => ({ ...current, ...patch }));
+    setNotice(null);
+    setError(null);
+  }
+
+  function toggleProject(projectId: string, checked: boolean) {
+    setDraft((current) => {
+      const nextIds = checked
+        ? [...current.subscribedProjectIds, projectId]
+        : current.subscribedProjectIds.filter((candidate) => candidate !== projectId);
+      const removesDefaultProject = !checked && current.defaultProjectId === projectId;
+      return {
+        ...current,
+        subscribedProjectIds: Array.from(new Set(nextIds)),
+        defaultProjectId: removesDefaultProject ? "" : current.defaultProjectId,
+        defaultSessionId: removesDefaultProject ? "" : current.defaultSessionId,
+      };
+    });
+    setNotice(null);
+    setError(null);
+  }
+
+  async function handleSave() {
+    setIsSaving(true);
+    setNotice(null);
+    setError(null);
+    try {
+      const nextProjectIds = draft.defaultProjectId
+        ? Array.from(new Set([...draft.subscribedProjectIds, draft.defaultProjectId]))
+        : draft.subscribedProjectIds;
+      const nextStatus = await updateTelegramConfig({
+        enabled: draft.enabled,
+        botToken: draft.botToken.trim() ? draft.botToken.trim() : undefined,
+        subscribedProjectIds: nextProjectIds,
+        defaultProjectId: draft.defaultProjectId || null,
+        defaultSessionId:
+          draft.defaultSessionId && selectedDefaultSessionExists
+            ? draft.defaultSessionId
+            : null,
+      });
+      setStatus(nextStatus);
+      setDraft(createTelegramDraft(nextStatus));
+      setNotice("Telegram settings saved.");
+    } catch (saveError: unknown) {
+      setError(saveError instanceof Error ? saveError.message : "Failed to save Telegram settings.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleTestConnection() {
+    setIsTesting(true);
+    setNotice(null);
+    setError(null);
+    try {
+      const result = await testTelegramConnection(
+        draft.botToken.trim() ? { botToken: draft.botToken.trim() } : {},
+      );
+      setNotice(
+        result.botUsername
+          ? `Connected to @${result.botUsername}.`
+          : `Connected to ${result.botName}.`,
+      );
+    } catch (testError: unknown) {
+      setError(testError instanceof Error ? testError.message : "Telegram connection test failed.");
+    } finally {
+      setIsTesting(false);
+    }
+  }
+
+  return (
+    <section className="settings-panel-stack">
+      <article className="message-card prompt-settings-card telegram-settings-card">
+        <div className="telegram-settings-header">
+          <div>
+            <div className="card-label">Mobile</div>
+            <h3>Telegram</h3>
+          </div>
+          <span className="remote-settings-badge">{telegramStatusLabel(status)}</span>
+        </div>
+
+        <div className="prompt-settings-grid telegram-settings-grid">
+          <div className="session-control-group telegram-token-group">
+            <label className="session-control-label" htmlFor="telegram-bot-token">
+              Bot token
+            </label>
+            <input
+              id="telegram-bot-token"
+              className="themed-input"
+              type="password"
+              value={draft.botToken}
+              placeholder={status?.botTokenMasked ?? "BotFather token"}
+              disabled={isLoading || isSaving}
+              autoComplete="off"
+              onChange={(event) => updateDraft({ botToken: event.target.value })}
+            />
+            {hasSavedToken ? (
+              <p className="session-control-hint">Saved as {status?.botTokenMasked}.</p>
+            ) : null}
+          </div>
+
+          <label className="remote-settings-toggle telegram-enable-toggle">
+            <input
+              type="checkbox"
+              checked={draft.enabled}
+              disabled={isLoading || isSaving}
+              onChange={(event) => updateDraft({ enabled: event.target.checked })}
+            />
+            <span>Enable relay</span>
+          </label>
+
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor="telegram-default-project">
+              Default project
+            </label>
+            <ThemedCombobox
+              id="telegram-default-project"
+              value={draft.defaultProjectId}
+              options={projectOptions}
+              disabled={isLoading || isSaving || projects.length === 0}
+              onChange={(nextProjectId) =>
+                updateDraft({
+                  defaultProjectId: nextProjectId,
+                  defaultSessionId: "",
+                  subscribedProjectIds: nextProjectId
+                    ? Array.from(new Set([...draft.subscribedProjectIds, nextProjectId]))
+                    : draft.subscribedProjectIds,
+                })
+              }
+            />
+          </div>
+
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor="telegram-default-session">
+              Default session
+            </label>
+            <ThemedCombobox
+              id="telegram-default-session"
+              value={selectedDefaultSessionExists ? draft.defaultSessionId : ""}
+              options={sessionOptions}
+              disabled={
+                isLoading ||
+                isSaving ||
+                !draft.defaultProjectId ||
+                defaultProjectSessions.length === 0
+              }
+              onChange={(nextSessionId) => updateDraft({ defaultSessionId: nextSessionId })}
+            />
+          </div>
+        </div>
+
+        <div className="telegram-project-list" aria-label="Telegram subscribed projects">
+          {projects.length > 0 ? (
+            projects.map((project) => (
+              <label key={project.id} className="telegram-project-option">
+                <input
+                  type="checkbox"
+                  checked={subscribedProjectIds.has(project.id)}
+                  disabled={isLoading || isSaving}
+                  onChange={(event) => toggleProject(project.id, event.target.checked)}
+                />
+                <span>
+                  <strong>{project.name}</strong>
+                  <span>{project.rootPath}</span>
+                </span>
+              </label>
+            ))
+          ) : (
+            <p className="session-control-hint">No projects yet.</p>
+          )}
+        </div>
+
+        <div className="remote-settings-actions telegram-settings-actions">
+          <button
+            className="ghost-button"
+            type="button"
+            aria-expanded={isSetupOpen}
+            aria-controls="telegram-setup-panel"
+            onClick={() => setIsSetupOpen((current) => !current)}
+          >
+            {isSetupOpen ? "Hide setup" : "Setup"}
+          </button>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={handleTestConnection}
+            disabled={isLoading || isTesting || !canTestToken}
+          >
+            {isTesting ? "Testing..." : "Test connection"}
+          </button>
+          <button
+            className="ghost-button"
+            type="button"
+            disabled
+            title="The link-code wizard lands in the next Telegram phase."
+          >
+            Link chat
+          </button>
+          <button
+            className="send-button"
+            type="button"
+            onClick={handleSave}
+            disabled={isLoading || isSaving}
+          >
+            {isSaving ? "Saving..." : "Save Telegram"}
+          </button>
+        </div>
+
+        {isSetupOpen ? (
+          <div id="telegram-setup-panel" className="telegram-setup-panel">
+            <p className="session-control-label">Setup flow</p>
+            <ol>
+              <li>Open @BotFather in Telegram, create a bot with /newbot, and copy the token.</li>
+              <li>Paste the token here, test the connection, choose projects, then save.</li>
+              <li>Turn on Enable relay. TermAl will run the Telegram relay from the main backend process.</li>
+              <li>Use Link chat to connect this one Telegram conversation to TermAl.</li>
+            </ol>
+            <p className="session-control-hint">
+              No separate TermAl process or telegram command should be required. Relay startup and link-code binding are the next backend wiring step.
+            </p>
+          </div>
+        ) : null}
+
+        {status?.linkedChatId !== null && status?.linkedChatId !== undefined ? (
+          <p className="session-control-hint">Linked chat id: {status.linkedChatId}</p>
+        ) : null}
+        {status?.enabled && status.lifecycle === "manual" ? (
+          <p className="session-control-hint">
+            Relay startup from this toggle lands in the next backend lifecycle phase.
+          </p>
+        ) : null}
+        {notice ? <p className="session-control-hint telegram-settings-notice">{notice}</p> : null}
+        {error ? <p className="session-control-hint telegram-settings-error">{error}</p> : null}
       </article>
     </section>
   );

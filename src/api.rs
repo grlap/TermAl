@@ -121,12 +121,24 @@ async fn get_state(State(state): State<AppState>) -> Result<Response, ApiError> 
         .into_response())
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetSessionQuery {
+    #[serde(default)]
+    tail: Option<usize>,
+}
+
 /// Gets one full session.
 async fn get_session(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<String>,
+    Query(query): Query<GetSessionQuery>,
 ) -> Result<Json<SessionResponse>, ApiError> {
-    let response = run_blocking_api(move || state.get_session(&session_id)).await?;
+    let response = run_blocking_api(move || match query.tail {
+        Some(message_limit) => state.get_session_tail(&session_id, message_limit),
+        None => state.get_session(&session_id),
+    })
+    .await?;
     Ok(Json(response))
 }
 

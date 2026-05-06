@@ -117,6 +117,10 @@ type SessionSettingsValue =
   | GeminiApprovalMode;
 
 const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES = 80;
+const INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES = 512;
+const INITIAL_ACTIVE_TRANSCRIPT_TAIL_MESSAGE_COUNT = 96;
+const INITIAL_ACTIVE_TRANSCRIPT_HYDRATION_DELAY_MS = 600;
+const INITIAL_ACTIVE_TRANSCRIPT_HYDRATION_IDLE_TIMEOUT_MS = 3_000;
 const EMPTY_COMPOSER_ATTACHMENTS: readonly {
   byteSize: number;
   fileName: string;
@@ -166,6 +170,119 @@ export function includeUndeferredMessageTail(
   }
 
   return deferredMessages;
+}
+
+function shouldUseInitialActiveTranscriptTailWindow({
+  hasConversationMarkers,
+  hasConversationSearch,
+  isActive,
+  messageCount,
+}: {
+  hasConversationMarkers: boolean;
+  hasConversationSearch: boolean;
+  isActive: boolean;
+  messageCount: number;
+}) {
+  return (
+    isActive &&
+    messageCount > INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES &&
+    !hasConversationMarkers &&
+    !hasConversationSearch
+  );
+}
+
+function scheduleInitialActiveTranscriptHydration(callback: () => void) {
+  let delayId: number | null = null;
+  let cancel = () => {
+    if (delayId !== null) {
+      window.clearTimeout(delayId);
+      delayId = null;
+    }
+  };
+  delayId = window.setTimeout(() => {
+    delayId = null;
+    if (window.requestIdleCallback) {
+      const idleId = window.requestIdleCallback(callback, {
+        timeout: INITIAL_ACTIVE_TRANSCRIPT_HYDRATION_IDLE_TIMEOUT_MS,
+      });
+      cancel = () => {
+        window.cancelIdleCallback(idleId);
+      };
+      return;
+    }
+
+    const fallbackId = window.setTimeout(callback, 0);
+    cancel = () => {
+      window.clearTimeout(fallbackId);
+    };
+  }, INITIAL_ACTIVE_TRANSCRIPT_HYDRATION_DELAY_MS);
+  return () => {
+    cancel();
+  };
+}
+
+function useInitialActiveTranscriptMessages({
+  hasConversationMarkers,
+  hasConversationSearch,
+  isActive,
+  messages,
+  sessionId,
+}: {
+  hasConversationMarkers: boolean;
+  hasConversationSearch: boolean;
+  isActive: boolean;
+  messages: Message[];
+  sessionId: string;
+}) {
+  const [, forceHydratedRender] = useState(0);
+  const hydrationRef = useRef({
+    hydrated: false,
+    sessionId,
+  });
+  if (hydrationRef.current.sessionId !== sessionId) {
+    hydrationRef.current = {
+      hydrated: false,
+      sessionId,
+    };
+  }
+
+  const isTailEligible = shouldUseInitialActiveTranscriptTailWindow({
+    hasConversationMarkers,
+    hasConversationSearch,
+    isActive,
+    messageCount: messages.length,
+  });
+  if (!isTailEligible && messages.length > INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES) {
+    hydrationRef.current.hydrated = true;
+  }
+  const isWindowed = isTailEligible && !hydrationRef.current.hydrated;
+
+  useEffect(() => {
+    if (!isWindowed) {
+      return undefined;
+    }
+
+    return scheduleInitialActiveTranscriptHydration(() => {
+      if (hydrationRef.current.sessionId !== sessionId) {
+        return;
+      }
+      hydrationRef.current.hydrated = true;
+      forceHydratedRender((current) => current + 1);
+    });
+  }, [isWindowed, sessionId]);
+
+  const windowedMessages = useMemo(
+    () =>
+      isWindowed
+        ? messages.slice(-INITIAL_ACTIVE_TRANSCRIPT_TAIL_MESSAGE_COUNT)
+        : messages,
+    [isWindowed, messages],
+  );
+
+  return {
+    isWindowed,
+    messages: windowedMessages,
+  };
 }
 
 function isSpaceKey(event: {
@@ -647,9 +764,24 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const pendingPrompts = session.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
   const deferredMessages = useDeferredValue(session.messages);
   const deferredPendingPrompts = useDeferredValue(pendingPrompts);
-  const visibleMessages = isActive
+  const visibleMarkers = session.markers ?? EMPTY_CONVERSATION_MARKERS;
+  const hasConversationSearch =
+    conversationSearchQuery.trim().length > 0 ||
+    conversationSearchMatchedItemKeys.size > 0 ||
+    conversationSearchActiveItemKey !== null;
+  const baseVisibleMessages = isActive
     ? includeUndeferredMessageTail(deferredMessages, session.messages)
     : session.messages;
+  const {
+    isWindowed: isInitialTranscriptWindowActive,
+    messages: visibleMessages,
+  } = useInitialActiveTranscriptMessages({
+    hasConversationMarkers: visibleMarkers.length > 0,
+    hasConversationSearch,
+    isActive,
+    messages: baseVisibleMessages,
+    sessionId: session.id,
+  });
   const visiblePendingPromptsBase = isActive ? deferredPendingPrompts : pendingPrompts;
   const visiblePendingPrompts = useMemo(() => {
     if (visiblePendingPromptsBase.length === 0 || visibleMessages.length === 0) {
@@ -669,13 +801,12 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const conversationOverview = useConversationOverviewController({
     agent: session.agent,
     isActive,
-    messageCount: visibleMessages.length,
+    messageCount: isInitialTranscriptWindowActive ? 0 : visibleMessages.length,
     scrollContainerRef,
     sessionId: session.id,
     showWaitingIndicator,
     waitingIndicatorPrompt,
   });
-  const visibleMarkers = session.markers ?? EMPTY_CONVERSATION_MARKERS;
   const markersByMessageId = useMemo(
     () => groupConversationMarkersByMessageId(visibleMarkers),
     [visibleMarkers],
@@ -693,6 +824,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
     contextMenuNode: markerContextMenuNode,
     openContextMenu: openMarkerContextMenu,
   } = useConversationMarkerContextMenu({
+    isActive,
     markersByMessageId,
     onCreateConversationMarker,
     onDeleteConversationMarker,
@@ -1059,6 +1191,7 @@ function ConversationMessageList({
       sessionId={sessionId}
       messages={messages}
       scrollContainerRef={scrollContainerRef}
+      preferInitialEstimatedBottomViewport
       virtualizerHandleRef={virtualizerHandleRef}
       conversationSearchQuery={conversationSearchQuery}
       conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}

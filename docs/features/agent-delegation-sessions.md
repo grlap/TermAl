@@ -232,8 +232,12 @@ wait_delegations(parentSessionId, delegationIds, options?) -> WaitDelegationsRes
 
 `spawn_reviewer_batch` is the first Phase 3 helper. It fans out several
 read-only reviewer spawns in parallel through the same Phase 1 REST create route
-and returns successful child ids plus per-item failures. Grouped parent-card UI
-and result consolidation remain separate Phase 3 work.
+and returns successful child ids plus per-item failures. `completed` means every
+spawn succeeded on one backend instance; `partial` means at least one spawn
+succeeded and at least one item failed; `error` means every item failed or the
+successful responses crossed backend instances during restart, in which case
+`error.kind === "mixed-server-instance"` and revision metadata is `null`.
+Grouped parent-card UI and result consolidation remain separate Phase 3 work.
 
 ### MCP Tools
 
@@ -408,6 +412,39 @@ type SpawnDelegationCommandResult = {
   serverInstanceId: string;
 };
 
+type CreateDelegationRequest = {
+  prompt: string;
+  title?: string;
+  cwd?: string;
+  agent?: AgentType;
+  model?: string;
+  mode?: DelegationMode;
+  writePolicy?: DelegationWritePolicy;
+};
+
+type SpawnReviewerBatchItem = Omit<CreateDelegationRequest, "mode" | "writePolicy">;
+
+type SpawnReviewerBatchFailure = {
+  index: number;
+  title: string | null;
+  name: string;
+  message: string;
+  apiErrorKind: ApiRequestErrorKind | null;
+  status: number | null;
+  restartRequired: boolean | null;
+};
+
+type SpawnReviewerBatchCommandResult = {
+  outcome: "completed" | "partial" | "error";
+  spawned: SpawnDelegationCommandResult[];
+  failed: SpawnReviewerBatchFailure[];
+  delegationIds: string[];
+  childSessionIds: string[];
+  revision: number | null;
+  serverInstanceId: string | null;
+  error: MixedServerInstanceErrorPacket | null;
+};
+
 type DelegationStatusCommandResult = {
   delegationId: string;
   childSessionId: string;
@@ -452,6 +489,11 @@ type WaitDelegationErrorPacket =
       status: number | null;
       restartRequired: boolean | null;
     };
+
+type MixedServerInstanceErrorPacket = Extract<
+  WaitDelegationErrorPacket,
+  { kind: "mixed-server-instance" }
+>;
 
 type WaitDelegationsBaseResult = {
   delegations: DelegationSummary[];

@@ -1010,6 +1010,70 @@ struct UpdateAppSettingsRequest {
     remotes: Option<Vec<RemoteConfig>>,
 }
 
+/// UI-owned Telegram relay configuration persisted outside `/api/state`.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TelegramUiConfig {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bot_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    subscribed_project_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_session_id: Option<String>,
+}
+
+/// Represents the Telegram settings response payload.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TelegramStatusResponse {
+    configured: bool,
+    enabled: bool,
+    running: bool,
+    lifecycle: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    linked_chat_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bot_token_masked: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    subscribed_project_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_session_id: Option<String>,
+}
+
+/// Represents the update Telegram settings request payload.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateTelegramConfigRequest {
+    enabled: Option<bool>,
+    bot_token: Option<Option<String>>,
+    subscribed_project_ids: Option<Vec<String>>,
+    default_project_id: Option<Option<String>>,
+    default_session_id: Option<Option<String>>,
+}
+
+/// Represents the Telegram connection test request payload.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TelegramTestRequest {
+    #[serde(default)]
+    bot_token: Option<String>,
+}
+
+/// Represents the Telegram connection test response payload.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TelegramTestResponse {
+    bot_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bot_username: Option<String>,
+}
+
 /// Represents file query.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

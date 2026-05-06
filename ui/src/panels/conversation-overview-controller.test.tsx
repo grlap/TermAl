@@ -81,11 +81,23 @@ describe("useConversationOverviewController", () => {
     vi.restoreAllMocks();
   });
 
-  it("activates only one long-session rail per animation frame", () => {
+  it("activates long-session rails from idle work after transcript paint frames", () => {
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const idleWindow = window as Window &
+      typeof globalThis & {
+        requestIdleCallback?: (
+          callback: IdleRequestCallback,
+          options?: IdleRequestOptions,
+        ) => number;
+        cancelIdleCallback?: (handle: number) => void;
+      };
+    const originalRequestIdleCallback = idleWindow.requestIdleCallback;
+    const originalCancelIdleCallback = idleWindow.cancelIdleCallback;
     const frameCallbacks = new Map<number, FrameRequestCallback>();
+    const idleCallbacks = new Map<number, IdleRequestCallback>();
     let nextFrameId = 1;
+    let nextIdleId = 1;
     window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
       const frameId = nextFrameId;
       nextFrameId += 1;
@@ -95,6 +107,15 @@ describe("useConversationOverviewController", () => {
     window.cancelAnimationFrame = ((frameId: number) => {
       frameCallbacks.delete(frameId);
     }) as typeof cancelAnimationFrame;
+    idleWindow.requestIdleCallback = ((callback: IdleRequestCallback) => {
+      const idleId = nextIdleId;
+      nextIdleId += 1;
+      idleCallbacks.set(idleId, callback);
+      return idleId;
+    }) as typeof requestIdleCallback;
+    idleWindow.cancelIdleCallback = ((idleId: number) => {
+      idleCallbacks.delete(idleId);
+    }) as typeof cancelIdleCallback;
     const flushNextFrame = () => {
       const nextFrame = frameCallbacks.entries().next().value as
         | [number, FrameRequestCallback]
@@ -106,6 +127,21 @@ describe("useConversationOverviewController", () => {
       const [frameId, callback] = nextFrame;
       frameCallbacks.delete(frameId);
       callback(performance.now());
+    };
+    const flushNextIdle = () => {
+      const nextIdle = idleCallbacks.entries().next().value as
+        | [number, IdleRequestCallback]
+        | undefined;
+      expect(nextIdle).toBeDefined();
+      if (!nextIdle) {
+        return;
+      }
+      const [idleId, callback] = nextIdle;
+      idleCallbacks.delete(idleId);
+      callback({
+        didTimeout: false,
+        timeRemaining: () => 16,
+      });
     };
 
     try {
@@ -135,7 +171,7 @@ describe("useConversationOverviewController", () => {
         "pending",
       );
 
-      act(flushNextFrame);
+      act(flushNextIdle);
 
       expect(screen.getByTestId("overview-session-a")).toHaveTextContent(
         "ready",
@@ -144,7 +180,7 @@ describe("useConversationOverviewController", () => {
         "pending",
       );
 
-      act(flushNextFrame);
+      act(flushNextIdle);
 
       expect(screen.getByTestId("overview-session-a")).toHaveTextContent(
         "ready",
@@ -155,6 +191,8 @@ describe("useConversationOverviewController", () => {
     } finally {
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
+      idleWindow.requestIdleCallback = originalRequestIdleCallback;
+      idleWindow.cancelIdleCallback = originalCancelIdleCallback;
     }
   });
 });

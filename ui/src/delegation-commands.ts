@@ -17,7 +17,10 @@ import {
 import {
   mismatchedDelegationIdErrorPacket,
   mixedServerInstanceErrorPacket,
+  spawnDelegationFailurePacket,
   statusFetchErrorPacket,
+  type MixedServerInstanceErrorPacket,
+  type SpawnDelegationFailurePacket,
   type WaitDelegationErrorPacket,
 } from "./delegation-error-packets";
 import type {
@@ -122,10 +125,9 @@ export type SpawnReviewerBatchItem = Omit<
   "mode" | "writePolicy"
 >;
 
-export type SpawnReviewerBatchFailure = {
+export type SpawnReviewerBatchFailure = SpawnDelegationFailurePacket & {
   index: number;
   title: string | null;
-  message: string;
 };
 
 export type SpawnReviewerBatchOutcome = "completed" | "partial" | "error";
@@ -138,6 +140,7 @@ export type SpawnReviewerBatchCommandResult = {
   childSessionIds: string[];
   revision: number | null;
   serverInstanceId: string | null;
+  error: MixedServerInstanceErrorPacket | null;
 };
 
 export type DelegationStatusCommandResult = {
@@ -256,7 +259,12 @@ async function spawnReviewerBatchWithTransport(
           (error: unknown) =>
             ({
               kind: "failed",
-              failure: reviewerBatchFailure(index, title, error),
+              failure: reviewerBatchFailure(
+                index,
+                title,
+                error,
+                normalizedParentSessionId,
+              ),
             }) as const,
         ),
     ),
@@ -270,10 +278,14 @@ async function spawnReviewerBatchWithTransport(
       failed.push(entry.failure);
     }
   });
-  const metadata = newestSpawnMetadata(spawned);
+  const mixedServerInstanceError = mixedSpawnServerInstanceError(spawned);
+  const metadata = mixedServerInstanceError
+    ? { revision: null, serverInstanceId: null }
+    : newestSpawnMetadata(spawned);
   return {
-    outcome:
-      failed.length === 0
+    outcome: mixedServerInstanceError
+      ? "error"
+      : failed.length === 0
         ? "completed"
         : spawned.length > 0
           ? "partial"
@@ -284,6 +296,7 @@ async function spawnReviewerBatchWithTransport(
     childSessionIds: spawned.map((result) => result.childSessionId),
     revision: metadata.revision,
     serverInstanceId: metadata.serverInstanceId,
+    error: mixedServerInstanceError,
   };
 }
 
@@ -958,7 +971,7 @@ function normalizeReviewerBatchRequests(
     if (request === null || typeof request !== "object") {
       throw new TypeError(`reviewer request ${index + 1} must be an object`);
     }
-    const compacted = compactCreateDelegationRequest({
+    const compacted = compactReviewerBatchRequest({
       ...request,
       mode: "reviewer",
       writePolicy: { kind: "readOnly" },
@@ -979,12 +992,39 @@ function reviewerBatchFailure(
   index: number,
   title: string | null,
   error: unknown,
+  parentSessionId: string,
 ): SpawnReviewerBatchFailure {
   return {
     index,
     title,
-    message: error instanceof Error ? error.message : String(error),
+    ...spawnDelegationFailurePacket(error, { parentSessionId }),
   };
+}
+
+function compactReviewerBatchRequest(
+  request: CreateDelegationRequest,
+): CreateDelegationRequest {
+  const compacted = compactCreateDelegationRequest(request);
+  if (typeof compacted.title !== "string") {
+    return compacted;
+  }
+  const title = compacted.title.trim();
+  if (!title) {
+    const rest = { ...compacted };
+    delete rest.title;
+    return rest;
+  }
+  return { ...compacted, title };
+}
+
+function mixedSpawnServerInstanceError(
+  spawned: readonly SpawnDelegationCommandResult[],
+) {
+  const serverInstanceIds = spawned.map((result) => result.serverInstanceId);
+  const uniqueServerInstanceIds = new Set(serverInstanceIds);
+  return uniqueServerInstanceIds.size > 1
+    ? mixedServerInstanceErrorPacket(serverInstanceIds)
+    : null;
 }
 
 function newestSpawnMetadata(spawned: readonly SpawnDelegationCommandResult[]) {
