@@ -84,6 +84,18 @@ export type ConversationOverviewProjection = {
   viewportHeightPx: number;
 };
 
+export type ConversationOverviewMessageMetadataCache = WeakMap<
+  Message,
+  Map<string, ConversationOverviewMessageMetadata>
+>;
+
+type ConversationOverviewMessageMetadata = {
+  estimatedHeightPx: number;
+  kind: ConversationOverviewItemKind;
+  status: ConversationOverviewItemStatus;
+  textSample: string;
+};
+
 export type ConversationOverviewSegmentKind =
   | ConversationOverviewItemKind
   | "mixed";
@@ -111,6 +123,7 @@ export type BuildConversationOverviewProjectionOptions = {
   maxHeightPx?: number;
   minItemHeightPx?: number;
   maxSampleLength?: number;
+  messageMetadataCache?: ConversationOverviewMessageMetadataCache;
 };
 
 export type BuildConversationOverviewSegmentsOptions = {
@@ -138,6 +151,7 @@ export function buildConversationOverviewProjection({
   maxHeightPx = DEFAULT_MAX_HEIGHT_PX,
   minItemHeightPx = DEFAULT_MIN_ITEM_HEIGHT_PX,
   maxSampleLength = DEFAULT_MAX_SAMPLE_LENGTH,
+  messageMetadataCache,
 }: BuildConversationOverviewProjectionOptions): ConversationOverviewProjection {
   const layoutByMessageId = buildLayoutByMessageId(layoutSnapshot);
   const measuredHeightByMessageId = buildMeasuredHeightByMessageId(layoutSnapshot);
@@ -146,6 +160,8 @@ export function buildConversationOverviewProjection({
     availableWidthPx,
     layoutByMessageId,
     measuredHeightByMessageId,
+    messageMetadataCache,
+    maxSampleLength,
   });
   const messageSourceHeightPx = Math.max(
     0,
@@ -183,8 +199,8 @@ export function buildConversationOverviewProjection({
       messageIndex: row.messageIndex,
       type: row.message.type,
       author: row.message.author,
-      kind: classifyConversationOverviewItem(row.message),
-      status: resolveConversationOverviewStatus(row.message),
+      kind: row.metadata.kind,
+      status: row.metadata.status,
       estimatedTopPx: row.estimatedTopPx,
       estimatedHeightPx: row.estimatedHeightPx,
       measuredHeightPx: row.measuredHeightPx,
@@ -195,7 +211,7 @@ export function buildConversationOverviewProjection({
       mapHeightPx: Math.max(minItemHeightPx, row.documentHeightPx * scale),
       markerIds: itemMarkers.map((marker) => marker.id),
       markers: itemMarkers,
-      textSample: summarizeConversationOverviewMessage(row.message, maxSampleLength),
+      textSample: row.metadata.textSample,
     };
   });
   let tailDocumentTopPx = messageSourceHeightPx;
@@ -350,6 +366,45 @@ function summarizeConversationOverviewTailItem(
     return sample;
   }
   return `${sample.slice(0, Math.max(0, maxSampleLength - 3)).trimEnd()}...`;
+}
+
+function getConversationOverviewMessageMetadata(
+  message: Message,
+  {
+    availableWidthPx,
+    maxSampleLength,
+    messageMetadataCache,
+  }: {
+    availableWidthPx: number;
+    maxSampleLength: number;
+    messageMetadataCache?: ConversationOverviewMessageMetadataCache;
+  },
+): ConversationOverviewMessageMetadata {
+  const cacheKey = `${availableWidthPx}:${maxSampleLength}`;
+  const cachedByKey = messageMetadataCache?.get(message);
+  const cached = cachedByKey?.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const metadata: ConversationOverviewMessageMetadata = {
+    estimatedHeightPx: estimateConversationMessageHeight(message, {
+      availableWidthPx,
+    }),
+    kind: classifyConversationOverviewItem(message),
+    status: resolveConversationOverviewStatus(message),
+    textSample: summarizeConversationOverviewMessage(message, maxSampleLength),
+  };
+
+  if (messageMetadataCache) {
+    if (cachedByKey) {
+      cachedByKey.set(cacheKey, metadata);
+    } else {
+      messageMetadataCache.set(message, new Map([[cacheKey, metadata]]));
+    }
+  }
+
+  return metadata;
 }
 
 export function findConversationOverviewItemAtY(
@@ -755,23 +810,28 @@ function buildEstimatedRows(
     availableWidthPx: number;
     layoutByMessageId: Map<string, VirtualizedConversationLayoutMessage>;
     measuredHeightByMessageId: Map<string, number>;
+    messageMetadataCache?: ConversationOverviewMessageMetadataCache;
+    maxSampleLength: number;
   },
 ) {
   let estimatedTopPx = 0;
   let documentTopPx = 0;
 
   return messages.map((message, messageIndex) => {
+    const metadata = getConversationOverviewMessageMetadata(message, {
+      availableWidthPx: options.availableWidthPx,
+      maxSampleLength: options.maxSampleLength,
+      messageMetadataCache: options.messageMetadataCache,
+    });
     const layoutMessage = options.layoutByMessageId.get(message.id);
     const estimatedHeightPx =
-      layoutMessage?.estimatedHeightPx ??
-      estimateConversationMessageHeight(message, {
-        availableWidthPx: options.availableWidthPx,
-      });
+      layoutMessage?.estimatedHeightPx ?? metadata.estimatedHeightPx;
     const measuredHeightPx = options.measuredHeightByMessageId.get(message.id) ?? null;
     const measuredPageHeightPx = layoutMessage?.measuredPageHeightPx ?? null;
     const rowEstimatedTopPx = layoutMessage?.estimatedTopPx ?? estimatedTopPx;
     const documentHeightPx = Math.max(1, measuredHeightPx ?? estimatedHeightPx);
     const row = {
+      metadata,
       message,
       messageIndex,
       estimatedTopPx: rowEstimatedTopPx,

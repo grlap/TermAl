@@ -18,6 +18,7 @@ import {
   MAX_DELEGATION_WAIT_TIMEOUT_MS,
   MIN_DELEGATION_WAIT_INTERVAL_MS,
   type DelegationCommandTransport,
+  type SpawnReviewerBatchCommandResult,
   type WaitDelegationErrorPacket,
   type WaitDelegationsResult,
 } from "./delegation-commands";
@@ -218,11 +219,19 @@ describe("delegation command surface", () => {
     expect(delegationCommands).not.toHaveProperty("wait_delegation");
   });
 
-  it("keeps wait results discriminated by outcome", () => {
+  it("keeps wait and spawn-batch results discriminated by outcome", () => {
     type ErrorResult = Extract<WaitDelegationsResult, { outcome: "error" }>;
     type NonErrorResult = Extract<
       WaitDelegationsResult,
       { outcome: "completed" | "timeout" }
+    >;
+    type SpawnBatchErrorResult = Extract<
+      SpawnReviewerBatchCommandResult,
+      { outcome: "error" }
+    >;
+    type SpawnBatchNonErrorResult = Extract<
+      SpawnReviewerBatchCommandResult,
+      { outcome: "completed" | "partial" }
     >;
 
     expectTypeOf<ErrorResult>().toMatchTypeOf<{
@@ -231,6 +240,14 @@ describe("delegation command surface", () => {
     }>();
     expectTypeOf<NonErrorResult>().toMatchTypeOf<{
       outcome: "completed" | "timeout";
+      error?: never;
+    }>();
+    expectTypeOf<SpawnBatchErrorResult>().toMatchTypeOf<{
+      outcome: "error";
+      error: unknown;
+    }>();
+    expectTypeOf<SpawnBatchNonErrorResult>().toMatchTypeOf<{
+      outcome: "completed" | "partial";
       error?: never;
     }>();
   });
@@ -261,8 +278,12 @@ describe("delegation command surface", () => {
       prompt: "Review this change.",
       title: "Review",
     });
+    if (result.outcome !== "completed") {
+      throw new Error(`unexpected spawn outcome: ${result.outcome}`);
+    }
 
     expect(result).toMatchObject({
+      outcome: "completed",
       delegationId: "delegation-1",
       childSessionId: "child-1",
       childSession: {
@@ -393,7 +414,7 @@ describe("delegation command surface", () => {
       expect.objectContaining({
         body: JSON.stringify({
           prompt: "Review this change.",
-          title,
+          title: title.trim(),
           model,
         }),
       }),
@@ -486,7 +507,6 @@ describe("delegation command surface", () => {
       failed: [],
       revision: 4,
       serverInstanceId: "server-a",
-      error: null,
     });
   });
 
@@ -534,6 +554,7 @@ describe("delegation command surface", () => {
           title: "Rust review",
           message: "parent session already has 4 active delegations",
           name: "ApiRequestError",
+          kind: "spawn-failed",
           apiErrorKind: "request-failed",
           status: 409,
           restartRequired: false,
@@ -541,7 +562,6 @@ describe("delegation command surface", () => {
       ],
       revision: 3,
       serverInstanceId: "server-a",
-      error: null,
     });
   });
 
@@ -570,6 +590,7 @@ describe("delegation command surface", () => {
         {
           index: 0,
           title: "React review",
+          kind: "spawn-failed",
           name: "ApiRequestError",
           message: "Spawn delegation failed.",
           apiErrorKind: "request-failed",
@@ -579,7 +600,109 @@ describe("delegation command surface", () => {
       ],
       revision: null,
       serverInstanceId: null,
-      error: null,
+      error: {
+        kind: "all-spawns-failed",
+        name: "SpawnReviewerBatchError",
+        message: "all reviewer spawns failed",
+      },
+    });
+  });
+
+  it("returns a sanitized error packet for single spawn transport failures", async () => {
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(async () => {
+        throw new ApiRequestError(
+          "request-failed",
+          "failed to persist delegation: C:/Users/example/.termal/state.sqlite",
+          { status: 500 },
+        );
+      }),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).spawn_delegation("parent-1", {
+        prompt: "Review React.",
+        title: "React review",
+      }),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      revision: null,
+      serverInstanceId: null,
+      error: {
+        kind: "spawn-failed",
+        name: "ApiRequestError",
+        message: "Spawn delegation failed.",
+        apiErrorKind: "request-failed",
+        status: 500,
+        restartRequired: false,
+      },
+    });
+  });
+
+  it("redacts non-ApiRequestError spawn failures", async () => {
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(async () => {
+        throw new TypeError("network down: file://internal/path");
+      }),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).spawn_reviewer_batch("parent-1", [
+        { prompt: "Review React.", title: "React review" },
+      ]),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      failed: [
+        {
+          kind: "spawn-failed",
+          name: "TypeError",
+          message: "Spawn delegation failed.",
+          apiErrorKind: null,
+          status: null,
+          restartRequired: null,
+        },
+      ],
+      error: { kind: "all-spawns-failed" },
+    });
+  });
+
+  it.each([
+    ["parent session id is required"],
+    ["session not found"],
+    ["unknown project `project-1`"],
+    ["delegation cwd `C:\\repo\\outside` must stay inside project `TermAl`"],
+  ])("passes through audited deterministic spawn errors: %s", async (message) => {
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(async () => {
+        throw new ApiRequestError("request-failed", message, { status: 400 });
+      }),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).spawn_reviewer_batch("parent-1", [
+        { prompt: "Review React.", title: "React review" },
+      ]),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      failed: [
+        {
+          kind: "spawn-failed",
+          name: "ApiRequestError",
+          message,
+          apiErrorKind: "request-failed",
+          status: 400,
+        },
+      ],
+      error: { kind: "all-spawns-failed" },
     });
   });
 
@@ -620,7 +743,23 @@ describe("delegation command surface", () => {
       serverInstanceId: null,
       error: {
         kind: "mixed-server-instance",
+        message:
+          "delegation spawn batch contained multiple server instances: server-a, server-b",
         serverInstanceIds: ["server-a", "server-b"],
+        recoveryGroups: [
+          {
+            serverInstanceId: "server-a",
+            revision: 8,
+            delegationIds: ["delegation-1"],
+            childSessionIds: ["child-1"],
+          },
+          {
+            serverInstanceId: "server-b",
+            revision: 1,
+            delegationIds: ["delegation-2"],
+            childSessionIds: ["child-2"],
+          },
+        ],
       },
     });
   });
@@ -692,7 +831,11 @@ describe("delegation command surface", () => {
       prompt: "Review this change.",
       title: "Review",
     });
+    if (spawnResult.outcome !== "completed") {
+      throw new Error(`unexpected spawn outcome: ${spawnResult.outcome}`);
+    }
     expect(spawnResult).toMatchObject({
+      outcome: "completed",
       delegationId: "delegation-1",
       childSession: {
         id: "child-1",

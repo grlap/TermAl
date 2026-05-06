@@ -234,9 +234,12 @@ wait_delegations(parentSessionId, delegationIds, options?) -> WaitDelegationsRes
 read-only reviewer spawns in parallel through the same Phase 1 REST create route
 and returns successful child ids plus per-item failures. `completed` means every
 spawn succeeded on one backend instance; `partial` means at least one spawn
-succeeded and at least one item failed; `error` means every item failed or the
-successful responses crossed backend instances during restart, in which case
-`error.kind === "mixed-server-instance"` and revision metadata is `null`.
+succeeded, at least one item failed, and every successful response came from the
+same backend instance. `error` means every item failed or any successful
+responses crossed backend instances during restart. Mixed-instance spawn errors
+set `error.kind === "mixed-server-instance"`, null top-level revision metadata,
+and include `error.recoveryGroups` so wrappers can route follow-up waits/cancels
+per backend instance.
 Grouped parent-card UI and result consolidation remain separate Phase 3 work.
 
 ### MCP Tools
@@ -403,14 +406,34 @@ type DelegationChildSessionSummary = {
   parentDelegationId: string | null;
 };
 
-type SpawnDelegationCommandResult = {
+type SpawnDelegationFailurePacket = {
+  kind: "spawn-failed";
+  name: string;
+  message: string;
+  apiErrorKind: ApiRequestErrorKind | null;
+  status: number | null;
+  restartRequired: boolean | null;
+};
+
+type SpawnDelegationCommandSuccessResult = {
+  outcome: "completed";
   delegationId: string;
   childSessionId: string;
   delegation: DelegationSummary;
   childSession: DelegationChildSessionSummary;
   revision: number;
   serverInstanceId: string;
+  error?: never;
 };
+
+type SpawnDelegationCommandResult =
+  | SpawnDelegationCommandSuccessResult
+  | {
+      outcome: "error";
+      revision: null;
+      serverInstanceId: null;
+      error: SpawnDelegationFailurePacket;
+    };
 
 type CreateDelegationRequest = {
   prompt: string;
@@ -425,6 +448,7 @@ type CreateDelegationRequest = {
 type SpawnReviewerBatchItem = Omit<CreateDelegationRequest, "mode" | "writePolicy">;
 
 type SpawnReviewerBatchFailure = {
+  kind: "spawn-failed";
   index: number;
   title: string | null;
   name: string;
@@ -434,16 +458,30 @@ type SpawnReviewerBatchFailure = {
   restartRequired: boolean | null;
 };
 
-type SpawnReviewerBatchCommandResult = {
-  outcome: "completed" | "partial" | "error";
-  spawned: SpawnDelegationCommandResult[];
+type SpawnReviewerBatchBaseResult = {
+  spawned: SpawnDelegationCommandSuccessResult[];
   failed: SpawnReviewerBatchFailure[];
   delegationIds: string[];
   childSessionIds: string[];
   revision: number | null;
   serverInstanceId: string | null;
-  error: MixedServerInstanceErrorPacket | null;
 };
+
+type SpawnReviewerBatchCommandResult =
+  | (SpawnReviewerBatchBaseResult & {
+      outcome: "completed" | "partial";
+      error?: never;
+    })
+  | (SpawnReviewerBatchBaseResult & {
+      outcome: "error";
+      error:
+        | MixedServerInstanceErrorPacket
+        | {
+            kind: "all-spawns-failed";
+            name: string;
+            message: string;
+          };
+    });
 
 type DelegationStatusCommandResult = {
   delegationId: string;
@@ -493,7 +531,14 @@ type WaitDelegationErrorPacket =
 type MixedServerInstanceErrorPacket = Extract<
   WaitDelegationErrorPacket,
   { kind: "mixed-server-instance" }
->;
+> & {
+  recoveryGroups: {
+    serverInstanceId: string;
+    revision: number;
+    delegationIds: string[];
+    childSessionIds: string[];
+  }[];
+};
 
 type WaitDelegationsBaseResult = {
   delegations: DelegationSummary[];

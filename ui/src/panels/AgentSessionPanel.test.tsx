@@ -663,7 +663,12 @@ describe("AgentSessionPanel conversation caching", () => {
       onDeleteConversationMarker,
       renderMessageCard: (message) => (
         <article className="message-card">
-          <div className="message-meta">
+          <div
+            className="message-meta"
+            data-conversation-marker-menu-trigger={
+              message.author === "assistant" ? true : undefined
+            }
+          >
             <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
             <span>{message.timestamp}</span>
           </div>
@@ -699,8 +704,6 @@ describe("AgentSessionPanel conversation caching", () => {
     await waitFor(() => {
       expect(addMenuItem).toHaveFocus();
     });
-    fireEvent.scroll(window);
-    expect(addMenu).toBeInTheDocument();
     fireEvent.keyDown(addMenuItem, { key: "ArrowDown" });
     expect(
       within(addMenu).getByRole("menuitem", { name: "Remove Review point" }),
@@ -718,6 +721,8 @@ describe("AgentSessionPanel conversation caching", () => {
 
     const originalInnerWidth = window.innerWidth;
     const originalInnerHeight = window.innerHeight;
+    const originalGetBoundingClientRect =
+      HTMLElement.prototype.getBoundingClientRect;
     const rectSpy = vi
       .spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockImplementation(function getBoundingClientRect(this: HTMLElement) {
@@ -734,17 +739,7 @@ describe("AgentSessionPanel conversation caching", () => {
             toJSON: () => ({}),
           } as DOMRect;
         }
-        return {
-          x: 0,
-          y: 0,
-          width: 0,
-          height: 0,
-          top: 0,
-          right: 0,
-          bottom: 0,
-          left: 0,
-          toJSON: () => ({}),
-        } as DOMRect;
+        return originalGetBoundingClientRect.call(this);
       });
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
@@ -829,7 +824,10 @@ describe("AgentSessionPanel conversation caching", () => {
       onCreateConversationMarker,
       renderMessageCard: () => (
         <article className="message-card">
-          <div className="message-meta">
+          <div
+            className="message-meta"
+            data-conversation-marker-menu-trigger
+          >
             <span>Agent header</span>
             <span>10:00</span>
           </div>
@@ -877,6 +875,242 @@ describe("AgentSessionPanel conversation caching", () => {
       "session-1",
       "message-1",
     );
+  });
+
+  it("opens marker actions from a keyboard-reachable toolbar trigger", () => {
+    const onCreateConversationMarker = vi.fn();
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      onCreateConversationMarker,
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open marker actions" }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+
+    expect(onCreateConversationMarker).toHaveBeenCalledWith(
+      "session-1",
+      "message-2",
+    );
+  });
+
+  it("closes the portaled marker menu when the transcript scrolls or the viewport resizes", () => {
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      renderMessageCard: (message) => (
+        <article className="message-card">
+          <div
+            className="message-meta"
+            data-conversation-marker-menu-trigger={
+              message.author === "assistant" ? true : undefined
+            }
+          >
+            <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+            <span>{message.timestamp}</span>
+          </div>
+          <p>{`${message.id} body`}</p>
+        </article>
+      ),
+    });
+
+    fireEvent.contextMenu(screen.getByText("Agent message-2"));
+    expect(
+      screen.getByRole("menu", { name: "Conversation marker actions" }),
+    ).toBeInTheDocument();
+
+    fireEvent.scroll(window);
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByText("Agent message-2"));
+    expect(
+      screen.getByRole("menu", { name: "Conversation marker actions" }),
+    ).toBeInTheDocument();
+
+    fireEvent.resize(window);
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("closes the portaled marker menu when its session becomes inactive", async () => {
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+    const harness = createAgentSessionPanelHarness({
+      activeSession,
+      renderMessageCard: (message) => (
+        <article className="message-card">
+          <div
+            className="message-meta"
+            data-conversation-marker-menu-trigger={
+              message.author === "assistant" ? true : undefined
+            }
+          >
+            <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+            <span>{message.timestamp}</span>
+          </div>
+          <p>{`${message.id} body`}</p>
+        </article>
+      ),
+    });
+    const { rerender } = render(harness());
+
+    fireEvent.contextMenu(screen.getByText("Agent message-2"));
+    expect(
+      screen.getByRole("menu", { name: "Conversation marker actions" }),
+    ).toBeInTheDocument();
+
+    rerender(harness({ activeSessionId: null }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("menu", { name: "Conversation marker actions" }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("clamps the marker menu from offset dimensions when DOMRect has no size", async () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    const originalOffsetWidth = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetWidth",
+    );
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight",
+    );
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 320,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 260,
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+      configurable: true,
+      get: () => 180,
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get: () => 120,
+    });
+
+    try {
+      renderSessionPanelWithDefaults({
+        activeSession,
+        renderMessageCard: (message) => (
+          <article className="message-card">
+            <div
+              className="message-meta"
+              data-conversation-marker-menu-trigger={
+                message.author === "assistant" ? true : undefined
+              }
+            >
+              <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+              <span>{message.timestamp}</span>
+            </div>
+            <p>{`${message.id} body`}</p>
+          </article>
+        ),
+      });
+
+      fireEvent.contextMenu(screen.getByText("Agent message-2"), {
+        clientX: 500,
+        clientY: 500,
+      });
+      const clampedMenu = screen.getByRole("menu", {
+        name: "Conversation marker actions",
+      });
+      await waitFor(() => {
+        expect(clampedMenu).toHaveStyle({ left: "132px", top: "132px" });
+      });
+    } finally {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+      if (originalOffsetWidth) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetWidth",
+          originalOffsetWidth,
+        );
+      }
+      if (originalOffsetHeight) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetHeight",
+          originalOffsetHeight,
+        );
+      }
+    }
+  });
+
+  it("starts marker-menu arrow navigation at item zero when focus is outside menu items", () => {
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+      markers: [
+        makeConversationMarker({
+          id: "marker-1",
+          messageId: "message-2",
+          name: "Review point",
+        }),
+      ],
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      renderMessageCard: (message) => (
+        <article className="message-card">
+          <div
+            className="message-meta"
+            data-conversation-marker-menu-trigger={
+              message.author === "assistant" ? true : undefined
+            }
+          >
+            <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+            <span>{message.timestamp}</span>
+          </div>
+          <p>{`${message.id} body`}</p>
+        </article>
+      ),
+    });
+
+    fireEvent.contextMenu(screen.getByText("Agent message-2"));
+    const menu = screen.getByRole("menu", {
+      name: "Conversation marker actions",
+    });
+    const firstItem = within(menu).getByRole("menuitem", {
+      name: "Add checkpoint marker",
+    });
+    firstItem.blur();
+
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+
+    expect(firstItem).toHaveFocus();
   });
 
   it("dispatches visible message actions through the latest parent callbacks", async () => {

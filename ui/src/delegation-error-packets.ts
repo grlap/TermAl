@@ -12,6 +12,14 @@ export type MixedServerInstanceErrorPacket = {
   name: string;
   message: string;
   serverInstanceIds: string[];
+  recoveryGroups: MixedServerInstanceRecoveryGroup[];
+};
+
+export type MixedServerInstanceRecoveryGroup = {
+  serverInstanceId: string;
+  revision: number;
+  delegationIds: string[];
+  childSessionIds: string[];
 };
 
 export type WaitDelegationErrorPacket =
@@ -35,12 +43,21 @@ export type WaitDelegationErrorPacket =
 export type WaitDelegationErrorKind = WaitDelegationErrorPacket["kind"];
 
 export type SpawnDelegationFailurePacket = {
+  kind: "spawn-failed";
   name: string;
   message: string;
   apiErrorKind: ApiRequestErrorKind | null;
   status: number | null;
   restartRequired: boolean | null;
 };
+
+export type SpawnReviewerBatchErrorPacket =
+  | MixedServerInstanceErrorPacket
+  | {
+      kind: "all-spawns-failed";
+      name: string;
+      message: string;
+    };
 
 const GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE =
   "Delegation status fetch failed.";
@@ -55,6 +72,8 @@ const SAFE_DELEGATION_STATUS_FETCH_STATUS_PATTERN =
   /^Request failed with status \d+\.$/u;
 const SAFE_SPAWN_DELEGATION_MESSAGES = new Set([
   "The TermAl backend is unavailable.",
+  "parent session id is required",
+  "session not found",
   "delegation prompt cannot be empty",
   "worker delegations are not implemented in Phase 1",
   "only readOnly delegation write policy is implemented in Phase 1",
@@ -69,6 +88,8 @@ const SAFE_SPAWN_DELEGATION_PATTERNS = [
   /^parent session already has \d+ active delegations$/u,
   /^delegation nesting depth is limited to \d+$/u,
   /^delegation cwd cannot be (?:a drive-relative Windows path|a UNC path|a Windows device namespace path)$/u,
+  /^unknown project `[^`]+`$/u,
+  /^delegation cwd `[^`]+` must stay inside project `[^`]+`$/u,
 ];
 // Paired with `formatUnavailableApiMessage` in `ui/src/api.ts` for the
 // delegation status route. Keep this suffix in sync with that helper's wording.
@@ -119,6 +140,7 @@ export function spawnDelegationFailurePacket(
 ): SpawnDelegationFailurePacket {
   if (error instanceof ApiRequestError) {
     return {
+      kind: "spawn-failed",
       name: error.name,
       message: safeSpawnDelegationFailureMessage(
         error.message,
@@ -132,6 +154,7 @@ export function spawnDelegationFailurePacket(
   }
   const name = error instanceof Error ? error.name : "Error";
   return {
+    kind: "spawn-failed",
     name,
     message: GENERIC_SPAWN_DELEGATION_ERROR_MESSAGE,
     apiErrorKind: null,
@@ -155,13 +178,27 @@ export function mismatchedDelegationIdErrorPacket(
 
 export function mixedServerInstanceErrorPacket(
   serverInstanceIds: readonly string[],
+  options: {
+    operation?: "status-batch" | "spawn-batch";
+    recoveryGroups?: readonly MixedServerInstanceRecoveryGroup[];
+  } = {},
 ): MixedServerInstanceErrorPacket {
   const uniqueServerInstanceIds = [...new Set(serverInstanceIds)].sort();
+  const operation =
+    options.operation === "spawn-batch"
+      ? "delegation spawn batch"
+      : "delegation status batch";
   return {
     kind: "mixed-server-instance",
     name: "MixedDelegationServerInstanceError",
-    message: `delegation status batch contained multiple server instances: ${uniqueServerInstanceIds.join(", ")}`,
+    message: `${operation} contained multiple server instances: ${uniqueServerInstanceIds.join(", ")}`,
     serverInstanceIds: uniqueServerInstanceIds,
+    recoveryGroups: [...(options.recoveryGroups ?? [])].map((group) => ({
+      serverInstanceId: group.serverInstanceId,
+      revision: group.revision,
+      delegationIds: [...group.delegationIds],
+      childSessionIds: [...group.childSessionIds],
+    })),
   };
 }
 

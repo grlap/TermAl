@@ -64,15 +64,57 @@ impl TelegramSessionReader for FakeTelegramSessionReader {
     }
 }
 
-// Pins that the slash-command parser strips Telegram's `@botname` mention
-// suffix and preserves trailing free-form args. Without this, group-chat
-// messages like `/commit@termal_bot now please` would be rejected as
-// unknown commands and silently dropped, breaking the bot for any chat
-// where it shares room with other bots.
+struct FakeTelegramSessionReaderById {
+    responses: HashMap<String, TelegramSessionFetchResponse>,
+}
+
+impl TelegramSessionReader for FakeTelegramSessionReaderById {
+    fn get_session(&self, session_id: &str) -> Result<TelegramSessionFetchResponse> {
+        self.responses
+            .get(session_id)
+            .cloned()
+            .with_context(|| format!("missing fake session `{session_id}`"))
+    }
+}
+
+fn create_telegram_settings_project_and_session(state: &AppState) -> (String, String) {
+    let root = std::env::temp_dir().join(format!("termal-telegram-project-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).expect("project root should exist");
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: Some("Telegram Project".to_owned()),
+            root_path: root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .expect("project should create");
+    let session = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Telegram Session".to_owned()),
+            workdir: None,
+            project_id: Some(project.project_id.clone()),
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("session should create");
+    (project.project_id, session.session_id)
+}
+
+// Pins that the slash-command parser only accepts Telegram's `@botname`
+// mention suffix when it matches the relay bot username, and preserves
+// trailing free-form args. Without the suffix check, group-chat messages
+// like `/stop@other_bot` could trigger TermAl actions accidentally.
 #[test]
 fn telegram_command_parser_supports_suffixes_and_aliases() {
     let parsed =
-        parse_telegram_command("/commit@termal_bot   now please").expect("command should parse");
+        parse_telegram_command_for_bot("/commit@termal_bot   now please", Some("termal_bot"))
+            .expect("command should parse");
     assert_eq!(
         parsed.command,
         TelegramIncomingCommand::Action(ProjectActionId::AskAgentToCommit)
@@ -81,6 +123,12 @@ fn telegram_command_parser_supports_suffixes_and_aliases() {
 
     let parsed = parse_telegram_command("/status").expect("status should parse");
     assert_eq!(parsed.command, TelegramIncomingCommand::Status);
+
+    assert!(parse_telegram_command("/commit@termal_bot now please").is_none());
+    assert!(
+        parse_telegram_command_for_bot("/commit@other_bot now please", Some("termal_bot"))
+            .is_none()
+    );
 }
 
 // Pins that unknown slash commands return `None` rather than falling back
@@ -250,6 +298,111 @@ fn telegram_prompt_without_prior_assistant_baseline_forwards_first_reply() {
 }
 
 #[test]
+fn telegram_assistant_forwarding_plan_only_mutates_after_apply() {
+    let termal = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![],
+            },
+        },
+    };
+    let mut state = TelegramBotState::default();
+
+    let plan = prepare_assistant_forwarding_for_telegram_prompt(&termal, "session-1")
+        .expect("prepare should succeed");
+
+    assert_eq!(state.forward_next_assistant_message_session_id, None);
+    assert_eq!(state.last_forwarded_assistant_message_id, None);
+    assert!(apply_assistant_forwarding_plan(&mut state, plan));
+    assert_eq!(
+        state.forward_next_assistant_message_session_id.as_deref(),
+        Some("session-1")
+    );
+}
+
+#[test]
+fn telegram_assistant_forwarding_plan_skips_preexisting_active_turn() {
+    let termal = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Active,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "message-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Existing local turn".to_owned(),
+                }],
+            },
+        },
+    };
+    let mut state = TelegramBotState::default();
+
+    let plan = prepare_assistant_forwarding_for_telegram_prompt(&termal, "session-1")
+        .expect("prepare should succeed");
+
+    assert_eq!(plan, TelegramAssistantForwardingPlan::Skip);
+    assert!(!apply_assistant_forwarding_plan(&mut state, plan));
+    assert_eq!(state.forward_next_assistant_message_session_id, None);
+    assert_eq!(state.last_forwarded_assistant_message_id, None);
+}
+
+#[test]
+fn telegram_forwarder_drains_armed_session_before_digest_primary() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramSessionReaderById {
+        responses: HashMap::from([
+            (
+                "session-1".to_owned(),
+                TelegramSessionFetchResponse {
+                    session: TelegramSessionFetchSession {
+                        status: TelegramSessionStatus::Idle,
+                        messages: vec![TelegramSessionFetchMessage::Text {
+                            id: "message-1".to_owned(),
+                            author: "assistant".to_owned(),
+                            text: "Telegram-originated reply".to_owned(),
+                        }],
+                    },
+                },
+            ),
+            (
+                "session-2".to_owned(),
+                TelegramSessionFetchResponse {
+                    session: TelegramSessionFetchSession {
+                        status: TelegramSessionStatus::Idle,
+                        messages: vec![TelegramSessionFetchMessage::Text {
+                            id: "message-2".to_owned(),
+                            author: "assistant".to_owned(),
+                            text: "Digest primary reply".to_owned(),
+                        }],
+                    },
+                },
+            ),
+        ]),
+    };
+    let mut state = TelegramBotState {
+        forward_next_assistant_message_session_id: Some("session-1".to_owned()),
+        ..TelegramBotState::default()
+    };
+
+    let changed =
+        forward_relevant_assistant_messages(&telegram, &termal, &mut state, 42, Some("session-2"));
+
+    assert!(changed);
+    assert_eq!(
+        telegram.sent_texts.borrow().as_slice(),
+        [
+            "Telegram-originated reply".to_owned(),
+            telegram_turn_settled_footer(&TelegramSessionStatus::Idle).to_owned()
+        ]
+    );
+    assert_eq!(
+        state.last_forwarded_assistant_message_id.as_deref(),
+        Some("message-1")
+    );
+    assert_eq!(state.forward_next_assistant_message_session_id, None);
+}
+
+#[test]
 fn telegram_unknown_forwarded_char_count_reforwards_tracked_message_once() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramSessionReader {
@@ -367,4 +520,250 @@ fn telegram_prompt_limit_uses_utf8_byte_length() {
         "{}界",
         "x".repeat(MAX_DELEGATION_PROMPT_BYTES - 1)
     )));
+}
+
+#[test]
+fn telegram_settings_request_nulls_clear_optional_fields() {
+    let request: UpdateTelegramConfigRequest = serde_json::from_value(json!({
+        "botToken": null,
+        "defaultProjectId": null,
+        "defaultSessionId": null
+    }))
+    .expect("request should deserialize");
+
+    assert_eq!(request.bot_token, Some(None));
+    assert_eq!(request.default_project_id, Some(None));
+    assert_eq!(request.default_session_id, Some(None));
+
+    let missing: UpdateTelegramConfigRequest =
+        serde_json::from_value(json!({})).expect("request should deserialize");
+    assert_eq!(missing.bot_token, None);
+    assert_eq!(missing.default_project_id, None);
+    assert_eq!(missing.default_session_id, None);
+
+    let test_request: TelegramTestRequest =
+        serde_json::from_value(json!({ "useSavedToken": true }))
+            .expect("test request should deserialize");
+    assert_eq!(test_request.bot_token, None);
+    assert!(test_request.use_saved_token);
+
+    let clear_test_request: TelegramTestRequest =
+        serde_json::from_value(json!({ "botToken": null }))
+            .expect("test request should deserialize");
+    assert_eq!(clear_test_request.bot_token, Some(None));
+    assert!(!clear_test_request.use_saved_token);
+}
+
+#[test]
+fn telegram_status_response_keeps_empty_project_list_on_wire() {
+    let value = serde_json::to_value(TelegramStatusResponse {
+        configured: false,
+        enabled: false,
+        running: false,
+        lifecycle: TelegramLifecycle::Manual,
+        linked_chat_id: None,
+        bot_token_masked: None,
+        subscribed_project_ids: Vec::new(),
+        default_project_id: None,
+        default_session_id: None,
+    })
+    .expect("response should serialize");
+
+    assert_eq!(value["lifecycle"], json!("manual"));
+    assert_eq!(value["subscribedProjectIds"], json!([]));
+}
+
+#[test]
+fn telegram_token_mask_only_exposes_short_suffix() {
+    assert_eq!(
+        mask_telegram_bot_token("123456:abcdefghi").as_deref(),
+        Some("****fghi")
+    );
+}
+
+#[test]
+fn telegram_test_rate_limit_rejects_immediate_retry() {
+    let token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
+
+    check_telegram_test_rate_limit(&token).expect("first attempt should pass");
+    let err = check_telegram_test_rate_limit(&token).expect_err("retry should be rate-limited");
+
+    assert_eq!(err.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[test]
+fn telegram_state_persist_preserves_settings_config() {
+    let path = std::env::temp_dir().join(format!("termal-telegram-state-{}.json", Uuid::new_v4()));
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "config": {
+                "enabled": true,
+                "botToken": "123456:secret",
+                "subscribedProjectIds": ["project-1"]
+            },
+            "chatId": 123
+        }))
+        .expect("fixture should encode"),
+    )
+    .expect("fixture should write");
+
+    let state = TelegramBotState {
+        chat_id: Some(456),
+        next_update_id: Some(99),
+        ..TelegramBotState::default()
+    };
+    persist_telegram_bot_state(&path, &state).expect("state should persist");
+
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("state file should read"))
+        .expect("state file should parse");
+    assert_eq!(value["config"]["botToken"], json!("123456:secret"));
+    assert_eq!(
+        value["config"]["subscribedProjectIds"],
+        json!(["project-1"])
+    );
+    assert_eq!(value["chatId"], json!(456));
+    assert_eq!(value["nextUpdateId"], json!(99));
+
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn telegram_state_persist_rejects_malformed_existing_file() {
+    let path =
+        std::env::temp_dir().join(format!("termal-telegram-bad-state-{}.json", Uuid::new_v4()));
+    fs::write(&path, b"{").expect("fixture should write");
+
+    let err = persist_telegram_bot_state(&path, &TelegramBotState::default())
+        .expect_err("malformed existing state should fail");
+
+    assert!(format!("{err:#}").contains("failed to parse existing"));
+    assert_eq!(fs::read(&path).expect("state file should remain"), b"{");
+
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn telegram_message_chunks_respect_utf16_limit() {
+    let text = "🙂".repeat(TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS + 1);
+    let chunks = chunk_telegram_message_text(&text);
+
+    assert!(chunks.len() > 1);
+    assert_eq!(chunks.concat(), text);
+    assert!(
+        chunks
+            .iter()
+            .all(|chunk| { chunk.encode_utf16().count() <= TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS })
+    );
+}
+
+#[test]
+fn telegram_settings_validation_autofills_session_project_subscription() {
+    let state = test_app_state();
+    let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
+    let mut config = TelegramUiConfig {
+        default_session_id: Some(session_id),
+        ..TelegramUiConfig::default()
+    };
+
+    state
+        .validate_and_normalize_telegram_config(&mut config)
+        .expect("config should validate");
+
+    assert_eq!(
+        config.default_project_id.as_deref(),
+        Some(project_id.as_str())
+    );
+    assert_eq!(config.subscribed_project_ids, vec![project_id]);
+}
+
+#[test]
+fn telegram_settings_validation_rejects_orphan_session_project() {
+    let state = test_app_state();
+    let session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .create_session(
+                Agent::Codex,
+                Some("Orphan Telegram Session".to_owned()),
+                "/tmp".to_owned(),
+                Some("missing-project".to_owned()),
+                None,
+            )
+            .session
+            .id
+    };
+    let mut config = TelegramUiConfig {
+        default_session_id: Some(session_id),
+        ..TelegramUiConfig::default()
+    };
+
+    let err = state
+        .validate_and_normalize_telegram_config(&mut config)
+        .expect_err("orphan session project should fail validation");
+
+    assert!(
+        err.message
+            .contains("unknown default Telegram session project")
+    );
+}
+
+#[test]
+fn telegram_status_sanitizes_stale_project_and_session_references() {
+    let state = test_app_state();
+    let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
+    let config = TelegramUiConfig {
+        subscribed_project_ids: vec![project_id.clone(), "missing-project".to_owned()],
+        default_project_id: Some(project_id.clone()),
+        default_session_id: Some("missing-session".to_owned()),
+        ..TelegramUiConfig::default()
+    };
+
+    let sanitized = state.sanitize_telegram_config_for_current_state(config);
+
+    assert_eq!(sanitized.subscribed_project_ids, vec![project_id]);
+    assert_eq!(sanitized.default_session_id, None);
+}
+
+#[test]
+fn delete_project_prunes_telegram_config_on_disk() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!("termal-telegram-home-{}", Uuid::new_v4()));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("state path should have a parent"))
+        .expect("settings dir should create");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "config": {
+                "enabled": true,
+                "botToken": "123456:secret",
+                "subscribedProjectIds": [project_id.clone()],
+                "defaultProjectId": project_id.clone(),
+                "defaultSessionId": session_id
+            },
+            "chatId": 123
+        }))
+        .expect("fixture should encode"),
+    )
+    .expect("fixture should write");
+
+    state
+        .delete_project(&project_id)
+        .expect("project should delete");
+
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert_eq!(value["config"]["botToken"], json!("123456:secret"));
+    assert!(
+        value["config"].get("subscribedProjectIds").is_none()
+            || value["config"]["subscribedProjectIds"] == json!([])
+    );
+    assert!(value["config"].get("defaultProjectId").is_none());
+    assert!(value["config"].get("defaultSessionId").is_none());
+    assert_eq!(value["chatId"], json!(123));
 }

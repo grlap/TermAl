@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ConversationOverviewRail } from "./ConversationOverviewRail";
@@ -117,6 +117,74 @@ describe("ConversationOverviewRail", () => {
       top: "100px",
       height: "150px",
     });
+  });
+
+  it("keeps the previous projection while the composer prompt is focused", () => {
+    vi.useFakeTimers();
+    const composer = document.createElement("textarea");
+    composer.className = "composer-input";
+    document.body.appendChild(composer);
+
+    try {
+      const messages = textMessages(5);
+      const updatedMessages = messages.map((message, index) =>
+        index === 0 && message.type === "text"
+          ? { ...message, text: "Updated prompt sample" }
+          : message,
+      );
+      act(() => {
+        composer.focus();
+        fireEvent.focusIn(composer);
+      });
+
+      const { rerender } = render(
+        <ConversationOverviewRail
+          messages={messages}
+          layoutSnapshot={layoutSnapshot(messages)}
+          minMessages={4}
+          maxHeightPx={250}
+          onNavigate={() => {}}
+        />,
+      );
+
+      expect(screen.getByLabelText(/User prompt 1: Message 1/)).toBeInTheDocument();
+
+      rerender(
+        <ConversationOverviewRail
+          messages={updatedMessages}
+          layoutSnapshot={layoutSnapshot(updatedMessages)}
+          minMessages={4}
+          maxHeightPx={250}
+          onNavigate={() => {}}
+        />,
+      );
+
+      expect(screen.getByLabelText(/User prompt 1: Message 1/)).toBeInTheDocument();
+      expect(
+        screen.queryByLabelText(/User prompt 1: Updated prompt sample/),
+      ).not.toBeInTheDocument();
+
+      act(() => {
+        composer.blur();
+        fireEvent.focusOut(composer);
+      });
+      rerender(
+        <ConversationOverviewRail
+          messages={updatedMessages}
+          layoutSnapshot={layoutSnapshot(updatedMessages)}
+          minMessages={4}
+          maxHeightPx={250}
+          onNavigate={() => {}}
+        />,
+      );
+
+      expect(
+        screen.getByLabelText(/User prompt 1: Updated prompt sample/),
+      ).toBeInTheDocument();
+    } finally {
+      document.body.removeChild(composer);
+      vi.useRealTimers();
+    }
   });
 
   it.each([

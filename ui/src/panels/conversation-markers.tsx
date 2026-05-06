@@ -48,7 +48,8 @@ const NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR = [
   "svg",
   "[data-native-context-menu='true']",
 ].join(",");
-const CONVERSATION_MARKER_CONTEXT_MENU_HEADER_SELECTOR = ".message-meta";
+const CONVERSATION_MARKER_CONTEXT_MENU_TRIGGER_SELECTOR =
+  "[data-conversation-marker-menu-trigger='true']";
 const CONVERSATION_MARKER_CONTEXT_MENU_VIEWPORT_MARGIN_PX = 8;
 
 export function groupConversationMarkersByMessageId(
@@ -115,6 +116,17 @@ export function MarkerPlusIcon() {
     <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
       <path
         d="M7.25 2.5h1.5v4.75h4.75v1.5H8.75v4.75h-1.5V8.75H2.5v-1.5h4.75Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+export function MarkerMenuIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M4 8a1.2 1.2 0 1 1-2.4 0A1.2 1.2 0 0 1 4 8Zm5.2 0a1.2 1.2 0 1 1-2.4 0 1.2 1.2 0 0 1 2.4 0Zm5.2 0A1.2 1.2 0 1 1 12 8a1.2 1.2 0 0 1 2.4 0Z"
         fill="currentColor"
       />
     </svg>
@@ -208,10 +220,12 @@ export function shouldOpenConversationMarkerContextMenu(
   if (hasSelectedTextInside(root)) {
     return false;
   }
-  const header = target.closest(
-    CONVERSATION_MARKER_CONTEXT_MENU_HEADER_SELECTOR,
+  // Keep marker actions on an explicit header affordance. The assistant body
+  // keeps the native context menu for copy/select/link/code interactions.
+  const trigger = target.closest(
+    CONVERSATION_MARKER_CONTEXT_MENU_TRIGGER_SELECTOR,
   );
-  if (!header || !root.contains(header)) {
+  if (!trigger || !root.contains(trigger)) {
     return false;
   }
   return target.closest(NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR) === null;
@@ -237,18 +251,32 @@ export function useConversationMarkerContextMenu({
   const contextMenuRef = useRef<ConversationMarkerContextMenuState | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const firstMenuItemRef = useRef<HTMLButtonElement | null>(null);
+  const focusRestoreFrameRef = useRef<number | null>(null);
   const isContextMenuOpen = contextMenu !== null;
   contextMenuRef.current = contextMenu;
+
+  const cancelFocusRestoreFrame = useCallback(() => {
+    if (focusRestoreFrameRef.current !== null) {
+      window.cancelAnimationFrame(focusRestoreFrameRef.current);
+      focusRestoreFrameRef.current = null;
+    }
+  }, []);
 
   const closeContextMenu = useCallback(
     ({ restoreFocus = false }: { restoreFocus?: boolean } = {}) => {
       const trigger = contextMenuRef.current?.trigger ?? null;
+      cancelFocusRestoreFrame();
       setContextMenu(null);
       if (restoreFocus && trigger) {
-        window.requestAnimationFrame(() => trigger.focus());
+        focusRestoreFrameRef.current = window.requestAnimationFrame(() => {
+          focusRestoreFrameRef.current = null;
+          if (trigger.isConnected) {
+            trigger.focus();
+          }
+        });
       }
     },
-    [],
+    [cancelFocusRestoreFrame],
   );
 
   const openContextMenu = useCallback(
@@ -278,6 +306,8 @@ export function useConversationMarkerContextMenu({
   useEffect(() => {
     closeContextMenu();
   }, [closeContextMenu, sessionId]);
+
+  useEffect(() => cancelFocusRestoreFrame, [cancelFocusRestoreFrame]);
 
   useEffect(() => {
     if (!isActive) {
@@ -341,17 +371,30 @@ export function useConversationMarkerContextMenu({
       closeContextMenu();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest(".conversation-marker-context-menu")
+      ) {
+        return;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         closeContextMenu({ restoreFocus: true });
       }
     };
+    const handleViewportMove = () => closeContextMenu();
 
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("scroll", handleViewportMove, true);
+    window.addEventListener("scroll", handleViewportMove, true);
+    window.addEventListener("resize", handleViewportMove);
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("scroll", handleViewportMove, true);
+      window.removeEventListener("scroll", handleViewportMove, true);
+      window.removeEventListener("resize", handleViewportMove);
     };
   }, [closeContextMenu, isContextMenuOpen]);
 
@@ -498,6 +541,7 @@ function handleConversationMarkerContextMenuKeyDown(
 ) {
   if (event.key === "Escape") {
     event.preventDefault();
+    event.stopPropagation();
     closeMenu();
     return;
   }
@@ -505,20 +549,22 @@ function handleConversationMarkerContextMenuKeyDown(
   if (menuItems.length === 0) {
     return;
   }
-  const currentIndex = Math.max(
-    0,
-    menuItems.findIndex((item) => item === document.activeElement),
+  const currentIndex = menuItems.findIndex(
+    (item) => item === document.activeElement,
   );
   let nextIndex: number | null = null;
   switch (event.key) {
     case "ArrowDown":
     case "ArrowRight":
-      nextIndex = (currentIndex + 1) % menuItems.length;
+      nextIndex =
+        currentIndex === -1 ? 0 : (currentIndex + 1) % menuItems.length;
       break;
     case "ArrowUp":
     case "ArrowLeft":
       nextIndex =
-        (currentIndex - 1 + menuItems.length) % menuItems.length;
+        currentIndex === -1
+          ? menuItems.length - 1
+          : (currentIndex - 1 + menuItems.length) % menuItems.length;
       break;
     case "Home":
       nextIndex = 0;

@@ -1011,7 +1011,7 @@ struct UpdateAppSettingsRequest {
 }
 
 /// UI-owned Telegram relay configuration persisted outside `/api/state`.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TelegramUiConfig {
     #[serde(default)]
@@ -1026,6 +1026,13 @@ struct TelegramUiConfig {
     default_session_id: Option<String>,
 }
 
+/// UI-visible Telegram relay lifecycle.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum TelegramLifecycle {
+    Manual,
+}
+
 /// Represents the Telegram settings response payload.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1033,12 +1040,12 @@ struct TelegramStatusResponse {
     configured: bool,
     enabled: bool,
     running: bool,
-    lifecycle: String,
+    lifecycle: TelegramLifecycle,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     linked_chat_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     bot_token_masked: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     subscribed_project_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     default_project_id: Option<String>,
@@ -1051,9 +1058,12 @@ struct TelegramStatusResponse {
 #[serde(rename_all = "camelCase")]
 struct UpdateTelegramConfigRequest {
     enabled: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_nullable_marker_field")]
     bot_token: Option<Option<String>>,
     subscribed_project_ids: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_nullable_marker_field")]
     default_project_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_nullable_marker_field")]
     default_session_id: Option<Option<String>>,
 }
 
@@ -1061,8 +1071,10 @@ struct UpdateTelegramConfigRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TelegramTestRequest {
+    #[serde(default, deserialize_with = "deserialize_nullable_marker_field")]
+    bot_token: Option<Option<String>>,
     #[serde(default)]
-    bot_token: Option<String>,
+    use_saved_token: bool,
 }
 
 /// Represents the Telegram connection test response payload.

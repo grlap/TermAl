@@ -628,7 +628,7 @@ export type TelegramStatusResponse = {
   configured: boolean;
   enabled: boolean;
   running: boolean;
-  lifecycle: string;
+  lifecycle: "manual";
   linkedChatId?: number | null;
   botTokenMasked?: string | null;
   subscribedProjectIds: string[];
@@ -660,7 +660,10 @@ export function updateTelegramConfig(payload: UpdateTelegramConfigPayload) {
   });
 }
 
-export function testTelegramConnection(payload: { botToken?: string }) {
+export function testTelegramConnection(payload: {
+  botToken?: string | null;
+  useSavedToken?: boolean;
+}) {
   return request<TelegramTestResponse>("/api/telegram/test", {
     method: "POST",
     body: JSON.stringify(payload),

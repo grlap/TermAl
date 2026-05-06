@@ -4063,6 +4063,7 @@ textarea {
   }
 }
 
+.conversation-message-marker-action-button,
 .conversation-message-marker-add-button {
   display: inline-flex;
   align-items: center;
@@ -4074,12 +4075,13 @@ textarea {
   box-shadow: 0 0.4rem 1rem color-mix(in srgb, var(--shadow-color, black) 18%, transparent);
 }
 
+.conversation-message-marker-action-button svg,
 .conversation-message-marker-add-button svg {
   width: var(--icon-size-sm);
   height: var(--icon-size-sm);
 }
 
-.conversation-message-marker-shell.can-open-marker-menu .message-meta {
+.conversation-message-marker-shell.can-open-marker-menu [data-conversation-marker-menu-trigger="true"] {
   cursor: context-menu;
 }
 

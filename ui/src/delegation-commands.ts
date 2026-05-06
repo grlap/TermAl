@@ -19,8 +19,9 @@ import {
   mixedServerInstanceErrorPacket,
   spawnDelegationFailurePacket,
   statusFetchErrorPacket,
-  type MixedServerInstanceErrorPacket,
+  type MixedServerInstanceRecoveryGroup,
   type SpawnDelegationFailurePacket,
+  type SpawnReviewerBatchErrorPacket,
   type WaitDelegationErrorPacket,
 } from "./delegation-error-packets";
 import type {
@@ -34,6 +35,7 @@ import type {
 } from "./types";
 
 export type {
+  MixedServerInstanceRecoveryGroup,
   WaitDelegationErrorKind,
   WaitDelegationErrorPacket,
 } from "./delegation-error-packets";
@@ -111,14 +113,27 @@ export type DelegationChildSessionSummary = {
   parentDelegationId: string | null;
 };
 
-export type SpawnDelegationCommandResult = {
+export type SpawnDelegationCommandSuccessResult = {
+  outcome: "completed";
   delegationId: string;
   childSessionId: string;
   delegation: DelegationSummary;
   childSession: DelegationChildSessionSummary;
   revision: number;
   serverInstanceId: string;
+  error?: never;
 };
+
+export type SpawnDelegationCommandErrorResult = {
+  outcome: "error";
+  revision: null;
+  serverInstanceId: null;
+  error: SpawnDelegationFailurePacket;
+};
+
+export type SpawnDelegationCommandResult =
+  | SpawnDelegationCommandSuccessResult
+  | SpawnDelegationCommandErrorResult;
 
 export type SpawnReviewerBatchItem = Omit<
   CreateDelegationRequest,
@@ -132,16 +147,28 @@ export type SpawnReviewerBatchFailure = SpawnDelegationFailurePacket & {
 
 export type SpawnReviewerBatchOutcome = "completed" | "partial" | "error";
 
-export type SpawnReviewerBatchCommandResult = {
-  outcome: SpawnReviewerBatchOutcome;
-  spawned: SpawnDelegationCommandResult[];
+export type SpawnReviewerBatchBaseResult = {
+  spawned: SpawnDelegationCommandSuccessResult[];
   failed: SpawnReviewerBatchFailure[];
   delegationIds: string[];
   childSessionIds: string[];
   revision: number | null;
   serverInstanceId: string | null;
-  error: MixedServerInstanceErrorPacket | null;
 };
+
+export type SpawnReviewerBatchSuccessResult = SpawnReviewerBatchBaseResult & {
+  outcome: "completed" | "partial";
+  error?: never;
+};
+
+export type SpawnReviewerBatchErrorResult = SpawnReviewerBatchBaseResult & {
+  outcome: "error";
+  error: SpawnReviewerBatchErrorPacket;
+};
+
+export type SpawnReviewerBatchCommandResult =
+  | SpawnReviewerBatchSuccessResult
+  | SpawnReviewerBatchErrorResult;
 
 export type DelegationStatusCommandResult = {
   delegationId: string;
@@ -218,11 +245,16 @@ async function spawnDelegationWithTransport(
     parentSessionId,
     "parent session id",
   );
-  const response = await transport.createDelegation(
-    normalizedParentSessionId,
-    compactCreateDelegationRequest(request),
-  );
-  return spawnDelegationCommandResult(response);
+  const compactedRequest = compactCreateDelegationRequest(request);
+  try {
+    const response = await transport.createDelegation(
+      normalizedParentSessionId,
+      compactedRequest,
+    );
+    return spawnDelegationCommandResult(response);
+  } catch (error) {
+    return spawnDelegationCommandErrorResult(error, normalizedParentSessionId);
+  }
 }
 
 export async function spawnReviewerBatchCommand(
@@ -269,7 +301,7 @@ async function spawnReviewerBatchWithTransport(
         ),
     ),
   );
-  const spawned: SpawnDelegationCommandResult[] = [];
+  const spawned: SpawnDelegationCommandSuccessResult[] = [];
   const failed: SpawnReviewerBatchFailure[] = [];
   settled.forEach((entry) => {
     if (entry.kind === "spawned") {
@@ -282,34 +314,63 @@ async function spawnReviewerBatchWithTransport(
   const metadata = mixedServerInstanceError
     ? { revision: null, serverInstanceId: null }
     : newestSpawnMetadata(spawned);
-  return {
-    outcome: mixedServerInstanceError
-      ? "error"
-      : failed.length === 0
-        ? "completed"
-        : spawned.length > 0
-          ? "partial"
-          : "error",
+  const base = {
     spawned,
     failed,
     delegationIds: spawned.map((result) => result.delegationId),
     childSessionIds: spawned.map((result) => result.childSessionId),
     revision: metadata.revision,
     serverInstanceId: metadata.serverInstanceId,
-    error: mixedServerInstanceError,
+  };
+  if (mixedServerInstanceError) {
+    return {
+      ...base,
+      outcome: "error",
+      error: mixedServerInstanceError,
+    };
+  }
+  if (failed.length === 0) {
+    return {
+      ...base,
+      outcome: "completed",
+    };
+  }
+  if (spawned.length > 0) {
+    return {
+      ...base,
+      outcome: "partial",
+    };
+  }
+  return {
+    ...base,
+    outcome: "error",
+    error: allReviewerSpawnsFailedError(),
   };
 }
 
 function spawnDelegationCommandResult(
   response: DelegationResponse,
-): SpawnDelegationCommandResult {
+): SpawnDelegationCommandSuccessResult {
   return {
+    outcome: "completed",
     delegationId: response.delegation.id,
     childSessionId: response.delegation.childSessionId,
     delegation: delegationSummary(response.delegation),
     childSession: delegationChildSessionSummary(response.childSession),
     revision: response.revision,
     serverInstanceId: response.serverInstanceId,
+  };
+}
+
+function spawnDelegationCommandErrorResult(
+  error: unknown,
+  parentSessionId: string,
+): SpawnDelegationCommandErrorResult {
+  return {
+    outcome: "error",
+    revision: null,
+    serverInstanceId: null,
+    error: spawnDelegationFailurePacket(error, { parentSessionId }),
   };
 }
 
@@ -1004,30 +1065,57 @@ function reviewerBatchFailure(
 function compactReviewerBatchRequest(
   request: CreateDelegationRequest,
 ): CreateDelegationRequest {
-  const compacted = compactCreateDelegationRequest(request);
-  if (typeof compacted.title !== "string") {
-    return compacted;
-  }
-  const title = compacted.title.trim();
-  if (!title) {
-    const rest = { ...compacted };
-    delete rest.title;
-    return rest;
-  }
-  return { ...compacted, title };
+  return compactCreateDelegationRequest(request);
 }
 
 function mixedSpawnServerInstanceError(
-  spawned: readonly SpawnDelegationCommandResult[],
+  spawned: readonly SpawnDelegationCommandSuccessResult[],
 ) {
   const serverInstanceIds = spawned.map((result) => result.serverInstanceId);
   const uniqueServerInstanceIds = new Set(serverInstanceIds);
   return uniqueServerInstanceIds.size > 1
-    ? mixedServerInstanceErrorPacket(serverInstanceIds)
+    ? mixedServerInstanceErrorPacket(serverInstanceIds, {
+        operation: "spawn-batch",
+        recoveryGroups: spawnRecoveryGroups(spawned),
+      })
     : null;
 }
 
-function newestSpawnMetadata(spawned: readonly SpawnDelegationCommandResult[]) {
+function spawnRecoveryGroups(
+  spawned: readonly SpawnDelegationCommandSuccessResult[],
+): MixedServerInstanceRecoveryGroup[] {
+  const groups = new Map<string, MixedServerInstanceRecoveryGroup>();
+  for (const result of spawned) {
+    const group = groups.get(result.serverInstanceId);
+    if (group) {
+      group.revision = Math.max(group.revision, result.revision);
+      group.delegationIds.push(result.delegationId);
+      group.childSessionIds.push(result.childSessionId);
+      continue;
+    }
+    groups.set(result.serverInstanceId, {
+      serverInstanceId: result.serverInstanceId,
+      revision: result.revision,
+      delegationIds: [result.delegationId],
+      childSessionIds: [result.childSessionId],
+    });
+  }
+  return [...groups.values()].sort((left, right) =>
+    left.serverInstanceId.localeCompare(right.serverInstanceId),
+  );
+}
+
+function allReviewerSpawnsFailedError(): SpawnReviewerBatchErrorPacket {
+  return {
+    kind: "all-spawns-failed",
+    name: "SpawnReviewerBatchError",
+    message: "all reviewer spawns failed",
+  };
+}
+
+function newestSpawnMetadata(
+  spawned: readonly SpawnDelegationCommandSuccessResult[],
+) {
   let revision: number | null = null;
   const serverInstanceIds = new Set<string>();
   for (const result of spawned) {
@@ -1086,11 +1174,16 @@ function compactCreateDelegationRequest(
       throw new TypeError(`${key} must be omitted instead of null`);
     }
     if (key === "title" && typeof value === "string") {
+      const title = value.trim();
       validateDelegationMetadataText(
-        value,
+        title,
         "title",
         MAX_DELEGATION_TITLE_CHARS,
       );
+      if (title.length > 0) {
+        payload[key] = title;
+      }
+      continue;
     }
     if (key === "model" && typeof value === "string") {
       validateDelegationMetadataText(

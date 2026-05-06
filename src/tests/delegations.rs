@@ -2207,7 +2207,7 @@ async fn delegation_route_failed_start_response_matches_durable_child_state() {
         response
             .child_session
             .preview
-            .contains("failed to start child session: forced delegation start failure")
+            .contains("child session failed to start")
     );
     assert_eq!(
         response
@@ -2215,7 +2215,7 @@ async fn delegation_route_failed_start_response_matches_durable_child_state() {
             .result
             .as_ref()
             .map(|result| result.summary.as_str()),
-        Some("failed to start child session: forced delegation start failure")
+        Some("child session failed to start")
     );
     let inner = state.inner.lock().expect("state mutex poisoned");
     assert_eq!(response.revision, inner.revision);

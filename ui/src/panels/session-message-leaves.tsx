@@ -62,7 +62,10 @@ export function MessageMeta({
   const isUser = author === "you";
 
   return (
-    <div className="message-meta">
+    <div
+      className="message-meta"
+      data-conversation-marker-menu-trigger={isUser ? undefined : true}
+    >
       <span
         className={`message-meta-author ${isUser ? "message-meta-author-user" : "message-meta-author-agent"}`}
       >

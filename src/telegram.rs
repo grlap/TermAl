@@ -13,6 +13,7 @@ action contract instead of exposing a second transport-specific control path.
 const TELEGRAM_API_BASE_URL: &str = "https://api.telegram.org";
 const TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS: u64 = 5;
 const TELEGRAM_ERROR_RETRY_DELAY: Duration = Duration::from_secs(2);
+const TELEGRAM_GET_UPDATES_LIMIT: i64 = 25;
 
 /// Runs Telegram bot.
 fn run_telegram_bot() -> Result<()> {
@@ -21,9 +22,17 @@ fn run_telegram_bot() -> Result<()> {
         .to_str()
         .context("current directory is not valid UTF-8")?
         .to_owned();
-    let config = TelegramBotConfig::from_env(&cwd)?;
+    let mut config = TelegramBotConfig::from_env(&cwd)?;
     let termal = TermalApiClient::new(&config.api_base_url)?;
     let telegram = TelegramApiClient::new(&config.bot_token, config.poll_timeout_secs)?;
+    match telegram.get_me() {
+        Ok(bot) => {
+            config.bot_username = bot.username;
+        }
+        Err(err) => {
+            log_telegram_error("failed to resolve bot username", &err);
+        }
+    }
     let mut state = load_telegram_bot_state(&config.state_path).unwrap_or_default();
     let mut dirty = false;
     if let Some(chat_id) = config.chat_id {
@@ -41,7 +50,9 @@ fn run_telegram_bot() -> Result<()> {
     println!("project: {}", config.project_id);
     match effective_telegram_chat_id(&config, &state) {
         Some(chat_id) => println!("chat: {chat_id}"),
-        None => println!("chat: not linked; send /start to the bot to link it"),
+        None => println!(
+            "chat: not linked; set TERMAL_TELEGRAM_CHAT_ID or use the Settings link flow when it is enabled"
+        ),
     }
 
     loop {
@@ -85,6 +96,7 @@ fn run_telegram_bot() -> Result<()> {
 #[derive(Clone)]
 struct TelegramBotConfig {
     api_base_url: String,
+    bot_username: Option<String>,
     bot_token: String,
     chat_id: Option<i64>,
     poll_timeout_secs: u64,
@@ -122,6 +134,7 @@ impl TelegramBotConfig {
 
         Ok(Self {
             api_base_url,
+            bot_username: None,
             bot_token,
             chat_id,
             poll_timeout_secs,
@@ -188,20 +201,24 @@ fn load_telegram_bot_state(path: &FsPath) -> Result<TelegramBotState> {
 
 /// Persists Telegram bot state.
 fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result<()> {
+    let _guard = telegram_settings_file_guard();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create `{}`", parent.display()))?;
     }
 
-    let mut file = fs::read(path)
-        .ok()
-        .and_then(|raw| serde_json::from_slice::<TelegramBotFile>(&raw).ok())
-        .unwrap_or_default();
+    let mut file = match fs::read(path) {
+        Ok(raw) => serde_json::from_slice::<TelegramBotFile>(&raw)
+            .with_context(|| format!("failed to parse existing `{}`", path.display()))?,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => TelegramBotFile::default(),
+        Err(err) => return Err(err).with_context(|| format!("failed to read `{}`", path.display())),
+    };
     file.state = state.clone();
 
     let encoded =
         serde_json::to_vec_pretty(&file).context("failed to serialize telegram bot state")?;
-    fs::write(path, encoded).with_context(|| format!("failed to write `{}`", path.display()))
+    write_telegram_bot_file(path, &encoded)
+        .with_context(|| format!("failed to write `{}`", path.display()))
 }
 
 /// Computes the effective Telegram chat ID.
@@ -309,6 +326,7 @@ impl TelegramApiClient {
     ) -> Result<Vec<TelegramUpdate>> {
         let mut body = serde_json::Map::new();
         body.insert("timeout".to_owned(), json!(timeout_secs));
+        body.insert("limit".to_owned(), json!(TELEGRAM_GET_UPDATES_LIMIT));
         body.insert(
             "allowed_updates".to_owned(),
             json!(["message", "callback_query"]),
@@ -770,7 +788,7 @@ fn handle_telegram_message(
     }
 
     if text.starts_with('/') {
-        let Some(command) = parse_telegram_command(text) else {
+        let Some(command) = parse_telegram_command_for_bot(text, config.bot_username.as_deref()) else {
             telegram.send_message(chat_id, &telegram_help_text(config), None)?;
             return Ok(false);
         };
@@ -869,9 +887,11 @@ fn forward_telegram_text_to_project(
         return Ok(false);
     };
 
-    let assistant_forwarding_baseline_changed =
-        arm_assistant_forwarding_for_telegram_prompt(termal, state, session_id)?;
+    let assistant_forwarding_plan =
+        prepare_assistant_forwarding_for_telegram_prompt(termal, session_id)?;
     let _ = termal.send_session_message(session_id, text)?;
+    let assistant_forwarding_baseline_changed =
+        apply_assistant_forwarding_plan(state, assistant_forwarding_plan);
     let next_digest = termal.get_project_digest(&config.project_id)?;
     let mut dirty = assistant_forwarding_baseline_changed;
     dirty |=
@@ -884,15 +904,13 @@ fn forward_telegram_text_to_project(
     // case where the agent finishes synchronously, and it keeps the
     // forward-once contract centralized at the few places digests
     // are sent.
-    if let Some(session_id) = next_digest.primary_session_id.as_deref() {
-        // Non-fatal here: the digest/action message already shipped, and the
-        // next poll can retry assistant forwarding. The merge helper still
-        // marks state dirty on partial-progress failures so cursors persist.
-        merge_assistant_forward_result(
-            &mut dirty,
-            forward_new_assistant_message_if_any(telegram, termal, state, chat_id, session_id),
-        );
-    }
+    dirty |= forward_relevant_assistant_messages(
+        telegram,
+        termal,
+        state,
+        chat_id,
+        Some(session_id),
+    );
     Ok(dirty)
 }
 
@@ -929,17 +947,43 @@ fn sync_telegram_digest(
     // Forward assistant text on every poll, not only when the compact digest
     // changes. The forwarder has its own id+char-count dedupe, so this catches
     // fresh replies whose truncated digest preview stayed byte-identical.
-    if let Some(session_id) = digest.primary_session_id.as_deref() {
-        // Non-fatal here: digest sync should not fail just because the
-        // follow-up assistant forward hit a transient send/read error.
-        // Partial progress is still persisted via the merge helper.
+    dirty |= forward_relevant_assistant_messages(
+        telegram,
+        termal,
+        state,
+        chat_id,
+        digest.primary_session_id.as_deref(),
+    );
+
+    Ok(dirty)
+}
+
+fn forward_relevant_assistant_messages(
+    telegram: &impl TelegramMessageSender,
+    termal: &impl TelegramSessionReader,
+    state: &mut TelegramBotState,
+    chat_id: i64,
+    primary_session_id: Option<&str>,
+) -> bool {
+    let mut dirty = false;
+    let armed_session_id = state.forward_next_assistant_message_session_id.clone();
+
+    if let Some(session_id) = armed_session_id.as_deref() {
+        merge_assistant_forward_result(
+            &mut dirty,
+            forward_new_assistant_message_if_any(telegram, termal, state, chat_id, session_id),
+        );
+        return dirty;
+    }
+
+    if let Some(session_id) = primary_session_id {
         merge_assistant_forward_result(
             &mut dirty,
             forward_new_assistant_message_if_any(telegram, termal, state, chat_id, session_id),
         );
     }
 
-    Ok(dirty)
+    dirty
 }
 
 fn merge_assistant_forward_result(dirty: &mut bool, result: Result<bool>) {
@@ -977,13 +1021,45 @@ fn clear_forward_next_assistant_message_session_id(
     false
 }
 
-fn arm_assistant_forwarding_for_telegram_prompt(
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum TelegramAssistantForwardingPlan {
+    Skip,
+    Baseline {
+        session_id: String,
+        latest: Option<(String, usize)>,
+    },
+}
+
+fn prepare_assistant_forwarding_for_telegram_prompt(
     termal: &impl TelegramSessionReader,
+    session_id: &str,
+) -> Result<TelegramAssistantForwardingPlan> {
+    let response = termal.get_session(session_id)?;
+    if !response.session.status.can_forward_settled_assistant_text() {
+        return Ok(TelegramAssistantForwardingPlan::Skip);
+    }
+
+    Ok(TelegramAssistantForwardingPlan::Baseline {
+        session_id: session_id.to_owned(),
+        latest: latest_assistant_text_cursor(&response.session.messages),
+    })
+}
+
+fn apply_assistant_forwarding_plan(
+    state: &mut TelegramBotState,
+    plan: TelegramAssistantForwardingPlan,
+) -> bool {
+    let TelegramAssistantForwardingPlan::Baseline { session_id, latest } = plan else {
+        return false;
+    };
+    apply_assistant_forwarding_baseline(state, &session_id, latest)
+}
+
+fn apply_assistant_forwarding_baseline(
     state: &mut TelegramBotState,
     session_id: &str,
-) -> Result<bool> {
-    let response = termal.get_session(session_id)?;
-    let latest = latest_assistant_text_cursor(&response.session.messages);
+    latest: Option<(String, usize)>,
+) -> bool {
     let mut changed = false;
 
     if let Some((id, char_count)) = latest {
@@ -996,7 +1072,7 @@ fn arm_assistant_forwarding_for_telegram_prompt(
             changed = true;
         }
         changed |= clear_forward_next_assistant_message_session_id(state, session_id);
-        return Ok(changed);
+        return changed;
     }
 
     if state.last_forwarded_assistant_message_id.take().is_some() {
@@ -1014,7 +1090,17 @@ fn arm_assistant_forwarding_for_telegram_prompt(
         changed = true;
     }
 
-    Ok(changed)
+    changed
+}
+
+#[cfg(test)]
+fn arm_assistant_forwarding_for_telegram_prompt(
+    termal: &impl TelegramSessionReader,
+    state: &mut TelegramBotState,
+    session_id: &str,
+) -> Result<bool> {
+    let plan = prepare_assistant_forwarding_for_telegram_prompt(termal, session_id)?;
+    Ok(apply_assistant_forwarding_plan(state, plan))
 }
 
 /// Forwards every assistant `Text` message that has appeared since
@@ -1237,44 +1323,65 @@ fn telegram_turn_settled_footer(status: &TelegramSessionStatus) -> &'static str 
 }
 
 /// Telegram's `sendMessage` rejects bodies over 4096 UTF-16 code
-/// units. Stay well under that with a character-count cap so
-/// multi-byte characters can't push a chunk past the limit.
-const TELEGRAM_MESSAGE_CHUNK_CHARS: usize = 3500;
+/// units. Stay below that limit using the same unit Telegram counts.
+const TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS: usize = 3500;
 
 /// Splits `text` into chunks no longer than
-/// `TELEGRAM_MESSAGE_CHUNK_CHARS`, preferring to break at the
+/// `TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS`, preferring to break at the
 /// last newline within each chunk window so chunks read like
 /// natural prose paragraphs rather than mid-sentence cuts.
-/// Falls back to a hard character-count split when a single
+/// Falls back to a hard UTF-16-unit split when a single
 /// line exceeds the limit (e.g., a giant URL or one-line code
 /// dump).
 fn chunk_telegram_message_text(text: &str) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
-    if chars.len() <= TELEGRAM_MESSAGE_CHUNK_CHARS {
+    if text.encode_utf16().count() <= TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS {
         return vec![text.to_owned()];
     }
+
     let mut chunks = Vec::new();
     let mut start = 0;
-    while start < chars.len() {
-        let end = (start + TELEGRAM_MESSAGE_CHUNK_CHARS).min(chars.len());
-        let break_at = if end < chars.len() {
-            chars[start..end]
-                .iter()
-                .rposition(|&c| c == '\n')
-                .map(|offset| start + offset + 1)
+    while start < text.len() {
+        let mut end = start;
+        let mut units = 0;
+        let mut last_newline_end = None;
+        for (offset, ch) in text[start..].char_indices() {
+            let char_start = start + offset;
+            let char_end = char_start + ch.len_utf8();
+            let char_units = ch.len_utf16();
+            if units + char_units > TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS {
+                break;
+            }
+
+            units += char_units;
+            end = char_end;
+            if ch == '\n' {
+                last_newline_end = Some(char_end);
+            }
+        }
+
+        if end == start {
+            let ch = text[start..]
+                .chars()
+                .next()
+                .expect("chunk start should point at a character");
+            end = start + ch.len_utf8();
+        }
+
+        let break_at = if end < text.len() {
+            last_newline_end
                 .filter(|&candidate| candidate > start)
                 .unwrap_or(end)
         } else {
             end
         };
-        let chunk: String = chars[start..break_at].iter().collect();
+        let chunk = &text[start..break_at];
         let trimmed = chunk.trim_end_matches('\n');
         if !trimmed.is_empty() {
             chunks.push(trimmed.to_owned());
         } else if !chunk.is_empty() {
             // Preserve the chunk if all its content was newlines —
             // unusual but better than dropping content silently.
-            chunks.push(chunk);
+            chunks.push(chunk.to_owned());
         }
         start = break_at;
     }
@@ -1496,13 +1603,29 @@ enum TelegramIncomingCommand {
 
 /// Parses Telegram command.
 fn parse_telegram_command(text: &str) -> Option<TelegramParsedCommand<'_>> {
+    parse_telegram_command_for_bot(text, None)
+}
+
+fn parse_telegram_command_for_bot<'a>(
+    text: &'a str,
+    bot_username: Option<&str>,
+) -> Option<TelegramParsedCommand<'a>> {
     let trimmed = text.trim();
     let command_text = trimmed.strip_prefix('/')?;
     let (raw_name, args) = match command_text.split_once(char::is_whitespace) {
         Some((name, args)) => (name, args.trim()),
         None => (command_text, ""),
     };
-    let name = raw_name.split('@').next().unwrap_or(raw_name).trim();
+    let (name, suffix) = match raw_name.split_once('@') {
+        Some((name, suffix)) => (name.trim(), Some(suffix.trim())),
+        None => (raw_name.trim(), None),
+    };
+    if let Some(suffix) = suffix {
+        let expected = bot_username?;
+        if !suffix.eq_ignore_ascii_case(expected) {
+            return None;
+        }
+    }
     let command = match name {
         "start" => TelegramIncomingCommand::Start,
         "help" => TelegramIncomingCommand::Help,

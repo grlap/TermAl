@@ -1352,8 +1352,9 @@ export function TelegramPreferencesPanel({
     setNotice(null);
     setError(null);
     try {
+      const trimmedToken = draft.botToken.trim();
       const result = await testTelegramConnection(
-        draft.botToken.trim() ? { botToken: draft.botToken.trim() } : {},
+        trimmedToken ? { botToken: trimmedToken } : { useSavedToken: true },
       );
       setNotice(
         result.botUsername

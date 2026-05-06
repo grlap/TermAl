@@ -42,6 +42,7 @@ import { useConversationOverviewController } from "./conversation-overview-contr
 import {
   ConversationMarkerNavigator,
   ConversationMessageMarkers,
+  MarkerMenuIcon,
   MarkerPlusIcon,
   findMountedConversationMessageSlot,
   groupConversationMarkersByMessageId,
@@ -783,21 +784,22 @@ const SessionConversationPage = memo(function SessionConversationPage({
     sessionId: session.id,
   });
   const visiblePendingPromptsBase = isActive ? deferredPendingPrompts : pendingPrompts;
+  const visibleMessageIds = useMemo(
+    () => new Set(visibleMessages.map((message) => message.id)),
+    [visibleMessages],
+  );
   const visiblePendingPrompts = useMemo(() => {
     if (visiblePendingPromptsBase.length === 0 || visibleMessages.length === 0) {
       return visiblePendingPromptsBase;
     }
 
-    const visibleMessageIds = new Set(
-      visibleMessages.map((message) => message.id),
-    );
     const filteredPendingPrompts = visiblePendingPromptsBase.filter(
       (prompt) => !visibleMessageIds.has(prompt.id),
     );
     return filteredPendingPrompts.length === visiblePendingPromptsBase.length
       ? visiblePendingPromptsBase
       : filteredPendingPrompts;
-  }, [visibleMessages, visiblePendingPromptsBase]);
+  }, [visibleMessages.length, visibleMessageIds, visiblePendingPromptsBase]);
   const conversationOverview = useConversationOverviewController({
     agent: session.agent,
     isActive,
@@ -814,10 +816,6 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const sortedMarkers = useMemo(
     () => sortConversationMarkersForNavigation(visibleMarkers, visibleMessages),
     [visibleMarkers, visibleMessages],
-  );
-  const visibleMessageIds = useMemo(
-    () => new Set(visibleMessages.map((message) => message.id)),
-    [visibleMessages],
   );
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
   const {
@@ -957,13 +955,38 @@ const SessionConversationPage = memo(function SessionConversationPage({
           trigger: event.currentTarget,
         });
       };
+      const openMarkerActionsFromButton = (
+        event: ReactMouseEvent<HTMLButtonElement>,
+      ) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        openMarkerContextMenu({
+          messageId: message.id,
+          clientX: rect.left,
+          clientY: rect.bottom,
+          trigger: event.currentTarget,
+        });
+      };
       return (
         <div
           className={`conversation-message-marker-shell${canOpenMarkerMenu ? " can-open-marker-menu" : ""}`}
           tabIndex={canOpenMarkerMenu ? -1 : undefined}
+          role={canOpenMarkerMenu ? "group" : undefined}
+          aria-label={canOpenMarkerMenu ? "Assistant message marker actions" : undefined}
           onContextMenu={handleMarkerContextMenu}
         >
           <div className="conversation-message-marker-toolbar">
+            {canOpenMarkerMenu ? (
+              <button
+                type="button"
+                className="ghost-button conversation-message-marker-action-button"
+                title="Open marker actions"
+                aria-label="Open marker actions"
+                aria-haspopup="menu"
+                onClick={openMarkerActionsFromButton}
+              >
+                <MarkerMenuIcon />
+              </button>
+            ) : null}
             <button
               type="button"
               className="ghost-button conversation-message-marker-add-button"

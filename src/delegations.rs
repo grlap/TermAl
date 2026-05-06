@@ -452,11 +452,10 @@ impl AppState {
             {
                 return self.delegation_response_from_state(&record.id);
             }
-            let detail = format!("failed to start child session: {}", err.message);
             self.mark_delegation_failed_after_start_error(
                 &record.id,
                 &record.child_session_id,
-                &detail,
+                "child session failed to start",
             )?;
             return self.delegation_response_from_state(&record.id);
         }

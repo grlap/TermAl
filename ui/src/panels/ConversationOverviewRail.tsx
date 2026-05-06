@@ -1,6 +1,9 @@
 import {
+  startTransition,
+  useEffect,
   useMemo,
   useRef,
+  useState,
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
@@ -12,6 +15,8 @@ import {
   findConversationOverviewItemAtY,
   projectConversationOverviewViewport,
   type ConversationOverviewItem,
+  type ConversationOverviewMessageMetadataCache,
+  type ConversationOverviewProjection,
   type ConversationOverviewMarkerInput,
   type ConversationOverviewSegment,
   type ConversationOverviewTailItemInput,
@@ -26,6 +31,7 @@ import type { Message } from "../types";
 export const CONVERSATION_OVERVIEW_MIN_MESSAGES = 80;
 const CONVERSATION_OVERVIEW_COMPACT_SEGMENT_THRESHOLD = 160;
 const CONVERSATION_OVERVIEW_COMPACT_VISUAL_SEGMENT_COUNT = 96;
+const CONVERSATION_OVERVIEW_FOCUSED_PROMPT_FALLBACK_DELAY_MS = 240;
 const EMPTY_CONVERSATION_OVERVIEW_MARKERS: readonly ConversationOverviewMarkerInput[] =
   [];
 const EMPTY_CONVERSATION_OVERVIEW_TAIL_ITEMS: readonly ConversationOverviewTailItemInput[] =
@@ -38,6 +44,14 @@ type CompactOverviewVisualSegment = {
   topPx: number;
   heightPx: number;
   fill: string;
+};
+
+type ConversationOverviewProjectionInput = {
+  messages: readonly Message[];
+  layoutSnapshot: VirtualizedConversationLayoutSnapshot | null;
+  markers: readonly ConversationOverviewMarkerInput[];
+  tailItems: readonly ConversationOverviewTailItemInput[];
+  maxHeightPx?: number;
 };
 
 export function ConversationOverviewRail({
@@ -63,17 +77,13 @@ export function ConversationOverviewRail({
   const dragPointerIdRef = useRef<number | null>(null);
   const dragStartedItemRef = useRef<HTMLElement | null>(null);
   const suppressNextClickRef = useRef(false);
-  const projection = useMemo(
-    () =>
-      buildConversationOverviewProjection({
-        layoutSnapshot,
-        markers,
-        maxHeightPx,
-        messages,
-        tailItems,
-      }),
-    [layoutSnapshot, markers, maxHeightPx, messages, tailItems],
-  );
+  const projection = useConversationOverviewProjection({
+    layoutSnapshot,
+    markers,
+    maxHeightPx,
+    messages,
+    tailItems,
+  });
   const viewportProjection = useMemo(
     () => projectConversationOverviewViewport(projection, viewportSnapshot),
     [projection, viewportSnapshot],
@@ -315,6 +325,182 @@ export function ConversationOverviewRail({
       />
     </div>
   );
+}
+
+function useConversationOverviewProjection({
+  messages,
+  layoutSnapshot,
+  markers,
+  tailItems,
+  maxHeightPx,
+}: ConversationOverviewProjectionInput) {
+  const metadataCacheRef = useRef<ConversationOverviewMessageMetadataCache>(
+    new WeakMap(),
+  );
+  const latestInputRef = useRef<ConversationOverviewProjectionInput>({
+    layoutSnapshot,
+    markers,
+    maxHeightPx,
+    messages,
+    tailItems,
+  });
+  const latestProjectionRef = useRef<ConversationOverviewProjection | null>(null);
+  const [, setDeferredProjectionVersion] = useState(0);
+  const isPromptFocused = useComposerPromptFocused();
+
+  latestInputRef.current = {
+    layoutSnapshot,
+    markers,
+    maxHeightPx,
+    messages,
+    tailItems,
+  };
+
+  const immediateProjection = useMemo(() => {
+    if (isPromptFocused && latestProjectionRef.current !== null) {
+      return null;
+    }
+
+    return buildConversationOverviewProjection({
+      layoutSnapshot,
+      markers,
+      maxHeightPx,
+      messageMetadataCache: metadataCacheRef.current,
+      messages,
+      tailItems,
+    });
+  }, [isPromptFocused, layoutSnapshot, markers, maxHeightPx, messages, tailItems]);
+
+  if (immediateProjection) {
+    latestProjectionRef.current = immediateProjection;
+  }
+
+  useEffect(() => {
+    if (!isPromptFocused || immediateProjection) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const cancelProjectionBuild = scheduleConversationOverviewProjectionBuild(() => {
+      if (cancelled) {
+        return;
+      }
+      const latestInput = latestInputRef.current;
+      const nextProjection = buildConversationOverviewProjection({
+        layoutSnapshot: latestInput.layoutSnapshot,
+        markers: latestInput.markers,
+        maxHeightPx: latestInput.maxHeightPx,
+        messageMetadataCache: metadataCacheRef.current,
+        messages: latestInput.messages,
+        tailItems: latestInput.tailItems,
+      });
+
+      if (cancelled) {
+        return;
+      }
+      latestProjectionRef.current = nextProjection;
+      startTransition(() => {
+        if (cancelled) {
+          return;
+        }
+        setDeferredProjectionVersion((version) => version + 1);
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelProjectionBuild();
+    };
+  }, [
+    immediateProjection,
+    isPromptFocused,
+    layoutSnapshot,
+    markers,
+    maxHeightPx,
+    messages,
+    tailItems,
+  ]);
+
+  if (latestProjectionRef.current) {
+    return latestProjectionRef.current;
+  }
+
+  const fallbackProjection = buildConversationOverviewProjection({
+    layoutSnapshot,
+    markers,
+    maxHeightPx,
+    messageMetadataCache: metadataCacheRef.current,
+    messages,
+    tailItems,
+  });
+  latestProjectionRef.current = fallbackProjection;
+  return fallbackProjection;
+}
+
+function useComposerPromptFocused() {
+  const [isPromptFocused, setIsPromptFocused] = useState(
+    isComposerPromptFocused,
+  );
+
+  useEffect(() => {
+    const updateFocusedPrompt = () => {
+      setIsPromptFocused(isComposerPromptFocused());
+    };
+
+    document.addEventListener("focusin", updateFocusedPrompt, true);
+    document.addEventListener("focusout", updateFocusedPrompt, true);
+    return () => {
+      document.removeEventListener("focusin", updateFocusedPrompt, true);
+      document.removeEventListener("focusout", updateFocusedPrompt, true);
+    };
+  }, []);
+
+  return isPromptFocused;
+}
+
+function isComposerPromptFocused() {
+  const activeElement = document.activeElement;
+  return (
+    activeElement instanceof HTMLTextAreaElement &&
+    activeElement.classList.contains("composer-input")
+  );
+}
+
+function scheduleConversationOverviewProjectionBuild(run: () => void) {
+  const idleWindow = window as Window &
+    typeof globalThis & {
+      requestIdleCallback?: (callback: IdleRequestCallback) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+
+  if (
+    typeof idleWindow.requestIdleCallback === "function" &&
+    typeof idleWindow.cancelIdleCallback === "function"
+  ) {
+    let idleHandle: number | null = null;
+    const runWhenIdle: IdleRequestCallback = (deadline) => {
+      idleHandle = null;
+      if (isComposerPromptFocused() && deadline.timeRemaining() < 8) {
+        idleHandle = idleWindow.requestIdleCallback?.(runWhenIdle) ?? null;
+        return;
+      }
+      run();
+    };
+
+    idleHandle = idleWindow.requestIdleCallback(runWhenIdle);
+    return () => {
+      if (idleHandle !== null) {
+        idleWindow.cancelIdleCallback?.(idleHandle);
+      }
+    };
+  }
+
+  const timeoutId = window.setTimeout(
+    run,
+    CONVERSATION_OVERVIEW_FOCUSED_PROMPT_FALLBACK_DELAY_MS,
+  );
+  return () => {
+    window.clearTimeout(timeoutId);
+  };
 }
 
 function resolveOverviewSegmentKeyboardIndex(
