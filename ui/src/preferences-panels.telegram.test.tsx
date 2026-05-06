@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -133,6 +134,25 @@ describe("TelegramPreferencesPanel", () => {
         useSavedToken: true,
       });
     });
+  });
+
+  it("keeps handler state updates enabled after React StrictMode remount checks", async () => {
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      botTokenMasked: "****oken",
+    });
+
+    render(
+      <StrictMode>
+        <TelegramPreferencesPanel projects={projects} sessions={sessions} />
+      </StrictMode>,
+    );
+
+    await screen.findByText("Saved as ****oken.");
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+
+    expect(await screen.findByText("Connected to @termal_bot.")).toBeInTheDocument();
   });
 
   it("removes a saved Telegram token explicitly", async () => {

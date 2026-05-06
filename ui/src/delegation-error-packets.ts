@@ -59,9 +59,6 @@ export type SpawnDelegationValidationFailurePacket = {
   kind: "validation-failed";
   name: string;
   message: string;
-  apiErrorKind: null;
-  status: null;
-  restartRequired: null;
 };
 
 export type SpawnReviewerBatchErrorPacket =
@@ -78,6 +75,11 @@ const GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE =
 const GENERIC_SPAWN_DELEGATION_ERROR_MESSAGE = "Spawn delegation failed.";
 const GENERIC_SPAWN_DELEGATION_VALIDATION_ERROR_MESSAGE =
   "Invalid delegation request.";
+const SAFE_SPAWN_DELEGATION_VALIDATION_NAMES = new Set([
+  "TypeError",
+  "RangeError",
+  "Error",
+]);
 // Audit boundary: every message allowed here is forwarded to wrapper callers.
 // New entries require reviewing every ApiRequestError constructor that can emit
 // that message family.
@@ -106,6 +108,30 @@ const SAFE_SPAWN_DELEGATION_PATTERNS = [
   /^delegation cwd cannot be (?:a drive-relative Windows path|a UNC path|a Windows device namespace path)$/u,
   /^unknown project `[^`]+`$/u,
   /^delegation cwd `[^`]+` must stay inside project `[^`]+`$/u,
+];
+const SAFE_SPAWN_DELEGATION_VALIDATION_MESSAGES = new Set([
+  "parent session id must be a string",
+  "parent session id must be non-empty",
+  "parent session id must not contain /, ?, #, or control characters",
+  "prompt must be a string",
+  "prompt must be non-empty",
+  "title must be omitted instead of null",
+  "cwd must be omitted instead of null",
+  "agent must be omitted instead of null",
+  "model must be omitted instead of null",
+  // Direct `spawn_delegation` callers may pass these optional fields as null.
+  // `spawn_reviewer_batch` overwrites them before validation.
+  "mode must be omitted instead of null",
+  "writePolicy must be omitted instead of null",
+  "spawn_reviewer_batch requests must be an array",
+  "spawn_reviewer_batch requires at least one reviewer",
+]);
+const SAFE_SPAWN_DELEGATION_VALIDATION_PATTERNS = [
+  /^prompt must be no larger than \d+ bytes$/u,
+  /^title must be no longer than \d+ characters$/u,
+  /^model must be no longer than \d+ characters$/u,
+  /^spawn_reviewer_batch accepts at most \d+ reviewers$/u,
+  /^reviewer request \d+ must be an object$/u,
 ];
 // Paired with `formatUnavailableApiMessage` in `ui/src/api.ts` for the
 // delegation status route. Keep this suffix in sync with that helper's wording.
@@ -182,14 +208,10 @@ export function spawnDelegationFailurePacket(
 export function spawnDelegationValidationFailurePacket(
   error: unknown,
 ): SpawnDelegationValidationFailurePacket {
-  const name = error instanceof Error ? error.name : "Error";
   return {
     kind: "validation-failed",
-    name,
+    name: safeSpawnDelegationValidationFailureName(error),
     message: safeSpawnDelegationValidationFailureMessage(error),
-    apiErrorKind: null,
-    status: null,
-    restartRequired: null,
   };
 }
 
@@ -271,9 +293,27 @@ function safeSpawnDelegationFailureMessage(
 
 function safeSpawnDelegationValidationFailureMessage(error: unknown) {
   if (error instanceof TypeError || error instanceof RangeError) {
-    return sanitizeUserFacingErrorMessage(error.message);
+    const sanitized = sanitizeUserFacingErrorMessage(error.message);
+    if (
+      SAFE_SPAWN_DELEGATION_VALIDATION_MESSAGES.has(sanitized) ||
+      SAFE_SPAWN_DELEGATION_VALIDATION_PATTERNS.some((pattern) =>
+        pattern.test(sanitized),
+      )
+    ) {
+      return sanitized;
+    }
   }
   return GENERIC_SPAWN_DELEGATION_VALIDATION_ERROR_MESSAGE;
+}
+
+function safeSpawnDelegationValidationFailureName(error: unknown) {
+  if (
+    error instanceof Error &&
+    SAFE_SPAWN_DELEGATION_VALIDATION_NAMES.has(error.name)
+  ) {
+    return error.name;
+  }
+  return "Error";
 }
 
 function isSafeUnavailableRouteDiagnostic(

@@ -7,127 +7,112 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Windows Telegram settings replacement can delete the saved bot config before rename
+## "in-flight Telegram test unmounts" test asserts only `consoleError`, doesn't actually pin the unmount guard
 
-**Severity:** High - the Windows replacement path removes the existing `telegram-bot.json` before renaming the temp file into place, so a crash or second rename failure can leave the bot token/config missing.
+**Severity:** Medium - React 18+ removed the "Can't perform a state update on an unmounted component" warning entirely, so removing the `isMountedRef` checks would not cause the test to fail.
 
-`src/telegram_settings.rs:455-459`. Unix rename replacement is atomic, but Windows `fs::rename` cannot overwrite an existing destination. The fallback currently calls `fs::remove_file(path)?` and then `fs::rename(temp_path, path)?`, creating a P0-platform failure window after the old config is gone and before the new config is committed.
-
-**Current behavior:**
-- The temp file is written first.
-- On Windows, the existing destination is deleted before the temp file is renamed.
-- A crash or failed second rename leaves no active Telegram settings file.
-
-**Proposal:**
-- Use a true Windows replacement primitive such as `ReplaceFileW` or `MoveFileExW` with replace semantics.
-- Or adopt a cross-platform atomic-persist helper that provides real overwrite semantics on Windows.
-
-## `/api/telegram/test` 502 message lost in UI mapping to "backend-unavailable"
-
-**Severity:** Medium - round 56 split transport errors (502) from API errors (422), but the frontend's `createResponseError` maps every 502/503/504 to a fixed `"The TermAl backend is unavailable."` with `kind: "backend-unavailable"`, discarding the descriptive Telegram-specific body.
-
-`src/telegram_settings.rs:378` and `ui/src/api.ts:1662`. `telegram_test_connection_error` correctly produces `ApiError::bad_gateway` with body `"Telegram connection test failed: <sanitized>"` for transport-class failures. But `TelegramPreferencesPanel` displays `testError.message`, so a Telegram transport failure now displays a generic backend-unavailable message instead of the actionable detail. The split-status closure on the backend is contract-correct but wasted on the wire.
+`ui/src/preferences-panels.telegram.test.tsx:162-189`. The test reads as effective coverage for the `isMountedRef` guard but actually catches no regression because no warning fires under React 18. A regression making `setError` always swallow would also pass.
 
 **Current behavior:**
-- Backend returns 502 with `{ error: "Telegram connection test failed: ..." }` for transport errors.
-- Frontend `createResponseError` collapses 5xx to a single `"The TermAl backend is unavailable."` message.
-- Test-connection failures display a misleading generic backend-unavailable error.
+- Test asserts `expect(consoleError).not.toHaveBeenCalled()`.
+- Under React 18, no warning fires regardless of the guard.
+- Removing the guard would not cause the test to fail.
 
 **Proposal:**
-- Either return 422 + a "transport" sub-kind so the frontend keeps the specific message, OR
-- Have a dedicated client wrapper for `testTelegramConnection` that preserves the response body for non-422 statuses (parse JSON `{ "error": "..." }` before falling through to `createResponseError`).
+- Spy on the test promise's then-handler (or wrap `setError`/`setIsTesting` via mock) to assert they aren't invoked post-unmount.
+- OR remount and verify state is freshly initialised.
+- Add a positive control: same flow stays mounted, error DOES surface.
 
-## `statusRecoveryGroups` "previous server instance" group conflates revision metadata across requests
+## Two cancellation patterns coexist in `TelegramPreferencesPanel`: `cancelled` flag for initial-fetch, `isMountedRef` for handlers
 
-**Severity:** Medium - the seeded group uses `previousRevision` (highest revision observed across ALL prior status-batch responses, regardless of instance) as the revision for delegations stored under `previousServerInstanceId`. If `previousRevision` came from a different instance, the synthetic group reports a revision the wrapper cannot correlate to per-instance state.
+**Severity:** Low - same component has two patterns for the same concern ("drop late updates after unmount"). Future maintainers may copy the wrong one.
 
-`ui/src/delegation-commands.ts:991-1028`. `applyStatusBatchResponses` passes `lastRevision` to `statusRecoveryGroups`, but `lastRevision` is updated by the latest applied responses across all server instances. The synthetic previous-instance group inherits this cross-instance revision.
+`ui/src/preferences-panels.tsx:1229-1263`. The fetch-status `useEffect` uses its own `cancelled` closure flag while the three async handlers use `isMountedRef`.
 
 **Current behavior:**
-- `statusRecoveryGroups` uses `previousRevision` for the synthetic previous-instance group.
-- `previousRevision` may not belong to `previousServerInstanceId`.
-- Wrapper callers using these revisions for adopt-state semantics see a value that's not per-instance.
+- Initial-fetch effect uses `cancelled` flag.
+- `handleSave`/`handleTestConnection`/`handleRemoveBotToken` use `isMountedRef`.
+- Two patterns side-by-side.
 
 **Proposal:**
-- Track `previousRevision` as a per-`previousServerInstanceId` field, OR
-- Document that `statusRecoveryGroups` reports a "best-known revision floor" rather than a precise per-instance revision, OR
-- Set the seeded group's revision to `0`/`null` to indicate "stale baseline; ask the wrapper to re-fetch".
+- Consolidate on one pattern. `isMountedRef` reads cleaner for fire-and-forget click handlers; `cancelled` flags read cleaner for effect-scoped fetches; both are fine, but pick one per file.
 
-## `statusRecoveryGroups` synthetic group includes records that may NOT have been re-fetched in the current batch
+## Telegram upstream 429 envelopes collapse to 502
 
-**Severity:** Medium - when a status batch flips server instance mid-poll, the synthetic previous-instance group includes EVERY record the wrapper has accumulated across all prior polls, regardless of whether each was even part of the current request.
+**Severity:** Medium - Telegram structured rate-limit errors still map to 502 instead of HTTP 429, so API callers cannot distinguish "retry later" from a generic upstream outage.
 
-`ui/src/delegation-commands.ts:996-1006`. Per the contract this is "delegations we had before the flip", but consumers reading `recoveryGroups` may assume each group represents a coherent in-flight batch state. The grouping mixes "previously-known stale state" with "newly-observed mixed state".
+`src/telegram_settings.rs:376`. The staged classifier now separates invalid Telegram API errors from upstream failures, but `TelegramApiError` envelopes with `status == 429` or `error_code == 429` are still treated as bad-gateway upstream errors.
 
 **Current behavior:**
-- Synthetic group seeded from FULL `recordsById` map.
-- Includes records not in the current request's `responses` array.
-- Wrappers cannot tell which records were in this batch vs prior batches.
+- Local Telegram test throttling returns HTTP 429.
+- Telegram API 429 JSON envelopes return HTTP 502.
+- Callers and wrappers cannot apply one retry policy for all rate-limit responses.
 
 **Proposal:**
-- Scope `previousRecords` to records whose `id` was in the current `responses` request, OR
-- Document the inclusive contract above the function (and in the feature brief).
+- Classify `TelegramApiError` with `status == 429` or `error_code == 429` as HTTP 429.
+- Keep Telegram 5xx/decode/transport failures in the 502/503 family.
+- Preserve sanitized response text in the JSON error body.
 
-## `SpawnDelegationFailurePacket` discriminated-union forces all-null fields on validation variant
+## Long-session overview navigation can use full-transcript indexes against a tail-only virtualizer
 
-**Severity:** Medium - both `SpawnDelegationTransportFailurePacket` and `SpawnDelegationValidationFailurePacket` share `apiErrorKind`/`status`/`restartRequired` fields, but on the validation variant they're typed as literal `null`. Consumers reading these fields without first narrowing on `kind` get `boolean | null` only after narrowing; the unconditionally-null shape on the validation packet hides the contract that validation packets cannot signal restart-required.
+**Severity:** Medium - the overview rail can render full-transcript items while its layout snapshot and virtualizer handle still describe only the initial tail window.
 
-`ui/src/delegation-error-packets.ts:45-65`. The duplication is wide enough that a wrapper-side `if (!packet.restartRequired)` "looks safe" without `kind`-narrowing — but type-checks fine in both branches.
+`ui/src/panels/AgentSessionPanel.tsx:1157` and `ui/src/panels/conversation-overview-controller.ts:261`. During initial long-session windowing, `overviewMessages` can contain the full transcript while `ConversationMessageList` renders only `visibleMessages`. If an older overview item cannot jump by id, the fallback `jumpToMessageIndex` uses a full-transcript index against the tail list.
 
 **Current behavior:**
-- `SpawnDelegationFailurePacket = SpawnDelegationTransportFailurePacket | SpawnDelegationValidationFailurePacket`.
-- Validation variant has `apiErrorKind: null`, `status: null`, `restartRequired: null`.
-- Consumers must narrow on `kind` before reading these fields meaningfully.
+- Overview items can be built from the full transcript.
+- The virtualizer can still be mounted over the tail window.
+- Clicking an older overview item can jump to the wrong tail item instead of hydrating and landing on the requested message.
 
 **Proposal:**
-- Drop the three null-only fields from `SpawnDelegationValidationFailurePacket` and let consumers narrow on `kind` first, OR
-- Keep the symmetric shape but document the "validation packets are always null on these three fields" invariant in the type's JSDoc.
+- Gate overview layout snapshots by transcript identity/count, OR
+- Disable index fallback while `overviewMessages !== visibleMessages`, OR
+- Teach the controller/virtualizer to expose a full-transcript layout model while the DOM remains tail-windowed.
 
-## `SpawnReviewerBatchFailure` type widens beyond doc contract
+## `wait_delegations` mixed-instance docs omit status-fetch priority
 
-**Severity:** Medium - the export `SpawnReviewerBatchFailure = SpawnDelegationFailurePacket & { index, title }` now permits `kind: "validation-failed"` items, but the doc still pins `kind: "spawn-failed"`. At runtime `failed[]` only contains `"spawn-failed"` items (validation errors short-circuit at the top-level `error`), so the wider type is misleading.
+**Severity:** Medium - the feature brief implies mixed-server-instance packets are returned whenever polling observes a restart, but current implementation gives status-fetch failures priority.
 
-`ui/src/delegation-commands.ts:144-147` and `docs/features/agent-delegation-sessions.md:461-470`.
+`docs/features/agent-delegation-sessions.md:245`. `wait_delegations` returns `status-fetch-failed` when `batch.kind === "error"` before mixed-instance detection runs, even if collected responses already include a different `serverInstanceId`.
 
 **Current behavior:**
-- TypeScript type permits both spawn-failed and validation-failed in `failed[]`.
-- Runtime never produces validation-failed in `failed[]` (only at top-level `error`).
-- Doc pins `kind: "spawn-failed"`.
+- Successful/timeout status batches can surface `mixed-server-instance` with `recoveryGroups`.
+- Status-fetch failures return `status-fetch-failed` first.
+- The docs do not state that priority rule.
 
 **Proposal:**
-- Narrow the export to `SpawnDelegationTransportFailurePacket & { index, title }` so the type matches the runtime invariant.
+- Clarify that mixed-instance packets are produced only for successful/timeout status batches, OR
+- Change the error path to surface `mixed-server-instance` when collected responses already prove an instance split.
 
-## Delegation validation-failure packets forward broad runtime error messages
+## `wait_delegations` recovery group ID order depends on response arrival
 
-**Severity:** Low - validation packets forward every caught `TypeError` or `RangeError` message after only generic UI sanitization instead of an explicit safe-message allowlist.
+**Severity:** Low - `recoveryGroups[].delegationIds` can be ordered by async status-response timing rather than the caller's requested id order.
 
-`ui/src/delegation-error-packets.ts:272`. The wrapper-facing delegation failure surface otherwise uses audited safe-message patterns. The broader validation catch can expose unexpected runtime bug text or caller-shaped object/property details across the redaction boundary.
+`ui/src/delegation-commands.ts:946`. Identical `wait_delegations` requests can produce different recovery packet ordering depending on network timing, which makes wrapper diagnostics and tests less deterministic.
 
 **Current behavior:**
-- `TypeError` and `RangeError` messages from validation are treated as user-facing packet messages.
-- The message still goes through generic UI sanitization.
-- Unexpected validation exceptions are not collapsed to a fixed safe message.
+- Status responses are collected as async requests resolve.
+- Recovery group id arrays inherit that arrival order.
+- Equivalent requests can produce equivalent groups with different id order.
 
 **Proposal:**
-- Allowlist the exact client-side validation messages/codes that may be exposed.
-- Collapse unexpected validation exceptions to a fixed message such as `Invalid delegation request.`
+- Snapshot or emit status responses in `pendingIds` order, OR
+- Sort IDs inside each recovery group before returning the packet.
 
-## Wait-side `recoveryGroups` semantics undocumented in feature brief
+## Delegation validation-message docs use symbolic constants where runtime emits numbers
 
-**Severity:** Medium - the feature brief talks about `recoveryGroups` only for "mixed-instance spawn errors" (`docs/features/agent-delegation-sessions.md:240-244`). It does not mention that `wait_delegations` can also surface `mixed-server-instance` errors with `recoveryGroups`, nor describe the synthetic "previous server instance" group convention, nor that the same `delegationId`/`childSessionId` may appear in MULTIPLE groups across cycles.
+**Severity:** Low - the feature brief's documented validation packet allowlist uses symbolic constants, but runtime messages contain numeric values.
 
-Wrappers reading the docs cannot reason about these shapes.
+`docs/features/agent-delegation-sessions.md:278`. A wrapper implementing the documented strings literally can reject valid runtime messages such as `65536 bytes` or `200 characters`.
 
 **Current behavior:**
-- Brief documents `recoveryGroups` for spawn batch only.
-- Wait-side `recoveryGroups` (round-56 addition) is undocumented.
-- Synthetic "previous server instance" group convention is implicit.
-- Cross-cycle delegationId duplication across groups is implicit.
+- Runtime validation messages interpolate numeric limits.
+- Docs show symbolic names for those limits.
+- The docs do not clearly say the symbolic values are placeholders/patterns.
 
 **Proposal:**
-- Extend the `recoveryGroups` paragraph to cover wait-side semantics and the previous-instance convention.
-- Pin that revisions are per-instance and not comparable across groups.
-- Document that `delegationId` may appear in multiple groups across cycles.
+- Document the entries as patterns/placeholders, OR
+- Show the current numeric wire strings alongside the exported constants.
 
 ## PATCH docstring does not cover `subscribed_project_ids`
 
@@ -141,66 +126,6 @@ Wrappers reading the docs cannot reason about these shapes.
 **Proposal:**
 - Tighten the docstring to "string fields decorated with `deserialize_nullable_marker_field`" + an explicit note that `subscribed_project_ids` differs, OR
 - Migrate `subscribed_project_ids` to the marker pattern.
-
-## `spawnRecoveryGroups` vs `statusRecoveryGroups` asymmetric duplicate handling
-
-**Severity:** Medium - `spawnRecoveryGroups` uses `group.delegationIds.push(...)` directly; `statusRecoveryGroups` uses `pushUnique(group.delegationIds, ...)`. For the spawn path duplicates can't occur in normal use, but the asymmetry is load-bearing for any wrapper code that compares group shapes between the two surfaces.
-
-`ui/src/delegation-commands.ts:1009-1027` (status-side `pushUnique`) vs `:1172-1192` (spawn-side bare `push`).
-
-**Current behavior:**
-- Spawn-side does not dedupe.
-- Wait-side dedupes via `pushUnique`.
-- A future refactor that lets the spawn loop run twice for the same delegation would silently produce duplicate ids on spawn but not on wait.
-
-**Proposal:**
-- Make spawn-side use `pushUnique` for consistency, OR
-- Add a comment justifying the asymmetry.
-
-## Window-targeted scroll events no longer close the marker context menu
-
-**Severity:** Medium - capture-phase `document.addEventListener("scroll", handleScroll, true)` will fire for window scrolls (with `event.target === document`), but `scrollRoot.contains(document)` returns false, so the menu stays open. The pre-round-56 code closed unconditionally on window scrolls via the now-removed window listener.
-
-`ui/src/panels/conversation-markers.tsx:388-398`. If this is intentional, untested and undocumented; if not, it's a regression from round 56's listener-deduplication.
-
-**Current behavior:**
-- Document scroll listener with capture catches all scrolls.
-- `handleScroll` closes the menu only when the scroll target is inside `scrollContainerRef.current`.
-- Window-targeted scrolls (e.g., browser chrome) no longer close the menu.
-
-**Proposal:**
-- Either add a `target === document` branch that closes the menu (matching prior behavior), OR
-- Document the new "window scrolls are intentionally ignored" contract with an explicit `fireEvent.scroll(window)` test asserting the menu stays open.
-
-## `scheduleMarkerJumpCorrection` redundantly re-runs `scrollIntoView` even when sync call succeeded
-
-**Severity:** Medium - `jumpToMarker` calls `scrollMountedMarkerSlotIntoView` synchronously and immediately afterwards `scheduleMarkerJumpCorrection`, which schedules a rAF that calls `scrollMountedMarkerSlotIntoView` again. If the slot was already mounted (typical case after `flush: true`), this is two `scrollIntoView` calls back-to-back.
-
-`ui/src/panels/AgentSessionPanel.tsx:899-914`. `scrollIntoView` on an in-view element is a near-no-op, but if user-initiated scrolling begins between the sync call and the rAF (within ~16 ms), the rAF can fight that scroll and snap the user back to center.
-
-**Current behavior:**
-- Sync `scrollMountedMarkerSlotIntoView` runs immediately.
-- `scheduleMarkerJumpCorrection` then schedules a rAF to call it again.
-- User-initiated scroll between calls is overridden by the rAF.
-
-**Proposal:**
-- Have the synchronous call return its result and skip scheduling when it succeeds, OR
-- Have the first rAF re-check `messageSlotNodes` cache before re-scrolling and bail if the cached slot's `getBoundingClientRect()` is already centered.
-
-## `virtualizerHandleRef` now passed unconditionally to `ConversationMessageList`
-
-**Severity:** Medium - round-56 behavioral change: enables virtualizer-driven jumps for short conversations (< `CONVERSATION_OVERVIEW_MIN_MESSAGES`), where the rail is hidden. Correct, but undocumented and not pinned by a test.
-
-`ui/src/panels/AgentSessionPanel.tsx:1099`. Was previously gated on `conversationOverview.shouldRender`. The change is correct (markers should jump regardless of rail visibility) but a reader of the diff has no signal that this is an intentional widening.
-
-**Current behavior:**
-- `virtualizerHandleRef.current` is populated even when the rail is hidden.
-- No regression test covering "marker click on a 5-message session uses `jumpToMessageId`".
-- Behavior change undocumented.
-
-**Proposal:**
-- Add a regression test creating a session with < `CONVERSATION_OVERVIEW_MIN_MESSAGES` messages, clicking a marker, asserting the virtualizer's `jumpToMessageId` was invoked (vs fallback to `findMountedConversationMessageSlot`).
-- Note the widening in a code comment.
 
 ## `write_telegram_bot_file` Unix `harden_telegram_bot_file_permissions` errors masked by cleanup-on-error path
 
@@ -684,21 +609,6 @@ Wrappers reading the docs cannot reason about these shapes.
 **Proposal:**
 - Add the Telegram routes to `docs/architecture.md` with methods, request/response shapes, and error semantics.
 - Document `GET /api/sessions/{id}?tail=N`, including when `messagesLoaded` is false and why callers must treat that response as a tail window rather than a full transcript.
-
-## Telegram preferences mounted-ref guard stays false under React StrictMode
-
-**Severity:** High - the new mounted-state guard sets `isMountedRef.current = false` in cleanup but never resets it to `true` in the effect body, so React 18 StrictMode effect replay can leave the still-mounted panel unable to update after async work.
-
-`ui/src/preferences-panels.tsx:1231`. In development StrictMode, React intentionally runs effect cleanup and setup during mount. Because setup does not restore the ref to `true`, `handleSave`, `handleTestConnection`, and `handleRemoveToken` can skip post-await state updates while the panel is still mounted.
-
-**Current behavior:**
-- StrictMode mount replay runs the cleanup and sets `isMountedRef.current = false`.
-- The effect setup does not restore the ref.
-- Save/test/remove can leave `isSaving` or `isTesting` stuck and skip success/error UI updates.
-
-**Proposal:**
-- Set `isMountedRef.current = true` inside the effect setup before returning cleanup.
-- Add StrictMode render coverage that proves mounted save/test/remove flows still update UI after promises resolve.
 
 ## Telegram settings UI belongs behind a focused module boundary
 
@@ -2200,19 +2110,19 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 ## Implementation Tasks
 
 - [ ] P2: Add Telegram settings API/security regressions:
-  cover corrupt-backup permission hardening, Windows ACL/secret-store fallback behavior, `/api/telegram/test` preserving transport/decode failure details in the UI, global/concurrent rate limiting that cannot be bypassed by rotating token strings, and bounded rate-limit cache retention.
+  cover corrupt-backup permission hardening, Windows ACL/secret-store fallback behavior, global/concurrent rate limiting that cannot be bypassed by rotating token strings, and bounded rate-limit cache retention.
 - [ ] P2: Add Telegram settings file concurrency regressions:
   simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
   cover API error display, stale default-session clearing, default-project auto-subscription, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
-- [ ] P2: Add delegation command error-contract regressions:
-  cover remaining `spawn_delegation` and `spawn_reviewer_batch` backend-unavailable/restart diagnostics, wrong-parent/project-boundary redaction, invalid parent-session-id validation packets, and explicit validation-message allowlist/collapse behavior.
 - [ ] P2: Add Telegram assistant-forwarding ownership/order regressions:
   cover an already-active non-Telegram turn before a Telegram prompt, prompt POST failure after forwarding state is prepared, post-send digest failure, a digest primary-session switch before the armed Telegram reply settles, an armed session entering approval with no assistant text before its post-approval reply, and two sessions proving assistant-forwarding cursors are session-scoped.
 - [ ] P2: Add Telegram long-message chunk retry and UTF-16 chunking coverage:
   fail a later chunk after an earlier chunk is sent and assert retry does not duplicate it; add emoji/surrogate-pair-heavy text proving chunks respect Telegram's UTF-16 code-unit limit.
 - [ ] P2: Add overview rail growth, remount, and cancellation coverage:
   after the delayed rail is ready, append messages and assert layout/viewport snapshots refresh; switch sessions or drop below threshold before queued animation frames drain and assert no stale rail appears; assert the conversation list DOM and scroll position survive rail readiness.
+- [ ] P2: Cover long-session overview navigation while the transcript is tail-windowed:
+  use a 600+ message active session, click an older overview item outside the rendered tail window, and assert full-transcript demand runs before the retry jump lands on the requested message.
 - [ ] P2: Add focused-composer overview projection scheduler coverage:
   mock repeated low-time `requestIdleCallback` deadlines while the composer remains focused, advance any hard timeout/fallback, and assert the latest rerendered messages/markers/tail items drive the rail projection without requiring blur.
 - [ ] P2: Add `messageCreatedDeltaIsNoOp` semantic-change negatives:
@@ -2245,6 +2155,8 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   drive the live-state hook or app through text-repair hydration after an unrelated newer live revision and assert the active transcript renders the repaired assistant text without scroll, focus, or another prompt.
 - [ ] P2: Add AgentSessionPanel deferred-tail component regressions:
   cover switching from a non-empty deferred transcript to an empty current session, and same-id updated assistant text through the rendered component path (`useDeferredValue`, pending-prompt filtering, and the virtualized list), not only the exported helper.
+- [ ] P2: Cover full-transcript demand inputs beyond upward wheel:
+  add table-style cases for `scrollTop <= 160`, `ArrowUp`/`Home`/`PageUp`, touch drag-up demand, and the ctrl-wheel negative branch on the long-session tail-window path.
 - [ ] P2: Add lagged-marker EventSource reconnect-boundary regression:
   dispatch `lagged`, trigger EventSource error/reconnect, then send a lower/same-instance state on the new stream and assert the old marker cannot force-adopt it.
 - [ ] P2: Add remote hydration dedupe production-path coverage:
@@ -2353,27 +2265,21 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   current test covers only pure-emoji input. Add (a) mixed BMP + surrogate-pair text where the boundary lands at the limit, (b) text that fits EXACTLY at the limit (no chunking), (c) text where a single character exceeds the limit (impossible at 3500 cap but worth a defensive test).
 - [ ] P2: Strengthen forwarder armed-priority assertion:
   the `telegram_forwarder_drains_armed_session_before_digest_primary` test asserts only `sent_texts == ["Telegram-originated reply", footer]`. This indirectly proves session-2 wasn't sent, but doesn't track which `session_id` values were passed to `get_session`. Track in the fake and assert exclusion explicitly.
-- [ ] P2: Tighten `validate_telegram_bot_token` boundary coverage to include 255 chars (round-56 added 256/257 only):
-  add `validate_telegram_bot_token(&"x".repeat(255)).expect("under-limit pass")` and a 1024-char over-limit case to defend against accidental wider window. An off-by-one swapping `>` to `>=` would still pass current tests.
-- [ ] P2: Cover `telegram_test_connection_error` for nested `TelegramApiError` via `.context()`:
-  current test exercises a bare `TelegramApiError` and a bare `anyhow!` error. Add a third case where `TelegramApiError` is wrapped via `.context("getMe call failed")` and assert classification still hits 422. The implementation uses `err.chain().any(downcast_ref)` so a regression to top-level-only would not be caught by current tests.
-- [ ] P2: Add explicit-bot-token path for `posts Telegram connection tests` API test:
-  current `api.test.ts:268-302` only covers `useSavedToken: true`. Add `testTelegramConnection({ botToken: "123:abc" })` and assert the exact body shape `{ botToken: "123:abc" }`.
-- [ ] P2: Make `corrects a virtualized marker jump` test exercise the two-rAF retry chain:
-  current test passes if the synchronous `scrollMountedMarkerSlotIntoView` call alone succeeds. Intercept rAF and make the target slot unavailable for the immediate lookup, then assert the scheduled correction scrolls once the slot appears. Cover cancellation on unmount/session switch or a second marker jump.
-- [ ] P2: Cover `aria-expanded="false"` after marker menu closes:
-  test asserts `aria-expanded="false"` initially and `"true"` after Enter, but does NOT assert it returns to `"false"` after the menu closes (e.g., after menuitem click or Escape). State-reset path is unverified.
-- [ ] P2: Expand `statusRecoveryGroups` coverage to merge and previous-instance branches:
-  current test uses one delegation per server instance; never exercises (a) `Math.max(group.revision, response.revision)` revision-merge branch for same-instance multi-response, (b) `previousServerInstanceId && previousRevision !== null` inject-prior-instance branch. Add a test that polls twice with a same-instance response on the first poll (priming `recordsById` and `lastServerInstanceId`/`lastRevision`) and a mixed-instance response on the second.
-- [ ] P2: Pin status-batch operation wording:
-  only spawn-batch `mixed-server-instance` message wording is asserted ("delegation spawn batch contained..."); status-batch wording ("delegation status batch contained...") in `mixedServerInstanceErrorPacket` is NOT asserted by the status-batch test.
+- [ ] P2: Cover Telegram upstream 429 envelopes returning HTTP 429:
+  add backend/API tests proving a Telegram API error envelope with `status == 429` or `error_code == 429` maps to HTTP 429 rather than 502, while invalid-token envelopes remain validation failures and 5xx/decode/transport failures remain upstream errors.
 - [ ] P2: Cover `backup_corrupt_telegram_bot_file` cross-fs fallback:
   current `telegram_state_persist_backs_up_malformed_existing_file` covers the rename success path but does NOT cover the `fs::copy` + `fs::remove_file` fallback. Extract `corrupt_telegram_bot_file_backup_path` + the rename-then-copy fallback to a helper accepting a `rename_fn: impl Fn(...)` and inject a forced-failure rename in a unit test.
 - [ ] P2: Add `write_telegram_bot_file` Unix `0o600` permission test:
   unfilled from round 55. Add `#[cfg(unix)] fn telegram_bot_file_is_chmod_600()` asserting `metadata().permissions().mode() & 0o777 == 0o600` after a `write_telegram_bot_file`. Round 56 widened this code path with `replace_telegram_bot_file` + `harden_telegram_bot_file_permissions`; none of the new helpers are tested.
 - [ ] P2: Cover `write_telegram_bot_file` atomic-rename + temp-cleanup:
   round 56's rewrite (`telegram_settings.rs:417-427`) introduced `let result = (|| {...})(); if result.is_err() { let _ = fs::remove_file(&temp_path); }`. A failure inside the closure that leaves a stale `.tmp` file would be a silent disk-leak regression. Add a test that injects a `write_all` failure and asserts the temp file is unlinked.
-- [ ] P2: Cover Windows `replace_telegram_bot_file` retry-after-remove fallback:
-  `#[cfg(windows)]` branch retries after `fs::remove_file(path)` if the rename returns an error and the path exists. Branch is fully untested.
+- [ ] P2: Cover Windows `MoveFileExW` Telegram settings replacement:
+  add a `#[cfg(windows)]` test that writes an existing Telegram settings file plus temp file, invokes the replacement/persist path, and asserts final content plus temp cleanup without delete-before-rename behavior.
 - [ ] P2: Cover `forward_new_assistant_message_if_any` armed-clear branch for non-matching session:
   the helper `clear_forward_next_assistant_message_session_id` checks session_id equality at the implementation but no test exercises a non-match (i.e., armed for session-A, called with session-B).
+- [ ] P2: Add `isConversationVirtualized` short-conversation gate test in `AgentSessionPanel.test.tsx`:
+  round 57's behavioral change has no test for the < 80 message branch. Add a `makeTextMessages(5)` session test that clicks a marker and asserts `findMountedConversationMessageSlot` was used (or assert `virtualizerHandleRef.current` was never accessed because the prop was undefined). Pin the contract.
+- [ ] P2: Cover `updateTelegramConfig` PATCH tri-state body shape (omitted vs null vs string):
+  `api.test.ts:235-263` exercises only `{ botToken: null, defaultSessionId: null }`. Add cases: omitted (no key in body) and explicit string (`botToken: "123:abc"`).
+- [ ] P2: Add AppDialogs Telegram tab path test:
+  `AppDialogs.test.tsx` contains no `telegram` references. Open the settings dialog with `settingsTab="telegram"` and assert the panel renders with initial fetch.

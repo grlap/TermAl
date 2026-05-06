@@ -490,7 +490,13 @@ export function isBackendUnavailableError(
   );
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  options?: {
+    preserveGatewayErrorBody?: boolean;
+  },
+): Promise<T> {
   const response = await performRequest(path, init);
 
   const contentType = response.headers.get("content-type") ?? "";
@@ -504,7 +510,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
-    throw createResponseError(raw, response.status);
+    throw createResponseError(raw, response.status, options);
   }
 
   if (!raw) {
@@ -664,10 +670,16 @@ export function testTelegramConnection(payload: {
   botToken?: string | null;
   useSavedToken?: boolean;
 }) {
-  return request<TelegramTestResponse>("/api/telegram/test", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return request<TelegramTestResponse>(
+    "/api/telegram/test",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    {
+      preserveGatewayErrorBody: true,
+    },
+  );
 }
 
 export function createSession(payload: CreateSessionRequest) {
@@ -1659,8 +1671,19 @@ function createBackendUnavailableError(
   });
 }
 
-function createResponseError(raw: string, status: number) {
+function createResponseError(
+  raw: string,
+  status: number,
+  options?: {
+    preserveGatewayErrorBody?: boolean;
+  },
+) {
   if (status === 502 || status === 503 || status === 504) {
+    if (options?.preserveGatewayErrorBody) {
+      return new ApiRequestError("request-failed", extractError(raw, status), {
+        status,
+      });
+    }
     return createBackendUnavailableError(
       "The TermAl backend is unavailable.",
       status,

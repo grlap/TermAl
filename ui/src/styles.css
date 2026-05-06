@@ -3899,11 +3899,13 @@ textarea {
   align-content: start;
 }
 
-.message-stack:has(.conversation-with-overview) {
+.message-stack:has(.conversation-with-overview),
+.message-stack:has(.session-conversation-page.has-conversation-overview-scroll) {
   scrollbar-width: none;
 }
 
-.message-stack:has(.conversation-with-overview)::-webkit-scrollbar {
+.message-stack:has(.conversation-with-overview)::-webkit-scrollbar,
+.message-stack:has(.session-conversation-page.has-conversation-overview-scroll)::-webkit-scrollbar {
   width: 0;
   height: 0;
 }
@@ -4226,6 +4228,20 @@ textarea {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface-card) 72%, transparent);
   overflow: hidden;
   cursor: pointer;
+}
+
+.conversation-overview-rail.is-pending {
+  cursor: default;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.conversation-overview-rail.is-pending::before {
+  content: "";
+  position: absolute;
+  inset: 0.45rem var(--conversation-overview-lane-left);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 42%, transparent);
 }
 
 .conversation-overview-rail:focus-visible {

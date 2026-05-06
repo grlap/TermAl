@@ -242,6 +242,49 @@ and include diagnostic `error.recoveryGroups`. The current command surface does
 not accept a server-instance selector, so wrappers should treat mixed-instance
 errors as non-recoverable through these helpers until a server-aware transport is
 added.
+`wait_delegations` also returns `error.kind === "mixed-server-instance"` when
+status polling observes a backend restart between polling cycles or within one
+parallel status batch. Its `error.recoveryGroups` are diagnostic only: groups
+identify which backend instance produced each observed delegation/status pair,
+and a previous-instance group is scoped to delegations fetched in the current
+poll. A single `delegationId` can appear in multiple groups within one error
+packet: once for the previous-instance baseline and once for the current
+instance response. If the first poll crosses instances, the previous-instance
+group is omitted because there is no baseline to report. Revisions are per
+server instance and must not be compared across groups.
+
+Spawn commands return client-side validation failures as `outcome: "error"`
+with `error.kind === "validation-failed"`. `wait_delegations` is different:
+invalid parent/delegation ids or wait options throw `TypeError`/`RangeError`
+before polling starts.
+
+Validation packet messages are intentionally allow-listed. Unknown validation
+exceptions collapse to `"Invalid delegation request."`; wrapper UX should not
+depend on messages outside this list:
+
+- `parent session id must be a string`
+- `parent session id must be non-empty`
+- `parent session id must not contain /, ?, #, or control characters`
+- `prompt must be a string`
+- `prompt must be non-empty`
+- `title must be omitted instead of null`
+- `cwd must be omitted instead of null`
+- `agent must be omitted instead of null`
+- `model must be omitted instead of null`
+- `mode must be omitted instead of null`
+- `writePolicy must be omitted instead of null`
+- `spawn_reviewer_batch requests must be an array`
+- `spawn_reviewer_batch requires at least one reviewer`
+- `prompt must be no larger than MAX_DELEGATION_PROMPT_BYTES bytes`
+- `title must be no longer than MAX_DELEGATION_TITLE_CHARS characters`
+- `model must be no longer than MAX_DELEGATION_MODEL_CHARS characters`
+- `spawn_reviewer_batch accepts at most MAX_REVIEWER_BATCH_SIZE reviewers`
+- `reviewer request N must be an object`
+
+Use the exported constants from `ui/src/delegation-commands.ts` as the numeric
+source of truth: `MAX_DELEGATION_PROMPT_BYTES`,
+`MAX_DELEGATION_TITLE_CHARS`, `MAX_DELEGATION_MODEL_CHARS`, and
+`MAX_REVIEWER_BATCH_SIZE`.
 Grouped parent-card UI and result consolidation remain separate Phase 3 work.
 
 ### MCP Tools
@@ -421,9 +464,6 @@ type SpawnDelegationFailurePacket =
       kind: "validation-failed";
       name: string;
       message: string;
-      apiErrorKind: null;
-      status: null;
-      restartRequired: null;
     };
 
 type SpawnDelegationCommandSuccessResult = {
@@ -517,6 +557,19 @@ type DelegationResultPacket = {
   serverInstanceId: string;
 };
 
+type MixedServerInstanceErrorPacket = {
+  kind: "mixed-server-instance";
+  name: string;
+  message: string;
+  serverInstanceIds: string[];
+  recoveryGroups: {
+    serverInstanceId: string;
+    revision: number;
+    delegationIds: string[];
+    childSessionIds: string[];
+  }[];
+};
+
 type WaitDelegationErrorPacket =
   | {
       kind: "mismatched-delegation-id";
@@ -525,12 +578,7 @@ type WaitDelegationErrorPacket =
       requestedId: string;
       receivedId: string;
     }
-  | {
-      kind: "mixed-server-instance";
-      name: string;
-      message: string;
-      serverInstanceIds: string[];
-    }
+  | MixedServerInstanceErrorPacket
   | {
       kind: "status-fetch-failed";
       name: string;
@@ -539,18 +587,6 @@ type WaitDelegationErrorPacket =
       status: number | null;
       restartRequired: boolean | null;
     };
-
-type MixedServerInstanceErrorPacket = Extract<
-  WaitDelegationErrorPacket,
-  { kind: "mixed-server-instance" }
-> & {
-  recoveryGroups: {
-    serverInstanceId: string;
-    revision: number;
-    delegationIds: string[];
-    childSessionIds: string[];
-  }[];
-};
 
 type WaitDelegationsBaseResult = {
   delegations: DelegationSummary[];

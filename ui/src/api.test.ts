@@ -295,6 +295,63 @@ describe("telegram API helpers", () => {
       useSavedToken: true,
     });
   });
+
+  it("posts explicit Telegram bot tokens to the test route", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(
+        JSON.stringify({
+          botName: "TermAl Bot",
+          botUsername: "termal_bot",
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await testTelegramConnection({ botToken: "123456:token" });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      botToken: "123456:token",
+    });
+  });
+
+  it("preserves Telegram test gateway error details", async () => {
+    expect.assertions(4);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: "Telegram connection test failed: failed to call Telegram `getMe`",
+          }),
+          {
+            status: 502,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      ),
+    );
+
+    try {
+      await testTelegramConnection({ botToken: "123456:token" });
+      throw new Error("Expected testTelegramConnection to reject");
+    } catch (error) {
+      expect(isBackendUnavailableError(error)).toBe(false);
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).status).toBe(502);
+      expect((error as Error).message).toBe(
+        "Telegram connection test failed: failed to call Telegram `getMe`",
+      );
+    }
+  });
 });
 
 describe("conversation marker API helpers", () => {

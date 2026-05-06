@@ -369,14 +369,31 @@ fn telegram_test_rate_limit_key(token: &str) -> String {
 fn telegram_test_connection_error(err: anyhow::Error) -> ApiError {
     let detail = sanitize_telegram_log_detail(&err.to_string());
     let message = format!("Telegram connection test failed: {detail}");
-    if err
+    if let Some(api_error) = err
         .chain()
-        .any(|cause| cause.downcast_ref::<TelegramApiError>().is_some())
+        .find_map(|cause| cause.downcast_ref::<TelegramApiError>())
     {
-        ApiError::from_status(StatusCode::UNPROCESSABLE_ENTITY, message)
+        if telegram_api_error_is_token_validation_failure(api_error) {
+            ApiError::from_status(StatusCode::UNPROCESSABLE_ENTITY, message)
+        } else {
+            ApiError::bad_gateway(message)
+        }
     } else {
         ApiError::bad_gateway(message)
     }
+}
+
+fn telegram_api_error_is_token_validation_failure(err: &TelegramApiError) -> bool {
+    matches!(
+        err.error_code,
+        Some(400 | 401 | 403 | 404)
+    ) || matches!(
+        err.status,
+        StatusCode::BAD_REQUEST
+            | StatusCode::UNAUTHORIZED
+            | StatusCode::FORBIDDEN
+            | StatusCode::NOT_FOUND
+    )
 }
 
 fn normalize_project_id_list(values: Vec<String>) -> Vec<String> {
@@ -453,13 +470,28 @@ fn telegram_bot_temp_file_path(path: &FsPath) -> PathBuf {
 
 #[cfg(windows)]
 fn replace_telegram_bot_file(temp_path: &FsPath, path: &FsPath) -> io::Result<()> {
-    match fs::rename(temp_path, path) {
-        Ok(()) => Ok(()),
-        Err(_) if path.exists() => {
-            fs::remove_file(path)?;
-            fs::rename(temp_path, path)
-        }
-        Err(err) => Err(err),
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    fn wide_path(path: &FsPath) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain(Some(0)).collect()
+    }
+
+    let from = wide_path(temp_path);
+    let to = wide_path(path);
+    let result = unsafe {
+        MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
 

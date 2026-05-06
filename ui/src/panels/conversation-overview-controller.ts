@@ -121,6 +121,7 @@ export function useConversationOverviewController({
   agent,
   isActive,
   messageCount,
+  onFullTranscriptDemand,
   scrollContainerRef,
   sessionId,
   showWaitingIndicator,
@@ -129,6 +130,7 @@ export function useConversationOverviewController({
   agent: Session["agent"];
   isActive: boolean;
   messageCount: number;
+  onFullTranscriptDemand?: () => void;
   scrollContainerRef: RefObject<HTMLElement | null>;
   sessionId: string;
   showWaitingIndicator: boolean;
@@ -220,6 +222,21 @@ export function useConversationOverviewController({
       if (!handle) {
         return;
       }
+      const retryAfterFullTranscriptDemand = () => {
+        onFullTranscriptDemand?.();
+        scheduleNavigationFrame(() => {
+          const nextHandle = virtualizerHandleRef.current;
+          if (!nextHandle) {
+            return;
+          }
+          const jumped =
+            nextHandle.jumpToMessageId(item.messageId, { align: "center" }) ||
+            nextHandle.jumpToMessageIndex(item.messageIndex, { align: "center" });
+          if (jumped) {
+            scheduleNavigationFrame(refreshViewportSnapshot);
+          }
+        });
+      };
       if (item.kind === "live_turn") {
         const jumpedToTail =
           messageCount > 0
@@ -245,10 +262,13 @@ export function useConversationOverviewController({
         handle.jumpToMessageIndex(item.messageIndex, { align: "center" });
       if (jumped) {
         scheduleNavigationFrame(refreshViewportSnapshot);
+      } else if (onFullTranscriptDemand) {
+        retryAfterFullTranscriptDemand();
       }
     },
     [
       messageCount,
+      onFullTranscriptDemand,
       refreshViewportSnapshot,
       scheduleNavigationFrame,
       scrollContainerRef,

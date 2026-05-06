@@ -459,7 +459,7 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
-  it("corrects a virtualized marker jump after the target slot mounts", async () => {
+  it("jumps to a virtualized marker target in one click without redundant correction", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const scrollIntoViewTargets: Array<string | null> = [];
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
@@ -525,6 +525,19 @@ describe("AgentSessionPanel conversation caching", () => {
       await waitFor(() => {
         expect(scrollIntoViewTargets).toContain("message:message-1");
       });
+      expect(
+        scrollIntoViewTargets.filter((target) => target === "message:message-1"),
+      ).toHaveLength(1);
+      await act(async () => {
+        await new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => resolve());
+          });
+        });
+      });
+      expect(
+        scrollIntoViewTargets.filter((target) => target === "message:message-1"),
+      ).toHaveLength(1);
       expect(screen.getByText("message-1")).toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
@@ -1036,6 +1049,7 @@ describe("AgentSessionPanel conversation caching", () => {
       "session-1",
       "message-2",
     );
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
   it("stops Escape from leaking out of the marker action menu", () => {
@@ -1114,6 +1128,21 @@ describe("AgentSessionPanel conversation caching", () => {
       ).toBeInTheDocument();
 
       fireEvent.scroll(unrelatedScrollRoot);
+      expect(
+        screen.getByRole("menu", { name: "Conversation marker actions" }),
+      ).toBeInTheDocument();
+
+      fireEvent.scroll(document);
+      expect(
+        screen.getByRole("menu", { name: "Conversation marker actions" }),
+      ).toBeInTheDocument();
+
+      fireEvent.scroll(window);
+      expect(
+        screen.queryByRole("menu", { name: "Conversation marker actions" }),
+      ).not.toBeInTheDocument();
+
+      fireEvent.contextMenu(screen.getByText("Agent message-2"));
       expect(
         screen.getByRole("menu", { name: "Conversation marker actions" }),
       ).toBeInTheDocument();
@@ -1895,7 +1924,7 @@ describe("AgentSessionPanel conversation caching", () => {
 
     window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
     try {
-      renderSessionPanelWithDefaults({
+      const { container } = renderSessionPanelWithDefaults({
         activeSession: makeSession("active-session", {
           status: "active",
           messages: makeTextMessages(90),
@@ -1905,6 +1934,15 @@ describe("AgentSessionPanel conversation caching", () => {
       });
 
       expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
+      expect(
+        container.querySelector(
+          ".session-conversation-page.has-conversation-overview-scroll",
+        ),
+      ).not.toBeNull();
+      expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
+      expect(
+        container.querySelector(".conversation-overview-rail.is-pending"),
+      ).not.toBeNull();
 
       const rail = await screen.findByLabelText("Conversation overview");
       expect(screen.getAllByLabelText("Conversation overview")).toHaveLength(1);
@@ -1925,36 +1963,116 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
-  it("defers full transcript hydration when first opening very long sessions", async () => {
+  it("keeps the first long-session tail window until older transcript is requested", async () => {
     vi.useFakeTimers();
     const OriginalResizeObserver = window.ResizeObserver;
+    const originalGetBoundingClientRect =
+      Element.prototype.getBoundingClientRect;
+    const scrollNode = document.createElement("section");
+    let scrollTop = 20_000;
 
     class ResizeObserverMock {
       observe() {}
       disconnect() {}
     }
 
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 600,
+    });
+    Object.defineProperty(scrollNode, "clientWidth", {
+      configurable: true,
+      get: () => 1000,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 24_000,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
     window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    Element.prototype.getBoundingClientRect =
+      function getBoundingClientRectMock() {
+        const element = this as HTMLElement;
+        if (element === scrollNode) {
+          return {
+            bottom: 600,
+            height: 600,
+            left: 0,
+            right: 1000,
+            top: 0,
+            width: 1000,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (element.classList.contains("virtualized-message-page")) {
+          return {
+            bottom: 600,
+            height: 600,
+            left: 0,
+            right: 1000,
+            top: 0,
+            width: 1000,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (element.classList.contains("virtualized-message-slot")) {
+          return {
+            bottom: 80,
+            height: 80,
+            left: 0,
+            right: 1000,
+            top: 0,
+            width: 1000,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return originalGetBoundingClientRect.call(this);
+      };
     try {
-      renderSessionPanelWithDefaults({
+      const messages = makeTextMessages(600);
+      const { container } = renderSessionPanelWithDefaults({
         activeSession: makeSession("active-session", {
           status: "idle",
-          messages: makeTextMessages(600),
+          messages,
         }),
+        scrollContainerRef: { current: scrollNode },
       });
 
       expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(1_000);
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
+      expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+
+      act(() => {
+        fireEvent.wheel(scrollNode, { deltaY: -120 });
       });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(500);
       });
 
       expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
+      expect(screen.getByText("message-193")).toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
       vi.useRealTimers();
     }
   });

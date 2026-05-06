@@ -37,17 +37,20 @@ import {
   type UserInputSubmitHandler,
   type VirtualizedConversationMessageListHandle,
 } from "./VirtualizedConversationMessageList";
-import { ConversationOverviewRail } from "./ConversationOverviewRail";
+import {
+  CONVERSATION_OVERVIEW_MIN_MESSAGES,
+  ConversationOverviewRail,
+} from "./ConversationOverviewRail";
 import { useConversationOverviewController } from "./conversation-overview-controller";
 import {
   ConversationMarkerNavigator,
   ConversationMessageMarkers,
   MarkerMenuIcon,
   MarkerPlusIcon,
-  findMountedConversationMessageSlot,
   groupConversationMarkersByMessageId,
   shouldOpenConversationMarkerContextMenu,
   sortConversationMarkersForNavigation,
+  useConversationMarkerJump,
   useConversationMarkerContextMenu,
 } from "./conversation-markers";
 import {
@@ -117,11 +120,14 @@ type SessionSettingsValue =
   | CursorMode
   | GeminiApprovalMode;
 
-const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES = 80;
+// The transcript virtualizer and overview rail intentionally share the same
+// size threshold. The rail may still defer its first paint, but marker jumps
+// need the virtualizer handle as soon as the transcript itself virtualizes.
+const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES =
+  CONVERSATION_OVERVIEW_MIN_MESSAGES;
 const INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES = 512;
-const INITIAL_ACTIVE_TRANSCRIPT_TAIL_MESSAGE_COUNT = 96;
-const INITIAL_ACTIVE_TRANSCRIPT_HYDRATION_DELAY_MS = 600;
-const INITIAL_ACTIVE_TRANSCRIPT_HYDRATION_IDLE_TIMEOUT_MS = 3_000;
+const INITIAL_ACTIVE_TRANSCRIPT_TAIL_MESSAGE_COUNT = 100;
+const INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX = 160;
 const EMPTY_COMPOSER_ATTACHMENTS: readonly {
   byteSize: number;
   fileName: string;
@@ -192,47 +198,19 @@ function shouldUseInitialActiveTranscriptTailWindow({
   );
 }
 
-function scheduleInitialActiveTranscriptHydration(callback: () => void) {
-  let delayId: number | null = null;
-  let cancel = () => {
-    if (delayId !== null) {
-      window.clearTimeout(delayId);
-      delayId = null;
-    }
-  };
-  delayId = window.setTimeout(() => {
-    delayId = null;
-    if (window.requestIdleCallback) {
-      const idleId = window.requestIdleCallback(callback, {
-        timeout: INITIAL_ACTIVE_TRANSCRIPT_HYDRATION_IDLE_TIMEOUT_MS,
-      });
-      cancel = () => {
-        window.cancelIdleCallback(idleId);
-      };
-      return;
-    }
-
-    const fallbackId = window.setTimeout(callback, 0);
-    cancel = () => {
-      window.clearTimeout(fallbackId);
-    };
-  }, INITIAL_ACTIVE_TRANSCRIPT_HYDRATION_DELAY_MS);
-  return () => {
-    cancel();
-  };
-}
-
 function useInitialActiveTranscriptMessages({
   hasConversationMarkers,
   hasConversationSearch,
   isActive,
   messages,
+  scrollContainerRef,
   sessionId,
 }: {
   hasConversationMarkers: boolean;
   hasConversationSearch: boolean;
   isActive: boolean;
   messages: Message[];
+  scrollContainerRef: RefObject<HTMLElement | null>;
   sessionId: string;
 }) {
   const [, forceHydratedRender] = useState(0);
@@ -257,20 +235,103 @@ function useInitialActiveTranscriptMessages({
     hydrationRef.current.hydrated = true;
   }
   const isWindowed = isTailEligible && !hydrationRef.current.hydrated;
+  const requestFullTranscriptRender = useCallback(() => {
+    if (
+      hydrationRef.current.sessionId !== sessionId ||
+      hydrationRef.current.hydrated
+    ) {
+      return;
+    }
+
+    hydrationRef.current.hydrated = true;
+    forceHydratedRender((current) => current + 1);
+  }, [sessionId]);
 
   useEffect(() => {
-    if (!isWindowed) {
+    if (
+      hydrationRef.current.sessionId !== sessionId ||
+      hydrationRef.current.hydrated
+    ) {
+      return undefined;
+    }
+    if (
+      !isActive ||
+      hasConversationMarkers ||
+      hasConversationSearch ||
+      messages.length === 0
+    ) {
       return undefined;
     }
 
-    return scheduleInitialActiveTranscriptHydration(() => {
-      if (hydrationRef.current.sessionId !== sessionId) {
+    const node = scrollContainerRef.current;
+    if (!node) {
+      return undefined;
+    }
+
+    let lastTouchClientY: number | null = null;
+    const hydrateIfNearTop = () => {
+      if (node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX) {
+        requestFullTranscriptRender();
+      }
+    };
+    const handleWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.deltaY >= -0.5) {
         return;
       }
-      hydrationRef.current.hydrated = true;
-      forceHydratedRender((current) => current + 1);
-    });
-  }, [isWindowed, sessionId]);
+      requestFullTranscriptRender();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key === "ArrowUp" ||
+        event.key === "Home" ||
+        event.key === "PageUp"
+      ) {
+        requestFullTranscriptRender();
+      }
+    };
+    const handleTouchStart = (event: TouchEvent) => {
+      lastTouchClientY = event.touches[0]?.clientY ?? null;
+    };
+    const handleTouchMove = (event: TouchEvent) => {
+      const touch = event.touches[0] ?? event.changedTouches[0] ?? null;
+      if (!touch) {
+        return;
+      }
+      if (lastTouchClientY !== null && touch.clientY - lastTouchClientY > 0.5) {
+        requestFullTranscriptRender();
+      }
+      lastTouchClientY = touch.clientY;
+    };
+    const handleTouchEnd = () => {
+      lastTouchClientY = null;
+    };
+
+    node.addEventListener("scroll", hydrateIfNearTop, { passive: true });
+    node.addEventListener("wheel", handleWheel, { passive: true });
+    node.addEventListener("keydown", handleKeyDown);
+    node.addEventListener("touchstart", handleTouchStart, { passive: true });
+    node.addEventListener("touchmove", handleTouchMove, { passive: true });
+    node.addEventListener("touchend", handleTouchEnd, { passive: true });
+    node.addEventListener("touchcancel", handleTouchEnd, { passive: true });
+
+    return () => {
+      node.removeEventListener("scroll", hydrateIfNearTop);
+      node.removeEventListener("wheel", handleWheel);
+      node.removeEventListener("keydown", handleKeyDown);
+      node.removeEventListener("touchstart", handleTouchStart);
+      node.removeEventListener("touchmove", handleTouchMove);
+      node.removeEventListener("touchend", handleTouchEnd);
+      node.removeEventListener("touchcancel", handleTouchEnd);
+    };
+  }, [
+    hasConversationMarkers,
+    hasConversationSearch,
+    isActive,
+    messages.length,
+    requestFullTranscriptRender,
+    scrollContainerRef,
+    sessionId,
+  ]);
 
   const windowedMessages = useMemo(
     () =>
@@ -283,6 +344,7 @@ function useInitialActiveTranscriptMessages({
   return {
     isWindowed,
     messages: windowedMessages,
+    requestFullTranscriptRender,
   };
 }
 
@@ -776,13 +838,18 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const {
     isWindowed: isInitialTranscriptWindowActive,
     messages: visibleMessages,
+    requestFullTranscriptRender,
   } = useInitialActiveTranscriptMessages({
     hasConversationMarkers: visibleMarkers.length > 0,
     hasConversationSearch,
     isActive,
     messages: baseVisibleMessages,
+    scrollContainerRef,
     sessionId: session.id,
   });
+  const overviewMessages = isInitialTranscriptWindowActive
+    ? baseVisibleMessages
+    : visibleMessages;
   const visiblePendingPromptsBase = isActive ? deferredPendingPrompts : pendingPrompts;
   const visibleMessageIds = useMemo(
     () => new Set(visibleMessages.map((message) => message.id)),
@@ -803,7 +870,8 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const conversationOverview = useConversationOverviewController({
     agent: session.agent,
     isActive,
-    messageCount: isInitialTranscriptWindowActive ? 0 : visibleMessages.length,
+    messageCount: overviewMessages.length,
+    onFullTranscriptDemand: requestFullTranscriptRender,
     scrollContainerRef,
     sessionId: session.id,
     showWaitingIndicator,
@@ -818,7 +886,6 @@ const SessionConversationPage = memo(function SessionConversationPage({
     [visibleMarkers, visibleMessages],
   );
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
-  const markerJumpCorrectionFrameRef = useRef<number | null>(null);
   const {
     contextMenuNode: markerContextMenuNode,
     contextMenuMessageId: markerContextMenuMessageId,
@@ -833,16 +900,15 @@ const SessionConversationPage = memo(function SessionConversationPage({
     sessionId: session.id,
     visibleMessageIds,
   });
-  const messageSlotNodesRef = useRef<Map<string, HTMLElement>>(new Map());
-  const messageSlotNodesSessionIdRef = useRef(session.id);
-
-  const ensureMessageSlotCacheForCurrentSession = useCallback(() => {
-    if (messageSlotNodesSessionIdRef.current !== session.id) {
-      messageSlotNodesRef.current = new Map();
-      messageSlotNodesSessionIdRef.current = session.id;
-    }
-    return messageSlotNodesRef.current;
-  }, [session.id]);
+  const {
+    handleConversationItemMount,
+    jumpToMarker: jumpToConversationMarker,
+  } = useConversationMarkerJump({
+    onConversationSearchItemMount,
+    scrollContainerRef,
+    sessionId: session.id,
+    virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
+  });
 
   useEffect(() => {
     if (
@@ -853,93 +919,12 @@ const SessionConversationPage = memo(function SessionConversationPage({
     }
   }, [activeMarkerId, visibleMarkers]);
 
-  const cancelMarkerJumpCorrectionFrame = useCallback(() => {
-    if (markerJumpCorrectionFrameRef.current !== null) {
-      window.cancelAnimationFrame(markerJumpCorrectionFrameRef.current);
-      markerJumpCorrectionFrameRef.current = null;
-    }
-  }, []);
-
-  // Re-creating this ref callback on session changes is intentional: React
-  // detaches and re-attaches mounted message slots, repopulating the per-session
-  // marker jump cache after the layout-effect reset.
-  const handleConversationItemMount = useCallback(
-    (itemKey: string, node: HTMLElement | null) => {
-      const messageId = itemKey.startsWith("message:")
-        ? itemKey.slice("message:".length)
-        : null;
-      if (messageId) {
-        const messageSlotNodes = ensureMessageSlotCacheForCurrentSession();
-        if (node) {
-          messageSlotNodes.set(messageId, node);
-        } else {
-          messageSlotNodes.delete(messageId);
-        }
-      }
-      onConversationSearchItemMount(itemKey, node);
-    },
-    [ensureMessageSlotCacheForCurrentSession, onConversationSearchItemMount],
-  );
-
-  const scrollMountedMarkerSlotIntoView = useCallback(
-    (messageId: string, behavior: ScrollBehavior = "smooth") => {
-      const messageSlotNodes = ensureMessageSlotCacheForCurrentSession();
-      const markerSlot =
-        messageSlotNodes.get(messageId) ??
-        findMountedConversationMessageSlot(
-          messageId,
-          scrollContainerRef.current ?? document,
-        );
-      markerSlot?.scrollIntoView?.({ block: "center", behavior });
-      return Boolean(markerSlot);
-    },
-    [ensureMessageSlotCacheForCurrentSession, scrollContainerRef],
-  );
-
-  const scheduleMarkerJumpCorrection = useCallback(
-    (messageId: string) => {
-      cancelMarkerJumpCorrectionFrame();
-      markerJumpCorrectionFrameRef.current = window.requestAnimationFrame(() => {
-        markerJumpCorrectionFrameRef.current = null;
-        if (scrollMountedMarkerSlotIntoView(messageId, "auto")) {
-          return;
-        }
-        markerJumpCorrectionFrameRef.current = window.requestAnimationFrame(() => {
-          markerJumpCorrectionFrameRef.current = null;
-          scrollMountedMarkerSlotIntoView(messageId, "auto");
-        });
-      });
-    },
-    [cancelMarkerJumpCorrectionFrame, scrollMountedMarkerSlotIntoView],
-  );
-
-  useEffect(() => cancelMarkerJumpCorrectionFrame, [
-    cancelMarkerJumpCorrectionFrame,
-    session.id,
-  ]);
-
   const jumpToMarker = useCallback(
     (marker: ConversationMarker) => {
-      cancelMarkerJumpCorrectionFrame();
       setActiveMarkerId(marker.id);
-      const jumpedWithVirtualizer =
-        conversationOverview.virtualizerHandleRef.current?.jumpToMessageId(
-          marker.messageId,
-          { align: "center", flush: true },
-        ) ?? false;
-      if (jumpedWithVirtualizer) {
-        scrollMountedMarkerSlotIntoView(marker.messageId, "auto");
-        scheduleMarkerJumpCorrection(marker.messageId);
-        return;
-      }
-      scrollMountedMarkerSlotIntoView(marker.messageId);
+      jumpToConversationMarker(marker);
     },
-    [
-      cancelMarkerJumpCorrectionFrame,
-      conversationOverview.virtualizerHandleRef,
-      scheduleMarkerJumpCorrection,
-      scrollMountedMarkerSlotIntoView,
-    ],
+    [jumpToConversationMarker],
   );
 
   const navigateMarkerByOffset = useCallback(
@@ -1090,13 +1075,21 @@ const SessionConversationPage = memo(function SessionConversationPage({
     );
   }
 
+  const isConversationVirtualized =
+    visibleMessages.length >= CONVERSATION_VIRTUALIZATION_MIN_MESSAGES;
   const conversationMessages = (
     <ConversationMessageList
       renderMessageCard={renderMarkedMessageCard}
       sessionId={session.id}
       messages={visibleMessages}
       scrollContainerRef={scrollContainerRef}
-      virtualizerHandleRef={conversationOverview.virtualizerHandleRef}
+      virtualizerHandleRef={
+        // Marker jumps need the virtualizer handle whenever the transcript is
+        // virtualized, even while the overview rail is still deferred.
+        isConversationVirtualized
+          ? conversationOverview.virtualizerHandleRef
+          : undefined
+      }
       isActive={isActive}
       onApprovalDecision={onApprovalDecision}
       onUserInputSubmit={onUserInputSubmit}
@@ -1150,23 +1143,32 @@ const SessionConversationPage = memo(function SessionConversationPage({
       {pendingPromptCards}
     </>
   );
+  const conversationPageClassName = `session-conversation-page${isActive ? " is-active" : ""}${conversationOverview.shouldRender ? " has-conversation-overview-scroll" : ""}`;
 
   return (
-    <div className={`session-conversation-page${isActive ? " is-active" : ""}`} hidden={!isActive}>
-      {conversationOverview.shouldRenderRail ? (
+    <div className={conversationPageClassName} hidden={!isActive}>
+      {conversationOverview.shouldRender ? (
         <div className="conversation-with-overview">
           <div className="conversation-overview-content">
             {conversationContent}
           </div>
-          <ConversationOverviewRail
-            messages={visibleMessages}
-            layoutSnapshot={conversationOverview.layoutSnapshot}
-            viewportSnapshot={conversationOverview.viewportSnapshot}
-            markers={visibleMarkers}
-            tailItems={conversationOverview.tailItems}
-            maxHeightPx={conversationOverview.maxHeightPx}
-            onNavigate={conversationOverview.navigate}
-          />
+          {conversationOverview.shouldRenderRail ? (
+            <ConversationOverviewRail
+              messages={overviewMessages}
+              layoutSnapshot={conversationOverview.layoutSnapshot}
+              viewportSnapshot={conversationOverview.viewportSnapshot}
+              markers={visibleMarkers}
+              tailItems={conversationOverview.tailItems}
+              maxHeightPx={conversationOverview.maxHeightPx}
+              onNavigate={conversationOverview.navigate}
+            />
+          ) : (
+            <div
+              aria-hidden="true"
+              className="conversation-overview-rail is-pending"
+              style={{ height: `${Math.ceil(conversationOverview.maxHeightPx)}px` }}
+            />
+          )}
         </div>
       ) : (
         conversationContent

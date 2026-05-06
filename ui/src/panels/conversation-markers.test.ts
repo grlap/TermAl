@@ -1,15 +1,17 @@
-import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
-import { createElement } from "react";
+import { describe, expect, it, vi } from "vitest";
+import { act, render } from "@testing-library/react";
+import { createElement, useEffect, useRef } from "react";
 
 import {
   ConversationMarkerNavigator,
   findMountedConversationMessageSlot,
   groupConversationMarkersByMessageId,
   sortConversationMarkersForNavigation,
+  useConversationMarkerJump,
 } from "./conversation-markers";
 import { DEFAULT_CONVERSATION_MARKER_COLOR } from "../conversation-marker-colors";
 import type { ConversationMarker, Message } from "../types";
+import type { VirtualizedConversationMessageListHandle } from "./VirtualizedConversationMessageList";
 
 function makeMessage(id: string): Message {
   return {
@@ -40,6 +42,83 @@ function makeMarker(
     updatedAt: "2026-05-02 10:00:00",
     createdBy: "user",
     ...overrides,
+  };
+}
+
+type MarkerJumpApi = ReturnType<typeof useConversationMarkerJump>;
+
+function makeVirtualizerHandle(
+  jumpToMessageId = vi.fn(() => true),
+): VirtualizedConversationMessageListHandle {
+  return {
+    getLayoutSnapshot: vi.fn(),
+    getViewportSnapshot: vi.fn(),
+    jumpToMessageId,
+    jumpToMessageIndex: vi.fn(() => false),
+  } as unknown as VirtualizedConversationMessageListHandle;
+}
+
+function MarkerJumpHarness({
+  onReady,
+  scrollRoot,
+  sessionId,
+  virtualizerHandle,
+}: {
+  onReady: (api: MarkerJumpApi) => void;
+  scrollRoot: HTMLElement;
+  sessionId: string;
+  virtualizerHandle: VirtualizedConversationMessageListHandle;
+}) {
+  const scrollContainerRef = useRef<HTMLElement | null>(scrollRoot);
+  const virtualizerHandleRef =
+    useRef<VirtualizedConversationMessageListHandle | null>(virtualizerHandle);
+  scrollContainerRef.current = scrollRoot;
+  virtualizerHandleRef.current = virtualizerHandle;
+  const api = useConversationMarkerJump({
+    onConversationSearchItemMount: () => {},
+    scrollContainerRef,
+    sessionId,
+    virtualizerHandleRef,
+  });
+
+  useEffect(() => {
+    onReady(api);
+  }, [api, onReady]);
+
+  return null;
+}
+
+function installManualAnimationFrames() {
+  const originalRequestAnimationFrame = window.requestAnimationFrame;
+  const originalCancelAnimationFrame = window.cancelAnimationFrame;
+  const callbacks = new Map<number, FrameRequestCallback>();
+  let nextFrameId = 1;
+
+  window.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+    const frameId = nextFrameId;
+    nextFrameId += 1;
+    callbacks.set(frameId, callback);
+    return frameId;
+  }) as typeof window.requestAnimationFrame;
+  window.cancelAnimationFrame = vi.fn((frameId: number) => {
+    callbacks.delete(frameId);
+  }) as typeof window.cancelAnimationFrame;
+
+  return {
+    callbacks,
+    flushNextFrame() {
+      const next = callbacks.entries().next();
+      if (next.done) {
+        throw new Error("Expected a queued animation frame");
+      }
+      const [frameId, callback] = next.value;
+      callbacks.delete(frameId);
+      callback(0);
+    },
+    restore() {
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    },
   };
 }
 
@@ -141,6 +220,128 @@ describe("conversation marker helpers", () => {
         [],
       ),
     ).toEqual([earliestHint, oldestById, oldestByIdAfter, newest]);
+  });
+
+  it("recovers a marker jump after the virtualized target mounts on the second frame", () => {
+    const frames = installManualAnimationFrames();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    const scrollRoot = document.createElement("section");
+    const virtualizerHandle = makeVirtualizerHandle();
+    let markerJump: MarkerJumpApi | null = null;
+    HTMLElement.prototype.scrollIntoView = function scrollIntoViewMock(
+      this: HTMLElement,
+      options?: ScrollIntoViewOptions,
+    ) {
+      scrollIntoView(this.dataset.sessionSearchItemKey, options);
+    };
+
+    try {
+      render(
+        createElement(MarkerJumpHarness, {
+          onReady: (api) => {
+            markerJump = api;
+          },
+          scrollRoot,
+          sessionId: "session-1",
+          virtualizerHandle,
+        }),
+      );
+
+      act(() => {
+        markerJump?.jumpToMarker(
+          makeMarker("marker-1", { messageId: "message-1" }),
+        );
+      });
+
+      expect(virtualizerHandle.jumpToMessageId).toHaveBeenCalledWith(
+        "message-1",
+        { align: "center", flush: true },
+      );
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(frames.callbacks.size).toBe(1);
+
+      act(() => {
+        frames.flushNextFrame();
+      });
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(frames.callbacks.size).toBe(1);
+
+      const markerSlot = document.createElement("article");
+      markerSlot.dataset.sessionSearchItemKey = "message:message-1";
+      scrollRoot.append(markerSlot);
+      act(() => {
+        frames.flushNextFrame();
+      });
+
+      expect(scrollIntoView).toHaveBeenCalledWith("message:message-1", {
+        block: "center",
+        behavior: "auto",
+      });
+      expect(frames.callbacks.size).toBe(0);
+    } finally {
+      frames.restore();
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it("ignores a delayed marker-jump correction after the session changes", () => {
+    const frames = installManualAnimationFrames();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    const scrollRoot = document.createElement("section");
+    const virtualizerHandle = makeVirtualizerHandle();
+    let markerJump: MarkerJumpApi | null = null;
+    HTMLElement.prototype.scrollIntoView = function scrollIntoViewMock(
+      this: HTMLElement,
+      options?: ScrollIntoViewOptions,
+    ) {
+      scrollIntoView(this.dataset.sessionSearchItemKey, options);
+    };
+
+    try {
+      const { rerender } = render(
+        createElement(MarkerJumpHarness, {
+          onReady: (api) => {
+            markerJump = api;
+          },
+          scrollRoot,
+          sessionId: "session-1",
+          virtualizerHandle,
+        }),
+      );
+
+      act(() => {
+        markerJump?.jumpToMarker(
+          makeMarker("marker-1", { messageId: "shared-message" }),
+        );
+      });
+      expect(frames.callbacks.size).toBe(1);
+      const staleCallbacks = [...frames.callbacks.values()];
+
+      rerender(
+        createElement(MarkerJumpHarness, {
+          onReady: (api) => {
+            markerJump = api;
+          },
+          scrollRoot,
+          sessionId: "session-2",
+          virtualizerHandle,
+        }),
+      );
+      const newSessionSlot = document.createElement("article");
+      newSessionSlot.dataset.sessionSearchItemKey = "message:shared-message";
+      scrollRoot.append(newSessionSlot);
+
+      act(() => {
+        staleCallbacks.forEach((callback) => callback(0));
+      });
+
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    } finally {
+      frames.restore();
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
   });
 
   it.each([

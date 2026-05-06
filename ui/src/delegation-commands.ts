@@ -22,6 +22,7 @@ import {
   statusFetchErrorPacket,
   type MixedServerInstanceRecoveryGroup,
   type SpawnDelegationFailurePacket,
+  type SpawnDelegationTransportFailurePacket,
   type SpawnReviewerBatchErrorPacket,
   type WaitDelegationErrorPacket,
 } from "./delegation-error-packets";
@@ -141,10 +142,11 @@ export type SpawnReviewerBatchItem = Omit<
   "mode" | "writePolicy"
 >;
 
-export type SpawnReviewerBatchFailure = SpawnDelegationFailurePacket & {
-  index: number;
-  title: string | null;
-};
+export type SpawnReviewerBatchFailure =
+  SpawnDelegationTransportFailurePacket & {
+    index: number;
+    title: string | null;
+  };
 
 export type SpawnReviewerBatchOutcome = "completed" | "partial" | "error";
 
@@ -293,25 +295,23 @@ async function spawnReviewerBatchWithTransport(
   }
   const settled = await Promise.all(
     normalizedRequests.map(({ request, title }, index) =>
-      transport
-        .createDelegation(normalizedParentSessionId, request)
-        .then(
-          (response) =>
-            ({
-              kind: "spawned",
-              result: spawnDelegationCommandResult(response),
-            }) as const,
-          (error: unknown) =>
-            ({
-              kind: "failed",
-              failure: reviewerBatchFailure(
-                index,
-                title,
-                error,
-                normalizedParentSessionId,
-              ),
-            }) as const,
-        ),
+      transport.createDelegation(normalizedParentSessionId, request).then(
+        (response) =>
+          ({
+            kind: "spawned",
+            result: spawnDelegationCommandResult(response),
+          }) as const,
+        (error: unknown) =>
+          ({
+            kind: "failed",
+            failure: reviewerBatchFailure(
+              index,
+              title,
+              error,
+              normalizedParentSessionId,
+            ),
+          }) as const,
+      ),
     ),
   );
   const spawned: SpawnDelegationCommandSuccessResult[] = [];
@@ -532,7 +532,9 @@ async function waitDelegationsWithTransport(
   );
   const ids = normalizeDelegationIds(delegationIds);
   if (ids.length === 0) {
-    throw new RangeError("wait_delegations requires at least one delegation id");
+    throw new RangeError(
+      "wait_delegations requires at least one delegation id",
+    );
   }
   if (ids.length > MAX_DELEGATION_WAIT_IDS) {
     throw new RangeError(
@@ -561,6 +563,7 @@ async function waitDelegationsWithTransport(
   }
   const deadlineAt = Date.now() + timeoutMs;
   const recordsById = new Map<string, DelegationRecord>();
+  const revisionByServerInstanceId = new Map<string, number>();
   let lastRevision: number | null = null;
   let lastServerInstanceId: string | null = null;
 
@@ -594,6 +597,7 @@ async function waitDelegationsWithTransport(
         recordsById,
         lastServerInstanceId,
       );
+      recordStatusBatchMetadata(appliedResponses, revisionByServerInstanceId);
       const metadata = newestStatusMetadata(
         appliedResponses,
         lastRevision,
@@ -615,7 +619,7 @@ async function waitDelegationsWithTransport(
     const applyResult = applyStatusBatchResponses(
       batch.responses,
       recordsById,
-      lastRevision,
+      serverInstanceRevision(revisionByServerInstanceId, lastServerInstanceId),
       lastServerInstanceId,
     );
     if (applyResult.error) {
@@ -632,6 +636,10 @@ async function waitDelegationsWithTransport(
       applyResult.appliedResponses,
       lastRevision,
       lastServerInstanceId,
+    );
+    recordStatusBatchMetadata(
+      applyResult.appliedResponses,
+      revisionByServerInstanceId,
     );
     lastRevision = metadata.revision;
     lastServerInstanceId = metadata.serverInstanceId;
@@ -694,16 +702,26 @@ export function createDelegationCommands(
   transport: DelegationCommandTransport = browserDelegationCommandTransport,
 ) {
   return {
-    spawn_delegation: (parentSessionId: string, request: CreateDelegationRequest) =>
-      spawnDelegationWithTransport(transport, parentSessionId, request),
+    spawn_delegation: (
+      parentSessionId: string,
+      request: CreateDelegationRequest,
+    ) => spawnDelegationWithTransport(transport, parentSessionId, request),
     spawn_reviewer_batch: (
       parentSessionId: string,
       requests: readonly SpawnReviewerBatchItem[],
     ) => spawnReviewerBatchWithTransport(transport, parentSessionId, requests),
     get_delegation_status: (parentSessionId: string, delegationId: string) =>
-      getDelegationStatusWithTransport(transport, parentSessionId, delegationId),
+      getDelegationStatusWithTransport(
+        transport,
+        parentSessionId,
+        delegationId,
+      ),
     get_delegation_result: (parentSessionId: string, delegationId: string) =>
-      getDelegationResultWithTransport(transport, parentSessionId, delegationId),
+      getDelegationResultWithTransport(
+        transport,
+        parentSessionId,
+        delegationId,
+      ),
     cancel_delegation: (parentSessionId: string, delegationId: string) =>
       cancelDelegationWithTransport(transport, parentSessionId, delegationId),
     wait_delegations: (
@@ -945,7 +963,7 @@ async function fetchStatusBatchWithDeadline(
 function applyStatusBatchResponses(
   responses: readonly StatusBatchResponse[],
   recordsById: Map<string, DelegationRecord>,
-  previousRevision: number | null,
+  previousServerInstanceRevision: number | null,
   previousServerInstanceId: string | null,
 ): StatusBatchApplyResult {
   for (const { requestedId, response } of responses) {
@@ -972,7 +990,7 @@ function applyStatusBatchResponses(
         recoveryGroups: statusRecoveryGroups(
           responses,
           recordsById,
-          previousRevision,
+          previousServerInstanceRevision,
           previousServerInstanceId,
         ),
       }),
@@ -991,16 +1009,21 @@ function applyStatusBatchResponses(
 function statusRecoveryGroups(
   responses: readonly StatusBatchResponse[],
   recordsById: ReadonlyMap<string, DelegationRecord>,
-  previousRevision: number | null,
+  previousServerInstanceRevision: number | null,
   previousServerInstanceId: string | null,
 ): MixedServerInstanceRecoveryGroup[] {
   const groups = new Map<string, MixedServerInstanceRecoveryGroup>();
-  if (previousServerInstanceId && previousRevision !== null) {
-    const previousRecords = [...recordsById.values()];
+  if (previousServerInstanceId && previousServerInstanceRevision !== null) {
+    const requestedIds = new Set(
+      responses.map((response) => response.requestedId),
+    );
+    const previousRecords = [...recordsById.values()].filter((record) =>
+      requestedIds.has(record.id),
+    );
     if (previousRecords.length > 0) {
       groups.set(previousServerInstanceId, {
         serverInstanceId: previousServerInstanceId,
-        revision: previousRevision,
+        revision: previousServerInstanceRevision,
         delegationIds: previousRecords.map((record) => record.id),
         childSessionIds: previousRecords.map((record) => record.childSessionId),
       });
@@ -1025,6 +1048,35 @@ function statusRecoveryGroups(
     });
   }
   return sortedRecoveryGroups(groups);
+}
+
+function recordStatusBatchMetadata(
+  responses: readonly StatusBatchResponse[],
+  revisionByServerInstanceId: Map<string, number>,
+) {
+  for (const { response } of responses) {
+    const previousRevision = revisionByServerInstanceId.get(
+      response.serverInstanceId,
+    );
+    if (
+      previousRevision === undefined ||
+      response.revision > previousRevision
+    ) {
+      revisionByServerInstanceId.set(
+        response.serverInstanceId,
+        response.revision,
+      );
+    }
+  }
+}
+
+function serverInstanceRevision(
+  revisionByServerInstanceId: ReadonlyMap<string, number>,
+  serverInstanceId: string | null,
+) {
+  return serverInstanceId === null
+    ? null
+    : (revisionByServerInstanceId.get(serverInstanceId) ?? null);
 }
 
 function applyCurrentInstanceStatusBatchResponses(
@@ -1177,8 +1229,8 @@ function spawnRecoveryGroups(
     const group = groups.get(result.serverInstanceId);
     if (group) {
       group.revision = Math.max(group.revision, result.revision);
-      group.delegationIds.push(result.delegationId);
-      group.childSessionIds.push(result.childSessionId);
+      pushUnique(group.delegationIds, result.delegationId);
+      pushUnique(group.childSessionIds, result.childSessionId);
       continue;
     }
     groups.set(result.serverInstanceId, {
@@ -1318,7 +1370,9 @@ function normalizeDelegationPrompt(prompt: string) {
   if (!normalizedPrompt) {
     throw new RangeError("prompt must be non-empty");
   }
-  const promptByteLength = new TextEncoder().encode(normalizedPrompt).byteLength;
+  const promptByteLength = new TextEncoder().encode(
+    normalizedPrompt,
+  ).byteLength;
   if (promptByteLength > MAX_DELEGATION_PROMPT_BYTES) {
     throw new RangeError(
       `prompt must be no larger than ${MAX_DELEGATION_PROMPT_BYTES} bytes`,

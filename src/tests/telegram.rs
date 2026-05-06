@@ -726,6 +726,8 @@ fn telegram_test_rate_limit_rejects_immediate_retry() {
 
 #[test]
 fn telegram_token_validation_enforces_max_length_boundary() {
+    validate_telegram_bot_token(&"x".repeat(TELEGRAM_BOT_TOKEN_MAX_CHARS - 1))
+        .expect("under-limit token should pass");
     validate_telegram_bot_token(&"x".repeat(TELEGRAM_BOT_TOKEN_MAX_CHARS))
         .expect("max-length token should pass");
 
@@ -734,10 +736,14 @@ fn telegram_token_validation_enforces_max_length_boundary() {
 
     assert_eq!(err.status, StatusCode::BAD_REQUEST);
     assert!(err.message.contains("at most 256 characters"));
+
+    let long_err =
+        validate_telegram_bot_token(&"x".repeat(1024)).expect_err("very long token should fail");
+    assert_eq!(long_err.status, StatusCode::BAD_REQUEST);
 }
 
 #[test]
-fn telegram_connection_test_error_classifies_api_and_transport_failures() {
+fn telegram_connection_test_error_classifies_api_statuses_and_transport_failures() {
     let telegram_api_error = anyhow::Error::new(TelegramApiError {
         method: "getMe".to_owned(),
         status: StatusCode::UNAUTHORIZED,
@@ -751,6 +757,34 @@ fn telegram_connection_test_error_classifies_api_and_transport_failures() {
             .message
             .contains("Telegram connection test failed")
     );
+
+    let wrapped = anyhow::Error::new(TelegramApiError {
+        method: "getMe".to_owned(),
+        status: StatusCode::UNAUTHORIZED,
+        error_code: Some(401),
+        description: "Unauthorized".to_owned(),
+    })
+    .context("getMe call failed");
+    let wrapped_validation = telegram_test_connection_error(wrapped);
+    assert_eq!(wrapped_validation.status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let telegram_rate_limit =
+        telegram_test_connection_error(anyhow::Error::new(TelegramApiError {
+            method: "getMe".to_owned(),
+            status: StatusCode::TOO_MANY_REQUESTS,
+            error_code: Some(429),
+            description: "Too Many Requests".to_owned(),
+        }));
+    assert_eq!(telegram_rate_limit.status, StatusCode::BAD_GATEWAY);
+
+    let telegram_server_error =
+        telegram_test_connection_error(anyhow::Error::new(TelegramApiError {
+            method: "getMe".to_owned(),
+            status: StatusCode::BAD_GATEWAY,
+            error_code: Some(502),
+            description: "Bad Gateway".to_owned(),
+        }));
+    assert_eq!(telegram_server_error.status, StatusCode::BAD_GATEWAY);
 
     let upstream = telegram_test_connection_error(anyhow!("failed to call Telegram `getMe`"));
     assert_eq!(upstream.status, StatusCode::BAD_GATEWAY);

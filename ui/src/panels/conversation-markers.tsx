@@ -18,6 +18,7 @@ import {
 import { createPortal } from "react-dom";
 
 import { DiffNavArrow } from "./DiffPanelIcons";
+import type { VirtualizedConversationMessageListHandle } from "./VirtualizedConversationMessageList";
 import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
 import type { ConversationMarker, Message } from "../types";
 
@@ -110,6 +111,140 @@ export function sortConversationMarkersForNavigation(
     const createdOrder = left.createdAt.localeCompare(right.createdAt);
     return createdOrder === 0 ? left.id.localeCompare(right.id) : createdOrder;
   });
+}
+
+export function useConversationMarkerJump({
+  onConversationSearchItemMount,
+  scrollContainerRef,
+  sessionId,
+  virtualizerHandleRef,
+}: {
+  onConversationSearchItemMount: (
+    itemKey: string,
+    node: HTMLElement | null,
+  ) => void;
+  scrollContainerRef: RefObject<HTMLElement | null>;
+  sessionId: string;
+  virtualizerHandleRef: RefObject<VirtualizedConversationMessageListHandle | null>;
+}) {
+  const correctionFrameRef = useRef<number | null>(null);
+  const correctionTokenRef = useRef(0);
+  const messageSlotNodesRef = useRef<Map<string, HTMLElement>>(new Map());
+  const messageSlotNodesSessionIdRef = useRef(sessionId);
+
+  const ensureMessageSlotCacheForCurrentSession = useCallback(() => {
+    if (messageSlotNodesSessionIdRef.current !== sessionId) {
+      messageSlotNodesRef.current = new Map();
+      messageSlotNodesSessionIdRef.current = sessionId;
+    }
+    return messageSlotNodesRef.current;
+  }, [sessionId]);
+
+  const cancelCorrectionFrame = useCallback(() => {
+    correctionTokenRef.current += 1;
+    if (correctionFrameRef.current !== null) {
+      window.cancelAnimationFrame(correctionFrameRef.current);
+      correctionFrameRef.current = null;
+    }
+  }, []);
+
+  // Re-creating this ref callback on session changes is intentional: React
+  // detaches and re-attaches mounted message slots, repopulating the per-session
+  // marker jump cache after the layout-effect reset.
+  const handleConversationItemMount = useCallback(
+    (itemKey: string, node: HTMLElement | null) => {
+      const messageId = itemKey.startsWith("message:")
+        ? itemKey.slice("message:".length)
+        : null;
+      if (messageId) {
+        const messageSlotNodes = ensureMessageSlotCacheForCurrentSession();
+        if (node) {
+          messageSlotNodes.set(messageId, node);
+        } else {
+          messageSlotNodes.delete(messageId);
+        }
+      }
+      onConversationSearchItemMount(itemKey, node);
+    },
+    [ensureMessageSlotCacheForCurrentSession, onConversationSearchItemMount],
+  );
+
+  const scrollMountedMarkerSlotIntoView = useCallback(
+    (messageId: string, behavior: ScrollBehavior = "smooth") => {
+      const messageSlotNodes = ensureMessageSlotCacheForCurrentSession();
+      const markerSlot =
+        messageSlotNodes.get(messageId) ??
+        findMountedConversationMessageSlot(
+          messageId,
+          scrollContainerRef.current ?? document,
+        );
+      markerSlot?.scrollIntoView?.({ block: "center", behavior });
+      return Boolean(markerSlot);
+    },
+    [ensureMessageSlotCacheForCurrentSession, scrollContainerRef],
+  );
+
+  const scheduleCorrectionFrame = useCallback(
+    (messageId: string) => {
+      cancelCorrectionFrame();
+      const correctionToken = correctionTokenRef.current;
+      correctionFrameRef.current = window.requestAnimationFrame(() => {
+        correctionFrameRef.current = null;
+        if (correctionTokenRef.current !== correctionToken) {
+          return;
+        }
+        if (scrollMountedMarkerSlotIntoView(messageId, "auto")) {
+          return;
+        }
+        correctionFrameRef.current = window.requestAnimationFrame(() => {
+          correctionFrameRef.current = null;
+          if (correctionTokenRef.current !== correctionToken) {
+            return;
+          }
+          scrollMountedMarkerSlotIntoView(messageId, "auto");
+        });
+      });
+    },
+    [cancelCorrectionFrame, scrollMountedMarkerSlotIntoView],
+  );
+
+  useLayoutEffect(() => cancelCorrectionFrame, [
+    cancelCorrectionFrame,
+    sessionId,
+  ]);
+
+  const jumpToMarker = useCallback(
+    (marker: ConversationMarker) => {
+      cancelCorrectionFrame();
+      const jumpedWithVirtualizer =
+        virtualizerHandleRef.current?.jumpToMessageId(marker.messageId, {
+          align: "center",
+          flush: true,
+        }) ?? false;
+      if (jumpedWithVirtualizer) {
+        const correctedSynchronously = scrollMountedMarkerSlotIntoView(
+          marker.messageId,
+          "auto",
+        );
+        if (!correctedSynchronously) {
+          scheduleCorrectionFrame(marker.messageId);
+        }
+        return;
+      }
+      scrollMountedMarkerSlotIntoView(marker.messageId);
+    },
+    [
+      cancelCorrectionFrame,
+      scheduleCorrectionFrame,
+      scrollMountedMarkerSlotIntoView,
+      virtualizerHandleRef,
+    ],
+  );
+
+  return {
+    handleConversationItemMount,
+    jumpToMarker,
+  };
 }
 
 export function MarkerPlusIcon() {
@@ -401,11 +536,13 @@ export function useConversationMarkerContextMenu({
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("scroll", handleScroll, true);
+    window.addEventListener("scroll", handleViewportMove);
     window.addEventListener("resize", handleViewportMove);
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("scroll", handleViewportMove);
       window.removeEventListener("resize", handleViewportMove);
     };
   }, [closeContextMenu, isContextMenuOpen, scrollContainerRef]);

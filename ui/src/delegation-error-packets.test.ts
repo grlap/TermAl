@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiRequestError } from "./api";
-import { spawnDelegationFailurePacket } from "./delegation-error-packets";
+import {
+  spawnDelegationFailurePacket,
+  spawnDelegationValidationFailurePacket,
+} from "./delegation-error-packets";
 
 const PARENT_SESSION_ID = "parent-1";
 
@@ -73,8 +76,14 @@ describe("delegation error packets", () => {
       "prompt bytes path",
       "delegation prompt must be at most 65536 bytes in C:/secret.log",
     ],
-    ["title missing number", "delegation title must be at most many characters"],
-    ["model missing number", "delegation model must be at most many characters"],
+    [
+      "title missing number",
+      "delegation title must be at most many characters",
+    ],
+    [
+      "model missing number",
+      "delegation model must be at most many characters",
+    ],
     [
       "active limit path",
       "parent session already has 4 active delegations in C:/secret.log",
@@ -84,7 +93,10 @@ describe("delegation error packets", () => {
       "delegation nesting depth is limited to 4 in C:/secret.log",
     ],
     ["cwd unknown shape", "delegation cwd cannot be /home/secret/path"],
-    ["unknown project path", "unknown project `C:/secret/project` extra detail"],
+    [
+      "unknown project path",
+      "unknown project `C:/secret/project` extra detail",
+    ],
     [
       "project boundary extra",
       "delegation cwd `C:\\repo\\outside` must stay inside project `TermAl` because token=secret",
@@ -123,5 +135,86 @@ describe("delegation error packets", () => {
         }),
       ),
     ).toBe("Spawn delegation failed.");
+  });
+
+  it.each([
+    ["parent type", new TypeError("parent session id must be a string")],
+    ["parent empty", new RangeError("parent session id must be non-empty")],
+    [
+      "parent unsafe",
+      new RangeError(
+        "parent session id must not contain /, ?, #, or control characters",
+      ),
+    ],
+    ["prompt type", new TypeError("prompt must be a string")],
+    ["prompt empty", new RangeError("prompt must be non-empty")],
+    ["title null", new TypeError("title must be omitted instead of null")],
+    ["cwd null", new TypeError("cwd must be omitted instead of null")],
+    ["agent null", new TypeError("agent must be omitted instead of null")],
+    ["model null", new TypeError("model must be omitted instead of null")],
+    ["mode null", new TypeError("mode must be omitted instead of null")],
+    [
+      "writePolicy null",
+      new TypeError("writePolicy must be omitted instead of null"),
+    ],
+    [
+      "batch type",
+      new TypeError("spawn_reviewer_batch requests must be an array"),
+    ],
+    [
+      "batch empty",
+      new RangeError("spawn_reviewer_batch requires at least one reviewer"),
+    ],
+    [
+      "prompt bytes",
+      new RangeError("prompt must be no larger than 65536 bytes"),
+    ],
+    [
+      "title chars",
+      new RangeError("title must be no longer than 200 characters"),
+    ],
+    [
+      "model chars",
+      new RangeError("model must be no longer than 200 characters"),
+    ],
+    [
+      "batch max",
+      new RangeError("spawn_reviewer_batch accepts at most 4 reviewers"),
+    ],
+    ["reviewer shape", new TypeError("reviewer request 2 must be an object")],
+  ])("passes through safe validation message: %s", (_caseName, error) => {
+    const packet = spawnDelegationValidationFailurePacket(error);
+
+    expect(packet).toEqual({
+      kind: "validation-failed",
+      name: error.name,
+      message: error.message,
+    });
+    expect(packet).not.toHaveProperty("apiErrorKind");
+    expect(packet).not.toHaveProperty("status");
+    expect(packet).not.toHaveProperty("restartRequired");
+  });
+
+  it("redacts unexpected validation exceptions", () => {
+    expect(
+      spawnDelegationValidationFailurePacket(
+        new TypeError("token=secret C:/internal/backend.log"),
+      ),
+    ).toMatchObject({
+      kind: "validation-failed",
+      name: "TypeError",
+      message: "Invalid delegation request.",
+    });
+  });
+
+  it("redacts unexpected validation error names", () => {
+    const error = new RangeError("prompt must be non-empty");
+    error.name = "token=secret";
+
+    expect(spawnDelegationValidationFailurePacket(error)).toEqual({
+      kind: "validation-failed",
+      name: "Error",
+      message: "prompt must be non-empty",
+    });
   });
 });
