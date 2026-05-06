@@ -459,6 +459,83 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
+  it("corrects a virtualized marker jump after the target slot mounts", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const scrollIntoViewTargets: Array<string | null> = [];
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollNode = document.createElement("section");
+    let scrollTop = 80_000;
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      value: 720,
+    });
+    Object.defineProperty(scrollNode, "clientWidth", {
+      configurable: true,
+      value: 900,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 90_000,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+    HTMLElement.prototype.scrollIntoView = function scrollIntoView() {
+      scrollIntoViewTargets.push(
+        this.getAttribute("data-session-search-item-key"),
+      );
+    };
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(96),
+      markers: [
+        makeConversationMarker({
+          id: "marker-top",
+          messageId: "message-1",
+          name: "Top checkpoint",
+          kind: "checkpoint",
+          messageIndexHint: 0,
+        }),
+      ],
+    });
+
+    try {
+      renderSessionPanelWithDefaults({
+        activeSession,
+        scrollContainerRef: { current: scrollNode },
+      });
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Jump to Checkpoint marker Top checkpoint",
+        }),
+      );
+
+      await waitFor(() => {
+        expect(scrollIntoViewTargets).toContain("message:message-1");
+      });
+      expect(screen.getByText("message-1")).toBeInTheDocument();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      if (originalScrollIntoView) {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      } else {
+        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      }
+    }
+  });
+
   it("keeps marker jumps working after switching sessions with the same message ids", () => {
     let scrolledText = "";
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;

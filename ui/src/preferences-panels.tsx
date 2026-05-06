@@ -1226,6 +1226,13 @@ export function TelegramPreferencesPanel({
   const [isSetupOpen, setIsSetupOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1337,13 +1344,24 @@ export function TelegramPreferencesPanel({
             ? draft.defaultSessionId
             : null,
       });
+      if (!isMountedRef.current) {
+        return;
+      }
       setStatus(nextStatus);
       setDraft(createTelegramDraft(nextStatus));
       setNotice("Telegram settings saved.");
     } catch (saveError: unknown) {
-      setError(saveError instanceof Error ? saveError.message : "Failed to save Telegram settings.");
+      if (isMountedRef.current) {
+        setError(
+          saveError instanceof Error
+            ? saveError.message
+            : "Failed to save Telegram settings.",
+        );
+      }
     } finally {
-      setIsSaving(false);
+      if (isMountedRef.current) {
+        setIsSaving(false);
+      }
     }
   }
 
@@ -1356,15 +1374,26 @@ export function TelegramPreferencesPanel({
       const result = await testTelegramConnection(
         trimmedToken ? { botToken: trimmedToken } : { useSavedToken: true },
       );
+      if (!isMountedRef.current) {
+        return;
+      }
       setNotice(
         result.botUsername
           ? `Connected to @${result.botUsername}.`
           : `Connected to ${result.botName}.`,
       );
     } catch (testError: unknown) {
-      setError(testError instanceof Error ? testError.message : "Telegram connection test failed.");
+      if (isMountedRef.current) {
+        setError(
+          testError instanceof Error
+            ? testError.message
+            : "Telegram connection test failed.",
+        );
+      }
     } finally {
-      setIsTesting(false);
+      if (isMountedRef.current) {
+        setIsTesting(false);
+      }
     }
   }
 
@@ -1377,17 +1406,24 @@ export function TelegramPreferencesPanel({
         enabled: false,
         botToken: null,
       });
+      if (!isMountedRef.current) {
+        return;
+      }
       setStatus(nextStatus);
       setDraft(createTelegramDraft(nextStatus));
       setNotice("Telegram bot token removed.");
     } catch (removeError: unknown) {
-      setError(
-        removeError instanceof Error
-          ? removeError.message
-          : "Failed to remove Telegram bot token.",
-      );
+      if (isMountedRef.current) {
+        setError(
+          removeError instanceof Error
+            ? removeError.message
+            : "Failed to remove Telegram bot token.",
+        );
+      }
     } finally {
-      setIsSaving(false);
+      if (isMountedRef.current) {
+        setIsSaving(false);
+      }
     }
   }
 

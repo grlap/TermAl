@@ -90,12 +90,7 @@ impl AppState {
 
         let telegram = TelegramApiClient::new(&token, TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS)
             .map_err(|err| ApiError::internal(sanitize_telegram_log_detail(&err.to_string())))?;
-        let bot = telegram.get_me().map_err(|err| {
-            ApiError::from_status(StatusCode::UNPROCESSABLE_ENTITY, format!(
-                "Telegram connection test failed: {}",
-                sanitize_telegram_log_detail(&err.to_string())
-            ))
-        })?;
+        let bot = telegram.get_me().map_err(telegram_test_connection_error)?;
 
         Ok(TelegramTestResponse {
             bot_name: bot.first_name,
@@ -369,6 +364,19 @@ fn telegram_test_rate_limit_key(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
     format!("{:x}", hasher.finalize())
+}
+
+fn telegram_test_connection_error(err: anyhow::Error) -> ApiError {
+    let detail = sanitize_telegram_log_detail(&err.to_string());
+    let message = format!("Telegram connection test failed: {detail}");
+    if err
+        .chain()
+        .any(|cause| cause.downcast_ref::<TelegramApiError>().is_some())
+    {
+        ApiError::from_status(StatusCode::UNPROCESSABLE_ENTITY, message)
+    } else {
+        ApiError::bad_gateway(message)
+    }
 }
 
 fn normalize_project_id_list(values: Vec<String>) -> Vec<String> {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -58,6 +58,14 @@ const sessions: Session[] = [
     messages: [],
   },
 ];
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
 
 describe("TelegramPreferencesPanel", () => {
   beforeEach(() => {
@@ -149,5 +157,34 @@ describe("TelegramPreferencesPanel", () => {
       });
     });
     expect(await screen.findByText("Telegram bot token removed.")).toBeInTheDocument();
+  });
+
+  it("does not update state after an in-flight Telegram test unmounts", async () => {
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      botTokenMasked: "****oken",
+    });
+    const testResult = createDeferred<Awaited<ReturnType<typeof testTelegramConnection>>>();
+    testTelegramConnectionMock.mockReturnValueOnce(testResult.promise);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = render(
+      <TelegramPreferencesPanel projects={projects} sessions={sessions} />,
+    );
+
+    await screen.findByText("Saved as ****oken.");
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+    unmount();
+    await act(async () => {
+      testResult.resolve({
+        botName: "TermAl Bot",
+        botUsername: "termal_bot",
+      });
+      await testResult.promise;
+    });
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });

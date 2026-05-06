@@ -818,6 +818,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
     [visibleMarkers, visibleMessages],
   );
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
+  const markerJumpCorrectionFrameRef = useRef<number | null>(null);
   const {
     contextMenuNode: markerContextMenuNode,
     contextMenuMessageId: markerContextMenuMessageId,
@@ -852,6 +853,13 @@ const SessionConversationPage = memo(function SessionConversationPage({
     }
   }, [activeMarkerId, visibleMarkers]);
 
+  const cancelMarkerJumpCorrectionFrame = useCallback(() => {
+    if (markerJumpCorrectionFrameRef.current !== null) {
+      window.cancelAnimationFrame(markerJumpCorrectionFrameRef.current);
+      markerJumpCorrectionFrameRef.current = null;
+    }
+  }, []);
+
   // Re-creating this ref callback on session changes is intentional: React
   // detaches and re-attaches mounted message slots, repopulating the per-session
   // marker jump cache after the layout-effect reset.
@@ -873,31 +881,64 @@ const SessionConversationPage = memo(function SessionConversationPage({
     [ensureMessageSlotCacheForCurrentSession, onConversationSearchItemMount],
   );
 
+  const scrollMountedMarkerSlotIntoView = useCallback(
+    (messageId: string, behavior: ScrollBehavior = "smooth") => {
+      const messageSlotNodes = ensureMessageSlotCacheForCurrentSession();
+      const markerSlot =
+        messageSlotNodes.get(messageId) ??
+        findMountedConversationMessageSlot(
+          messageId,
+          scrollContainerRef.current ?? document,
+        );
+      markerSlot?.scrollIntoView?.({ block: "center", behavior });
+      return Boolean(markerSlot);
+    },
+    [ensureMessageSlotCacheForCurrentSession, scrollContainerRef],
+  );
+
+  const scheduleMarkerJumpCorrection = useCallback(
+    (messageId: string) => {
+      cancelMarkerJumpCorrectionFrame();
+      markerJumpCorrectionFrameRef.current = window.requestAnimationFrame(() => {
+        markerJumpCorrectionFrameRef.current = null;
+        if (scrollMountedMarkerSlotIntoView(messageId, "auto")) {
+          return;
+        }
+        markerJumpCorrectionFrameRef.current = window.requestAnimationFrame(() => {
+          markerJumpCorrectionFrameRef.current = null;
+          scrollMountedMarkerSlotIntoView(messageId, "auto");
+        });
+      });
+    },
+    [cancelMarkerJumpCorrectionFrame, scrollMountedMarkerSlotIntoView],
+  );
+
+  useEffect(() => cancelMarkerJumpCorrectionFrame, [
+    cancelMarkerJumpCorrectionFrame,
+    session.id,
+  ]);
+
   const jumpToMarker = useCallback(
     (marker: ConversationMarker) => {
+      cancelMarkerJumpCorrectionFrame();
       setActiveMarkerId(marker.id);
       const jumpedWithVirtualizer =
         conversationOverview.virtualizerHandleRef.current?.jumpToMessageId(
           marker.messageId,
-          { align: "center" },
+          { align: "center", flush: true },
         ) ?? false;
       if (jumpedWithVirtualizer) {
+        scrollMountedMarkerSlotIntoView(marker.messageId, "auto");
+        scheduleMarkerJumpCorrection(marker.messageId);
         return;
       }
-      const messageSlotNodes = ensureMessageSlotCacheForCurrentSession();
-      (
-        messageSlotNodes.get(marker.messageId) ??
-        findMountedConversationMessageSlot(
-          marker.messageId,
-          scrollContainerRef.current ?? document,
-        )
-      )
-        ?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+      scrollMountedMarkerSlotIntoView(marker.messageId);
     },
     [
+      cancelMarkerJumpCorrectionFrame,
       conversationOverview.virtualizerHandleRef,
-      ensureMessageSlotCacheForCurrentSession,
-      scrollContainerRef,
+      scheduleMarkerJumpCorrection,
+      scrollMountedMarkerSlotIntoView,
     ],
   );
 
@@ -1055,11 +1096,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       sessionId={session.id}
       messages={visibleMessages}
       scrollContainerRef={scrollContainerRef}
-      virtualizerHandleRef={
-        conversationOverview.shouldRender
-          ? conversationOverview.virtualizerHandleRef
-          : undefined
-      }
+      virtualizerHandleRef={conversationOverview.virtualizerHandleRef}
       isActive={isActive}
       onApprovalDecision={onApprovalDecision}
       onUserInputSubmit={onUserInputSubmit}

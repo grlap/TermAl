@@ -10,6 +10,7 @@ import {
   deleteWorkspaceLayout,
   fetchDelegationResult,
   fetchDelegationStatus,
+  fetchTelegramStatus,
   fetchWorkspaceLayout,
   fetchState,
   isBackendUnavailableError,
@@ -17,7 +18,9 @@ import {
   runTerminalCommandStream,
   saveFile,
   TERMINAL_SSE_BUFFER_MAX_CHARS,
+  testTelegramConnection,
   updateConversationMarker,
+  updateTelegramConfig,
 } from "./api";
 
 describe("createOrchestratorInstance", () => {
@@ -177,6 +180,120 @@ describe("delegation API helpers", () => {
         method: "POST",
       }),
     );
+  });
+});
+
+describe("telegram API helpers", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  function stubJsonFetch() {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(
+        JSON.stringify({
+          configured: false,
+          enabled: false,
+          running: false,
+          lifecycle: "manual",
+          subscribedProjectIds: [],
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("fetches Telegram status from the status route", async () => {
+    const fetchMock = stubJsonFetch();
+
+    await fetchTelegramStatus();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/telegram/status",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("posts Telegram config updates with nullable clear markers", async () => {
+    const fetchMock = stubJsonFetch();
+
+    await updateTelegramConfig({
+      enabled: true,
+      botToken: null,
+      subscribedProjectIds: ["project-1"],
+      defaultProjectId: "project-1",
+      defaultSessionId: null,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/telegram/config",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      enabled: true,
+      botToken: null,
+      subscribedProjectIds: ["project-1"],
+      defaultProjectId: "project-1",
+      defaultSessionId: null,
+    });
+  });
+
+  it("posts Telegram connection tests to the test route", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(
+        JSON.stringify({
+          botName: "TermAl Bot",
+          botUsername: "termal_bot",
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await testTelegramConnection({ useSavedToken: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/telegram/test",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      useSavedToken: true,
+    });
   });
 });
 

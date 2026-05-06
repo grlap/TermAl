@@ -4685,7 +4685,7 @@ fn delegation_metadata_size_errors_precede_phase_one_feature_gates() {
 }
 
 #[test]
-fn delegation_metadata_size_errors_precede_agent_readiness_setup_errors() {
+fn delegation_metadata_size_errors_precede_setup_failure_injection() {
     let state = test_app_state();
     state
         .test_agent_setup_failures
@@ -4714,10 +4714,15 @@ fn delegation_metadata_size_errors_precede_agent_readiness_setup_errors() {
     };
 
     assert_eq!(title_err.status, StatusCode::BAD_REQUEST);
-    assert!(title_err.message.contains("title"));
+    assert_eq!(
+        title_err.message,
+        format!("delegation title must be at most {MAX_DELEGATION_TITLE_CHARS} characters")
+    );
     assert!(
-        !title_err.message.contains("cursor-agent"),
-        "metadata validation should run before Cursor readiness: {}",
+        !title_err
+            .message
+            .contains("forced Cursor setup failure for ordering test"),
+        "metadata validation should run before setup failure injection: {}",
         title_err.message
     );
 
@@ -4739,10 +4744,15 @@ fn delegation_metadata_size_errors_precede_agent_readiness_setup_errors() {
     };
 
     assert_eq!(model_err.status, StatusCode::BAD_REQUEST);
-    assert!(model_err.message.contains("model"));
+    assert_eq!(
+        model_err.message,
+        format!("delegation model must be at most {MAX_DELEGATION_MODEL_CHARS} characters")
+    );
     assert!(
-        !model_err.message.contains("cursor-agent"),
-        "metadata validation should run before Cursor readiness: {}",
+        !model_err
+            .message
+            .contains("forced Cursor setup failure for ordering test"),
+        "metadata validation should run before setup failure injection: {}",
         model_err.message
     );
 

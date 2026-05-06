@@ -5,11 +5,9 @@
 // actions, deep link) to a linked chat and accepts slash commands like
 // `/commit`, `/stop`, or `/status` that are mapped onto `ProjectActionId`
 // values and dispatched against the same HTTP action API used by the desktop
-// UI. These tests pin two pieces of that adapter: `parse_telegram_command`
-// (slash-command routing) and `render_telegram_digest` /
-// `build_telegram_digest_keyboard` (outgoing digest formatting and inline
-// keyboard). Everything else in `src/telegram.rs` is thin I/O glue around
-// those pure functions.
+// UI. These tests pin command routing, digest rendering, assistant forwarding
+// cursors, Telegram/TermAl wire projections, settings persistence, validation,
+// error classification, log sanitization, and prompt/message size guards.
 
 use super::*;
 use std::cell::{Cell, RefCell};
@@ -502,6 +500,99 @@ fn telegram_unknown_session_status_does_not_forward_assistant_text() {
     assert!(telegram.sent_texts.borrow().is_empty());
 }
 
+#[test]
+fn telegram_session_fetch_projection_decodes_sample_json_statuses() {
+    let response: TelegramSessionFetchResponse = serde_json::from_value(json!({
+        "session": {
+            "status": "idle",
+            "messages": [
+                {
+                    "type": "text",
+                    "id": "message-1",
+                    "author": "assistant",
+                    "text": "Ready."
+                },
+                {
+                    "type": "thinking",
+                    "id": "thinking-1",
+                    "author": "assistant",
+                    "title": "Plan",
+                    "lines": ["Inspecting."]
+                }
+            ],
+            "ignoredField": true
+        }
+    }))
+    .expect("sample session JSON should decode");
+
+    assert_eq!(response.session.status, TelegramSessionStatus::Idle);
+    assert_eq!(response.session.messages.len(), 2);
+    assert!(matches!(
+        &response.session.messages[0],
+        TelegramSessionFetchMessage::Text { id, author, text }
+            if id == "message-1" && author == "assistant" && text == "Ready."
+    ));
+    assert!(matches!(
+        response.session.messages[1],
+        TelegramSessionFetchMessage::Other
+    ));
+
+    let unknown: TelegramSessionFetchResponse = serde_json::from_value(json!({
+        "session": {
+            "status": "paused-for-future-state",
+            "messages": []
+        }
+    }))
+    .expect("unknown session status should decode");
+    assert_eq!(unknown.session.status, TelegramSessionStatus::Unknown);
+
+    let missing: TelegramSessionFetchResponse = serde_json::from_value(json!({
+        "session": {
+            "messages": []
+        }
+    }))
+    .expect("missing session status should decode");
+    assert_eq!(missing.session.status, TelegramSessionStatus::Unknown);
+}
+
+#[test]
+fn telegram_api_error_envelope_decodes_sample_json() {
+    let envelope: TelegramApiEnvelope<Value> = serde_json::from_value(json!({
+        "ok": false,
+        "error_code": 401,
+        "description": "Unauthorized"
+    }))
+    .expect("Telegram error envelope should decode");
+
+    assert!(!envelope.ok);
+    assert_eq!(envelope.error_code, Some(401));
+    assert_eq!(envelope.description.as_deref(), Some("Unauthorized"));
+    assert!(envelope.result.is_none());
+}
+
+#[test]
+fn telegram_session_fetch_message_matches_canonical_text_wire_shape() {
+    let canonical = Message::Text {
+        attachments: Vec::new(),
+        id: "message-1".to_owned(),
+        timestamp: "2026-05-06T12:00:00Z".to_owned(),
+        author: Author::Assistant,
+        text: "Canonical assistant text.".to_owned(),
+        expanded_text: None,
+    };
+    let projected: TelegramSessionFetchMessage =
+        serde_json::from_value(serde_json::to_value(canonical).expect("message should encode"))
+            .expect("canonical text message should decode into Telegram projection");
+
+    assert!(matches!(
+        projected,
+        TelegramSessionFetchMessage::Text { id, author, text }
+            if id == "message-1"
+                && author == "assistant"
+                && text == "Canonical assistant text."
+    ));
+}
+
 // Pins the dirty-merge policy for assistant forwarding: the forwarding helper
 // can update the persisted cursor after one successful send and then fail on a
 // later chunk/message. Callers must still persist that partial progress.
@@ -634,6 +725,39 @@ fn telegram_test_rate_limit_rejects_immediate_retry() {
 }
 
 #[test]
+fn telegram_token_validation_enforces_max_length_boundary() {
+    validate_telegram_bot_token(&"x".repeat(TELEGRAM_BOT_TOKEN_MAX_CHARS))
+        .expect("max-length token should pass");
+
+    let err = validate_telegram_bot_token(&"x".repeat(TELEGRAM_BOT_TOKEN_MAX_CHARS + 1))
+        .expect_err("over-limit token should fail");
+
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(err.message.contains("at most 256 characters"));
+}
+
+#[test]
+fn telegram_connection_test_error_classifies_api_and_transport_failures() {
+    let telegram_api_error = anyhow::Error::new(TelegramApiError {
+        method: "getMe".to_owned(),
+        status: StatusCode::UNAUTHORIZED,
+        error_code: Some(401),
+        description: "Unauthorized".to_owned(),
+    });
+    let validation = telegram_test_connection_error(telegram_api_error);
+    assert_eq!(validation.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        validation
+            .message
+            .contains("Telegram connection test failed")
+    );
+
+    let upstream = telegram_test_connection_error(anyhow!("failed to call Telegram `getMe`"));
+    assert_eq!(upstream.status, StatusCode::BAD_GATEWAY);
+    assert!(upstream.message.contains("Telegram connection test failed"));
+}
+
+#[test]
 fn telegram_state_persist_preserves_settings_config() {
     let path = std::env::temp_dir().join(format!("termal-telegram-state-{}.json", Uuid::new_v4()));
     fs::write(
@@ -642,7 +766,9 @@ fn telegram_state_persist_preserves_settings_config() {
             "config": {
                 "enabled": true,
                 "botToken": "123456:secret",
-                "subscribedProjectIds": ["project-1"]
+                "subscribedProjectIds": ["project-1"],
+                "defaultProjectId": "project-1",
+                "defaultSessionId": "session-1"
             },
             "chatId": 123
         }))
@@ -664,6 +790,8 @@ fn telegram_state_persist_preserves_settings_config() {
         value["config"]["subscribedProjectIds"],
         json!(["project-1"])
     );
+    assert_eq!(value["config"]["defaultProjectId"], json!("project-1"));
+    assert_eq!(value["config"]["defaultSessionId"], json!("session-1"));
     assert_eq!(value["chatId"], json!(456));
     assert_eq!(value["nextUpdateId"], json!(99));
 

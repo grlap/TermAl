@@ -1054,6 +1054,10 @@ struct TelegramStatusResponse {
 }
 
 /// Represents the update Telegram settings request payload.
+///
+/// Nullable string fields use the same tri-state PATCH convention as marker
+/// fields elsewhere in the API: omitted means "leave unchanged", `null` means
+/// "clear the saved value", and a string means "replace with this value".
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateTelegramConfigRequest {
