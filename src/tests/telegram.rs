@@ -121,6 +121,14 @@ fn telegram_command_parser_supports_suffixes_and_aliases() {
     );
     assert_eq!(parsed.args, "now please");
 
+    let parsed = parse_telegram_command_for_bot("/commit now please", Some("termal_bot"))
+        .expect("private-chat command should parse without suffix");
+    assert_eq!(
+        parsed.command,
+        TelegramIncomingCommand::Action(ProjectActionId::AskAgentToCommit)
+    );
+    assert_eq!(parsed.args, "now please");
+
     let parsed = parse_telegram_command("/status").expect("status should parse");
     assert_eq!(parsed.command, TelegramIncomingCommand::Status);
 
@@ -129,6 +137,14 @@ fn telegram_command_parser_supports_suffixes_and_aliases() {
         parse_telegram_command_for_bot("/commit@other_bot now please", Some("termal_bot"))
             .is_none()
     );
+    assert!(telegram_command_mentions_other_bot(
+        "/commit@other_bot now please",
+        Some("termal_bot")
+    ));
+    assert!(!telegram_command_mentions_other_bot(
+        "/commit@termal_bot now please",
+        Some("termal_bot")
+    ));
 }
 
 // Pins that unknown slash commands return `None` rather than falling back
@@ -403,6 +419,32 @@ fn telegram_forwarder_drains_armed_session_before_digest_primary() {
 }
 
 #[test]
+fn telegram_armed_session_without_assistant_text_clears_to_avoid_starvation() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![],
+            },
+        },
+    };
+    let mut state = TelegramBotState {
+        forward_next_assistant_message_session_id: Some("session-1".to_owned()),
+        ..TelegramBotState::default()
+    };
+
+    let changed =
+        forward_new_assistant_message_if_any(&telegram, &termal, &mut state, 42, "session-1")
+            .expect("empty settled session should not fail");
+
+    assert!(changed);
+    assert!(telegram.sent_texts.borrow().is_empty());
+    assert_eq!(state.last_forwarded_assistant_message_id, None);
+    assert_eq!(state.forward_next_assistant_message_session_id, None);
+}
+
+#[test]
 fn telegram_unknown_forwarded_char_count_reforwards_tracked_message_once() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramSessionReader {
@@ -629,18 +671,47 @@ fn telegram_state_persist_preserves_settings_config() {
 }
 
 #[test]
-fn telegram_state_persist_rejects_malformed_existing_file() {
+fn telegram_state_persist_backs_up_malformed_existing_file() {
     let path =
         std::env::temp_dir().join(format!("termal-telegram-bad-state-{}.json", Uuid::new_v4()));
     fs::write(&path, b"{").expect("fixture should write");
 
-    let err = persist_telegram_bot_state(&path, &TelegramBotState::default())
-        .expect_err("malformed existing state should fail");
+    let state = TelegramBotState {
+        chat_id: Some(456),
+        next_update_id: Some(99),
+        ..TelegramBotState::default()
+    };
+    persist_telegram_bot_state(&path, &state)
+        .expect("malformed existing state should be backed up and replaced");
 
-    assert!(format!("{err:#}").contains("failed to parse existing"));
-    assert_eq!(fs::read(&path).expect("state file should remain"), b"{");
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("state file should read"))
+        .expect("state file should parse");
+    assert_eq!(value["chatId"], json!(456));
+    assert_eq!(value["nextUpdateId"], json!(99));
+
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .expect("path should have utf8 file name");
+    let backup_prefix = format!("{file_name}.corrupt-");
+    let backups: Vec<PathBuf> = fs::read_dir(path.parent().expect("path should have a parent"))
+        .expect("temp dir should read")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|candidate| {
+            candidate
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.starts_with(&backup_prefix) && name.ends_with(".json"))
+        })
+        .collect();
+
+    assert_eq!(backups.len(), 1);
+    assert_eq!(fs::read(&backups[0]).expect("backup should read"), b"{");
 
     fs::remove_file(&path).ok();
+    for backup in backups {
+        fs::remove_file(backup).ok();
+    }
 }
 
 #[test]

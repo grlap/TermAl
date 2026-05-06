@@ -1368,6 +1368,29 @@ export function TelegramPreferencesPanel({
     }
   }
 
+  async function handleRemoveToken() {
+    setIsSaving(true);
+    setNotice(null);
+    setError(null);
+    try {
+      const nextStatus = await updateTelegramConfig({
+        enabled: false,
+        botToken: null,
+      });
+      setStatus(nextStatus);
+      setDraft(createTelegramDraft(nextStatus));
+      setNotice("Telegram bot token removed.");
+    } catch (removeError: unknown) {
+      setError(
+        removeError instanceof Error
+          ? removeError.message
+          : "Failed to remove Telegram bot token.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   return (
     <section className="settings-panel-stack">
       <article className="message-card prompt-settings-card telegram-settings-card">
@@ -1487,6 +1510,14 @@ export function TelegramPreferencesPanel({
             disabled={isLoading || isTesting || !canTestToken}
           >
             {isTesting ? "Testing..." : "Test connection"}
+          </button>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={handleRemoveToken}
+            disabled={isLoading || isSaving || !hasSavedToken}
+          >
+            Remove token
           </button>
           <button
             className="ghost-button"

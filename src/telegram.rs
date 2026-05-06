@@ -25,14 +25,18 @@ fn run_telegram_bot() -> Result<()> {
     let mut config = TelegramBotConfig::from_env(&cwd)?;
     let termal = TermalApiClient::new(&config.api_base_url)?;
     let telegram = TelegramApiClient::new(&config.bot_token, config.poll_timeout_secs)?;
-    match telegram.get_me() {
-        Ok(bot) => {
-            config.bot_username = bot.username;
-        }
-        Err(err) => {
-            log_telegram_error("failed to resolve bot username", &err);
-        }
-    }
+    let bot = telegram.get_me().map_err(|err| {
+        anyhow!(
+            "failed to resolve Telegram bot username: {}",
+            sanitize_telegram_log_detail(&err.to_string())
+        )
+    })?;
+    config.bot_username = Some(
+        bot.username
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow!("Telegram getMe response did not include a bot username"))?,
+    );
     let mut state = load_telegram_bot_state(&config.state_path).unwrap_or_default();
     let mut dirty = false;
     if let Some(chat_id) = config.chat_id {
@@ -195,8 +199,13 @@ fn load_telegram_bot_state(path: &FsPath) -> Result<TelegramBotState> {
     }
 
     let raw = fs::read(path).with_context(|| format!("failed to read `{}`", path.display()))?;
-    serde_json::from_slice(&raw)
-        .with_context(|| format!("failed to parse `{}`", path.display()))
+    match serde_json::from_slice(&raw) {
+        Ok(state) => Ok(state),
+        Err(err) => {
+            backup_corrupt_telegram_bot_file(path, &err)?;
+            Ok(TelegramBotState::default())
+        }
+    }
 }
 
 /// Persists Telegram bot state.
@@ -208,8 +217,13 @@ fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result
     }
 
     let mut file = match fs::read(path) {
-        Ok(raw) => serde_json::from_slice::<TelegramBotFile>(&raw)
-            .with_context(|| format!("failed to parse existing `{}`", path.display()))?,
+        Ok(raw) => match serde_json::from_slice::<TelegramBotFile>(&raw) {
+            Ok(file) => file,
+            Err(err) => {
+                backup_corrupt_telegram_bot_file(path, &err)?;
+                TelegramBotFile::default()
+            }
+        },
         Err(err) if err.kind() == io::ErrorKind::NotFound => TelegramBotFile::default(),
         Err(err) => return Err(err).with_context(|| format!("failed to read `{}`", path.display())),
     };
@@ -219,6 +233,39 @@ fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result
         serde_json::to_vec_pretty(&file).context("failed to serialize telegram bot state")?;
     write_telegram_bot_file(path, &encoded)
         .with_context(|| format!("failed to write `{}`", path.display()))
+}
+
+fn backup_corrupt_telegram_bot_file(path: &FsPath, err: impl std::fmt::Display) -> Result<()> {
+    let backup_path = corrupt_telegram_bot_file_backup_path(path);
+    eprintln!(
+        "telegram> failed to parse `{}`: {err}; moving corrupt file to `{}`",
+        path.display(),
+        backup_path.display()
+    );
+    match fs::rename(path, &backup_path) {
+        Ok(()) => Ok(()),
+        Err(rename_err) => {
+            fs::copy(path, &backup_path).with_context(|| {
+                format!(
+                    "failed to copy corrupt `{}` to `{}` after rename failed: {rename_err}",
+                    path.display(),
+                    backup_path.display()
+                )
+            })?;
+            fs::remove_file(path)
+                .with_context(|| format!("failed to remove corrupt `{}`", path.display()))?;
+            Ok(())
+        }
+    }
+}
+
+fn corrupt_telegram_bot_file_backup_path(path: &FsPath) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| FsPath::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("telegram-bot.json");
+    parent.join(format!("{file_name}.corrupt-{}.json", Uuid::new_v4()))
 }
 
 /// Computes the effective Telegram chat ID.
@@ -768,8 +815,12 @@ fn handle_telegram_message(
     let chat_id = message.chat.id;
 
     if effective_telegram_chat_id(config, state).is_none() {
+        if telegram_command_mentions_other_bot(text, config.bot_username.as_deref()) {
+            return Ok(false);
+        }
         if matches!(
-            parse_telegram_command(text).map(|command| command.command),
+            parse_telegram_command_for_bot(text, config.bot_username.as_deref())
+                .map(|command| command.command),
             Some(TelegramIncomingCommand::Start | TelegramIncomingCommand::Help)
         ) {
             telegram.send_message(
@@ -788,6 +839,9 @@ fn handle_telegram_message(
     }
 
     if text.starts_with('/') {
+        if telegram_command_mentions_other_bot(text, config.bot_username.as_deref()) {
+            return Ok(false);
+        }
         let Some(command) = parse_telegram_command_for_bot(text, config.bot_username.as_deref()) else {
             telegram.send_message(chat_id, &telegram_help_text(config), None)?;
             return Ok(false);
@@ -892,10 +946,21 @@ fn forward_telegram_text_to_project(
     let _ = termal.send_session_message(session_id, text)?;
     let assistant_forwarding_baseline_changed =
         apply_assistant_forwarding_plan(state, assistant_forwarding_plan);
-    let next_digest = termal.get_project_digest(&config.project_id)?;
     let mut dirty = assistant_forwarding_baseline_changed;
-    dirty |=
-        send_fresh_telegram_digest_from_response(telegram, config, state, chat_id, &next_digest)?;
+    let next_digest = match termal.get_project_digest(&config.project_id) {
+        Ok(digest) => digest,
+        Err(err) => {
+            log_telegram_error("failed to refresh digest after Telegram prompt", &err);
+            return Ok(dirty);
+        }
+    };
+    match send_fresh_telegram_digest_from_response(telegram, config, state, chat_id, &next_digest) {
+        Ok(changed) => dirty |= changed,
+        Err(err) => {
+            log_telegram_error("failed to send digest after Telegram prompt", &err);
+            return Ok(dirty);
+        }
+    }
     // The agent's reply usually hasn't landed by the time this
     // immediate digest fetch fires (the agent is still working), so
     // this branch normally finds nothing to forward and the next
@@ -1241,7 +1306,12 @@ fn forward_new_assistant_message_if_any(
         .collect();
 
     if to_forward.is_empty() {
-        return Ok(false);
+        let cleared = if forward_without_existing_baseline {
+            clear_forward_next_assistant_message_session_id(state, session_id)
+        } else {
+            false
+        };
+        return Ok(cleared);
     }
 
     let mut sent_visible_content = false;
@@ -1602,6 +1672,7 @@ enum TelegramIncomingCommand {
 }
 
 /// Parses Telegram command.
+#[cfg(test)]
 fn parse_telegram_command(text: &str) -> Option<TelegramParsedCommand<'_>> {
     parse_telegram_command_for_bot(text, None)
 }
@@ -1644,6 +1715,26 @@ fn parse_telegram_command_for_bot<'a>(
     };
 
     Some(TelegramParsedCommand { args, command })
+}
+
+fn telegram_command_mentions_other_bot(text: &str, bot_username: Option<&str>) -> bool {
+    let Some(expected) = bot_username.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    let trimmed = text.trim();
+    let Some(command_text) = trimmed.strip_prefix('/') else {
+        return false;
+    };
+    let raw_name = command_text
+        .split_once(char::is_whitespace)
+        .map(|(name, _)| name)
+        .unwrap_or(command_text)
+        .trim();
+    let Some((_, suffix)) = raw_name.split_once('@') else {
+        return false;
+    };
+    let suffix = suffix.trim();
+    !suffix.is_empty() && !suffix.eq_ignore_ascii_case(expected)
 }
 
 fn required_env_var(key: &str) -> Result<String> {

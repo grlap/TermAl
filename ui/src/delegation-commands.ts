@@ -18,6 +18,7 @@ import {
   mismatchedDelegationIdErrorPacket,
   mixedServerInstanceErrorPacket,
   spawnDelegationFailurePacket,
+  spawnDelegationValidationFailurePacket,
   statusFetchErrorPacket,
   type MixedServerInstanceRecoveryGroup,
   type SpawnDelegationFailurePacket,
@@ -241,11 +242,17 @@ async function spawnDelegationWithTransport(
   parentSessionId: string,
   request: CreateDelegationRequest,
 ): Promise<SpawnDelegationCommandResult> {
-  const normalizedParentSessionId = normalizeTransportId(
-    parentSessionId,
-    "parent session id",
-  );
-  const compactedRequest = compactCreateDelegationRequest(request);
+  let normalizedParentSessionId: string;
+  let compactedRequest: CreateDelegationRequest;
+  try {
+    normalizedParentSessionId = normalizeTransportId(
+      parentSessionId,
+      "parent session id",
+    );
+    compactedRequest = compactCreateDelegationRequest(request);
+  } catch (error) {
+    return spawnDelegationCommandValidationErrorResult(error);
+  }
   try {
     const response = await transport.createDelegation(
       normalizedParentSessionId,
@@ -273,11 +280,17 @@ async function spawnReviewerBatchWithTransport(
   parentSessionId: string,
   requests: readonly SpawnReviewerBatchItem[],
 ): Promise<SpawnReviewerBatchCommandResult> {
-  const normalizedParentSessionId = normalizeTransportId(
-    parentSessionId,
-    "parent session id",
-  );
-  const normalizedRequests = normalizeReviewerBatchRequests(requests);
+  let normalizedParentSessionId: string;
+  let normalizedRequests: ReturnType<typeof normalizeReviewerBatchRequests>;
+  try {
+    normalizedParentSessionId = normalizeTransportId(
+      parentSessionId,
+      "parent session id",
+    );
+    normalizedRequests = normalizeReviewerBatchRequests(requests);
+  } catch (error) {
+    return spawnReviewerBatchValidationErrorResult(error);
+  }
   const settled = await Promise.all(
     normalizedRequests.map(({ request, title }, index) =>
       transport
@@ -371,6 +384,32 @@ function spawnDelegationCommandErrorResult(
     revision: null,
     serverInstanceId: null,
     error: spawnDelegationFailurePacket(error, { parentSessionId }),
+  };
+}
+
+function spawnDelegationCommandValidationErrorResult(
+  error: unknown,
+): SpawnDelegationCommandErrorResult {
+  return {
+    outcome: "error",
+    revision: null,
+    serverInstanceId: null,
+    error: spawnDelegationValidationFailurePacket(error),
+  };
+}
+
+function spawnReviewerBatchValidationErrorResult(
+  error: unknown,
+): SpawnReviewerBatchErrorResult {
+  return {
+    outcome: "error",
+    spawned: [],
+    failed: [],
+    delegationIds: [],
+    childSessionIds: [],
+    revision: null,
+    serverInstanceId: null,
+    error: spawnDelegationValidationFailurePacket(error),
   };
 }
 
@@ -576,6 +615,7 @@ async function waitDelegationsWithTransport(
     const applyResult = applyStatusBatchResponses(
       batch.responses,
       recordsById,
+      lastRevision,
       lastServerInstanceId,
     );
     if (applyResult.error) {
@@ -905,6 +945,7 @@ async function fetchStatusBatchWithDeadline(
 function applyStatusBatchResponses(
   responses: readonly StatusBatchResponse[],
   recordsById: Map<string, DelegationRecord>,
+  previousRevision: number | null,
   previousServerInstanceId: string | null,
 ): StatusBatchApplyResult {
   for (const { requestedId, response } of responses) {
@@ -926,7 +967,15 @@ function applyStatusBatchResponses(
   if (serverInstanceIds.length > 1) {
     return {
       appliedResponses: [],
-      error: mixedServerInstanceErrorPacket(serverInstanceIds),
+      error: mixedServerInstanceErrorPacket(serverInstanceIds, {
+        operation: "status-batch",
+        recoveryGroups: statusRecoveryGroups(
+          responses,
+          recordsById,
+          previousRevision,
+          previousServerInstanceId,
+        ),
+      }),
     };
   }
 
@@ -937,6 +986,45 @@ function applyStatusBatchResponses(
     appliedResponses: [...responses],
     error: null,
   };
+}
+
+function statusRecoveryGroups(
+  responses: readonly StatusBatchResponse[],
+  recordsById: ReadonlyMap<string, DelegationRecord>,
+  previousRevision: number | null,
+  previousServerInstanceId: string | null,
+): MixedServerInstanceRecoveryGroup[] {
+  const groups = new Map<string, MixedServerInstanceRecoveryGroup>();
+  if (previousServerInstanceId && previousRevision !== null) {
+    const previousRecords = [...recordsById.values()];
+    if (previousRecords.length > 0) {
+      groups.set(previousServerInstanceId, {
+        serverInstanceId: previousServerInstanceId,
+        revision: previousRevision,
+        delegationIds: previousRecords.map((record) => record.id),
+        childSessionIds: previousRecords.map((record) => record.childSessionId),
+      });
+    }
+  }
+  for (const { response } of responses) {
+    const serverInstanceId = response.serverInstanceId;
+    const delegationId = response.delegation.id;
+    const childSessionId = response.delegation.childSessionId;
+    const group = groups.get(serverInstanceId);
+    if (group) {
+      group.revision = Math.max(group.revision, response.revision);
+      pushUnique(group.delegationIds, delegationId);
+      pushUnique(group.childSessionIds, childSessionId);
+      continue;
+    }
+    groups.set(serverInstanceId, {
+      serverInstanceId,
+      revision: response.revision,
+      delegationIds: [delegationId],
+      childSessionIds: [childSessionId],
+    });
+  }
+  return sortedRecoveryGroups(groups);
 }
 
 function applyCurrentInstanceStatusBatchResponses(
@@ -1100,9 +1188,7 @@ function spawnRecoveryGroups(
       childSessionIds: [result.childSessionId],
     });
   }
-  return [...groups.values()].sort((left, right) =>
-    left.serverInstanceId.localeCompare(right.serverInstanceId),
-  );
+  return sortedRecoveryGroups(groups);
 }
 
 function allReviewerSpawnsFailedError(): SpawnReviewerBatchErrorPacket {
@@ -1111,6 +1197,20 @@ function allReviewerSpawnsFailedError(): SpawnReviewerBatchErrorPacket {
     name: "SpawnReviewerBatchError",
     message: "all reviewer spawns failed",
   };
+}
+
+function pushUnique(values: string[], value: string) {
+  if (!values.includes(value)) {
+    values.push(value);
+  }
+}
+
+function sortedRecoveryGroups(
+  groups: ReadonlyMap<string, MixedServerInstanceRecoveryGroup>,
+) {
+  return [...groups.values()].sort((left, right) =>
+    left.serverInstanceId.localeCompare(right.serverInstanceId),
+  );
 }
 
 function newestSpawnMetadata(

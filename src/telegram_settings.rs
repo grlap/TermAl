@@ -6,6 +6,11 @@ The relay loop still reads the legacy flat runtime fields from
 `telegram-bot.json`; the settings file format below keeps those fields flat and
 adds a `config` object so the existing `cargo run -- telegram` path can ignore
 UI-only fields during the transition.
+
+Locking invariant: file I/O uses `telegram_settings_file_guard()`, and callers
+must not hold the main app state mutex while acquiring that guard. This module
+may briefly read app state while holding the file guard for validation, but it
+must release app state before writing to disk.
 */
 
 const TELEGRAM_BOT_TOKEN_MAX_CHARS: usize = 256;
@@ -410,22 +415,83 @@ fn telegram_settings_file_error(
     ApiError::internal(format!("failed to {operation} Telegram settings"))
 }
 
-#[cfg(unix)]
 fn write_telegram_bot_file(path: &FsPath, encoded: &[u8]) -> io::Result<()> {
-    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+    let temp_path = telegram_bot_temp_file_path(path);
+    let result = (|| {
+        let mut file = open_telegram_bot_temp_file(&temp_path)?;
+        file.write_all(encoded)?;
+        file.sync_all()?;
+        drop(file);
+        replace_telegram_bot_file(&temp_path, path)?;
+        harden_telegram_bot_file_permissions(path)?;
+        Ok(())
+    })();
 
-    let mut file = fs::OpenOptions::new()
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+
+    result
+}
+
+fn telegram_bot_temp_file_path(path: &FsPath) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| FsPath::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("telegram-bot.json");
+    parent.join(format!(".{file_name}.{}.tmp", Uuid::new_v4()))
+}
+
+#[cfg(windows)]
+fn replace_telegram_bot_file(temp_path: &FsPath, path: &FsPath) -> io::Result<()> {
+    match fs::rename(temp_path, path) {
+        Ok(()) => Ok(()),
+        Err(_) if path.exists() => {
+            fs::remove_file(path)?;
+            fs::rename(temp_path, path)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_telegram_bot_file(temp_path: &FsPath, path: &FsPath) -> io::Result<()> {
+    fs::rename(temp_path, path)
+}
+
+#[cfg(unix)]
+fn open_telegram_bot_temp_file(path: &FsPath) -> io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    fs::OpenOptions::new()
         .create(true)
+        .create_new(true)
         .truncate(true)
         .write(true)
         .mode(0o600)
-        .open(path)?;
-    file.write_all(encoded)?;
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_telegram_bot_temp_file(path: &FsPath) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .create(true)
+        .create_new(true)
+        .truncate(true)
+        .write(true)
+        .open(path)
+}
+
+#[cfg(unix)]
+fn harden_telegram_bot_file_permissions(path: &FsPath) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     Ok(())
 }
 
 #[cfg(not(unix))]
-fn write_telegram_bot_file(path: &FsPath, encoded: &[u8]) -> io::Result<()> {
-    fs::write(path, encoded)
+fn harden_telegram_bot_file_permissions(_path: &FsPath) -> io::Result<()> {
+    Ok(())
 }

@@ -337,57 +337,83 @@ describe("delegation command surface", () => {
     );
   });
 
-  it("rejects invalid spawn prompt and null optional fields before dispatch", async () => {
+  it("returns validation packets for invalid spawn requests before dispatch", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
       spawnDelegationCommand("parent-1", { prompt: "   " }),
-    ).rejects.toThrow(/^prompt must be non-empty/);
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "validation-failed",
+        name: "RangeError",
+        message: "prompt must be non-empty",
+      },
+    });
     await expect(
       spawnDelegationCommand("parent-1", {
         prompt: "x".repeat(MAX_DELEGATION_PROMPT_BYTES + 1),
       }),
-    ).rejects.toThrow(
-      new RegExp(
-        `^prompt must be no larger than ${MAX_DELEGATION_PROMPT_BYTES} bytes`,
-      ),
-    );
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "validation-failed",
+        name: "RangeError",
+        message: `prompt must be no larger than ${MAX_DELEGATION_PROMPT_BYTES} bytes`,
+      },
+    });
     await expect(
       spawnDelegationCommand("parent-1", {
         prompt: "界".repeat(Math.floor(MAX_DELEGATION_PROMPT_BYTES / 2)),
       }),
-    ).rejects.toThrow(
-      new RegExp(
-        `^prompt must be no larger than ${MAX_DELEGATION_PROMPT_BYTES} bytes`,
-      ),
-    );
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "validation-failed",
+        name: "RangeError",
+        message: `prompt must be no larger than ${MAX_DELEGATION_PROMPT_BYTES} bytes`,
+      },
+    });
     await expect(
       spawnDelegationCommand("parent-1", {
         prompt: "Review this change.",
         title: "x".repeat(MAX_DELEGATION_TITLE_CHARS + 1),
       }),
-    ).rejects.toThrow(
-      new RegExp(
-        `^title must be no longer than ${MAX_DELEGATION_TITLE_CHARS} characters`,
-      ),
-    );
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "validation-failed",
+        name: "RangeError",
+        message: `title must be no longer than ${MAX_DELEGATION_TITLE_CHARS} characters`,
+      },
+    });
     await expect(
       spawnDelegationCommand("parent-1", {
         prompt: "Review this change.",
         model: "x".repeat(MAX_DELEGATION_MODEL_CHARS + 1),
       }),
-    ).rejects.toThrow(
-      new RegExp(
-        `^model must be no longer than ${MAX_DELEGATION_MODEL_CHARS} characters`,
-      ),
-    );
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "validation-failed",
+        name: "RangeError",
+        message: `model must be no longer than ${MAX_DELEGATION_MODEL_CHARS} characters`,
+      },
+    });
     await expect(
       spawnDelegationCommand("parent-1", {
         prompt: "Review this change.",
         title: null as never,
       }),
-    ).rejects.toThrow(/^title must be omitted instead of null/);
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "validation-failed",
+        name: "TypeError",
+        message: "title must be omitted instead of null",
+      },
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -672,6 +698,84 @@ describe("delegation command surface", () => {
     });
   });
 
+  it("preserves restartRequired on spawn failure packets", async () => {
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(async () => {
+        throw new ApiRequestError(
+          "backend-unavailable",
+          "The TermAl backend is unavailable.",
+          { status: 503, restartRequired: true },
+        );
+      }),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).spawn_reviewer_batch("parent-1", [
+        { prompt: "Review React.", title: "React review" },
+      ]),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      failed: [
+        {
+          kind: "spawn-failed",
+          message: "The TermAl backend is unavailable.",
+          apiErrorKind: "backend-unavailable",
+          status: 503,
+          restartRequired: true,
+        },
+      ],
+    });
+  });
+
+  it("returns all-spawns-failed when every reviewer spawn fails", async () => {
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(async (_parentSessionId, request) => {
+        throw new ApiRequestError(
+          "request-failed",
+          request.title === "React review"
+            ? "session not found"
+            : "parent session already has 4 active delegations",
+          { status: request.title === "React review" ? 404 : 409 },
+        );
+      }),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    await expect(
+      createDelegationCommands(transport).spawn_reviewer_batch("parent-1", [
+        { prompt: "Review React.", title: "React review" },
+        { prompt: "Review Rust.", title: "Rust review" },
+      ]),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      spawned: [],
+      failed: [
+        {
+          index: 0,
+          title: "React review",
+          kind: "spawn-failed",
+          message: "session not found",
+          status: 404,
+        },
+        {
+          index: 1,
+          title: "Rust review",
+          kind: "spawn-failed",
+          message: "parent session already has 4 active delegations",
+          status: 409,
+        },
+      ],
+      error: {
+        kind: "all-spawns-failed",
+      },
+    });
+  });
+
   it.each([
     ["parent session id is required"],
     ["session not found"],
@@ -707,21 +811,31 @@ describe("delegation command surface", () => {
   });
 
   it("returns a batch error when reviewer spawns cross backend instances", async () => {
+    const responseByTitle = new Map([
+      ["Z review", { index: 1, serverInstanceId: "server-z", revision: 3 }],
+      ["A review", { index: 2, serverInstanceId: "server-a", revision: 7 }],
+      ["M review", { index: 3, serverInstanceId: "server-m", revision: 5 }],
+      ["Z follow-up", { index: 4, serverInstanceId: "server-z", revision: 9 }],
+    ]);
     const transport: DelegationCommandTransport = {
       createDelegation: vi.fn(async (_parentSessionId, request) => {
-        const isRust = request.title === "Rust review";
+        const title = request.title ?? "";
+        const response = responseByTitle.get(title);
+        if (!response) {
+          throw new Error(`unexpected reviewer title: ${title}`);
+        }
         return {
-          revision: isRust ? 1 : 8,
-          serverInstanceId: isRust ? "server-b" : "server-a",
+          revision: response.revision,
+          serverInstanceId: response.serverInstanceId,
           delegation: makeDelegation({
-            id: isRust ? "delegation-2" : "delegation-1",
-            childSessionId: isRust ? "child-2" : "child-1",
-            title: request.title,
+            id: `delegation-${response.index}`,
+            childSessionId: `child-${response.index}`,
+            title,
           }),
           childSession: makeSession({
-            id: isRust ? "child-2" : "child-1",
-            name: request.title,
-            parentDelegationId: isRust ? "delegation-2" : "delegation-1",
+            id: `child-${response.index}`,
+            name: title,
+            parentDelegationId: `delegation-${response.index}`,
           }),
         };
       }),
@@ -732,39 +846,52 @@ describe("delegation command surface", () => {
 
     await expect(
       createDelegationCommands(transport).spawn_reviewer_batch("parent-1", [
-        { prompt: "Review React.", title: "React review" },
-        { prompt: "Review Rust.", title: "Rust review" },
+        { prompt: "Review Z.", title: "Z review" },
+        { prompt: "Review A.", title: "A review" },
+        { prompt: "Review M.", title: "M review" },
+        { prompt: "Review Z again.", title: "Z follow-up" },
       ]),
     ).resolves.toMatchObject({
       outcome: "error",
-      delegationIds: ["delegation-1", "delegation-2"],
+      delegationIds: [
+        "delegation-1",
+        "delegation-2",
+        "delegation-3",
+        "delegation-4",
+      ],
       failed: [],
       revision: null,
       serverInstanceId: null,
       error: {
         kind: "mixed-server-instance",
         message:
-          "delegation spawn batch contained multiple server instances: server-a, server-b",
-        serverInstanceIds: ["server-a", "server-b"],
+          "delegation spawn batch contained multiple server instances: server-a, server-m, server-z",
+        serverInstanceIds: ["server-a", "server-m", "server-z"],
         recoveryGroups: [
           {
             serverInstanceId: "server-a",
-            revision: 8,
-            delegationIds: ["delegation-1"],
-            childSessionIds: ["child-1"],
-          },
-          {
-            serverInstanceId: "server-b",
-            revision: 1,
+            revision: 7,
             delegationIds: ["delegation-2"],
             childSessionIds: ["child-2"],
+          },
+          {
+            serverInstanceId: "server-m",
+            revision: 5,
+            delegationIds: ["delegation-3"],
+            childSessionIds: ["child-3"],
+          },
+          {
+            serverInstanceId: "server-z",
+            revision: 9,
+            delegationIds: ["delegation-1", "delegation-4"],
+            childSessionIds: ["child-1", "child-4"],
           },
         ],
       },
     });
   });
 
-  it("rejects invalid reviewer batches before dispatch", async () => {
+  it("returns validation packets for invalid reviewer batches before dispatch", async () => {
     const transport: DelegationCommandTransport = {
       createDelegation: vi.fn(),
       fetchDelegationStatus: vi.fn(),
@@ -773,9 +900,14 @@ describe("delegation command surface", () => {
     };
     const commands = createDelegationCommands(transport);
 
-    await expect(commands.spawn_reviewer_batch("parent-1", [])).rejects.toThrow(
-      /^spawn_reviewer_batch requires at least one reviewer/,
-    );
+    await expect(commands.spawn_reviewer_batch("parent-1", [])).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "validation-failed",
+        name: "RangeError",
+        message: "spawn_reviewer_batch requires at least one reviewer",
+      },
+    });
     await expect(
       commands.spawn_reviewer_batch(
         "parent-1",
@@ -784,16 +916,66 @@ describe("delegation command surface", () => {
           title: `Reviewer ${index + 1}`,
         })),
       ),
-    ).rejects.toThrow(
-      new RegExp(
-        `^spawn_reviewer_batch accepts at most ${MAX_REVIEWER_BATCH_SIZE} reviewers`,
-      ),
-    );
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "validation-failed",
+        name: "RangeError",
+        message: `spawn_reviewer_batch accepts at most ${MAX_REVIEWER_BATCH_SIZE} reviewers`,
+      },
+    });
     await expect(
       commands.spawn_reviewer_batch("parent-1", [
         { prompt: "   ", title: "Empty prompt" },
       ]),
-    ).rejects.toThrow(/^prompt must be non-empty/);
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "validation-failed",
+        name: "RangeError",
+        message: "prompt must be non-empty",
+      },
+    });
+    await expect(
+      commands.spawn_reviewer_batch("parent-1", null as never),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "validation-failed",
+        name: "TypeError",
+        message: "spawn_reviewer_batch requests must be an array",
+      },
+    });
+    await expect(
+      commands.spawn_reviewer_batch("parent-1", "not-an-array" as never),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "validation-failed",
+        name: "TypeError",
+        message: "spawn_reviewer_batch requests must be an array",
+      },
+    });
+    await expect(
+      commands.spawn_reviewer_batch("parent-1", [null as never]),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "validation-failed",
+        name: "TypeError",
+        message: "reviewer request 1 must be an object",
+      },
+    });
+    await expect(
+      commands.spawn_reviewer_batch("parent-1", [42 as never]),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "validation-failed",
+        name: "TypeError",
+        message: "reviewer request 1 must be an object",
+      },
+    });
     expect(transport.createDelegation).not.toHaveBeenCalled();
   });
 
@@ -1337,6 +1519,20 @@ describe("delegation command surface", () => {
         kind: "mixed-server-instance",
         name: "MixedDelegationServerInstanceError",
         serverInstanceIds: ["server-a", "server-b"],
+        recoveryGroups: [
+          {
+            serverInstanceId: "server-a",
+            revision: 2,
+            delegationIds: ["delegation-1"],
+            childSessionIds: ["child-1"],
+          },
+          {
+            serverInstanceId: "server-b",
+            revision: 3,
+            delegationIds: ["delegation-2"],
+            childSessionIds: ["child-2"],
+          },
+        ],
       },
     });
   });
@@ -1940,6 +2136,20 @@ describe("delegation command surface", () => {
       error: {
         kind: "mixed-server-instance",
         serverInstanceIds: ["server-a", "server-b"],
+        recoveryGroups: [
+          {
+            serverInstanceId: "server-a",
+            revision: 2,
+            delegationIds: ["delegation-1"],
+            childSessionIds: ["child-1"],
+          },
+          {
+            serverInstanceId: "server-b",
+            revision: 3,
+            delegationIds: ["delegation-1"],
+            childSessionIds: ["child-1"],
+          },
+        ],
       },
     });
   });

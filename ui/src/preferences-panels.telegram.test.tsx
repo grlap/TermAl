@@ -126,4 +126,28 @@ describe("TelegramPreferencesPanel", () => {
       });
     });
   });
+
+  it("removes a saved Telegram token explicitly", async () => {
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      enabled: true,
+      botTokenMasked: "****oken",
+      subscribedProjectIds: ["project-1"],
+    });
+    updateTelegramConfigMock.mockResolvedValueOnce(emptyTelegramStatus);
+
+    render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
+
+    await screen.findByText("Saved as ****oken.");
+    fireEvent.click(screen.getByRole("button", { name: "Remove token" }));
+
+    await waitFor(() => {
+      expect(updateTelegramConfigMock).toHaveBeenCalledWith({
+        enabled: false,
+        botToken: null,
+      });
+    });
+    expect(await screen.findByText("Telegram bot token removed.")).toBeInTheDocument();
+  });
 });

@@ -42,7 +42,11 @@ export type WaitDelegationErrorPacket =
 
 export type WaitDelegationErrorKind = WaitDelegationErrorPacket["kind"];
 
-export type SpawnDelegationFailurePacket = {
+export type SpawnDelegationFailurePacket =
+  | SpawnDelegationTransportFailurePacket
+  | SpawnDelegationValidationFailurePacket;
+
+export type SpawnDelegationTransportFailurePacket = {
   kind: "spawn-failed";
   name: string;
   message: string;
@@ -51,17 +55,29 @@ export type SpawnDelegationFailurePacket = {
   restartRequired: boolean | null;
 };
 
+export type SpawnDelegationValidationFailurePacket = {
+  kind: "validation-failed";
+  name: string;
+  message: string;
+  apiErrorKind: null;
+  status: null;
+  restartRequired: null;
+};
+
 export type SpawnReviewerBatchErrorPacket =
   | MixedServerInstanceErrorPacket
   | {
       kind: "all-spawns-failed";
       name: string;
       message: string;
-    };
+    }
+  | SpawnDelegationValidationFailurePacket;
 
 const GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE =
   "Delegation status fetch failed.";
 const GENERIC_SPAWN_DELEGATION_ERROR_MESSAGE = "Spawn delegation failed.";
+const GENERIC_SPAWN_DELEGATION_VALIDATION_ERROR_MESSAGE =
+  "Invalid delegation request.";
 // Audit boundary: every message allowed here is forwarded to wrapper callers.
 // New entries require reviewing every ApiRequestError constructor that can emit
 // that message family.
@@ -137,7 +153,7 @@ export function statusFetchErrorPacket(
 export function spawnDelegationFailurePacket(
   error: unknown,
   context: SpawnDelegationErrorContext,
-): SpawnDelegationFailurePacket {
+): SpawnDelegationTransportFailurePacket {
   if (error instanceof ApiRequestError) {
     return {
       kind: "spawn-failed",
@@ -157,6 +173,20 @@ export function spawnDelegationFailurePacket(
     kind: "spawn-failed",
     name,
     message: GENERIC_SPAWN_DELEGATION_ERROR_MESSAGE,
+    apiErrorKind: null,
+    status: null,
+    restartRequired: null,
+  };
+}
+
+export function spawnDelegationValidationFailurePacket(
+  error: unknown,
+): SpawnDelegationValidationFailurePacket {
+  const name = error instanceof Error ? error.name : "Error";
+  return {
+    kind: "validation-failed",
+    name,
+    message: safeSpawnDelegationValidationFailureMessage(error),
     apiErrorKind: null,
     status: null,
     restartRequired: null,
@@ -237,6 +267,13 @@ function safeSpawnDelegationFailureMessage(
     return sanitized;
   }
   return GENERIC_SPAWN_DELEGATION_ERROR_MESSAGE;
+}
+
+function safeSpawnDelegationValidationFailureMessage(error: unknown) {
+  if (error instanceof TypeError || error instanceof RangeError) {
+    return sanitizeUserFacingErrorMessage(error.message);
+  }
+  return GENERIC_SPAWN_DELEGATION_VALIDATION_ERROR_MESSAGE;
 }
 
 function isSafeUnavailableRouteDiagnostic(

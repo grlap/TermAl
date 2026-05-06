@@ -820,12 +820,15 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
   const {
     contextMenuNode: markerContextMenuNode,
+    contextMenuMessageId: markerContextMenuMessageId,
+    isContextMenuOpen: isMarkerContextMenuOpen,
     openContextMenu: openMarkerContextMenu,
   } = useConversationMarkerContextMenu({
     isActive,
     markersByMessageId,
     onCreateConversationMarker,
     onDeleteConversationMarker,
+    scrollContainerRef,
     sessionId: session.id,
     visibleMessageIds,
   });
@@ -970,11 +973,17 @@ const SessionConversationPage = memo(function SessionConversationPage({
         <div
           className={`conversation-message-marker-shell${canOpenMarkerMenu ? " can-open-marker-menu" : ""}`}
           tabIndex={canOpenMarkerMenu ? -1 : undefined}
-          role={canOpenMarkerMenu ? "group" : undefined}
-          aria-label={canOpenMarkerMenu ? "Assistant message marker actions" : undefined}
           onContextMenu={handleMarkerContextMenu}
         >
-          <div className="conversation-message-marker-toolbar">
+          <div
+            className="conversation-message-marker-toolbar"
+            role="toolbar"
+            aria-label={
+              canOpenMarkerMenu
+                ? "Assistant message marker actions"
+                : "Message marker actions"
+            }
+          >
             {canOpenMarkerMenu ? (
               <button
                 type="button"
@@ -982,6 +991,10 @@ const SessionConversationPage = memo(function SessionConversationPage({
                 title="Open marker actions"
                 aria-label="Open marker actions"
                 aria-haspopup="menu"
+                aria-expanded={
+                  isMarkerContextMenuOpen &&
+                  markerContextMenuMessageId === message.id
+                }
                 onClick={openMarkerActionsFromButton}
               >
                 <MarkerMenuIcon />
@@ -1014,6 +1027,8 @@ const SessionConversationPage = memo(function SessionConversationPage({
       markersByMessageId,
       onCreateConversationMarker,
       openMarkerContextMenu,
+      isMarkerContextMenuOpen,
+      markerContextMenuMessageId,
       renderMessageCard,
       session.id,
     ],

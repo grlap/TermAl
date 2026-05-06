@@ -7,6 +7,374 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Windows Telegram settings replacement can delete the saved bot config before rename
+
+**Severity:** High - the Windows replacement path removes the existing `telegram-bot.json` before renaming the temp file into place, so a crash or second rename failure can leave the bot token/config missing.
+
+`src/telegram_settings.rs:455-459`. Unix rename replacement is atomic, but Windows `fs::rename` cannot overwrite an existing destination. The fallback currently calls `fs::remove_file(path)?` and then `fs::rename(temp_path, path)?`, creating a P0-platform failure window after the old config is gone and before the new config is committed.
+
+**Current behavior:**
+- The temp file is written first.
+- On Windows, the existing destination is deleted before the temp file is renamed.
+- A crash or failed second rename leaves no active Telegram settings file.
+
+**Proposal:**
+- Use a true Windows replacement primitive such as `ReplaceFileW` or `MoveFileExW` with replace semantics.
+- Or adopt a cross-platform atomic-persist helper that provides real overwrite semantics on Windows.
+
+## `/api/telegram/test` 502 message lost in UI mapping to "backend-unavailable"
+
+**Severity:** Medium - round 56 split transport errors (502) from API errors (422), but the frontend's `createResponseError` maps every 502/503/504 to a fixed `"The TermAl backend is unavailable."` with `kind: "backend-unavailable"`, discarding the descriptive Telegram-specific body.
+
+`src/telegram_settings.rs:378` and `ui/src/api.ts:1662`. `telegram_test_connection_error` correctly produces `ApiError::bad_gateway` with body `"Telegram connection test failed: <sanitized>"` for transport-class failures. But `TelegramPreferencesPanel` displays `testError.message`, so a Telegram transport failure now displays a generic backend-unavailable message instead of the actionable detail. The split-status closure on the backend is contract-correct but wasted on the wire.
+
+**Current behavior:**
+- Backend returns 502 with `{ error: "Telegram connection test failed: ..." }` for transport errors.
+- Frontend `createResponseError` collapses 5xx to a single `"The TermAl backend is unavailable."` message.
+- Test-connection failures display a misleading generic backend-unavailable error.
+
+**Proposal:**
+- Either return 422 + a "transport" sub-kind so the frontend keeps the specific message, OR
+- Have a dedicated client wrapper for `testTelegramConnection` that preserves the response body for non-422 statuses (parse JSON `{ "error": "..." }` before falling through to `createResponseError`).
+
+## `statusRecoveryGroups` "previous server instance" group conflates revision metadata across requests
+
+**Severity:** Medium - the seeded group uses `previousRevision` (highest revision observed across ALL prior status-batch responses, regardless of instance) as the revision for delegations stored under `previousServerInstanceId`. If `previousRevision` came from a different instance, the synthetic group reports a revision the wrapper cannot correlate to per-instance state.
+
+`ui/src/delegation-commands.ts:991-1028`. `applyStatusBatchResponses` passes `lastRevision` to `statusRecoveryGroups`, but `lastRevision` is updated by the latest applied responses across all server instances. The synthetic previous-instance group inherits this cross-instance revision.
+
+**Current behavior:**
+- `statusRecoveryGroups` uses `previousRevision` for the synthetic previous-instance group.
+- `previousRevision` may not belong to `previousServerInstanceId`.
+- Wrapper callers using these revisions for adopt-state semantics see a value that's not per-instance.
+
+**Proposal:**
+- Track `previousRevision` as a per-`previousServerInstanceId` field, OR
+- Document that `statusRecoveryGroups` reports a "best-known revision floor" rather than a precise per-instance revision, OR
+- Set the seeded group's revision to `0`/`null` to indicate "stale baseline; ask the wrapper to re-fetch".
+
+## `statusRecoveryGroups` synthetic group includes records that may NOT have been re-fetched in the current batch
+
+**Severity:** Medium - when a status batch flips server instance mid-poll, the synthetic previous-instance group includes EVERY record the wrapper has accumulated across all prior polls, regardless of whether each was even part of the current request.
+
+`ui/src/delegation-commands.ts:996-1006`. Per the contract this is "delegations we had before the flip", but consumers reading `recoveryGroups` may assume each group represents a coherent in-flight batch state. The grouping mixes "previously-known stale state" with "newly-observed mixed state".
+
+**Current behavior:**
+- Synthetic group seeded from FULL `recordsById` map.
+- Includes records not in the current request's `responses` array.
+- Wrappers cannot tell which records were in this batch vs prior batches.
+
+**Proposal:**
+- Scope `previousRecords` to records whose `id` was in the current `responses` request, OR
+- Document the inclusive contract above the function (and in the feature brief).
+
+## `SpawnDelegationFailurePacket` discriminated-union forces all-null fields on validation variant
+
+**Severity:** Medium - both `SpawnDelegationTransportFailurePacket` and `SpawnDelegationValidationFailurePacket` share `apiErrorKind`/`status`/`restartRequired` fields, but on the validation variant they're typed as literal `null`. Consumers reading these fields without first narrowing on `kind` get `boolean | null` only after narrowing; the unconditionally-null shape on the validation packet hides the contract that validation packets cannot signal restart-required.
+
+`ui/src/delegation-error-packets.ts:45-65`. The duplication is wide enough that a wrapper-side `if (!packet.restartRequired)` "looks safe" without `kind`-narrowing — but type-checks fine in both branches.
+
+**Current behavior:**
+- `SpawnDelegationFailurePacket = SpawnDelegationTransportFailurePacket | SpawnDelegationValidationFailurePacket`.
+- Validation variant has `apiErrorKind: null`, `status: null`, `restartRequired: null`.
+- Consumers must narrow on `kind` before reading these fields meaningfully.
+
+**Proposal:**
+- Drop the three null-only fields from `SpawnDelegationValidationFailurePacket` and let consumers narrow on `kind` first, OR
+- Keep the symmetric shape but document the "validation packets are always null on these three fields" invariant in the type's JSDoc.
+
+## `SpawnReviewerBatchFailure` type widens beyond doc contract
+
+**Severity:** Medium - the export `SpawnReviewerBatchFailure = SpawnDelegationFailurePacket & { index, title }` now permits `kind: "validation-failed"` items, but the doc still pins `kind: "spawn-failed"`. At runtime `failed[]` only contains `"spawn-failed"` items (validation errors short-circuit at the top-level `error`), so the wider type is misleading.
+
+`ui/src/delegation-commands.ts:144-147` and `docs/features/agent-delegation-sessions.md:461-470`.
+
+**Current behavior:**
+- TypeScript type permits both spawn-failed and validation-failed in `failed[]`.
+- Runtime never produces validation-failed in `failed[]` (only at top-level `error`).
+- Doc pins `kind: "spawn-failed"`.
+
+**Proposal:**
+- Narrow the export to `SpawnDelegationTransportFailurePacket & { index, title }` so the type matches the runtime invariant.
+
+## Delegation validation-failure packets forward broad runtime error messages
+
+**Severity:** Low - validation packets forward every caught `TypeError` or `RangeError` message after only generic UI sanitization instead of an explicit safe-message allowlist.
+
+`ui/src/delegation-error-packets.ts:272`. The wrapper-facing delegation failure surface otherwise uses audited safe-message patterns. The broader validation catch can expose unexpected runtime bug text or caller-shaped object/property details across the redaction boundary.
+
+**Current behavior:**
+- `TypeError` and `RangeError` messages from validation are treated as user-facing packet messages.
+- The message still goes through generic UI sanitization.
+- Unexpected validation exceptions are not collapsed to a fixed safe message.
+
+**Proposal:**
+- Allowlist the exact client-side validation messages/codes that may be exposed.
+- Collapse unexpected validation exceptions to a fixed message such as `Invalid delegation request.`
+
+## Wait-side `recoveryGroups` semantics undocumented in feature brief
+
+**Severity:** Medium - the feature brief talks about `recoveryGroups` only for "mixed-instance spawn errors" (`docs/features/agent-delegation-sessions.md:240-244`). It does not mention that `wait_delegations` can also surface `mixed-server-instance` errors with `recoveryGroups`, nor describe the synthetic "previous server instance" group convention, nor that the same `delegationId`/`childSessionId` may appear in MULTIPLE groups across cycles.
+
+Wrappers reading the docs cannot reason about these shapes.
+
+**Current behavior:**
+- Brief documents `recoveryGroups` for spawn batch only.
+- Wait-side `recoveryGroups` (round-56 addition) is undocumented.
+- Synthetic "previous server instance" group convention is implicit.
+- Cross-cycle delegationId duplication across groups is implicit.
+
+**Proposal:**
+- Extend the `recoveryGroups` paragraph to cover wait-side semantics and the previous-instance convention.
+- Pin that revisions are per-instance and not comparable across groups.
+- Document that `delegationId` may appear in multiple groups across cycles.
+
+## PATCH docstring does not cover `subscribed_project_ids`
+
+**Severity:** Medium - round 56's docstring at `src/wire.rs:1056-1060` reads "Nullable string fields use the same tri-state PATCH convention". `subscribed_project_ids: Option<Vec<String>>` (line 1067) is NOT a string field, has NO `deserialize_nullable_marker_field`, and silently accepts `null` as no-op. A reader of just the docstring + struct will conclude all `Option<...>` fields share tri-state semantics.
+
+**Current behavior:**
+- Docstring documents tri-state for "string fields".
+- `subscribed_project_ids` is `Option<Vec<String>>` and behaves differently.
+- Round 56's docstring widens the surface for confusion rather than narrowing it.
+
+**Proposal:**
+- Tighten the docstring to "string fields decorated with `deserialize_nullable_marker_field`" + an explicit note that `subscribed_project_ids` differs, OR
+- Migrate `subscribed_project_ids` to the marker pattern.
+
+## `spawnRecoveryGroups` vs `statusRecoveryGroups` asymmetric duplicate handling
+
+**Severity:** Medium - `spawnRecoveryGroups` uses `group.delegationIds.push(...)` directly; `statusRecoveryGroups` uses `pushUnique(group.delegationIds, ...)`. For the spawn path duplicates can't occur in normal use, but the asymmetry is load-bearing for any wrapper code that compares group shapes between the two surfaces.
+
+`ui/src/delegation-commands.ts:1009-1027` (status-side `pushUnique`) vs `:1172-1192` (spawn-side bare `push`).
+
+**Current behavior:**
+- Spawn-side does not dedupe.
+- Wait-side dedupes via `pushUnique`.
+- A future refactor that lets the spawn loop run twice for the same delegation would silently produce duplicate ids on spawn but not on wait.
+
+**Proposal:**
+- Make spawn-side use `pushUnique` for consistency, OR
+- Add a comment justifying the asymmetry.
+
+## Window-targeted scroll events no longer close the marker context menu
+
+**Severity:** Medium - capture-phase `document.addEventListener("scroll", handleScroll, true)` will fire for window scrolls (with `event.target === document`), but `scrollRoot.contains(document)` returns false, so the menu stays open. The pre-round-56 code closed unconditionally on window scrolls via the now-removed window listener.
+
+`ui/src/panels/conversation-markers.tsx:388-398`. If this is intentional, untested and undocumented; if not, it's a regression from round 56's listener-deduplication.
+
+**Current behavior:**
+- Document scroll listener with capture catches all scrolls.
+- `handleScroll` closes the menu only when the scroll target is inside `scrollContainerRef.current`.
+- Window-targeted scrolls (e.g., browser chrome) no longer close the menu.
+
+**Proposal:**
+- Either add a `target === document` branch that closes the menu (matching prior behavior), OR
+- Document the new "window scrolls are intentionally ignored" contract with an explicit `fireEvent.scroll(window)` test asserting the menu stays open.
+
+## `scheduleMarkerJumpCorrection` redundantly re-runs `scrollIntoView` even when sync call succeeded
+
+**Severity:** Medium - `jumpToMarker` calls `scrollMountedMarkerSlotIntoView` synchronously and immediately afterwards `scheduleMarkerJumpCorrection`, which schedules a rAF that calls `scrollMountedMarkerSlotIntoView` again. If the slot was already mounted (typical case after `flush: true`), this is two `scrollIntoView` calls back-to-back.
+
+`ui/src/panels/AgentSessionPanel.tsx:899-914`. `scrollIntoView` on an in-view element is a near-no-op, but if user-initiated scrolling begins between the sync call and the rAF (within ~16 ms), the rAF can fight that scroll and snap the user back to center.
+
+**Current behavior:**
+- Sync `scrollMountedMarkerSlotIntoView` runs immediately.
+- `scheduleMarkerJumpCorrection` then schedules a rAF to call it again.
+- User-initiated scroll between calls is overridden by the rAF.
+
+**Proposal:**
+- Have the synchronous call return its result and skip scheduling when it succeeds, OR
+- Have the first rAF re-check `messageSlotNodes` cache before re-scrolling and bail if the cached slot's `getBoundingClientRect()` is already centered.
+
+## `virtualizerHandleRef` now passed unconditionally to `ConversationMessageList`
+
+**Severity:** Medium - round-56 behavioral change: enables virtualizer-driven jumps for short conversations (< `CONVERSATION_OVERVIEW_MIN_MESSAGES`), where the rail is hidden. Correct, but undocumented and not pinned by a test.
+
+`ui/src/panels/AgentSessionPanel.tsx:1099`. Was previously gated on `conversationOverview.shouldRender`. The change is correct (markers should jump regardless of rail visibility) but a reader of the diff has no signal that this is an intentional widening.
+
+**Current behavior:**
+- `virtualizerHandleRef.current` is populated even when the rail is hidden.
+- No regression test covering "marker click on a 5-message session uses `jumpToMessageId`".
+- Behavior change undocumented.
+
+**Proposal:**
+- Add a regression test creating a session with < `CONVERSATION_OVERVIEW_MIN_MESSAGES` messages, clicking a marker, asserting the virtualizer's `jumpToMessageId` was invoked (vs fallback to `findMountedConversationMessageSlot`).
+- Note the widening in a code comment.
+
+## `write_telegram_bot_file` Unix `harden_telegram_bot_file_permissions` errors masked by cleanup-on-error path
+
+**Severity:** Medium - on Unix, the temp file is opened with `mode(0o600)` and `create_new(true)` (good). After `replace_telegram_bot_file` succeeds, `harden_telegram_bot_file_permissions` re-asserts `0o600` on the final path. If `harden_*` returns `Err`, the early-`?` exits the closure and the cleanup `if result.is_err() { fs::remove_file(&temp_path) }` removes the temp path that no longer exists (rename moved it). The final path is left in place with whatever permissions the rename produced.
+
+`src/telegram_settings.rs:417-431`. The error surfaces to the caller, but the file remains at the destination with potentially wrong permissions.
+
+**Current behavior:**
+- Closure `?`-exits on `harden_*` failure.
+- Cleanup removes the no-longer-existing temp path (silent best-effort).
+- Final destination retains permissions from the rename.
+
+**Proposal:**
+- Swap the order — chmod the temp file before rename — so the rename atomically commits a known-permissions file.
+- Or attempt chmod-before-rename and fall back to chmod-after only as defense-in-depth.
+
+## `prepare_assistant_forwarding_for_telegram_prompt` race window between cursor capture and POST send
+
+**Severity:** Medium - the new prepare/apply split correctly avoids mutate-before-success, but widens the cursor-capture-to-apply window across a network round-trip. If the agent emits new assistant text between T0 (capture) and T1 (POST returns), the T0 baseline marks the freshly-emitted message as already-forwarded.
+
+`src/telegram.rs:890-894`. The pre-round-55 `arm_assistant_forwarding_for_telegram_prompt` had the same fundamental race but a much narrower window (no network call between cursor read and state write).
+
+**Current behavior:**
+- T0: `prepare_*` reads cursor.
+- T1: `send_session_message` POST returns.
+- T2: `apply_*` commits T0 cursor to state.
+- An assistant message emitted between T0 and T1 is silently marked as "already forwarded".
+
+**Proposal:**
+- Re-fetch the cursor right before applying, not at the prepare step.
+- Or capture `latest` AFTER the POST returns (since the goal is "baseline as of after this prompt is sent").
+
+## `validate_and_normalize_telegram_config` mutates `default_project_id` before validating against `known_projects`
+
+**Severity:** Medium - when a `default_session_id` references a session whose `project_id` no longer exists, the function (1) auto-fills `config.default_project_id = session_project_id`, (2) then errors with "unknown default Telegram session project".
+
+`src/telegram_settings.rs:198-213`. Caller drops the mutation since the error propagates. But if a future caller persists the partially-mutated config on validation error, it will write a known-bad project_id.
+
+**Current behavior:**
+- Auto-fill at line 206 happens before known-projects re-check at line 209.
+- Caller drops mutated config on error today.
+- A future caller could persist the partial mutation.
+
+**Proposal:**
+- Reorder: run `known_projects.contains(session_project_id)` BEFORE the auto-fill.
+- Or take config by value + return the validated result, so callers cannot persist on error.
+
+## `prune_telegram_config_for_deleted_project` failure is `eprintln!`-only
+
+**Severity:** Medium - if pruning fails, `delete_project` returns success and on-disk Telegram config retains stale references. The on-read sanitize masks them, but `validate_and_normalize_telegram_config` REJECTS unknown subscribed project ids on save — so a future `update_telegram_config` will fail with "unknown Telegram project `<deleted>`" with no obvious recovery path.
+
+`src/session_crud.rs:525-530`. The eprintln logs the failure but the API surface returns success.
+
+**Current behavior:**
+- `prune_telegram_config_for_deleted_project` failure is logged to stderr.
+- `delete_project` returns success regardless.
+- Next `update_telegram_config` fails with confusing error.
+
+**Proposal:**
+- Either persist Telegram config inside `commit_locked` (atomic), or have `validate_and_normalize_telegram_config` strip unknown ids on write rather than reject, or escalate the prune failure to a 5xx instead of swallowing.
+
+## `src/telegram.rs` past 1500-line architecture rubric threshold
+
+**Severity:** Medium - file now exceeds 1766 lines after round 56. CLAUDE.md asks for smaller modules.
+
+`src/telegram.rs`. Round 56 added `backup_corrupt_telegram_bot_file`, `telegram_command_mentions_other_bot`, and digest-failure branches on top of the round-55 baseline. Mixes: HTTP client, TermAl client, wire types, command parser, digest renderer, assistant-forwarding cursor logic, corrupt-file backup helper, and the relay loop. `telegram_settings.rs` already extracted the UI surface; the next natural cut is `telegram_relay.rs` + `telegram_clients.rs` + `telegram_wire.rs`.
+
+**Current behavior:**
+- One file owns seven concerns now.
+- Continued growth pattern across recent rounds.
+
+**Proposal:**
+- Split into 2-3 modules mirroring the api.rs/wire.rs split shape.
+- Defer to a dedicated pure-code-move commit per CLAUDE.md.
+
+## `ui/src/preferences-panels.tsx` past 2000-line natural split point
+
+**Severity:** Medium - `TelegramPreferencesPanel` now has three async handlers (handleSave, handleTestConnection, handleRemoveBotToken) each with `if (!isMountedRef.current)` guards repeated 3×. Pattern duplication is wide enough that a `useUnmountSafeAsync` helper would cut ~60 lines.
+
+`ui/src/preferences-panels.tsx:1226-1430`. CLAUDE.md asks for smaller modules; the panel duplicates 30-40 line handler bodies with the same guard pattern.
+
+**Current behavior:**
+- Three async handlers each with three `if (!isMountedRef.current)` checkpoints (start of catch, end of try, finally).
+- Pattern duplication; future maintainer copies the shape into a fourth handler.
+
+**Proposal:**
+- Extract `useUnmountSafeAsync` hook returning a `runSafe(asyncFn, { onSuccess, onError, onFinally })` wrapper, OR
+- Split `TelegramPreferencesPanel` into form-state component + inner mount-safe handler module.
+
+## `validate_and_normalize_telegram_config` mixes pure validation, mutation, and mutex acquisition
+
+**Severity:** Medium - holds the state mutex while iterating + mutating caller-owned config. Same anti-pattern that the new prepare/apply assistant-forwarding split fixed elsewhere this round.
+
+`src/telegram_settings.rs:148-227`. The rename from `validate_telegram_config` documents the dual responsibility but the `&mut TelegramUiConfig` signature still buries it.
+
+**Current behavior:**
+- One function holds state mutex, iterates `inner.projects`/`inner.sessions`, mutates caller-owned config.
+- State held across multiple checks, allocations, and conditional mutations.
+
+**Proposal:**
+- Split into `pure_validate_telegram_config(...) -> Result<TelegramConfigNormalization, ApiError>` + `apply_telegram_config_normalization(...)` outside the lock.
+
+## ConversationOverviewRail "deferred build" test never exercises the deferred path
+
+**Severity:** Medium - uses `vi.useFakeTimers()` but never advances them past `CONVERSATION_OVERVIEW_FOCUSED_PROMPT_FALLBACK_DELAY_MS`. JSDOM lacks `requestIdleCallback`. The whole 50+ line scheduler is untested.
+
+`ui/src/panels/ConversationOverviewRail.test.tsx:122-188`. The test verifies "stale projection while focused" but not "deferred catch-up". A regression that never fires the rebuild would still pass.
+
+**Current behavior:**
+- `vi.useFakeTimers()` set but never advanced.
+- `setTimeout` fallback never fires during test.
+- Idle-callback path can't be tested under JSDOM.
+
+**Proposal:**
+- Explicitly assert the timer was scheduled, then advance with `act(() => vi.runAllTimers())` and verify the rebuild result.
+- Add a `delete window.requestIdleCallback` test variant exercising the `setTimeout` fallback.
+
+## ConversationOverviewRail roving tabindex still pinned to first segment
+
+**Severity:** Medium - `tabIndex={index === 0 ? 0 : -1}` is a single-tab-stop pattern, not true roving. Tab-out and Tab-back lands on first segment, not most-recently-focused.
+
+`ui/src/panels/ConversationOverviewRail.tsx:298`. The round-53 finding was NOT actually closed. Existing test only checks arrow-key focus moves; doesn't assert `tabIndex` updates after focus changes nor a Tab-out/Tab-back round trip.
+
+**Current behavior:**
+- `tabIndex` is purely a function of rendered index.
+- Arrow-key focus moves don't update tabIndex.
+- Tab-out and Tab-back resets focus to first segment.
+
+**Proposal:**
+- Track `focusedSegmentIndex` in state, set it on segment focus, render `tabIndex={index === focusedSegmentIndex ? 0 : -1}`.
+
+## `isComposerPromptFocused` couples ConversationOverviewRail to `.composer-input` CSS class
+
+**Severity:** Medium - matches `HTMLTextAreaElement` with `classList.contains("composer-input")`. Any rename of `.composer-input` silently breaks the focus-aware projection deferral.
+
+`ui/src/panels/ConversationOverviewRail.tsx:60-66`. CSS-class-based coupling between two unrelated components.
+
+**Current behavior:**
+- ConversationOverviewRail reads `.composer-input` class to detect focus.
+- AgentSessionPanel owns the class.
+- No shared constant or contract.
+
+**Proposal:**
+- Add a `data-conversation-composer-input="true"` attribute on the textarea, or export a `COMPOSER_INPUT_CLASS_NAME` constant from a shared module.
+
+## `POST /api/telegram/test` 429 missing `Retry-After` header / cooldown duration
+
+**Severity:** Medium - body says "Try again in a moment." but doesn't include a numeric duration nor an HTTP `Retry-After` header.
+
+`src/telegram_settings.rs:354`. The cooldown is `TELEGRAM_TEST_COOLDOWN = Duration::from_secs(2)`; HTTP-aware clients can't act on a structured rate-limit signal.
+
+**Current behavior:**
+- 429 status.
+- Body: "Telegram connection tests are rate-limited. Try again in a moment."
+- No `Retry-After` header.
+
+**Proposal:**
+- Either include the cooldown seconds in the message or attach a `Retry-After: 2` header.
+
+## `subscribed_project_ids: Option<Vec<String>>` lacks `deserialize_nullable_marker_field` — `null` no-ops
+
+**Severity:** Medium - inconsistent with sibling PATCH fields. With default serde, `null` deserializes to `None` (treated identically to "field absent"), so `{"subscribedProjectIds": null}` silently means "do not update".
+
+`src/wire.rs:1063`. There is no test asserting the `null`-as-no-op behavior.
+
+**Current behavior:**
+- Other PATCH fields use `deserialize_nullable_marker_field`.
+- `subscribed_project_ids` does not.
+- `null` and absent are indistinguishable.
+
+**Proposal:**
+- Add a regression test asserting `{"subscribedProjectIds": null}` is no-op, OR
+- Switch to `deserialize_nullable_marker_field` with `Vec::new()` interpretation for explicit-null for symmetry.
+
 ## `get_session_tail` skips remote-proxy hydration that `get_session` performs
 
 **Severity:** High - the new tail-first path silently degrades for remote-proxy sessions, returning an empty tail instead of triggering upstream hydration.
@@ -243,49 +611,49 @@ the Implementation Tasks section.
 
 ## Telegram settings and relay state can overwrite each other in `telegram-bot.json`
 
-**Severity:** High - the UI settings endpoint and Telegram relay both read-modify-write the same JSON file, and the new settings mutex only protects one process.
+**Severity:** Medium - the UI settings endpoint and Telegram relay both read-modify-write the same JSON file, and the settings mutex only protects one process.
 
-`src/telegram_settings.rs:15` defines a process-local mutex, while `src/telegram.rs:203` can still run in the standalone `cargo run -- telegram` process and write the same file. Concurrent `/api/telegram/config` saves and relay cursor persistence can lose either UI-owned token/config fields or runtime-owned `chatId` / `nextUpdateId` fields. The writer also truncates in place, so a concurrent reader can observe partial JSON.
+`src/telegram_settings.rs:20` defines a process-local mutex, while `src/telegram.rs` can still run in the standalone `cargo run -- telegram` process and write the same file. Concurrent `/api/telegram/config` saves and relay cursor persistence can lose either UI-owned token/config fields or runtime-owned `chatId` / `nextUpdateId` fields. Atomic file replacement prevents partial files, but it does not serialize read-modify-write cycles across processes.
 
 **Current behavior:**
 - Settings saves and relay state persistence share one file.
 - Writes are read-modify-write operations without cross-process serialization.
 - The process-local mutex does not coordinate server and standalone relay modes.
-- The file is truncated/replaced in place rather than written through an atomic temp-file swap.
+- Last writer wins if the two processes read old state and then save different halves.
 
 **Proposal:**
-- Split UI config and runtime cursor/chat state into separate files, or guard all writers with an OS-level file lock plus atomic temp-file replacement.
+- Split UI config and runtime cursor/chat state into separate files, or guard all writers with an OS-level file lock.
 - Add cross-process interleaving coverage proving config and runtime state both survive competing writes.
 
-## Telegram token file hardening can expose existing permissive files during rewrite
+## Telegram relay startup silently defaults after settings load failures
 
-**Severity:** Medium - an existing permissive token file is truncated and rewritten before permissions are tightened.
+**Severity:** Medium - startup still uses `load_telegram_bot_state(...).unwrap_or_default()`, hiding real read or corrupt-backup failures.
 
-`src/telegram_settings.rs:417-424` opens the target file with `create + truncate + write`, writes the encoded settings, then calls `set_permissions(0o600)`. If `~/.termal/telegram-bot.json` already has permissive mode, there is a local read window before permissions are repaired. The non-Unix branch at `src/telegram_settings.rs:429-431` still relies on inherited ACLs.
-
-**Current behavior:**
-- Bot tokens are stored in the local Telegram settings JSON file.
-- Existing Unix files can be truncated/written before restrictive permissions are applied.
-- Windows file access still depends on inherited directory ACLs.
-
-**Proposal:**
-- Prefer an OS secret store where available.
-- Otherwise write through a `0600` temp file and atomic rename, or set restrictive permissions before writing existing files.
-- Document or implement the Windows ACL behavior explicitly.
-
-## `/api/telegram/test` maps all `getMe` failures to validation errors
-
-**Severity:** Medium - retryable Telegram transport/upstream failures look like user-input errors.
-
-`src/telegram_settings.rs:88` maps every `get_me()` failure to HTTP 422. Invalid tokens, Telegram downtime, timeouts, and decode failures therefore collapse into the same client-visible class.
+`src/telegram.rs:40`. `load_telegram_bot_state` already treats missing files and backed-up corrupt files as recoverable defaults. If it returns any other error, defaulting at the call site can make the relay run with empty `chat_id` / `next_update_id` after a real I/O failure.
 
 **Current behavior:**
-- Invalid-token-style Telegram API errors and transport failures both return 422.
-- Callers cannot distinguish "fix the token" from "retry later".
+- Relay startup converts all load errors to default state.
+- A real read failure can make the bot appear unlinked.
+- A lost `next_update_id` can cause state replay or confusing later persist failures.
 
 **Proposal:**
-- Split Telegram application errors from transport/decode failures.
-- Keep invalid-token responses in the 400/422 family, but map upstream/transport failures to 502/504 or a path-aware frontend error class that preserves the Telegram-specific body.
+- Propagate non-recoverable startup load errors with `?`.
+- Keep the recoverable default behavior inside `load_telegram_bot_state` for not-found and backed-up corrupt files only.
+
+## Corrupt Telegram bot config backups are not permission-hardened
+
+**Severity:** Low - backups of corrupt `telegram-bot.json` files may preserve permissive permissions even though the active token file write path hardens to `0600` on Unix.
+
+`src/telegram.rs:245`. The corrupt-file recovery path renames or copies the existing token-bearing file to a backup. That backup keeps the original file permissions, while normal active-file writes explicitly harden the destination.
+
+**Current behavior:**
+- A corrupt Telegram settings file can contain `botToken`.
+- The corrupt-file backup inherits the source file's permissions.
+- The active rewritten file is hardened, but the backup side file is not.
+
+**Proposal:**
+- Harden the backup path after a successful rename/copy.
+- Add a Unix permissions regression test for corrupt backups.
 
 ## `POST /api/telegram/test` rate limiting is per token and can be bypassed
 
@@ -317,34 +685,20 @@ the Implementation Tasks section.
 - Add the Telegram routes to `docs/architecture.md` with methods, request/response shapes, and error semantics.
 - Document `GET /api/sessions/{id}?tail=N`, including when `messagesLoaded` is false and why callers must treat that response as a tail window rather than a full transcript.
 
-## Telegram preferences save/test handlers set state after awaited requests without an unmount guard
+## Telegram preferences mounted-ref guard stays false under React StrictMode
 
-**Severity:** Low - closing the settings dialog or switching away while a request is in flight can run React state updates after the panel unmounts.
+**Severity:** High - the new mounted-state guard sets `isMountedRef.current = false` in cleanup but never resets it to `true` in the effect body, so React 18 StrictMode effect replay can leave the still-mounted panel unable to update after async work.
 
-`ui/src/preferences-panels.tsx:1322` and the test-connection handler update `status`, `draft`, `notice`, `error`, `isSaving`, and `isTesting` after awaited API calls. The initial load effect has a cancellation guard, but the user-triggered save/test flows do not.
-
-**Current behavior:**
-- `handleSave` and `handleTestConnection` await network calls.
-- Post-await state updates are unconditional.
-- The component can unmount while the request is still pending.
-
-**Proposal:**
-- Track mounted state or use abortable requests and guard every post-await state update in both handlers.
-
-## Telegram preferences UI has no clear path for removing a saved bot token
-
-**Severity:** Low - clearing the password field preserves the saved credential rather than revoking it.
-
-`ui/src/preferences-panels.tsx:1332` sends `undefined` when the token field is empty, which preserves the token on disk. The backend now supports `botToken: null`, but the UI does not expose an explicit remove-token action or confirmation flow.
+`ui/src/preferences-panels.tsx:1231`. In development StrictMode, React intentionally runs effect cleanup and setup during mount. Because setup does not restore the ref to `true`, `handleSave`, `handleTestConnection`, and `handleRemoveToken` can skip post-await state updates while the panel is still mounted.
 
 **Current behavior:**
-- Empty token input means "leave saved token unchanged".
-- Users can test the saved token, but cannot clearly remove it from the settings UI.
-- A persisted Telegram bot credential can remain active after the user clears the field and saves.
+- StrictMode mount replay runs the cleanup and sets `isMountedRef.current = false`.
+- The effect setup does not restore the ref.
+- Save/test/remove can leave `isSaving` or `isTesting` stuck and skip success/error UI updates.
 
 **Proposal:**
-- Add an explicit "Remove saved token" action or a clear-and-confirm flow that sends `botToken: null`.
-- Cover the removal path in Telegram preferences tests.
+- Set `isMountedRef.current = true` inside the effect setup before returning cleanup.
+- Add StrictMode render coverage that proves mounted save/test/remove flows still update UI after promises resolve.
 
 ## Telegram settings UI belongs behind a focused module boundary
 
@@ -497,21 +851,6 @@ the Implementation Tasks section.
 - Stabilize handlers via `useCallback`.
 - Or document explicitly that the panel intentionally avoids memoization. Either is fine; consistency is the architectural goal.
 
-## `UpdateTelegramConfigRequest` `Option<Option<String>>` PATCH-tristate pattern lacks doc comment
-
-**Severity:** Low - the double-Option pattern is non-obvious, load-bearing, and inconsistent with every other PATCH-style endpoint in `wire.rs`.
-
-`src/wire.rs:1052-1058`. The pattern is supposed to distinguish "field absent" from "field null" (see the High-severity entry above for why it doesn't actually work without `deserialize_with`). Even after that fix, a reader scanning the file will see `Option<Option<String>>` without explanation. A reader could simplify to single `Option` and silently break the PATCH semantics.
-
-**Current behavior:**
-- Three fields use `Option<Option<String>>` with no inline doc comment.
-- Every other PATCH endpoint in `wire.rs` uses single `Option`.
-- The pattern's PATCH semantics are not self-documenting.
-
-**Proposal:**
-- Add a `///` comment to each `Option<Option<...>>` field explaining the PATCH semantics.
-- Or define a `PatchField<T>` newtype for clarity.
-
 ## `src/telegram_settings.rs` module header doesn't enumerate critical invariants
 
 **Severity:** Low - the header explains the file format transition but does not document the two-writer race, validation TOCTOU, divergent lock-error handling, or sanitize-on-read recovery model.
@@ -611,51 +950,6 @@ the Implementation Tasks section.
 - Move `activeIndex` into a ref synchronized with the state update; drop it from deps.
 - Or split the effect into "attach listeners once when open" + "read activeIndex from a ref".
 
-## Vestigial `!message.contains("cursor-agent")` assertions no longer prove ordering after PATH-to-injection swap
-
-**Severity:** Medium - round 52's swap of process-wide PATH mutation for `state.test_agent_setup_failures` injection left the original negative assertions in place. They are now trivially true and no longer pin the ordering claim.
-
-`src/tests/delegations.rs:4716-4722, 4743-4747`. The original test (round 51 staged) used `ScopedEnvVar::set_path("PATH", &empty_path)` to force `validate_agent_session_setup` to fail with messages like `cursor-agent CLI not found on PATH`. The negative assertion `!title_err.message.contains("cursor-agent")` then proved metadata validation ran *before* readiness setup. Round 52 swapped the PATH approach for an injected setup failure with the message `"forced Cursor setup failure for ordering test"`. That message doesn't contain "cursor-agent" anyway, so the assertion is now trivially true even if metadata validation had been skipped. The ordering proof for the title and model paths now relies only on the implicit "title vs. injection" message diff.
-
-**Current behavior:**
-- `!title_err.message.contains("cursor-agent")` passes regardless of whether metadata validation actually ran first.
-- `!model_err.message.contains("cursor-agent")` is the same trivial check.
-- The new third assertion (`setup_err`) at lines 4747-4769 proves the injection itself fires, but the title and model halves no longer prove ordering against the injection sentinel.
-
-**Proposal:**
-- Replace `!title_err.message.contains("cursor-agent")` with `!title_err.message.contains("forced Cursor setup failure")` (or assert against the exact injection sentinel) so the negative assertion targets what actually fires when the gate runs.
-- Same for the `model_err` assertion.
-
-## `normalizeReviewerBatchRequests` synchronous throw bypasses the spawn-failure-packet redactor
-
-**Severity:** Low - argument-validation errors propagate out of `spawn_reviewer_batch` as plain JS exceptions, bypassing `reviewerBatchFailure`/`spawnDelegationFailurePacket` entirely.
-
-`ui/src/delegation-commands.ts:957-983`. `validateDelegationMetadataText` `RangeError` (title too long), `TypeError` (malformed item), `RangeError` (prompt empty), and `normalizeTransportId` errors at the parent-session-id boundary all surface as raw thrown exceptions outside the result envelope. The exception messages themselves are deterministic and don't carry paths/secrets, so this is a contract/UX issue rather than an information-disclosure leak. But it complicates the audit story for "every wrapper-facing failure is a redacted packet."
-
-**Current behavior:**
-- Most failures arrive as redacted `SpawnReviewerBatchFailure` packets in `result.failed[]`.
-- A subset surfaces as raw thrown exceptions outside the result envelope.
-- Contract is inconsistent across the same wrapper-facing surface.
-
-**Proposal:**
-- Either (a) catch synchronous validation errors inside `spawnReviewerBatchWithTransport` and emit them as per-item failure packets (with index attribution and a fixed "invalid request" message), or (b) document the synchronous throw boundary explicitly in `delegation-error-packets.ts` so future maintainers don't assume the redactor is the only failure surface.
-
-
-## Delegation wrapper docs overstate mixed-instance recovery
-
-**Severity:** Medium - the documented recovery contract promises routing behavior that the command API cannot perform.
-
-`docs/features/agent-delegation-sessions.md:241` says `error.recoveryGroups` lets wrappers route follow-up waits/cancels per backend instance. The actual wrapper surface still exposes `wait_delegations(parentSessionId, delegationIds, options?)` without a server-instance or base-route selector, so the packet is diagnostic rather than a recovery transport.
-
-**Current behavior:**
-- Mixed-instance spawn failures can include `recoveryGroups`.
-- The documented wrapper contract implies wait/cancel can route by backend instance.
-- The command/API surface has no server-instance-aware recovery/cancel route.
-
-**Proposal:**
-- Document mixed-instance spawn errors as non-recoverable diagnostics through the current wrapper surface.
-- Or add a server-instance-aware recovery/cancel route or transport contract before promising recovery routing.
-
 ## Conversation overview controller activation effect deps drop `messageCount`
 
 **Severity:** Low - pure message-growth above the rail-render threshold without resize/scroll won't refresh the layout snapshot.
@@ -732,21 +1026,22 @@ This overlaps with the existing "Conversation overview rail snapshots can go sta
 - Only baseline settled assistant text, or store an explicit pre-prompt boundary that skips the currently active turn without enabling truncated-resend forwarding.
 - Add coverage where a desktop/local turn is already streaming before a Telegram prompt is forwarded.
 
-## Armed Telegram assistant forwarding can permanently starve primary-session forwarding
+## Armed Telegram forwarding is cleared when approval pauses before assistant text
 
-**Severity:** High - an armed session that settles without assistant text can keep blocking the digest primary forever.
+**Severity:** High - `Approval` is treated as settled even when the armed session has not produced assistant text yet, so a Telegram-originated turn that pauses for approval can lose its forwarding arm before the real reply arrives.
 
-`src/telegram.rs:971` returns early whenever `forward_next_assistant_message_session_id` is set. If that armed session settles with no forwardable assistant `Text` message, `src/telegram.rs:1243` returns `Ok(false)` without clearing the armed id. Every later digest sync retries the empty armed session and never forwards replies from the current primary session.
+`src/telegram.rs:1308`. The current drain path clears `forward_next_assistant_message_session_id` when the armed session reaches an approval-like settled state with no assistant `Text`. Approval pauses can occur before the assistant reply, so the eventual post-approval message is later treated as an unarmed first-seen message and baselined instead of forwarded to Telegram.
 
 **Current behavior:**
 - `forward_relevant_assistant_messages` prioritizes the armed session over the digest primary.
-- A settled armed session with no assistant text leaves the armed id in place.
-- Later primary-session assistant replies can be skipped indefinitely.
+- An armed session entering `Approval` with no assistant text clears the armed id.
+- The post-approval assistant reply is no longer associated with the Telegram prompt.
+- The first reply after approval can be baselined instead of forwarded.
 
 **Proposal:**
-- Clear the armed id when the armed session is settled and has no forwardable assistant text.
-- Model the forwarding helper result as pending/drained so primary forwarding can resume.
-- Add a regression for "armed session settles with no assistant text, then primary session has a reply."
+- Do not clear the armed id on `Approval` without assistant text.
+- Track an explicit "armed through approval" / pending state so the first post-approval assistant text still forwards while unrelated sessions cannot starve forever.
+- Add a regression for "armed Telegram session enters approval with no assistant text, then forwards the post-approval reply."
 
 ## Telegram assistant forwarding cursor state is global rather than per-session
 
@@ -1905,15 +2200,15 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 ## Implementation Tasks
 
 - [ ] P2: Add Telegram settings API/security regressions:
-  cover existing permissive token-file rewrites before permission repair, Windows ACL/secret-store fallback behavior, `/api/telegram/test` distinguishing invalid-token errors from transport/decode failures, global/concurrent rate limiting that cannot be bypassed by rotating token strings, and bounded rate-limit cache retention.
+  cover corrupt-backup permission hardening, Windows ACL/secret-store fallback behavior, `/api/telegram/test` preserving transport/decode failure details in the UI, global/concurrent rate limiting that cannot be bypassed by rotating token strings, and bounded rate-limit cache retention.
 - [ ] P2: Add Telegram settings file concurrency regressions:
   simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
-  cover API error display, stale default-session clearing, default-project auto-subscription, AppDialogs Telegram tab path, post-await unmount guards for save/test, and an explicit remove-saved-token flow that sends `botToken: null`.
+  cover API error display, stale default-session clearing, default-project auto-subscription, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
 - [ ] P2: Add delegation command error-contract regressions:
-  cover remaining `spawn_delegation` and `spawn_reviewer_batch` backend-unavailable/restart diagnostics, wrong-parent/project-boundary redaction, and full safe spawn-message allowlist pattern matrix.
+  cover remaining `spawn_delegation` and `spawn_reviewer_batch` backend-unavailable/restart diagnostics, wrong-parent/project-boundary redaction, invalid parent-session-id validation packets, and explicit validation-message allowlist/collapse behavior.
 - [ ] P2: Add Telegram assistant-forwarding ownership/order regressions:
-  cover an already-active non-Telegram turn before a Telegram prompt, prompt POST failure after forwarding state is prepared, post-send digest failure, a digest primary-session switch before the armed Telegram reply settles, an armed session settling with no assistant text before a primary reply, and two sessions proving assistant-forwarding cursors are session-scoped.
+  cover an already-active non-Telegram turn before a Telegram prompt, prompt POST failure after forwarding state is prepared, post-send digest failure, a digest primary-session switch before the armed Telegram reply settles, an armed session entering approval with no assistant text before its post-approval reply, and two sessions proving assistant-forwarding cursors are session-scoped.
 - [ ] P2: Add Telegram long-message chunk retry and UTF-16 chunking coverage:
   fail a later chunk after an earlier chunk is sent and assert retry does not duplicate it; add emoji/surrogate-pair-heavy text proving chunks respect Telegram's UTF-16 code-unit limit.
 - [ ] P2: Add overview rail growth, remount, and cancellation coverage:
@@ -1926,10 +2221,8 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   start near bottom, send with a pending POST, grow `scrollHeight`, and assert no old-target smooth scroll fires before the prompt lands.
 - [ ] P2: Add virtualized bottom re-entry scroll-kind expiry coverage:
   return to bottom, cancel idle compaction, then issue a native scroll without wheel/touch/key prelude and assert stale `lastUserScrollKindRef` classification cannot leak.
-- [ ] P2: Add Telegram command suffix and startup-message coverage:
-  ignore `/command@other_bot`, parse `/start@termal_bot` and `/help@termal_bot` in the unlinked setup path once the bot username is known, keep unknown commands distinct from foreign-bot suffixes, and assert the no-chat startup message points to `TERMAL_TELEGRAM_CHAT_ID` / trusted state binding rather than first-touch `/start`.
-- [ ] P2: Add Telegram JSON sample deserialization coverage:
-  parse Telegram error envelopes with `error_code`, and TermAl session responses with known, unknown, and missing statuses.
+- [ ] P2: Add Telegram startup-message coverage:
+  assert the no-chat startup message points to `TERMAL_TELEGRAM_CHAT_ID` / trusted state binding rather than first-touch `/start`.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
 - [ ] P2: Add equal-revision gap repair snapshot adoption coverage:
@@ -2002,28 +2295,12 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `ui/src/live-updates.test.ts` now pins reducer-level `appliedNoOp` for `messageCreated`, `textReplace`, `messageUpdated`, `commandUpdate`, `parallelAgentsUpdate`, and marker replays, and `App.live-state.deltas.test.tsx` covers `textReplace` plus duplicate `messageCreated`. Add siblings for the remaining no-op replay types and assert the watchdog still fires within `LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 3000` ms.
 - [ ] P2: Add genuine-divergence reconciliation coverage for same-revision unknown-session deltas:
   `docs/architecture.md` now documents that session creation advances the main revision, and `ui/src/app-live-state.ts` cross-links that contract. Add a coverage test that (a) sets the client up with a session list missing `session-X`, (b) dispatches a same-revision session delta for `session-X` (where `latestStateRevisionRef.current === delta.revision`) — asserting NO immediate `/api/state` fetch, then (c) dispatches the next authoritative `state` event including `session-X` and asserts it adopts cleanly.
-- [ ] P2: Tighten delegation-ordering vestigial assertions:
-  replace `!message.contains("cursor-agent")` with `!message.contains("forced Cursor setup failure")` (or assert the exact unique metadata-validation strings) at `src/tests/delegations.rs:4716-4722, 4743-4747` so the ordering proof targets the active injection sentinel rather than a string that happens to be absent regardless.
-- [ ] P2: Add per-pattern coverage for the spawn-failure allow-list:
-  `delegation-error-packets.ts:64-72` defines seven safe regex patterns (prompt-bytes, title-chars, model-chars, parent-active-limit, nesting depth, cwd Windows shapes, request-failed-status) plus six exact-string entries. Only the parent-active-limit pattern is currently exercised. Add `it.each(...)` covering each safe message/pattern with positive (passes) and at least one negative near-miss (collapses to GENERIC) per entry.
-- [ ] P2: Add `restartRequired: true` propagation through the spawn-failure packet:
-  construct an `ApiRequestError("backend-unavailable", ..., { status: 503, restartRequired: true })` and assert `failed[0].restartRequired === true`. Today's tests only build `ApiRequestError` with the default `restartRequired: false`, so a regression that drops the field at the packet boundary would not be caught.
-- [ ] P2: Cover `normalizeReviewerBatchRequests` non-array/null/non-object item rejection:
-  the normalizer throws `TypeError("spawn_reviewer_batch requests must be an array")` on non-array input and `TypeError("reviewer request N must be an object")` on null/primitive items. Neither is currently tested. Extend the existing rejection test with `null` input, `"not-an-array"` input, and `[null]` / `[42]` items.
-- [ ] P2: Make the mixed-server-instance sort assertion load-bearing:
-  the existing batch test happens to feed `"server-a"`, `"server-b"` (alphabetical = insertion order). Use ids whose insertion order differs from sorted order (e.g., `"server-z"` then `"server-a"`) so a refactor that drops `[...new Set(...)].sort()` would fail.
 - [ ] P2: Reset module-level rail-build FIFO state between overview controller tests:
   `pendingConversationOverviewRailBuildTasks`, `nextConversationOverviewRailBuildTaskId`, and `conversationOverviewRailBuildFrameId` persist across Vitest workers. Today only one test exists in `conversation-overview-controller.test.tsx`, but the test is built around tightly-counted frame flushes — order-dependency surface area is real. Either expose a test-only reset or use `vi.resetModules()` at the suite boundary.
 - [ ] P2: Cover overview activation cancellation when the controller unmounts mid-pending:
   mount an overview-controller harness, flush one or two frames so a queued second-rAF or FIFO task is alive, then unmount and flush the remaining frames asserting that `setIsRailReady(true)` was never observed and the FIFO is empty. The current test never unmounts mid-pending so the rAF cancellation paths and FIFO splice-by-task-id are unexercised.
 - [ ] P2: Finish splitting the remaining marker-menu create/remove test:
   the marker-menu coverage now has focused cases for keyboard trigger, portal cleanup, scroll/resize close, explicit trigger contract, and clamp fallback. The original create/remove test still combines add/remove, Escape focus restore, ArrowDown navigation, and rect-based clamp behavior; split the remaining assertions if it grows again.
-- [ ] P2: Cover production marker-menu trigger and transcript-scroll paths:
-  render the real `MessageCard` / `MessageMeta` path and assert assistant headers expose `data-conversation-marker-menu-trigger` while user headers/body content do not; dispatch `scroll` on the actual transcript/scroll-container path so document-capture close behavior is pinned separately from the window resize/scroll listener.
-- [ ] P2: Rename or document `delegation_metadata_size_errors_precede_agent_readiness_setup_errors`:
-  with round 52's swap from PATH mutation to `test_agent_setup_failures` injection, the test no longer specifically about *agent readiness setup errors*; it's about "any setup-failure that reaches the bad_request branch after `has_test_runtime_override` is false". Either keep the name and add a comment, or rename to reflect the injected-failure proof, e.g., `delegation_metadata_size_errors_precede_setup_failure_injection`.
-- [ ] P2: Expand Telegram state-persist config preservation coverage:
-  update `telegram_state_persist_preserves_settings_config` so the fixture includes every `TelegramUiConfig` field (`enabled`, token, subscribed projects, default project, default session) and asserts each survives `persist_telegram_bot_state`.
 - [ ] P2: Add compact `ConversationOverviewRail` accessibility coverage:
   assert the compact rail exposes an operable role, accessible name, and current/position state instead of only a `navigation` landmark with hidden segment semantics.
 - [ ] P2: Add `ConversationOverviewRail` compact-mode keyboard navigation coverage:
@@ -2044,10 +2321,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   extend `AgentSessionPanel.test.tsx:1493-1525` so the first render includes a newest-tail message and excludes an early message, then assert the early/full transcript appears only after the scheduled hydration delay.
 - [ ] P2: Add intermediate-checkpoint assertion to the deferred-tail-window test:
   `AgentSessionPanel.test.tsx:1493-1525` asserts only that the rail is absent immediately and present after 1.5s of advanced timers. A regression that made the rail render *immediately* (defeating the deferral) would still pass the post-advance assertion. Add an intermediate `act(() => vi.advanceTimersByTime(100))` checkpoint asserting the rail is *still* absent. Or assert directly on a transcript-hydration symptom (count of mounted message slots is small at t=0 and large at t=1500ms).
-- [ ] P2: Add `api.ts` Telegram client coverage:
-  `fetchTelegramStatus`, `updateTelegramConfig`, `testTelegramConnection` are not exercised by `api.test.ts`. Mirror the existing `createOrchestratorInstance` test pattern to pin URL + method + JSON body for at least `updateTelegramConfig`. Catches typos like `/api/telegram/conifg`.
-- [ ] P2: Add direct test file for `ui/src/delegation-error-packets.ts`:
-  `SAFE_SPAWN_DELEGATION_PATTERNS` regex set is exercised only indirectly through `delegation-commands.test.ts`. A typo in `(?:a drive-relative...|a UNC...|a Windows device namespace...)` would only fail if the integration test happens to surface that specific message. Add `delegation-error-packets.test.ts` with `it.each` over each safe message + each pattern, plus an unsafe-message control case asserting the generic fallback.
 - [ ] P2: Cover roving tabindex update in `ConversationOverviewRail`:
   the per-segment buttons render with `tabIndex={index === 0 ? 0 : -1}` regardless of focus. Add a test that focuses a non-first segment via keyboard, then blurs and refocuses the rail, and asserts focus restores to the previously-interacted segment (currently fails because tabIndex is purely a function of index).
 - [ ] P2: Add `get_session_tail` boundary and error coverage:
@@ -2068,3 +2341,39 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   five separate skip conditions (lines 767-783): `allowDivergentTextRepairAfterNewerRevision === true`, session not found, `messagesLoaded !== false`, `messages.length > 0`, `messageCount` below threshold. Add at least one test per skip condition.
 - [ ] P2: Verify partial-adoption preserves `messageCount`:
   add `expect(sessionsRef.current[0]?.messageCount).toBe(150)` after the partial-adoption assertion in `app-live-state.test.ts`. A regression that drops or zeros `messageCount` in the partial path would still let the `messages.length === 100` assertion pass while breaking message-count rendering.
+- [ ] P2: Add `write_telegram_bot_file` Unix `0o600` permission coverage:
+  add a `#[cfg(unix)]` test that writes the file and reads back `metadata().permissions().mode() & 0o777 == 0o600`. The cfg-gated helper is the security guarantee for the bot-token-on-disk file.
+- [ ] P2: Broaden `mask_telegram_bot_token` test cases:
+  current single happy-case is brittle. Add cases for empty, all-whitespace, < 4 chars (e.g., `"ab"` → `"****ab"`), trimmed-whitespace, full-length token; and an explicit "exactly 4 chars revealed" assertion across input lengths.
+- [ ] P2: Cover `check_telegram_test_rate_limit` cooldown expiration and 60s retain TTL:
+  current test covers only "first OK, second rejected". Add cases for (a) third call after >2s passes (cooldown actually expires), (b) entries pruned after 60s `TELEGRAM_TEST_RATE_LIMIT_RETAIN`. Use injected clock or `tokio::time::pause`.
+- [ ] P2: Cover `prune_telegram_config_for_deleted_project` no-op early-return:
+  call against a config that doesn't reference the target project; assert no disk write happens (file mtime unchanged or `Ok(())` returned without invoking persistence). The `telegram_configs_equal` early-return is currently uncovered.
+- [ ] P2: Strengthen UTF-16 chunking coverage:
+  current test covers only pure-emoji input. Add (a) mixed BMP + surrogate-pair text where the boundary lands at the limit, (b) text that fits EXACTLY at the limit (no chunking), (c) text where a single character exceeds the limit (impossible at 3500 cap but worth a defensive test).
+- [ ] P2: Strengthen forwarder armed-priority assertion:
+  the `telegram_forwarder_drains_armed_session_before_digest_primary` test asserts only `sent_texts == ["Telegram-originated reply", footer]`. This indirectly proves session-2 wasn't sent, but doesn't track which `session_id` values were passed to `get_session`. Track in the fake and assert exclusion explicitly.
+- [ ] P2: Tighten `validate_telegram_bot_token` boundary coverage to include 255 chars (round-56 added 256/257 only):
+  add `validate_telegram_bot_token(&"x".repeat(255)).expect("under-limit pass")` and a 1024-char over-limit case to defend against accidental wider window. An off-by-one swapping `>` to `>=` would still pass current tests.
+- [ ] P2: Cover `telegram_test_connection_error` for nested `TelegramApiError` via `.context()`:
+  current test exercises a bare `TelegramApiError` and a bare `anyhow!` error. Add a third case where `TelegramApiError` is wrapped via `.context("getMe call failed")` and assert classification still hits 422. The implementation uses `err.chain().any(downcast_ref)` so a regression to top-level-only would not be caught by current tests.
+- [ ] P2: Add explicit-bot-token path for `posts Telegram connection tests` API test:
+  current `api.test.ts:268-302` only covers `useSavedToken: true`. Add `testTelegramConnection({ botToken: "123:abc" })` and assert the exact body shape `{ botToken: "123:abc" }`.
+- [ ] P2: Make `corrects a virtualized marker jump` test exercise the two-rAF retry chain:
+  current test passes if the synchronous `scrollMountedMarkerSlotIntoView` call alone succeeds. Intercept rAF and make the target slot unavailable for the immediate lookup, then assert the scheduled correction scrolls once the slot appears. Cover cancellation on unmount/session switch or a second marker jump.
+- [ ] P2: Cover `aria-expanded="false"` after marker menu closes:
+  test asserts `aria-expanded="false"` initially and `"true"` after Enter, but does NOT assert it returns to `"false"` after the menu closes (e.g., after menuitem click or Escape). State-reset path is unverified.
+- [ ] P2: Expand `statusRecoveryGroups` coverage to merge and previous-instance branches:
+  current test uses one delegation per server instance; never exercises (a) `Math.max(group.revision, response.revision)` revision-merge branch for same-instance multi-response, (b) `previousServerInstanceId && previousRevision !== null` inject-prior-instance branch. Add a test that polls twice with a same-instance response on the first poll (priming `recordsById` and `lastServerInstanceId`/`lastRevision`) and a mixed-instance response on the second.
+- [ ] P2: Pin status-batch operation wording:
+  only spawn-batch `mixed-server-instance` message wording is asserted ("delegation spawn batch contained..."); status-batch wording ("delegation status batch contained...") in `mixedServerInstanceErrorPacket` is NOT asserted by the status-batch test.
+- [ ] P2: Cover `backup_corrupt_telegram_bot_file` cross-fs fallback:
+  current `telegram_state_persist_backs_up_malformed_existing_file` covers the rename success path but does NOT cover the `fs::copy` + `fs::remove_file` fallback. Extract `corrupt_telegram_bot_file_backup_path` + the rename-then-copy fallback to a helper accepting a `rename_fn: impl Fn(...)` and inject a forced-failure rename in a unit test.
+- [ ] P2: Add `write_telegram_bot_file` Unix `0o600` permission test:
+  unfilled from round 55. Add `#[cfg(unix)] fn telegram_bot_file_is_chmod_600()` asserting `metadata().permissions().mode() & 0o777 == 0o600` after a `write_telegram_bot_file`. Round 56 widened this code path with `replace_telegram_bot_file` + `harden_telegram_bot_file_permissions`; none of the new helpers are tested.
+- [ ] P2: Cover `write_telegram_bot_file` atomic-rename + temp-cleanup:
+  round 56's rewrite (`telegram_settings.rs:417-427`) introduced `let result = (|| {...})(); if result.is_err() { let _ = fs::remove_file(&temp_path); }`. A failure inside the closure that leaves a stale `.tmp` file would be a silent disk-leak regression. Add a test that injects a `write_all` failure and asserts the temp file is unlinked.
+- [ ] P2: Cover Windows `replace_telegram_bot_file` retry-after-remove fallback:
+  `#[cfg(windows)]` branch retries after `fs::remove_file(path)` if the rename returns an error and the path exists. Branch is fully untested.
+- [ ] P2: Cover `forward_new_assistant_message_if_any` armed-clear branch for non-matching session:
+  the helper `clear_forward_next_assistant_message_session_id` checks session_id equality at the implementation but no test exercises a non-match (i.e., armed for session-A, called with session-B).

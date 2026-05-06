@@ -13,6 +13,7 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 
@@ -236,6 +237,7 @@ export function useConversationMarkerContextMenu({
   markersByMessageId,
   onCreateConversationMarker,
   onDeleteConversationMarker,
+  scrollContainerRef,
   sessionId,
   visibleMessageIds,
 }: {
@@ -243,6 +245,7 @@ export function useConversationMarkerContextMenu({
   markersByMessageId: ReadonlyMap<string, readonly ConversationMarker[]>;
   onCreateConversationMarker: (sessionId: string, messageId: string) => void;
   onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
+  scrollContainerRef: RefObject<HTMLElement | null>;
   sessionId: string;
   visibleMessageIds: ReadonlySet<string>;
 }) {
@@ -382,21 +385,30 @@ export function useConversationMarkerContextMenu({
         closeContextMenu({ restoreFocus: true });
       }
     };
+    const handleScroll = (event: Event) => {
+      const scrollRoot = scrollContainerRef.current;
+      if (!scrollRoot) {
+        closeContextMenu();
+        return;
+      }
+      const target = event.target;
+      if (target instanceof Node && scrollRoot.contains(target)) {
+        closeContextMenu();
+      }
+    };
     const handleViewportMove = () => closeContextMenu();
 
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
-    document.addEventListener("scroll", handleViewportMove, true);
-    window.addEventListener("scroll", handleViewportMove, true);
+    document.addEventListener("scroll", handleScroll, true);
     window.addEventListener("resize", handleViewportMove);
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
-      document.removeEventListener("scroll", handleViewportMove, true);
-      window.removeEventListener("scroll", handleViewportMove, true);
+      document.removeEventListener("scroll", handleScroll, true);
       window.removeEventListener("resize", handleViewportMove);
     };
-  }, [closeContextMenu, isContextMenuOpen]);
+  }, [closeContextMenu, isContextMenuOpen, scrollContainerRef]);
 
   const contextMenuMarkers = contextMenu
     ? markersByMessageId.get(contextMenu.messageId) ?? []
@@ -459,6 +471,8 @@ export function useConversationMarkerContextMenu({
 
   return {
     contextMenuNode,
+    contextMenuMessageId: contextMenu?.messageId ?? null,
+    isContextMenuOpen,
     openContextMenu,
   };
 }

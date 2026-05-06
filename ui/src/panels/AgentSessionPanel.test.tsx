@@ -6,6 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useLayoutEffect, type RefObject } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -19,6 +20,7 @@ import { buildConversationOverviewTailItems } from "./conversation-overview-cont
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { RunningIndicator } from "./session-activity-cards";
 import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
+import { MessageCard } from "../message-cards";
 import {
   resetSessionStoreForTesting,
   syncComposerSessionsStore,
@@ -877,7 +879,55 @@ describe("AgentSessionPanel conversation caching", () => {
     );
   });
 
-  it("opens marker actions from a keyboard-reachable toolbar trigger", () => {
+  it("exposes the marker context-menu trigger only on real assistant message headers", () => {
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+    const { container } = renderSessionPanelWithDefaults({
+      activeSession,
+      renderMessageCard: (message) => (
+        <MessageCard
+          message={message}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />
+      ),
+    });
+
+    const messageMetas = Array.from(
+      container.querySelectorAll<HTMLElement>(".message-meta"),
+    );
+    const userMeta = messageMetas.find((meta) =>
+      meta.textContent?.includes("You"),
+    );
+    const assistantMeta = messageMetas.find((meta) =>
+      meta.textContent?.includes("Agent"),
+    );
+
+    expect(userMeta).toBeTruthy();
+    expect(assistantMeta).toBeTruthy();
+    expect(userMeta).not.toHaveAttribute(
+      "data-conversation-marker-menu-trigger",
+    );
+    expect(assistantMeta).toHaveAttribute(
+      "data-conversation-marker-menu-trigger",
+      "true",
+    );
+
+    fireEvent.contextMenu(userMeta!);
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(assistantMeta!);
+    expect(
+      screen.getByRole("menu", { name: "Conversation marker actions" }),
+    ).toBeInTheDocument();
+  });
+
+  it("opens marker actions from a keyboard-reachable toolbar trigger", async () => {
+    const user = userEvent.setup();
     const onCreateConversationMarker = vi.fn();
     const activeSession = makeSession("session-1", {
       messages: makeTextMessages(2),
@@ -888,9 +938,19 @@ describe("AgentSessionPanel conversation caching", () => {
       onCreateConversationMarker,
     });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Open marker actions" }),
-    );
+    const toolbar = screen.getByRole("toolbar", {
+      name: "Assistant message marker actions",
+    });
+    const trigger = within(toolbar).getByRole("button", {
+      name: "Open marker actions",
+    });
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+
     fireEvent.click(
       screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
     );
@@ -901,7 +961,8 @@ describe("AgentSessionPanel conversation caching", () => {
     );
   });
 
-  it("closes the portaled marker menu when the transcript scrolls or the viewport resizes", () => {
+  it("stops Escape from leaking out of the marker action menu", () => {
+    const documentKeydownSpy = vi.fn();
     const activeSession = makeSession("session-1", {
       messages: makeTextMessages(2),
     });
@@ -925,24 +986,79 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     fireEvent.contextMenu(screen.getByText("Agent message-2"));
-    expect(
-      screen.getByRole("menu", { name: "Conversation marker actions" }),
-    ).toBeInTheDocument();
+    const menu = screen.getByRole("menu", {
+      name: "Conversation marker actions",
+    });
 
-    fireEvent.scroll(window);
-    expect(
-      screen.queryByRole("menu", { name: "Conversation marker actions" }),
-    ).not.toBeInTheDocument();
+    document.addEventListener("keydown", documentKeydownSpy);
+    try {
+      fireEvent.keyDown(menu, { key: "Escape" });
 
-    fireEvent.contextMenu(screen.getByText("Agent message-2"));
-    expect(
-      screen.getByRole("menu", { name: "Conversation marker actions" }),
-    ).toBeInTheDocument();
+      expect(documentKeydownSpy).not.toHaveBeenCalled();
+      expect(
+        screen.queryByRole("menu", { name: "Conversation marker actions" }),
+      ).not.toBeInTheDocument();
+    } finally {
+      document.removeEventListener("keydown", documentKeydownSpy);
+    }
+  });
 
-    fireEvent.resize(window);
-    expect(
-      screen.queryByRole("menu", { name: "Conversation marker actions" }),
-    ).not.toBeInTheDocument();
+  it("closes the portaled marker menu only for transcript scrolls or viewport resizes", () => {
+    const transcriptScrollRoot = document.createElement("section");
+    const unrelatedScrollRoot = document.createElement("section");
+    document.body.append(transcriptScrollRoot, unrelatedScrollRoot);
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+
+    try {
+      renderSessionPanelWithDefaults({
+        activeSession,
+        scrollContainerRef: { current: transcriptScrollRoot },
+        renderMessageCard: (message) => (
+          <article className="message-card">
+            <div
+              className="message-meta"
+              data-conversation-marker-menu-trigger={
+                message.author === "assistant" ? true : undefined
+              }
+            >
+              <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+              <span>{message.timestamp}</span>
+            </div>
+            <p>{`${message.id} body`}</p>
+          </article>
+        ),
+      });
+
+      fireEvent.contextMenu(screen.getByText("Agent message-2"));
+      expect(
+        screen.getByRole("menu", { name: "Conversation marker actions" }),
+      ).toBeInTheDocument();
+
+      fireEvent.scroll(unrelatedScrollRoot);
+      expect(
+        screen.getByRole("menu", { name: "Conversation marker actions" }),
+      ).toBeInTheDocument();
+
+      fireEvent.scroll(transcriptScrollRoot);
+      expect(
+        screen.queryByRole("menu", { name: "Conversation marker actions" }),
+      ).not.toBeInTheDocument();
+
+      fireEvent.contextMenu(screen.getByText("Agent message-2"));
+      expect(
+        screen.getByRole("menu", { name: "Conversation marker actions" }),
+      ).toBeInTheDocument();
+
+      fireEvent.resize(window);
+      expect(
+        screen.queryByRole("menu", { name: "Conversation marker actions" }),
+      ).not.toBeInTheDocument();
+    } finally {
+      transcriptScrollRoot.remove();
+      unrelatedScrollRoot.remove();
+    }
   });
 
   it("closes the portaled marker menu when its session becomes inactive", async () => {
@@ -1069,49 +1185,57 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
-  it("starts marker-menu arrow navigation at item zero when focus is outside menu items", () => {
-    const activeSession = makeSession("session-1", {
-      messages: makeTextMessages(2),
-      markers: [
-        makeConversationMarker({
-          id: "marker-1",
-          messageId: "message-2",
-          name: "Review point",
-        }),
-      ],
-    });
+  it.each([
+    ["ArrowDown", "Add checkpoint marker"],
+    ["ArrowUp", "Remove Review point"],
+  ])(
+    "starts marker-menu %s navigation from the nearest boundary when focus is outside menu items",
+    (key, expectedItemName) => {
+      const activeSession = makeSession("session-1", {
+        messages: makeTextMessages(2),
+        markers: [
+          makeConversationMarker({
+            id: "marker-1",
+            messageId: "message-2",
+            name: "Review point",
+          }),
+        ],
+      });
 
-    renderSessionPanelWithDefaults({
-      activeSession,
-      renderMessageCard: (message) => (
-        <article className="message-card">
-          <div
-            className="message-meta"
-            data-conversation-marker-menu-trigger={
-              message.author === "assistant" ? true : undefined
-            }
-          >
-            <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
-            <span>{message.timestamp}</span>
-          </div>
-          <p>{`${message.id} body`}</p>
-        </article>
-      ),
-    });
+      renderSessionPanelWithDefaults({
+        activeSession,
+        renderMessageCard: (message) => (
+          <article className="message-card">
+            <div
+              className="message-meta"
+              data-conversation-marker-menu-trigger={
+                message.author === "assistant" ? true : undefined
+              }
+            >
+              <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+              <span>{message.timestamp}</span>
+            </div>
+            <p>{`${message.id} body`}</p>
+          </article>
+        ),
+      });
 
-    fireEvent.contextMenu(screen.getByText("Agent message-2"));
-    const menu = screen.getByRole("menu", {
-      name: "Conversation marker actions",
-    });
-    const firstItem = within(menu).getByRole("menuitem", {
-      name: "Add checkpoint marker",
-    });
-    firstItem.blur();
+      fireEvent.contextMenu(screen.getByText("Agent message-2"));
+      const menu = screen.getByRole("menu", {
+        name: "Conversation marker actions",
+      });
+      const firstItem = within(menu).getByRole("menuitem", {
+        name: "Add checkpoint marker",
+      });
+      firstItem.blur();
 
-    fireEvent.keyDown(menu, { key: "ArrowDown" });
+      fireEvent.keyDown(menu, { key });
 
-    expect(firstItem).toHaveFocus();
-  });
+      expect(
+        within(menu).getByRole("menuitem", { name: expectedItemName }),
+      ).toHaveFocus();
+    },
+  );
 
   it("dispatches visible message actions through the latest parent callbacks", async () => {
     const initialApproval = vi.fn();

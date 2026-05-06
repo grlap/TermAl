@@ -238,8 +238,10 @@ succeeded, at least one item failed, and every successful response came from the
 same backend instance. `error` means every item failed or any successful
 responses crossed backend instances during restart. Mixed-instance spawn errors
 set `error.kind === "mixed-server-instance"`, null top-level revision metadata,
-and include `error.recoveryGroups` so wrappers can route follow-up waits/cancels
-per backend instance.
+and include diagnostic `error.recoveryGroups`. The current command surface does
+not accept a server-instance selector, so wrappers should treat mixed-instance
+errors as non-recoverable through these helpers until a server-aware transport is
+added.
 Grouped parent-card UI and result consolidation remain separate Phase 3 work.
 
 ### MCP Tools
@@ -406,14 +408,23 @@ type DelegationChildSessionSummary = {
   parentDelegationId: string | null;
 };
 
-type SpawnDelegationFailurePacket = {
-  kind: "spawn-failed";
-  name: string;
-  message: string;
-  apiErrorKind: ApiRequestErrorKind | null;
-  status: number | null;
-  restartRequired: boolean | null;
-};
+type SpawnDelegationFailurePacket =
+  | {
+      kind: "spawn-failed";
+      name: string;
+      message: string;
+      apiErrorKind: ApiRequestErrorKind | null;
+      status: number | null;
+      restartRequired: boolean | null;
+    }
+  | {
+      kind: "validation-failed";
+      name: string;
+      message: string;
+      apiErrorKind: null;
+      status: null;
+      restartRequired: null;
+    };
 
 type SpawnDelegationCommandSuccessResult = {
   outcome: "completed";
@@ -480,7 +491,8 @@ type SpawnReviewerBatchCommandResult =
             kind: "all-spawns-failed";
             name: string;
             message: string;
-          };
+          }
+        | Extract<SpawnDelegationFailurePacket, { kind: "validation-failed" }>;
     });
 
 type DelegationStatusCommandResult = {
