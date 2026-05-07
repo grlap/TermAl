@@ -373,6 +373,10 @@ export function shouldOpenConversationMarkerContextMenu(
   return target.closest(NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR) === null;
 }
 
+/// Resolves the explicit marker-menu trigger for pointer/keyboard activation.
+/// Unlike the context-menu predicate above, this intentionally does not inspect
+/// selected text because click/key activation is only allowed from the trigger
+/// itself.
 export function findConversationMarkerContextMenuTrigger(
   root: HTMLElement,
   target: EventTarget | null,
@@ -384,6 +388,23 @@ export function findConversationMarkerContextMenuTrigger(
     CONVERSATION_MARKER_CONTEXT_MENU_TRIGGER_SELECTOR,
   );
   return trigger && root.contains(trigger) ? trigger : null;
+}
+
+/// Resolves a trigger for synthetic activation, rejecting nested native controls
+/// inside the metadata row so buttons/links keep their own click and key
+/// behavior.
+export function findActivatableConversationMarkerContextMenuTrigger(
+  root: HTMLElement,
+  target: EventTarget | null,
+) {
+  const trigger = findConversationMarkerContextMenuTrigger(root, target);
+  if (!trigger || !(target instanceof Element)) {
+    return null;
+  }
+  const nativeTarget = target.closest(NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR);
+  return nativeTarget && nativeTarget !== trigger && trigger.contains(nativeTarget)
+    ? null
+    : trigger;
 }
 
 export function useConversationMarkerContextMenu({

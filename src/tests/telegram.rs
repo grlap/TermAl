@@ -782,6 +782,18 @@ fn telegram_generic_token_redaction_requires_telegram_or_bot_word_context() {
         sanitize_telegram_log_detail(&format!("bot config token:{token}")),
         "bot config token:<redacted>"
     );
+    assert_eq!(
+        sanitize_telegram_log_detail(&format!("telegram_bot: {{ token: {token} }}")),
+        "telegram_bot: { token: <redacted> }"
+    );
+    assert_eq!(
+        sanitize_telegram_log_detail(&format!("telegram-bot token={token}")),
+        "telegram-bot token=<redacted>"
+    );
+    assert_eq!(
+        sanitize_telegram_log_detail(&format!("telegramBot token={token}")),
+        "telegramBot token=<redacted>"
+    );
 }
 
 #[test]
@@ -855,6 +867,23 @@ fn telegram_token_mask_only_exposes_short_suffix() {
         mask_telegram_bot_token("123456:abcdefghi").as_deref(),
         Some("****fghi")
     );
+    assert_eq!(mask_telegram_bot_token(""), None);
+    assert_eq!(mask_telegram_bot_token("   \t\n"), None);
+    assert_eq!(mask_telegram_bot_token("ab").as_deref(), Some("****ab"));
+    assert_eq!(mask_telegram_bot_token("abcd").as_deref(), Some("****abcd"));
+    assert_eq!(
+        mask_telegram_bot_token(" abcdef ").as_deref(),
+        Some("****cdef")
+    );
+
+    for token in ["a", "ab", "abc", "abcd", "abcde", "123456:abcdefghi"] {
+        let masked = mask_telegram_bot_token(token).expect("non-empty token should mask");
+        let revealed = masked
+            .strip_prefix("****")
+            .expect("mask should keep fixed redaction prefix");
+        assert_eq!(revealed.chars().count(), token.chars().count().min(4));
+        assert!(token.ends_with(revealed));
+    }
 }
 
 #[test]
@@ -883,6 +912,7 @@ fn telegram_token_validation_enforces_max_length_boundary() {
     let long_err =
         validate_telegram_bot_token(&"x".repeat(1024)).expect_err("very long token should fail");
     assert_eq!(long_err.status, StatusCode::BAD_REQUEST);
+    assert!(long_err.message.contains("at most 256 characters"));
 }
 
 fn telegram_api_error(method: &str, status: StatusCode, error_code: Option<i64>) -> anyhow::Error {

@@ -965,7 +965,7 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     const messageMetas = Array.from(
-      container.querySelectorAll<HTMLElement>(".message-meta"),
+      container.querySelectorAll<HTMLElement>(".message-meta-author"),
     );
     const userMeta = messageMetas.find((meta) =>
       meta.textContent?.includes("You"),
@@ -1014,7 +1014,7 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     const assistantMeta = Array.from(
-      container.querySelectorAll<HTMLElement>(".message-meta"),
+      container.querySelectorAll<HTMLElement>(".message-meta-author-agent"),
     ).find((meta) => meta.textContent?.includes("Agent"));
 
     expect(assistantMeta).toBeTruthy();
@@ -1043,6 +1043,60 @@ describe("AgentSessionPanel conversation caching", () => {
       "session-1",
       "message-2",
     );
+  });
+
+  it("does not open marker actions from interactive controls inside assistant metadata", async () => {
+    const user = userEvent.setup();
+    const onCreateConversationMarker = vi.fn();
+    const activeSession = makeSession("session-1", {
+      messages: [
+        {
+          id: "message-parallel-agents",
+          type: "parallelAgents",
+          author: "assistant",
+          timestamp: "10:02",
+          agents: [
+            {
+              id: "delegation-completed",
+              source: "delegation",
+              title: "Review frontend",
+              status: "completed",
+              detail: "No issues found",
+            },
+          ],
+        },
+      ],
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      onCreateConversationMarker,
+      renderMessageCard: (message) => (
+        <MessageCard
+          message={message}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />
+      ),
+    });
+
+    const showTasks = screen.getByRole("button", { name: "Show tasks" });
+    fireEvent.click(showTasks);
+
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+    expect(onCreateConversationMarker).not.toHaveBeenCalled();
+
+    const hideTasks = screen.getByRole("button", { name: "Hide tasks" });
+    hideTasks.focus();
+    await user.keyboard("{Enter}");
+
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show tasks" })).toBeInTheDocument();
   });
 
   it("does not render the removed right-side marker toolbar", () => {

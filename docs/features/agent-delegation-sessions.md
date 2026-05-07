@@ -211,6 +211,12 @@ Automatic parent prompting should be opt-in.
 Cancel stops the child session and marks the delegation canceled. The parent
 card should preserve partial transcript access and any partial result summary.
 
+Cancel responses return the server's latest delegation status. The UI treats a
+`failed` response as an error because the cancel was a no-op against an already
+errored delegation. `completed` and `canceled` are idempotent terminal no-ops,
+while `queued` and `running` can occur while the cancel request has been accepted
+but follow-up state is still arriving through SSE.
+
 ## Command And Tool Surface
 
 ### Internal Commands

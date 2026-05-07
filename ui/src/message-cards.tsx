@@ -164,6 +164,20 @@ const HEAVY_MARKDOWN_LINE_THRESHOLD = 24;
 const FILE_CHANGES_COLLAPSE_THRESHOLD = 6;
 let mermaidDiagramIdCounter = 0;
 
+const MessageMetaMarkerMenuContext = createContext(false);
+
+export function MessageMetaMarkerMenuProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  return (
+    <MessageMetaMarkerMenuContext.Provider value={true}>
+      {children}
+    </MessageMetaMarkerMenuContext.Provider>
+  );
+}
+
 type WindowWithMermaidBundle = Window &
   typeof globalThis & {
     mermaid?: MermaidModule;
@@ -710,18 +724,20 @@ function MessageMeta({
   trailing?: ReactNode;
 }) {
   const isUser = author === "you";
+  const enableMarkerMenuTrigger = useContext(MessageMetaMarkerMenuContext);
+  const isMarkerMenuTrigger = enableMarkerMenuTrigger && !isUser;
 
   return (
-    <div
-      className="message-meta"
-      role={isUser ? undefined : "button"}
-      tabIndex={isUser ? undefined : 0}
-      aria-haspopup={isUser ? undefined : "menu"}
-      title={isUser ? undefined : "Open marker actions"}
-      data-conversation-marker-menu-trigger={isUser ? undefined : true}
-    >
+    <div className="message-meta">
       <span
         className={`message-meta-author ${isUser ? "message-meta-author-user" : "message-meta-author-agent"}`}
+        role={isMarkerMenuTrigger ? "button" : undefined}
+        tabIndex={isMarkerMenuTrigger ? 0 : undefined}
+        aria-haspopup={isMarkerMenuTrigger ? "menu" : undefined}
+        title={isMarkerMenuTrigger ? "Open marker actions" : undefined}
+        data-conversation-marker-menu-trigger={
+          isMarkerMenuTrigger ? true : undefined
+        }
       >
         {isUser ? "You" : "Agent"}
       </span>
@@ -2191,15 +2207,16 @@ function ParallelAgentsCard({
             const hasAgentActions =
               isDelegationAgent &&
               (onOpenAgentSession || onInsertAgentResult || onCancelAgent);
-            const openActionKey = `${agent.id}:open`;
-            const insertActionKey = `${agent.id}:insert`;
-            const cancelActionKey = `${agent.id}:cancel`;
+            const agentIdentity = `${agent.source}:${agent.id}`;
+            const openActionKey = `${agentIdentity}:open`;
+            const insertActionKey = `${agentIdentity}:insert`;
+            const cancelActionKey = `${agentIdentity}:cancel`;
             const isOpenPending = pendingActionKeys.has(openActionKey);
             const isInsertPending = pendingActionKeys.has(insertActionKey);
             const isCancelPending = pendingActionKeys.has(cancelActionKey);
             return (
               <li
-                key={agent.id}
+                key={agentIdentity}
                 className={`parallel-agent-row parallel-agent-row-${parallelAgentStatusTone(agent.status)}`}
               >
                 <div className="parallel-agent-line">

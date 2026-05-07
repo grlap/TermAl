@@ -63,6 +63,10 @@ export function shouldPreferStreamingAssistantTextRender(
 }
 
 function cancelDelegationTerminalErrorMessage(status: DelegationStatus) {
+  // Cancel returns the server's latest delegation status. Failed means the
+  // cancel was a no-op against an errored delegation; completed/canceled are
+  // idempotent terminal no-ops, and queued/running mean the request was
+  // accepted or is still being reflected by follow-up SSE updates.
   switch (status) {
     case "failed":
       return "Delegation cannot be canceled because it has already failed.";
@@ -71,6 +75,21 @@ function cancelDelegationTerminalErrorMessage(status: DelegationStatus) {
     case "queued":
     case "running":
       return null;
+  }
+}
+
+function delegationChildUnavailableStatusLabel(status: DelegationStatus) {
+  switch (status) {
+    case "completed":
+      return "already completed";
+    case "failed":
+      return "already failed";
+    case "canceled":
+      return "already canceled";
+    case "queued":
+      return "still queued";
+    case "running":
+      return "still running";
   }
 }
 
@@ -85,6 +104,7 @@ type UseSessionRenderCallbacksParams = {
   latestAssistantMessageId: string | null;
   streamingAssistantTextMessageId: string | null;
   modelOptionsError: string | null;
+  enableLocalDelegationActions: boolean;
   onArchiveCodexThread: (sessionId: string) => void;
   onCompactCodexThread: (sessionId: string) => void;
   onForkCodexThread: (
@@ -131,6 +151,7 @@ export function useSessionRenderCallbacks({
   latestAssistantMessageId,
   streamingAssistantTextMessageId,
   modelOptionsError,
+  enableLocalDelegationActions,
   onArchiveCodexThread,
   onCompactCodexThread,
   onForkCodexThread,
@@ -210,7 +231,7 @@ export function useSessionRenderCallbacks({
               : "";
           if (!childSessionId) {
             onComposerError(
-              `Delegation child session is unavailable (${response.status}).`,
+              `Delegation child session is unavailable (${delegationChildUnavailableStatusLabel(response.status)}).`,
             );
             return;
           }
@@ -335,9 +356,19 @@ export function useSessionRenderCallbacks({
         onUserInputSubmit={handleUserInput}
         onMcpElicitationSubmit={handleMcpElicitation}
         onCodexAppRequestSubmit={handleCodexAppRequest}
-        onOpenParallelAgentSession={handleOpenParallelAgentSession}
-        onInsertParallelAgentResult={handleInsertParallelAgentResult}
-        onCancelParallelAgent={handleCancelParallelAgent}
+        onOpenParallelAgentSession={
+          enableLocalDelegationActions
+            ? handleOpenParallelAgentSession
+            : undefined
+        }
+        onInsertParallelAgentResult={
+          enableLocalDelegationActions
+            ? handleInsertParallelAgentResult
+            : undefined
+        }
+        onCancelParallelAgent={
+          enableLocalDelegationActions ? handleCancelParallelAgent : undefined
+        }
         searchQuery={
           activeSessionSearchMatchItemKey === `message:${message.id}`
             ? sessionFindQuery
@@ -366,6 +397,7 @@ export function useSessionRenderCallbacks({
       activeSession?.workdir,
       activeSessionSearchMatchItemKey,
       editorAppearance,
+      enableLocalDelegationActions,
       getConnectionRetryDisplayState,
       handleCancelParallelAgent,
       handleInsertParallelAgentResult,

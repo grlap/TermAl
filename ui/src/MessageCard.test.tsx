@@ -52,6 +52,30 @@ describe("MessageCard", () => {
     expect(screen.queryByText("Command")).not.toBeInTheDocument();
   });
 
+  it("does not expose marker menu button semantics outside the panel owner", () => {
+    const message: TextMessage = {
+      id: "message-standalone-assistant",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: "Standalone assistant card",
+    };
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    const meta = container.querySelector<HTMLElement>(".message-meta-author-agent");
+    expect(meta).toBeTruthy();
+    expect(meta).not.toHaveAttribute("role", "button");
+    expect(meta).not.toHaveAttribute("tabindex");
+    expect(meta).not.toHaveAttribute("aria-haspopup");
+    expect(meta).not.toHaveAttribute("data-conversation-marker-menu-trigger");
+  });
+
   it("renders delegation actions on parallel-agent cards", () => {
     const message: ParallelAgentsMessage = {
       id: "message-parallel-agents",
@@ -150,6 +174,63 @@ describe("MessageCard", () => {
       within(rows[3]!).queryByRole("button", { name: "Cancel" }),
     ).toBeNull();
     expect(within(rows[4]!).queryByRole("button")).toBeNull();
+  });
+
+  it("keeps mixed-source parallel-agent rows distinct when ids collide", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const message: ParallelAgentsMessage = {
+      id: "message-parallel-agents-same-id",
+      type: "parallelAgents",
+      author: "assistant",
+      timestamp: "10:02",
+      agents: [
+        {
+          id: "shared-agent-id",
+          source: "tool",
+          title: "Claude task",
+          status: "running",
+          detail: "Tool row",
+        },
+        {
+          id: "shared-agent-id",
+          source: "delegation",
+          title: "Delegated review",
+          status: "running",
+          detail: "Delegation row",
+        },
+      ],
+    };
+    const onCancelParallelAgent = vi.fn();
+
+    try {
+      render(
+        <MessageCard
+          message={message}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+          onCancelParallelAgent={onCancelParallelAgent}
+        />,
+      );
+
+      const rows = screen.getAllByRole("listitem");
+      expect(within(rows[0]!).queryByRole("button")).toBeNull();
+      fireEvent.click(
+        within(rows[1]!).getByRole("button", { name: "Cancel" }),
+      );
+
+      expect(onCancelParallelAgent).toHaveBeenCalledWith("shared-agent-id");
+      expect(
+        consoleError.mock.calls.some((call) =>
+          call.some(
+            (part) =>
+              typeof part === "string" &&
+              part.includes("Encountered two children with the same key"),
+          ),
+        ),
+      ).toBe(false);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("disables parallel-agent actions while an action is pending", async () => {

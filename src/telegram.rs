@@ -490,16 +490,23 @@ fn ascii_bytes_contains_word_ignore_case(haystack: &[u8], needle: &[u8]) -> bool
 }
 
 fn ascii_word_boundary_at(value: &[u8], index: usize) -> bool {
-    value
-        .get(index.wrapping_sub(1))
-        .is_none_or(|byte| !telegram_token_key_byte(*byte))
-        || index == 0
+    if index == 0 {
+        return true;
+    }
+    let before = value[index - 1];
+    let current = value.get(index).copied();
+    !before.is_ascii_alphanumeric()
+        || current.is_some_and(|byte| before.is_ascii_lowercase() && byte.is_ascii_uppercase())
 }
 
 fn ascii_word_boundary_after(value: &[u8], index: usize) -> bool {
-    value
-        .get(index)
-        .is_none_or(|byte| !telegram_token_key_byte(*byte))
+    match value.get(index).copied() {
+        None => true,
+        Some(after) if !after.is_ascii_alphanumeric() => true,
+        Some(after) => value
+            .get(index.saturating_sub(1))
+            .is_some_and(|before| before.is_ascii_lowercase() && after.is_ascii_uppercase()),
+    }
 }
 
 fn standalone_telegram_bot_token_has_bearer_context(detail: &str, cursor: usize) -> bool {

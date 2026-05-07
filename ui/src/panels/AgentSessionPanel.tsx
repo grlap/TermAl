@@ -46,6 +46,7 @@ import { useConversationOverviewController } from "./conversation-overview-contr
 import {
   ConversationMarkerNavigator,
   ConversationMessageMarkers,
+  findActivatableConversationMarkerContextMenuTrigger,
   findConversationMarkerContextMenuTrigger,
   groupConversationMarkersByMessageId,
   shouldOpenConversationMarkerContextMenu,
@@ -64,6 +65,7 @@ import {
   useSessionRecordSnapshot,
 } from "../session-store";
 import { useStableEvent } from "./use-stable-event";
+import { MessageMetaMarkerMenuProvider } from "../message-cards";
 import type {
   ApprovalDecision,
   AgentCommand,
@@ -1090,7 +1092,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
         if (!canOpenMarkerMenu || event.button !== 0) {
           return;
         }
-        const trigger = findConversationMarkerContextMenuTrigger(
+        const trigger = findActivatableConversationMarkerContextMenuTrigger(
           event.currentTarget,
           event.target,
         );
@@ -1113,7 +1115,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
         ) {
           return;
         }
-        const trigger = findConversationMarkerContextMenuTrigger(
+        const trigger = findActivatableConversationMarkerContextMenuTrigger(
           event.currentTarget,
           event.target,
         );
@@ -1139,11 +1141,19 @@ const SessionConversationPage = memo(function SessionConversationPage({
               onMarkerClick={jumpToMarker}
             />
           ) : null}
-          {rendered}
+          {canOpenMarkerMenu ? (
+            <MessageMetaMarkerMenuProvider>
+              {rendered}
+            </MessageMetaMarkerMenuProvider>
+          ) : (
+            rendered
+          )}
         </div>
       );
     },
     [
+      // The marker menu owns session/create/delete state internally; keep this
+      // callback keyed only to the rendered card and marker lookup surfaces.
       activeMarkerId,
       jumpToMarker,
       markersByMessageId,

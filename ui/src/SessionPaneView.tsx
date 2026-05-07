@@ -169,6 +169,7 @@ import {
   streamingAssistantTextMessageIdForSession,
   useSessionRenderCallbacks,
 } from "./SessionPaneView.render-callbacks";
+import { isLocalRemoteId } from "./remotes";
 
 const SESSION_PAGE_JUMP_VIEWPORT_FACTOR = 0.45;
 
@@ -534,6 +535,13 @@ export function SessionPaneView({
     (pane.activeSessionId ? sessionLookup.get(pane.activeSessionId) : null) ??
     sessionTabs[0]?.session ??
     null;
+  const activeSessionProject =
+    activeSession?.projectId != null
+      ? (projectLookup.get(activeSession.projectId) ?? null)
+      : null;
+  const enableLocalDelegationActions = isLocalRemoteId(
+    activeSessionProject?.remoteId,
+  );
   const allKnownSessions = useMemo(
     () => Array.from(sessionLookup.values()),
     [sessionLookup],
@@ -2396,6 +2404,7 @@ export function SessionPaneView({
     latestAssistantMessageId,
     streamingAssistantTextMessageId,
     modelOptionsError,
+    enableLocalDelegationActions,
     onArchiveCodexThread,
     onCompactCodexThread,
     onForkCodexThread,
