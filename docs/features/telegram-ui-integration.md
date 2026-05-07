@@ -266,6 +266,12 @@ and 502 for Telegram transport/decode/upstream failures. Clients should use the
 error message to distinguish local request-shape 422s from Telegram token/auth
 422s.
 
+Compatibility note: validation now reports a session whose project was deleted
+as `unknown default Telegram session project` before checking whether that
+session matches the configured default project. Callers should not branch on the
+older `default Telegram session must belong to the default project` text for
+orphaned sessions.
+
 ## Build sequence (incremental, each step shippable)
 
 ### Step 1 — Backend lifecycle move (no UI yet)

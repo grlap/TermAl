@@ -1,18 +1,16 @@
+// delegation-result-prompt.ts
+//
+// Owns formatting delegation result data into composer-ready prompt text.
+// It deliberately does not own command transport, active-session guards, or
+// composer insertion. Split out of: ui/src/SessionPaneView.render-callbacks.tsx.
+
 import type {
   DelegationCommandResult,
   DelegationFinding,
-  DelegationStatus,
+  DelegationResult,
 } from "./types";
 
-export type DelegationPromptResult = {
-  childSessionId: string;
-  status: DelegationStatus;
-  summary: string;
-  findings?: DelegationFinding[];
-  changedFiles?: string[];
-  commandsRun?: DelegationCommandResult[];
-  notes?: string[];
-};
+export type DelegationPromptResult = Omit<DelegationResult, "delegationId">;
 
 function normalizeMultiline(value: string, fallback: string) {
   const normalized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();

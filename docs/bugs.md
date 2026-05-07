@@ -7,6 +7,231 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Three phantom diff files staged at the index and would land in master on next commit
+
+**Severity:** High - three files with paths like `"C\357\200\272tmpround63_*.diff"` (= `C:tmpround63_rust_main.diff`, `C:tmpround63_rust_tests.diff`, `C:tmpround63_unstaged_ui.diff`) are tracked at the index. They were created when `git add C:\tmp\round63_*.diff` was issued from a Bash shell that interpreted the colon as a UTF-8 encoded byte. ~1684 lines of cached diff dumps total.
+
+Visible via `git ls-files --cached | grep tmp`. They contain only synthetic test fixtures (no real secrets per security scan), but committing diff dumps as repo artifacts pollutes the tree.
+
+**Current behavior:**
+- 3 phantom files staged at index.
+- `git diff --cached --stat` shows them at top.
+- Next `git commit` would land them in main.
+
+**Proposal:**
+- Run `git rm --cached -- "C:tmpround63_rust_main.diff" "C:tmpround63_rust_tests.diff" "C:tmpround63_unstaged_ui.diff"`.
+- Verify with `git ls-files --cached | grep tmp`.
+- Add `*.diff` (or `tmp*`) to `.gitignore` so this can't recur.
+
+## `MessageCard.test.tsx` "missing source" test name is misleading; exercises a state the wire contract says cannot exist
+
+**Severity:** Medium - the new test at `ui/src/MessageCard.test.tsx:343-377` is named "does not render delegation actions when a parallel-agent source is missing" but the round-64 TS type at `ui/src/types.ts:470` makes `source` required. The test compiles only because of `as unknown as ParallelAgentsMessage`. It exercises a state the wire contract says cannot exist.
+
+The round-63 task that motivated this asked for a `source: "tool"` no-callback assertion (a different concern: the contract case where source is present but non-delegation). The defense-in-depth case is reasonable but the test name and scope drift away from what the task tracked.
+
+**Current behavior:**
+- Test name: "missing source".
+- Implementation: `as unknown as ParallelAgentsMessage` cast.
+- The original round-63 task asks for a `source: "tool"` test asserting `onCancelParallelAgent` is NOT called.
+
+**Proposal:**
+- Either rename to "does not render delegation actions when source !== 'delegation'" and pass `source: "tool"` (the contract case the type allows).
+- Or keep both: a `tool`-source case (the contract case) and the missing-source defense-in-depth case.
+- Add an inline comment near the cast explaining "Cast bypasses TS to simulate a backend that pre-dates the source field".
+
+## `harden_telegram_bot_file_permissions(path)?` before rename can prevent corrupt-file quarantine
+
+**Severity:** Low - round-64 added a pre-rename `harden_telegram_bot_file_permissions(path)?` call inside `backup_corrupt_telegram_bot_file`. If the harden of the source file fails (Unix `EPERM` on a foreign uid, Windows ACL set rejection, read-only mount), the function returns early and the corrupt original is left in place. Subsequent loads keep hitting the same parse failure.
+
+This is the opposite of the round-63 proposal's intent ("defense-in-depth ... so the leak does not persist"). The pre-rename harden was a defense-in-depth pass; round-64 made it load-bearing.
+
+`src/telegram.rs:241-269`.
+
+**Current behavior:**
+- `harden_telegram_bot_file_permissions(path)?` propagates errors.
+- A transient permission failure becomes a recurring boot-time error.
+- Corrupt file is never quarantined under permission-failure conditions.
+
+**Proposal:**
+- Log-and-continue on the pre-rename harden (it's defense-in-depth, not load-bearing).
+- Or only attempt the source-side harden when the rename path is taken.
+
+## Allowlist contains case-duplicate entries equivalent under `eq_ignore_ascii_case`
+
+**Severity:** Low - the marker allowlist at `src/telegram.rs:422-431` lists eight entries but `eq_ignore_ascii_case` matching makes `termal_telegram_bot_token` and `TERMAL_TELEGRAM_BOT_TOKEN` strictly equivalent (and other case-pairs). Duplicate intent.
+
+**Current behavior:**
+- Eight literal entries.
+- Only six unique under `eq_ignore_ascii_case`.
+
+**Proposal:**
+- Drop one of each duplicated pair.
+- Or switch to case-sensitive matching against the literal forms users paste.
+
+## Duplicate Rust serialization tests in `tests/mod.rs` and `tests/http_routes.rs`
+
+**Severity:** Low - the two new tests `parallel_agent_source_serializes_wire_contract` (in `tests/mod.rs:98-132`) and `parallel_agent_progress_source_serializes_with_wire_values` (in `tests/http_routes.rs:486-508`) cover the same wire contract. The mod.rs version is a strict superset (also tests deserialization). The http_routes.rs version is mis-located in an HTTP-route file with no actual route exercise.
+
+**Current behavior:**
+- Two near-identical tests assert the same JSON wire contract.
+- The http_routes.rs version is a strict subset and mis-located.
+
+**Proposal:**
+- Drop the http_routes.rs test.
+- Or repurpose it to assert the full SSE/state envelope (e.g., via `parallelAgentsUpdate` delta event) carries the wire `source`.
+
+## `standalone_telegram_bot_token_has_bearer_context` still doesn't handle `=` separator
+
+**Severity:** Low - round-64 added `:` colon separator support, but `=` separator (`Bearer = <token>`, env-var-style logs) still fails.
+
+`src/telegram.rs:436-450`. The bug-ledger entry suggested "Accept `bearer` followed by `:` or `=`", and round 64 only added `:`.
+
+**Current behavior:**
+- `Bearer ` (space-separated) and `Bearer:` (colon-separated) match.
+- `Bearer =` and `bearer=` do not match.
+
+**Proposal:**
+- Allow `=` in the same trim branch in `has_bearer_context`.
+
+## `delegations.rs` production-construction-site `source` pinning still missing
+
+**Severity:** Low - round-64 added `tests/claude.rs:222-258` pinning the Claude task tool path's `source = ParallelAgentSource::Tool`. The corresponding `delegations.rs:1109` production path that should produce `source = Delegation` has no analogous test.
+
+**Current behavior:**
+- Claude task path covered.
+- Delegation runtime path uncovered.
+- A `Default::default()` regression in `delegations.rs` would not surface.
+
+**Proposal:**
+- Add a test that drives `delegations.rs` through its production path and asserts `latest[0].source == ParallelAgentSource::Delegation`.
+
+## Round-64 added another bundled telegram redaction test, perpetuating an explicitly-flagged anti-pattern
+
+**Severity:** Low - the new `telegram_standalone_token_redaction_handles_escaped_and_telegram_specific_contexts` at `src/tests/telegram.rs:730-751` bundles six independent assertions. The `..._respects_context_and_thresholds` test already had 12 disjoint cases. Round-64 added another bundled test rather than splitting either of the prior bundles.
+
+The new `ambiguous_token_key` case (the `token=` bare-key behavior flip) is also pinned only as one assertion deep in this bundle.
+
+**Current behavior:**
+- Three bundled tests now exhibit the pattern.
+- `ambiguous_token_key` is hidden in a bundle.
+
+**Proposal:**
+- Promote each behavior change to its own `#[test]`.
+- Or use a small `(input, expected_redacted, name)` table fixture and one helper.
+
+## `handle_claude_task_result` unconditionally writes `source = Tool` on update branch (clobber, not assert)
+
+**Severity:** Note - `src/claude.rs:581` unconditionally sets `agent.source = ParallelAgentSource::Tool` on the get_mut existing-entry branch. Today this is a no-op clobber, but the test at `src/tests/claude.rs:229-258` actively asserts the clobber behavior by mutating `source = Delegation` before the result and asserting it becomes `Tool` after.
+
+A future code path that legitimately produces `Delegation`-source entries through this pipeline would silently lose its discriminator.
+
+**Current behavior:**
+- Update branch: unconditional `agent.source = Tool` set.
+- Test asserts the clobber behavior.
+- Future delegation-through-task-tool path would silently mis-classify.
+
+**Proposal:**
+- Drop the unconditional set on the existing-entry branch.
+- Or replace with `debug_assert_eq!(agent.source, ParallelAgentSource::Tool, ...);` and a `///` comment.
+
+## No SSE-envelope test for `parallelAgentsUpdate` carrying `source`
+
+**Severity:** Note - the two new `parallel_agent_source_*` tests both serialize a bare `ParallelAgentProgress` struct in isolation. Neither exercises the `DeltaEvent::ParallelAgentsUpdate` envelope or the SSE-encoded payload that the frontend receives.
+
+A regression where the delta event added `#[serde(skip)]` or remapped `source` would still pass these isolated struct tests.
+
+**Current behavior:**
+- Struct-level wire tests cover the field.
+- No SSE-envelope test exists.
+
+**Proposal:**
+- Extend a `parallelAgentsUpdate` SSE test to assert `agents[0].source` end-to-end.
+
+## Formatter typed against `DelegationResult` rather than `DelegationResultPacket`
+
+**Severity:** Note - `formatDelegationResultPrompt` accepts `Omit<DelegationResult, "delegationId">` but the actual command-layer packet is `DelegationResultPacket` (in `delegation-commands.ts:185-196`) which has `findings`/`changedFiles`/`commandsRun`/`notes` as **required** arrays — `DelegationResult` declares them as **optional**. Structural compatibility holds (caller passes the stricter packet, formatter accepts the looser type) so TS compiles, but the dependency arrow is reversed.
+
+`ui/src/delegation-result-prompt.ts:13`. If `DelegationResultPacket` ever omits `notes` or renames `commandsRun`, the formatter keeps compiling.
+
+**Current behavior:**
+- Formatter accepts looser shape than producer emits.
+- Type-drift between formatter input and packet definition not blocked by compiler.
+
+**Proposal:**
+- Change to `Pick<DelegationResultPacket, ...>`.
+- Or make `DelegationResult.findings` etc. required.
+
+## Open-session error message drops resolved server status
+
+**Severity:** Note - the new validation at `ui/src/SessionPaneView.render-callbacks.tsx:194-200` surfaces `"Delegation child session is unavailable."` whenever `response.childSessionId` is invalid. The resolved `response.status` (e.g., `"canceled"`, `"failed"`) is silently dropped.
+
+**Current behavior:**
+- Fixed-text English error.
+- No error code or `response.status` in the message.
+
+**Proposal:**
+- Include the resolved status: `"Delegation child session is unavailable (canceled)."` or similar.
+
+## `docs/architecture.md` `ParallelAgents` row blurs which agents emit which source
+
+**Severity:** Note - the round-64 architecture doc at `docs/architecture.md:711` documents the contract but the "typical source" cell now reads "Delegation progress … or tool progress". Combined with the surrounding text describing `SubagentResult` as "Codex subagent/task results", a reader may infer that delegation-progress is Codex-only when in practice both Claude and Codex paths write `Tool` and the delegation runtime writes `Delegation` regardless of agent backend.
+
+**Current behavior:**
+- "typical source" cell reads as if delegations are Codex-specific.
+- Both agent backends emit `Tool`-source.
+
+**Proposal:**
+- Add a parenthetical "(any agent backend)".
+
+## `docs/features/telegram-ui-integration.md` 422 disambiguation paragraph internally inconsistent with new compatibility note
+
+**Severity:** Note - the 422 disambiguation paragraph at `:261-267` asks clients to branch on `error.message` text. The new compatibility note at `:269-273` describes a behavior change where validation now reports `unknown default Telegram session project` instead of `default Telegram session must belong to the default project` — exactly the kind of message-text change the prior paragraph warns clients about.
+
+**Current behavior:**
+- Paragraph 1: "Clients should use the error message".
+- Paragraph 2: "We changed the error message; clients depending on the old text break."
+
+**Proposal:**
+- Add a separate machine-readable error-code field.
+- Or call out the orphan path explicitly in the disambiguation paragraph.
+
+## `markActionPending` doesn't check `mountedRef.current` (asymmetric with `clearActionPending`)
+
+**Severity:** Note - `clearActionPending` at `ui/src/message-cards.tsx:2116` checks `mountedRef.current` before calling `setPendingActionKeys`. `markActionPending` at `:2099-2107` does not. In practice harmless because clicks happen after commit, but the asymmetry is potentially confusing.
+
+**Current behavior:**
+- `clearActionPending` mounted-guarded.
+- `markActionPending` unguarded.
+
+**Proposal:**
+- Gate `setPendingActionKeys(nextKeys)` in `markActionPending` with the same check.
+
+## `#[non_exhaustive]` on `ParallelAgentSource` is a no-op for in-crate matches
+
+**Severity:** Note - the enum at `src/wire_messages.rs:135` is module-private. `#[non_exhaustive]` is primarily aimed at external crate consumers; on a private enum it has no effect for in-crate matches. The `///` doc warning is what's load-bearing.
+
+**Current behavior:**
+- `#[non_exhaustive]` on private enum.
+- No effect on internal matches.
+
+**Proposal:**
+- Document the no-op behavior in a comment, or move the type to a public module if external consumers are anticipated.
+
+## `scheduleLayoutRefresh` callback double-refreshes viewport snapshot per flush
+
+**Severity:** Medium - the rAF callback at `ui/src/panels/conversation-overview-controller.ts:241-252` calls `refreshLayoutSnapshot()` (which already updates `viewportSnapshot` via `extractConversationOverviewViewportSnapshot(nextSnapshot)`) AND THEN `refreshViewportSnapshot()` (which makes a separate `getViewportSnapshot()` call and updates the same `viewportSnapshot` again). Two consecutive `setViewportSnapshot` calls per flush.
+
+The two calls produce different values (one derived, one fresh). React 18 batches both within an effect, but `refreshLayoutSnapshot` and `refreshViewportSnapshot` are independent setters — either the second overwrites the first (waste) or vice versa.
+
+**Current behavior:**
+- Both setters called from the same rAF flush.
+- Two `setViewportSnapshot` updates per scheduled refresh.
+- Either is wasted depending on which value wins.
+
+**Proposal:**
+- Decide whether the layout-derived viewport snapshot or the fresh `getViewportSnapshot()` is the source of truth.
+- If both are needed, fold into a single update path.
+
 ## Conversation overview viewport translation can reuse a stale same-size tail window or cross-session translation
 
 **Severity:** Medium - tail-window viewport translation validates compatibility only by `messageCount` and lacks any session identity guard.
@@ -43,29 +268,58 @@ the Implementation Tasks section.
 
 **Severity:** Medium - `cancelDelegationCommand` returns a `DelegationStatusCommandResult`, but the handler ignores it. On success the user has no immediate feedback (the button only stops rendering after a downstream `parallelAgentsUpdate` SSE arrives, which is racy).
 
-`ui/src/SessionPaneView.render-callbacks.tsx`. The other two handlers have analogous response-handling gaps - `handleOpenParallelAgentSession` opens the conversation but never reflects a `notFound`/`canceled` status to the user beyond catch, and `handleInsertParallelAgentResult` accepts any result status including `failed` without disclaiming the inserted prompt context.
+`ui/src/SessionPaneView.render-callbacks.tsx`. The open and insert handlers now validate their critical response paths, but cancel still discards the resolved status packet.
 
 **Current behavior:**
 - Success response is discarded; no UI acknowledgement until SSE arrives.
 
 **Proposal:**
 - Surface the resolved `DelegationStatus` via `onComposerError` for terminal-but-error cases.
-- For "Insert result", tag the prompt body with `result.status` even when not `completed`.
 
-## `MessageCard` memo comparator ignores parallel-agent action props
+## Delegation action mounted ref is not StrictMode-safe
 
-**Severity:** Medium - `MessageCard` now renders parallel-agent action buttons from `onOpenParallelAgentSession`, `onInsertParallelAgentResult`, and `onCancelParallelAgent`, but its custom `memo` comparator does not compare those props.
+**Severity:** Medium - `useSessionRenderCallbacks` initializes `mountedRef` to `true`, but its effect only sets the ref to `false` in cleanup.
 
-`ui/src/message-cards.tsx:587`. If the parent rerenders the same `message` object with a different pane/session action callback, React can skip the card render and leave the existing buttons wired to stale callbacks.
+`ui/src/SessionPaneView.render-callbacks.tsx:136-148` runs under the app-level `React.StrictMode` wrapper in `ui/src/main.tsx:27`. React 18 development StrictMode replays effect setup/cleanup on mount. Because the setup never restores `mountedRef.current = true`, a replay can leave `canApplyDelegationActionResult` permanently false while the component is still mounted.
 
 **Current behavior:**
-- The comparator checks existing callbacks such as approvals and MCP submissions.
-- The three new parallel-agent action callbacks are omitted.
-- A callback-only change can reuse stale button handlers.
+- Valid async open/insert/error results can be ignored in development StrictMode.
+- The guard also lacks regression coverage for click -> session switch/unmount -> command settlement.
 
 **Proposal:**
-- Add all three action callbacks to the comparator.
-- Add a regression that rerenders the same parallel-agent message with changed action handlers and asserts the new handler is invoked.
+- Set `mountedRef.current = true` inside the effect setup before returning cleanup.
+- Add StrictMode and stale-settlement tests for open, insert, cancel, and error paths.
+
+## `ParallelAgentsCard` pending cleanup mounted ref is not StrictMode-safe
+
+**Severity:** Medium - `ParallelAgentsCard` uses the same cleanup-only mounted-ref pattern while clearing async pending action state.
+
+`ui/src/message-cards.tsx:2075-2118` updates the pending-key ref when an async action settles, but skips `setPendingActionKeys` when `mountedRef.current` is false. React 18 StrictMode effect replay can leave that ref false on a mounted card, so action buttons can remain visually busy/disabled even after the promise resolves.
+
+**Current behavior:**
+- Pending keys are removed from the ref.
+- UI state can stay stale because `setPendingActionKeys` is skipped.
+- Rejected-promise and unmount-while-pending paths are not pinned.
+
+**Proposal:**
+- Set `mountedRef.current = true` in the effect setup.
+- Add StrictMode, unmount, and rejected-promise coverage for pending action cleanup.
+
+## Parallel-agent reconciliation ignores `source`
+
+**Severity:** Medium - full-state reconciliation treats two `parallelAgents` messages as identical even when an agent's `source` discriminator changes.
+
+`ui/src/session-reconcile.ts:472-493` compares id/title/status/detail, but not `source`. The new `source` field decides whether `agent.id` is a routable delegation id or an opaque tool-use id. A state resync where only `source` changes can preserve the old message object and leave delegation actions incorrectly visible for tool rows or hidden for delegation rows.
+
+**Current behavior:**
+- `agent.source` is required in `ui/src/types.ts`.
+- `MessageCard` gates action buttons on `agent.source === "delegation"`.
+- Full-state reconciliation can keep a stale message when only `source` changes.
+
+**Proposal:**
+- Include `source` in `reconcileParallelAgentsMessage`.
+- Include `source` in `messageChangeMarker` if source-only changes should invalidate transcript signatures.
+- Add a source-only reconciliation regression test.
 
 ## `resolveViewportSnapshotTranslation` only happy-path tested
 
@@ -245,22 +499,6 @@ A regression that dropped the guard would still pass every existing test, but a 
 **Proposal:**
 - Document the partial-information loss in `agent-delegation-sessions.md` so wrappers know `status-fetch-failed` may hide a concurrent server restart.
 
-## `_getme_` classifier predicates lack code-level docs explaining method-guard contract and OR-vs-AND asymmetry
-
-**Severity:** Low - both classifiers are now method-guarded as `telegram_getme_error_is_rate_limited` / `telegram_getme_error_is_token_validation_failure`. The function names imply a `getMe`-only contract, but neither has a `///` doc comment that pins the contract for future callers, and the underlying OR-vs-AND asymmetry between the two predicates is still undocumented in code.
-
-`src/telegram_settings.rs:388-396`.
-
-**Current behavior:**
-- Rate-limit classifier returns true on either `error_code == Some(429)` OR `status == TOO_MANY_REQUESTS`.
-- Token-validation classifier requires both signals (when `error_code` is `Some`).
-- Both functions silently downgrade non-`getMe` callers to false (returning `502 Bad Gateway`).
-- Function names hint the contract but no `///` doc states it.
-
-**Proposal:**
-- Add `///` doc comments on each predicate explicitly stating the `getMe`-only contract and the rationale for OR vs AND.
-- Note that any future caller for a different method must add its own classification.
-
 ## Tail-window thresholds drift apart: 101-message hydration vs 512-message render mode
 
 **Severity:** Low - `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` triggers backend tail hydration of `SESSION_TAIL_FIRST_HYDRATION_MESSAGE_COUNT = 20`, but the UI tail-window only activates when `INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES = 512`. Sessions in [101, 512] messages get a 20-message tail hydration response while the conversation page does not enter tail-window mode.
@@ -304,20 +542,108 @@ A regression that dropped the guard would still pass every existing test, but a 
 - Build a `Map<messageId, rowIndex>` once for `estimatedRows` and reuse for the lookup.
 - Or compare `layoutSnapshot.messages[0].messageId` to the trailing-N message ids (since the layout window is always near the end).
 
-## `backup_corrupt_telegram_bot_file` rename/copy paths leave backup with permissive permissions on partial-failure
+## `handleInsertParallelAgentResult` accepts any status without warning
 
-**Severity:** Low - in `backup_corrupt_telegram_bot_file`, the sequence is rename-or-copy → harden permissions. If `harden_telegram_bot_file_permissions(&backup_path)` returns Err after rename/copy succeeded, the backup file already exists at its destination with whatever permissions the original or copy operation produced (Unix mirrors source-mode bits). The error propagates, but a token-bearing file is left on disk with non-`0600` mode. The `fs::copy` + `fs::remove_file` arm has the additional property that on remove failure, two token-bearing files exist.
+**Severity:** Low - the handler at `ui/src/SessionPaneView.render-callbacks.tsx:217-250` accepts any `result.status` (including `"failed"`, `"canceled"`) and inserts the formatted prompt without warning. The formatter prefixes `Delegation result (failed) from child-1:` as a status disclaimer in the prompt body, but the user has no UI-level confirmation they're inserting a failed result.
 
-`src/telegram.rs:241-267`. Same security guarantee just added — a corrupt-token backup must never be world-readable.
+A user clicking "Insert result" on an `error`-status agent gets the failure summary inserted as if it were guidance — fine for an aware user, confusing for an unaware one. Round-62 noted this; round-63 still threads any result.
 
 **Current behavior:**
-- Backup file lands at final path with original perms before harden runs.
-- On harden-failure or remove-failure, file persists unhardened.
-- The active `write_telegram_bot_file` path correctly hardens BEFORE rename; this path does not.
+- Status disclaimer in prompt body only (no UI prompt).
+- `status === "failed"` inserts failure summary as if it were guidance.
+- Empty/whitespace summary falls back to "No summary provided." with no further hint.
 
 **Proposal:**
-- Harden permissions on the staged source path BEFORE the rename/copy-to-backup, paralleling the temp-file harden-then-rename pattern.
-- Or add defense-in-depth `fs::remove_file(&backup_path)` on the harden-failed branch so the leak does not persist.
+- Confirm with the user via a "do you really want to insert a failed result?" pattern when `result.status !== "completed"`.
+- Or surface a non-blocking notice via `onComposerError`.
+
+## `runAgentAction.finally(...)` can create unhandled rejections
+
+**Severity:** Low - `ui/src/message-cards.tsx:2120-2140` clears pending state with `void result.finally(...)`. If an action prop rejects, the promise returned by `finally` also rejects, and React does not await or handle that event promise.
+
+The current production handlers catch their normal command failures, but the helper accepts arbitrary action props and the test suite has no rejected-action or unhandled-rejection assertion. A future refactor that lets a rejection escape would surface as global unhandled rejection noise while the local pending cleanup still appears to run.
+
+**Current behavior:**
+- Promise cleanup uses `void result.finally(...)`.
+- Rejected action promises can create an unhandled rejection from the `finally` chain.
+- No rejected-action test pins the intended behavior.
+
+**Proposal:**
+- Add explicit rejection handling in `runAgentAction`, such as `result.finally(...).catch(...)`.
+- Or make the action prop contract require handlers to catch/report their own errors and cover rejected actions in tests.
+
+## `canApplyDelegationActionResult` empty deps obscure intent
+
+**Severity:** Low - the callback at `ui/src/SessionPaneView.render-callbacks.tsx:146-149` has empty deps `[]` but reads `mountedRef.current` and `activeSessionIdRef.current`. This is intentional and correct (refs are read at call time, never close over values), but the empty deps are easy to misread.
+
+A future maintainer might think the callback should depend on `activeSession?.id` and add it, breaking the stable-reference contract that flows down through the callback chain.
+
+**Current behavior:**
+- Empty deps array.
+- Reads refs at call time — correct but easy to misread.
+- No comment explaining the intent.
+
+**Proposal:**
+- Add `// eslint-disable-next-line react-hooks/exhaustive-deps` with a short comment explaining "intentionally empty: reads refs only".
+- Or convert to a non-`useCallback` function-statement (consumers don't include it in dep arrays).
+
+## `runAgentAction` not memoized; recreated per render
+
+**Severity:** Low - `runAgentAction` at `ui/src/message-cards.tsx:2120-2140` is defined inline inside the component without `useCallback`. It now reads pending state through refs, so the stale-closure bug is fixed, but the helper and per-row inline arrow handlers still get fresh identities on every render.
+
+Acceptable today; flagging for future re-use when N grows.
+
+**Current behavior:**
+- `runAgentAction` recreated per render.
+- Per-row click handlers also recreated.
+- No `useCallback` memoization.
+
+**Proposal:**
+- If parallel-agent counts grow, memoize `runAgentAction` with `useCallback` and stable deps.
+- Or extract `ParallelAgentRow` per existing tracked entry.
+
+## messageCount-driven effect has no cleanup; pending rAF survives across rerenders
+
+**Severity:** Low - the messageCount effect at `ui/src/panels/conversation-overview-controller.ts:446-457` calls `scheduleLayoutRefresh()` but has no cleanup that calls `cancelLayoutRefreshFrame()`. The schedule helper is idempotent (early-returns if a frame is pending), so this isn't a leak per se. But if the activation effect re-runs and resets `setIsRailReady(false)` while a frame is in-flight, the rAF callback fires after `isRailReady` is already false; the session-id guard catches it but only because the rail-build path bumps `overviewSessionIdRef.current = sessionId`. A rail-rebuild with the SAME sessionId would still flush.
+
+**Current behavior:**
+- messageCount effect schedules without cleanup.
+- Session-id guard catches stale flushes only when sessionId differs.
+- A same-sessionId rail-rebuild flushes the stale frame.
+
+**Proposal:**
+- Add a cleanup to the messageCount effect that calls `cancelLayoutRefreshFrame()`.
+- Document the guard semantics around `overviewSessionIdRef`.
+
+## `standalone_telegram_bot_token_has_bearer_context` still doesn't handle `=` separator
+
+**Severity:** Low - round-64 added `:` colon separator support to bearer-context (e.g., `Bearer: <token>`, `bearer:<token>`), but `=` separator (`Bearer = <token>`, env-var-style logs) still fails. The function only walks back over alphabetic bytes plus a single optional `:`.
+
+`src/telegram.rs:436-450`. The bug-ledger entry suggested "Accept `bearer` followed by `:` or `=`", and round 64 only added `:`.
+
+**Current behavior:**
+- `Bearer ` (space-separated) matches.
+- `Bearer:` and `bearer:` (colon-separated) match.
+- `Bearer =` and `bearer=` (equals-separated) do not match.
+
+**Proposal:**
+- Allow `=` in the same trim branch in `has_bearer_context`, mirroring what `has_key_context` already accepts.
+- Add a regression test for `Bearer = <token>` and `Authorization=Bearer <token>`.
+
+## Standalone Telegram redaction excludes generic `token` key context
+
+**Severity:** Low - the standalone Telegram-token sanitizer no longer treats bare `token=` / `token:` as a token-bearing marker.
+
+`src/telegram.rs:421-431` now allowlists Telegram-specific key names and bearer contexts, while `src/tests/telegram.rs:717-721` pins `token=<telegram-shaped-token>` as unredacted. Generic `token` keys are common in error payloads and debug logs; if Telegram returns or wraps a bot token under that key, `sanitize_telegram_log_detail` can expose it in stderr or `/api/telegram/test` error text.
+
+**Current behavior:**
+- `botToken=`, `telegramBotToken=`, `telegram_bot_token=`, and `TERMAL_TELEGRAM_BOT_TOKEN=` redact.
+- `token=<telegram-shaped-token>` does not redact.
+- The behavior improves false-positive precision but weakens secret-redaction recall for a common key name.
+
+**Proposal:**
+- Either restore bare `token` redaction in this Telegram-specific sanitizer.
+- Or require an additional Telegram-adjacent context while still covering `token=` / `token:` payloads that can carry bot tokens.
 
 ## Wheel/scrollTop demand-hydration thresholds lack boundary-exact test coverage
 
@@ -422,38 +748,6 @@ Acceptable for the current N≤10ish parallel-agent count; flagging because the 
 **Proposal:**
 - If parallel-agent counts grow, extract a `ParallelAgentRow` child component memoized on `(agent, callbacks)` and pass stable callbacks via `useCallback`.
 
-## `ParallelAgentsCard` clears pending action state after unmount
-
-**Severity:** Low - the new action runner clears `pendingActionKey` in a promise `finally` callback without checking whether the card is still mounted.
-
-`ui/src/message-cards.tsx:2098`. If a user starts an async delegation action and the parallel-agents card unmounts before the promise settles, the cleanup path still calls `setPendingActionKey`.
-
-**Current behavior:**
-- Async action buttons set `pendingActionKey`.
-- The promise `finally` callback always calls `setPendingActionKey`.
-- No mounted guard or cancellation flag protects the cleanup path.
-
-**Proposal:**
-- Track mounted state or otherwise ignore the pending-state reset after unmount.
-- Add a regression that clicks an async action, unmounts the card, resolves the promise, and asserts no post-unmount state update path fires.
-
-## Parallel-agent `source` discriminator contract is weakly typed, undocumented, and unpinned
-
-**Severity:** Low - backend serialization now requires `ParallelAgentProgress.source`, but the frontend type keeps it optional, the architecture docs still describe `ParallelAgents` as Codex-only progress, and backend JSON/SSE tests do not assert emitted `source` values.
-
-`src/wire_messages.rs:120`, `ui/src/types.ts:470`, `docs/architecture.md:711`. Delegation actions are gated by `agent.source === "delegation"`, and the action handlers treat `agent.id` as a delegation id. If a current-tree producer or fixture omits `source`, delegation actions disappear; if the `id`/`source` relationship drifts, TypeScript and the existing backend tests do not catch it.
-
-**Current behavior:**
-- Rust requires a `source` discriminator for serialized parallel-agent progress.
-- TypeScript allows `source` to be omitted.
-- Architecture documentation does not list `source`, its allowed values, or the delegation-id meaning of `id`.
-- Tests mostly add `source` to fixtures to compile, but do not assert serialized `tool`/`delegation` values.
-
-**Proposal:**
-- Make `ParallelAgentProgress.source` required in the frontend wire type.
-- Document `source: "delegation" | "tool"` and the meaning of `id` for each source.
-- Add backend JSON/SSE or delegation-card tests asserting Claude task agents serialize as `tool` and delegation cards serialize as `delegation`.
-
 ## Delegation result insertion lacks an untrusted-output boundary
 
 **Severity:** Low - `formatDelegationResultPrompt` inserts child-agent result text directly into the parent composer as active prompt text.
@@ -468,20 +762,6 @@ Acceptable for the current N≤10ish parallel-agent count; flagging because the 
 **Proposal:**
 - Wrap delegation output in a clearly delimited quoted/data block.
 - Prepend guidance that the delegation output is untrusted reference material, not instructions.
-
-## Delegation result formatter duplicates the command result packet shape
-
-**Severity:** Note - `formatDelegationResultPrompt` defines a parallel `DelegationPromptResult` shape instead of depending on the command-layer `DelegationResultPacket` it formats.
-
-`ui/src/delegation-result-prompt.ts:7`. If the command result evolves, optional sections such as changed files, commands, or notes can drift from the formatter while TypeScript still compiles.
-
-**Current behavior:**
-- `getDelegationResultCommand` returns `DelegationResultPacket`.
-- `formatDelegationResultPrompt` accepts a similar but separate local type.
-- Several arrays are optional in the formatter type even though the command packet provides them.
-
-**Proposal:**
-- Type the formatter against a shared result type or a `Pick<DelegationResultPacket, ...>`.
 
 ## `MessageCard.test.tsx` parallel-agent test mounts without `DeferredHeavyContentActivationProvider`
 
@@ -555,34 +835,6 @@ Acceptable for the current N≤10ish parallel-agent count; flagging because the 
 - Add a short comment explaining the intended layering (e.g., "Validate user input strictly, then sanitize against any state that may have changed since the user clicked save").
 - Or merge the two passes if the use cases have converged.
 
-## `redact_telegram_bot_url_tokens` empty-token defensive branch lacks comment
-
-**Severity:** Note - the URL redactor at lines 307-322 special-cases `token_end == 0` to copy one byte and advance, defending against `/bot/bot/getMe`-style infinite-loop inputs. Logic is correct but the loop has no comment describing why the empty-token branch exists or what attack surface it guards against.
-
-`src/telegram.rs:307-322`. A future contributor simplifying the function may merge the branches and reintroduce the hang.
-
-**Current behavior:**
-- Empty-token branch advances one byte to avoid hanging.
-- The defensive-advance pattern is non-obvious without context.
-- No comment explains the pinned `/bot/bot/getMe` regression.
-
-**Proposal:**
-- Add a one-line comment such as `// Empty token span: advance one byte to avoid an infinite loop on /bot followed immediately by '/'`.
-
-## `eprintln!` paths in Telegram subsystem bypass `sanitize_telegram_log_detail`
-
-**Severity:** Note - two `eprintln!` paths log error sources directly to stderr without running them through `sanitize_telegram_log_detail`: `telegram_settings_file_error` at `src/telegram_settings.rs:453` and the parse-error branch in `backup_corrupt_telegram_bot_file` at `src/telegram.rs:243-247`. Today `serde_json::Error::Display` does not echo source bytes, so the bot token does not leak. However, the contract that errors never echo source content is implicit. A future error variant (custom JSON parser with context, dependency upgrade, or upstream `io::Error::other(format!("... {raw_data} ..."))`) could embed file contents in the error string.
-
-`src/telegram_settings.rs:453`, `src/telegram.rs:243-247`.
-
-**Current behavior:**
-- `eprintln!("...{err}", err = err)` formats the error directly.
-- No `sanitize_telegram_log_detail` wrapping.
-- Active token-write path elsewhere routes through `sanitize_telegram_log_detail`; these stderr paths are the lone exceptions.
-
-**Proposal:**
-- Wrap `{err}` formatting in `sanitize_telegram_log_detail(&err.to_string())` for defense-in-depth, mirroring the relay's `log_telegram_error` discipline.
-
 ## `telegram_token_boundary_byte` and `telegram_token_secret_byte` are byte-for-byte identical predicates
 
 **Severity:** Note - both predicates resolve to `is_alphanumeric || _ | -`. The duplication is functionally correct (the secret loop greedily consumes every byte, so the post-loop boundary check is trivially satisfied) but is an attractive nuisance — a future contributor may try to tighten one without the other and reintroduce a redaction gap. The two predicates serve conceptually different roles (delimiter detection vs. content matching).
@@ -612,21 +864,6 @@ Acceptable for the current N≤10ish parallel-agent count; flagging because the 
 **Proposal:**
 - Optionally treat any non-whitespace byte as a "boundary" (i.e. keep the strict-letter rule and additionally exclude `:` from the boundary set).
 - Or document the chosen contract.
-
-## Standalone Telegram token redaction misses Telegram-specific key names
-
-**Severity:** Low - the new context gate allows generic token keys (`botToken`, `bot_token`, `bot-token`, `token`) and bearer headers, but misses common Telegram-specific key names.
-
-`src/telegram.rs:423`. Log/error text such as `telegram_bot_token=123456:<secret>`, `telegramBotToken=123456:<secret>`, or `TERMAL_TELEGRAM_BOT_TOKEN=123456:<secret>` still matches Telegram bot-token shape but is not redacted because the key allowlist rejects it.
-
-**Current behavior:**
-- Standalone token redaction now requires nearby key or bearer context.
-- The key allowlist omits Telegram-specific env/config names.
-- Tokens beside those keys remain visible in sanitized log detail.
-
-**Proposal:**
-- Broaden the key allowlist to include Telegram-specific variants such as `telegram_bot_token`, `telegramBotToken`, and `TERMAL_TELEGRAM_BOT_TOKEN`.
-- Add focused tests for those key names.
 
 ## `validate_and_normalize_telegram_config` clones bot token into snapshot copy
 
@@ -658,50 +895,19 @@ Acceptable for the current N≤10ish parallel-agent count; flagging because the 
 - Consider attaching the listener to `node` directly (since composedPath also resolves through bubbles) and dropping `capture: true`.
 - Or short-circuit on key first (only `ArrowUp`/`Home`/`PageUp` trigger expensive scope checks).
 
-## `standalone_telegram_bot_token_has_context` allocates a fresh lowercase `String` per digit-start
+## `standalone_telegram_bot_token_has_context` still lacks `///` doc comment
 
-**Severity:** Note - the redaction loop at `src/telegram.rs:390-406` calls `prefix.to_ascii_lowercase()` for every digit-starting substring. For each digit boundary in the input, the helper slices the entire `detail[..start]`, runs `trim_end_matches`, and allocates a fresh lowercased copy. A long log line containing many digit-starting substrings (PIDs, IDs, version numbers, byte offsets) drives O(n²) allocation work.
+**Severity:** Note - round-64 added a `///` doc to `standalone_telegram_bot_token_end` but the bug-ledger entry specifically named `_has_context` as the function carrying the closed-allowlist contract. Round-64 partially closed this — the marker list (`bottoken=`, `bot_token=`, `bot-token=`, `telegram_bot_token=`, `telegramBotToken=`, etc., plus `Bearer`) is hand-curated and now narrower than before, but no `///` doc on `_has_context` enumerates it as the authoritative allowlist or instructs future contributors how to extend it.
 
-`sanitize_telegram_log_detail` runs redaction *before* the 256-char truncation, so the input is bounded only by upstream error/log sizes. `request_json` reads the full response body with no size cap, then surfaces the description through `TelegramApiError::Display` and into `sanitize_telegram_log_detail`. A hostile/malformed upstream response of, say, 10 MB of digit boundaries would do ~10 MB × n_digit_starts work in lowercase allocation before truncation.
-
-**Current behavior:**
-- Per-candidate full-prefix lowercased allocation.
-- Linear-in-input allocation cost per digit-start.
-- Quadratic-in-input total cost on pathological inputs.
-
-**Proposal:**
-- Inspect only the last ~16 bytes of `detail[..start]` (longest marker is ~10 chars).
-- Or compare each marker case-insensitively against the suffix without allocating.
-- Truncate input to `MAX_LOG_DETAIL_CHARS` (or a generous multiple) BEFORE running redaction.
-
-## `update_telegram_config` doubled `sanitize_telegram_config_for_current_state` call lacks rationale comment
-
-**Severity:** Note - `update_telegram_config` calls `sanitize_telegram_config_for_current_state` twice — once before applying request fields and once after `validate_and_normalize_telegram_config`. The pre-call is needed so the user's `enabled: true` can succeed even when the persisted file references a missing project/session.
-
-`src/telegram_settings.rs:51,70`. The double-call works but obscures the invariant — a future refactor that drops one or the other could silently regress one of the two cases (pre: tolerate stale persisted refs; post: re-clean any references the request introduced or validation widened).
+`src/telegram.rs:411-433`.
 
 **Current behavior:**
-- Two sequential sanitize calls with the same name on either side of validation.
-- No comment at either call site.
-- A naive de-duplication PR could silently regress either case.
+- `standalone_telegram_bot_token_end` now has a `///` doc.
+- `standalone_telegram_bot_token_has_context` (the function the bug entry named) does not.
+- Marker list is the de-facto allowlist but its location and rationale are not documented at the gate.
 
 **Proposal:**
-- Document the rationale at both call sites.
-- Or fold the pre-sanitization into `load_telegram_bot_file` for callers that want a "clean view."
-
-## `standalone_telegram_bot_token_has_context` lacks `///` doc comment for closed-allowlist contract
-
-**Severity:** Note - the new `standalone_telegram_bot_token_has_context` function and the relaxed 6-digit threshold land together with no `///` doc comment on either `standalone_telegram_bot_token_end` or `standalone_telegram_bot_token_has_context` explaining the contract.
-
-`src/telegram.rs:353-388`. The marker list (`bottoken=`, `bot_token=`, `bot-token=`, `token=`, `Bearer`) is hand-curated; a future contributor adding logging for a new token-bearing field would have no signal that they need to extend this list to maintain redaction.
-
-**Current behavior:**
-- No `///` doc comment on either standalone-redaction helper.
-- Marker list is the de-facto contract but not documented.
-- Defensive code without comments rots silently.
-
-**Proposal:**
-- Add `///` doc comments stating: (1) the function only redacts tokens with a recognized leading marker, (2) the marker list is the authoritative allowlist, (3) any new token-bearing log shape must extend the marker list or rely on the URL redactor, (4) the bearer context exists because `Authorization: Bearer ...` is conventional.
+- Move/duplicate the contract comment onto `standalone_telegram_bot_token_has_context` and the inline allowlist literal, listing the marker list as authoritative and instructing future contributors to extend it when adding token-bearing log shapes.
 
 ## `useSessionRenderCallbacks` gains three new required props without optional fallbacks
 
@@ -735,17 +941,49 @@ Acceptable for now since there's a single caller; flagging for future re-use of 
 
 ## Single test bundles five Telegram redaction assertions
 
-**Severity:** Note - `telegram_log_sanitizer_redacts_bot_tokens_and_truncates` bundles five independent assertions (URL redaction + truncation, standalone `=`-delimited, colon-delimited, benign three-shape passthrough, malformed `/bot/bot/`). Same pattern bugs.md previously called out for the connection-test classifier. A failure deep inside makes the line number unhelpful.
+**Severity:** Note - `telegram_log_sanitizer_redacts_bot_tokens_and_truncates` bundles five independent assertions (URL redaction + truncation, standalone `=`-delimited, colon-delimited, benign three-shape passthrough, malformed `/bot/bot/`). Round-63 added another bundled test, `telegram_standalone_token_redaction_respects_context_and_thresholds`, with 11 disjoint assertions — the same anti-pattern. Same pattern bugs.md previously called out for the connection-test classifier. A failure deep inside makes the line number unhelpful.
 
-`src/tests/telegram.rs:630-660`.
+`src/tests/telegram.rs:630-660` and `:662-722`. Plus round-63 added `telegram_settings_validation_does_not_partially_mutate_on_other_error_paths` which bundles three independent error paths.
 
 **Current behavior:**
-- One `#[test]` function asserts five disjoint shapes.
-- Failure messages cluster at one location.
+- Three bundled tests now exhibit the pattern.
+- Failure messages cluster at one location each.
 
 **Proposal:**
-- Split into per-shape `#[test]` functions.
+- Split each into per-shape `#[test]` functions.
 - Or use a small `(input, expected_substring_present, expected_substring_absent)` table and one helper.
+
+## `useSessionRenderCallbacks` hard-imports `delegation-commands` and `delegation-result-prompt`
+
+**Severity:** Note - the hook at `ui/src/SessionPaneView.render-callbacks.tsx:13-20` imports `delegation-commands` and `delegation-result-prompt` directly. Any test of `useSessionRenderCallbacks` must mock `delegation-commands` (the round-63 test file does at line 16-20). A future refactor to swap delegation transports requires re-wiring the hook.
+
+Inverting the dependency would let the parent inject the action handlers.
+
+**Current behavior:**
+- Hook directly imports network-API module.
+- Tests must mock the imports at the module level.
+- Future transport swap requires hook rewrite.
+
+**Proposal:**
+- Pass `delegationActions: { open, insert, cancel }` as hook props (defaulting to the production wrappers in `SessionPaneView.tsx`).
+- Or expose a `DelegationActionContext` provider so consumers can override.
+
+## Standalone redactor precision-vs-recall trade-off documented for future reviewers
+
+**Severity:** Note - round-63 fundamentally inverted the standalone-token redactor: from "redact everything matching the shape" (round 62) to "redact only with key-context or bearer-context." The new gate trades recall for precision. The bug ledger pre-round-63 noted the prior behavior leaked under foreign-token false positives (Low) and unanticipated formats (Medium).
+
+The new design fixes the false-positive Low (verified by `accessToken=` and `csrfToken =` tests) but leaves the Medium concern partially open: tokens still leak when they appear in unanticipated structures (JSON arrays without keys, free-prose mentions, code spans, YAML lists, anything where the standalone token isn't preceded by `=`/`:` + approved key, or the alphabetic word "bearer"). The `unanchored = "trace value <token>"` test fixture documents this as deliberate.
+
+`src/telegram.rs:353-388`.
+
+**Current behavior:**
+- Closed-allowlist redaction.
+- Tokens in unanticipated formats (no key context, no Bearer prefix) leak by design.
+- Test fixture `unanchored` pins the trade-off.
+
+**Proposal:**
+- Add a comment to `redact_standalone_telegram_bot_tokens` explaining the precision-over-recall choice and listing the formats that intentionally leak so future contributors understand the design intent.
+- Reconsider if telemetry shows real leaks.
 
 ## Copy/rename Git staging pathspec branch lacks coverage
 
@@ -2696,18 +2934,20 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - Drop or overwrite superseded snapshots before they can accumulate in memory.
 - Add a burst test that publishes multiple large snapshots while the broadcaster is delayed and asserts only the latest snapshot is retained.
 
-## Untracked round-63 diff artifacts are present in the repo root
+## Staged round-63 diff artifacts are present in the repo root
 
-**Severity:** Note - `Ctmpround63_rust_main.diff`, `Ctmpround63_rust_tests.diff`, and `Ctmpround63_unstaged_ui.diff` are untracked generated diff captures.
+**Severity:** Low - `Ctmpround63_rust_main.diff`, `Ctmpround63_rust_tests.diff`, and `Ctmpround63_unstaged_ui.diff` are staged generated diff captures.
 
-The files are not product code or test assets. If they remain in the worktree, they can pollute commit selection and duplicate source patches during future reviews.
+The files are not product code or test assets. They duplicate review diffs, add noisy staged lines, use an unusual private-use filename character, and currently make `git diff --cached --check` fail on trailing whitespace.
 
 **Current behavior:**
-- Three generated diff artifacts are untracked at the repository root.
-- They are included by `git status --short` but not by `git diff --name-only`.
+- Three generated diff artifacts are staged at the repository root.
+- `git diff --cached --check` reports trailing whitespace in all three files.
+- They are included by `git diff --cached --name-only`.
 
 **Proposal:**
-- Remove the artifacts before committing, or add an appropriate local ignore pattern if they are intentionally regenerated.
+- Remove or unstage the artifacts before committing.
+- Add an appropriate local ignore pattern if they are intentionally regenerated.
 
 ## Implementation Tasks
 
@@ -2893,20 +3133,44 @@ The files are not product code or test assets. If they remain in the worktree, t
   export the helper (or a thin shim) and add unit tests for cross-session, empty previous window, no growth, partial overlap, no first-message match, and contiguous match at index 0.
 - [ ] P2: Pin `mountedRangeWillChange` early-return absence of stale-rect scroll write:
   during the prepend integration test, capture `harness.scrollWrites` between the prepend and the followup effect and assert no scroll write lands at the stale `targetScrollTop` value computed from pre-mutation rects.
-- [ ] P2: Add Telegram-specific redaction key tests:
-  cover key contexts such as `telegram_bot_token=123456:<secret>`, `telegramBotToken=123456:<secret>`, and `TERMAL_TELEGRAM_BOT_TOKEN=123456:<secret>`. Split bundled sanitizer assertions into per-shape tests if they keep growing.
+- [ ] P2: Split bundled Telegram sanitizer assertions:
+  break `telegram_log_sanitizer_redacts_bot_tokens_and_truncates` and `telegram_standalone_token_redaction_respects_context_and_thresholds` into focused per-shape tests so URL redaction, key contexts, bearer contexts, thresholds, and false-positive avoidance fail independently.
+- [ ] P2: Cover generic Telegram-shaped `token=` redaction:
+  add a sanitizer regression for `token=123456:<secret>` (and `token: 123456:<secret>`) once the generic-token recall decision is fixed, alongside negative cases for `accessToken` and `csrfToken`.
 - [ ] P2: Add wheel/scrollTop demand-hydration boundary tests:
   add `deltaY: -7` (below threshold) and `deltaY: -8` (at threshold) cases, plus `scrollTop: 160` vs `161` cases to pin the constants.
 - [ ] P2: Add `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` boundary test:
   add a 100-message session test asserting `fetchSessionTail` is NOT called, and a 101-message session test asserting it IS called.
+- [ ] P2: Pin `handleCancelParallelAgent` success path with explicit assertions:
+  add a `cancelDelegationCommand.mockResolvedValueOnce(...)` test asserting `onComposerError` was NOT called and that whichever success-path UX signal is chosen (e.g., transient toast or composer-notice clear) actually fires.
+- [ ] P2: Add unsafe-input handling assertions for `formatDelegationResultPrompt`:
+  add a test with multi-line summary, multi-line finding message, and a finding whose message starts with `- `, and assert a clear untrusted-output boundary or escaping behavior before inserted child-agent output reaches the parent prompt.
+- [ ] P2: Add Rust default-construction pinning for `ParallelAgentProgress.source`:
+  add a Rust test driving the `delegations.rs` production path (e.g., `add_parent_delegation_card_locked` / dispatch) and asserts `latest[0].source == ParallelAgentSource::Delegation`. Round-64 covers the claude.rs path; the delegations.rs path is still uncovered.
+- [ ] P2: Pin `parallelAgentsUpdate` SSE-envelope source field:
+  extend a `parallelAgentsUpdate` SSE delta-event test to assert the JSON shape of `agents[0].source` end-to-end via a real recorder fixture, not a struct-level `serde_json::to_value`. A `#[serde(skip)]` regression on the delta event would still pass the existing struct tests.
+- [ ] P2: Replace bundled `..._handles_escaped_and_telegram_specific_contexts` test with per-shape `#[test]`s:
+  promote each of the six assertions (escaped JSON, Bearer:, lowercase bearer-colon, snake-case key, camel-case key, env-var key) to its own `#[test]`. Same for the prior 12-case bundled test and the `ambiguous_token_key` behavior flip.
+- [ ] P2: Drop or repurpose the duplicate `tests/http_routes.rs` `parallel_agent_progress_source_serializes_with_wire_values` test:
+  the `tests/mod.rs` version is a strict superset (also tests deserialization). Either delete the http_routes.rs duplicate or repurpose it to assert the SSE/state envelope wire shape.
+- [ ] P2: Add `Bearer = <token>` regression for `standalone_telegram_bot_token_has_bearer_context`:
+  round-64 added `:` separator handling but `=` is still missing. Add a regression test for `Authorization=Bearer <token>` and `Bearer = <token>` shapes once the implementation is updated.
+- [ ] P2: Add StrictMode + click-then-switch tests for delegation handlers:
+  exercise React 18 StrictMode effect-replay and pane-switch-mid-await for open/insert/cancel/error paths, asserting no stale callback fires after switch and `mountedRef`-gated state remains responsive after replay.
+- [ ] P2: Pin `event.target === node` mousedown guard with negative case:
+  add a sibling test that fires `mouseDown` on a child of `scrollNode` (e.g., a virtualized message slot) and asserts hydration does NOT occur. Round-63's isolated test only fires mouseDown directly on the scrollNode.
+- [ ] P2: Cover MessageCard pending-action across all action types:
+  the existing pending-action test only covers cancel. Add sibling tests for `Open session` and `Insert result`, asserting duplicate clicks on the same action are suppressed while unrelated action buttons keep their documented per-action pending behavior.
+- [ ] P2: Cover ParallelAgentsCard tool-source no-callback assertion:
+  in addition to the existing "no buttons rendered" assertion, also assert that `onCancelParallelAgent` / `onOpenParallelAgentSession` / `onInsertParallelAgentResult` were NOT called with the tool agent's id (defense in depth).
 - [ ] P2: Add delegation handler integration tests:
-  extend the render-callback coverage for no-op when `activeSession` is null, session switch before command settlement, and unmount safety for success and error paths (clicked -> switch/unmount -> no stale open/insert/error callback).
-- [ ] P2: Add `MessageCard` parallel-agent action comparator coverage:
-  rerender the same parallel-agent message with changed `onOpenParallelAgentSession`, `onInsertParallelAgentResult`, and `onCancelParallelAgent` handlers, then assert the latest handlers are invoked.
+  extend the render-callback coverage for session switch before command settlement, unmount safety, and React StrictMode effect replay for success and error paths (clicked -> switch/unmount/replay -> no stale open/insert/error callback).
 - [ ] P2: Add `ParallelAgentsCard` pending-action unmount coverage:
-  click an async action, unmount before the promise settles, resolve/reject the promise, and assert the pending-state cleanup cannot update after unmount.
+  click an async action, unmount before the promise settles, resolve/reject the promise, and assert the pending-state cleanup cannot update after unmount. Add a StrictMode-mounted case proving settled actions clear the visible busy state.
 - [ ] P2: Assert serialized parallel-agent `source` values:
   extend a backend parallel-agents SSE/delta or delegation-card test to assert Claude task agents emit `source: "tool"` and delegation cards emit `source: "delegation"`.
+- [ ] P2: Add source-only parallel-agent reconciliation coverage:
+  feed `reconcileSessions` a full-state snapshot where a `parallelAgents` row changes only `source`, and assert the message object is replaced and `messageChangeMarker` changes if source-only updates affect rendered actions.
 - [ ] P2: Pin session-id guard in scheduled refresh callbacks:
   extend the controller test harness so a `rerender({ sessionId: "session-b", messageCount: 90 })` between a schedule and the flush asserts the layout snapshot is NOT updated to the stale session-a result, and the new session's later flush wins.
 - [ ] P2: Add unmount-while-pending tests for new rAF schedulers:

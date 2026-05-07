@@ -133,10 +133,9 @@ export function useSessionRenderCallbacks({
   sessionFindQuery,
   sessionSettingNotice,
 }: UseSessionRenderCallbacksParams) {
-  const mountedRef = useRef(false);
+  const mountedRef = useRef(true);
   const activeSessionIdRef = useRef<string | null>(activeSession?.id ?? null);
   useEffect(() => {
-    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -191,7 +190,15 @@ export function useSessionRenderCallbacks({
           if (!canApplyDelegationActionResult(parentSessionId)) {
             return;
           }
-          onOpenConversationFromDiff(response.childSessionId, paneId);
+          const childSessionId =
+            typeof response.childSessionId === "string"
+              ? response.childSessionId.trim()
+              : "";
+          if (!childSessionId) {
+            onComposerError("Delegation child session is unavailable.");
+            return;
+          }
+          onOpenConversationFromDiff(childSessionId, paneId);
         } catch (error) {
           if (canApplyDelegationActionResult(parentSessionId)) {
             onComposerError(getErrorMessage(error));

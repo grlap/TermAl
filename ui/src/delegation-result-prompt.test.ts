@@ -19,6 +19,110 @@ describe("formatDelegationResultPrompt", () => {
     );
   });
 
+  it("formats only the summary when optional sections are absent", () => {
+    expect(
+      formatDelegationResultPrompt({
+        childSessionId: "child-1",
+        status: "completed",
+        summary: "Reviewed changes.",
+      }),
+    ).toBe(
+      [
+        "Delegation result (completed) from child-1:",
+        "",
+        "Reviewed changes.",
+      ].join("\n"),
+    );
+  });
+
+  it("formats findings independently", () => {
+    expect(
+      formatDelegationResultPrompt({
+        childSessionId: "child-1",
+        status: "completed",
+        summary: "Reviewed changes.",
+        findings: [
+          {
+            severity: "High",
+            file: "src/main.rs",
+            line: 42,
+            message: "Bug found",
+          },
+        ],
+      }),
+    ).toBe(
+      [
+        "Delegation result (completed) from child-1:",
+        "",
+        "Reviewed changes.",
+        "",
+        "Findings:",
+        "- High src/main.rs:42: Bug found",
+      ].join("\n"),
+    );
+  });
+
+  it("formats changed files independently", () => {
+    expect(
+      formatDelegationResultPrompt({
+        childSessionId: "child-1",
+        status: "completed",
+        summary: "Reviewed changes.",
+        changedFiles: ["src/main.rs"],
+      }),
+    ).toBe(
+      [
+        "Delegation result (completed) from child-1:",
+        "",
+        "Reviewed changes.",
+        "",
+        "Changed files:",
+        "- src/main.rs",
+      ].join("\n"),
+    );
+  });
+
+  it("formats command results independently", () => {
+    expect(
+      formatDelegationResultPrompt({
+        childSessionId: "child-1",
+        status: "completed",
+        summary: "Reviewed changes.",
+        commandsRun: [{ command: "cargo check", status: "success" }],
+      }),
+    ).toBe(
+      [
+        "Delegation result (completed) from child-1:",
+        "",
+        "Reviewed changes.",
+        "",
+        "Commands run:",
+        "- cargo check",
+        "  Status: success",
+      ].join("\n"),
+    );
+  });
+
+  it("formats notes independently", () => {
+    expect(
+      formatDelegationResultPrompt({
+        childSessionId: "child-1",
+        status: "completed",
+        summary: "Reviewed changes.",
+        notes: ["Needs follow-up"],
+      }),
+    ).toBe(
+      [
+        "Delegation result (completed) from child-1:",
+        "",
+        "Reviewed changes.",
+        "",
+        "Notes:",
+        "- Needs follow-up",
+      ].join("\n"),
+    );
+  });
+
   it("formats all optional result sections", () => {
     expect(
       formatDelegationResultPrompt({

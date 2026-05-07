@@ -594,6 +594,7 @@ describe("delegation delta repair", () => {
           agents: [
             {
               id: "delegation-1",
+              source: "delegation",
               title: "Review",
               status: "running",
               summary: "Reviewing",
@@ -684,6 +685,7 @@ describe("delegation delta repair", () => {
           agents: [
             {
               id: "delegation-1",
+              source: "delegation",
               title: "Review",
               status: "running",
               summary: "Reviewing",

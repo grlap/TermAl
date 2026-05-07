@@ -96,6 +96,42 @@ fn format_runtime_stderr_prefix_includes_timestamp_and_label() {
 }
 
 #[test]
+fn parallel_agent_source_serializes_wire_contract() {
+    let delegation = ParallelAgentProgress {
+        detail: None,
+        id: "delegation-1".to_owned(),
+        source: ParallelAgentSource::Delegation,
+        status: ParallelAgentStatus::Running,
+        title: "Reviewer".to_owned(),
+    };
+    let tool = ParallelAgentProgress {
+        detail: None,
+        id: "toolu-1".to_owned(),
+        source: ParallelAgentSource::Tool,
+        status: ParallelAgentStatus::Completed,
+        title: "Claude task".to_owned(),
+    };
+
+    let delegation_value = serde_json::to_value(&delegation).expect("serializes");
+    let tool_value = serde_json::to_value(&tool).expect("serializes");
+
+    assert_eq!(delegation_value["source"], json!("delegation"));
+    assert_eq!(tool_value["source"], json!("tool"));
+    assert_eq!(
+        serde_json::from_value::<ParallelAgentProgress>(delegation_value)
+            .expect("deserializes delegation source")
+            .source,
+        ParallelAgentSource::Delegation
+    );
+    assert_eq!(
+        serde_json::from_value::<ParallelAgentProgress>(tool_value)
+            .expect("deserializes tool source")
+            .source,
+        ParallelAgentSource::Tool
+    );
+}
+
+#[test]
 fn stamp_now_includes_seconds() {
     let timestamp = stamp_now();
     let parts: Vec<&str> = timestamp.split(':').collect();

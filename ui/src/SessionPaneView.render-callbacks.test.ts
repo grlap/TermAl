@@ -1,5 +1,14 @@
-import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  within,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cancelDelegationCommand,
   getDelegationResultCommand,
@@ -17,6 +26,11 @@ vi.mock("./delegation-commands", () => ({
   getDelegationResultCommand: vi.fn(),
   getDelegationStatusCommand: vi.fn(),
 }));
+
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+});
 
 function makeSession(
   status: Session["status"],
@@ -198,6 +212,42 @@ describe("SessionPaneView render callbacks", () => {
     );
   });
 
+  it("reports an unavailable delegation child session instead of navigating", async () => {
+    vi.mocked(getDelegationStatusCommand).mockResolvedValueOnce({
+      delegationId: "delegation-1",
+      childSessionId: "  ",
+      status: "canceled",
+      delegation: {
+        id: "delegation-1",
+        parentSessionId: "session-1",
+        childSessionId: "",
+        mode: "reviewer",
+        status: "canceled",
+        title: "Review",
+        agent: "Codex",
+        model: null,
+        writePolicy: { kind: "readOnly" },
+        createdAt: "now",
+        startedAt: "now",
+        completedAt: "now",
+        result: null,
+      },
+      revision: 2,
+      serverInstanceId: "server-1",
+    });
+    const { params } = renderCallbacks();
+    renderDelegationCard(params);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open session" }));
+
+    await waitFor(() =>
+      expect(params.onComposerError).toHaveBeenCalledWith(
+        "Delegation child session is unavailable.",
+      ),
+    );
+    expect(params.onOpenConversationFromDiff).not.toHaveBeenCalled();
+  });
+
   it("inserts delegation results through the command wrapper", async () => {
     vi.mocked(getDelegationResultCommand).mockResolvedValueOnce({
       delegationId: "delegation-1",
@@ -252,6 +302,56 @@ describe("SessionPaneView render callbacks", () => {
     );
   });
 
+  it("tags non-completed delegation results when inserting them", async () => {
+    vi.mocked(getDelegationResultCommand).mockResolvedValueOnce({
+      delegationId: "delegation-1",
+      childSessionId: "child-1",
+      status: "failed",
+      summary: "Could not finish.",
+      findings: [],
+      changedFiles: [],
+      commandsRun: [],
+      notes: [],
+      revision: 2,
+      serverInstanceId: "server-1",
+    });
+    const { params, hook } = renderCallbacks();
+    const element = hook.result.current.renderSessionMessageCard(
+      {
+        id: "delegations",
+        type: "parallelAgents",
+        author: "assistant",
+        timestamp: "10:10",
+        agents: [
+          {
+            id: "delegation-1",
+            source: "delegation",
+            title: "Review",
+            status: "error",
+            detail: "Failed",
+          },
+        ],
+      },
+      false,
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+    );
+    render(element);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show tasks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Insert result" }));
+
+    await waitFor(() =>
+      expect(params.onInsertReviewIntoPrompt).toHaveBeenCalledWith(
+        "session-1",
+        "pane-1",
+        "Delegation result (failed) from child-1:\n\nCould not finish.",
+      ),
+    );
+  });
+
   it("cancels delegations through the command wrapper and reports errors", async () => {
     vi.mocked(cancelDelegationCommand).mockRejectedValueOnce(
       new Error("delegation not found"),
@@ -270,5 +370,57 @@ describe("SessionPaneView render callbacks", () => {
       "session-1",
       "delegation-1",
     );
+  });
+
+  it("does not call delegation commands without an active session", async () => {
+    const { hook } = renderCallbacks({ activeSession: null });
+    const element = hook.result.current.renderSessionMessageCard(
+      {
+        id: "delegations",
+        type: "parallelAgents",
+        author: "assistant",
+        timestamp: "10:10",
+        agents: [
+          {
+            id: "delegation-running",
+            source: "delegation",
+            title: "Running review",
+            status: "running",
+            detail: "Running",
+          },
+          {
+            id: "delegation-completed",
+            source: "delegation",
+            title: "Completed review",
+            status: "completed",
+            detail: "Done",
+          },
+        ],
+      },
+      false,
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+    );
+    render(element);
+
+    const rows = screen.getAllByRole("listitem");
+    await act(async () => {
+      fireEvent.click(
+        within(rows[0]!).getByRole("button", { name: "Open session" }),
+      );
+      fireEvent.click(
+        within(rows[0]!).getByRole("button", { name: "Cancel" }),
+      );
+      fireEvent.click(
+        within(rows[1]!).getByRole("button", { name: "Insert result" }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(getDelegationStatusCommand).not.toHaveBeenCalled();
+    expect(getDelegationResultCommand).not.toHaveBeenCalled();
+    expect(cancelDelegationCommand).not.toHaveBeenCalled();
   });
 });

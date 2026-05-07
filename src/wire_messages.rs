@@ -117,15 +117,25 @@ struct ParallelAgentProgress {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
     id: String,
+    /// Discriminates which subsystem owns `id`. Delegation rows carry a
+    /// TermAl delegation id that can be routed to delegation APIs; tool rows
+    /// carry an opaque tool-use id and must not be used as delegation ids.
     source: ParallelAgentSource,
     status: ParallelAgentStatus,
     title: String,
 }
 
+/// Identifies the producer of a parallel-agent progress row.
+///
+/// Adding a variant is a wire-contract change: update all UI consumers and
+/// routing gates so only delegation-owned rows expose delegation actions.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 #[serde(rename_all = "camelCase")]
 enum ParallelAgentSource {
+    /// TermAl delegation id, routable through delegation status/result/cancel commands.
     Delegation,
+    /// Agent-runtime tool id, shown as progress only and not routable as a delegation.
     Tool,
 }
 

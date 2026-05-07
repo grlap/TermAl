@@ -483,6 +483,30 @@ fn local_streaming_delta_events_include_message_count() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+#[test]
+fn parallel_agent_progress_source_serializes_with_wire_values() {
+    let delegation_agent = ParallelAgentProgress {
+        detail: None,
+        id: "delegation-1".to_owned(),
+        source: ParallelAgentSource::Delegation,
+        status: ParallelAgentStatus::Running,
+        title: "Reviewer".to_owned(),
+    };
+    let delegation_value =
+        serde_json::to_value(&delegation_agent).expect("delegation agent should encode");
+    assert_eq!(delegation_value["source"], json!("delegation"));
+
+    let tool_agent = ParallelAgentProgress {
+        detail: None,
+        id: "toolu-1".to_owned(),
+        source: ParallelAgentSource::Tool,
+        status: ParallelAgentStatus::Running,
+        title: "Claude Task".to_owned(),
+    };
+    let tool_value = serde_json::to_value(&tool_agent).expect("tool agent should encode");
+    assert_eq!(tool_value["source"], json!("tool"));
+}
+
 // Tests that the empty SSE fallback payload carries an explicit fallback marker.
 #[test]
 fn empty_state_events_payload_carries_explicit_fallback_marker() {

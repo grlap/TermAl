@@ -240,11 +240,13 @@ fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result
 
 fn backup_corrupt_telegram_bot_file(path: &FsPath, err: impl std::fmt::Display) -> Result<()> {
     let backup_path = corrupt_telegram_bot_file_backup_path(path);
+    let err = sanitize_telegram_log_detail(&err.to_string());
     eprintln!(
         "telegram> failed to parse `{}`: {err}; moving corrupt file to `{}`",
         path.display(),
         backup_path.display()
     );
+    harden_telegram_bot_file_permissions(path)?;
     match fs::rename(path, &backup_path) {
         Ok(()) => {
             harden_telegram_bot_file_permissions(&backup_path)?;
@@ -258,9 +260,9 @@ fn backup_corrupt_telegram_bot_file(path: &FsPath, err: impl std::fmt::Display) 
                     backup_path.display()
                 )
             })?;
+            harden_telegram_bot_file_permissions(&backup_path)?;
             fs::remove_file(path)
                 .with_context(|| format!("failed to remove corrupt `{}`", path.display()))?;
-            harden_telegram_bot_file_permissions(&backup_path)?;
             Ok(())
         }
     }
@@ -309,6 +311,8 @@ fn redact_telegram_bot_url_tokens(detail: &str) -> String {
         output.push_str(before);
         let token_end = after_marker.find('/').unwrap_or(after_marker.len());
         if token_end == 0 {
+            // `/bot/` is malformed for Telegram, but can appear in failed URL
+            // logs. Advance by one byte so redaction cannot loop forever.
             if after_marker.is_empty() {
                 remainder = after_marker;
                 break;
@@ -350,6 +354,9 @@ fn redact_standalone_telegram_bot_tokens(detail: &str) -> String {
     output
 }
 
+/// Returns the token end when a Telegram-shaped standalone token appears in a
+/// known token-bearing context. Unanchored digit/secret pairs are intentionally
+/// left visible to avoid redacting benign log fields like `12345:67890123`.
 fn standalone_telegram_bot_token_end(detail: &str, start: usize) -> Option<usize> {
     const MIN_BOT_ID_DIGITS: usize = 6;
     const MIN_TOKEN_SECRET_CHARS: usize = 35;
@@ -389,11 +396,7 @@ fn standalone_telegram_bot_token_end(detail: &str, start: usize) -> Option<usize
 
 fn standalone_telegram_bot_token_has_context(detail: &str, start: usize) -> bool {
     let bytes = detail.as_bytes();
-    let mut cursor = trim_ascii_whitespace_left(bytes, start);
-    if cursor > 0 && telegram_token_quote_byte(bytes[cursor - 1]) {
-        cursor -= 1;
-        cursor = trim_ascii_whitespace_left(bytes, cursor);
-    }
+    let cursor = trim_telegram_token_quote_left(bytes, trim_ascii_whitespace_left(bytes, start));
 
     standalone_telegram_bot_token_has_key_context(detail, cursor)
         || standalone_telegram_bot_token_has_bearer_context(detail, cursor)
@@ -405,11 +408,7 @@ fn standalone_telegram_bot_token_has_key_context(detail: &str, cursor: usize) ->
         return false;
     }
 
-    let mut key_end = trim_ascii_whitespace_left(bytes, cursor - 1);
-    if key_end > 0 && telegram_token_quote_byte(bytes[key_end - 1]) {
-        key_end -= 1;
-        key_end = trim_ascii_whitespace_left(bytes, key_end);
-    }
+    let key_end = trim_telegram_token_quote_left(bytes, trim_ascii_whitespace_left(bytes, cursor - 1));
 
     let mut key_start = key_end;
     while key_start > 0 && telegram_token_key_byte(bytes[key_start - 1]) {
@@ -420,13 +419,27 @@ fn standalone_telegram_bot_token_has_key_context(detail: &str, cursor: usize) ->
     }
 
     let key = &detail[key_start..key_end];
-    ["botToken", "bot_token", "bot-token", "token"]
+    [
+        "botToken",
+        "bot_token",
+        "bot-token",
+        "telegramBotToken",
+        "telegram_bot_token",
+        "telegram-bot-token",
+        "termal_telegram_bot_token",
+        "TERMAL_TELEGRAM_BOT_TOKEN",
+    ]
         .iter()
         .any(|candidate| key.eq_ignore_ascii_case(candidate))
 }
 
 fn standalone_telegram_bot_token_has_bearer_context(detail: &str, cursor: usize) -> bool {
     let bytes = detail.as_bytes();
+    let cursor = if cursor > 0 && bytes[cursor - 1] == b':' {
+        trim_ascii_whitespace_left(bytes, cursor - 1)
+    } else {
+        cursor
+    };
     let mut word_start = cursor;
     while word_start > 0 && bytes[word_start - 1].is_ascii_alphabetic() {
         word_start -= 1;
@@ -434,6 +447,18 @@ fn standalone_telegram_bot_token_has_bearer_context(detail: &str, cursor: usize)
     let word = &detail[word_start..cursor];
     word.eq_ignore_ascii_case("bearer")
         && (word_start == 0 || !telegram_token_boundary_byte(bytes[word_start - 1]))
+}
+
+fn trim_telegram_token_quote_left(bytes: &[u8], mut end: usize) -> usize {
+    if end > 0 && telegram_token_quote_byte(bytes[end - 1]) {
+        end -= 1;
+        if end > 0 && bytes[end - 1] == b'\\' {
+            end -= 1;
+        }
+        trim_ascii_whitespace_left(bytes, end)
+    } else {
+        end
+    }
 }
 
 fn trim_ascii_whitespace_left(bytes: &[u8], mut end: usize) -> usize {

@@ -2063,6 +2063,7 @@ describe("applyDeltaToSessions", () => {
         agents: [
           {
             id: "reviewer",
+            source: "tool" as const,
             title: "Reviewer",
             status: "initializing" as const,
           },
@@ -2078,6 +2079,7 @@ describe("applyDeltaToSessions", () => {
         agents: [
           {
             id: "reviewer",
+            source: "tool" as const,
             title: "Reviewer",
             status: "running",
             detail: "Checking diffs",
@@ -2092,6 +2094,7 @@ describe("applyDeltaToSessions", () => {
         agents: [
           {
             id: "reviewer",
+            source: "tool" as const,
             title: "Reviewer",
             status: "running",
             detail: "Checking diffs",
@@ -2260,6 +2263,7 @@ describe("applyDeltaToSessions", () => {
         agents: [
           {
             id: "reviewer",
+            source: "tool" as const,
             title: "Reviewer",
             status: "initializing" as const,
           },
@@ -2275,6 +2279,7 @@ describe("applyDeltaToSessions", () => {
         agents: [
           {
             id: "reviewer",
+            source: "tool",
             title: "Reviewer",
             status: "running",
             detail: "Checking",
@@ -2856,6 +2861,7 @@ describe("applyDeltaToSessions", () => {
     const agents = [
       {
         id: "reviewer",
+        source: "tool",
         title: "Reviewer",
         status: "running",
         detail: "Checking diffs",
@@ -2982,6 +2988,7 @@ describe("applyDeltaToSessions", () => {
     const agents = [
       {
         id: "reviewer",
+        source: "tool",
         title: "Reviewer",
         status: "running",
         detail: "Checking diffs",
@@ -3238,6 +3245,7 @@ describe("applyDeltaToSessions", () => {
             agents: [
               {
                 id: "reviewer",
+                source: "tool",
                 title: "Reviewer",
                 status: "initializing",
               },
@@ -3256,6 +3264,7 @@ describe("applyDeltaToSessions", () => {
       agents: [
         {
           id: "reviewer",
+          source: "tool",
           title: "Reviewer",
           status: "running",
           detail: "Checking diffs",
@@ -3280,6 +3289,7 @@ describe("applyDeltaToSessions", () => {
       agents: [
         {
           id: "reviewer",
+          source: "tool",
           title: "Reviewer",
           status: "running",
           detail: "Checking diffs",
@@ -3300,6 +3310,7 @@ describe("applyDeltaToSessions", () => {
       agents: [
         {
           id: "reviewer",
+          source: "tool",
           title: "Reviewer",
           status: "running",
         },

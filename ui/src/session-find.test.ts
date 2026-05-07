@@ -133,12 +133,14 @@ describe("session find helpers", () => {
           agents: [
             {
               id: "task-1",
+              source: "tool",
               title: "Rust code review",
               status: "completed",
               detail: "Reviewer found a batching bug in location smoothing.",
             },
             {
               id: "task-2",
+              source: "tool",
               title: "Architecture code review",
               status: "initializing",
               detail: "Initializing...",

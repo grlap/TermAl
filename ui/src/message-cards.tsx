@@ -596,6 +596,9 @@ export const MessageCard = memo(
     previous.onUserInputSubmit === next.onUserInputSubmit &&
     previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
     previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
+    previous.onOpenParallelAgentSession === next.onOpenParallelAgentSession &&
+    previous.onInsertParallelAgentResult === next.onInsertParallelAgentResult &&
+    previous.onCancelParallelAgent === next.onCancelParallelAgent &&
     previous.searchQuery === next.searchQuery &&
     previous.searchHighlightTone === next.searchHighlightTone &&
     previous.isLatestAssistantMessage === next.isLatestAssistantMessage &&
@@ -2069,10 +2072,20 @@ function ParallelAgentsCard({
   searchHighlightTone?: SearchHighlightTone;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
+  const pendingActionKeysRef = useRef<ReadonlySet<string>>(new Set());
+  const mountedRef = useRef(true);
+  const [pendingActionKeys, setPendingActionKeys] = useState<ReadonlySet<string>>(
+    pendingActionKeysRef.current,
+  );
   const isSearchExpanded = searchQuery.trim().length > 0;
   const hasActiveAgents = message.agents.some(
     (agent) => agent.status === "initializing" || agent.status === "running",
+  );
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
   );
   useEffect(() => {
     if (hasActiveAgents) {
@@ -2083,22 +2096,47 @@ function ParallelAgentsCard({
   const isExpanded = hasActiveAgents || isSearchExpanded || expanded;
   const heading = parallelAgentsHeading(message);
   const summary = parallelAgentsSummary(message);
+  const markActionPending = (actionKey: string) => {
+    if (pendingActionKeysRef.current.has(actionKey)) {
+      return false;
+    }
+    const nextKeys = new Set(pendingActionKeysRef.current);
+    nextKeys.add(actionKey);
+    pendingActionKeysRef.current = nextKeys;
+    setPendingActionKeys(nextKeys);
+    return true;
+  };
+  const clearActionPending = (actionKey: string) => {
+    if (!pendingActionKeysRef.current.has(actionKey)) {
+      return;
+    }
+    const nextKeys = new Set(pendingActionKeysRef.current);
+    nextKeys.delete(actionKey);
+    pendingActionKeysRef.current = nextKeys;
+    if (mountedRef.current) {
+      setPendingActionKeys(nextKeys);
+    }
+  };
   const runAgentAction = (
     actionKey: string,
     action: () => Promise<void> | void,
   ) => {
-    if (pendingActionKey !== null) {
+    if (!markActionPending(actionKey)) {
       return;
     }
-    const result = action();
+    let result: Promise<void> | void;
+    try {
+      result = action();
+    } catch (error) {
+      clearActionPending(actionKey);
+      throw error;
+    }
     if (!result || typeof result.then !== "function") {
+      clearActionPending(actionKey);
       return;
     }
-    setPendingActionKey(actionKey);
     void result.finally(() => {
-      setPendingActionKey((current) =>
-        current === actionKey ? null : current,
-      );
+      clearActionPending(actionKey);
     });
   };
 
@@ -2139,6 +2177,12 @@ function ParallelAgentsCard({
             const hasAgentActions =
               isDelegationAgent &&
               (onOpenAgentSession || onInsertAgentResult || onCancelAgent);
+            const openActionKey = `${agent.id}:open`;
+            const insertActionKey = `${agent.id}:insert`;
+            const cancelActionKey = `${agent.id}:cancel`;
+            const isOpenPending = pendingActionKeys.has(openActionKey);
+            const isInsertPending = pendingActionKeys.has(insertActionKey);
+            const isCancelPending = pendingActionKeys.has(cancelActionKey);
             return (
               <li
                 key={agent.id}
@@ -2184,9 +2228,10 @@ function ParallelAgentsCard({
                           <button
                             className="ghost-button parallel-agent-action"
                             type="button"
-                            disabled={pendingActionKey !== null}
+                            disabled={isOpenPending}
+                            aria-busy={isOpenPending}
                             onClick={() =>
-                              runAgentAction(`${agent.id}:open`, () =>
+                              runAgentAction(openActionKey, () =>
                                 onOpenAgentSession(agent.id),
                               )
                             }
@@ -2200,9 +2245,10 @@ function ParallelAgentsCard({
                           <button
                             className="ghost-button parallel-agent-action"
                             type="button"
-                            disabled={pendingActionKey !== null}
+                            disabled={isInsertPending}
+                            aria-busy={isInsertPending}
                             onClick={() =>
-                              runAgentAction(`${agent.id}:insert`, () =>
+                              runAgentAction(insertActionKey, () =>
                                 onInsertAgentResult(agent.id),
                               )
                             }
@@ -2216,9 +2262,10 @@ function ParallelAgentsCard({
                           <button
                             className="ghost-button parallel-agent-action parallel-agent-action-danger"
                             type="button"
-                            disabled={pendingActionKey !== null}
+                            disabled={isCancelPending}
+                            aria-busy={isCancelPending}
                             onClick={() =>
-                              runAgentAction(`${agent.id}:cancel`, () =>
+                              runAgentAction(cancelActionKey, () =>
                                 onCancelAgent(agent.id),
                               )
                             }

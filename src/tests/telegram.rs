@@ -683,9 +683,9 @@ fn telegram_standalone_token_redaction_respects_context_and_thresholds() {
     assert_eq!(bearer, "Authorization: Bearer <redacted>");
 
     let multi = sanitize_telegram_log_detail(&format!(
-        "botToken={six_digit_token} token:{eight_digit_token}"
+        "botToken={six_digit_token} telegramBotToken:{eight_digit_token}"
     ));
-    assert_eq!(multi, "botToken=<redacted> token:<redacted>");
+    assert_eq!(multi, "botToken=<redacted> telegramBotToken:<redacted>");
 
     let short_bot_id = format!("12345:{secret_35}");
     assert_eq!(
@@ -714,11 +714,40 @@ fn telegram_standalone_token_redaction_respects_context_and_thresholds() {
         foreign_spaced_token_key
     );
 
+    let ambiguous_token_key = format!("token={six_digit_token}");
+    assert_eq!(
+        sanitize_telegram_log_detail(&ambiguous_token_key),
+        ambiguous_token_key
+    );
+
     let false_bearer_prefix = format!("notbearer {six_digit_token}");
     assert_eq!(
         sanitize_telegram_log_detail(&false_bearer_prefix),
         false_bearer_prefix
     );
+}
+
+#[test]
+fn telegram_standalone_token_redaction_handles_escaped_and_telegram_specific_contexts() {
+    let token = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi";
+
+    let escaped_json = sanitize_telegram_log_detail(&format!("\\\"botToken\\\": \\\"{token}\\\""));
+    assert_eq!(escaped_json, "\\\"botToken\\\": \\\"<redacted>\\\"");
+
+    let bearer_colon = sanitize_telegram_log_detail(&format!("Authorization: Bearer: {token}"));
+    assert_eq!(bearer_colon, "Authorization: Bearer: <redacted>");
+
+    let lower_bearer_colon = sanitize_telegram_log_detail(&format!("bearer:{token}"));
+    assert_eq!(lower_bearer_colon, "bearer:<redacted>");
+
+    let snake = sanitize_telegram_log_detail(&format!("telegram_bot_token={token}"));
+    assert_eq!(snake, "telegram_bot_token=<redacted>");
+
+    let camel = sanitize_telegram_log_detail(&format!("telegramBotToken={token}"));
+    assert_eq!(camel, "telegramBotToken=<redacted>");
+
+    let env = sanitize_telegram_log_detail(&format!("TERMAL_TELEGRAM_BOT_TOKEN={token}"));
+    assert_eq!(env, "TERMAL_TELEGRAM_BOT_TOKEN=<redacted>");
 }
 
 #[test]

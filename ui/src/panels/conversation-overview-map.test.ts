@@ -105,6 +105,7 @@ describe("conversation overview map", () => {
         agents: [
           {
             id: "agent-1",
+            source: "tool",
             title: "Review",
             status: "running",
           },

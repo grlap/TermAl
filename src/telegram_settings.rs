@@ -48,6 +48,9 @@ impl AppState {
     ) -> Result<TelegramStatusResponse, ApiError> {
         let _guard = telegram_settings_file_guard();
         let mut file = self.load_telegram_bot_file()?;
+        // Stale on-disk project/session references are tolerated before
+        // applying the user's patch; user-supplied unknown ids are still
+        // rejected by validation below.
         file.config = self.sanitize_telegram_config_for_current_state(file.config);
 
         if let Some(enabled) = request.enabled {
@@ -67,6 +70,8 @@ impl AppState {
         }
 
         self.validate_and_normalize_telegram_config(&mut file.config)?;
+        // Re-sanitize after validation so a concurrent project/session delete
+        // cannot leave references that the next status read would hide.
         file.config = self.sanitize_telegram_config_for_current_state(file.config);
         self.persist_telegram_bot_file(&file)?;
 
@@ -393,11 +398,22 @@ fn telegram_test_connection_error(err: anyhow::Error) -> ApiError {
     }
 }
 
+/// Classifies Telegram `getMe` rate limits for `/api/telegram/test`.
+///
+/// Telegram can carry rate-limit information in either the JSON API
+/// `error_code` or the HTTP status, so either signal is enough once the method
+/// is known to be `getMe`.
 fn telegram_getme_error_is_rate_limited(err: &TelegramApiError) -> bool {
     err.method == "getMe"
         && (err.error_code == Some(429) || err.status == StatusCode::TOO_MANY_REQUESTS)
 }
 
+/// Classifies Telegram `getMe` token/auth validation failures.
+///
+/// Unlike rate limits, validation failures require aligned API and HTTP signals
+/// when Telegram supplies an API code. Contradictory envelopes fall back to a
+/// generic upstream failure so token-remediation UI is not shown for ambiguous
+/// Telegram responses.
 fn telegram_getme_error_is_token_validation_failure(err: &TelegramApiError) -> bool {
     if err.method != "getMe" {
         return false;
@@ -453,6 +469,7 @@ fn telegram_settings_file_error(
     path: &FsPath,
     err: impl std::fmt::Display,
 ) -> ApiError {
+    let err = sanitize_telegram_log_detail(&err.to_string());
     eprintln!(
         "telegram settings> failed to {operation} `{}`: {err}",
         path.display()

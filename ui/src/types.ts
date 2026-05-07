@@ -467,7 +467,7 @@ export type ParallelAgentSource = "delegation" | "tool";
 export type ParallelAgentProgress = {
   detail?: string | null;
   id: string;
-  source?: ParallelAgentSource;
+  source: ParallelAgentSource;
   status: ParallelAgentStatus;
   title: string;
 };
