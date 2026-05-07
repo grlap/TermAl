@@ -660,6 +660,68 @@ fn telegram_log_sanitizer_redacts_bot_tokens_and_truncates() {
 }
 
 #[test]
+fn telegram_standalone_token_redaction_respects_context_and_thresholds() {
+    let secret_35 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi";
+    let secret_34 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh";
+    let six_digit_token = format!("123456:{secret_35}");
+    let eight_digit_token = format!("12345678:{secret_35}");
+
+    let documented = sanitize_telegram_log_detail(&format!("botToken={six_digit_token}"));
+    assert_eq!(documented, "botToken=<redacted>");
+
+    let quoted_json = sanitize_telegram_log_detail(&format!("\"botToken\":\"{six_digit_token}\""));
+    assert_eq!(quoted_json, "\"botToken\":\"<redacted>\"");
+
+    let spaced = sanitize_telegram_log_detail(&format!("botToken = {six_digit_token}"));
+    assert_eq!(spaced, "botToken = <redacted>");
+
+    let snake_quoted = sanitize_telegram_log_detail(&format!("bot_token\": \"{six_digit_token}\""));
+    assert_eq!(snake_quoted, "bot_token\": \"<redacted>\"");
+
+    let bearer =
+        sanitize_telegram_log_detail(&format!("Authorization: Bearer {eight_digit_token}"));
+    assert_eq!(bearer, "Authorization: Bearer <redacted>");
+
+    let multi = sanitize_telegram_log_detail(&format!(
+        "botToken={six_digit_token} token:{eight_digit_token}"
+    ));
+    assert_eq!(multi, "botToken=<redacted> token:<redacted>");
+
+    let short_bot_id = format!("12345:{secret_35}");
+    assert_eq!(
+        sanitize_telegram_log_detail(&format!("botToken={short_bot_id}")),
+        format!("botToken={short_bot_id}")
+    );
+
+    let short_secret = format!("12345678:{secret_34}");
+    assert_eq!(
+        sanitize_telegram_log_detail(&format!("botToken={short_secret}")),
+        format!("botToken={short_secret}")
+    );
+
+    let unanchored = format!("trace value {six_digit_token}");
+    assert_eq!(sanitize_telegram_log_detail(&unanchored), unanchored);
+
+    let foreign_token_key = format!("accessToken={six_digit_token}");
+    assert_eq!(
+        sanitize_telegram_log_detail(&foreign_token_key),
+        foreign_token_key
+    );
+
+    let foreign_spaced_token_key = format!("csrfToken : {six_digit_token}");
+    assert_eq!(
+        sanitize_telegram_log_detail(&foreign_spaced_token_key),
+        foreign_spaced_token_key
+    );
+
+    let false_bearer_prefix = format!("notbearer {six_digit_token}");
+    assert_eq!(
+        sanitize_telegram_log_detail(&false_bearer_prefix),
+        false_bearer_prefix
+    );
+}
+
+#[test]
 fn telegram_prompt_limit_uses_utf8_byte_length() {
     assert!(!telegram_prompt_exceeds_byte_limit(
         &"x".repeat(MAX_DELEGATION_PROMPT_BYTES)
@@ -1126,6 +1188,82 @@ fn telegram_settings_validation_does_not_partially_mutate_on_late_errors() {
 }
 
 #[test]
+fn telegram_settings_validation_does_not_partially_mutate_on_other_error_paths() {
+    let state = test_app_state();
+    let (default_project_id, _default_session_id) =
+        create_telegram_settings_project_and_session(&state);
+    let (_other_project_id, other_session_id) =
+        create_telegram_settings_project_and_session(&state);
+    let no_project_session_id = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Telegram Session Without Project".to_owned()),
+            workdir: None,
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("session should create")
+        .session_id;
+
+    let mut unknown_default_project = TelegramUiConfig {
+        default_project_id: Some("missing-project".to_owned()),
+        ..TelegramUiConfig::default()
+    };
+    let err = state
+        .validate_and_normalize_telegram_config(&mut unknown_default_project)
+        .expect_err("unknown default project should fail validation");
+    assert!(err.message.contains("unknown default Telegram project"));
+    assert_eq!(
+        unknown_default_project.default_project_id.as_deref(),
+        Some("missing-project")
+    );
+    assert!(unknown_default_project.subscribed_project_ids.is_empty());
+
+    let mut no_project_session = TelegramUiConfig {
+        default_project_id: Some(default_project_id.clone()),
+        default_session_id: Some(no_project_session_id),
+        ..TelegramUiConfig::default()
+    };
+    let err = state
+        .validate_and_normalize_telegram_config(&mut no_project_session)
+        .expect_err("session without project should fail validation");
+    assert!(
+        err.message
+            .contains("default Telegram session must belong to a project")
+    );
+    assert_eq!(
+        no_project_session.default_project_id.as_deref(),
+        Some(default_project_id.as_str())
+    );
+    assert!(no_project_session.subscribed_project_ids.is_empty());
+
+    let mut mismatched_session_project = TelegramUiConfig {
+        default_project_id: Some(default_project_id.clone()),
+        default_session_id: Some(other_session_id),
+        ..TelegramUiConfig::default()
+    };
+    let err = state
+        .validate_and_normalize_telegram_config(&mut mismatched_session_project)
+        .expect_err("mismatched default session project should fail validation");
+    assert!(
+        err.message
+            .contains("default Telegram session must belong to the default project")
+    );
+    assert_eq!(
+        mismatched_session_project.default_project_id.as_deref(),
+        Some(default_project_id.as_str())
+    );
+    assert!(mismatched_session_project.subscribed_project_ids.is_empty());
+}
+
+#[test]
 fn telegram_status_sanitizes_stale_project_and_session_references() {
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
@@ -1140,6 +1278,91 @@ fn telegram_status_sanitizes_stale_project_and_session_references() {
 
     assert_eq!(sanitized.subscribed_project_ids, vec![project_id]);
     assert_eq!(sanitized.default_session_id, None);
+}
+
+#[test]
+fn telegram_settings_load_defaults_only_for_missing_file() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-settings-load-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let path = state.telegram_bot_file_path();
+
+    let missing = state
+        .load_telegram_bot_file()
+        .expect("missing settings file should default");
+    assert_eq!(missing.config.bot_token, None);
+    assert_eq!(missing.state.chat_id, None);
+
+    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
+        .expect("settings dir should create");
+    fs::create_dir(&path).expect("directory fixture should create");
+
+    let err = match state.load_telegram_bot_file() {
+        Ok(_) => panic!("non-file settings path should fail instead of defaulting"),
+        Err(err) => err,
+    };
+    assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(err.message.contains("failed to read Telegram settings"));
+}
+
+#[test]
+fn telegram_config_update_sanitizes_stale_persisted_references_before_validation() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-stale-config-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
+        .expect("settings dir should create");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "config": {
+                "enabled": false,
+                "botToken": "123456:secret",
+                "subscribedProjectIds": ["missing-project"],
+                "defaultProjectId": "missing-project",
+                "defaultSessionId": "missing-session"
+            },
+            "chatId": 123
+        }))
+        .expect("fixture should encode"),
+    )
+    .expect("fixture should write");
+
+    let request: UpdateTelegramConfigRequest = serde_json::from_value(json!({
+        "enabled": true,
+        "subscribedProjectIds": [project_id.clone()]
+    }))
+    .expect("request should decode");
+    let response = state
+        .update_telegram_config(request)
+        .expect("unrelated update should sanitize stale persisted references");
+
+    assert!(response.enabled);
+    assert_eq!(response.subscribed_project_ids, vec![project_id.clone()]);
+    assert_eq!(response.default_project_id, None);
+    assert_eq!(response.default_session_id, None);
+    assert_eq!(response.linked_chat_id, Some(123));
+
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert_eq!(value["config"]["enabled"], json!(true));
+    assert_eq!(value["config"]["botToken"], json!("123456:secret"));
+    assert_eq!(value["config"]["subscribedProjectIds"], json!([project_id]));
+    assert!(value["config"].get("defaultProjectId").is_none());
+    assert!(value["config"].get("defaultSessionId").is_none());
+    assert_eq!(value["chatId"], json!(123));
 }
 
 #[test]

@@ -474,6 +474,7 @@ fn register_claude_tool_use(
                 ParallelAgentProgress {
                     detail: Some("Initializing...".to_owned()),
                     id: tool_id.to_owned(),
+                    source: ParallelAgentSource::Tool,
                     status: ParallelAgentStatus::Initializing,
                     title: describe_claude_task_tool(
                         description.as_deref(),
@@ -588,6 +589,7 @@ fn handle_claude_task_result(
             ParallelAgentProgress {
                 detail: Some(summarized_detail.clone()),
                 id: tool_use_id.to_owned(),
+                source: ParallelAgentSource::Tool,
                 status,
                 title: title.clone(),
             },

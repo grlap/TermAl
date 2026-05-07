@@ -289,7 +289,7 @@ describe("useConversationOverviewController", () => {
     }
   });
 
-  it("refreshes the ready layout snapshot when the transcript message count grows", () => {
+  it("coalesces ready layout refreshes when the transcript message count grows", () => {
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
     const idleWindow = window as Window &
@@ -366,14 +366,32 @@ describe("useConversationOverviewController", () => {
       expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
         "90",
       );
+      expect(frameCallbacks.size).toBe(1);
 
       act(() => {
         rerender(<OverviewGrowthHarness messageCount={120} />);
       });
 
       expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
-        "120",
+        "90",
       );
+      expect(frameCallbacks.size).toBe(1);
+
+      act(() => {
+        rerender(<OverviewGrowthHarness messageCount={140} />);
+      });
+
+      expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
+        "90",
+      );
+      expect(frameCallbacks.size).toBe(1);
+
+      act(flushNextFrame);
+
+      expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
+        "140",
+      );
+      expect(frameCallbacks.size).toBe(0);
     } finally {
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;

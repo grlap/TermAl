@@ -460,6 +460,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
         harness.container.querySelector<HTMLElement>(
           '[data-message-id="message-600"]',
         );
+      vi.useFakeTimers();
 
       act(() => {
         fireEvent.wheel(harness.scrollNode, { deltaY: -wheelDeltaPx });
@@ -519,7 +520,6 @@ describe("VirtualizedConversationMessageList foundation", () => {
       const message600OffsetBeforeIdleCompaction =
         message600Slot()?.getBoundingClientRect().top;
       expect(message600OffsetBeforeIdleCompaction).toBeGreaterThan(0);
-      vi.useFakeTimers();
       await advanceIdleMountedRangeCompaction();
 
       const message600AfterIdleCompaction = message600Slot();

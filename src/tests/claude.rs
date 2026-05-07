@@ -42,6 +42,7 @@ fn clear_claude_turn_state_resets_all_fields() {
             ParallelAgentProgress {
                 detail: Some("Working".to_owned()),
                 id: "agent-1".to_owned(),
+                source: ParallelAgentSource::Tool,
                 status: ParallelAgentStatus::Running,
                 title: "Agent 1".to_owned(),
             },
@@ -90,6 +91,7 @@ fn reset_claude_turn_state_clears_all_fields_and_finishes_streaming_text() {
             ParallelAgentProgress {
                 detail: Some("Working".to_owned()),
                 id: "agent-1".to_owned(),
+                source: ParallelAgentSource::Tool,
                 status: ParallelAgentStatus::Running,
                 title: "Agent 1".to_owned(),
             },

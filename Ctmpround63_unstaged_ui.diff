@@ -1,0 +1,1084 @@
+warning: in the working copy of 'ui/src/MessageCard.test.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ui/src/SessionPaneView.render-callbacks.test.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ui/src/SessionPaneView.render-callbacks.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ui/src/SessionPaneView.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ui/src/message-cards.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ui/src/panels/AgentSessionPanel.test.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ui/src/panels/conversation-overview-controller.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ui/src/styles.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ui/src/types.ts', LF will be replaced by CRLF the next time Git touches it
+diff --git a/ui/src/MessageCard.test.tsx b/ui/src/MessageCard.test.tsx
+index 62b194b..9b28833 100644
+--- a/ui/src/MessageCard.test.tsx
++++ b/ui/src/MessageCard.test.tsx
+@@ -1,4 +1,4 @@
+-import { fireEvent, render, screen } from "@testing-library/react";
++import { act, fireEvent, render, screen, within } from "@testing-library/react";
+ import { describe, expect, it, vi } from "vitest";
+ 
+ import {
+@@ -15,6 +15,7 @@ import type {
+   DiffMessage,
+   FileChangesMessage,
+   McpElicitationRequestMessage,
++  ParallelAgentsMessage,
+   TextMessage,
+   ThinkingMessage,
+   UserInputRequestMessage,
+@@ -50,6 +51,153 @@ describe("MessageCard", () => {
+     expect(screen.queryByText("Command")).not.toBeInTheDocument();
+   });
+ 
++  it("renders delegation actions on parallel-agent cards", () => {
++    const message: ParallelAgentsMessage = {
++      id: "message-parallel-agents",
++      type: "parallelAgents",
++      author: "assistant",
++      timestamp: "10:02",
++      agents: [
++        {
++          id: "delegation-running",
++          source: "delegation",
++          title: "Review backend",
++          status: "running",
++          detail: "Checking Rust changes",
++        },
++        {
++          id: "delegation-completed",
++          source: "delegation",
++          title: "Review frontend",
++          status: "completed",
++          detail: "No issues found",
++        },
++        {
++          id: "delegation-initializing",
++          source: "delegation",
++          title: "Review docs",
++          status: "initializing",
++          detail: "Starting",
++        },
++        {
++          id: "delegation-error",
++          source: "delegation",
++          title: "Review security",
++          status: "error",
++          detail: "Failed with findings",
++        },
++        {
++          id: "toolu-task",
++          source: "tool",
++          title: "Claude task",
++          status: "running",
++          detail: "Not a TermAl delegation",
++        },
++      ],
++    };
++    const onOpenParallelAgentSession = vi.fn();
++    const onInsertParallelAgentResult = vi.fn();
++    const onCancelParallelAgent = vi.fn();
++
++    render(
++      <MessageCard
++        message={message}
++        onApprovalDecision={vi.fn()}
++        onUserInputSubmit={vi.fn()}
++        onOpenParallelAgentSession={onOpenParallelAgentSession}
++        onInsertParallelAgentResult={onInsertParallelAgentResult}
++        onCancelParallelAgent={onCancelParallelAgent}
++      />,
++    );
++
++    const rows = screen.getAllByRole("listitem");
++    fireEvent.click(
++      within(rows[0]!).getByRole("button", { name: "Open session" }),
++    );
++    fireEvent.click(within(rows[0]!).getByRole("button", { name: "Cancel" }));
++    fireEvent.click(
++      within(rows[1]!).getByRole("button", { name: "Insert result" }),
++    );
++    fireEvent.click(within(rows[2]!).getByRole("button", { name: "Cancel" }));
++    fireEvent.click(
++      within(rows[3]!).getByRole("button", { name: "Insert result" }),
++    );
++
++    expect(onOpenParallelAgentSession).toHaveBeenCalledWith(
++      "delegation-running",
++    );
++    expect(onCancelParallelAgent).toHaveBeenCalledWith("delegation-running");
++    expect(onCancelParallelAgent).toHaveBeenCalledWith(
++      "delegation-initializing",
++    );
++    expect(onInsertParallelAgentResult).toHaveBeenCalledWith(
++      "delegation-completed",
++    );
++    expect(onInsertParallelAgentResult).toHaveBeenCalledWith(
++      "delegation-error",
++    );
++    expect(
++      within(rows[0]!).queryByRole("button", { name: "Insert result" }),
++    ).toBeNull();
++    expect(
++      within(rows[1]!).queryByRole("button", { name: "Cancel" }),
++    ).toBeNull();
++    expect(
++      within(rows[2]!).queryByRole("button", { name: "Insert result" }),
++    ).toBeNull();
++    expect(
++      within(rows[3]!).queryByRole("button", { name: "Cancel" }),
++    ).toBeNull();
++    expect(within(rows[4]!).queryByRole("button")).toBeNull();
++  });
++
++  it("disables parallel-agent actions while an action is pending", async () => {
++    const message: ParallelAgentsMessage = {
++      id: "message-parallel-agents-pending",
++      type: "parallelAgents",
++      author: "assistant",
++      timestamp: "10:02",
++      agents: [
++        {
++          id: "delegation-running",
++          source: "delegation",
++          title: "Review backend",
++          status: "running",
++          detail: "Checking Rust changes",
++        },
++      ],
++    };
++    let resolveAction!: () => void;
++    const pendingAction = new Promise<void>((resolve) => {
++      resolveAction = resolve;
++    });
++    const onCancelParallelAgent = vi.fn(() => pendingAction);
++
++    render(
++      <MessageCard
++        message={message}
++        onApprovalDecision={vi.fn()}
++        onUserInputSubmit={vi.fn()}
++        onCancelParallelAgent={onCancelParallelAgent}
++      />,
++    );
++
++    const cancelButton = screen.getByRole("button", { name: "Cancel" });
++    expect(screen.queryByRole("button", { name: "Open session" })).toBeNull();
++    fireEvent.click(cancelButton);
++    fireEvent.click(cancelButton);
++
++    expect(cancelButton).toBeDisabled();
++    expect(onCancelParallelAgent).toHaveBeenCalledTimes(1);
++
++    await act(async () => {
++      resolveAction();
++      await pendingAction;
++    });
++
++    expect(cancelButton).not.toBeDisabled();
++  });
++
+   it("renders thinking content with markdown formatting", async () => {
+     const message: ThinkingMessage = {
+       id: "message-3",
+diff --git a/ui/src/SessionPaneView.render-callbacks.test.ts b/ui/src/SessionPaneView.render-callbacks.test.ts
+index 6a79125..3b6649e 100644
+--- a/ui/src/SessionPaneView.render-callbacks.test.ts
++++ b/ui/src/SessionPaneView.render-callbacks.test.ts
+@@ -1,10 +1,23 @@
+-import { describe, expect, it } from "vitest";
++import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
++import { describe, expect, it, vi } from "vitest";
++import {
++  cancelDelegationCommand,
++  getDelegationResultCommand,
++  getDelegationStatusCommand,
++} from "./delegation-commands";
+ import {
+   shouldPreferStreamingAssistantTextRender,
+   streamingAssistantTextMessageIdForSession,
++  useSessionRenderCallbacks,
+ } from "./SessionPaneView.render-callbacks";
+ import type { Message, Session } from "./types";
+ 
++vi.mock("./delegation-commands", () => ({
++  cancelDelegationCommand: vi.fn(),
++  getDelegationResultCommand: vi.fn(),
++  getDelegationStatusCommand: vi.fn(),
++}));
++
+ function makeSession(
+   status: Session["status"],
+   messages: Message[],
+@@ -47,6 +60,64 @@ const approvalCard: Message = {
+   decision: "pending",
+ };
+ 
++function renderCallbacks(overrides: Partial<Parameters<typeof useSessionRenderCallbacks>[0]> = {}) {
++  const params: Parameters<typeof useSessionRenderCallbacks>[0] = {
++    activeSession: makeSession("idle", []),
++    activeSessionSearchMatchItemKey: undefined,
++    editorAppearance: "dark",
++    getConnectionRetryDisplayState: () => undefined,
++    isRefreshingModelOptions: false,
++    latestAssistantMessageId: null,
++    streamingAssistantTextMessageId: null,
++    modelOptionsError: null,
++    onArchiveCodexThread: vi.fn(),
++    onCompactCodexThread: vi.fn(),
++    onForkCodexThread: vi.fn(),
++    onOpenDiffPreviewTab: vi.fn(),
++    onOpenSourceTab: vi.fn(),
++    onOpenConversationFromDiff: vi.fn(),
++    onInsertReviewIntoPrompt: vi.fn(),
++    onComposerError: vi.fn(),
++    onRefreshSessionModelOptions: vi.fn(),
++    onRollbackCodexThread: vi.fn(),
++    onUnarchiveCodexThread: vi.fn(),
++    paneId: "pane-1",
++    sessionFindQuery: "",
++    sessionSettingNotice: null,
++    ...overrides,
++  };
++  const hook = renderHook(() => useSessionRenderCallbacks(params));
++  return { hook, params };
++}
++
++function renderDelegationCard(params: Parameters<typeof useSessionRenderCallbacks>[0]) {
++  const hook = renderHook(() => useSessionRenderCallbacks(params));
++  const element = hook.result.current.renderSessionMessageCard(
++    {
++      id: "delegations",
++      type: "parallelAgents",
++      author: "assistant",
++      timestamp: "10:10",
++      agents: [
++        {
++          id: "delegation-1",
++          source: "delegation",
++          title: "Review",
++          status: "running",
++          detail: "Running",
++        },
++      ],
++    },
++    false,
++    vi.fn(),
++    vi.fn(),
++    vi.fn(),
++    vi.fn(),
++  );
++  render(element);
++  return hook;
++}
++
+ describe("SessionPaneView render callbacks", () => {
+   it("streams only the active assistant text that is the last transcript item", () => {
+     const session = makeSession("active", [assistantTable]);
+@@ -86,4 +157,118 @@ describe("SessionPaneView render callbacks", () => {
+       ).toBe(false);
+     }
+   });
++
++  it("opens delegation child sessions through the command wrapper", async () => {
++    vi.mocked(getDelegationStatusCommand).mockResolvedValueOnce({
++      delegationId: "delegation-1",
++      childSessionId: "child-1",
++      status: "running",
++      delegation: {
++        id: "delegation-1",
++        parentSessionId: "session-1",
++        childSessionId: "child-1",
++        mode: "reviewer",
++        status: "running",
++        title: "Review",
++        agent: "Codex",
++        model: null,
++        writePolicy: { kind: "readOnly" },
++        createdAt: "now",
++        startedAt: "now",
++        completedAt: null,
++        result: null,
++      },
++      revision: 2,
++      serverInstanceId: "server-1",
++    });
++    const { params } = renderCallbacks();
++    renderDelegationCard(params);
++
++    fireEvent.click(screen.getByRole("button", { name: "Open session" }));
++
++    await waitFor(() =>
++      expect(params.onOpenConversationFromDiff).toHaveBeenCalledWith(
++        "child-1",
++        "pane-1",
++      ),
++    );
++    expect(getDelegationStatusCommand).toHaveBeenCalledWith(
++      "session-1",
++      "delegation-1",
++    );
++  });
++
++  it("inserts delegation results through the command wrapper", async () => {
++    vi.mocked(getDelegationResultCommand).mockResolvedValueOnce({
++      delegationId: "delegation-1",
++      childSessionId: "child-1",
++      status: "completed",
++      summary: "Result summary",
++      findings: [],
++      changedFiles: [],
++      commandsRun: [],
++      notes: [],
++      revision: 2,
++      serverInstanceId: "server-1",
++    });
++    const { params, hook } = renderCallbacks();
++    const element = hook.result.current.renderSessionMessageCard(
++      {
++        id: "delegations",
++        type: "parallelAgents",
++        author: "assistant",
++        timestamp: "10:10",
++        agents: [
++          {
++            id: "delegation-1",
++            source: "delegation",
++            title: "Review",
++            status: "completed",
++            detail: "Done",
++          },
++        ],
++      },
++      false,
++      vi.fn(),
++      vi.fn(),
++      vi.fn(),
++      vi.fn(),
++    );
++    render(element);
++
++    fireEvent.click(screen.getByRole("button", { name: "Show tasks" }));
++    fireEvent.click(screen.getByRole("button", { name: "Insert result" }));
++
++    await waitFor(() =>
++      expect(params.onInsertReviewIntoPrompt).toHaveBeenCalledWith(
++        "session-1",
++        "pane-1",
++        "Delegation result (completed) from child-1:\n\nResult summary",
++      ),
++    );
++    expect(getDelegationResultCommand).toHaveBeenCalledWith(
++      "session-1",
++      "delegation-1",
++    );
++  });
++
++  it("cancels delegations through the command wrapper and reports errors", async () => {
++    vi.mocked(cancelDelegationCommand).mockRejectedValueOnce(
++      new Error("delegation not found"),
++    );
++    const { params } = renderCallbacks();
++    renderDelegationCard(params);
++
++    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
++
++    await waitFor(() =>
++      expect(params.onComposerError).toHaveBeenCalledWith(
++        "delegation not found",
++      ),
++    );
++    expect(cancelDelegationCommand).toHaveBeenCalledWith(
++      "session-1",
++      "delegation-1",
++    );
++  });
+ });
+diff --git a/ui/src/SessionPaneView.render-callbacks.tsx b/ui/src/SessionPaneView.render-callbacks.tsx
+index 54bcbd8..e55f776 100644
+--- a/ui/src/SessionPaneView.render-callbacks.tsx
++++ b/ui/src/SessionPaneView.render-callbacks.tsx
+@@ -1,12 +1,23 @@
+ // SessionPaneView.render-callbacks.tsx
+ //
+-// Owns the stable render callbacks that SessionPaneView passes into
++// Owns the stable render/action callbacks that SessionPaneView passes into
+ // AgentSessionPanel. The pane component keeps orchestration state; this hook
+-// owns only repeated card rendering closures.
++// owns repeated card rendering closures and the UI-side delegation card actions
++// they expose.
+ //
+ // Split out of: ui/src/SessionPaneView.tsx.
+ 
+-import { useCallback } from "react";
++import { useCallback, useEffect, useRef } from "react";
++import { type OpenPathOptions } from "./api";
++import { getErrorMessage } from "./app-utils";
++import {
++  cancelDelegationCommand,
++  getDelegationResultCommand,
++  getDelegationStatusCommand,
++} from "./delegation-commands";
++import {
++  formatDelegationResultPrompt,
++} from "./delegation-result-prompt";
+ import {
+   CodexPromptSettingsCard,
+   ClaudePromptSettingsCard,
+@@ -14,7 +25,6 @@ import {
+   GeminiPromptSettingsCard,
+ } from "./prompt-settings-cards";
+ import { CommandCard, DiffCard, MessageCard } from "./message-cards";
+-import type { OpenPathOptions } from "./api";
+ import type { MonacoAppearance } from "./monaco";
+ import type { RenderMessageCard } from "./panels/VirtualizedConversationMessageList";
+ import type { ConnectionRetryDisplayState } from "./connection-retry";
+@@ -81,6 +91,16 @@ type UseSessionRenderCallbacksParams = {
+     originProjectId: string | null,
+     options?: OpenPathOptions,
+   ) => void;
++  onOpenConversationFromDiff: (
++    sessionId: string,
++    preferredPaneId: string | null,
++  ) => void;
++  onInsertReviewIntoPrompt: (
++    sessionId: string,
++    preferredPaneId: string | null,
++    prompt: string,
++  ) => void;
++  onComposerError: (message: string | null) => void;
+   onRefreshSessionModelOptions: (sessionId: string) => void;
+   onRollbackCodexThread: (sessionId: string, numTurns: number) => void;
+   onUnarchiveCodexThread: (sessionId: string) => void;
+@@ -103,6 +123,9 @@ export function useSessionRenderCallbacks({
+   onForkCodexThread,
+   onOpenDiffPreviewTab,
+   onOpenSourceTab,
++  onOpenConversationFromDiff,
++  onInsertReviewIntoPrompt,
++  onComposerError,
+   onRefreshSessionModelOptions,
+   onRollbackCodexThread,
+   onUnarchiveCodexThread,
+@@ -110,6 +133,22 @@ export function useSessionRenderCallbacks({
+   sessionFindQuery,
+   sessionSettingNotice,
+ }: UseSessionRenderCallbacksParams) {
++  const mountedRef = useRef(false);
++  const activeSessionIdRef = useRef<string | null>(activeSession?.id ?? null);
++  useEffect(() => {
++    mountedRef.current = true;
++    return () => {
++      mountedRef.current = false;
++    };
++  }, []);
++  useEffect(() => {
++    activeSessionIdRef.current = activeSession?.id ?? null;
++  }, [activeSession?.id]);
++  const canApplyDelegationActionResult = useCallback(
++    (parentSessionId: string) =>
++      mountedRef.current && activeSessionIdRef.current === parentSessionId,
++    [],
++  );
+   const renderSessionCommandCard = useCallback(
+     (message: CommandMessage) => <CommandCard message={message} />,
+     [],
+@@ -137,6 +176,90 @@ export function useSessionRenderCallbacks({
+       paneId,
+     ],
+   );
++  const handleOpenParallelAgentSession = useCallback(
++    (delegationId: string) => {
++      const parentSessionId = activeSession?.id;
++      if (!parentSessionId) {
++        return Promise.resolve();
++      }
++      return (async () => {
++        try {
++          const response = await getDelegationStatusCommand(
++            parentSessionId,
++            delegationId,
++          );
++          if (!canApplyDelegationActionResult(parentSessionId)) {
++            return;
++          }
++          onOpenConversationFromDiff(response.childSessionId, paneId);
++        } catch (error) {
++          if (canApplyDelegationActionResult(parentSessionId)) {
++            onComposerError(getErrorMessage(error));
++          }
++        }
++      })();
++    },
++    [
++      activeSession?.id,
++      canApplyDelegationActionResult,
++      onComposerError,
++      onOpenConversationFromDiff,
++      paneId,
++    ],
++  );
++  const handleInsertParallelAgentResult = useCallback(
++    (delegationId: string) => {
++      const parentSessionId = activeSession?.id;
++      if (!parentSessionId) {
++        return Promise.resolve();
++      }
++      return (async () => {
++        try {
++          const result = await getDelegationResultCommand(
++            parentSessionId,
++            delegationId,
++          );
++          if (!canApplyDelegationActionResult(parentSessionId)) {
++            return;
++          }
++          onInsertReviewIntoPrompt(
++            parentSessionId,
++            paneId,
++            formatDelegationResultPrompt(result),
++          );
++        } catch (error) {
++          if (canApplyDelegationActionResult(parentSessionId)) {
++            onComposerError(getErrorMessage(error));
++          }
++        }
++      })();
++    },
++    [
++      activeSession?.id,
++      canApplyDelegationActionResult,
++      onComposerError,
++      onInsertReviewIntoPrompt,
++      paneId,
++    ],
++  );
++  const handleCancelParallelAgent = useCallback(
++    (delegationId: string) => {
++      const parentSessionId = activeSession?.id;
++      if (!parentSessionId) {
++        return Promise.resolve();
++      }
++      return (async () => {
++        try {
++          await cancelDelegationCommand(parentSessionId, delegationId);
++        } catch (error) {
++          if (canApplyDelegationActionResult(parentSessionId)) {
++            onComposerError(getErrorMessage(error));
++          }
++        }
++      })();
++    },
++    [activeSession?.id, canApplyDelegationActionResult, onComposerError],
++  );
+   const renderSessionMessageCard = useCallback<RenderMessageCard>(
+     (
+       message,
+@@ -175,6 +298,9 @@ export function useSessionRenderCallbacks({
+         onUserInputSubmit={handleUserInput}
+         onMcpElicitationSubmit={handleMcpElicitation}
+         onCodexAppRequestSubmit={handleCodexAppRequest}
++        onOpenParallelAgentSession={handleOpenParallelAgentSession}
++        onInsertParallelAgentResult={handleInsertParallelAgentResult}
++        onCancelParallelAgent={handleCancelParallelAgent}
+         searchQuery={
+           activeSessionSearchMatchItemKey === `message:${message.id}`
+             ? sessionFindQuery
+@@ -204,6 +330,9 @@ export function useSessionRenderCallbacks({
+       activeSessionSearchMatchItemKey,
+       editorAppearance,
+       getConnectionRetryDisplayState,
++      handleCancelParallelAgent,
++      handleInsertParallelAgentResult,
++      handleOpenParallelAgentSession,
+       latestAssistantMessageId,
+       streamingAssistantTextMessageId,
+       onOpenDiffPreviewTab,
+diff --git a/ui/src/SessionPaneView.tsx b/ui/src/SessionPaneView.tsx
+index 192b6e2..38d418d 100644
+--- a/ui/src/SessionPaneView.tsx
++++ b/ui/src/SessionPaneView.tsx
+@@ -2401,6 +2401,9 @@ export function SessionPaneView({
+     onForkCodexThread,
+     onOpenDiffPreviewTab,
+     onOpenSourceTab,
++    onOpenConversationFromDiff,
++    onInsertReviewIntoPrompt,
++    onComposerError,
+     onRefreshSessionModelOptions,
+     onRollbackCodexThread,
+     onUnarchiveCodexThread,
+diff --git a/ui/src/message-cards.tsx b/ui/src/message-cards.tsx
+index f7025fb..aa06bd5 100644
+--- a/ui/src/message-cards.tsx
++++ b/ui/src/message-cards.tsx
+@@ -313,6 +313,9 @@ export const MessageCard = memo(
+     onUserInputSubmit,
+     onMcpElicitationSubmit = NOOP_MCP_ELICITATION_SUBMIT,
+     onCodexAppRequestSubmit = NOOP_CODEX_APP_REQUEST_SUBMIT,
++    onOpenParallelAgentSession,
++    onInsertParallelAgentResult,
++    onCancelParallelAgent,
+     searchQuery = "",
+     searchHighlightTone = "match",
+     isLatestAssistantMessage = true,
+@@ -336,6 +339,9 @@ export const MessageCard = memo(
+       content?: JsonValue,
+     ) => void;
+     onCodexAppRequestSubmit?: (messageId: string, result: JsonValue) => void;
++    onOpenParallelAgentSession?: (agentId: string) => Promise<void> | void;
++    onInsertParallelAgentResult?: (agentId: string) => Promise<void> | void;
++    onCancelParallelAgent?: (agentId: string) => Promise<void> | void;
+     searchQuery?: string;
+     searchHighlightTone?: SearchHighlightTone;
+     // When false, `ConnectionRetryCard` renders the resolved (static, past-tense)
+@@ -508,6 +514,9 @@ export const MessageCard = memo(
+         return (
+           <ParallelAgentsCard
+             message={message}
++            onOpenAgentSession={onOpenParallelAgentSession}
++            onInsertAgentResult={onInsertParallelAgentResult}
++            onCancelAgent={onCancelParallelAgent}
+             searchQuery={searchQuery}
+             searchHighlightTone={searchHighlightTone}
+           />
+@@ -2046,14 +2055,21 @@ function parallelAgentDetail(agent: ParallelAgentsMessage["agents"][number]) {
+ 
+ function ParallelAgentsCard({
+   message,
++  onOpenAgentSession,
++  onInsertAgentResult,
++  onCancelAgent,
+   searchQuery = "",
+   searchHighlightTone = "match",
+ }: {
+   message: ParallelAgentsMessage;
++  onOpenAgentSession?: (agentId: string) => Promise<void> | void;
++  onInsertAgentResult?: (agentId: string) => Promise<void> | void;
++  onCancelAgent?: (agentId: string) => Promise<void> | void;
+   searchQuery?: string;
+   searchHighlightTone?: SearchHighlightTone;
+ }) {
+   const [expanded, setExpanded] = useState(false);
++  const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
+   const isSearchExpanded = searchQuery.trim().length > 0;
+   const hasActiveAgents = message.agents.some(
+     (agent) => agent.status === "initializing" || agent.status === "running",
+@@ -2067,6 +2083,24 @@ function ParallelAgentsCard({
+   const isExpanded = hasActiveAgents || isSearchExpanded || expanded;
+   const heading = parallelAgentsHeading(message);
+   const summary = parallelAgentsSummary(message);
++  const runAgentAction = (
++    actionKey: string,
++    action: () => Promise<void> | void,
++  ) => {
++    if (pendingActionKey !== null) {
++      return;
++    }
++    const result = action();
++    if (!result || typeof result.then !== "function") {
++      return;
++    }
++    setPendingActionKey(actionKey);
++    void result.finally(() => {
++      setPendingActionKey((current) =>
++        current === actionKey ? null : current,
++      );
++    });
++  };
+ 
+   return (
+     <article
+@@ -2101,6 +2135,10 @@ function ParallelAgentsCard({
+         <ol className="parallel-agents-tree">
+           {message.agents.map((agent, index) => {
+             const isLast = index === message.agents.length - 1;
++            const isDelegationAgent = agent.source === "delegation";
++            const hasAgentActions =
++              isDelegationAgent &&
++              (onOpenAgentSession || onInsertAgentResult || onCancelAgent);
+             return (
+               <li
+                 key={agent.id}
+@@ -2140,6 +2178,56 @@ function ParallelAgentsCard({
+                         )}
+                       </span>
+                     </div>
++                    {hasAgentActions ? (
++                      <div className="parallel-agent-actions">
++                        {onOpenAgentSession ? (
++                          <button
++                            className="ghost-button parallel-agent-action"
++                            type="button"
++                            disabled={pendingActionKey !== null}
++                            onClick={() =>
++                              runAgentAction(`${agent.id}:open`, () =>
++                                onOpenAgentSession(agent.id),
++                              )
++                            }
++                          >
++                            Open session
++                          </button>
++                        ) : null}
++                        {onInsertAgentResult &&
++                        (agent.status === "completed" ||
++                          agent.status === "error") ? (
++                          <button
++                            className="ghost-button parallel-agent-action"
++                            type="button"
++                            disabled={pendingActionKey !== null}
++                            onClick={() =>
++                              runAgentAction(`${agent.id}:insert`, () =>
++                                onInsertAgentResult(agent.id),
++                              )
++                            }
++                          >
++                            Insert result
++                          </button>
++                        ) : null}
++                        {onCancelAgent &&
++                        (agent.status === "initializing" ||
++                          agent.status === "running") ? (
++                          <button
++                            className="ghost-button parallel-agent-action parallel-agent-action-danger"
++                            type="button"
++                            disabled={pendingActionKey !== null}
++                            onClick={() =>
++                              runAgentAction(`${agent.id}:cancel`, () =>
++                                onCancelAgent(agent.id),
++                              )
++                            }
++                          >
++                            Cancel
++                          </button>
++                        ) : null}
++                      </div>
++                    ) : null}
+                   </div>
+                 </div>
+               </li>
+diff --git a/ui/src/panels/AgentSessionPanel.test.tsx b/ui/src/panels/AgentSessionPanel.test.tsx
+index 886d1aa..8b1c2ff 100644
+--- a/ui/src/panels/AgentSessionPanel.test.tsx
++++ b/ui/src/panels/AgentSessionPanel.test.tsx
+@@ -2190,6 +2190,121 @@ describe("AgentSessionPanel conversation caching", () => {
+     }
+   });
+ 
++  it("hydrates a long-session tail after a native-scrollbar mousedown", async () => {
++    vi.useFakeTimers();
++    const OriginalResizeObserver = window.ResizeObserver;
++    const originalGetBoundingClientRect =
++      Element.prototype.getBoundingClientRect;
++    const scrollNode = document.createElement("section");
++    let scrollTop = 20_000;
++
++    class ResizeObserverMock {
++      observe() {}
++      disconnect() {}
++    }
++
++    Object.defineProperty(scrollNode, "clientHeight", {
++      configurable: true,
++      get: () => 600,
++    });
++    Object.defineProperty(scrollNode, "clientWidth", {
++      configurable: true,
++      get: () => 1000,
++    });
++    Object.defineProperty(scrollNode, "scrollHeight", {
++      configurable: true,
++      get: () => 24_000,
++    });
++    Object.defineProperty(scrollNode, "scrollTop", {
++      configurable: true,
++      get: () => scrollTop,
++      set: (nextValue: number) => {
++        scrollTop = nextValue;
++      },
++    });
++
++    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
++    Element.prototype.getBoundingClientRect =
++      function getBoundingClientRectMock() {
++        const element = this as HTMLElement;
++        if (element === scrollNode) {
++          return {
++            bottom: 600,
++            height: 600,
++            left: 0,
++            right: 1000,
++            top: 0,
++            width: 1000,
++            x: 0,
++            y: 0,
++            toJSON: () => ({}),
++          } as DOMRect;
++        }
++        if (element.classList.contains("virtualized-message-page")) {
++          return {
++            bottom: 600,
++            height: 600,
++            left: 0,
++            right: 1000,
++            top: 0,
++            width: 1000,
++            x: 0,
++            y: 0,
++            toJSON: () => ({}),
++          } as DOMRect;
++        }
++        if (element.classList.contains("virtualized-message-slot")) {
++          return {
++            bottom: 80,
++            height: 80,
++            left: 0,
++            right: 1000,
++            top: 0,
++            width: 1000,
++            x: 0,
++            y: 0,
++            toJSON: () => ({}),
++          } as DOMRect;
++        }
++        return originalGetBoundingClientRect.call(this);
++      };
++
++    try {
++      const messages = makeTextMessages(600);
++      document.body.append(scrollNode);
++      renderSessionPanelWithDefaults({
++        activeSession: makeSession("active-session", {
++          status: "idle",
++          messages,
++        }),
++        scrollContainerRef: { current: scrollNode },
++      });
++
++      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
++      await act(async () => {
++        await vi.advanceTimersByTimeAsync(5_000);
++      });
++      expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
++      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
++
++      act(() => {
++        fireEvent.mouseDown(scrollNode);
++        scrollTop = 50;
++        fireEvent.scroll(scrollNode);
++      });
++      await act(async () => {
++        await vi.advanceTimersByTimeAsync(500);
++      });
++
++      expect(screen.getByText("message-1")).toBeInTheDocument();
++    } finally {
++      window.ResizeObserver = OriginalResizeObserver;
++      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
++      scrollNode.remove();
++      vi.useRealTimers();
++    }
++  });
++
+   it("keeps demand-hydration listeners bound across message arrivals while tail-windowed", async () => {
+     const OriginalResizeObserver = window.ResizeObserver;
+     const scrollNode = document.createElement("section");
+diff --git a/ui/src/panels/conversation-overview-controller.ts b/ui/src/panels/conversation-overview-controller.ts
+index 1521271..c9c074f 100644
+--- a/ui/src/panels/conversation-overview-controller.ts
++++ b/ui/src/panels/conversation-overview-controller.ts
+@@ -212,6 +212,67 @@ export function useConversationOverviewController({
+         : nextSnapshot,
+     );
+   }, []);
++  const layoutRefreshFrameIdRef = useRef<number | null>(null);
++  const viewportRefreshFrameIdRef = useRef<number | null>(null);
++
++  const cancelLayoutRefreshFrame = useCallback(() => {
++    if (layoutRefreshFrameIdRef.current === null) {
++      return;
++    }
++    window.cancelAnimationFrame(layoutRefreshFrameIdRef.current);
++    layoutRefreshFrameIdRef.current = null;
++  }, []);
++
++  const cancelViewportRefreshFrame = useCallback(() => {
++    if (viewportRefreshFrameIdRef.current === null) {
++      return;
++    }
++    window.cancelAnimationFrame(viewportRefreshFrameIdRef.current);
++    viewportRefreshFrameIdRef.current = null;
++  }, []);
++
++  const scheduleLayoutRefresh = useCallback(() => {
++    if (layoutRefreshFrameIdRef.current !== null) {
++      return;
++    }
++    const expectedSessionId = overviewSessionIdRef.current;
++    let frameId: number | null = null;
++    let ranSynchronously = false;
++    frameId = window.requestAnimationFrame(() => {
++      if (frameId === null) {
++        ranSynchronously = true;
++      } else if (layoutRefreshFrameIdRef.current === frameId) {
++        layoutRefreshFrameIdRef.current = null;
++      }
++      if (overviewSessionIdRef.current !== expectedSessionId) {
++        return;
++      }
++      refreshLayoutSnapshot();
++      refreshViewportSnapshot();
++    });
++    layoutRefreshFrameIdRef.current = ranSynchronously ? null : frameId;
++  }, [refreshLayoutSnapshot, refreshViewportSnapshot]);
++
++  const scheduleViewportRefresh = useCallback(() => {
++    if (viewportRefreshFrameIdRef.current !== null) {
++      return;
++    }
++    const expectedSessionId = overviewSessionIdRef.current;
++    let frameId: number | null = null;
++    let ranSynchronously = false;
++    frameId = window.requestAnimationFrame(() => {
++      if (frameId === null) {
++        ranSynchronously = true;
++      } else if (viewportRefreshFrameIdRef.current === frameId) {
++        viewportRefreshFrameIdRef.current = null;
++      }
++      if (overviewSessionIdRef.current !== expectedSessionId) {
++        return;
++      }
++      refreshViewportSnapshot();
++    });
++    viewportRefreshFrameIdRef.current = ranSynchronously ? null : frameId;
++  }, [refreshViewportSnapshot]);
+ 
+   const cancelNavigationFrames = useCallback(() => {
+     navigationFrameIdsRef.current.forEach((frameId) => {
+@@ -359,37 +420,6 @@ export function useConversationOverviewController({
+       return undefined;
+     }
+     const scrollNode = scrollContainerRef.current;
+-    let layoutFrameId: number | null = null;
+-    let viewportFrameId: number | null = null;
+-    const scheduleLayoutRefresh = () => {
+-      if (layoutFrameId !== null) {
+-        return;
+-      }
+-      let ranSynchronously = false;
+-      const frameId = window.requestAnimationFrame(() => {
+-        if (layoutFrameId === null) {
+-          ranSynchronously = true;
+-        }
+-        layoutFrameId = null;
+-        refreshLayoutSnapshot();
+-        refreshViewportSnapshot();
+-      });
+-      layoutFrameId = ranSynchronously ? null : frameId;
+-    };
+-    const scheduleViewportRefresh = () => {
+-      if (viewportFrameId !== null) {
+-        return;
+-      }
+-      let ranSynchronously = false;
+-      const frameId = window.requestAnimationFrame(() => {
+-        if (viewportFrameId === null) {
+-          ranSynchronously = true;
+-        }
+-        viewportFrameId = null;
+-        refreshViewportSnapshot();
+-      });
+-      viewportFrameId = ranSynchronously ? null : frameId;
+-    };
+ 
+     scheduleLayoutRefresh();
+     scrollNode?.addEventListener("scroll", scheduleViewportRefresh, {
+@@ -397,21 +427,19 @@ export function useConversationOverviewController({
+     });
+     window.addEventListener("resize", scheduleLayoutRefresh);
+     return () => {
+-      if (layoutFrameId !== null) {
+-        window.cancelAnimationFrame(layoutFrameId);
+-      }
+-      if (viewportFrameId !== null) {
+-        window.cancelAnimationFrame(viewportFrameId);
+-      }
++      cancelLayoutRefreshFrame();
++      cancelViewportRefreshFrame();
+       scrollNode?.removeEventListener("scroll", scheduleViewportRefresh);
+       window.removeEventListener("resize", scheduleLayoutRefresh);
+     };
+   }, [
++    cancelLayoutRefreshFrame,
++    cancelViewportRefreshFrame,
+     isActive,
+     isRailReady,
+-    refreshLayoutSnapshot,
+-    refreshViewportSnapshot,
+     scrollContainerRef,
++    scheduleLayoutRefresh,
++    scheduleViewportRefresh,
+     shouldRender,
+   ]);
+ 
+@@ -419,14 +447,12 @@ export function useConversationOverviewController({
+     if (!isActive || !shouldRender || !isRailReady) {
+       return;
+     }
+-    refreshLayoutSnapshot();
+-    refreshViewportSnapshot();
++    scheduleLayoutRefresh();
+   }, [
+     isActive,
+     isRailReady,
+     messageCount,
+-    refreshLayoutSnapshot,
+-    refreshViewportSnapshot,
++    scheduleLayoutRefresh,
+     shouldRender,
+   ]);
+ 
+diff --git a/ui/src/styles.css b/ui/src/styles.css
+index 00ac2ba..e548b54 100644
+--- a/ui/src/styles.css
++++ b/ui/src/styles.css
+@@ -7965,6 +7965,24 @@ textarea {
+   color: var(--text-muted);
+ }
+ 
++.parallel-agent-actions {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.35rem;
++  margin-top: 0.26rem;
++}
++
++.parallel-agent-action {
++  min-block-size: 1.55rem;
++  padding: 0.16rem 0.48rem;
++  font-size: 0.78rem;
++  line-height: 1.1;
++}
++
++.parallel-agent-action-danger {
++  color: var(--signal-red);
++}
++
+ .parallel-agent-row-error .parallel-agent-title {
+   color: var(--signal-red);
+ }
+diff --git a/ui/src/types.ts b/ui/src/types.ts
+index c9af2be..3468491 100644
+--- a/ui/src/types.ts
++++ b/ui/src/types.ts
+@@ -462,9 +462,12 @@ export type ParallelAgentStatus =
+   | "completed"
+   | "error";
+ 
++export type ParallelAgentSource = "delegation" | "tool";
++
+ export type ParallelAgentProgress = {
+   detail?: string | null;
+   id: string;
++  source?: ParallelAgentSource;
+   status: ParallelAgentStatus;
+   title: string;
+ };

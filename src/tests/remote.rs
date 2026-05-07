@@ -4004,6 +4004,7 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
                 agents: vec![ParallelAgentProgress {
                     detail: Some("working".to_owned()),
                     id: "agent-1".to_owned(),
+                    source: ParallelAgentSource::Tool,
                     status: ParallelAgentStatus::Running,
                     title: "Agent one".to_owned(),
                 }],
@@ -4258,6 +4259,7 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         agents: vec![ParallelAgentProgress {
             detail: Some(detail.to_owned()),
             id: "agent-1".to_owned(),
+            source: ParallelAgentSource::Tool,
             status: ParallelAgentStatus::Running,
             title: "Agent one".to_owned(),
         }],
@@ -4593,6 +4595,7 @@ fn remote_delta_replay_key_isolates_individual_fingerprinted_fields() {
             agents: vec![ParallelAgentProgress {
                 detail: detail.map(str::to_owned),
                 id: id.to_owned(),
+                source: ParallelAgentSource::Tool,
                 status,
                 title: title.to_owned(),
             }],
@@ -5021,6 +5024,7 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
             agents: vec![ParallelAgentProgress {
                 detail: Some("same detail".to_owned()),
                 id: "agent-1".to_owned(),
+                source: ParallelAgentSource::Tool,
                 status: ParallelAgentStatus::Running,
                 title: "Agent one".to_owned(),
             }],
@@ -6438,6 +6442,7 @@ fn remote_parallel_agents_update_missing_target_rejects_gap_without_advancing_re
                 agents: vec![ParallelAgentProgress {
                     detail: Some("Collecting context".to_owned()),
                     id: "reviewer".to_owned(),
+                    source: ParallelAgentSource::Tool,
                     status: ParallelAgentStatus::Running,
                     title: "Reviewer".to_owned(),
                 }],

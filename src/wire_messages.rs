@@ -117,8 +117,16 @@ struct ParallelAgentProgress {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
     id: String,
+    source: ParallelAgentSource,
     status: ParallelAgentStatus,
     title: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum ParallelAgentSource {
+    Delegation,
+    Tool,
 }
 
 /// Represents message image attachment.

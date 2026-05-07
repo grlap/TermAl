@@ -331,7 +331,7 @@ fn redact_standalone_telegram_bot_tokens(detail: &str) -> String {
     let mut index = 0;
     while index < bytes.len() {
         if bytes[index].is_ascii_digit() && (index == 0 || !bytes[index - 1].is_ascii_digit()) {
-            if let Some(end) = standalone_telegram_bot_token_end(bytes, index) {
+            if let Some(end) = standalone_telegram_bot_token_end(detail, index) {
                 output.push_str(&detail[last_copied..index]);
                 output.push_str("<redacted>");
                 index = end;
@@ -350,10 +350,15 @@ fn redact_standalone_telegram_bot_tokens(detail: &str) -> String {
     output
 }
 
-fn standalone_telegram_bot_token_end(bytes: &[u8], start: usize) -> Option<usize> {
-    const MIN_BOT_ID_DIGITS: usize = 8;
+fn standalone_telegram_bot_token_end(detail: &str, start: usize) -> Option<usize> {
+    const MIN_BOT_ID_DIGITS: usize = 6;
     const MIN_TOKEN_SECRET_CHARS: usize = 35;
 
+    if !standalone_telegram_bot_token_has_context(detail, start) {
+        return None;
+    }
+
+    let bytes = detail.as_bytes();
     if start > 0 && telegram_token_boundary_byte(bytes[start - 1]) {
         return None;
     }
@@ -380,6 +385,70 @@ fn standalone_telegram_bot_token_end(bytes: &[u8], start: usize) -> Option<usize
     }
 
     Some(index)
+}
+
+fn standalone_telegram_bot_token_has_context(detail: &str, start: usize) -> bool {
+    let bytes = detail.as_bytes();
+    let mut cursor = trim_ascii_whitespace_left(bytes, start);
+    if cursor > 0 && telegram_token_quote_byte(bytes[cursor - 1]) {
+        cursor -= 1;
+        cursor = trim_ascii_whitespace_left(bytes, cursor);
+    }
+
+    standalone_telegram_bot_token_has_key_context(detail, cursor)
+        || standalone_telegram_bot_token_has_bearer_context(detail, cursor)
+}
+
+fn standalone_telegram_bot_token_has_key_context(detail: &str, cursor: usize) -> bool {
+    let bytes = detail.as_bytes();
+    if cursor == 0 || !matches!(bytes[cursor - 1], b'=' | b':') {
+        return false;
+    }
+
+    let mut key_end = trim_ascii_whitespace_left(bytes, cursor - 1);
+    if key_end > 0 && telegram_token_quote_byte(bytes[key_end - 1]) {
+        key_end -= 1;
+        key_end = trim_ascii_whitespace_left(bytes, key_end);
+    }
+
+    let mut key_start = key_end;
+    while key_start > 0 && telegram_token_key_byte(bytes[key_start - 1]) {
+        key_start -= 1;
+    }
+    if key_start == key_end {
+        return false;
+    }
+
+    let key = &detail[key_start..key_end];
+    ["botToken", "bot_token", "bot-token", "token"]
+        .iter()
+        .any(|candidate| key.eq_ignore_ascii_case(candidate))
+}
+
+fn standalone_telegram_bot_token_has_bearer_context(detail: &str, cursor: usize) -> bool {
+    let bytes = detail.as_bytes();
+    let mut word_start = cursor;
+    while word_start > 0 && bytes[word_start - 1].is_ascii_alphabetic() {
+        word_start -= 1;
+    }
+    let word = &detail[word_start..cursor];
+    word.eq_ignore_ascii_case("bearer")
+        && (word_start == 0 || !telegram_token_boundary_byte(bytes[word_start - 1]))
+}
+
+fn trim_ascii_whitespace_left(bytes: &[u8], mut end: usize) -> usize {
+    while end > 0 && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    end
+}
+
+fn telegram_token_quote_byte(byte: u8) -> bool {
+    matches!(byte, b'"' | b'\'')
+}
+
+fn telegram_token_key_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
 }
 
 fn telegram_token_boundary_byte(byte: u8) -> bool {

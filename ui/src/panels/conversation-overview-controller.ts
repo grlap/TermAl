@@ -212,6 +212,67 @@ export function useConversationOverviewController({
         : nextSnapshot,
     );
   }, []);
+  const layoutRefreshFrameIdRef = useRef<number | null>(null);
+  const viewportRefreshFrameIdRef = useRef<number | null>(null);
+
+  const cancelLayoutRefreshFrame = useCallback(() => {
+    if (layoutRefreshFrameIdRef.current === null) {
+      return;
+    }
+    window.cancelAnimationFrame(layoutRefreshFrameIdRef.current);
+    layoutRefreshFrameIdRef.current = null;
+  }, []);
+
+  const cancelViewportRefreshFrame = useCallback(() => {
+    if (viewportRefreshFrameIdRef.current === null) {
+      return;
+    }
+    window.cancelAnimationFrame(viewportRefreshFrameIdRef.current);
+    viewportRefreshFrameIdRef.current = null;
+  }, []);
+
+  const scheduleLayoutRefresh = useCallback(() => {
+    if (layoutRefreshFrameIdRef.current !== null) {
+      return;
+    }
+    const expectedSessionId = overviewSessionIdRef.current;
+    let frameId: number | null = null;
+    let ranSynchronously = false;
+    frameId = window.requestAnimationFrame(() => {
+      if (frameId === null) {
+        ranSynchronously = true;
+      } else if (layoutRefreshFrameIdRef.current === frameId) {
+        layoutRefreshFrameIdRef.current = null;
+      }
+      if (overviewSessionIdRef.current !== expectedSessionId) {
+        return;
+      }
+      refreshLayoutSnapshot();
+      refreshViewportSnapshot();
+    });
+    layoutRefreshFrameIdRef.current = ranSynchronously ? null : frameId;
+  }, [refreshLayoutSnapshot, refreshViewportSnapshot]);
+
+  const scheduleViewportRefresh = useCallback(() => {
+    if (viewportRefreshFrameIdRef.current !== null) {
+      return;
+    }
+    const expectedSessionId = overviewSessionIdRef.current;
+    let frameId: number | null = null;
+    let ranSynchronously = false;
+    frameId = window.requestAnimationFrame(() => {
+      if (frameId === null) {
+        ranSynchronously = true;
+      } else if (viewportRefreshFrameIdRef.current === frameId) {
+        viewportRefreshFrameIdRef.current = null;
+      }
+      if (overviewSessionIdRef.current !== expectedSessionId) {
+        return;
+      }
+      refreshViewportSnapshot();
+    });
+    viewportRefreshFrameIdRef.current = ranSynchronously ? null : frameId;
+  }, [refreshViewportSnapshot]);
 
   const cancelNavigationFrames = useCallback(() => {
     navigationFrameIdsRef.current.forEach((frameId) => {
@@ -359,37 +420,6 @@ export function useConversationOverviewController({
       return undefined;
     }
     const scrollNode = scrollContainerRef.current;
-    let layoutFrameId: number | null = null;
-    let viewportFrameId: number | null = null;
-    const scheduleLayoutRefresh = () => {
-      if (layoutFrameId !== null) {
-        return;
-      }
-      let ranSynchronously = false;
-      const frameId = window.requestAnimationFrame(() => {
-        if (layoutFrameId === null) {
-          ranSynchronously = true;
-        }
-        layoutFrameId = null;
-        refreshLayoutSnapshot();
-        refreshViewportSnapshot();
-      });
-      layoutFrameId = ranSynchronously ? null : frameId;
-    };
-    const scheduleViewportRefresh = () => {
-      if (viewportFrameId !== null) {
-        return;
-      }
-      let ranSynchronously = false;
-      const frameId = window.requestAnimationFrame(() => {
-        if (viewportFrameId === null) {
-          ranSynchronously = true;
-        }
-        viewportFrameId = null;
-        refreshViewportSnapshot();
-      });
-      viewportFrameId = ranSynchronously ? null : frameId;
-    };
 
     scheduleLayoutRefresh();
     scrollNode?.addEventListener("scroll", scheduleViewportRefresh, {
@@ -397,21 +427,19 @@ export function useConversationOverviewController({
     });
     window.addEventListener("resize", scheduleLayoutRefresh);
     return () => {
-      if (layoutFrameId !== null) {
-        window.cancelAnimationFrame(layoutFrameId);
-      }
-      if (viewportFrameId !== null) {
-        window.cancelAnimationFrame(viewportFrameId);
-      }
+      cancelLayoutRefreshFrame();
+      cancelViewportRefreshFrame();
       scrollNode?.removeEventListener("scroll", scheduleViewportRefresh);
       window.removeEventListener("resize", scheduleLayoutRefresh);
     };
   }, [
+    cancelLayoutRefreshFrame,
+    cancelViewportRefreshFrame,
     isActive,
     isRailReady,
-    refreshLayoutSnapshot,
-    refreshViewportSnapshot,
     scrollContainerRef,
+    scheduleLayoutRefresh,
+    scheduleViewportRefresh,
     shouldRender,
   ]);
 
@@ -419,14 +447,12 @@ export function useConversationOverviewController({
     if (!isActive || !shouldRender || !isRailReady) {
       return;
     }
-    refreshLayoutSnapshot();
-    refreshViewportSnapshot();
+    scheduleLayoutRefresh();
   }, [
     isActive,
     isRailReady,
     messageCount,
-    refreshLayoutSnapshot,
-    refreshViewportSnapshot,
+    scheduleLayoutRefresh,
     shouldRender,
   ]);
 

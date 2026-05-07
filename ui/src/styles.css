@@ -7965,6 +7965,24 @@ textarea {
   color: var(--text-muted);
 }
 
+.parallel-agent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.26rem;
+}
+
+.parallel-agent-action {
+  min-block-size: 1.55rem;
+  padding: 0.16rem 0.48rem;
+  font-size: 0.78rem;
+  line-height: 1.1;
+}
+
+.parallel-agent-action-danger {
+  color: var(--signal-red);
+}
+
 .parallel-agent-row-error .parallel-agent-title {
   color: var(--signal-red);
 }

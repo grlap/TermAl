@@ -452,6 +452,7 @@ fn local_streaming_delta_events_include_message_count() {
     let running_agent = ParallelAgentProgress {
         detail: Some("Checking files".to_owned()),
         id: "agent-1".to_owned(),
+        source: ParallelAgentSource::Tool,
         status: ParallelAgentStatus::Running,
         title: "Reviewer".to_owned(),
     };
@@ -466,6 +467,7 @@ fn local_streaming_delta_events_include_message_count() {
             vec![ParallelAgentProgress {
                 detail: Some("Done".to_owned()),
                 id: "agent-1".to_owned(),
+                source: ParallelAgentSource::Tool,
                 status: ParallelAgentStatus::Completed,
                 title: "Reviewer".to_owned(),
             }],

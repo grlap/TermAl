@@ -2190,6 +2190,121 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
+  it("hydrates a long-session tail after a native-scrollbar mousedown", async () => {
+    vi.useFakeTimers();
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalGetBoundingClientRect =
+      Element.prototype.getBoundingClientRect;
+    const scrollNode = document.createElement("section");
+    let scrollTop = 20_000;
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 600,
+    });
+    Object.defineProperty(scrollNode, "clientWidth", {
+      configurable: true,
+      get: () => 1000,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 24_000,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    Element.prototype.getBoundingClientRect =
+      function getBoundingClientRectMock() {
+        const element = this as HTMLElement;
+        if (element === scrollNode) {
+          return {
+            bottom: 600,
+            height: 600,
+            left: 0,
+            right: 1000,
+            top: 0,
+            width: 1000,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (element.classList.contains("virtualized-message-page")) {
+          return {
+            bottom: 600,
+            height: 600,
+            left: 0,
+            right: 1000,
+            top: 0,
+            width: 1000,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (element.classList.contains("virtualized-message-slot")) {
+          return {
+            bottom: 80,
+            height: 80,
+            left: 0,
+            right: 1000,
+            top: 0,
+            width: 1000,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return originalGetBoundingClientRect.call(this);
+      };
+
+    try {
+      const messages = makeTextMessages(600);
+      document.body.append(scrollNode);
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("active-session", {
+          status: "idle",
+          messages,
+        }),
+        scrollContainerRef: { current: scrollNode },
+      });
+
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+
+      act(() => {
+        fireEvent.mouseDown(scrollNode);
+        scrollTop = 50;
+        fireEvent.scroll(scrollNode);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      expect(screen.getByText("message-1")).toBeInTheDocument();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      scrollNode.remove();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps demand-hydration listeners bound across message arrivals while tail-windowed", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const scrollNode = document.createElement("section");

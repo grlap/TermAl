@@ -313,6 +313,9 @@ export const MessageCard = memo(
     onUserInputSubmit,
     onMcpElicitationSubmit = NOOP_MCP_ELICITATION_SUBMIT,
     onCodexAppRequestSubmit = NOOP_CODEX_APP_REQUEST_SUBMIT,
+    onOpenParallelAgentSession,
+    onInsertParallelAgentResult,
+    onCancelParallelAgent,
     searchQuery = "",
     searchHighlightTone = "match",
     isLatestAssistantMessage = true,
@@ -336,6 +339,9 @@ export const MessageCard = memo(
       content?: JsonValue,
     ) => void;
     onCodexAppRequestSubmit?: (messageId: string, result: JsonValue) => void;
+    onOpenParallelAgentSession?: (agentId: string) => Promise<void> | void;
+    onInsertParallelAgentResult?: (agentId: string) => Promise<void> | void;
+    onCancelParallelAgent?: (agentId: string) => Promise<void> | void;
     searchQuery?: string;
     searchHighlightTone?: SearchHighlightTone;
     // When false, `ConnectionRetryCard` renders the resolved (static, past-tense)
@@ -508,6 +514,9 @@ export const MessageCard = memo(
         return (
           <ParallelAgentsCard
             message={message}
+            onOpenAgentSession={onOpenParallelAgentSession}
+            onInsertAgentResult={onInsertParallelAgentResult}
+            onCancelAgent={onCancelParallelAgent}
             searchQuery={searchQuery}
             searchHighlightTone={searchHighlightTone}
           />
@@ -2046,14 +2055,21 @@ function parallelAgentDetail(agent: ParallelAgentsMessage["agents"][number]) {
 
 function ParallelAgentsCard({
   message,
+  onOpenAgentSession,
+  onInsertAgentResult,
+  onCancelAgent,
   searchQuery = "",
   searchHighlightTone = "match",
 }: {
   message: ParallelAgentsMessage;
+  onOpenAgentSession?: (agentId: string) => Promise<void> | void;
+  onInsertAgentResult?: (agentId: string) => Promise<void> | void;
+  onCancelAgent?: (agentId: string) => Promise<void> | void;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
   const isSearchExpanded = searchQuery.trim().length > 0;
   const hasActiveAgents = message.agents.some(
     (agent) => agent.status === "initializing" || agent.status === "running",
@@ -2067,6 +2083,24 @@ function ParallelAgentsCard({
   const isExpanded = hasActiveAgents || isSearchExpanded || expanded;
   const heading = parallelAgentsHeading(message);
   const summary = parallelAgentsSummary(message);
+  const runAgentAction = (
+    actionKey: string,
+    action: () => Promise<void> | void,
+  ) => {
+    if (pendingActionKey !== null) {
+      return;
+    }
+    const result = action();
+    if (!result || typeof result.then !== "function") {
+      return;
+    }
+    setPendingActionKey(actionKey);
+    void result.finally(() => {
+      setPendingActionKey((current) =>
+        current === actionKey ? null : current,
+      );
+    });
+  };
 
   return (
     <article
@@ -2101,6 +2135,10 @@ function ParallelAgentsCard({
         <ol className="parallel-agents-tree">
           {message.agents.map((agent, index) => {
             const isLast = index === message.agents.length - 1;
+            const isDelegationAgent = agent.source === "delegation";
+            const hasAgentActions =
+              isDelegationAgent &&
+              (onOpenAgentSession || onInsertAgentResult || onCancelAgent);
             return (
               <li
                 key={agent.id}
@@ -2140,6 +2178,56 @@ function ParallelAgentsCard({
                         )}
                       </span>
                     </div>
+                    {hasAgentActions ? (
+                      <div className="parallel-agent-actions">
+                        {onOpenAgentSession ? (
+                          <button
+                            className="ghost-button parallel-agent-action"
+                            type="button"
+                            disabled={pendingActionKey !== null}
+                            onClick={() =>
+                              runAgentAction(`${agent.id}:open`, () =>
+                                onOpenAgentSession(agent.id),
+                              )
+                            }
+                          >
+                            Open session
+                          </button>
+                        ) : null}
+                        {onInsertAgentResult &&
+                        (agent.status === "completed" ||
+                          agent.status === "error") ? (
+                          <button
+                            className="ghost-button parallel-agent-action"
+                            type="button"
+                            disabled={pendingActionKey !== null}
+                            onClick={() =>
+                              runAgentAction(`${agent.id}:insert`, () =>
+                                onInsertAgentResult(agent.id),
+                              )
+                            }
+                          >
+                            Insert result
+                          </button>
+                        ) : null}
+                        {onCancelAgent &&
+                        (agent.status === "initializing" ||
+                          agent.status === "running") ? (
+                          <button
+                            className="ghost-button parallel-agent-action parallel-agent-action-danger"
+                            type="button"
+                            disabled={pendingActionKey !== null}
+                            onClick={() =>
+                              runAgentAction(`${agent.id}:cancel`, () =>
+                                onCancelAgent(agent.id),
+                              )
+                            }
+                          >
+                            Cancel
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </li>

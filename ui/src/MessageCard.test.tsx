@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -15,6 +15,7 @@ import type {
   DiffMessage,
   FileChangesMessage,
   McpElicitationRequestMessage,
+  ParallelAgentsMessage,
   TextMessage,
   ThinkingMessage,
   UserInputRequestMessage,
@@ -48,6 +49,153 @@ describe("MessageCard", () => {
     render(<MessageCard message={message} onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />);
 
     expect(screen.queryByText("Command")).not.toBeInTheDocument();
+  });
+
+  it("renders delegation actions on parallel-agent cards", () => {
+    const message: ParallelAgentsMessage = {
+      id: "message-parallel-agents",
+      type: "parallelAgents",
+      author: "assistant",
+      timestamp: "10:02",
+      agents: [
+        {
+          id: "delegation-running",
+          source: "delegation",
+          title: "Review backend",
+          status: "running",
+          detail: "Checking Rust changes",
+        },
+        {
+          id: "delegation-completed",
+          source: "delegation",
+          title: "Review frontend",
+          status: "completed",
+          detail: "No issues found",
+        },
+        {
+          id: "delegation-initializing",
+          source: "delegation",
+          title: "Review docs",
+          status: "initializing",
+          detail: "Starting",
+        },
+        {
+          id: "delegation-error",
+          source: "delegation",
+          title: "Review security",
+          status: "error",
+          detail: "Failed with findings",
+        },
+        {
+          id: "toolu-task",
+          source: "tool",
+          title: "Claude task",
+          status: "running",
+          detail: "Not a TermAl delegation",
+        },
+      ],
+    };
+    const onOpenParallelAgentSession = vi.fn();
+    const onInsertParallelAgentResult = vi.fn();
+    const onCancelParallelAgent = vi.fn();
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        onOpenParallelAgentSession={onOpenParallelAgentSession}
+        onInsertParallelAgentResult={onInsertParallelAgentResult}
+        onCancelParallelAgent={onCancelParallelAgent}
+      />,
+    );
+
+    const rows = screen.getAllByRole("listitem");
+    fireEvent.click(
+      within(rows[0]!).getByRole("button", { name: "Open session" }),
+    );
+    fireEvent.click(within(rows[0]!).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(
+      within(rows[1]!).getByRole("button", { name: "Insert result" }),
+    );
+    fireEvent.click(within(rows[2]!).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(
+      within(rows[3]!).getByRole("button", { name: "Insert result" }),
+    );
+
+    expect(onOpenParallelAgentSession).toHaveBeenCalledWith(
+      "delegation-running",
+    );
+    expect(onCancelParallelAgent).toHaveBeenCalledWith("delegation-running");
+    expect(onCancelParallelAgent).toHaveBeenCalledWith(
+      "delegation-initializing",
+    );
+    expect(onInsertParallelAgentResult).toHaveBeenCalledWith(
+      "delegation-completed",
+    );
+    expect(onInsertParallelAgentResult).toHaveBeenCalledWith(
+      "delegation-error",
+    );
+    expect(
+      within(rows[0]!).queryByRole("button", { name: "Insert result" }),
+    ).toBeNull();
+    expect(
+      within(rows[1]!).queryByRole("button", { name: "Cancel" }),
+    ).toBeNull();
+    expect(
+      within(rows[2]!).queryByRole("button", { name: "Insert result" }),
+    ).toBeNull();
+    expect(
+      within(rows[3]!).queryByRole("button", { name: "Cancel" }),
+    ).toBeNull();
+    expect(within(rows[4]!).queryByRole("button")).toBeNull();
+  });
+
+  it("disables parallel-agent actions while an action is pending", async () => {
+    const message: ParallelAgentsMessage = {
+      id: "message-parallel-agents-pending",
+      type: "parallelAgents",
+      author: "assistant",
+      timestamp: "10:02",
+      agents: [
+        {
+          id: "delegation-running",
+          source: "delegation",
+          title: "Review backend",
+          status: "running",
+          detail: "Checking Rust changes",
+        },
+      ],
+    };
+    let resolveAction!: () => void;
+    const pendingAction = new Promise<void>((resolve) => {
+      resolveAction = resolve;
+    });
+    const onCancelParallelAgent = vi.fn(() => pendingAction);
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        onCancelParallelAgent={onCancelParallelAgent}
+      />,
+    );
+
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    expect(screen.queryByRole("button", { name: "Open session" })).toBeNull();
+    fireEvent.click(cancelButton);
+    fireEvent.click(cancelButton);
+
+    expect(cancelButton).toBeDisabled();
+    expect(onCancelParallelAgent).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveAction();
+      await pendingAction;
+    });
+
+    expect(cancelButton).not.toBeDisabled();
   });
 
   it("renders thinking content with markdown formatting", async () => {

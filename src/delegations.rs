@@ -1106,6 +1106,7 @@ fn add_parent_delegation_card_locked(
                 .unwrap_or_default()
         )),
         id: delegation.id.clone(),
+        source: ParallelAgentSource::Delegation,
         status: ParallelAgentStatus::Running,
         title: delegation.title.clone(),
     };

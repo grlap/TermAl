@@ -48,6 +48,7 @@ impl AppState {
     ) -> Result<TelegramStatusResponse, ApiError> {
         let _guard = telegram_settings_file_guard();
         let mut file = self.load_telegram_bot_file()?;
+        file.config = self.sanitize_telegram_config_for_current_state(file.config);
 
         if let Some(enabled) = request.enabled {
             file.config.enabled = enabled;
@@ -122,11 +123,13 @@ impl AppState {
 
     fn load_telegram_bot_file(&self) -> Result<TelegramBotFile, ApiError> {
         let path = self.telegram_bot_file_path();
-        if !path.exists() {
-            return Ok(TelegramBotFile::default());
-        }
-
-        let raw = fs::read(&path).map_err(|err| telegram_settings_file_error("read", &path, err))?;
+        let raw = match fs::read(&path) {
+            Ok(raw) => raw,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Ok(TelegramBotFile::default());
+            }
+            Err(err) => return Err(telegram_settings_file_error("read", &path, err)),
+        };
         serde_json::from_slice(&raw)
             .map_err(|err| telegram_settings_file_error("parse", &path, err))
     }

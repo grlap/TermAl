@@ -462,9 +462,12 @@ export type ParallelAgentStatus =
   | "completed"
   | "error";
 
+export type ParallelAgentSource = "delegation" | "tool";
+
 export type ParallelAgentProgress = {
   detail?: string | null;
   id: string;
+  source?: ParallelAgentSource;
   status: ParallelAgentStatus;
   title: string;
 };
