@@ -149,7 +149,9 @@ impl AppState {
         &self,
         config: &mut TelegramUiConfig,
     ) -> Result<(), ApiError> {
-        if let Some(token) = config.bot_token.as_deref() {
+        let mut normalized = config.clone();
+
+        if let Some(token) = normalized.bot_token.as_deref() {
             validate_telegram_bot_token(token)?;
         }
 
@@ -160,7 +162,7 @@ impl AppState {
             .map(|project| project.id.as_str())
             .collect::<HashSet<_>>();
 
-        for project_id in &config.subscribed_project_ids {
+        for project_id in &normalized.subscribed_project_ids {
             if !known_projects.contains(project_id.as_str()) {
                 return Err(ApiError::bad_request(format!(
                     "unknown Telegram project `{project_id}`"
@@ -168,22 +170,22 @@ impl AppState {
             }
         }
 
-        if let Some(project_id) = config.default_project_id.as_deref() {
-            if !known_projects.contains(project_id) {
+        if let Some(project_id) = normalized.default_project_id.clone() {
+            if !known_projects.contains(project_id.as_str()) {
                 return Err(ApiError::bad_request(format!(
                     "unknown default Telegram project `{project_id}`"
                 )));
             }
-            if !config
+            if !normalized
                 .subscribed_project_ids
                 .iter()
-                .any(|candidate| candidate == project_id)
+                .any(|candidate| candidate == &project_id)
             {
-                config.subscribed_project_ids.push(project_id.to_owned());
+                normalized.subscribed_project_ids.push(project_id);
             }
         }
 
-        if let Some(session_id) = config.default_session_id.as_deref() {
+        if let Some(session_id) = normalized.default_session_id.as_deref() {
             let session = inner
                 .sessions
                 .iter()
@@ -201,7 +203,7 @@ impl AppState {
                 )));
             }
 
-            match config.default_project_id.as_deref() {
+            match normalized.default_project_id.as_deref() {
                 Some(project_id) if project_id != session_project_id => {
                     return Err(ApiError::bad_request(
                         "default Telegram session must belong to the default project",
@@ -209,21 +211,22 @@ impl AppState {
                 }
                 Some(_) => {}
                 None => {
-                    config.default_project_id = Some(session_project_id.to_owned());
+                    normalized.default_project_id = Some(session_project_id.to_owned());
                 }
             }
 
-            if !config
+            if !normalized
                 .subscribed_project_ids
                 .iter()
                 .any(|candidate| candidate == session_project_id)
             {
-                config
+                normalized
                     .subscribed_project_ids
                     .push(session_project_id.to_owned());
             }
         }
 
+        *config = normalized;
         Ok(())
     }
 

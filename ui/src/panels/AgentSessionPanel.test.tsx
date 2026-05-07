@@ -1943,10 +1943,24 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(
         container.querySelector(".conversation-overview-rail.is-pending"),
       ).not.toBeNull();
+      const overviewContentBefore = container.querySelector(
+        ".conversation-overview-content",
+      );
+      const virtualizedListBefore = container.querySelector(
+        ".virtualized-message-list",
+      );
+      expect(overviewContentBefore).not.toBeNull();
+      expect(virtualizedListBefore).not.toBeNull();
 
       const rail = await screen.findByLabelText("Conversation overview");
       expect(screen.getAllByLabelText("Conversation overview")).toHaveLength(1);
       expect(rail).toBeInTheDocument();
+      expect(container.querySelector(".conversation-overview-content")).toBe(
+        overviewContentBefore,
+      );
+      expect(container.querySelector(".virtualized-message-list")).toBe(
+        virtualizedListBefore,
+      );
       expect(
         rail.closest(".conversation-with-overview")?.querySelector(".activity-card-live"),
       ).toBeInTheDocument();
@@ -2056,6 +2070,7 @@ describe("AgentSessionPanel conversation caching", () => {
       };
     try {
       const messages = makeTextMessages(600);
+      document.body.append(scrollNode);
       const { container } = renderSessionPanelWithDefaults({
         activeSession: makeSession("active-session", {
           status: "idle",
@@ -2100,6 +2115,15 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.queryByText("message-193")).not.toBeInTheDocument();
 
       act(() => {
+        scrollTop = 20_000;
+        fireEvent.wheel(scrollNode, { deltaY: -120 });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(screen.queryByText("message-193")).not.toBeInTheDocument();
+
+      act(() => {
         scrollNode.dispatchEvent(new TouchEvent("touchstart", {
           bubbles: true,
           touches: [{ clientY: 100 } as Touch],
@@ -2117,7 +2141,7 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.queryByText("message-193")).not.toBeInTheDocument();
 
       const editable = document.createElement("textarea");
-      document.body.append(editable);
+      scrollNode.append(editable);
       try {
         act(() => {
           fireEvent.keyDown(editable, { key: "PageUp" });
@@ -2126,29 +2150,32 @@ describe("AgentSessionPanel conversation caching", () => {
           await vi.advanceTimersByTimeAsync(500);
         });
         expect(screen.queryByText("message-193")).not.toBeInTheDocument();
-
-        act(() => {
-          scrollTop = 20_000;
-          fireEvent.keyDown(editable, {
-            ctrlKey: true,
-            key: "PageUp",
-            shiftKey: true,
-          });
-        });
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(500);
-        });
       } finally {
         editable.remove();
       }
 
+      const outsideTarget = document.createElement("button");
+      document.body.append(outsideTarget);
+      try {
+        act(() => {
+          fireEvent.keyDown(outsideTarget, { key: "Home" });
+        });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(500);
+        });
+        expect(screen.queryByText("message-193")).not.toBeInTheDocument();
+      } finally {
+        outsideTarget.remove();
+      }
+
       expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
-      expect(screen.getByText("message-577")).toBeInTheDocument();
+      expect(screen.getByText("message-597")).toBeInTheDocument();
       expect(screen.queryByText("message-193")).not.toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       window.TouchEvent = OriginalTouchEvent;
       Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      scrollNode.remove();
       vi.useRealTimers();
     }
   });
@@ -2254,6 +2281,10 @@ describe("AgentSessionPanel conversation caching", () => {
       const baselineRemoveCounts = new Map(removeCounts);
       const baselineDocumentKeydownAdds = documentKeydownAdds;
       const baselineDocumentKeydownRemoves = documentKeydownRemoves;
+      scrollNodeDemandEvents.forEach((eventName) => {
+        expect(baselineAddCounts.get(eventName)).toBeGreaterThan(0);
+      });
+      expect(baselineDocumentKeydownAdds).toBeGreaterThan(0);
 
       act(() => {
         syncComposerSessionsStore({

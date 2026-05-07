@@ -195,11 +195,13 @@ struct TelegramBotState {
 
 /// Loads Telegram bot state.
 fn load_telegram_bot_state(path: &FsPath) -> Result<TelegramBotState> {
-    if !path.exists() {
-        return Ok(TelegramBotState::default());
-    }
-
-    let raw = fs::read(path).with_context(|| format!("failed to read `{}`", path.display()))?;
+    let raw = match fs::read(path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            return Ok(TelegramBotState::default());
+        }
+        Err(err) => return Err(err).with_context(|| format!("failed to read `{}`", path.display())),
+    };
     match serde_json::from_slice(&raw) {
         Ok(state) => Ok(state),
         Err(err) => {
@@ -306,6 +308,15 @@ fn redact_telegram_bot_url_tokens(detail: &str) -> String {
         let (before, after_marker) = remainder.split_at(index + "/bot".len());
         output.push_str(before);
         let token_end = after_marker.find('/').unwrap_or(after_marker.len());
+        if token_end == 0 {
+            if after_marker.is_empty() {
+                remainder = after_marker;
+                break;
+            }
+            output.push_str(&after_marker[..1]);
+            remainder = &after_marker[1..];
+            continue;
+        }
         output.push_str("<redacted>");
         remainder = &after_marker[token_end..];
     }
@@ -319,12 +330,14 @@ fn redact_standalone_telegram_bot_tokens(detail: &str) -> String {
     let mut last_copied = 0;
     let mut index = 0;
     while index < bytes.len() {
-        if let Some(end) = standalone_telegram_bot_token_end(bytes, index) {
-            output.push_str(&detail[last_copied..index]);
-            output.push_str("<redacted>");
-            index = end;
-            last_copied = end;
-            continue;
+        if bytes[index].is_ascii_digit() && (index == 0 || !bytes[index - 1].is_ascii_digit()) {
+            if let Some(end) = standalone_telegram_bot_token_end(bytes, index) {
+                output.push_str(&detail[last_copied..index]);
+                output.push_str("<redacted>");
+                index = end;
+                last_copied = end;
+                continue;
+            }
         }
 
         let ch = detail[index..]
@@ -338,10 +351,10 @@ fn redact_standalone_telegram_bot_tokens(detail: &str) -> String {
 }
 
 fn standalone_telegram_bot_token_end(bytes: &[u8], start: usize) -> Option<usize> {
-    const MIN_BOT_ID_DIGITS: usize = 5;
-    const MIN_TOKEN_SECRET_CHARS: usize = 8;
+    const MIN_BOT_ID_DIGITS: usize = 8;
+    const MIN_TOKEN_SECRET_CHARS: usize = 35;
 
-    if start > 0 && telegram_token_ascii_byte(bytes[start - 1]) {
+    if start > 0 && telegram_token_boundary_byte(bytes[start - 1]) {
         return None;
     }
 
@@ -362,15 +375,15 @@ fn standalone_telegram_bot_token_end(bytes: &[u8], start: usize) -> Option<usize
         return None;
     }
 
-    if index < bytes.len() && telegram_token_ascii_byte(bytes[index]) {
+    if index < bytes.len() && telegram_token_boundary_byte(bytes[index]) {
         return None;
     }
 
     Some(index)
 }
 
-fn telegram_token_ascii_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b':')
+fn telegram_token_boundary_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
 }
 
 fn telegram_token_secret_byte(byte: u8) -> bool {

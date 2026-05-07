@@ -1509,7 +1509,7 @@ describe("hydration adoption side effects", () => {
       sessionMutationStamp: 1,
     });
     const tailSession = makeSession({
-      messages: messages.slice(-100),
+      messages: messages.slice(-20),
       messagesLoaded: false,
       messageCount: messages.length,
       sessionMutationStamp: 1,
@@ -1544,14 +1544,14 @@ describe("hydration adoption side effects", () => {
     renderLiveStateHarness(params, () => {});
 
     await waitFor(() => expect(api.fetchSessionTail).toHaveBeenCalledTimes(1));
-    expect(api.fetchSessionTail).toHaveBeenCalledWith("session-1", 100);
+    expect(api.fetchSessionTail).toHaveBeenCalledWith("session-1", 20);
     await waitFor(() =>
       expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toHaveLength(
-        100,
+        20,
       ),
     );
     expect(params.adoptionRefs.sessionsRef.current[0]?.messages[0]?.id).toBe(
-      "message-51",
+      "message-131",
     );
     expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
       false,

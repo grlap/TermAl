@@ -629,21 +629,34 @@ fn telegram_message_not_modified_classifier_requires_telegram_400_error() {
 
 #[test]
 fn telegram_log_sanitizer_redacts_bot_tokens_and_truncates() {
+    let token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi";
     let detail = format!(
-        "request failed for https://api.telegram.org/bot123456:secretToken/getUpdates: {}",
+        "request failed for https://api.telegram.org/bot{token}/getUpdates: {}",
         "x".repeat(300)
     );
     let sanitized = sanitize_telegram_log_detail(&detail);
 
-    assert!(!sanitized.contains("123456:secretToken"));
+    assert!(!sanitized.contains(token));
     assert!(sanitized.contains("/bot<redacted>/getUpdates"));
     assert!(sanitized.ends_with("..."));
     assert!(sanitized.chars().count() <= 259);
 
     let standalone =
-        sanitize_telegram_log_detail("Telegram token rejected: botToken=123456:secretToken.");
-    assert!(!standalone.contains("123456:secretToken"));
+        sanitize_telegram_log_detail(&format!("Telegram token rejected: botToken={token}."));
+    assert!(!standalone.contains(token));
     assert!(standalone.contains("botToken=<redacted>."));
+
+    let colon_delimited = sanitize_telegram_log_detail(&format!(
+        "Telegram token rejected: botToken:{token}: invalid"
+    ));
+    assert!(!colon_delimited.contains(token));
+    assert!(colon_delimited.contains("botToken:<redacted>: invalid"));
+
+    let benign = "trace [12345:67890123] pid 12345:abcdefgh version 12345:6.7.8.9";
+    assert_eq!(sanitize_telegram_log_detail(benign), benign);
+
+    let malformed_url = "request failed for https://api.telegram.org/bot/bot/getMe";
+    assert_eq!(sanitize_telegram_log_detail(malformed_url), malformed_url);
 }
 
 #[test]
@@ -970,6 +983,20 @@ fn telegram_state_persist_backs_up_malformed_existing_file() {
 }
 
 #[test]
+fn telegram_state_load_defaults_missing_file() {
+    let path = std::env::temp_dir().join(format!(
+        "termal-telegram-missing-state-{}.json",
+        Uuid::new_v4()
+    ));
+    fs::remove_file(&path).ok();
+
+    let state = load_telegram_bot_state(&path).expect("missing state should default");
+
+    assert_eq!(state.chat_id, None);
+    assert_eq!(state.next_update_id, None);
+}
+
+#[test]
 fn telegram_state_load_reports_unreadable_paths() {
     let path = std::env::temp_dir().join(format!("termal-telegram-state-dir-{}", Uuid::new_v4()));
     fs::create_dir(&path).expect("fixture directory should create");
@@ -1065,6 +1092,28 @@ fn telegram_settings_validation_rejects_orphan_session_project() {
             .contains("unknown default Telegram session project")
     );
     assert_eq!(config.default_project_id, None);
+    assert!(config.subscribed_project_ids.is_empty());
+}
+
+#[test]
+fn telegram_settings_validation_does_not_partially_mutate_on_late_errors() {
+    let state = test_app_state();
+    let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
+    let mut config = TelegramUiConfig {
+        default_project_id: Some(project_id.clone()),
+        default_session_id: Some("missing-session".to_owned()),
+        ..TelegramUiConfig::default()
+    };
+
+    let err = state
+        .validate_and_normalize_telegram_config(&mut config)
+        .expect_err("unknown default session should fail validation");
+
+    assert!(err.message.contains("unknown default Telegram session"));
+    assert_eq!(
+        config.default_project_id.as_deref(),
+        Some(project_id.as_str())
+    );
     assert!(config.subscribed_project_ids.is_empty());
 }
 

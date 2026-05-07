@@ -127,7 +127,7 @@ type SessionSettingsValue =
 const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES =
   CONVERSATION_OVERVIEW_MIN_MESSAGES;
 const INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES = 512;
-const INITIAL_ACTIVE_TRANSCRIPT_TAIL_MESSAGE_COUNT = 100;
+const INITIAL_ACTIVE_TRANSCRIPT_TAIL_MESSAGE_COUNT = 20;
 const INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX = 160;
 const INITIAL_ACTIVE_TRANSCRIPT_WHEEL_DEMAND_THRESHOLD_PX = 8;
 const INITIAL_ACTIVE_TRANSCRIPT_TOUCH_PULL_DEMAND_THRESHOLD_PX = 8;
@@ -228,6 +228,18 @@ function shouldIgnoreTranscriptDemandKeyTarget(event: KeyboardEvent) {
       "input, textarea, select, option, [contenteditable]",
     ),
   );
+}
+
+function isTranscriptDemandKeyEventInScope(
+  event: KeyboardEvent,
+  scrollNode: HTMLElement,
+) {
+  const path =
+    typeof event.composedPath === "function" ? event.composedPath() : [];
+  if (path.length > 0) {
+    return path.includes(scrollNode);
+  }
+  return event.target instanceof Node && scrollNode.contains(event.target);
 }
 
 function useInitialActiveTranscriptMessages({
@@ -333,9 +345,14 @@ function useInitialActiveTranscriptMessages({
         return;
       }
       hasDemandInteraction = true;
-      requestFullTranscriptRenderAfterWheel();
+      if (node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX) {
+        requestFullTranscriptRenderAfterWheel();
+      }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isTranscriptDemandKeyEventInScope(event, node)) {
+        return;
+      }
       if (shouldIgnoreTranscriptDemandKeyTarget(event)) {
         return;
       }
@@ -373,7 +390,7 @@ function useInitialActiveTranscriptMessages({
 
     node.addEventListener("scroll", hydrateIfNearTop, { passive: true });
     node.addEventListener("wheel", handleWheel, { passive: true });
-    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown, { capture: true });
     node.addEventListener("touchstart", handleTouchStart, { passive: true });
     node.addEventListener("touchmove", handleTouchMove, { passive: true });
     node.addEventListener("touchend", handleTouchEnd, { passive: true });
@@ -383,7 +400,9 @@ function useInitialActiveTranscriptMessages({
       disposed = true;
       node.removeEventListener("scroll", hydrateIfNearTop);
       node.removeEventListener("wheel", handleWheel);
-      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown, {
+        capture: true,
+      });
       node.removeEventListener("touchstart", handleTouchStart);
       node.removeEventListener("touchmove", handleTouchMove);
       node.removeEventListener("touchend", handleTouchEnd);
@@ -1142,6 +1161,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   }
 
   const isConversationVirtualized =
+    isInitialTranscriptWindowActive ||
     visibleMessages.length >= CONVERSATION_VIRTUALIZATION_MIN_MESSAGES;
   const conversationMessages = (
     <ConversationMessageList
@@ -1165,7 +1185,8 @@ const SessionConversationPage = memo(function SessionConversationPage({
       conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
       conversationSearchActiveItemKey={conversationSearchActiveItemKey}
       onConversationSearchItemMount={handleConversationItemMount}
-      />
+      forceVirtualized={isInitialTranscriptWindowActive}
+    />
   );
   const liveTurnCard = showWaitingIndicator ? (
     <RunningIndicator agent={session.agent} lastPrompt={waitingIndicatorPrompt} />
@@ -1275,6 +1296,7 @@ function ConversationMessageList({
   conversationSearchMatchedItemKeys,
   conversationSearchActiveItemKey,
   onConversationSearchItemMount,
+  forceVirtualized = false,
 }: {
   renderMessageCard: RenderMessageCard;
   sessionId: string;
@@ -1290,8 +1312,9 @@ function ConversationMessageList({
   conversationSearchMatchedItemKeys: ReadonlySet<string>;
   conversationSearchActiveItemKey: string | null;
   onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
+  forceVirtualized?: boolean;
 }) {
-  if (messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
+  if (!forceVirtualized && messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
     return (
       <>
         {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}

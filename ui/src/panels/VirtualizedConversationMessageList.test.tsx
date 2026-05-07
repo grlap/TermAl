@@ -370,7 +370,9 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
   it("preserves scroll position when older messages are prepended to an initial tail window", async () => {
     const messages = makeTextMessages(600);
-    const tailMessages = messages.slice(-100);
+    const tailMessages = messages.slice(-20);
+    const tailFirstMessageNumber = messages.length - tailMessages.length + 1;
+    const afterLastTailMessageNumber = messages.length + 1;
     const clientHeight = 500;
     const clientWidth = 1000;
     const messageNumber = (message: Message) =>
@@ -396,7 +398,10 @@ describe("VirtualizedConversationMessageList foundation", () => {
     const scrollHeightFromMountedDom = () => {
       const list = document.querySelector<HTMLElement>(".virtualized-message-list");
       if (!list) {
-        return actualRangeHeight(501, 601);
+        return actualRangeHeight(
+          tailFirstMessageNumber,
+          afterLastTailMessageNumber,
+        );
       }
 
       let height = 0;
@@ -427,7 +432,9 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
       return height;
     };
-    const tailBottomScrollTop = actualRangeHeight(501, 601) - clientHeight;
+    const tailBottomScrollTop =
+      actualRangeHeight(tailFirstMessageNumber, afterLastTailMessageNumber) -
+      clientHeight;
     const harness = renderVirtualizedHarness({
       clientHeight,
       clientWidth,
@@ -531,7 +538,9 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
   it("keeps the first upward wheel from a tail bottom near the hydrated bottom", async () => {
     const messages = makeTextMessages(600);
-    const tailMessages = messages.slice(-100);
+    const tailMessages = messages.slice(-20);
+    const tailFirstMessageNumber = messages.length - tailMessages.length + 1;
+    const afterLastTailMessageNumber = messages.length + 1;
     const clientHeight = 500;
     const clientWidth = 1000;
     const messageNumber = (message: Message) =>
@@ -557,7 +566,11 @@ describe("VirtualizedConversationMessageList foundation", () => {
         VIRTUALIZED_MESSAGE_GAP_PX
       );
     };
-    const tailBottomScrollTop = estimatedRangeHeight(501, 601) - clientHeight;
+    const tailBottomScrollTop =
+      estimatedRangeHeight(
+        tailFirstMessageNumber,
+        afterLastTailMessageNumber,
+      ) - clientHeight;
     const wheelDeltaY = -120;
     const harness = renderVirtualizedHarness({
       clientHeight,
@@ -600,7 +613,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
     const messages = makeTextMessages(600);
     const harness = renderVirtualizedHarness({
       initialScrollTop: 0,
-      messages: messages.slice(-100),
+      messages: messages.slice(-20),
     });
 
     try {
