@@ -7,21 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## `targetScrollTop` reads rect BEFORE `applyMountedPageRange` mutates DOM — single-frame visual jump
-
-**Severity:** High - the layout effect reads `node.getBoundingClientRect()` and `preservedAnchorSlot.getBoundingClientRect()`, then calls `applyMountedPageRange(nextMountedRange)` (which can change DOM), then calls `writeScrollTopAndSyncViewport(node, targetScrollTop)` with the now-stale `targetScrollTop`.
-
-`ui/src/panels/VirtualizedConversationMessageList.tsx:1488-1510`. The followup effect re-anchors but only on its own dep changes (`layoutVersion`, `mountedPageRange`), not synchronously. A single-frame visual jump can occur before the followup effect re-anchors.
-
-**Current behavior:**
-- Rects captured before `applyMountedPageRange`.
-- DOM may change after rect capture.
-- Scroll target written with stale rect data.
-
-**Proposal:**
-- Capture rect AFTER `applyMountedPageRange`, OR
-- Recompute targetScrollTop in a follow-up rAF after the range change settles.
-
 ## `useEffect` synchronous `refreshLayoutSnapshot()` on every `messageCount` change bypasses rAF coalescing
 
 **Severity:** Medium - the new `useEffect` runs `refreshLayoutSnapshot()` and `refreshViewportSnapshot()` on every `messageCount` change while active+rendered+ready. During streaming, message count changes on every assistant chunk delta. Both refreshes call `getLayoutSnapshot()` which iterates all messages on every chunk.
@@ -37,48 +22,185 @@ the Implementation Tasks section.
 - Route the new effect through the same rAF-coalesced `scheduleLayoutRefresh` scheduler that the steady-state effect uses.
 - Or guard with a small debounce / batch interval.
 
-## `redact_standalone_telegram_bot_tokens` thresholds (5 digits, 8 secret chars) produce false positives on benign log content
+## Standalone Telegram token redaction misses documented 6-digit bot ids
 
-**Severity:** Medium - real Telegram tokens are `<bot_id>:<35 chars>` where bot_id is typically 8-10 digits. The current matcher accepts any digit run of ≥5 followed by `:` and ≥8 alphanum/_/- as "telegram token". This false-positives on common log shapes like `[12345:67890123]`, `pid 12345:abcdefgh`, version strings `12345:6.7.8.9`.
+**Severity:** Medium - the standalone token scanner now requires an 8-digit bot id, but Telegram's documented token shape includes 6-digit bot ids.
 
-`src/telegram.rs:340-369` (`standalone_telegram_bot_token_end`). No anchor token (e.g., `botToken=`, `Bearer `, `/bot`) required.
-
-**Current behavior:**
-- 5+ digits + `:` + 8+ alphanum/_/- gets redacted.
-- Common log shapes get over-redacted.
-
-**Proposal:**
-- Tighten to `MIN_BOT_ID_DIGITS >= 8` and `MIN_TOKEN_SECRET_CHARS >= 30`.
-- Or require a prefix anchor token within a small window before the candidate.
-
-## `redact_standalone_telegram_bot_tokens` false negative when token is colon-surrounded
-
-**Severity:** Medium - `telegram_token_ascii_byte` includes `:` as a "token byte". The trailing-byte check rejects matches when followed by `:`. Messages like `"token=12345:abcdefgh: invalid"` don't redact because the secret terminator is treated as a token character.
-
-`src/telegram.rs:340-369`. The leading-byte check has the same property: `prefix:12345:secret123` won't redact either.
+`src/telegram.rs:354`. The `/bot.../` URL redactor still covers URL paths, but standalone log shapes such as `botToken=123456:<secret>` can pass through unredacted.
 
 **Current behavior:**
-- Tokens followed by `:` slip through.
-- Tokens preceded by `:` slip through.
+- Standalone token candidates require at least 8 bot-id digits.
+- 6-digit standalone tokens are not redacted.
+- Sanitized logs and API error details can still include those token strings.
 
 **Proposal:**
-- Narrow `telegram_token_ascii_byte` to exclude `:` (boundary mode), use a separate predicate for "inside token".
+- Lower the bot-id threshold to include documented 6-digit token ids, or require trusted prefixes such as `botToken=`, `bot_token`, or `Authorization` before matching shorter ids.
+- Add a regression using a 6-digit bot id with a 35-character secret.
 
-## `validate_and_normalize_telegram_config` partial-mutation gap remains for `subscribed_project_ids`
+## Telegram config updates validate stale persisted references before sanitizing them
 
-**Severity:** Medium - round-60 fix targets `default_project_id` auto-fill ordering, but line 182 still pushes `default_project_id` onto `subscribed_project_ids` BEFORE the session-project-known check at line 198 can return Err.
+**Severity:** Medium - `POST /api/telegram/config` validates the loaded `telegram-bot.json` config before pruning stale project/session references that the status path already hides.
 
-`src/telegram_settings.rs:177-184, 198-225`. Caller drops `&mut config` on Err today, but contract is fragile: a future caller persisting partially-mutated config on validation error would write known-bad state.
+`src/telegram_settings.rs:68-69`. If the persisted config still references a deleted project or session, an unrelated partial config update can fail with `unknown Telegram project` even though `GET /api/telegram/status` returns sanitized state.
 
 **Current behavior:**
-- `subscribed_project_ids.push` at line 182 runs before line 198 known-projects check.
-- On Err return, caller has partial mutation in `&mut config`.
-- Contract violated for new caller usage.
+- `update_telegram_config` applies the patch to the raw loaded config.
+- Validation runs before `sanitize_telegram_config_for_current_state`.
+- Stale references hidden from the client can block unrelated updates.
 
 **Proposal:**
-- Snapshot+restore on Err, OR
-- Restructure as pure validation followed by separate normalize step, OR
-- Move all mutations to the end of the function after every check passes.
+- Sanitize the loaded config before applying and validating the patch.
+- Keep the post-validation sanitize as a TOCTOU cleanup before persisting.
+- Add a regression with stale on-disk references plus an unrelated config update.
+
+## Telegram settings loader hides non-NotFound read failures behind `exists()`
+
+**Severity:** Medium - `load_telegram_bot_file` checks `Path::exists()` before reading the settings file, so metadata/access errors can be treated as missing config.
+
+`src/telegram_settings.rs:123-126`. The relay state loader was hardened to read directly and default only on `ErrorKind::NotFound`, but the UI settings loader still has the older failure mode.
+
+**Current behavior:**
+- `load_telegram_bot_file` returns the default file when `exists()` is false.
+- Some metadata/access failures can make `exists()` return false.
+- The UI settings path can silently ignore an unreadable token/config file.
+
+**Proposal:**
+- Call `fs::read` directly.
+- Return the default config only for `ErrorKind::NotFound`.
+- Propagate all other read errors and add settings-loader coverage.
+
+## Conversation overview viewport translation can reuse a stale same-size tail window or cross-session translation
+
+**Severity:** Medium - tail-window viewport translation validates compatibility only by `messageCount` and lacks any session identity guard.
+
+`ui/src/panels/conversation-overview-map.ts:299-333`. During streaming, the visible tail can shift from one 20-message window to another while the viewport snapshot still reports the same count, allowing an old translation offset to project the rail viewport marker onto the wrong transcript region. Additionally, a snapshot from a different session that happens to share the same `messageCount` could trigger the translation branch, projecting one session's viewport against another session's overview.
+
+**Current behavior:**
+- `viewportSnapshotTranslation` carries only `snapshotMessageCount`.
+- `projectConversationOverviewViewport` accepts any later viewport snapshot with the same count.
+- Same-size shifted tail windows can reuse a stale `sourceTopOffsetPx`.
+- No `sessionId` equality guard; cross-session reuse is structurally possible.
+
+**Proposal:**
+- Include a cheap window identity, such as first/last message id or a layout window version, in both the translation and viewport snapshot.
+- Add `sessionId` equality as part of the translation gate (and persist `sessionId` on the translation).
+- Add regressions for a same-size shifted tail window and for cross-session viewport projection.
+
+## Returning to bottom leaves stale virtualized scroll-kind classification
+
+**Severity:** Medium - bottom re-entry clears the idle-compaction timer but leaves `lastUserScrollKindRef.current` set to `"incremental"`.
+
+`ui/src/panels/VirtualizedConversationMessageList.tsx:2726`. The cleared idle timer is normally what expires scroll-kind state, so later native scrollbar movement without wheel/key/touch input can inherit the stale classification.
+
+**Current behavior:**
+- Native downward scroll near bottom sets `lastUserScrollKindRef.current = "incremental"`.
+- The idle-compaction timer is cleared at the same boundary.
+- Later native scrolls can reuse the cached scroll kind indefinitely.
+
+**Proposal:**
+- Clear `lastUserScrollKindRef` on bottom re-entry, or expire the one-tick override with a short timestamp/timer.
+- Add a regression that returns to bottom, then performs a native scroll with no preceding wheel/key/touch input.
+
+## Mousedown hydration test is not regression-sensitive
+
+**Severity:** Medium - the new `AgentSessionPanel` mousedown hydration assertion reuses a render where prior wheel/touch interactions already set demand interaction state.
+
+`ui/src/panels/AgentSessionPanel.test.tsx:2175`. Removing the new mousedown listener can still leave the test passing because `hasDemandInteraction` was already true before the mousedown assertion runs.
+
+**Current behavior:**
+- The test fires earlier demand-marking events.
+- The final mousedown path is asserted in the same render.
+- The assertion does not prove mousedown itself enables hydration.
+
+**Proposal:**
+- Isolate the mousedown case in a fresh render, or avoid any prior demand-marking events before the mousedown assertion.
+- Add a positive in-scope keyboard case for `Home` or `PageUp`.
+
+## Idle-compaction test enables fake timers after scheduling the timer
+
+**Severity:** Medium - the `VirtualizedConversationMessageList` idle-compaction assertion can pass without flushing the production timer it claims to exercise.
+
+`ui/src/panels/VirtualizedConversationMessageList.test.tsx:522`. The scroll interaction schedules compaction before fake timers are enabled, so `advanceTimersByTimeAsync` may not control that scheduled callback.
+
+**Current behavior:**
+- The test fires the interaction that schedules idle compaction.
+- Fake timers are enabled afterward.
+- Timer advancement may not exercise the production compaction callback.
+
+**Proposal:**
+- Enable fake timers before the interaction that schedules compaction.
+- Assert the post-compaction state or otherwise prove the compaction callback ran.
+
+## `resolveViewportSnapshotTranslation` only happy-path tested
+
+**Severity:** Medium - the new translation helper has six negative branches (`layoutSnapshot === null`, `layoutSnapshot.messageCount >= estimatedRows.length` (full-transcript no-op), `layoutSnapshot.messages.length === 0`, `firstRowIndex < 0` (orphan tail message id absent from full transcript), `!hasContiguousWindow`, drift case where `viewportSnapshot.messageCount !== snapshotMessageCount`). The new test at `conversation-overview-map.test.ts:452-506` covers only the happy path.
+
+`ui/src/panels/conversation-overview-map.test.ts:452-506`. Each negative branch silently returns null and falls through to the legacy projection. A regression that flipped any of these guards would only surface as misaligned viewport markers in production.
+
+**Current behavior:**
+- One happy-path test exercises contiguous tail window with `messageCount < estimatedRows.length`.
+- Negative branches silently fall through.
+- Drift case (where viewport snapshot count differs from translation snapshot count) is uncovered.
+
+**Proposal:**
+- Add focused tests for each negative branch via `buildConversationOverviewProjection` then probing `projection.viewportSnapshotTranslation` for null in each case.
+- Add a drift-case test where viewport snapshot count differs from translation snapshot count and the legacy projection path is exercised.
+
+## `resolvePrependedMessageCount` only happy path tested
+
+**Severity:** Medium - the new pure helper has six branches (cross-session, empty previous window, no growth, partial overlap, no first-message match, contiguous match at index 0). Only the happy path (genuine prepend at startIndex>0) is exercised end-to-end via the prepend integration test.
+
+`ui/src/panels/VirtualizedConversationMessageList.tsx:413-441`. The integration test combines layout, scroll, and DOM behavior, so a regression in the matcher (off-by-one in `maxStartIndex`, accepting a non-contiguous overlap) might be masked by the looser scroll-position assertion.
+
+**Current behavior:**
+- Helper is not exported; no direct unit test.
+- Edge cases (empty before/after, single message, all messages new vs. all stale, partial overlap, session change) unverified.
+
+**Proposal:**
+- Export `resolvePrependedMessageCount` (or move it to a sibling module) and add unit tests for each branch with `MessageWindowSnapshot` fixtures.
+
+## `mountedRangeWillChange` early-return not pinned by test
+
+**Severity:** Medium - the new `mountedRangeWillChange || !preservedAnchorSlot` early-return at `VirtualizedConversationMessageList.tsx:1561-1567` is the load-bearing fix for the "single-frame visual jump" issue (which was removed from bugs.md by this round). The integration test was simultaneously rewritten to drop `await waitFor(...)` in favor of a synchronous assertion. There is no test that pins the new condition — i.e., that when a prepend forces a range change AND the anchor is mounted, no stale-rect scroll write is emitted before the followup effect re-anchors.
+
+`ui/src/panels/VirtualizedConversationMessageList.test.tsx:484-492`. The test asserts the post-flush position, not the absence of the intermediate stale write. A regression that flipped back to the old `!preservedAnchorSlot` gate would still pass the new test (the followup effect catches up either way).
+
+**Current behavior:**
+- New test asserts post-flush scroll position synchronously.
+- No assertion verifies the absence of an intermediate stale-rect scroll write.
+- A regression to the prior gate would not be caught.
+
+**Proposal:**
+- Assert `harness.scrollWrites` between the prepend and the followup effect — specifically, that no scroll write lands at the stale `targetScrollTop` value computed from pre-mutation rects.
+- Or use `hydrationScrollWrites.every(...)` to assert all writes track the final scroll position.
+
+## `redact_standalone_telegram_bot_tokens` threshold-boundary coverage is weak
+
+**Severity:** Medium - the new test pins the new threshold (`MIN_BOT_ID_DIGITS = 8`, `MIN_TOKEN_SECRET_CHARS = 35`) but only at the single happy-case combination. Boundary cases — 7-digit bot id (must NOT redact), 8-digit/34-char secret (must NOT redact), 8-digit/35-char (must redact) — are uncovered. Multiple-token-in-one-string is also not exercised.
+
+`src/tests/telegram.rs:631-660`. A regression that flipped the constants back to the looser values (which was the previous false-positive bug) would silently re-introduce false positives.
+
+**Current behavior:**
+- Single test bundles five independent assertions.
+- Threshold-adjacent cases not pinned.
+- Multi-token-in-one-string case not exercised.
+
+**Proposal:**
+- Add three boundary cases — 7-digit/35-char (not redacted), 8-digit/34-char (not redacted), 8-digit/35-char (redacted) — plus a multi-token-in-one-string case.
+- Split the bundled assertions into per-shape `#[test]` functions.
+
+## `validate_and_normalize_telegram_config` partial-mutation tested for only one error path
+
+**Severity:** Medium - the new `telegram_settings_validation_does_not_partially_mutate_on_late_errors` test covers the orphan-session error path. It does not cover the other three late-error paths — unknown default project, default-session-must-belong-to-project, default-session-must-belong-to-default-project — each of which fires AFTER the `subscribed_project_ids.push(default_project_id)` mutation. The snapshot+restore guarantee should hold for all four error paths.
+
+`src/tests/telegram.rs:1107-1126`. A future regression that moved `*config = normalized` outside one error branch (e.g., consolidating validation into a helper that loses the snapshot wrapper for one path) would only be caught by the specific path's test.
+
+**Current behavior:**
+- One test covers the orphan-session error path's snapshot/restore.
+- The other three late-error paths are uncovered.
+
+**Proposal:**
+- Add three sister tests that trigger each of the other late errors and assert `config.subscribed_project_ids.is_empty()` and `config.default_project_id` retains its original value.
 
 ## `markUserScroll` anchor speculation captures approximate touch offsets
 
@@ -153,21 +275,6 @@ the Implementation Tasks section.
 - Throttle via rAF.
 - OR only capture when prepend is imminent.
 
-## `is_rate_limited` retains method-agnostic classification while sibling is now `getMe`-only
-
-**Severity:** Medium - after round 60, asymmetry is sharper: `telegram_getme_error_is_token_validation_failure` is method-guarded; `telegram_api_error_is_rate_limited` is not. A future `sendMessage` 401 returns 502 (correct), but `sendMessage` 429 returns 429 (matches getMe rate-limit semantics).
-
-`src/telegram_settings.rs:389-390, 393-409`.
-
-**Current behavior:**
-- `is_rate_limited` returns true on either signal regardless of method.
-- `is_token_validation_failure` requires `method == "getMe"`.
-- Asymmetry could be intentional (rate-limit applies to all methods) but undocumented.
-
-**Proposal:**
-- Either guard `is_rate_limited` similarly with `method`, OR
-- Document explicitly that rate-limit signal is intentionally method-agnostic in a code comment.
-
 ## `validate_and_normalize_telegram_config` orphan-session error message reorder is wire-visible
 
 **Severity:** Medium - same input now produces a different error message. Round 60 reordered the `known_projects` check to run before the project-mismatch check; the user-visible error message changes from `"default Telegram session must belong to the default project"` to `"unknown default Telegram session project P_unknown"` for the case where session points to an unknown project.
@@ -197,19 +304,108 @@ the Implementation Tasks section.
 **Proposal:**
 - Document the partial-information loss in `agent-delegation-sessions.md` so wrappers know `status-fetch-failed` may hide a concurrent server restart.
 
-## `is_rate_limited` OR semantic asymmetric with `is_token_validation_failure` AND — undocumented in code
+## `_getme_` classifier predicates lack code-level docs explaining method-guard contract and OR-vs-AND asymmetry
 
-**Severity:** Low - rate-limit uses OR (`error_code == Some(429) || status == TOO_MANY_REQUESTS`); token-validation uses AND-when-Some. Asymmetry is intentional but undocumented in code; tests document intent in test form but the function definitions alone don't.
+**Severity:** Low - both classifiers are now method-guarded as `telegram_getme_error_is_rate_limited` / `telegram_getme_error_is_token_validation_failure`. The function names imply a `getMe`-only contract, but neither has a `///` doc comment that pins the contract for future callers, and the underlying OR-vs-AND asymmetry between the two predicates is still undocumented in code.
 
-`src/telegram_settings.rs:388-390, 392-404`.
+`src/telegram_settings.rs:388-396`.
 
 **Current behavior:**
-- `is_rate_limited` returns true on either signal.
-- `is_token_validation_failure` requires both signals (when error_code is Some).
-- No code-level documentation explains the asymmetry.
+- Rate-limit classifier returns true on either `error_code == Some(429)` OR `status == TOO_MANY_REQUESTS`.
+- Token-validation classifier requires both signals (when `error_code` is `Some`).
+- Both functions silently downgrade non-`getMe` callers to false (returning `502 Bad Gateway`).
+- Function names hint the contract but no `///` doc states it.
 
 **Proposal:**
-- Add `// NOTE: ...` doc above each predicate explaining why one ANDs and the other ORs (e.g., "Rate-limit is the more actionable signal; prefer false-positive over false-negative" for the OR case).
+- Add `///` doc comments on each predicate explicitly stating the `getMe`-only contract and the rationale for OR vs AND.
+- Note that any future caller for a different method must add its own classification.
+
+## Tail-window thresholds drift apart: 101-message hydration vs 512-message render mode
+
+**Severity:** Low - `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` triggers backend tail hydration of `SESSION_TAIL_FIRST_HYDRATION_MESSAGE_COUNT = 20`, but the UI tail-window only activates when `INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES = 512`. Sessions in [101, 512] messages get a 20-message tail hydration response while the conversation page does not enter tail-window mode.
+
+`ui/src/panels/AgentSessionPanel.tsx:129-130`, `ui/src/app-live-state.ts:272-273`. The 101/512 asymmetry is undocumented; future tuning lands inconsistently.
+
+**Current behavior:**
+- Sessions ≥101 messages get a 20-message tail hydration.
+- Sessions <512 messages render in normal (non-tail-window) mode.
+- For sessions in [101, 512], demand-hydration UX is unreachable because tail-window is not active.
+
+**Proposal:**
+- Align the two thresholds, or add a contract comment explaining the deliberate asymmetry (e.g. why 101 is the hydration-shape threshold and 512 is the rendering-window threshold).
+
+## `previousMessageWindowRef` lazy-init makes early-return unreachable
+
+**Severity:** Low - the new lazy-init at `VirtualizedConversationMessageList.tsx:525-531` unconditionally sets `previousMessageWindowRef.current` to a non-null `MessageWindowSnapshot` during the first render. By the time the `useLayoutEffect` runs at line 1406, the ref is already non-null, so the `if (previousWindow === null) return;` early-return at line 1414 is unreachable.
+
+`ui/src/panels/VirtualizedConversationMessageList.tsx:1414-1416`. Correctness-neutral (the next downstream check `resolvePrependedMessageCount` handles the same-content case naturally), but the dead-code obscures intent.
+
+**Current behavior:**
+- First-render initializer sets ref to non-null.
+- `if (previousWindow === null) return;` never fires.
+- A reader thinks "there's a real first-mount short-circuit" when there isn't.
+
+**Proposal:**
+- Either remove the dead check, OR reset `previousMessageWindowRef.current = null` between session boundaries inside an effect to make the check live.
+
+## `resolveViewportSnapshotTranslation` does an O(N+M) full-transcript pass per layout snapshot rebuild
+
+**Severity:** Low - the helper uses `Array.prototype.findIndex` to find the first layout-snapshot message in `estimatedRows`, then `.every` to verify a contiguous window. For a 1000-message transcript with a 100-message tail, `findIndex` scans up to 900 entries and `.every` walks up to 100. Acceptable for current sizes, but `buildConversationOverviewProjection` runs on every layout snapshot change.
+
+`ui/src/panels/conversation-overview-map.ts:903-942`. The active "messageCount-driven refreshLayoutSnapshot" effect (already in bugs.md as Medium) makes this snowball with the streaming layout-refresh cadence.
+
+**Current behavior:**
+- O(N) `findIndex` over full estimatedRows.
+- O(M) `.every` over layoutSnapshot.messages.
+- Runs on every layout snapshot rebuild during streaming.
+
+**Proposal:**
+- Build a `Map<messageId, rowIndex>` once for `estimatedRows` and reuse for the lookup.
+- Or compare `layoutSnapshot.messages[0].messageId` to the trailing-N message ids (since the layout window is always near the end).
+
+## `backup_corrupt_telegram_bot_file` rename/copy paths leave backup with permissive permissions on partial-failure
+
+**Severity:** Low - in `backup_corrupt_telegram_bot_file`, the sequence is rename-or-copy → harden permissions. If `harden_telegram_bot_file_permissions(&backup_path)` returns Err after rename/copy succeeded, the backup file already exists at its destination with whatever permissions the original or copy operation produced (Unix mirrors source-mode bits). The error propagates, but a token-bearing file is left on disk with non-`0600` mode. The `fs::copy` + `fs::remove_file` arm has the additional property that on remove failure, two token-bearing files exist.
+
+`src/telegram.rs:241-267`. Same security guarantee just added — a corrupt-token backup must never be world-readable.
+
+**Current behavior:**
+- Backup file lands at final path with original perms before harden runs.
+- On harden-failure or remove-failure, file persists unhardened.
+- The active `write_telegram_bot_file` path correctly hardens BEFORE rename; this path does not.
+
+**Proposal:**
+- Harden permissions on the staged source path BEFORE the rename/copy-to-backup, paralleling the temp-file harden-then-rename pattern.
+- Or add defense-in-depth `fs::remove_file(&backup_path)` on the harden-failed branch so the leak does not persist.
+
+## Wheel/scrollTop demand-hydration thresholds lack boundary-exact test coverage
+
+**Severity:** Low - the wheel test fires `deltaY: -4` (below threshold) and asserts no hydration, then `deltaY: -120` with `scrollTop: 20_000` (above scrollTop ceiling) and asserts no hydration. The exact threshold boundary — `deltaY: -8` (should trigger) vs `-7` (should not), and `scrollTop: 160` vs `161` — is not pinned.
+
+`ui/src/panels/AgentSessionPanel.tsx:340-351`, `ui/src/panels/AgentSessionPanel.test.tsx`. A future change to the constants would not surface as a failing test because no boundary-exact case is asserted.
+
+**Current behavior:**
+- `deltaY: -4` and `deltaY: -120` cases pinned.
+- `deltaY: -7` (below threshold) and `-8` (at threshold) untested.
+- `scrollTop: 160`/`161` boundary untested.
+
+**Proposal:**
+- Add `deltaY: -8` (just at threshold) and `deltaY: -7` cases.
+- Add `scrollTop: 160` (at ceiling) vs `161` (above) cases.
+
+## `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` boundary not tested
+
+**Severity:** Low - `app-live-state.test.ts:1509-1547` was updated to pin the new `SESSION_TAIL_FIRST_HYDRATION_MESSAGE_COUNT = 20` count, but no test pins the boundary at `MIN_MESSAGES = 101`. A 100-message session should NOT trigger tail hydration; a 101-message session should.
+
+`ui/src/app-live-state.ts:272`, `ui/src/app-live-state.test.ts:1509-1547`. A regression that lowered the trigger threshold to 21 (mistaking `MESSAGE_COUNT` for `MIN_MESSAGES`) would not be caught.
+
+**Current behavior:**
+- Test confirms tail hydration uses the new count.
+- Boundary value (100 vs 101) is not exercised.
+
+**Proposal:**
+- Add a 100-message session test asserting `fetchSessionTail` is NOT called.
+- Add a 101-message session test asserting it IS called.
 
 ## Git file actions treat user paths as Git pathspecs instead of literals
 
@@ -226,35 +422,138 @@ the Implementation Tasks section.
 - Force literal pathspec handling for all user-derived Git path args, for example via `GIT_LITERAL_PATHSPECS=1` or `:(literal)` wrapping.
 - Add regression coverage for `*`, `?`, `[]`, and `:(top)` filenames.
 
-## Native scrollbar-to-top does not hydrate the initial active transcript tail
+## `ConversationOverviewViewportSnapshotTranslation` is not exported despite appearing on public projection shape
 
-**Severity:** Medium - tail-window hydration now gates near-top scroll hydration on `hasDemandInteraction`, but native scrollbar drag or track-click scrolling fires `scroll` without prior wheel, key, or touch handlers.
+**Severity:** Note - the new local `type ConversationOverviewViewportSnapshotTranslation` is referenced by the public `ConversationOverviewProjection` interface (which IS exported), but the type itself is not exported. External consumers can read `projection.viewportSnapshotTranslation` only via inference and cannot import the type by name. There is also no contract comment explaining when translation is used vs the legacy path, what the units of `sourceTopOffsetPx` are, or the `messageCount` keying contract.
 
-`ui/src/panels/AgentSessionPanel.tsx:320`. A long active transcript can remain stuck at the top of the initial tail window after the user drags the scrollbar thumb or clicks the scrollbar track toward the top.
-
-**Current behavior:**
-- `scroll` hydrates only when `hasDemandInteraction` is true.
-- The flag is set by wheel, document keydown, and touch handlers.
-- Native scrollbar movement can reach the top threshold without setting the flag.
-
-**Proposal:**
-- Track upward/native scroll intent in the scroll handler, or add pointer/mousedown handling for scrollbar interaction.
-- Preserve the guard against initial mount and programmatic near-top scrolls.
-
-## Idle-compaction test enables fake timers after scheduling the timer
-
-**Severity:** Medium - the new `VirtualizedConversationMessageList` idle-compaction assertion can pass without flushing the production timer it claims to exercise.
-
-`ui/src/panels/VirtualizedConversationMessageList.test.tsx:518`. The wheel interaction schedules compaction before fake timers are enabled, so `advanceTimersByTimeAsync` may not control that scheduled callback.
+`ui/src/panels/conversation-overview-map.ts:85-91`.
 
 **Current behavior:**
-- The test fires the user interaction that schedules idle compaction.
-- Fake timers are enabled afterward.
-- The timer advancement may not exercise the production compaction callback.
+- Type is declared as a local `type`, not `export type`.
+- No JSDoc on `viewportSnapshotTranslation`, `resolveViewportSnapshotTranslation`, or `projectConversationOverviewViewport`.
+- Downstream callers in `ConversationOverviewRail.tsx` and tests must reach in via projection.
 
 **Proposal:**
-- Enable fake timers before the interaction that schedules compaction.
-- Or reschedule under fake timers and assert that compaction actually occurred.
+- Export the type to mirror the visibility of its container.
+- Add a short module-level contract comment explaining "translation captures `documentTop − layoutTop` for a contiguous window so a viewport snapshot from the windowed virtualizer can map onto the full-transcript overview".
+- Document the `snapshotMessageCount` re-use rule.
+
+## `validate_and_normalize_telegram_config` and `sanitize_telegram_config_for_current_state` have overlapping responsibilities with implicit ordering
+
+**Severity:** Note - `update_telegram_config` runs `validate_and_normalize_telegram_config` followed by `sanitize_telegram_config_for_current_state` on the success path. Both functions filter `subscribed_project_ids` against `known_projects`, but with different semantics — validate rejects unknown projects with `ApiError::bad_request`, sanitize silently drops them. The order matters and the layering contract is implicit.
+
+`src/telegram_settings.rs:68-69`. No comment explains why both run on the write path.
+
+**Current behavior:**
+- `validate_and_normalize_telegram_config` strictly rejects unknown ids.
+- `sanitize_telegram_config_for_current_state` silently drops them.
+- Both run sequentially with no comment explaining the layering.
+
+**Proposal:**
+- Add a short comment explaining the intended layering (e.g., "Validate user input strictly, then sanitize against any state that may have changed since the user clicked save").
+- Or merge the two passes if the use cases have converged.
+
+## `redact_telegram_bot_url_tokens` empty-token defensive branch lacks comment
+
+**Severity:** Note - the URL redactor at lines 307-322 special-cases `token_end == 0` to copy one byte and advance, defending against `/bot/bot/getMe`-style infinite-loop inputs. Logic is correct but the loop has no comment describing why the empty-token branch exists or what attack surface it guards against.
+
+`src/telegram.rs:307-322`. A future contributor simplifying the function may merge the branches and reintroduce the hang.
+
+**Current behavior:**
+- Empty-token branch advances one byte to avoid hanging.
+- The defensive-advance pattern is non-obvious without context.
+- No comment explains the pinned `/bot/bot/getMe` regression.
+
+**Proposal:**
+- Add a one-line comment such as `// Empty token span: advance one byte to avoid an infinite loop on /bot followed immediately by '/'`.
+
+## `eprintln!` paths in Telegram subsystem bypass `sanitize_telegram_log_detail`
+
+**Severity:** Note - two `eprintln!` paths log error sources directly to stderr without running them through `sanitize_telegram_log_detail`: `telegram_settings_file_error` at `src/telegram_settings.rs:453` and the parse-error branch in `backup_corrupt_telegram_bot_file` at `src/telegram.rs:243-247`. Today `serde_json::Error::Display` does not echo source bytes, so the bot token does not leak. However, the contract that errors never echo source content is implicit. A future error variant (custom JSON parser with context, dependency upgrade, or upstream `io::Error::other(format!("... {raw_data} ..."))`) could embed file contents in the error string.
+
+`src/telegram_settings.rs:453`, `src/telegram.rs:243-247`.
+
+**Current behavior:**
+- `eprintln!("...{err}", err = err)` formats the error directly.
+- No `sanitize_telegram_log_detail` wrapping.
+- Active token-write path elsewhere routes through `sanitize_telegram_log_detail`; these stderr paths are the lone exceptions.
+
+**Proposal:**
+- Wrap `{err}` formatting in `sanitize_telegram_log_detail(&err.to_string())` for defense-in-depth, mirroring the relay's `log_telegram_error` discipline.
+
+## `telegram_token_boundary_byte` and `telegram_token_secret_byte` are byte-for-byte identical predicates
+
+**Severity:** Note - both predicates resolve to `is_alphanumeric || _ | -`. The duplication is functionally correct (the secret loop greedily consumes every byte, so the post-loop boundary check is trivially satisfied) but is an attractive nuisance — a future contributor may try to tighten one without the other and reintroduce a redaction gap. The two predicates serve conceptually different roles (delimiter detection vs. content matching).
+
+`src/telegram.rs:385-390`.
+
+**Current behavior:**
+- Boundary and secret predicates accept identical byte sets.
+- No documentation of the subset/equality requirement.
+- A change to one without the other would silently break redaction.
+
+**Proposal:**
+- Collapse into a single predicate with an explanatory `///` comment.
+- Or add comments noting that the boundary and secret byte sets must remain a subset/equal for correctness.
+
+## `standalone_telegram_bot_token_end` boundary uses `is_ascii_alphanumeric` only
+
+**Severity:** Note - the new `telegram_token_boundary_byte` excludes `:` (fixing the colon-delimited case), but the boundary check uses `is_ascii_alphanumeric` only — non-ASCII alphanumeric prefix bytes (e.g., a Cyrillic letter immediately preceding the digit run from a Telegram error or interpolated chat title) are NOT boundary bytes, so a token whose left boundary is a multi-byte UTF-8 letter would still redact.
+
+`src/telegram.rs:353-383`. Mostly defense-in-depth for log shapes that may not exist today; if an upstream library ever interpolates a chat title with a non-ASCII letter, the redactor will treat it as a delimiter.
+
+**Current behavior:**
+- Boundary detection accepts only ASCII alphanumeric.
+- Non-ASCII letters before/after a candidate are treated as delimiters.
+- Tightening only `:` was the targeted fix; not all callers were considered.
+
+**Proposal:**
+- Optionally treat any non-whitespace byte as a "boundary" (i.e. keep the strict-letter rule and additionally exclude `:` from the boundary set).
+- Or document the chosen contract.
+
+## `validate_and_normalize_telegram_config` clones bot token into snapshot copy
+
+**Severity:** Note - the snapshot+restore fix uses `let mut normalized = config.clone()`, which clones the entire `TelegramUiConfig` including `bot_token: Option<String>`. The token now exists twice on the heap until `normalized` drops at function return. Validation never zeroes it. Consistent with the rest of the codebase but worth noting if you ever introduce a `Zeroizing<String>` wrapper for the bot token elsewhere.
+
+`src/telegram_settings.rs:149-232`.
+
+**Current behavior:**
+- `clone()` creates a duplicate of `bot_token` for the duration of validation.
+- No `Zeroizing` wrapper.
+- Phase 1 single-user trust boundary makes this acceptable.
+
+**Proposal:**
+- Either accept (Phase 1 single-user stance).
+- Or restructure as pure validation that does not own a copy of secrets — collect required mutations into a small `Normalization { default_project_id: Option<String>, push_subscriptions: Vec<String> }` value and apply after validation passes.
+
+## `handleKeyDown` listener attached to `document` with `capture: true` fires for every keystroke globally
+
+**Severity:** Note - the `AgentSessionPanel` keyboard demand-hydration listener is now in the capture phase, so it sees keystrokes on every element on the page. The `isTranscriptDemandKeyEventInScope` guard checks `composedPath().includes(scrollNode)` to filter, but the document-level capture listener fires for every keystroke during typing. `composedPath()` allocates an array per event.
+
+`ui/src/panels/AgentSessionPanel.tsx:357-372`. Current scope filter prevents misfires; the cost is observable but probably acceptable.
+
+**Current behavior:**
+- `document.addEventListener("keydown", ..., { capture: true })`.
+- Fires for every global keystroke including unrelated panels and modals.
+- `composedPath()` filtering allocates per event.
+
+**Proposal:**
+- Consider attaching the listener to `node` directly (since composedPath also resolves through bubbles) and dropping `capture: true`.
+- Or short-circuit on key first (only `ArrowUp`/`Home`/`PageUp` trigger expensive scope checks).
+
+## Single test bundles five Telegram redaction assertions
+
+**Severity:** Note - `telegram_log_sanitizer_redacts_bot_tokens_and_truncates` bundles five independent assertions (URL redaction + truncation, standalone `=`-delimited, colon-delimited, benign three-shape passthrough, malformed `/bot/bot/`). Same pattern bugs.md previously called out for the connection-test classifier. A failure deep inside makes the line number unhelpful.
+
+`src/tests/telegram.rs:630-660`.
+
+**Current behavior:**
+- One `#[test]` function asserts five disjoint shapes.
+- Failure messages cluster at one location.
+
+**Proposal:**
+- Split into per-shape `#[test]` functions.
+- Or use a small `(input, expected_substring_present, expected_substring_absent)` table and one helper.
 
 ## Copy/rename Git staging pathspec branch lacks coverage
 
@@ -271,21 +570,6 @@ the Implementation Tasks section.
 - Add focused coverage for `Some("R")` and `Some("C")`.
 - Prefer a real repo staging scenario that proves both old and new paths are staged together.
 
-## Telegram URL token redaction can hang on malformed `/bot` paths
-
-**Severity:** Medium - `redact_telegram_bot_url_tokens` can loop forever when `/bot` is immediately followed by another slash, such as `/bot/bot/getMe`.
-
-`src/telegram.rs:305`. `after_marker.find('/')` returns `0`, `remainder` is reset to the same slice, and Telegram error sanitization never returns.
-
-**Current behavior:**
-- The redactor loops on each `/bot` marker.
-- A following slash yields a zero-length token span.
-- The loop does not advance before the next iteration.
-
-**Proposal:**
-- Ensure the loop always advances on non-token `/bot` matches, or redact only when `/bot` is followed by at least one non-slash token byte.
-- Add a regression test for `/bot/bot/...`.
-
 ## `preserveGatewayErrorBody` masks backend-unavailable responses on empty gateway bodies
 
 **Severity:** Medium - opted-in routes map every 502/503/504 response to `request-failed`, even when the body is empty or not an intentional third-party JSON error.
@@ -301,20 +585,36 @@ the Implementation Tasks section.
 - Preserve gateway bodies only when the response contains a parseable, intentional JSON error payload.
 - Fall back to `backend-unavailable` for empty, malformed, or otherwise non-actionable 5xx gateway bodies.
 
-## Telegram test endpoint docs blur local JSON 422s with token/auth 422s
+## Telegram test endpoint contract makes 422 clients parse human-readable messages
 
-**Severity:** Low - the Telegram UI integration feature brief now lists 422 for Telegram `getMe` token/auth rejections, but malformed JSON/data rejections also flow through the shared API JSON rejection path as 422.
+**Severity:** Low - the Telegram UI integration feature brief lists 422 for Telegram `getMe` token/auth rejections, but malformed JSON/data rejections also flow through the shared API JSON rejection path as 422.
 
-`docs/features/telegram-ui-integration.md:262`. API consumers can treat all 422 responses as "fix your Telegram token" even though some 422s are local request-shape failures.
+`docs/features/telegram-ui-integration.md:263`. API consumers can distinguish the two 422 meanings only by inspecting the human-readable error message, making copy text part of the wire contract.
 
 **Current behavior:**
 - The docs say `/api/telegram/test` uses 400 for malformed local requests.
 - Axum JSON syntax/data rejections return 422 before route-level validation runs.
 - Telegram token/auth failures also return 422.
+- The documented distinction depends on response text rather than a stable code/kind.
 
 **Proposal:**
-- Clarify that 400 covers parsed local validation failures.
-- Clarify that 422 can mean either JSON syntax/data rejection or Telegram token/auth rejection, depending on the response message.
+- Add a stable error code/kind for local JSON-shape failures versus Telegram token/auth failures.
+- Or use distinct statuses so clients do not need to parse human-readable text.
+
+## Tail-window size policy is duplicated across frontend layers
+
+**Severity:** Low - tail-first hydration and active transcript tail rendering both encode the same 20-message policy in separate private constants.
+
+`ui/src/app-live-state.ts:272` and `ui/src/panels/AgentSessionPanel.tsx:130`. If `SESSION_TAIL_FIRST_HYDRATION_MESSAGE_COUNT` and `INITIAL_ACTIVE_TRANSCRIPT_TAIL_MESSAGE_COUNT` diverge, partial hydration and active transcript rendering can unexpectedly add or drop visible tail messages.
+
+**Current behavior:**
+- The hydration layer requests a 20-message tail.
+- The active transcript render path slices a 20-message tail independently.
+- No shared policy or cross-reference ties the two values together.
+
+**Proposal:**
+- Centralize the tail-window size in a shared UI policy module.
+- Or add explicit comments documenting why the two constants must match or may intentionally differ.
 
 ## `useInitialActiveTranscriptMessages` mutates `hydrationRef` during render
 
@@ -490,9 +790,9 @@ the Implementation Tasks section.
 
 ## `POST /api/telegram/test` 429 missing `Retry-After` header / cooldown duration
 
-**Severity:** Medium - body says "Try again in a moment." but doesn't include a numeric duration nor an HTTP `Retry-After` header.
+**Severity:** Low - body says "Try again in a moment." but doesn't include a numeric duration nor an HTTP `Retry-After` header.
 
-`src/telegram_settings.rs:354`. The cooldown is `TELEGRAM_TEST_COOLDOWN = Duration::from_secs(2)`; HTTP-aware clients can't act on a structured rate-limit signal.
+`src/telegram_settings.rs:358`. The cooldown is `TELEGRAM_TEST_COOLDOWN = Duration::from_secs(2)`; HTTP-aware clients can't act on a structured rate-limit signal.
 
 **Current behavior:**
 - 429 status.
@@ -500,7 +800,7 @@ the Implementation Tasks section.
 - No `Retry-After` header.
 
 **Proposal:**
-- Either include the cooldown seconds in the message or attach a `Retry-After: 2` header.
+- Attach a `Retry-After: 2` header, or add a stable `retryAfterSeconds` field to the error contract.
 
 ## `subscribed_project_ids: Option<Vec<String>>` lacks `deserialize_nullable_marker_field` — `null` no-ops
 
@@ -767,21 +1067,6 @@ the Implementation Tasks section.
 - Split UI config and runtime cursor/chat state into separate files, or guard all writers with an OS-level file lock.
 - Add cross-process interleaving coverage proving config and runtime state both survive competing writes.
 
-## Telegram relay state loading can still hide metadata errors behind `exists()`
-
-**Severity:** Low - relay startup now propagates `load_telegram_bot_state` errors, but the loader still calls `path.exists()` before reading.
-
-`src/telegram.rs:198`. `Path::exists()` can return false for some metadata errors, so an unreadable or otherwise problematic state path can still be treated as "missing" and silently defaulted.
-
-**Current behavior:**
-- `load_telegram_bot_state` checks `!path.exists()` and returns default state.
-- Only after that does it call `fs::read`.
-- Metadata failures can be collapsed into the default-state path.
-
-**Proposal:**
-- Attempt `fs::read` directly.
-- Treat only `ErrorKind::NotFound` as default state; propagate other read or metadata errors.
-
 ## `POST /api/telegram/test` rate limiting is per token and can be bypassed
 
 **Severity:** Medium - a script can rotate bogus token values to fan out outbound requests and grow the rate-limit cache.
@@ -990,22 +1275,6 @@ the Implementation Tasks section.
 **Proposal:**
 - Combine with the atomic-write fix on the existing two-writer-race entry.
 - Distinguish "file does not exist" (legitimate first-run) from "file exists but unparseable mid-write" (warn + retry).
-
-## Standalone Telegram token redaction misses colon-delimited tokens and can rescan long digit runs
-
-**Severity:** Low - the staged standalone token scanner improves coverage beyond `/bot<TOKEN>/` URLs, but its boundary rules still reject common colon-delimited log formats and its failed-candidate scanning can be quadratic on long digit runs.
-
-`src/telegram.rs:321-352`. Examples such as `botToken:123456:secretToken` or `123456:secretToken:` can remain unredacted because `:` is treated as a token byte for both pre- and post-boundary checks.
-
-**Current behavior:**
-- `standalone_telegram_bot_token_end` rejects candidates preceded or followed by `:`.
-- The outer scanner advances one UTF-8 char at a time after failed candidates.
-- Sanitization happens before log truncation.
-
-**Proposal:**
-- Use separate pre/post boundary checks that allow punctuation separators such as `:`.
-- Add tests for colon-prefixed and colon-suffixed tokens.
-- Skip failed digit/secret runs or use a single-pass scanner to avoid quadratic rescans.
 
 ## No length validation on `default_project_id`, `default_session_id`, or `subscribed_project_ids`
 
@@ -2409,22 +2678,40 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   spy on `node.removeEventListener` and assert each event name is removed on unmount/sessionId change. A leak that retains a listener on a detached scrollNode would not be caught.
 - [ ] P2: Cover touch hydration semantics in `AgentSessionPanel.test.tsx`:
   dispatch touchstart at clientY=100, then touchmove at clientY=50 (negative delta, pull-up) → no hydration. Then touchstart at clientY=100, touchmove at clientY=200 (pull-down) → hydration. Verify touchend resets `lastTouchClientY` so the next touchstart starts fresh.
-- [ ] P2: Cover native scrollbar demand hydration:
-  add a long active-session test that drags/clicks the native scrollbar or otherwise produces a near-top `scroll` without preceding wheel/key/touch, then assert the full transcript hydrates while initial/programmatic near-top scrolls remain ignored.
-- [ ] P2: Fix idle-compaction fake-timer coverage:
-  enable fake timers before the wheel/scroll interaction that schedules compaction in `VirtualizedConversationMessageList.test.tsx`, or reschedule under fake timers and assert the compaction callback actually ran.
+- [ ] P2: Isolate mousedown demand hydration coverage:
+  render a fresh long active transcript, fire `mousedown` on the scroll node before any other demand input, then near-top scroll and assert hydration. Add a positive in-scope `Home`/`PageUp` keyboard case.
 - [ ] P2: Cover post-arrival demand hydration:
   in `AgentSessionPanel.test.tsx`, fire a demand gesture after message arrival to prove the retained listener still hydrates the transcript.
+- [ ] P2: Fix idle-compaction fake-timer coverage:
+  enable fake timers before the scroll/wheel interaction that schedules compaction in `VirtualizedConversationMessageList.test.tsx`, then advance timers and assert the post-compaction state.
+- [ ] P2: Cover same-size tail-window overview translation shifts:
+  build or render two different 20-message tail windows with the same `messageCount` and assert stale viewport translation is not reused across first/last message id changes. Include a cross-session case where one session's snapshot is queried against another's projection at the same `messageCount`.
+- [ ] P2: Cover `resolveViewportSnapshotTranslation` negative branches:
+  add focused tests for null layout snapshot, full-transcript no-op (`layoutSnapshot.messageCount >= estimatedRows.length`), empty layout messages, missing first row in estimated rows, and non-contiguous window. Add a drift-case test where viewport snapshot count differs from translation snapshot count.
+- [ ] P2: Cover `resolvePrependedMessageCount` branches directly:
+  export the helper (or a thin shim) and add unit tests for cross-session, empty previous window, no growth, partial overlap, no first-message match, and contiguous match at index 0.
+- [ ] P2: Pin `mountedRangeWillChange` early-return absence of stale-rect scroll write:
+  during the prepend integration test, capture `harness.scrollWrites` between the prepend and the followup effect and assert no scroll write lands at the stale `targetScrollTop` value computed from pre-mutation rects.
+- [ ] P2: Add Telegram redaction threshold-boundary tests:
+  add 7-digit/35-char (not redacted), 8-digit/34-char (not redacted), 8-digit/35-char (redacted), and multi-token-in-one-string cases to `redact_standalone_telegram_bot_tokens`. Split `telegram_log_sanitizer_redacts_bot_tokens_and_truncates` into per-shape `#[test]` functions.
+- [ ] P2: Add Telegram validation partial-mutation tests for the other late-error paths:
+  the existing test covers the orphan-session error. Add three sister tests that trigger unknown-default-project, default-session-must-belong-to-project, and default-session-must-belong-to-default-project errors, asserting `subscribed_project_ids` and `default_project_id` are unchanged on Err.
+- [ ] P2: Add wheel/scrollTop demand-hydration boundary tests:
+  add `deltaY: -7` (below threshold) and `deltaY: -8` (at threshold) cases, plus `scrollTop: 160` vs `161` cases to pin the constants.
+- [ ] P2: Add `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` boundary test:
+  add a 100-message session test asserting `fetchSessionTail` is NOT called, and a 101-message session test asserting it IS called.
 - [ ] P2: Cover Git literal pathspec handling:
   after forcing literal pathspec behavior, add regression coverage for filenames containing `*`, `?`, `[]`, and `:(top)` so single-file Git actions cannot expand to other files.
 - [ ] P2: Cover copy/rename staging pathspecs:
   add focused coverage for `collect_git_stage_pathspecs(..., Some("R"))` and `Some("C")`, preferably through a real repo scenario proving old and new paths are staged together.
-- [ ] P2: Cover Telegram redaction malformed `/bot` and delimiter cases:
-  add tests for `/bot/bot/getMe`, `botToken:123456:secretToken`, and `123456:secretToken:`. Include a long digit-run case to keep standalone redaction from becoming quadratic.
-- [ ] P2: Cover Telegram state load metadata/read failures:
-  after changing `load_telegram_bot_state` to read directly, assert `NotFound` returns default state while non-`NotFound` read/metadata errors propagate.
-- [ ] P2: Clarify `/api/telegram/test` 422 documentation:
-  update the feature brief to distinguish parsed local validation `400`, JSON syntax/data rejection `422`, Telegram token/auth `422`, rate-limit `429`, and Telegram transport/decode/upstream `502`.
+- [ ] P2: Cover documented 6-digit Telegram standalone token redaction:
+  add a regression using a 6-digit bot id plus 35-character secret in a standalone log shape such as `botToken=123456:<secret>`.
+- [ ] P2: Cover Telegram settings load metadata/read failures:
+  after changing `load_telegram_bot_file` to read directly, assert `NotFound` returns default config while non-`NotFound` read/metadata errors propagate.
+- [ ] P2: Cover stale Telegram config update recovery:
+  persist stale deleted project/session references, submit an unrelated config patch, and assert the update sanitizes stale state instead of failing with `unknown Telegram project`.
+- [ ] P2: Stabilize `/api/telegram/test` 422 discrimination:
+  add a stable error code/kind or distinct statuses for local JSON-shape failures versus Telegram token/auth failures, then update the feature brief and tests to avoid message-text parsing.
 - [ ] P2: Pin the 1024-char error message in token validation test:
   the new 1024-char case asserts only `status == BAD_REQUEST`. Add `assert!(long_err.message.contains("at most 256 characters"));` to ensure the limit is named even on extreme oversize.
 - [ ] P2: Cover the `kind: "request-failed"` doc gap:

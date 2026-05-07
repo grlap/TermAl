@@ -5,6 +5,7 @@ import {
   buildConversationOverviewSegments,
   findConversationOverviewItemAtY,
   getConversationOverviewItemByMessageId,
+  projectConversationOverviewViewport,
 } from "./conversation-overview-map";
 import type { VirtualizedConversationLayoutSnapshot } from "./VirtualizedConversationMessageList";
 import type { Message } from "../types";
@@ -445,6 +446,62 @@ describe("conversation overview map", () => {
     expect(projection.viewportTopPx).toBe(92);
     expect(projection.viewportTopPx + projection.viewportHeightPx).toBe(
       projection.totalHeightPx,
+    );
+  });
+
+  it("projects a tail-window viewport against the full transcript map", () => {
+    const messages = Array.from({ length: 100 }, (_, index) =>
+      textMessage(`m${index + 1}`, {
+        text: `message ${index + 1}`,
+      }),
+    );
+    const tailMessages = messages.slice(-20);
+    const layoutSnapshot: VirtualizedConversationLayoutSnapshot = {
+      sessionId: "session-1",
+      messageCount: tailMessages.length,
+      estimatedTotalHeightPx: 2_000,
+      viewportTopPx: 1_500,
+      viewportHeightPx: 500,
+      viewportWidthPx: 800,
+      isActive: true,
+      visiblePageRange: {
+        startIndex: 15,
+        endIndex: 20,
+      },
+      mountedPageRange: {
+        startIndex: 12,
+        endIndex: 20,
+      },
+      messages: tailMessages.map((message, index) => ({
+        messageId: message.id,
+        messageIndex: index,
+        pageIndex: Math.floor(index / 8),
+        type: message.type,
+        author: message.author,
+        estimatedTopPx: index * 100,
+        estimatedHeightPx: 100,
+        measuredPageHeightPx: null,
+      })),
+    };
+
+    const projection = buildConversationOverviewProjection({
+      layoutSnapshot,
+      maxHeightPx: 1_000,
+      messages,
+    });
+    const viewportProjection = projectConversationOverviewViewport(
+      projection,
+      layoutSnapshot,
+    );
+    const tailFirstItem = projection.items.find((item) => item.messageId === "m81");
+
+    expect(tailFirstItem).not.toBeUndefined();
+    expect(viewportProjection.viewportTopPx).toBeCloseTo(
+      ((tailFirstItem?.documentTopPx ?? 0) + layoutSnapshot.viewportTopPx) *
+        projection.scale,
+    );
+    expect(viewportProjection.viewportHeightPx).toBeCloseTo(
+      layoutSnapshot.viewportHeightPx * projection.scale,
     );
   });
 

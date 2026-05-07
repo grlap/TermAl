@@ -349,6 +349,11 @@ function useInitialActiveTranscriptMessages({
         requestFullTranscriptRenderAfterWheel();
       }
     };
+    const handleMouseDown = (event: MouseEvent) => {
+      if (event.target === node) {
+        hasDemandInteraction = true;
+      }
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!isTranscriptDemandKeyEventInScope(event, node)) {
         return;
@@ -390,6 +395,7 @@ function useInitialActiveTranscriptMessages({
 
     node.addEventListener("scroll", hydrateIfNearTop, { passive: true });
     node.addEventListener("wheel", handleWheel, { passive: true });
+    node.addEventListener("mousedown", handleMouseDown, { passive: true });
     document.addEventListener("keydown", handleKeyDown, { capture: true });
     node.addEventListener("touchstart", handleTouchStart, { passive: true });
     node.addEventListener("touchmove", handleTouchMove, { passive: true });
@@ -400,6 +406,7 @@ function useInitialActiveTranscriptMessages({
       disposed = true;
       node.removeEventListener("scroll", hydrateIfNearTop);
       node.removeEventListener("wheel", handleWheel);
+      node.removeEventListener("mousedown", handleMouseDown);
       document.removeEventListener("keydown", handleKeyDown, {
         capture: true,
       });

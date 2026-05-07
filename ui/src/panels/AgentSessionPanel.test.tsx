@@ -2171,6 +2171,16 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
       expect(screen.getByText("message-597")).toBeInTheDocument();
       expect(screen.queryByText("message-193")).not.toBeInTheDocument();
+
+      act(() => {
+        fireEvent.mouseDown(scrollNode);
+        scrollTop = 50;
+        fireEvent.scroll(scrollNode);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(screen.getByText("message-1")).toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       window.TouchEvent = OriginalTouchEvent;
@@ -2186,6 +2196,7 @@ describe("AgentSessionPanel conversation caching", () => {
     const scrollNodeDemandEvents = [
       "scroll",
       "wheel",
+      "mousedown",
       "touchstart",
       "touchmove",
       "touchend",

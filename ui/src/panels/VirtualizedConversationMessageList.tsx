@@ -1541,7 +1541,6 @@ export function VirtualizedConversationMessageList({
     const nextMountedRange =
       preservedAnchor &&
       !shouldPreserveBottomGapAfterPrepend &&
-      !preservedAnchorSlot &&
       preservedAnchorLocation
         ? {
             startIndex: Math.max(preservedAnchorLocation.pageIndex - 3, 0),
@@ -1551,14 +1550,18 @@ export function VirtualizedConversationMessageList({
             targetScrollTop,
             node.clientHeight,
           );
-    if (!rangesEqual(mountedPageRangeRef.current, nextMountedRange)) {
+    const mountedRangeWillChange = !rangesEqual(
+      mountedPageRangeRef.current,
+      nextMountedRange,
+    );
+    if (mountedRangeWillChange) {
       applyMountedPageRange(nextMountedRange);
     }
 
     if (
       preservedAnchor &&
       !shouldPreserveBottomGapAfterPrepend &&
-      !preservedAnchorSlot
+      (mountedRangeWillChange || !preservedAnchorSlot)
     ) {
       return;
     }

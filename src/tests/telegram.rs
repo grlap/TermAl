@@ -856,7 +856,7 @@ fn telegram_connection_test_error_treats_non_rate_limited_contradictions_as_upst
 }
 
 #[test]
-fn telegram_connection_test_error_does_not_reuse_getme_validation_for_other_methods() {
+fn telegram_connection_test_error_does_not_reuse_getme_classification_for_other_methods() {
     let send_message_auth_error = telegram_test_connection_error(telegram_api_error(
         "sendMessage",
         StatusCode::UNAUTHORIZED,
@@ -864,6 +864,14 @@ fn telegram_connection_test_error_does_not_reuse_getme_validation_for_other_meth
     ));
 
     assert_eq!(send_message_auth_error.status, StatusCode::BAD_GATEWAY);
+
+    let send_message_rate_limit = telegram_test_connection_error(telegram_api_error(
+        "sendMessage",
+        StatusCode::TOO_MANY_REQUESTS,
+        Some(429),
+    ));
+
+    assert_eq!(send_message_rate_limit.status, StatusCode::BAD_GATEWAY);
 }
 
 #[test]

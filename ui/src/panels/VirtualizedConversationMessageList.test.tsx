@@ -395,6 +395,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
         VIRTUALIZED_MESSAGE_GAP_PX
       );
     };
+    const wheelDeltaPx = 80;
     const scrollHeightFromMountedDom = () => {
       const list = document.querySelector<HTMLElement>(".virtualized-message-list");
       if (!list) {
@@ -461,8 +462,8 @@ describe("VirtualizedConversationMessageList foundation", () => {
         );
 
       act(() => {
-        fireEvent.wheel(harness.scrollNode, { deltaY: -120 });
-        harness.setScrollTop(tailBottomScrollTop - 120);
+        fireEvent.wheel(harness.scrollNode, { deltaY: -wheelDeltaPx });
+        harness.setScrollTop(tailBottomScrollTop - wheelDeltaPx);
         fireEvent.scroll(harness.scrollNode);
       });
       const message600OffsetBeforePrepend =
@@ -484,13 +485,11 @@ describe("VirtualizedConversationMessageList foundation", () => {
         harness.rerenderWithMessages(hydratedMessages);
       });
 
-      await waitFor(() => {
-        const message600 = message600Slot();
-        expect(message600).not.toBeNull();
-        expect(message600!.getBoundingClientRect().top).toBe(
-          message600OffsetBeforePrepend,
-        );
-      });
+      const message600AfterPrepend = message600Slot();
+      expect(message600AfterPrepend).not.toBeNull();
+      expect(message600AfterPrepend!.getBoundingClientRect().top).toBe(
+        message600OffsetBeforePrepend,
+      );
       const hydrationScrollWrites = harness.scrollWrites.slice(
         hydrationScrollWriteStart,
       );
@@ -506,18 +505,16 @@ describe("VirtualizedConversationMessageList foundation", () => {
         message600Slot()?.getBoundingClientRect().top;
       expect(message600OffsetBeforeSecondWheel).toBeGreaterThan(0);
       act(() => {
-        fireEvent.wheel(harness.scrollNode, { deltaY: -120 });
-        harness.setScrollTop(harness.scrollTop - 120);
+        fireEvent.wheel(harness.scrollNode, { deltaY: -wheelDeltaPx });
+        harness.setScrollTop(harness.scrollTop - wheelDeltaPx);
         fireEvent.scroll(harness.scrollNode);
       });
 
-      await waitFor(() => {
-        const message600 = message600Slot();
-        expect(message600).not.toBeNull();
-        expect(message600!.getBoundingClientRect().top).toBe(
-          message600OffsetBeforeSecondWheel! + 120,
-        );
-      });
+      const message600AfterSecondWheel = message600Slot();
+      expect(message600AfterSecondWheel).not.toBeNull();
+      expect(message600AfterSecondWheel!.getBoundingClientRect().top).toBe(
+        message600OffsetBeforeSecondWheel! + wheelDeltaPx,
+      );
 
       const message600OffsetBeforeIdleCompaction =
         message600Slot()?.getBoundingClientRect().top;

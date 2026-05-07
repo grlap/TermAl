@@ -66,6 +66,7 @@ impl AppState {
         }
 
         self.validate_and_normalize_telegram_config(&mut file.config)?;
+        file.config = self.sanitize_telegram_config_for_current_state(file.config);
         self.persist_telegram_bot_file(&file)?;
 
         Ok(self.telegram_status_from_file(file))
@@ -377,7 +378,7 @@ fn telegram_test_connection_error(err: anyhow::Error) -> ApiError {
         .chain()
         .find_map(|cause| cause.downcast_ref::<TelegramApiError>())
     {
-        if telegram_api_error_is_rate_limited(api_error) {
+        if telegram_getme_error_is_rate_limited(api_error) {
             ApiError::from_status(StatusCode::TOO_MANY_REQUESTS, message)
         } else if telegram_getme_error_is_token_validation_failure(api_error) {
             ApiError::from_status(StatusCode::UNPROCESSABLE_ENTITY, message)
@@ -389,8 +390,9 @@ fn telegram_test_connection_error(err: anyhow::Error) -> ApiError {
     }
 }
 
-fn telegram_api_error_is_rate_limited(err: &TelegramApiError) -> bool {
-    err.error_code == Some(429) || err.status == StatusCode::TOO_MANY_REQUESTS
+fn telegram_getme_error_is_rate_limited(err: &TelegramApiError) -> bool {
+    err.method == "getMe"
+        && (err.error_code == Some(429) || err.status == StatusCode::TOO_MANY_REQUESTS)
 }
 
 fn telegram_getme_error_is_token_validation_failure(err: &TelegramApiError) -> bool {

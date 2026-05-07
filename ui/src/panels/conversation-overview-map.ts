@@ -82,6 +82,12 @@ export type ConversationOverviewProjection = {
   scale: number;
   viewportTopPx: number;
   viewportHeightPx: number;
+  viewportSnapshotTranslation: ConversationOverviewViewportSnapshotTranslation | null;
+};
+
+type ConversationOverviewViewportSnapshotTranslation = {
+  snapshotMessageCount: number;
+  sourceTopOffsetPx: number;
 };
 
 export type ConversationOverviewMessageMetadataCache = WeakMap<
@@ -172,15 +178,44 @@ export function buildConversationOverviewProjection({
     0,
   );
   const sourceHeightPx = messageSourceHeightPx + tailSourceHeightPx;
+  const viewportSnapshotTranslation =
+    resolveViewportSnapshotTranslation(layoutSnapshot, estimatedRows);
   const boundedMaxHeightPx = Math.max(1, maxHeightPx);
   const scale =
     sourceHeightPx > boundedMaxHeightPx ? boundedMaxHeightPx / sourceHeightPx : 1;
   const totalHeightPx = sourceHeightPx === 0 ? 0 : Math.max(1, sourceHeightPx * scale);
   const estimatedScrollHeightPx = Math.max(
     1,
-    (layoutSnapshot?.estimatedTotalHeightPx ?? messageSourceHeightPx) +
-      tailSourceHeightPx,
+    viewportSnapshotTranslation
+      ? sourceHeightPx
+      : (layoutSnapshot?.estimatedTotalHeightPx ?? messageSourceHeightPx) +
+          tailSourceHeightPx,
   );
+  const viewportHeightPx =
+    viewportSnapshotTranslation && layoutSnapshot
+      ? projectTranslatedViewportHeight(layoutSnapshot, scale, totalHeightPx)
+      : projectViewportHeight(
+          layoutSnapshot,
+          sourceHeightPx,
+          scale,
+          estimatedScrollHeightPx,
+        );
+  const viewportTopPx =
+    viewportSnapshotTranslation && layoutSnapshot
+      ? projectTranslatedViewportTop(
+          layoutSnapshot,
+          viewportSnapshotTranslation,
+          scale,
+          totalHeightPx,
+          viewportHeightPx,
+        )
+      : projectViewportTop(
+          layoutSnapshot,
+          sourceHeightPx,
+          scale,
+          estimatedScrollHeightPx,
+          viewportHeightPx,
+        );
 
   const projectedMarkers: ConversationOverviewMarkerProjection[] = [];
   const items: ConversationOverviewItem[] = estimatedRows.map((row, itemIndex) => {
@@ -248,13 +283,6 @@ export function buildConversationOverviewProjection({
     tailEstimatedTopPx += estimatedHeightPx;
   });
 
-  const viewportHeightPx = projectViewportHeight(
-    layoutSnapshot,
-    sourceHeightPx,
-    scale,
-    estimatedScrollHeightPx,
-  );
-
   return {
     items,
     markers: projectedMarkers,
@@ -262,13 +290,8 @@ export function buildConversationOverviewProjection({
     estimatedScrollHeightPx,
     totalHeightPx,
     scale,
-    viewportTopPx: projectViewportTop(
-      layoutSnapshot,
-      sourceHeightPx,
-      scale,
-      estimatedScrollHeightPx,
-      viewportHeightPx,
-    ),
+    viewportSnapshotTranslation,
+    viewportTopPx,
     viewportHeightPx,
   };
 }
@@ -276,10 +299,39 @@ export function buildConversationOverviewProjection({
 export function projectConversationOverviewViewport(
   projection: Pick<
     ConversationOverviewProjection,
-    "estimatedScrollHeightPx" | "scale" | "sourceHeightPx" | "totalHeightPx"
+    | "estimatedScrollHeightPx"
+    | "scale"
+    | "sourceHeightPx"
+    | "totalHeightPx"
+    | "viewportSnapshotTranslation"
   >,
   viewportSnapshot: VirtualizedConversationViewportSnapshot | null,
 ) {
+  if (
+    viewportSnapshot &&
+    projection.viewportSnapshotTranslation &&
+    viewportSnapshot.messageCount ===
+      projection.viewportSnapshotTranslation.snapshotMessageCount
+  ) {
+    const viewportHeightPx = projectTranslatedViewportHeight(
+      viewportSnapshot,
+      projection.scale,
+      projection.totalHeightPx,
+    );
+    const viewportTopPx = projectTranslatedViewportTop(
+      viewportSnapshot,
+      projection.viewportSnapshotTranslation,
+      projection.scale,
+      projection.totalHeightPx,
+      viewportHeightPx,
+    );
+
+    return {
+      viewportTopPx,
+      viewportHeightPx,
+    };
+  }
+
   const estimatedScrollHeightPx = Math.max(
     1,
     viewportSnapshot?.estimatedTotalHeightPx ??
@@ -846,6 +898,76 @@ function buildEstimatedRows(
     documentTopPx += documentHeightPx;
     return row;
   });
+}
+
+function resolveViewportSnapshotTranslation(
+  layoutSnapshot: VirtualizedConversationLayoutSnapshot | null,
+  estimatedRows: ReturnType<typeof buildEstimatedRows>,
+): ConversationOverviewViewportSnapshotTranslation | null {
+  if (
+    !layoutSnapshot ||
+    layoutSnapshot.messageCount >= estimatedRows.length ||
+    layoutSnapshot.messages.length === 0
+  ) {
+    return null;
+  }
+
+  const firstLayoutMessage = layoutSnapshot.messages[0];
+  if (!firstLayoutMessage) {
+    return null;
+  }
+
+  const firstRowIndex = estimatedRows.findIndex(
+    (row) => row.message.id === firstLayoutMessage.messageId,
+  );
+  if (firstRowIndex < 0) {
+    return null;
+  }
+
+  const hasContiguousWindow = layoutSnapshot.messages.every(
+    (layoutMessage, offset) =>
+      estimatedRows[firstRowIndex + offset]?.message.id ===
+      layoutMessage.messageId,
+  );
+  if (!hasContiguousWindow) {
+    return null;
+  }
+
+  return {
+    snapshotMessageCount: layoutSnapshot.messageCount,
+    sourceTopOffsetPx:
+      estimatedRows[firstRowIndex].documentTopPx -
+      firstLayoutMessage.estimatedTopPx,
+  };
+}
+
+function projectTranslatedViewportTop(
+  viewportSnapshot: VirtualizedConversationViewportSnapshot,
+  translation: ConversationOverviewViewportSnapshotTranslation,
+  scale: number,
+  totalHeightPx: number,
+  projectedViewportHeightPx: number,
+) {
+  return clamp(
+    (translation.sourceTopOffsetPx + viewportSnapshot.viewportTopPx) * scale,
+    0,
+    Math.max(totalHeightPx - projectedViewportHeightPx, 0),
+  );
+}
+
+function projectTranslatedViewportHeight(
+  viewportSnapshot: VirtualizedConversationViewportSnapshot,
+  scale: number,
+  totalHeightPx: number,
+) {
+  return clamp(
+    Math.max(
+      MIN_VIEWPORT_MARKER_HEIGHT_PX,
+      viewportSnapshot.viewportHeightPx * scale,
+    ),
+    0,
+    totalHeightPx,
+  );
 }
 
 function projectViewportTop(
