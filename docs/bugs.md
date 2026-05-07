@@ -7,6 +7,109 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## `is_rate_limited` OR semantic asymmetric with `is_token_validation_failure` AND — undocumented in code
+
+**Severity:** Low - rate-limit uses OR (`error_code == Some(429) || status == TOO_MANY_REQUESTS`); token-validation uses AND-when-Some. Asymmetry is intentional but undocumented in code; tests document intent in test form but the function definitions alone don't.
+
+`src/telegram_settings.rs:388-390, 392-404`.
+
+**Current behavior:**
+- `is_rate_limited` returns true on either signal.
+- `is_token_validation_failure` requires both signals (when error_code is Some).
+- No code-level documentation explains the asymmetry.
+
+**Proposal:**
+- Add `// NOTE: ...` doc above each predicate explaining why one ANDs and the other ORs (e.g., "Rate-limit is the more actionable signal; prefer false-positive over false-negative" for the OR case).
+
+## `telegram_getme_error_is_token_validation_failure` function name says "_getme_" but body has no enforcement
+
+**Severity:** Low - name documents intent (`getMe`-specific) but body is generic. Future callers using this for `sendMessage` etc. would hit wrong classification for non-getMe 400s.
+
+`src/telegram_settings.rs:392-404`.
+
+**Current behavior:**
+- Function name signals scope.
+- Body classifies based on status/error_code without any method-specific guard.
+- Single-caller status keeps this low-priority.
+
+**Proposal:**
+- Take `method: &str` and assert/match inside, OR
+- Add `debug_assert_eq!(err.method, "getMe")` at function top, OR
+- Add `///` doc comment explaining "Only valid for getMe errors."
+
+## `telegram_connection_test_error_classifies_*` test bundles nine sub-assertions in one function
+
+**Severity:** Low - single test function with nine `let _ = telegram_test_connection_error(...)` calls covers many independent classifications. A failure in one branch produces a misleading line number deep inside the function.
+
+`src/tests/telegram.rs:746-838`.
+
+**Current behavior:**
+- One test asserts rate-limit, validation, transport, contradictory envelopes all in one function.
+- Failure pinpointing is obscured.
+
+**Proposal:**
+- Split into per-classifier `#[test]` functions, OR
+- Use a data-driven `#[rstest]`-style table where the input shape is the test id.
+
+## Telegram getMe error classification lacks explicit precedence for contradictory envelopes
+
+**Severity:** Medium - the staged classifier now treats any `429` signal as rate limiting, while token validation requires aligned Telegram `error_code` and HTTP `status`. Non-429 disagreement cases still rely on implicit fallback behavior.
+
+`src/telegram_settings.rs:388-402`. Examples such as `status: UNAUTHORIZED, error_code: Some(999)` or `status: OK, error_code: Some(401)` are not pinned by tests or documented as a chosen policy.
+
+**Current behavior:**
+- `error_code == Some(429)` or HTTP `status == 429` returns HTTP 429.
+- Token validation returns 422 only when a token-like `error_code` aligns with a token-like HTTP status, or when `error_code` is absent and the status is token-like.
+- Contradictory non-429 envelopes fall through to gateway behavior without an explicit precedence rule.
+
+**Proposal:**
+- Define one precedence rule, preferably classifying by Telegram `error_code` when present and falling back to HTTP `status` only when absent.
+- Add tests for token-like status with non-token code, token-like code with non-token status, and `error_code: None` fallback.
+
+## `preserveGatewayErrorBody` masks backend-unavailable responses on empty gateway bodies
+
+**Severity:** Medium - opted-in routes map every 502/503/504 response to `request-failed`, even when the body is empty or not an intentional third-party JSON error.
+
+`ui/src/api.ts:1687-1689`. A real TermAl backend/proxy outage on a preserved route can bypass the established `backend-unavailable` path and lose restart/retry semantics.
+
+**Current behavior:**
+- `preserveGatewayErrorBody` forces 502/503/504 into `request-failed`.
+- Empty or non-actionable bodies still use the preserved path.
+- Callers cannot reliably distinguish intentional upstream errors from backend availability failures.
+
+**Proposal:**
+- Preserve gateway bodies only when the response contains a parseable, intentional JSON error payload.
+- Fall back to `backend-unavailable` for empty, malformed, or otherwise non-actionable 5xx gateway bodies.
+
+## Telegram test endpoint docs omit 422 and 429 outcomes
+
+**Severity:** Low - the Telegram UI integration feature brief still summarizes `/api/telegram/test` errors as local `400` validation and `502` upstream Telegram failures.
+
+`docs/features/telegram-ui-integration.md:262`. The staged implementation now exposes token-validation failures as `422` and Telegram API rate-limit envelopes as `429`, so wrapper authors following the brief can apply the wrong retry and remediation policy.
+
+**Current behavior:**
+- The endpoint table lists `/api/telegram/test` but the error notes mention only `400` and `502` examples.
+- The docs omit Telegram token validation `422`.
+- The docs omit Telegram upstream rate-limit `429`.
+
+**Proposal:**
+- Update the endpoint contract to list local validation `400`, Telegram token validation `422`, Telegram rate limit `429`, and remaining upstream/decode/transport failures as gateway errors.
+
+## `useInitialActiveTranscriptMessages` mutates `hydrationRef` during render
+
+**Severity:** Medium - render-time side effect on a ref. Works but fragile under concurrent mode (`useTransition`/`Suspense`) — a render that's discarded would still leave the ref in its mutated state, prematurely flipping `hydrated = true` on a discarded render path.
+
+`ui/src/panels/AgentSessionPanel.tsx:228-236`. Lines 221-226 reset on session change; lines 234-236 set `hydrated = true` in early-eligibility branch.
+
+**Current behavior:**
+- Two ref mutations during render body.
+- React 18 concurrent rendering or Suspense can discard renders.
+- Discarded render's ref mutations persist.
+
+**Proposal:**
+- Hoist the session-id-change reset into a `useEffect` (with the trade-off of one stale render after the change).
+- Or document the render-mutation as deliberate and known-fragile under Suspense.
+
 ## "in-flight Telegram test unmounts" test asserts only `consoleError`, doesn't actually pin the unmount guard
 
 **Severity:** Medium - React 18+ removed the "Can't perform a state update on an unmounted component" warning entirely, so removing the `isMountedRef` checks would not cause the test to fail.
@@ -36,83 +139,6 @@ the Implementation Tasks section.
 
 **Proposal:**
 - Consolidate on one pattern. `isMountedRef` reads cleaner for fire-and-forget click handlers; `cancelled` flags read cleaner for effect-scoped fetches; both are fine, but pick one per file.
-
-## Telegram upstream 429 envelopes collapse to 502
-
-**Severity:** Medium - Telegram structured rate-limit errors still map to 502 instead of HTTP 429, so API callers cannot distinguish "retry later" from a generic upstream outage.
-
-`src/telegram_settings.rs:376`. The staged classifier now separates invalid Telegram API errors from upstream failures, but `TelegramApiError` envelopes with `status == 429` or `error_code == 429` are still treated as bad-gateway upstream errors.
-
-**Current behavior:**
-- Local Telegram test throttling returns HTTP 429.
-- Telegram API 429 JSON envelopes return HTTP 502.
-- Callers and wrappers cannot apply one retry policy for all rate-limit responses.
-
-**Proposal:**
-- Classify `TelegramApiError` with `status == 429` or `error_code == 429` as HTTP 429.
-- Keep Telegram 5xx/decode/transport failures in the 502/503 family.
-- Preserve sanitized response text in the JSON error body.
-
-## Long-session overview navigation can use full-transcript indexes against a tail-only virtualizer
-
-**Severity:** Medium - the overview rail can render full-transcript items while its layout snapshot and virtualizer handle still describe only the initial tail window.
-
-`ui/src/panels/AgentSessionPanel.tsx:1157` and `ui/src/panels/conversation-overview-controller.ts:261`. During initial long-session windowing, `overviewMessages` can contain the full transcript while `ConversationMessageList` renders only `visibleMessages`. If an older overview item cannot jump by id, the fallback `jumpToMessageIndex` uses a full-transcript index against the tail list.
-
-**Current behavior:**
-- Overview items can be built from the full transcript.
-- The virtualizer can still be mounted over the tail window.
-- Clicking an older overview item can jump to the wrong tail item instead of hydrating and landing on the requested message.
-
-**Proposal:**
-- Gate overview layout snapshots by transcript identity/count, OR
-- Disable index fallback while `overviewMessages !== visibleMessages`, OR
-- Teach the controller/virtualizer to expose a full-transcript layout model while the DOM remains tail-windowed.
-
-## `wait_delegations` mixed-instance docs omit status-fetch priority
-
-**Severity:** Medium - the feature brief implies mixed-server-instance packets are returned whenever polling observes a restart, but current implementation gives status-fetch failures priority.
-
-`docs/features/agent-delegation-sessions.md:245`. `wait_delegations` returns `status-fetch-failed` when `batch.kind === "error"` before mixed-instance detection runs, even if collected responses already include a different `serverInstanceId`.
-
-**Current behavior:**
-- Successful/timeout status batches can surface `mixed-server-instance` with `recoveryGroups`.
-- Status-fetch failures return `status-fetch-failed` first.
-- The docs do not state that priority rule.
-
-**Proposal:**
-- Clarify that mixed-instance packets are produced only for successful/timeout status batches, OR
-- Change the error path to surface `mixed-server-instance` when collected responses already prove an instance split.
-
-## `wait_delegations` recovery group ID order depends on response arrival
-
-**Severity:** Low - `recoveryGroups[].delegationIds` can be ordered by async status-response timing rather than the caller's requested id order.
-
-`ui/src/delegation-commands.ts:946`. Identical `wait_delegations` requests can produce different recovery packet ordering depending on network timing, which makes wrapper diagnostics and tests less deterministic.
-
-**Current behavior:**
-- Status responses are collected as async requests resolve.
-- Recovery group id arrays inherit that arrival order.
-- Equivalent requests can produce equivalent groups with different id order.
-
-**Proposal:**
-- Snapshot or emit status responses in `pendingIds` order, OR
-- Sort IDs inside each recovery group before returning the packet.
-
-## Delegation validation-message docs use symbolic constants where runtime emits numbers
-
-**Severity:** Low - the feature brief's documented validation packet allowlist uses symbolic constants, but runtime messages contain numeric values.
-
-`docs/features/agent-delegation-sessions.md:278`. A wrapper implementing the documented strings literally can reject valid runtime messages such as `65536 bytes` or `200 characters`.
-
-**Current behavior:**
-- Runtime validation messages interpolate numeric limits.
-- Docs show symbolic names for those limits.
-- The docs do not clearly say the symbolic values are placeholders/patterns.
-
-**Proposal:**
-- Document the entries as patterns/placeholders, OR
-- Show the current numeric wire strings alongside the exported constants.
 
 ## PATCH docstring does not cover `subscribed_project_ids`
 
@@ -860,22 +886,6 @@ the Implementation Tasks section.
 - Move `activeIndex` into a ref synchronized with the state update; drop it from deps.
 - Or split the effect into "attach listeners once when open" + "read activeIndex from a ref".
 
-## Conversation overview controller activation effect deps drop `messageCount`
-
-**Severity:** Low - pure message-growth above the rail-render threshold without resize/scroll won't refresh the layout snapshot.
-
-`ui/src/panels/conversation-overview-controller.ts:277`. The rail-activation effect deps were trimmed from `[isActive, messageCount, refreshLayoutSnapshot, sessionId, shouldRender]` to `[isActive, refreshLayoutSnapshot, sessionId, shouldRender]`. Since `shouldRender = messageCount >= MIN_MESSAGES`, only the threshold-crossing transition triggers a re-run. If `messageCount` grows substantially while staying above threshold (50 → 500 over a long session), this effect won't re-run. A separate effect at line 279 captures resize/scroll-driven snapshot refreshes, so most cases are covered, but a pure message-count growth without layout change wouldn't refresh the snapshot from this path.
-
-This overlaps with the existing "Conversation overview rail snapshots can go stale after transcript growth" entry but is a narrower, more recent symptom: the effect's deps trimming makes it impossible to recover via this path even if a future fix added `messageCount` back.
-
-**Current behavior:**
-- Activation effect deps no longer include `messageCount`.
-- Threshold-crossing transition triggers re-run.
-- Pure growth above threshold without resize/scroll does not.
-
-**Proposal:**
-- Either add `messageCount` back to deps (cheap re-run when count changes), or document why the upstream layout-refresh path is sufficient.
-
 ## `AgentSessionPanel.tsx` exceeds 2000-line architecture rubric threshold
 
 **Severity:** Low - file remains over the documented TSX file-size budget after round-51/52 hook extractions.
@@ -1044,21 +1054,6 @@ This overlaps with the existing "Conversation overview rail snapshots can go sta
 - Gate only the rail node, readiness styling, or a placeholder inside the stable wrapper.
 - Add DOM-identity and scroll-position coverage proving the message list does not remount when the rail becomes ready.
 
-## Conversation overview rail snapshots can go stale after transcript growth
-
-**Severity:** Medium - once the delayed overview rail is ready, new messages can leave overview layout and viewport state based on the old transcript until a scroll or resize occurs.
-
-`ui/src/panels/conversation-overview-controller.ts:277` delays the initial rail activation, but the activation effect no longer depends on `messageCount` and the steady-state effect refreshes layout on initial ready, scroll, or resize rather than transcript growth. Appending messages to an already-long transcript can therefore leave overview proportions, marker placement, and viewport projection stale during live streaming.
-
-**Current behavior:**
-- Initial overview rail activation waits for the transcript paint.
-- After the rail is ready, layout refreshes are event-driven by scroll/resize.
-- Message growth alone does not refresh layout snapshots.
-
-**Proposal:**
-- Keep the initial double-RAF delay, but add a separate ready-state refresh keyed on transcript growth that calls `refreshLayoutSnapshot()` without hiding the rail.
-- Add coverage for appending or streaming messages into an already rail-ready long transcript.
-
 ## `messageCreatedDeltaIsNoOp` lacks semantic-change negative coverage
 
 **Severity:** Medium - the identical-replay tests do not prove the no-op predicate still material-applies when the message payload changes while metadata stays equal.
@@ -1087,20 +1082,6 @@ This overlaps with the existing "Conversation overview rail snapshots can go sta
 
 **Proposal:**
 - Add an `App.scroll-behavior.test.tsx` case that starts near bottom, sends with a pending POST, grows `scrollHeight`, and asserts no old-target smooth scroll occurs before the prompt lands.
-
-## Deferred overview rail activation lacks cancellation coverage
-
-**Severity:** Low - the double-requestAnimationFrame activation guard has stale-session and cancellation logic that is not directly tested.
-
-`ui/src/panels/conversation-overview-controller.ts:189` queues two animation frames before activating the overview rail. The effect cancels queued frames and checks the expected session id, but the tests cover only the happy path where the rail eventually appears. Switching sessions or dropping below the overview threshold before queued frames drain could regress without test failure.
-
-**Current behavior:**
-- Rail activation is delayed by two animation frames.
-- Cleanup cancels queued frame ids and guards against stale session ids.
-- No test drains mocked frames after a session switch or threshold drop to prove no stale rail appears.
-
-**Proposal:**
-- Add a mocked-RAF test that switches sessions or drops below the overview threshold before queued frames drain, then asserts no stale overview rail appears.
 
 ## Returning to bottom leaves stale virtualized scroll-kind classification
 
@@ -2119,10 +2100,8 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   cover an already-active non-Telegram turn before a Telegram prompt, prompt POST failure after forwarding state is prepared, post-send digest failure, a digest primary-session switch before the armed Telegram reply settles, an armed session entering approval with no assistant text before its post-approval reply, and two sessions proving assistant-forwarding cursors are session-scoped.
 - [ ] P2: Add Telegram long-message chunk retry and UTF-16 chunking coverage:
   fail a later chunk after an earlier chunk is sent and assert retry does not duplicate it; add emoji/surrogate-pair-heavy text proving chunks respect Telegram's UTF-16 code-unit limit.
-- [ ] P2: Add overview rail growth, remount, and cancellation coverage:
-  after the delayed rail is ready, append messages and assert layout/viewport snapshots refresh; switch sessions or drop below threshold before queued animation frames drain and assert no stale rail appears; assert the conversation list DOM and scroll position survive rail readiness.
-- [ ] P2: Cover long-session overview navigation while the transcript is tail-windowed:
-  use a 600+ message active session, click an older overview item outside the rendered tail window, and assert full-transcript demand runs before the retry jump lands on the requested message.
+- [ ] P2: Add overview rail remount coverage:
+  assert the conversation list DOM and scroll position survive rail readiness.
 - [ ] P2: Add focused-composer overview projection scheduler coverage:
   mock repeated low-time `requestIdleCallback` deadlines while the composer remains focused, advance any hard timeout/fallback, and assert the latest rerendered messages/markers/tail items drive the rail projection without requiring blur.
 - [ ] P2: Add `messageCreatedDeltaIsNoOp` semantic-change negatives:
@@ -2265,8 +2244,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   current test covers only pure-emoji input. Add (a) mixed BMP + surrogate-pair text where the boundary lands at the limit, (b) text that fits EXACTLY at the limit (no chunking), (c) text where a single character exceeds the limit (impossible at 3500 cap but worth a defensive test).
 - [ ] P2: Strengthen forwarder armed-priority assertion:
   the `telegram_forwarder_drains_armed_session_before_digest_primary` test asserts only `sent_texts == ["Telegram-originated reply", footer]`. This indirectly proves session-2 wasn't sent, but doesn't track which `session_id` values were passed to `get_session`. Track in the fake and assert exclusion explicitly.
-- [ ] P2: Cover Telegram upstream 429 envelopes returning HTTP 429:
-  add backend/API tests proving a Telegram API error envelope with `status == 429` or `error_code == 429` maps to HTTP 429 rather than 502, while invalid-token envelopes remain validation failures and 5xx/decode/transport failures remain upstream errors.
 - [ ] P2: Cover `backup_corrupt_telegram_bot_file` cross-fs fallback:
   current `telegram_state_persist_backs_up_malformed_existing_file` covers the rename success path but does NOT cover the `fs::copy` + `fs::remove_file` fallback. Extract `corrupt_telegram_bot_file_backup_path` + the rename-then-copy fallback to a helper accepting a `rename_fn: impl Fn(...)` and inject a forced-failure rename in a unit test.
 - [ ] P2: Add `write_telegram_bot_file` Unix `0o600` permission test:
@@ -2283,3 +2260,19 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `api.test.ts:235-263` exercises only `{ botToken: null, defaultSessionId: null }`. Add cases: omitted (no key in body) and explicit string (`botToken: "123:abc"`).
 - [ ] P2: Add AppDialogs Telegram tab path test:
   `AppDialogs.test.tsx` contains no `telegram` references. Open the settings dialog with `settingsTab="telegram"` and assert the panel renders with initial fetch.
+- [ ] P2: Cover all 7 demand-driven hydration listeners in `AgentSessionPanel.test.tsx`:
+  current test exercises only `wheel` of seven listeners (scroll, wheel, keydown, touchstart, touchmove, touchend, touchcancel). Add scroll-near-top (scrollTop = 50, fire scroll, expect hydration), keydown (ArrowUp/Home/PageUp dispatch), touchstart+touchmove with positive deltaY (pull-down) producing hydration, and a NEGATIVE control: `event.ctrlKey` wheel with `deltaY: -120` should NOT hydrate.
+- [ ] P2: Assert one-shot hydration in demand-driven hydration test:
+  after the wheel triggers hydration, fire wheel again and assert no further state churn (e.g., rendering doesn't re-mount, listeners are torn down because the effect's early-return fires after `hydrated` is true).
+- [ ] P2: Assert listeners removed on unmount in demand-driven hydration test:
+  spy on `node.removeEventListener` and assert each event name is removed on unmount/sessionId change. A leak that retains a listener on a detached scrollNode would not be caught.
+- [ ] P2: Cover touch hydration semantics in `AgentSessionPanel.test.tsx`:
+  dispatch touchstart at clientY=100, then touchmove at clientY=50 (negative delta, pull-up) → no hydration. Then touchstart at clientY=100, touchmove at clientY=200 (pull-down) → hydration. Verify touchend resets `lastTouchClientY` so the next touchstart starts fresh.
+- [ ] P2: Cover Telegram getMe contradictory envelope precedence:
+  after choosing the desired precedence rule, add cases for `status: UNAUTHORIZED, error_code: Some(999)`, `status: OK, error_code: Some(401)`, and `status: NOT_FOUND, error_code: None`. Assert the chosen 422-vs-gateway behavior for each so future classifier edits cannot silently change the API contract.
+- [ ] P2: Pin the 1024-char error message in token validation test:
+  the new 1024-char case asserts only `status == BAD_REQUEST`. Add `assert!(long_err.message.contains("at most 256 characters"));` to ensure the limit is named even on extreme oversize.
+- [ ] P2: Cover the `kind: "request-failed"` doc gap:
+  document `ApiRequestErrorKind` post-round-58: round 58's `preserveGatewayErrorBody` makes `kind: "request-failed"` no longer a strict status-class signal — it can now appear with status 502/503/504 alongside non-5xx status codes. Update `ApiRequestErrorKind` JSDoc and feature-brief contract for wrappers using `error.status` for status-class triage.
+- [ ] P2: Add 5xx empty-body fallback to `extractError` for `preserveGatewayErrorBody` callers:
+  for empty 502 body, `extractError` returns `"Request failed with status 502."` — more confusing than the prior `"The TermAl backend is unavailable."`. Either fall through to backend-unavailable copy when `raw` is empty AND `status >= 502`, or have `extractError` return a sentinel that the caller can detect for a fallback.

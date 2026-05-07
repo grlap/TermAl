@@ -1604,6 +1604,97 @@ describe("delegation command surface", () => {
     );
   });
 
+  it("pins wait validation throw messages for wrapper diagnostics", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    const excessiveIds = Array.from(
+      { length: MAX_DELEGATION_WAIT_IDS + 1 },
+      (_, index) => `delegation-${index + 1}`,
+    );
+    const cases: {
+      run: () => Promise<WaitDelegationsResult>;
+      message: string;
+    }[] = [
+      {
+        run: () =>
+          waitDelegationsCommand(123 as unknown as string, ["delegation-1"]),
+        message: "parent session id must be a string",
+      },
+      {
+        run: () => waitDelegationsCommand(" ", ["delegation-1"]),
+        message: "parent session id must be non-empty",
+      },
+      {
+        run: () => waitDelegationsCommand("parent/1", ["delegation-1"]),
+        message:
+          "parent session id must not contain /, ?, #, or control characters",
+      },
+      {
+        run: () =>
+          waitDelegationsCommand(
+            "parent-1",
+            "abc" as unknown as readonly string[],
+          ),
+        message: "delegation ids must be an array",
+      },
+      {
+        run: () =>
+          waitDelegationsCommand("parent-1", [123 as unknown as string]),
+        message: "delegation id must be a string",
+      },
+      {
+        run: () => waitDelegationsCommand("parent-1", [" "]),
+        message: "delegation id must be non-empty",
+      },
+      {
+        run: () => waitDelegationsCommand("parent-1", ["delegation/1"]),
+        message:
+          "delegation id must not contain /, ?, #, or control characters",
+      },
+      {
+        run: () => waitDelegationsCommand("parent-1", []),
+        message: "wait_delegations requires at least one delegation id",
+      },
+      {
+        run: () => waitDelegationsCommand("parent-1", excessiveIds),
+        message: `wait_delegations accepts at most ${MAX_DELEGATION_WAIT_IDS} ids`,
+      },
+      {
+        run: () =>
+          waitDelegationsCommand("parent-1", ["delegation-1"], {
+            pollIntervalMs: Number.NaN,
+          }),
+        message: "pollIntervalMs must be a finite positive duration",
+      },
+      {
+        run: () =>
+          waitDelegationsCommand("parent-1", ["delegation-1"], {
+            timeoutMs: Number.NaN,
+          }),
+        message: "timeoutMs must be a finite positive duration",
+      },
+      {
+        run: () =>
+          waitDelegationsCommand("parent-1", ["delegation-1"], {
+            pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS - 1,
+          }),
+        message: `pollIntervalMs must be at least ${MIN_DELEGATION_WAIT_INTERVAL_MS}ms`,
+      },
+      {
+        run: () =>
+          waitDelegationsCommand("parent-1", ["delegation-1"], {
+            timeoutMs: MAX_DELEGATION_WAIT_TIMEOUT_MS + 1,
+          }),
+        message: `timeoutMs must be no greater than ${MAX_DELEGATION_WAIT_TIMEOUT_MS}ms`,
+      },
+    ];
+
+    for (const { run, message } of cases) {
+      await expect(run()).rejects.toThrow(message);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects blank delegation ids instead of returning an empty success", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);
@@ -1626,6 +1717,29 @@ describe("delegation command surface", () => {
         timeoutMs: 100,
       }),
     ).rejects.toThrow(/^wait_delegations requires at least one delegation id/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-array delegation id batches before dispatch", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      waitDelegationsCommand(
+        "parent-1",
+        "abc" as unknown as readonly string[],
+        {
+          pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+          timeoutMs: 100,
+        },
+      ),
+    ).rejects.toThrow(/^delegation ids must be an array/);
+    await expect(
+      waitDelegationsCommand("parent-1", null as unknown as readonly string[], {
+        pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+        timeoutMs: 100,
+      }),
+    ).rejects.toThrow(/^delegation ids must be an array/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -1739,7 +1853,7 @@ describe("delegation command surface", () => {
     });
   });
 
-  it("sorts three-instance status recovery groups by server instance id", async () => {
+  it("sorts three-instance status recovery groups by request order", async () => {
     stubFetchResponses(
       {
         revision: 2,
@@ -1785,6 +1899,12 @@ describe("delegation command surface", () => {
         serverInstanceIds: ["server-a", "server-m", "server-z"],
         recoveryGroups: [
           {
+            serverInstanceId: "server-z",
+            revision: 2,
+            delegationIds: ["delegation-1"],
+            childSessionIds: ["child-1"],
+          },
+          {
             serverInstanceId: "server-a",
             revision: 3,
             delegationIds: ["delegation-2"],
@@ -1795,12 +1915,6 @@ describe("delegation command surface", () => {
             revision: 4,
             delegationIds: ["delegation-3"],
             childSessionIds: ["child-3"],
-          },
-          {
-            serverInstanceId: "server-z",
-            revision: 2,
-            delegationIds: ["delegation-1"],
-            childSessionIds: ["child-1"],
           },
         ],
       },
@@ -2456,10 +2570,28 @@ describe("delegation command surface", () => {
         }),
       },
       {
-        revision: 6,
+        revision: 7,
+        serverInstanceId: "server-a",
+        delegation: makeDelegation({
+          id: "delegation-3",
+          childSessionId: "child-3",
+          status: "running",
+        }),
+      },
+      {
+        revision: 8,
         serverInstanceId: "server-b",
         delegation: makeDelegation({
           id: "delegation-1",
+          status: "completed",
+        }),
+      },
+      {
+        revision: 9,
+        serverInstanceId: "server-b",
+        delegation: makeDelegation({
+          id: "delegation-3",
+          childSessionId: "child-3",
           status: "completed",
         }),
       },
@@ -2467,7 +2599,7 @@ describe("delegation command surface", () => {
 
     const wait = waitDelegationsCommand(
       "parent-1",
-      ["delegation-1", "delegation-2"],
+      ["delegation-1", "delegation-2", "delegation-3"],
       {
         pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
         timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
@@ -2479,22 +2611,231 @@ describe("delegation command surface", () => {
     await expect(wait).resolves.toMatchObject({
       outcome: "error",
       completed: [{ id: "delegation-2", status: "completed" }],
-      pending: [{ id: "delegation-1", status: "running" }],
+      pending: [
+        { id: "delegation-1", status: "running" },
+        { id: "delegation-3", status: "running" },
+      ],
       error: {
         kind: "mixed-server-instance",
         serverInstanceIds: ["server-a", "server-b"],
         recoveryGroups: [
           {
             serverInstanceId: "server-a",
-            revision: 5,
-            delegationIds: ["delegation-1"],
-            childSessionIds: ["child-1"],
+            revision: 7,
+            delegationIds: ["delegation-1", "delegation-3"],
+            childSessionIds: ["child-1", "child-3"],
           },
           {
             serverInstanceId: "server-b",
-            revision: 6,
-            delegationIds: ["delegation-1"],
-            childSessionIds: ["child-1"],
+            revision: 9,
+            delegationIds: ["delegation-1", "delegation-3"],
+            childSessionIds: ["child-1", "child-3"],
+          },
+        ],
+      },
+    });
+  });
+
+  it("orders mixed-instance recovery group ids by the requested delegation order", async () => {
+    type DelegationStatusTransportResponse = Awaited<
+      ReturnType<DelegationCommandTransport["fetchDelegationStatus"]>
+    >;
+    const pendingResponses = new Map<
+      string,
+      ReturnType<typeof deferred<DelegationStatusTransportResponse>>
+    >();
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(),
+      fetchDelegationStatus: vi.fn(async (_parentSessionId, delegationId) => {
+        const pending = deferred<DelegationStatusTransportResponse>();
+        pendingResponses.set(delegationId, pending);
+        return pending.promise;
+      }),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    const wait = createDelegationCommands(transport).wait_delegations(
+      "parent-1",
+      ["delegation-1", "delegation-2", "delegation-3"],
+      {
+        pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+        timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 3,
+      },
+    );
+
+    expect(transport.fetchDelegationStatus).toHaveBeenCalledTimes(3);
+    pendingResponses.get("delegation-3")?.resolve({
+      revision: 6,
+      serverInstanceId: "server-b",
+      delegation: makeDelegation({
+        id: "delegation-3",
+        childSessionId: "child-3",
+        status: "running",
+      }),
+    });
+    pendingResponses.get("delegation-1")?.resolve({
+      revision: 5,
+      serverInstanceId: "server-b",
+      delegation: makeDelegation({
+        id: "delegation-1",
+        childSessionId: "child-1",
+        status: "running",
+      }),
+    });
+    pendingResponses.get("delegation-2")?.resolve({
+      revision: 4,
+      serverInstanceId: "server-a",
+      delegation: makeDelegation({
+        id: "delegation-2",
+        childSessionId: "child-2",
+        status: "running",
+      }),
+    });
+
+    await expect(wait).resolves.toMatchObject({
+      outcome: "error",
+      error: {
+        kind: "mixed-server-instance",
+        recoveryGroups: [
+          {
+            serverInstanceId: "server-b",
+            delegationIds: ["delegation-1", "delegation-3"],
+            childSessionIds: ["child-1", "child-3"],
+          },
+          {
+            serverInstanceId: "server-a",
+            delegationIds: ["delegation-2"],
+            childSessionIds: ["child-2"],
+          },
+        ],
+      },
+    });
+  });
+
+  it("keeps prior-instance recovery groups ordered and aligned after an out-of-order prior poll", async () => {
+    vi.useFakeTimers();
+    type DelegationStatusTransportResponse = Awaited<
+      ReturnType<DelegationCommandTransport["fetchDelegationStatus"]>
+    >;
+    const statusCalls: {
+      delegationId: string;
+      pending: ReturnType<typeof deferred<DelegationStatusTransportResponse>>;
+    }[] = [];
+    const statusResponse = (
+      delegationId: string,
+      serverInstanceId: string,
+      revision: number,
+    ): DelegationStatusTransportResponse => ({
+      revision,
+      serverInstanceId,
+      delegation: makeDelegation({
+        id: delegationId,
+        childSessionId: delegationId.replace("delegation-", "child-"),
+        status: "running",
+      }),
+    });
+    const resolveStatus = (
+      calls: typeof statusCalls,
+      delegationId: string,
+      response: DelegationStatusTransportResponse,
+    ) => {
+      const call = calls.find(
+        (candidate) => candidate.delegationId === delegationId,
+      );
+      expect(call).toBeDefined();
+      call?.pending.resolve(response);
+    };
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(),
+      fetchDelegationStatus: vi.fn((_parentSessionId, delegationId) => {
+        const pending = deferred<DelegationStatusTransportResponse>();
+        statusCalls.push({ delegationId, pending });
+        return pending.promise;
+      }),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+    };
+
+    const wait = createDelegationCommands(transport).wait_delegations(
+      "parent-1",
+      ["delegation-1", "delegation-2", "delegation-3"],
+      {
+        pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+        timeoutMs: MIN_DELEGATION_WAIT_INTERVAL_MS * 5,
+      },
+    );
+
+    expect(statusCalls.map((call) => call.delegationId)).toEqual([
+      "delegation-1",
+      "delegation-2",
+      "delegation-3",
+    ]);
+    const firstPoll = statusCalls.slice(0, 3);
+    resolveStatus(
+      firstPoll,
+      "delegation-3",
+      statusResponse("delegation-3", "server-a", 30),
+    );
+    resolveStatus(
+      firstPoll,
+      "delegation-1",
+      statusResponse("delegation-1", "server-a", 10),
+    );
+    resolveStatus(
+      firstPoll,
+      "delegation-2",
+      statusResponse("delegation-2", "server-a", 20),
+    );
+
+    await vi.advanceTimersByTimeAsync(MIN_DELEGATION_WAIT_INTERVAL_MS);
+    expect(statusCalls.map((call) => call.delegationId)).toEqual([
+      "delegation-1",
+      "delegation-2",
+      "delegation-3",
+      "delegation-1",
+      "delegation-2",
+      "delegation-3",
+    ]);
+
+    const secondPoll = statusCalls.slice(3);
+    resolveStatus(
+      secondPoll,
+      "delegation-3",
+      statusResponse("delegation-3", "server-b", 60),
+    );
+    resolveStatus(
+      secondPoll,
+      "delegation-1",
+      statusResponse("delegation-1", "server-b", 40),
+    );
+    resolveStatus(
+      secondPoll,
+      "delegation-2",
+      statusResponse("delegation-2", "server-b", 50),
+    );
+
+    await expect(wait).resolves.toMatchObject({
+      outcome: "error",
+      pending: [
+        { id: "delegation-1", childSessionId: "child-1" },
+        { id: "delegation-2", childSessionId: "child-2" },
+        { id: "delegation-3", childSessionId: "child-3" },
+      ],
+      error: {
+        kind: "mixed-server-instance",
+        recoveryGroups: [
+          {
+            serverInstanceId: "server-a",
+            revision: 30,
+            delegationIds: ["delegation-1", "delegation-2", "delegation-3"],
+            childSessionIds: ["child-1", "child-2", "child-3"],
+          },
+          {
+            serverInstanceId: "server-b",
+            revision: 60,
+            delegationIds: ["delegation-1", "delegation-2", "delegation-3"],
+            childSessionIds: ["child-1", "child-2", "child-3"],
           },
         ],
       },

@@ -193,7 +193,11 @@ async fn apply_git_file_action(
 
         match request.action {
             GitFileAction::Stage => {
-                let pathspecs = collect_git_pathspecs(&current_path, original_path.as_deref());
+                let pathspecs = collect_git_stage_pathspecs(
+                    &current_path,
+                    original_path.as_deref(),
+                    request.status_code.as_deref(),
+                );
                 run_git_pathspec_command(
                     &repo_root,
                     &["add", "-A"],

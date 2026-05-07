@@ -129,8 +129,10 @@ export function useConversationMarkerJump({
 }) {
   const correctionFrameRef = useRef<number | null>(null);
   const correctionTokenRef = useRef(0);
+  const activeSessionIdRef = useRef(sessionId);
   const messageSlotNodesRef = useRef<Map<string, HTMLElement>>(new Map());
   const messageSlotNodesSessionIdRef = useRef(sessionId);
+  activeSessionIdRef.current = sessionId;
 
   const ensureMessageSlotCacheForCurrentSession = useCallback(() => {
     if (messageSlotNodesSessionIdRef.current !== sessionId) {
@@ -188,9 +190,13 @@ export function useConversationMarkerJump({
     (messageId: string) => {
       cancelCorrectionFrame();
       const correctionToken = correctionTokenRef.current;
+      const correctionSessionId = sessionId;
       correctionFrameRef.current = window.requestAnimationFrame(() => {
         correctionFrameRef.current = null;
-        if (correctionTokenRef.current !== correctionToken) {
+        if (
+          correctionTokenRef.current !== correctionToken ||
+          activeSessionIdRef.current !== correctionSessionId
+        ) {
           return;
         }
         if (scrollMountedMarkerSlotIntoView(messageId, "auto")) {
@@ -198,17 +204,20 @@ export function useConversationMarkerJump({
         }
         correctionFrameRef.current = window.requestAnimationFrame(() => {
           correctionFrameRef.current = null;
-          if (correctionTokenRef.current !== correctionToken) {
+          if (
+            correctionTokenRef.current !== correctionToken ||
+            activeSessionIdRef.current !== correctionSessionId
+          ) {
             return;
           }
           scrollMountedMarkerSlotIntoView(messageId, "auto");
         });
       });
     },
-    [cancelCorrectionFrame, scrollMountedMarkerSlotIntoView],
+    [cancelCorrectionFrame, scrollMountedMarkerSlotIntoView, sessionId],
   );
 
-  useLayoutEffect(() => cancelCorrectionFrame, [
+  useEffect(() => cancelCorrectionFrame, [
     cancelCorrectionFrame,
     sessionId,
   ]);

@@ -119,6 +119,26 @@ describe("resolvePaneScrollCommand", () => {
     ).toEqual({ kind: "boundary", direction: "up" });
   });
 
+  it("maps Ctrl+Shift+PageUp from a textarea body to a boundary jump", () => {
+    const textarea = document.createElement("textarea");
+    textarea.value = "prompt";
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "PageUp",
+          metaKey: false,
+          shiftKey: true,
+        },
+        textarea,
+        "Win32",
+      ),
+    ).toEqual({ kind: "boundary", direction: "up" });
+  });
+
   it("does not intercept Ctrl+PageUp on macOS", () => {
     // Ctrl+PageUp/PageDown is a Windows/Linux boundary-jump
     // shortcut. macOS's equivalent is Cmd-arrow (already rejected

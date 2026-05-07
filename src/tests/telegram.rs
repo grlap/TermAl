@@ -639,6 +639,11 @@ fn telegram_log_sanitizer_redacts_bot_tokens_and_truncates() {
     assert!(sanitized.contains("/bot<redacted>/getUpdates"));
     assert!(sanitized.ends_with("..."));
     assert!(sanitized.chars().count() <= 259);
+
+    let standalone =
+        sanitize_telegram_log_detail("Telegram token rejected: botToken=123456:secretToken.");
+    assert!(!standalone.contains("123456:secretToken"));
+    assert!(standalone.contains("botToken=<redacted>."));
 }
 
 #[test]
@@ -742,15 +747,28 @@ fn telegram_token_validation_enforces_max_length_boundary() {
     assert_eq!(long_err.status, StatusCode::BAD_REQUEST);
 }
 
+fn telegram_api_error(method: &str, status: StatusCode, error_code: Option<i64>) -> anyhow::Error {
+    anyhow::Error::new(TelegramApiError {
+        method: method.to_owned(),
+        status,
+        error_code,
+        description: status
+            .canonical_reason()
+            .unwrap_or("Telegram API error")
+            .to_owned(),
+    })
+}
+
+fn telegram_getme_api_error(status: StatusCode, error_code: Option<i64>) -> anyhow::Error {
+    telegram_api_error("getMe", status, error_code)
+}
+
 #[test]
-fn telegram_connection_test_error_classifies_api_statuses_and_transport_failures() {
-    let telegram_api_error = anyhow::Error::new(TelegramApiError {
-        method: "getMe".to_owned(),
-        status: StatusCode::UNAUTHORIZED,
-        error_code: Some(401),
-        description: "Unauthorized".to_owned(),
-    });
-    let validation = telegram_test_connection_error(telegram_api_error);
+fn telegram_connection_test_error_classifies_getme_auth_failures_as_validation() {
+    let validation = telegram_test_connection_error(telegram_getme_api_error(
+        StatusCode::UNAUTHORIZED,
+        Some(401),
+    ));
     assert_eq!(validation.status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(
         validation
@@ -758,32 +776,89 @@ fn telegram_connection_test_error_classifies_api_statuses_and_transport_failures
             .contains("Telegram connection test failed")
     );
 
-    let wrapped = anyhow::Error::new(TelegramApiError {
-        method: "getMe".to_owned(),
-        status: StatusCode::UNAUTHORIZED,
-        error_code: Some(401),
-        description: "Unauthorized".to_owned(),
-    })
-    .context("getMe call failed");
+    let wrapped =
+        telegram_getme_api_error(StatusCode::UNAUTHORIZED, Some(401)).context("getMe call failed");
     let wrapped_validation = telegram_test_connection_error(wrapped);
     assert_eq!(wrapped_validation.status, StatusCode::UNPROCESSABLE_ENTITY);
+}
 
-    let telegram_rate_limit =
-        telegram_test_connection_error(anyhow::Error::new(TelegramApiError {
-            method: "getMe".to_owned(),
-            status: StatusCode::TOO_MANY_REQUESTS,
-            error_code: Some(429),
-            description: "Too Many Requests".to_owned(),
-        }));
-    assert_eq!(telegram_rate_limit.status, StatusCode::BAD_GATEWAY);
+#[test]
+fn telegram_connection_test_error_classifies_getme_rate_limits_as_429() {
+    let telegram_rate_limit = telegram_test_connection_error(telegram_getme_api_error(
+        StatusCode::TOO_MANY_REQUESTS,
+        Some(429),
+    ));
+    assert_eq!(telegram_rate_limit.status, StatusCode::TOO_MANY_REQUESTS);
 
-    let telegram_server_error =
-        telegram_test_connection_error(anyhow::Error::new(TelegramApiError {
-            method: "getMe".to_owned(),
-            status: StatusCode::BAD_GATEWAY,
-            error_code: Some(502),
-            description: "Bad Gateway".to_owned(),
-        }));
+    let wrapped_rate_limit = telegram_getme_api_error(StatusCode::TOO_MANY_REQUESTS, Some(429))
+        .context("getMe call failed");
+    let wrapped_rate_limit = telegram_test_connection_error(wrapped_rate_limit);
+    assert_eq!(wrapped_rate_limit.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[test]
+fn telegram_connection_test_error_gives_429_precedence_in_contradictory_envelopes() {
+    let rate_limited_status_with_validation_code = telegram_test_connection_error(
+        telegram_getme_api_error(StatusCode::TOO_MANY_REQUESTS, Some(401)),
+    );
+    assert_eq!(
+        rate_limited_status_with_validation_code.status,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+
+    let validation_status_with_rate_limited_code = telegram_test_connection_error(
+        telegram_getme_api_error(StatusCode::UNAUTHORIZED, Some(429)),
+    );
+    assert_eq!(
+        validation_status_with_rate_limited_code.status,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}
+
+#[test]
+fn telegram_connection_test_error_treats_non_rate_limited_contradictions_as_upstream() {
+    let contradictory_non_rate_limited = telegram_test_connection_error(telegram_getme_api_error(
+        StatusCode::BAD_GATEWAY,
+        Some(400),
+    ));
+    assert_eq!(
+        contradictory_non_rate_limited.status,
+        StatusCode::BAD_GATEWAY
+    );
+
+    let unexpected_code_with_validation_status = telegram_test_connection_error(
+        telegram_getme_api_error(StatusCode::UNAUTHORIZED, Some(999)),
+    );
+    assert_eq!(
+        unexpected_code_with_validation_status.status,
+        StatusCode::BAD_GATEWAY
+    );
+
+    let validation_code_with_non_error_status =
+        telegram_test_connection_error(telegram_getme_api_error(StatusCode::OK, Some(401)));
+    assert_eq!(
+        validation_code_with_non_error_status.status,
+        StatusCode::BAD_GATEWAY
+    );
+}
+
+#[test]
+fn telegram_connection_test_error_does_not_reuse_getme_validation_for_other_methods() {
+    let send_message_auth_error = telegram_test_connection_error(telegram_api_error(
+        "sendMessage",
+        StatusCode::UNAUTHORIZED,
+        Some(401),
+    ));
+
+    assert_eq!(send_message_auth_error.status, StatusCode::BAD_GATEWAY);
+}
+
+#[test]
+fn telegram_connection_test_error_classifies_transport_and_server_failures_as_bad_gateway() {
+    let telegram_server_error = telegram_test_connection_error(telegram_getme_api_error(
+        StatusCode::BAD_GATEWAY,
+        Some(502),
+    ));
     assert_eq!(telegram_server_error.status, StatusCode::BAD_GATEWAY);
 
     let upstream = telegram_test_connection_error(anyhow!("failed to call Telegram `getMe`"));
@@ -837,6 +912,13 @@ fn telegram_state_persist_backs_up_malformed_existing_file() {
     let path =
         std::env::temp_dir().join(format!("termal-telegram-bad-state-{}.json", Uuid::new_v4()));
     fs::write(&path, b"{").expect("fixture should write");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644))
+            .expect("fixture permissions should set");
+    }
 
     let state = TelegramBotState {
         chat_id: Some(456),
@@ -869,11 +951,54 @@ fn telegram_state_persist_backs_up_malformed_existing_file() {
 
     assert_eq!(backups.len(), 1);
     assert_eq!(fs::read(&backups[0]).expect("backup should read"), b"{");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let mode = fs::metadata(&backups[0])
+            .expect("backup metadata should read")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+    }
 
     fs::remove_file(&path).ok();
     for backup in backups {
         fs::remove_file(backup).ok();
     }
+}
+
+#[test]
+fn telegram_state_load_reports_unreadable_paths() {
+    let path = std::env::temp_dir().join(format!("termal-telegram-state-dir-{}", Uuid::new_v4()));
+    fs::create_dir(&path).expect("fixture directory should create");
+
+    let err = load_telegram_bot_state(&path)
+        .expect_err("unreadable state paths should fail instead of defaulting");
+
+    assert!(err.to_string().contains("failed to read"));
+
+    fs::remove_dir(&path).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn telegram_bot_file_write_sets_mode_600() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let path = std::env::temp_dir().join(format!("termal-telegram-mode-{}.json", Uuid::new_v4()));
+
+    write_telegram_bot_file(&path, b"{}").expect("telegram bot file should write");
+
+    let mode = fs::metadata(&path)
+        .expect("state file metadata should read")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+
+    fs::remove_file(&path).ok();
 }
 
 #[test]
@@ -939,6 +1064,8 @@ fn telegram_settings_validation_rejects_orphan_session_project() {
         err.message
             .contains("unknown default Telegram session project")
     );
+    assert_eq!(config.default_project_id, None);
+    assert!(config.subscribed_project_ids.is_empty());
 }
 
 #[test]

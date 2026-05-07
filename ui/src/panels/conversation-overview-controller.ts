@@ -51,6 +51,31 @@ let cancelConversationOverviewRailBuildDrain: (() => void) | null = null;
 const pendingConversationOverviewRailBuildTasks: ConversationOverviewRailBuildTask[] =
   [];
 
+function canUseMessageIndexFallback(
+  handle: VirtualizedConversationMessageListHandle,
+  item: ConversationOverviewItem,
+) {
+  const snapshot = handle.getLayoutSnapshot();
+  return snapshot.messages.some(
+    (message) =>
+      message.messageIndex === item.messageIndex &&
+      message.messageId === item.messageId,
+  );
+}
+
+function jumpToOverviewItem(
+  handle: VirtualizedConversationMessageListHandle,
+  item: ConversationOverviewItem,
+) {
+  if (handle.jumpToMessageId(item.messageId, { align: "center" })) {
+    return true;
+  }
+  if (!canUseMessageIndexFallback(handle, item)) {
+    return false;
+  }
+  return handle.jumpToMessageIndex(item.messageIndex, { align: "center" });
+}
+
 function scheduleConversationOverviewRailBuild(run: () => void) {
   const task: ConversationOverviewRailBuildTask = {
     id: nextConversationOverviewRailBuildTaskId,
@@ -224,17 +249,22 @@ export function useConversationOverviewController({
       }
       const retryAfterFullTranscriptDemand = () => {
         onFullTranscriptDemand?.();
-        scheduleNavigationFrame(() => {
+        const retryJump = () => {
           const nextHandle = virtualizerHandleRef.current;
           if (!nextHandle) {
-            return;
+            return false;
           }
-          const jumped =
-            nextHandle.jumpToMessageId(item.messageId, { align: "center" }) ||
-            nextHandle.jumpToMessageIndex(item.messageIndex, { align: "center" });
+          const jumped = jumpToOverviewItem(nextHandle, item);
           if (jumped) {
             scheduleNavigationFrame(refreshViewportSnapshot);
           }
+          return jumped;
+        };
+        scheduleNavigationFrame(() => {
+          if (retryJump()) {
+            return;
+          }
+          scheduleNavigationFrame(retryJump);
         });
       };
       if (item.kind === "live_turn") {
@@ -257,9 +287,7 @@ export function useConversationOverviewController({
         }
         return;
       }
-      const jumped =
-        handle.jumpToMessageId(item.messageId, { align: "center" }) ||
-        handle.jumpToMessageIndex(item.messageIndex, { align: "center" });
+      const jumped = jumpToOverviewItem(handle, item);
       if (jumped) {
         scheduleNavigationFrame(refreshViewportSnapshot);
       } else if (onFullTranscriptDemand) {
@@ -384,6 +412,21 @@ export function useConversationOverviewController({
     refreshLayoutSnapshot,
     refreshViewportSnapshot,
     scrollContainerRef,
+    shouldRender,
+  ]);
+
+  useEffect(() => {
+    if (!isActive || !shouldRender || !isRailReady) {
+      return;
+    }
+    refreshLayoutSnapshot();
+    refreshViewportSnapshot();
+  }, [
+    isActive,
+    isRailReady,
+    messageCount,
+    refreshLayoutSnapshot,
+    refreshViewportSnapshot,
     shouldRender,
   ]);
 

@@ -368,6 +368,268 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("preserves scroll position when older messages are prepended to an initial tail window", async () => {
+    const messages = makeTextMessages(600);
+    const tailMessages = messages.slice(-100);
+    const clientHeight = 500;
+    const clientWidth = 1000;
+    const messageNumber = (message: Message) =>
+      Number(message.id.replace("message-", ""));
+    const actualHeightForMessageNumber = (number: number) =>
+      number <= 500 ? 132 : 96;
+    const actualOffsetBeforeMessage = (firstNumber: number, number: number) => {
+      let offset = 0;
+      for (let current = firstNumber; current < number; current += 1) {
+        offset += actualHeightForMessageNumber(current) + VIRTUALIZED_MESSAGE_GAP_PX;
+      }
+      return offset;
+    };
+    const actualRangeHeight = (firstNumber: number, afterLastNumber: number) => {
+      if (firstNumber >= afterLastNumber) {
+        return 0;
+      }
+      return (
+        actualOffsetBeforeMessage(firstNumber, afterLastNumber) -
+        VIRTUALIZED_MESSAGE_GAP_PX
+      );
+    };
+    const scrollHeightFromMountedDom = () => {
+      const list = document.querySelector<HTMLElement>(".virtualized-message-list");
+      if (!list) {
+        return actualRangeHeight(501, 601);
+      }
+
+      let height = 0;
+      Array.from(list.children).forEach((child) => {
+        const element = child as HTMLElement;
+        if (element.classList.contains("virtualized-message-spacer")) {
+          height += Number.parseFloat(element.style.height || "0") || 0;
+          return;
+        }
+        if (!element.classList.contains("virtualized-message-page")) {
+          return;
+        }
+
+        const slotNodes = Array.from(
+          element.querySelectorAll<HTMLElement>(".virtualized-message-slot"),
+        );
+        slotNodes.forEach((slot, index) => {
+          const number = Number(slot.dataset.messageId?.replace("message-", ""));
+          height += actualHeightForMessageNumber(number);
+          if (index < slotNodes.length - 1) {
+            height += VIRTUALIZED_MESSAGE_GAP_PX;
+          }
+        });
+        const pageGap = element.querySelector<HTMLElement>(
+          ".virtualized-message-page-gap",
+        );
+        height += Number.parseFloat(pageGap?.style.height || "0") || 0;
+      });
+      return height;
+    };
+    const tailBottomScrollTop = actualRangeHeight(501, 601) - clientHeight;
+    const harness = renderVirtualizedHarness({
+      clientHeight,
+      clientWidth,
+      initialScrollTop: tailBottomScrollTop,
+      messages: tailMessages,
+      scrollHeight: scrollHeightFromMountedDom,
+      slotRect: (message, messageIndex, scrollTop) => {
+        const number = messageNumber(message);
+        const firstNumber = number - messageIndex;
+        return {
+          height: actualHeightForMessageNumber(number),
+          top: actualOffsetBeforeMessage(firstNumber, number) - scrollTop,
+        };
+      },
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-600")).toBeInTheDocument();
+      });
+      const message600Slot = () =>
+        harness.container.querySelector<HTMLElement>(
+          '[data-message-id="message-600"]',
+        );
+
+      act(() => {
+        fireEvent.wheel(harness.scrollNode, { deltaY: -120 });
+        harness.setScrollTop(tailBottomScrollTop - 120);
+        fireEvent.scroll(harness.scrollNode);
+      });
+      const message600OffsetBeforePrepend =
+        message600Slot()?.getBoundingClientRect().top;
+      expect(message600OffsetBeforePrepend).toBeGreaterThan(0);
+      const hydratedMessages: Message[] = [
+        ...messages,
+        {
+          author: "assistant",
+          id: "message-601",
+          text: "Message 601",
+          timestamp: "10:601",
+          type: "text",
+        },
+      ];
+      const hydrationScrollWriteStart = harness.scrollWrites.length;
+
+      act(() => {
+        harness.rerenderWithMessages(hydratedMessages);
+      });
+
+      await waitFor(() => {
+        const message600 = message600Slot();
+        expect(message600).not.toBeNull();
+        expect(message600!.getBoundingClientRect().top).toBe(
+          message600OffsetBeforePrepend,
+        );
+      });
+      const hydrationScrollWrites = harness.scrollWrites.slice(
+        hydrationScrollWriteStart,
+      );
+      expect(hydrationScrollWrites.length).toBeGreaterThan(0);
+      expect(
+        hydrationScrollWrites.every(
+          (scrollTop) => Math.abs(scrollTop - harness.scrollTop) < 1,
+        ),
+      ).toBe(true);
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+
+      const message600OffsetBeforeSecondWheel =
+        message600Slot()?.getBoundingClientRect().top;
+      expect(message600OffsetBeforeSecondWheel).toBeGreaterThan(0);
+      act(() => {
+        fireEvent.wheel(harness.scrollNode, { deltaY: -120 });
+        harness.setScrollTop(harness.scrollTop - 120);
+        fireEvent.scroll(harness.scrollNode);
+      });
+
+      await waitFor(() => {
+        const message600 = message600Slot();
+        expect(message600).not.toBeNull();
+        expect(message600!.getBoundingClientRect().top).toBe(
+          message600OffsetBeforeSecondWheel! + 120,
+        );
+      });
+
+      const message600OffsetBeforeIdleCompaction =
+        message600Slot()?.getBoundingClientRect().top;
+      expect(message600OffsetBeforeIdleCompaction).toBeGreaterThan(0);
+      vi.useFakeTimers();
+      await advanceIdleMountedRangeCompaction();
+
+      const message600AfterIdleCompaction = message600Slot();
+      expect(message600AfterIdleCompaction).not.toBeNull();
+      expect(message600AfterIdleCompaction!.getBoundingClientRect().top).toBe(
+        message600OffsetBeforeIdleCompaction,
+      );
+    } finally {
+      vi.useRealTimers();
+      harness.restore();
+    }
+  });
+
+  it("keeps the first upward wheel from a tail bottom near the hydrated bottom", async () => {
+    const messages = makeTextMessages(600);
+    const tailMessages = messages.slice(-100);
+    const clientHeight = 500;
+    const clientWidth = 1000;
+    const messageNumber = (message: Message) =>
+      Number(message.id.replace("message-", ""));
+    const estimatedHeightForMessageNumber = (number: number) =>
+      estimateConversationMessageHeight(messages[number - 1]!, {
+        availableWidthPx: clientWidth,
+      });
+    const estimatedOffsetBeforeMessage = (firstNumber: number, number: number) => {
+      let offset = 0;
+      for (let current = firstNumber; current < number; current += 1) {
+        offset +=
+          estimatedHeightForMessageNumber(current) + VIRTUALIZED_MESSAGE_GAP_PX;
+      }
+      return offset;
+    };
+    const estimatedRangeHeight = (firstNumber: number, afterLastNumber: number) => {
+      if (firstNumber >= afterLastNumber) {
+        return 0;
+      }
+      return (
+        estimatedOffsetBeforeMessage(firstNumber, afterLastNumber) -
+        VIRTUALIZED_MESSAGE_GAP_PX
+      );
+    };
+    const tailBottomScrollTop = estimatedRangeHeight(501, 601) - clientHeight;
+    const wheelDeltaY = -120;
+    const harness = renderVirtualizedHarness({
+      clientHeight,
+      clientWidth,
+      initialScrollTop: tailBottomScrollTop,
+      messages: tailMessages,
+      slotRect: (message, messageIndex, scrollTop) => {
+        const number = messageNumber(message);
+        const firstNumber = number - messageIndex;
+        return {
+          height: estimatedHeightForMessageNumber(number),
+          top: estimatedOffsetBeforeMessage(firstNumber, number) - scrollTop,
+        };
+      },
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-600")).toBeInTheDocument();
+      });
+
+      act(() => {
+        harness.scrollNode.dispatchEvent(
+          new window.WheelEvent("wheel", { bubbles: true, deltaY: wheelDeltaY }),
+        );
+      });
+      act(() => {
+        harness.rerenderWithMessages(messages);
+      });
+
+      await waitFor(() => {
+        expect(harness.scrollTop).toBeGreaterThan(tailBottomScrollTop + 10_000);
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("keeps a top boundary seek at the real top when a tail window hydrates", async () => {
+    const messages = makeTextMessages(600);
+    const harness = renderVirtualizedHarness({
+      initialScrollTop: 0,
+      messages: messages.slice(-100),
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-600")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+
+      act(() => {
+        harness.scrollNode.scrollTop = 0;
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "seek",
+          scrollSource: "user",
+        });
+      });
+      act(() => {
+        harness.rerenderWithMessages(messages);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("message-1")).toBeInTheDocument();
+      });
+      expect(harness.scrollTop).toBe(0);
+      expect(screen.queryByText("message-600")).not.toBeInTheDocument();
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("exposes a DOM-backed viewport snapshot through the handle", async () => {
     const messages = makeTextMessages(48);
     const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {

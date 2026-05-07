@@ -858,6 +858,7 @@ function waitDelegationsResult(
 
 type StatusBatchResponse = {
   requestedId: string;
+  requestedIndex: number;
   response: DelegationStatusResponse;
 };
 
@@ -933,7 +934,7 @@ async function fetchStatusBatchWithDeadline(
       finish({ kind: "timeout" }, { abortPending: true });
     }, remainingMs);
 
-    for (const requestedId of pendingIds) {
+    for (const [requestedIndex, requestedId] of pendingIds.entries()) {
       transport
         .fetchDelegationStatus(parentSessionId, requestedId, {
           signal: controller.signal,
@@ -943,7 +944,7 @@ async function fetchStatusBatchWithDeadline(
             if (finished) {
               return;
             }
-            responses.push({ requestedId, response });
+            responses.push({ requestedId, requestedIndex, response });
             completedCount += 1;
             if (completedCount === pendingIds.length) {
               finish({ kind: "responses" });
@@ -1012,6 +1013,12 @@ function statusRecoveryGroups(
   previousServerInstanceRevision: number | null,
   previousServerInstanceId: string | null,
 ): MixedServerInstanceRecoveryGroup[] {
+  const requestedOrder = new Map(
+    responses.map((response) => [
+      response.requestedId,
+      response.requestedIndex,
+    ]),
+  );
   const groups = new Map<string, MixedServerInstanceRecoveryGroup>();
   if (previousServerInstanceId && previousServerInstanceRevision !== null) {
     const requestedIds = new Set(
@@ -1036,8 +1043,7 @@ function statusRecoveryGroups(
     const group = groups.get(serverInstanceId);
     if (group) {
       group.revision = Math.max(group.revision, response.revision);
-      pushUnique(group.delegationIds, delegationId);
-      pushUnique(group.childSessionIds, childSessionId);
+      upsertRecoveryGroupDelegation(group, delegationId, childSessionId);
       continue;
     }
     groups.set(serverInstanceId, {
@@ -1047,7 +1053,7 @@ function statusRecoveryGroups(
       childSessionIds: [childSessionId],
     });
   }
-  return sortedRecoveryGroups(groups);
+  return sortedStatusRecoveryGroups(groups, requestedOrder);
 }
 
 function recordStatusBatchMetadata(
@@ -1142,6 +1148,9 @@ function mixedServerInstanceIds(
 }
 
 function normalizeDelegationIds(delegationIds: readonly string[]) {
+  if (!Array.isArray(delegationIds)) {
+    throw new TypeError("delegation ids must be an array");
+  }
   const seen = new Set<string>();
   const normalizedIds: string[] = [];
   for (const id of delegationIds) {
@@ -1263,6 +1272,108 @@ function sortedRecoveryGroups(
   return [...groups.values()].sort((left, right) =>
     left.serverInstanceId.localeCompare(right.serverInstanceId),
   );
+}
+
+function sortedStatusRecoveryGroups(
+  groups: ReadonlyMap<string, MixedServerInstanceRecoveryGroup>,
+  requestedOrder: ReadonlyMap<string, number>,
+) {
+  return [...groups.values()]
+    .map((group) => recoveryGroupSortedByRequestOrder(group, requestedOrder))
+    .sort((left, right) =>
+      compareRecoveryGroupsByRequestOrder(left, right, requestedOrder),
+    );
+}
+
+function recoveryGroupSortedByRequestOrder(
+  group: MixedServerInstanceRecoveryGroup,
+  requestedOrder: ReadonlyMap<string, number>,
+) {
+  const pairs = group.delegationIds.map((delegationId, index) => {
+    const childSessionId = group.childSessionIds[index];
+    if (childSessionId === undefined) {
+      throw new Error(
+        `recovery group missing child session id for ${delegationId}`,
+      );
+    }
+    return { delegationId, childSessionId };
+  });
+  pairs.sort((left, right) =>
+    compareRequestedDelegationIds(
+      left.delegationId,
+      right.delegationId,
+      requestedOrder,
+    ),
+  );
+  return {
+    ...group,
+    delegationIds: pairs.map((pair) => pair.delegationId),
+    childSessionIds: pairs.map((pair) => pair.childSessionId),
+  };
+}
+
+function compareRequestedDelegationIds(
+  left: string,
+  right: string,
+  requestedOrder: ReadonlyMap<string, number>,
+) {
+  const leftOrder = requestedOrderIndex(left, requestedOrder);
+  const rightOrder = requestedOrderIndex(right, requestedOrder);
+  if (leftOrder !== rightOrder) {
+    return leftOrder - rightOrder;
+  }
+  return left.localeCompare(right);
+}
+
+function compareRecoveryGroupsByRequestOrder(
+  left: MixedServerInstanceRecoveryGroup,
+  right: MixedServerInstanceRecoveryGroup,
+  requestedOrder: ReadonlyMap<string, number>,
+) {
+  const leftOrder = recoveryGroupFirstRequestedIndex(left, requestedOrder);
+  const rightOrder = recoveryGroupFirstRequestedIndex(right, requestedOrder);
+  if (leftOrder !== rightOrder) {
+    return leftOrder - rightOrder;
+  }
+  return left.serverInstanceId.localeCompare(right.serverInstanceId);
+}
+
+function recoveryGroupFirstRequestedIndex(
+  group: MixedServerInstanceRecoveryGroup,
+  requestedOrder: ReadonlyMap<string, number>,
+) {
+  return Math.min(
+    ...group.delegationIds.map((delegationId) =>
+      requestedOrderIndex(delegationId, requestedOrder),
+    ),
+  );
+}
+
+function requestedOrderIndex(
+  delegationId: string,
+  requestedOrder: ReadonlyMap<string, number>,
+) {
+  const index = requestedOrder.get(delegationId);
+  if (index === undefined) {
+    throw new Error(
+      `missing requested order for delegation id ${delegationId}`,
+    );
+  }
+  return index;
+}
+
+function upsertRecoveryGroupDelegation(
+  group: MixedServerInstanceRecoveryGroup,
+  delegationId: string,
+  childSessionId: string,
+) {
+  const existingIndex = group.delegationIds.indexOf(delegationId);
+  if (existingIndex >= 0) {
+    group.childSessionIds[existingIndex] = childSessionId;
+    return;
+  }
+  group.delegationIds.push(delegationId);
+  group.childSessionIds.push(childSessionId);
 }
 
 function newestSpawnMetadata(

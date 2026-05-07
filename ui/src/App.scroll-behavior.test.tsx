@@ -364,6 +364,67 @@ describe("App scroll behaviour", () => {
     });
   });
 
+  it("jumps to the top on Ctrl+Shift+PageUp from the composer textarea", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalPlatform = Object.getOwnPropertyDescriptor(
+        window.navigator,
+        "platform",
+      );
+      Object.defineProperty(window.navigator, "platform", {
+        configurable: true,
+        value: "Win32",
+      });
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+
+      try {
+        const messageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+        const composer = await screen.findByLabelText("Message Session 1");
+        if (!(composer instanceof HTMLTextAreaElement)) {
+          throw new Error("Composer textarea not found");
+        }
+
+        await act(async () => {
+          fireEvent.change(composer, { target: { value: "hello world" } });
+        });
+
+        messageStack.scrollTop = 800;
+        composer.focus();
+        composer.setSelectionRange(composer.value.length, composer.value.length);
+
+        await act(async () => {
+          fireEvent.keyDown(composer, {
+            key: "PageUp",
+            code: "PageUp",
+            ctrlKey: true,
+            shiftKey: true,
+          });
+        });
+        await settleAsyncUi();
+
+        expect(messageStack.scrollTop).toBe(0);
+        expect(filterScrollToCallsAt(scrollToMock, 0, "auto").length).toBeGreaterThan(0);
+      } finally {
+        context.cleanup();
+        restoreScrollGeometry();
+        if (originalPlatform) {
+          Object.defineProperty(window.navigator, "platform", originalPlatform);
+        } else {
+          Reflect.deleteProperty(window.navigator, "platform");
+        }
+      }
+    });
+  });
+
   it("keeps plain PageDown inside the composer textarea when the caret is not at the start", async () => {
     await withSuppressedActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({

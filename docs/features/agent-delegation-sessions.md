@@ -242,25 +242,31 @@ and include diagnostic `error.recoveryGroups`. The current command surface does
 not accept a server-instance selector, so wrappers should treat mixed-instance
 errors as non-recoverable through these helpers until a server-aware transport is
 added.
-`wait_delegations` also returns `error.kind === "mixed-server-instance"` when
-status polling observes a backend restart between polling cycles or within one
-parallel status batch. Its `error.recoveryGroups` are diagnostic only: groups
-identify which backend instance produced each observed delegation/status pair,
-and a previous-instance group is scoped to delegations fetched in the current
-poll. A single `delegationId` can appear in multiple groups within one error
-packet: once for the previous-instance baseline and once for the current
-instance response. If the first poll crosses instances, the previous-instance
-group is omitted because there is no baseline to report. Revisions are per
-server instance and must not be compared across groups.
+`wait_delegations` returns `error.kind === "mixed-server-instance"` when a
+successful or timed-out status batch observes a backend restart between polling
+cycles or within one parallel status batch. Status-fetch failures have priority:
+if any status request rejects, the result is `status-fetch-failed` even when
+collected responses already include another `serverInstanceId`. Its
+`error.recoveryGroups` are diagnostic only: groups identify which backend
+instance produced each observed delegation/status pair, and a previous-instance
+group is scoped to delegations fetched in the current poll. A single
+`delegationId` can appear in multiple groups within one error packet: once for
+the previous-instance baseline and once for the current instance response. If
+the first poll crosses instances, the previous-instance group is omitted because
+there is no baseline to report. Within each group, `delegationIds` and
+`childSessionIds` are ordered by each delegation id's position in the original
+`wait_delegations` request. Groups are ordered by the earliest requested
+delegation id they contain, with `serverInstanceId` as the tie-breaker.
+Revisions are per server instance and must not be compared across groups.
 
 Spawn commands return client-side validation failures as `outcome: "error"`
 with `error.kind === "validation-failed"`. `wait_delegations` is different:
 invalid parent/delegation ids or wait options throw `TypeError`/`RangeError`
 before polling starts.
 
-Validation packet messages are intentionally allow-listed. Unknown validation
-exceptions collapse to `"Invalid delegation request."`; wrapper UX should not
-depend on messages outside this list:
+Spawn validation packet messages are intentionally allow-listed. Unknown spawn
+validation exceptions collapse to `"Invalid delegation request."`; wrapper UX
+should not depend on spawn packet messages outside this list:
 
 - `parent session id must be a string`
 - `parent session id must be non-empty`
@@ -275,16 +281,45 @@ depend on messages outside this list:
 - `writePolicy must be omitted instead of null`
 - `spawn_reviewer_batch requests must be an array`
 - `spawn_reviewer_batch requires at least one reviewer`
-- `prompt must be no larger than MAX_DELEGATION_PROMPT_BYTES bytes`
-- `title must be no longer than MAX_DELEGATION_TITLE_CHARS characters`
-- `model must be no longer than MAX_DELEGATION_MODEL_CHARS characters`
-- `spawn_reviewer_batch accepts at most MAX_REVIEWER_BATCH_SIZE reviewers`
+- `prompt must be no larger than <MAX_DELEGATION_PROMPT_BYTES> bytes`
+- `title must be no longer than <MAX_DELEGATION_TITLE_CHARS> characters`
+- `model must be no longer than <MAX_DELEGATION_MODEL_CHARS> characters`
+- `spawn_reviewer_batch accepts at most <MAX_REVIEWER_BATCH_SIZE> reviewers`
 - `reviewer request N must be an object`
 
+Wait validation throws `TypeError` or `RangeError` before polling starts. These
+throws are not spawn validation packets and are not sanitized by
+`delegation-error-packets.ts`. Wrappers should catch by error type for UX.
+The current runtime message templates are pinned by delegation command tests for
+wrapper diagnostics:
+
+- `parent session id must be a string`
+- `parent session id must be non-empty`
+- `parent session id must not contain /, ?, #, or control characters`
+- `delegation ids must be an array`
+- `delegation id must be a string`
+- `delegation id must be non-empty`
+- `delegation id must not contain /, ?, #, or control characters`
+- `wait_delegations requires at least one delegation id`
+- `wait_delegations accepts at most <MAX_DELEGATION_WAIT_IDS> ids`
+- `pollIntervalMs must be a finite positive duration`
+- `timeoutMs must be a finite positive duration`
+- `pollIntervalMs must be at least <MIN_DELEGATION_WAIT_INTERVAL_MS>ms`
+- `timeoutMs must be no greater than <MAX_DELEGATION_WAIT_TIMEOUT_MS>ms`
+
 Use the exported constants from `ui/src/delegation-commands.ts` as the numeric
-source of truth: `MAX_DELEGATION_PROMPT_BYTES`,
-`MAX_DELEGATION_TITLE_CHARS`, `MAX_DELEGATION_MODEL_CHARS`, and
-`MAX_REVIEWER_BATCH_SIZE`.
+source of truth. Angle-bracket placeholders above interpolate these values in
+runtime strings:
+
+- `MAX_DELEGATION_PROMPT_BYTES = 65536`
+- `MAX_DELEGATION_TITLE_CHARS = 200`
+- `MAX_DELEGATION_MODEL_CHARS = 200`
+- `MAX_REVIEWER_BATCH_SIZE = 4`
+- `MAX_DELEGATION_WAIT_IDS = 10`
+- `MIN_DELEGATION_WAIT_INTERVAL_MS = 500`
+- `MAX_DELEGATION_WAIT_TIMEOUT_MS = 1800000`
+- `DEFAULT_DELEGATION_WAIT_INTERVAL_MS = 1000`
+- `DEFAULT_DELEGATION_WAIT_TIMEOUT_MS = 300000`
 Grouped parent-card UI and result consolidation remain separate Phase 3 work.
 
 ### MCP Tools

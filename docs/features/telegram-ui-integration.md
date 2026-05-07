@@ -259,7 +259,9 @@ code can no longer attach a chat.
 | POST | `/api/telegram/test-send` | Send a one-line digest to the linked chat to verify end-to-end delivery |
 
 All routes return JSON; all errors return `ApiError` with appropriate status
-codes (400 for validation, 502 for upstream Telegram failures, etc.).
+codes. `/api/telegram/test` uses 400 for malformed local requests, 422 for
+Telegram `getMe` token/auth rejections, 429 for local or Telegram rate limits,
+and 502 for Telegram transport/decode/upstream failures.
 
 ## Build sequence (incremental, each step shippable)
 

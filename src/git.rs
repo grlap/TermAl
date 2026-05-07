@@ -264,6 +264,18 @@ fn collect_git_pathspecs(current_path: &str, original_path: Option<&str>) -> Vec
     pathspecs
 }
 
+/// Collects pathspecs for staging a Git file action.
+fn collect_git_stage_pathspecs(
+    current_path: &str,
+    original_path: Option<&str>,
+    status_code: Option<&str>,
+) -> Vec<String> {
+    match status_code.and_then(|code| code.trim().chars().next()) {
+        Some('C' | 'R') => collect_git_pathspecs(current_path, original_path),
+        _ => vec![current_path.to_owned()],
+    }
+}
+
 /// Loads Git file diff text.
 fn load_git_file_diff_text(
     repo_root: &FsPath,

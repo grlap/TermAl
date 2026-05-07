@@ -490,12 +490,20 @@ export function isBackendUnavailableError(
   );
 }
 
+type RequestOptions = {
+  /**
+   * Keep 502/503/504 response bodies as request-failed details instead of
+   * mapping them to the generic backend-unavailable UI path. Use this only for
+   * routes that deliberately proxy a third-party service and return actionable
+   * JSON errors for upstream failures.
+   */
+  preserveGatewayErrorBody?: boolean;
+};
+
 async function request<T>(
   path: string,
   init?: RequestInit,
-  options?: {
-    preserveGatewayErrorBody?: boolean;
-  },
+  options?: RequestOptions,
 ): Promise<T> {
   const response = await performRequest(path, init);
 
@@ -1674,9 +1682,7 @@ function createBackendUnavailableError(
 function createResponseError(
   raw: string,
   status: number,
-  options?: {
-    preserveGatewayErrorBody?: boolean;
-  },
+  options?: RequestOptions,
 ) {
   if (status === 502 || status === 503 || status === 504) {
     if (options?.preserveGatewayErrorBody) {

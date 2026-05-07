@@ -88,7 +88,11 @@ function MarkerJumpHarness({
   return null;
 }
 
-function installManualAnimationFrames() {
+function installManualAnimationFrames({
+  cancelRemovesCallbacks = true,
+}: {
+  cancelRemovesCallbacks?: boolean;
+} = {}) {
   const originalRequestAnimationFrame = window.requestAnimationFrame;
   const originalCancelAnimationFrame = window.cancelAnimationFrame;
   const callbacks = new Map<number, FrameRequestCallback>();
@@ -101,7 +105,9 @@ function installManualAnimationFrames() {
     return frameId;
   }) as typeof window.requestAnimationFrame;
   window.cancelAnimationFrame = vi.fn((frameId: number) => {
-    callbacks.delete(frameId);
+    if (cancelRemovesCallbacks) {
+      callbacks.delete(frameId);
+    }
   }) as typeof window.cancelAnimationFrame;
 
   return {
@@ -286,7 +292,9 @@ describe("conversation marker helpers", () => {
   });
 
   it("ignores a delayed marker-jump correction after the session changes", () => {
-    const frames = installManualAnimationFrames();
+    const frames = installManualAnimationFrames({
+      cancelRemovesCallbacks: false,
+    });
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     const scrollIntoView = vi.fn();
     const scrollRoot = document.createElement("section");
@@ -317,7 +325,6 @@ describe("conversation marker helpers", () => {
         );
       });
       expect(frames.callbacks.size).toBe(1);
-      const staleCallbacks = [...frames.callbacks.values()];
 
       rerender(
         createElement(MarkerJumpHarness, {
@@ -334,10 +341,112 @@ describe("conversation marker helpers", () => {
       scrollRoot.append(newSessionSlot);
 
       act(() => {
-        staleCallbacks.forEach((callback) => callback(0));
+        frames.flushNextFrame();
       });
 
       expect(scrollIntoView).not.toHaveBeenCalled();
+    } finally {
+      frames.restore();
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it("falls back to mounted slot lookup when the virtualizer cannot jump", () => {
+    const frames = installManualAnimationFrames();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    const scrollRoot = document.createElement("section");
+    const markerSlot = document.createElement("article");
+    const virtualizerHandle = makeVirtualizerHandle(vi.fn(() => false));
+    let markerJump: MarkerJumpApi | null = null;
+    markerSlot.dataset.sessionSearchItemKey = "message:message-1";
+    scrollRoot.append(markerSlot);
+    HTMLElement.prototype.scrollIntoView = function scrollIntoViewMock(
+      this: HTMLElement,
+      options?: ScrollIntoViewOptions,
+    ) {
+      scrollIntoView(this.dataset.sessionSearchItemKey, options);
+    };
+
+    try {
+      render(
+        createElement(MarkerJumpHarness, {
+          onReady: (api) => {
+            markerJump = api;
+          },
+          scrollRoot,
+          sessionId: "session-1",
+          virtualizerHandle,
+        }),
+      );
+
+      act(() => {
+        markerJump?.jumpToMarker(
+          makeMarker("marker-1", { messageId: "message-1" }),
+        );
+      });
+
+      expect(virtualizerHandle.jumpToMessageId).toHaveBeenCalledWith(
+        "message-1",
+        { align: "center", flush: true },
+      );
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView).toHaveBeenCalledWith("message:message-1", {
+        block: "center",
+        behavior: "smooth",
+      });
+      expect(frames.callbacks.size).toBe(0);
+    } finally {
+      frames.restore();
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it("does not schedule marker jump correction when the mounted slot is found synchronously", () => {
+    const frames = installManualAnimationFrames();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    const scrollRoot = document.createElement("section");
+    const markerSlot = document.createElement("article");
+    const virtualizerHandle = makeVirtualizerHandle();
+    let markerJump: MarkerJumpApi | null = null;
+    markerSlot.dataset.sessionSearchItemKey = "message:message-1";
+    scrollRoot.append(markerSlot);
+    HTMLElement.prototype.scrollIntoView = function scrollIntoViewMock(
+      this: HTMLElement,
+      options?: ScrollIntoViewOptions,
+    ) {
+      scrollIntoView(this.dataset.sessionSearchItemKey, options);
+    };
+
+    try {
+      render(
+        createElement(MarkerJumpHarness, {
+          onReady: (api) => {
+            markerJump = api;
+          },
+          scrollRoot,
+          sessionId: "session-1",
+          virtualizerHandle,
+        }),
+      );
+
+      act(() => {
+        markerJump?.jumpToMarker(
+          makeMarker("marker-1", { messageId: "message-1" }),
+        );
+      });
+
+      expect(virtualizerHandle.jumpToMessageId).toHaveBeenCalledWith(
+        "message-1",
+        { align: "center", flush: true },
+      );
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView).toHaveBeenCalledWith("message:message-1", {
+        block: "center",
+        behavior: "auto",
+      });
+      expect(frames.callbacks.size).toBe(0);
     } finally {
       frames.restore();
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;

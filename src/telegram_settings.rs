@@ -195,6 +195,12 @@ impl AppState {
                 ApiError::bad_request("default Telegram session must belong to a project")
             })?;
 
+            if !known_projects.contains(session_project_id) {
+                return Err(ApiError::bad_request(format!(
+                    "unknown default Telegram session project `{session_project_id}`"
+                )));
+            }
+
             match config.default_project_id.as_deref() {
                 Some(project_id) if project_id != session_project_id => {
                     return Err(ApiError::bad_request(
@@ -205,11 +211,6 @@ impl AppState {
                 None => {
                     config.default_project_id = Some(session_project_id.to_owned());
                 }
-            }
-            if !known_projects.contains(session_project_id) {
-                return Err(ApiError::bad_request(format!(
-                    "unknown default Telegram session project `{session_project_id}`"
-                )));
             }
 
             if !config
@@ -373,7 +374,9 @@ fn telegram_test_connection_error(err: anyhow::Error) -> ApiError {
         .chain()
         .find_map(|cause| cause.downcast_ref::<TelegramApiError>())
     {
-        if telegram_api_error_is_token_validation_failure(api_error) {
+        if telegram_api_error_is_rate_limited(api_error) {
+            ApiError::from_status(StatusCode::TOO_MANY_REQUESTS, message)
+        } else if telegram_getme_error_is_token_validation_failure(api_error) {
             ApiError::from_status(StatusCode::UNPROCESSABLE_ENTITY, message)
         } else {
             ApiError::bad_gateway(message)
@@ -383,17 +386,26 @@ fn telegram_test_connection_error(err: anyhow::Error) -> ApiError {
     }
 }
 
-fn telegram_api_error_is_token_validation_failure(err: &TelegramApiError) -> bool {
-    matches!(
-        err.error_code,
-        Some(400 | 401 | 403 | 404)
-    ) || matches!(
+fn telegram_api_error_is_rate_limited(err: &TelegramApiError) -> bool {
+    err.error_code == Some(429) || err.status == StatusCode::TOO_MANY_REQUESTS
+}
+
+fn telegram_getme_error_is_token_validation_failure(err: &TelegramApiError) -> bool {
+    if err.method != "getMe" {
+        return false;
+    }
+
+    let status_is_token_error = matches!(
         err.status,
         StatusCode::BAD_REQUEST
             | StatusCode::UNAUTHORIZED
             | StatusCode::FORBIDDEN
             | StatusCode::NOT_FOUND
-    )
+    );
+    match err.error_code {
+        Some(code) => matches!(code, 400 | 401 | 403 | 404) && status_is_token_error,
+        None => status_is_token_error,
+    }
 }
 
 fn normalize_project_id_list(values: Vec<String>) -> Vec<String> {
@@ -447,8 +459,8 @@ fn write_telegram_bot_file(path: &FsPath, encoded: &[u8]) -> io::Result<()> {
         file.write_all(encoded)?;
         file.sync_all()?;
         drop(file);
+        harden_telegram_bot_file_permissions(&temp_path)?;
         replace_telegram_bot_file(&temp_path, path)?;
-        harden_telegram_bot_file_permissions(path)?;
         Ok(())
     })();
 

@@ -37,7 +37,8 @@ fn run_telegram_bot() -> Result<()> {
             .filter(|value| !value.is_empty())
             .ok_or_else(|| anyhow!("Telegram getMe response did not include a bot username"))?,
     );
-    let mut state = load_telegram_bot_state(&config.state_path).unwrap_or_default();
+    let mut state = load_telegram_bot_state(&config.state_path)
+        .context("failed to load Telegram bot state")?;
     let mut dirty = false;
     if let Some(chat_id) = config.chat_id {
         if state.chat_id != Some(chat_id) {
@@ -243,7 +244,10 @@ fn backup_corrupt_telegram_bot_file(path: &FsPath, err: impl std::fmt::Display) 
         backup_path.display()
     );
     match fs::rename(path, &backup_path) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            harden_telegram_bot_file_permissions(&backup_path)?;
+            Ok(())
+        }
         Err(rename_err) => {
             fs::copy(path, &backup_path).with_context(|| {
                 format!(
@@ -254,6 +258,7 @@ fn backup_corrupt_telegram_bot_file(path: &FsPath, err: impl std::fmt::Display) 
             })?;
             fs::remove_file(path)
                 .with_context(|| format!("failed to remove corrupt `{}`", path.display()))?;
+            harden_telegram_bot_file_permissions(&backup_path)?;
             Ok(())
         }
     }
@@ -290,6 +295,11 @@ fn sanitize_telegram_log_detail(detail: &str) -> String {
 }
 
 fn redact_telegram_bot_tokens(detail: &str) -> String {
+    let redacted_urls = redact_telegram_bot_url_tokens(detail);
+    redact_standalone_telegram_bot_tokens(&redacted_urls)
+}
+
+fn redact_telegram_bot_url_tokens(detail: &str) -> String {
     let mut output = String::with_capacity(detail.len());
     let mut remainder = detail;
     while let Some(index) = remainder.find("/bot") {
@@ -301,6 +311,70 @@ fn redact_telegram_bot_tokens(detail: &str) -> String {
     }
     output.push_str(remainder);
     output
+}
+
+fn redact_standalone_telegram_bot_tokens(detail: &str) -> String {
+    let bytes = detail.as_bytes();
+    let mut output = String::with_capacity(detail.len());
+    let mut last_copied = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        if let Some(end) = standalone_telegram_bot_token_end(bytes, index) {
+            output.push_str(&detail[last_copied..index]);
+            output.push_str("<redacted>");
+            index = end;
+            last_copied = end;
+            continue;
+        }
+
+        let ch = detail[index..]
+            .chars()
+            .next()
+            .expect("index should stay within string bounds");
+        index += ch.len_utf8();
+    }
+    output.push_str(&detail[last_copied..]);
+    output
+}
+
+fn standalone_telegram_bot_token_end(bytes: &[u8], start: usize) -> Option<usize> {
+    const MIN_BOT_ID_DIGITS: usize = 5;
+    const MIN_TOKEN_SECRET_CHARS: usize = 8;
+
+    if start > 0 && telegram_token_ascii_byte(bytes[start - 1]) {
+        return None;
+    }
+
+    let mut index = start;
+    while index < bytes.len() && bytes[index].is_ascii_digit() {
+        index += 1;
+    }
+    if index - start < MIN_BOT_ID_DIGITS || bytes.get(index) != Some(&b':') {
+        return None;
+    }
+
+    index += 1;
+    let secret_start = index;
+    while index < bytes.len() && telegram_token_secret_byte(bytes[index]) {
+        index += 1;
+    }
+    if index - secret_start < MIN_TOKEN_SECRET_CHARS {
+        return None;
+    }
+
+    if index < bytes.len() && telegram_token_ascii_byte(bytes[index]) {
+        return None;
+    }
+
+    Some(index)
+}
+
+fn telegram_token_ascii_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b':')
+}
+
+fn telegram_token_secret_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
 }
 
 fn telegram_prompt_exceeds_byte_limit(text: &str) -> bool {

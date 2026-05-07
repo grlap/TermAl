@@ -1966,6 +1966,7 @@ describe("AgentSessionPanel conversation caching", () => {
   it("keeps the first long-session tail window until older transcript is requested", async () => {
     vi.useFakeTimers();
     const OriginalResizeObserver = window.ResizeObserver;
+    const OriginalTouchEvent = window.TouchEvent;
     const originalGetBoundingClientRect =
       Element.prototype.getBoundingClientRect;
     const scrollNode = document.createElement("section");
@@ -1974,6 +1975,17 @@ describe("AgentSessionPanel conversation caching", () => {
     class ResizeObserverMock {
       observe() {}
       disconnect() {}
+    }
+
+    class TouchEventMock extends Event {
+      readonly changedTouches: Touch[];
+      readonly touches: Touch[];
+
+      constructor(type: string, init: TouchEventInit = {}) {
+        super(type, { bubbles: init.bubbles ?? true, cancelable: init.cancelable });
+        this.changedTouches = init.changedTouches ?? [];
+        this.touches = init.touches ?? [];
+      }
     }
 
     Object.defineProperty(scrollNode, "clientHeight", {
@@ -1997,6 +2009,7 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    window.TouchEvent = TouchEventMock as unknown as typeof TouchEvent;
     Element.prototype.getBoundingClientRect =
       function getBoundingClientRectMock() {
         const element = this as HTMLElement;
@@ -2062,18 +2075,223 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.queryByText("message-1")).not.toBeInTheDocument();
 
       act(() => {
-        fireEvent.wheel(scrollNode, { deltaY: -120 });
+        scrollTop = 50;
+        fireEvent.scroll(scrollNode);
       });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(500);
       });
+      expect(screen.queryByText("message-193")).not.toBeInTheDocument();
+
+      act(() => {
+        fireEvent.wheel(scrollNode, { ctrlKey: true, deltaY: -120 });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(screen.queryByText("message-193")).not.toBeInTheDocument();
+
+      act(() => {
+        fireEvent.wheel(scrollNode, { deltaY: -4 });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(screen.queryByText("message-193")).not.toBeInTheDocument();
+
+      act(() => {
+        scrollNode.dispatchEvent(new TouchEvent("touchstart", {
+          bubbles: true,
+          touches: [{ clientY: 100 } as Touch],
+          changedTouches: [{ clientY: 100 } as Touch],
+        }));
+        scrollNode.dispatchEvent(new TouchEvent("touchmove", {
+          bubbles: true,
+          touches: [{ clientY: 104 } as Touch],
+          changedTouches: [{ clientY: 104 } as Touch],
+        }));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(screen.queryByText("message-193")).not.toBeInTheDocument();
+
+      const editable = document.createElement("textarea");
+      document.body.append(editable);
+      try {
+        act(() => {
+          fireEvent.keyDown(editable, { key: "PageUp" });
+        });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(500);
+        });
+        expect(screen.queryByText("message-193")).not.toBeInTheDocument();
+
+        act(() => {
+          scrollTop = 20_000;
+          fireEvent.keyDown(editable, {
+            ctrlKey: true,
+            key: "PageUp",
+            shiftKey: true,
+          });
+        });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(500);
+        });
+      } finally {
+        editable.remove();
+      }
 
       expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
-      expect(screen.getByText("message-193")).toBeInTheDocument();
+      expect(screen.getByText("message-577")).toBeInTheDocument();
+      expect(screen.queryByText("message-193")).not.toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
+      window.TouchEvent = OriginalTouchEvent;
       Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
       vi.useRealTimers();
+    }
+  });
+
+  it("keeps demand-hydration listeners bound across message arrivals while tail-windowed", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const scrollNode = document.createElement("section");
+    const scrollNodeDemandEvents = [
+      "scroll",
+      "wheel",
+      "touchstart",
+      "touchmove",
+      "touchend",
+      "touchcancel",
+    ] as const;
+    const addCounts = new Map<string, number>();
+    const removeCounts = new Map<string, number>();
+    let documentKeydownAdds = 0;
+    let documentKeydownRemoves = 0;
+    const originalAdd = scrollNode.addEventListener.bind(scrollNode);
+    const originalRemove = scrollNode.removeEventListener.bind(scrollNode);
+    const originalDocumentAdd = document.addEventListener.bind(document);
+    const originalDocumentRemove = document.removeEventListener.bind(document);
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 600,
+    });
+    Object.defineProperty(scrollNode, "clientWidth", {
+      configurable: true,
+      get: () => 1000,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 24_000,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => 20_000,
+      set: () => {},
+    });
+    scrollNode.addEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: AddEventListenerOptions | boolean,
+    ) => {
+      if (scrollNodeDemandEvents.includes(type as (typeof scrollNodeDemandEvents)[number])) {
+        addCounts.set(type, (addCounts.get(type) ?? 0) + 1);
+      }
+      return originalAdd(type, listener, options);
+    }) as typeof scrollNode.addEventListener;
+    scrollNode.removeEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: EventListenerOptions | boolean,
+    ) => {
+      if (scrollNodeDemandEvents.includes(type as (typeof scrollNodeDemandEvents)[number])) {
+        removeCounts.set(type, (removeCounts.get(type) ?? 0) + 1);
+      }
+      return originalRemove(type, listener, options);
+    }) as typeof scrollNode.removeEventListener;
+    document.addEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: AddEventListenerOptions | boolean,
+    ) => {
+      if (type === "keydown") {
+        documentKeydownAdds += 1;
+      }
+      return originalDocumentAdd(type, listener, options);
+    }) as typeof document.addEventListener;
+    document.removeEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: EventListenerOptions | boolean,
+    ) => {
+      if (type === "keydown") {
+        documentKeydownRemoves += 1;
+      }
+      return originalDocumentRemove(type, listener, options);
+    }) as typeof document.removeEventListener;
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    try {
+      const initialMessages = makeTextMessages(600);
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("active-session", {
+          status: "idle",
+          messages: initialMessages,
+        }),
+        scrollContainerRef: { current: scrollNode },
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      const baselineAddCounts = new Map(addCounts);
+      const baselineRemoveCounts = new Map(removeCounts);
+      const baselineDocumentKeydownAdds = documentKeydownAdds;
+      const baselineDocumentKeydownRemoves = documentKeydownRemoves;
+
+      act(() => {
+        syncComposerSessionsStore({
+          sessions: [
+            makeSession("active-session", {
+              status: "idle",
+              messages: [
+                ...initialMessages,
+                {
+                  author: "assistant",
+                  id: "message-601",
+                  text: "message-601",
+                  timestamp: "10:00",
+                  type: "text",
+                },
+              ],
+            }),
+          ],
+          draftsBySessionId: {},
+          draftAttachmentsBySessionId: {},
+        });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      scrollNodeDemandEvents.forEach((eventName) => {
+        expect(addCounts.get(eventName)).toBe(baselineAddCounts.get(eventName));
+        expect(removeCounts.get(eventName)).toBe(
+          baselineRemoveCounts.get(eventName),
+        );
+      });
+      expect(documentKeydownAdds).toBe(baselineDocumentKeydownAdds);
+      expect(documentKeydownRemoves).toBe(baselineDocumentKeydownRemoves);
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      document.addEventListener = originalDocumentAdd;
+      document.removeEventListener = originalDocumentRemove;
     }
   });
 

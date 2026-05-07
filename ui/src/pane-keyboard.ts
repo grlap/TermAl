@@ -60,10 +60,6 @@ export function resolvePaneScrollCommand(
     return null;
   }
 
-  if (!shouldHandlePanePageKey(target)) {
-    return null;
-  }
-
   if (event.key === "PageUp" || event.key === "PageDown") {
     if (event.altKey || event.metaKey) {
       return null;
@@ -82,6 +78,10 @@ export function resolvePaneScrollCommand(
         return null;
       }
       return { kind: "boundary", direction: event.key === "PageUp" ? "up" : "down" };
+    }
+
+    if (!shouldHandlePanePageKey(target)) {
+      return null;
     }
 
     return makePaneScrollCommand(event.key === "PageUp" ? "up" : "down", event.shiftKey);

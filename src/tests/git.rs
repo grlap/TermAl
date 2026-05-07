@@ -125,6 +125,66 @@ fn git_status_file_actions_support_paths_with_spaces() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
+// Pins staging a worktree edit made after a staged rename. Git reports
+// this as `RM old -> new`, but `git add` must receive only the current
+// path for the unstaged modification; the old path no longer matches.
+#[test]
+fn git_stage_action_supports_unstaged_edit_on_staged_rename() {
+    let repo_root =
+        std::env::temp_dir().join(format!("termal-git-stage-rename-{}", Uuid::new_v4()));
+    let status_dir = repo_root.join("docs").join("status");
+    let old_file = status_dir.join("gdpr.md");
+    let new_file = status_dir.join("legal.md");
+
+    fs::create_dir_all(&status_dir).unwrap();
+    fs::write(&old_file, "# GDPR\n\nBase text.\n").unwrap();
+    init_git_document_test_repo(&repo_root);
+    run_git_test_command(&repo_root, &["add", "docs/status/gdpr.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    run_git_test_command(
+        &repo_root,
+        &["mv", "docs/status/gdpr.md", "docs/status/legal.md"],
+    );
+    fs::write(&new_file, "# GDPR\n\nBase text.\n\nWorktree edit.\n").unwrap();
+
+    let status = load_git_status_for_path(&repo_root).unwrap();
+    let file = status
+        .files
+        .iter()
+        .find(|entry| entry.path == "docs/status/legal.md")
+        .expect("status should include the renamed file");
+
+    assert_eq!(file.original_path.as_deref(), Some("docs/status/gdpr.md"));
+    assert_eq!(file.index_status.as_deref(), Some("R"));
+    assert_eq!(file.worktree_status.as_deref(), Some("M"));
+
+    let pathspecs = collect_git_stage_pathspecs(
+        &file.path,
+        file.original_path.as_deref(),
+        file.worktree_status.as_deref(),
+    );
+    assert_eq!(pathspecs, vec!["docs/status/legal.md".to_owned()]);
+
+    run_git_pathspec_command(
+        &repo_root,
+        &["add", "-A"],
+        &pathspecs,
+        "failed to stage git changes",
+    )
+    .unwrap();
+
+    let staged_status = load_git_status_for_path(&repo_root).unwrap();
+    assert!(
+        staged_status
+            .files
+            .iter()
+            .all(|entry| entry.worktree_status.is_none())
+    );
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
 // Pins the staged/unstaged side mapping for Markdown enrichment:
 // staged reads HEAD → index, unstaged reads index → worktree, and a
 // staged view is marked read-only when the worktree has unstaged

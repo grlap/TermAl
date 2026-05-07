@@ -57,6 +57,7 @@ import {
   renderHighlightedText,
   type SearchHighlightTone,
 } from "../search-highlight";
+import { resolvePaneScrollCommand } from "../pane-keyboard";
 import { findLastUserPrompt } from "../app-utils";
 import {
   useComposerSessionSnapshot,
@@ -128,6 +129,8 @@ const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES =
 const INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES = 512;
 const INITIAL_ACTIVE_TRANSCRIPT_TAIL_MESSAGE_COUNT = 100;
 const INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX = 160;
+const INITIAL_ACTIVE_TRANSCRIPT_WHEEL_DEMAND_THRESHOLD_PX = 8;
+const INITIAL_ACTIVE_TRANSCRIPT_TOUCH_PULL_DEMAND_THRESHOLD_PX = 8;
 const EMPTY_COMPOSER_ATTACHMENTS: readonly {
   byteSize: number;
   fileName: string;
@@ -198,6 +201,35 @@ function shouldUseInitialActiveTranscriptTailWindow({
   );
 }
 
+function isTranscriptTopBoundaryDemandKey(event: KeyboardEvent) {
+  const command = resolvePaneScrollCommand(
+    {
+      altKey: event.altKey,
+      ctrlKey: event.ctrlKey,
+      key: event.key,
+      metaKey: event.metaKey,
+      shiftKey: event.shiftKey,
+    },
+    event.target,
+  );
+  return command?.kind === "boundary" && command.direction === "up";
+}
+
+function shouldIgnoreTranscriptDemandKeyTarget(event: KeyboardEvent) {
+  const target = event.target;
+  if (isTranscriptTopBoundaryDemandKey(event)) {
+    return false;
+  }
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  return Boolean(
+    target.closest(
+      "input, textarea, select, option, [contenteditable]",
+    ),
+  );
+}
+
 function useInitialActiveTranscriptMessages({
   hasConversationMarkers,
   hasConversationSearch,
@@ -235,6 +267,7 @@ function useInitialActiveTranscriptMessages({
     hydrationRef.current.hydrated = true;
   }
   const isWindowed = isTailEligible && !hydrationRef.current.hydrated;
+  const hasMessages = messages.length > 0;
   const requestFullTranscriptRender = useCallback(() => {
     if (
       hydrationRef.current.sessionId !== sessionId ||
@@ -258,7 +291,7 @@ function useInitialActiveTranscriptMessages({
       !isActive ||
       hasConversationMarkers ||
       hasConversationSearch ||
-      messages.length === 0
+      !hasMessages
     ) {
       return undefined;
     }
@@ -269,27 +302,54 @@ function useInitialActiveTranscriptMessages({
     }
 
     let lastTouchClientY: number | null = null;
+    let hasDemandInteraction = false;
+    let hasQueuedWheelDemandRender = false;
+    let disposed = false;
+    const requestFullTranscriptRenderAfterWheel = () => {
+      if (hasQueuedWheelDemandRender) {
+        return;
+      }
+      hasQueuedWheelDemandRender = true;
+      queueMicrotask(() => {
+        hasQueuedWheelDemandRender = false;
+        if (!disposed) {
+          requestFullTranscriptRender();
+        }
+      });
+    };
     const hydrateIfNearTop = () => {
-      if (node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX) {
+      if (
+        hasDemandInteraction &&
+        node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX
+      ) {
         requestFullTranscriptRender();
       }
     };
     const handleWheel = (event: WheelEvent) => {
-      if (event.ctrlKey || event.deltaY >= -0.5) {
+      if (
+        event.ctrlKey ||
+        event.deltaY >= -INITIAL_ACTIVE_TRANSCRIPT_WHEEL_DEMAND_THRESHOLD_PX
+      ) {
         return;
       }
-      requestFullTranscriptRender();
+      hasDemandInteraction = true;
+      requestFullTranscriptRenderAfterWheel();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (shouldIgnoreTranscriptDemandKeyTarget(event)) {
+        return;
+      }
       if (
         event.key === "ArrowUp" ||
         event.key === "Home" ||
         event.key === "PageUp"
       ) {
+        hasDemandInteraction = true;
         requestFullTranscriptRender();
       }
     };
     const handleTouchStart = (event: TouchEvent) => {
+      hasDemandInteraction = true;
       lastTouchClientY = event.touches[0]?.clientY ?? null;
     };
     const handleTouchMove = (event: TouchEvent) => {
@@ -297,7 +357,12 @@ function useInitialActiveTranscriptMessages({
       if (!touch) {
         return;
       }
-      if (lastTouchClientY !== null && touch.clientY - lastTouchClientY > 0.5) {
+      if (
+        lastTouchClientY !== null &&
+        touch.clientY - lastTouchClientY >
+          INITIAL_ACTIVE_TRANSCRIPT_TOUCH_PULL_DEMAND_THRESHOLD_PX &&
+        node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX
+      ) {
         requestFullTranscriptRender();
       }
       lastTouchClientY = touch.clientY;
@@ -308,16 +373,17 @@ function useInitialActiveTranscriptMessages({
 
     node.addEventListener("scroll", hydrateIfNearTop, { passive: true });
     node.addEventListener("wheel", handleWheel, { passive: true });
-    node.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
     node.addEventListener("touchstart", handleTouchStart, { passive: true });
     node.addEventListener("touchmove", handleTouchMove, { passive: true });
     node.addEventListener("touchend", handleTouchEnd, { passive: true });
     node.addEventListener("touchcancel", handleTouchEnd, { passive: true });
 
     return () => {
+      disposed = true;
       node.removeEventListener("scroll", hydrateIfNearTop);
       node.removeEventListener("wheel", handleWheel);
-      node.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown);
       node.removeEventListener("touchstart", handleTouchStart);
       node.removeEventListener("touchmove", handleTouchMove);
       node.removeEventListener("touchend", handleTouchEnd);
@@ -326,8 +392,8 @@ function useInitialActiveTranscriptMessages({
   }, [
     hasConversationMarkers,
     hasConversationSearch,
+    hasMessages,
     isActive,
-    messages.length,
     requestFullTranscriptRender,
     scrollContainerRef,
     sessionId,

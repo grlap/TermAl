@@ -2713,6 +2713,16 @@ export function SessionPaneView({
       <section
         ref={messageStackRef}
         className={`message-stack${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}${activeTerminalTab ? " terminal-panel-stack" : ""}`}
+        tabIndex={
+          activeTab?.kind === "session" && pane.viewMode === "session"
+            ? 0
+            : undefined
+        }
+        aria-label={
+          activeTab?.kind === "session" && pane.viewMode === "session"
+            ? "Session transcript"
+            : undefined
+        }
         onScroll={(event) => {
           const node = event.currentTarget;
           const { shouldStick } = syncMessageStackScrollPosition(
