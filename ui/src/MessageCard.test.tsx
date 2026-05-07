@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -271,6 +272,98 @@ describe("MessageCard", () => {
     expect(secondCancelButton).not.toBeDisabled();
   });
 
+  it("clears pending parallel-agent actions after StrictMode effect replay", async () => {
+    const message: ParallelAgentsMessage = {
+      id: "message-parallel-agents-strict-mode",
+      type: "parallelAgents",
+      author: "assistant",
+      timestamp: "10:02",
+      agents: [
+        {
+          id: "delegation-running",
+          source: "delegation",
+          title: "Review backend",
+          status: "running",
+          detail: "Checking Rust changes",
+        },
+      ],
+    };
+    let resolveAction!: () => void;
+    const pendingAction = new Promise<void>((resolve) => {
+      resolveAction = resolve;
+    });
+    const onCancelParallelAgent = vi.fn(() => pendingAction);
+
+    render(
+      <StrictMode>
+        <MessageCard
+          message={message}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+          onCancelParallelAgent={onCancelParallelAgent}
+        />
+      </StrictMode>,
+    );
+
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    fireEvent.click(cancelButton);
+
+    expect(cancelButton).toBeDisabled();
+
+    await act(async () => {
+      resolveAction();
+      await pendingAction;
+    });
+
+    expect(cancelButton).not.toBeDisabled();
+  });
+
+  it("clears pending parallel-agent actions when an action rejects", async () => {
+    const message: ParallelAgentsMessage = {
+      id: "message-parallel-agents-rejected-action",
+      type: "parallelAgents",
+      author: "assistant",
+      timestamp: "10:02",
+      agents: [
+        {
+          id: "delegation-running",
+          source: "delegation",
+          title: "Review backend",
+          status: "running",
+          detail: "Checking Rust changes",
+        },
+      ],
+    };
+    let rejectAction!: (error: Error) => void;
+    const rejectedAction = new Promise<void>((_, reject) => {
+      rejectAction = reject;
+    });
+    const onCancelParallelAgent = vi.fn(() => rejectedAction);
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        onCancelParallelAgent={onCancelParallelAgent}
+      />,
+    );
+
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    fireEvent.click(cancelButton);
+
+    expect(cancelButton).toBeDisabled();
+
+    await act(async () => {
+      rejectAction(new Error("cancel failed"));
+      await rejectedAction.catch(() => undefined);
+      await Promise.resolve();
+    });
+
+    expect(cancelButton).not.toBeDisabled();
+    expect(onCancelParallelAgent).toHaveBeenCalledTimes(1);
+  });
+
   it("rerenders parallel-agent callbacks when only action handlers change", () => {
     const message: ParallelAgentsMessage = {
       id: "message-parallel-agents-callbacks",
@@ -340,7 +433,10 @@ describe("MessageCard", () => {
     expect(secondInsert).toHaveBeenCalledWith("delegation-completed");
   });
 
-  it("does not render delegation actions when a parallel-agent source is missing", () => {
+  it("does not render delegation actions for malformed parallel-agent rows without source", () => {
+    // Bypass the required wire type to simulate an invalid backend payload from
+    // a pre-source producer. The supported non-delegation case is covered by
+    // the `source: "tool"` row in the main parallel-agent action test.
     const message = {
       id: "message-parallel-agents-missing-source",
       type: "parallelAgents",

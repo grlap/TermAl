@@ -222,11 +222,6 @@ fn claude_task_tool_result_updates_parallel_agents_and_records_subagent_result()
         &mut recorder,
     )
     .unwrap();
-    turn_state
-        .parallel_agents
-        .get_mut("task-1")
-        .expect("task progress should exist before result")
-        .source = ParallelAgentSource::Delegation;
 
     let detail = "Reviewer found a batching bug in location smoothing.\nRead src/state.rs for the stale preview path.";
     handle_claude_event(

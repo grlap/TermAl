@@ -714,6 +714,10 @@ function MessageMeta({
   return (
     <div
       className="message-meta"
+      role={isUser ? undefined : "button"}
+      tabIndex={isUser ? undefined : 0}
+      aria-haspopup={isUser ? undefined : "menu"}
+      title={isUser ? undefined : "Open marker actions"}
       data-conversation-marker-menu-trigger={isUser ? undefined : true}
     >
       <span
@@ -2082,8 +2086,11 @@ function ParallelAgentsCard({
     (agent) => agent.status === "initializing" || agent.status === "running",
   );
   useEffect(
-    () => () => {
-      mountedRef.current = false;
+    () => {
+      mountedRef.current = true;
+      return () => {
+        mountedRef.current = false;
+      };
     },
     [],
   );
@@ -2103,7 +2110,9 @@ function ParallelAgentsCard({
     const nextKeys = new Set(pendingActionKeysRef.current);
     nextKeys.add(actionKey);
     pendingActionKeysRef.current = nextKeys;
-    setPendingActionKeys(nextKeys);
+    if (mountedRef.current) {
+      setPendingActionKeys(nextKeys);
+    }
     return true;
   };
   const clearActionPending = (actionKey: string) => {
@@ -2135,9 +2144,14 @@ function ParallelAgentsCard({
       clearActionPending(actionKey);
       return;
     }
-    void result.finally(() => {
-      clearActionPending(actionKey);
-    });
+    void result
+      .finally(() => {
+        clearActionPending(actionKey);
+      })
+      .catch(() => {
+        // Action handlers own user-facing error reporting; this only prevents
+        // the cleanup promise from becoming an unhandled rejection.
+      });
   };
 
   return (

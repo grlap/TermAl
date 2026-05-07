@@ -30,6 +30,7 @@ import type { RenderMessageCard } from "./panels/VirtualizedConversationMessageL
 import type { ConnectionRetryDisplayState } from "./connection-retry";
 import type {
   CommandMessage,
+  DelegationStatus,
   DiffMessage,
   Message,
   Session,
@@ -59,6 +60,18 @@ export function shouldPreferStreamingAssistantTextRender(
   streamingAssistantTextMessageId: string | null,
 ) {
   return message.id === streamingAssistantTextMessageId;
+}
+
+function cancelDelegationTerminalErrorMessage(status: DelegationStatus) {
+  switch (status) {
+    case "failed":
+      return "Delegation cannot be canceled because it has already failed.";
+    case "completed":
+    case "canceled":
+    case "queued":
+    case "running":
+      return null;
+  }
 }
 
 type UseSessionRenderCallbacksParams = {
@@ -136,6 +149,7 @@ export function useSessionRenderCallbacks({
   const mountedRef = useRef(true);
   const activeSessionIdRef = useRef<string | null>(activeSession?.id ?? null);
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -195,7 +209,9 @@ export function useSessionRenderCallbacks({
               ? response.childSessionId.trim()
               : "";
           if (!childSessionId) {
-            onComposerError("Delegation child session is unavailable.");
+            onComposerError(
+              `Delegation child session is unavailable (${response.status}).`,
+            );
             return;
           }
           onOpenConversationFromDiff(childSessionId, paneId);
@@ -257,7 +273,21 @@ export function useSessionRenderCallbacks({
       }
       return (async () => {
         try {
-          await cancelDelegationCommand(parentSessionId, delegationId);
+          const response = await cancelDelegationCommand(
+            parentSessionId,
+            delegationId,
+          );
+          if (!canApplyDelegationActionResult(parentSessionId)) {
+            return;
+          }
+          const terminalErrorMessage = cancelDelegationTerminalErrorMessage(
+            response.status,
+          );
+          if (terminalErrorMessage !== null) {
+            onComposerError(terminalErrorMessage);
+          } else {
+            onComposerError(null);
+          }
         } catch (error) {
           if (canApplyDelegationActionResult(parentSessionId)) {
             onComposerError(getErrorMessage(error));

@@ -6,6 +6,7 @@
 /ui/tsconfig.node.tsbuildinfo
 /ui/vite.config.js
 /ui/vite.config.d.ts
+*.diff
 
 .termal
 .tmp

@@ -64,6 +64,10 @@ export function MessageMeta({
   return (
     <div
       className="message-meta"
+      role={isUser ? undefined : "button"}
+      tabIndex={isUser ? undefined : 0}
+      aria-haspopup={isUser ? undefined : "menu"}
+      title={isUser ? undefined : "Open marker actions"}
       data-conversation-marker-menu-trigger={isUser ? undefined : true}
     >
       <span

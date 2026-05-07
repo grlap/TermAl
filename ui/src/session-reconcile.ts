@@ -481,6 +481,7 @@ function reconcileParallelAgentsMessage(
       const nextAgent = next.agents[index];
       return (
         nextAgent?.id === agent.id &&
+        nextAgent.source === agent.source &&
         nextAgent.title === agent.title &&
         nextAgent.status === agent.status &&
         (nextAgent.detail ?? null) === (agent.detail ?? null)

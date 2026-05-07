@@ -740,6 +740,16 @@ fn telegram_standalone_token_redaction_handles_escaped_and_telegram_specific_con
     let lower_bearer_colon = sanitize_telegram_log_detail(&format!("bearer:{token}"));
     assert_eq!(lower_bearer_colon, "bearer:<redacted>");
 
+    let bearer_equals = sanitize_telegram_log_detail(&format!("Authorization: Bearer = {token}"));
+    assert_eq!(bearer_equals, "Authorization: Bearer = <redacted>");
+
+    let authorization_equals =
+        sanitize_telegram_log_detail(&format!("Authorization=Bearer {token}"));
+    assert_eq!(authorization_equals, "Authorization=Bearer <redacted>");
+
+    let lower_bearer_equals = sanitize_telegram_log_detail(&format!("bearer={token}"));
+    assert_eq!(lower_bearer_equals, "bearer=<redacted>");
+
     let snake = sanitize_telegram_log_detail(&format!("telegram_bot_token={token}"));
     assert_eq!(snake, "telegram_bot_token=<redacted>");
 
@@ -748,6 +758,30 @@ fn telegram_standalone_token_redaction_handles_escaped_and_telegram_specific_con
 
     let env = sanitize_telegram_log_detail(&format!("TERMAL_TELEGRAM_BOT_TOKEN={token}"));
     assert_eq!(env, "TERMAL_TELEGRAM_BOT_TOKEN=<redacted>");
+}
+
+#[test]
+fn telegram_generic_token_redaction_requires_telegram_or_bot_word_context() {
+    let token = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi";
+
+    for context in [
+        "robot pipeline",
+        "bottom panel",
+        "slackbot relay",
+        "botanical job",
+    ] {
+        let detail = format!("{context} token={token}");
+        assert_eq!(sanitize_telegram_log_detail(&detail), detail);
+    }
+
+    assert_eq!(
+        sanitize_telegram_log_detail(&format!("Telegram API error token={token}")),
+        "Telegram API error token=<redacted>"
+    );
+    assert_eq!(
+        sanitize_telegram_log_detail(&format!("bot config token:{token}")),
+        "bot config token:<redacted>"
+    );
 }
 
 #[test]

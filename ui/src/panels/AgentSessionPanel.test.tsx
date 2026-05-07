@@ -714,27 +714,6 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
-  it("dispatches checkpoint marker creation from a message toolbar", () => {
-    const onCreateConversationMarker = vi.fn();
-    const activeSession = makeSession("session-1", {
-      messages: makeTextMessages(2),
-    });
-
-    renderSessionPanelWithDefaults({
-      activeSession,
-      onCreateConversationMarker,
-    });
-
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "Add checkpoint marker" })[0],
-    );
-
-    expect(onCreateConversationMarker).toHaveBeenCalledWith(
-      "session-1",
-      "message-1",
-    );
-  });
-
   it("adds and removes message markers from the assistant response context menu", async () => {
     const onCreateConversationMarker = vi.fn();
     const onDeleteConversationMarker = vi.fn();
@@ -1016,40 +995,72 @@ describe("AgentSessionPanel conversation caching", () => {
     ).toBeInTheDocument();
   });
 
-  it("opens marker actions from a keyboard-reachable toolbar trigger", async () => {
+  it("opens marker actions from the assistant header click and keyboard trigger", async () => {
     const user = userEvent.setup();
     const onCreateConversationMarker = vi.fn();
+    const { container } = renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-1", {
+        messages: makeTextMessages(2),
+      }),
+      onCreateConversationMarker,
+      renderMessageCard: (message) => (
+        <MessageCard
+          message={message}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />
+      ),
+    });
+
+    const assistantMeta = Array.from(
+      container.querySelectorAll<HTMLElement>(".message-meta"),
+    ).find((meta) => meta.textContent?.includes("Agent"));
+
+    expect(assistantMeta).toBeTruthy();
+    expect(assistantMeta).toHaveAttribute("role", "button");
+    expect(assistantMeta).toHaveAttribute("tabindex", "0");
+    expect(assistantMeta).toHaveAttribute("aria-haspopup", "menu");
+
+    fireEvent.click(assistantMeta!, { clientX: 140, clientY: 80 });
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+
+    assistantMeta!.focus();
+    await user.keyboard("{Enter}");
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+
+    expect(onCreateConversationMarker).toHaveBeenNthCalledWith(
+      1,
+      "session-1",
+      "message-2",
+    );
+    expect(onCreateConversationMarker).toHaveBeenNthCalledWith(
+      2,
+      "session-1",
+      "message-2",
+    );
+  });
+
+  it("does not render the removed right-side marker toolbar", () => {
     const activeSession = makeSession("session-1", {
       messages: makeTextMessages(2),
     });
 
     renderSessionPanelWithDefaults({
       activeSession,
-      onCreateConversationMarker,
     });
 
-    const toolbar = screen.getByRole("toolbar", {
-      name: "Assistant message marker actions",
-    });
-    const trigger = within(toolbar).getByRole("button", {
-      name: "Open marker actions",
-    });
-    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
-
-    trigger.focus();
-    await user.keyboard("{Enter}");
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
-
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
-    );
-
-    expect(onCreateConversationMarker).toHaveBeenCalledWith(
-      "session-1",
-      "message-2",
-    );
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open marker actions" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Add checkpoint marker" }),
+    ).not.toBeInTheDocument();
   });
 
   it("stops Escape from leaking out of the marker action menu", () => {

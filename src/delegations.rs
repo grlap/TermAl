@@ -1151,7 +1151,9 @@ fn update_parent_delegation_card_locked(
         let Message::ParallelAgents { id, agents, .. } = message else {
             continue;
         };
-        let Some(agent) = agents.iter_mut().find(|agent| agent.id == delegation.id) else {
+        let Some(agent) = agents.iter_mut().find(|agent| {
+            agent.id == delegation.id && agent.source == ParallelAgentSource::Delegation
+        }) else {
             continue;
         };
         agent.status = status;

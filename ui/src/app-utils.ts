@@ -241,7 +241,10 @@ export function messageChangeMarker(message: Message) {
       return `${message.type}:${message.title.length}:${message.markdown.length}`;
     case "parallelAgents":
       return `${message.type}:${message.agents.length}:${message.agents
-        .map((agent) => `${agent.id}:${agent.status}:${agent.detail?.length ?? 0}`)
+        .map(
+          (agent) =>
+            `${agent.id}:${agent.source}:${agent.status}:${agent.detail?.length ?? 0}`,
+        )
         .join("|")}`;
     case "fileChanges":
       return `${message.type}:${message.files.length}:${message.files

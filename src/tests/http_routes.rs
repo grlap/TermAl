@@ -483,30 +483,6 @@ fn local_streaming_delta_events_include_message_count() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-#[test]
-fn parallel_agent_progress_source_serializes_with_wire_values() {
-    let delegation_agent = ParallelAgentProgress {
-        detail: None,
-        id: "delegation-1".to_owned(),
-        source: ParallelAgentSource::Delegation,
-        status: ParallelAgentStatus::Running,
-        title: "Reviewer".to_owned(),
-    };
-    let delegation_value =
-        serde_json::to_value(&delegation_agent).expect("delegation agent should encode");
-    assert_eq!(delegation_value["source"], json!("delegation"));
-
-    let tool_agent = ParallelAgentProgress {
-        detail: None,
-        id: "toolu-1".to_owned(),
-        source: ParallelAgentSource::Tool,
-        status: ParallelAgentStatus::Running,
-        title: "Claude Task".to_owned(),
-    };
-    let tool_value = serde_json::to_value(&tool_agent).expect("tool agent should encode");
-    assert_eq!(tool_value["source"], json!("tool"));
-}
-
 // Tests that the empty SSE fallback payload carries an explicit fallback marker.
 #[test]
 fn empty_state_events_payload_carries_explicit_fallback_marker() {
@@ -604,6 +580,84 @@ async fn state_events_route_streams_initial_state_and_live_deltas() {
     assert_eq!(delta["messageCount"], 1);
     assert_eq!(delta["message"]["type"], "text");
     assert_eq!(delta["message"]["text"], "Live delta");
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[tokio::test]
+async fn state_events_route_streams_parallel_agents_update_sources() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    let app = app_router(state.clone());
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+    let _ = next_sse_event(&mut body).await;
+
+    state
+        .upsert_parallel_agents_message(
+            &session_id,
+            "agents-source-wire",
+            vec![
+                ParallelAgentProgress {
+                    detail: Some("Tool is running".to_owned()),
+                    id: "tool-1".to_owned(),
+                    source: ParallelAgentSource::Tool,
+                    status: ParallelAgentStatus::Running,
+                    title: "Tool task".to_owned(),
+                },
+                ParallelAgentProgress {
+                    detail: Some("Delegation is running".to_owned()),
+                    id: "delegation-1".to_owned(),
+                    source: ParallelAgentSource::Delegation,
+                    status: ParallelAgentStatus::Running,
+                    title: "Delegation task".to_owned(),
+                },
+            ],
+        )
+        .expect("parallel agents message should be created");
+    let _ = next_sse_event(&mut body).await;
+
+    state
+        .upsert_parallel_agents_message(
+            &session_id,
+            "agents-source-wire",
+            vec![
+                ParallelAgentProgress {
+                    detail: Some("Tool completed".to_owned()),
+                    id: "tool-1".to_owned(),
+                    source: ParallelAgentSource::Tool,
+                    status: ParallelAgentStatus::Completed,
+                    title: "Tool task".to_owned(),
+                },
+                ParallelAgentProgress {
+                    detail: Some("Delegation completed".to_owned()),
+                    id: "delegation-1".to_owned(),
+                    source: ParallelAgentSource::Delegation,
+                    status: ParallelAgentStatus::Completed,
+                    title: "Delegation task".to_owned(),
+                },
+            ],
+        )
+        .expect("parallel agents update should publish");
+    let update_event = next_sse_event(&mut body).await;
+    let (event_name, event_data) = parse_sse_event(&update_event);
+    assert_eq!(event_name, "delta");
+    let delta: Value = serde_json::from_str(&event_data).expect("delta SSE payload should parse");
+    assert_eq!(delta["type"], "parallelAgentsUpdate");
+    assert_eq!(delta["sessionId"], session_id);
+    assert_eq!(delta["messageId"], "agents-source-wire");
+    assert_eq!(delta["agents"][0]["source"], "tool");
+    assert_eq!(delta["agents"][1]["source"], "delegation");
+
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 

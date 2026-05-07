@@ -246,10 +246,16 @@ fn backup_corrupt_telegram_bot_file(path: &FsPath, err: impl std::fmt::Display) 
         path.display(),
         backup_path.display()
     );
-    harden_telegram_bot_file_permissions(path)?;
+    if let Err(err) = harden_telegram_bot_file_permissions(path) {
+        eprintln!(
+            "telegram> failed to pre-harden corrupt `{}` before quarantine: {}; continuing",
+            path.display(),
+            sanitize_telegram_log_detail(&err.to_string())
+        );
+    }
     match fs::rename(path, &backup_path) {
         Ok(()) => {
-            harden_telegram_bot_file_permissions(&backup_path)?;
+            harden_telegram_backup_file_or_remove(&backup_path)?;
             Ok(())
         }
         Err(rename_err) => {
@@ -260,12 +266,26 @@ fn backup_corrupt_telegram_bot_file(path: &FsPath, err: impl std::fmt::Display) 
                     backup_path.display()
                 )
             })?;
-            harden_telegram_bot_file_permissions(&backup_path)?;
+            harden_telegram_backup_file_or_remove(&backup_path)?;
             fs::remove_file(path)
                 .with_context(|| format!("failed to remove corrupt `{}`", path.display()))?;
             Ok(())
         }
     }
+}
+
+fn harden_telegram_backup_file_or_remove(path: &FsPath) -> io::Result<()> {
+    if let Err(err) = harden_telegram_bot_file_permissions(path) {
+        if let Err(remove_err) = fs::remove_file(path) {
+            eprintln!(
+                "telegram> failed to remove non-hardened backup `{}`: {}",
+                path.display(),
+                sanitize_telegram_log_detail(&remove_err.to_string())
+            );
+        }
+        return Err(err);
+    }
+    Ok(())
 }
 
 fn corrupt_telegram_bot_file_backup_path(path: &FsPath) -> PathBuf {
@@ -394,6 +414,11 @@ fn standalone_telegram_bot_token_end(detail: &str, start: usize) -> Option<usize
     Some(index)
 }
 
+/// Returns true when a standalone Telegram-shaped token is preceded by an
+/// allowlisted Telegram token key, a bearer marker, or a generic `token` key
+/// with nearby Telegram/bot word context. Extend the explicit key list for known
+/// fields and the generic context gate for broader log shapes; unanchored tokens
+/// are left visible to avoid redacting benign ids.
 fn standalone_telegram_bot_token_has_context(detail: &str, start: usize) -> bool {
     let bytes = detail.as_bytes();
     let cursor = trim_telegram_token_quote_left(bytes, trim_ascii_whitespace_left(bytes, start));
@@ -419,6 +444,11 @@ fn standalone_telegram_bot_token_has_key_context(detail: &str, cursor: usize) ->
     }
 
     let key = &detail[key_start..key_end];
+    if key.eq_ignore_ascii_case("token") {
+        return standalone_telegram_generic_token_has_context(detail, key_start);
+    }
+
+    // Authoritative key allowlist for standalone Telegram bot tokens.
     [
         "botToken",
         "bot_token",
@@ -427,15 +457,54 @@ fn standalone_telegram_bot_token_has_key_context(detail: &str, cursor: usize) ->
         "telegram_bot_token",
         "telegram-bot-token",
         "termal_telegram_bot_token",
-        "TERMAL_TELEGRAM_BOT_TOKEN",
     ]
         .iter()
         .any(|candidate| key.eq_ignore_ascii_case(candidate))
 }
 
+fn standalone_telegram_generic_token_has_context(detail: &str, key_start: usize) -> bool {
+    const TOKEN_CONTEXT_WINDOW_BYTES: usize = 96;
+
+    let context_start = key_start.saturating_sub(TOKEN_CONTEXT_WINDOW_BYTES);
+    let context = &detail.as_bytes()[context_start..key_start];
+    ascii_bytes_contains_word_ignore_case(context, b"telegram")
+        || ascii_bytes_contains_word_ignore_case(context, b"bot")
+}
+
+fn ascii_bytes_contains_word_ignore_case(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return false;
+    }
+
+    haystack
+        .windows(needle.len())
+        .enumerate()
+        .any(|(index, candidate)| {
+            ascii_word_boundary_at(haystack, index)
+                && ascii_word_boundary_after(haystack, index + needle.len())
+                && candidate
+                    .iter()
+                    .zip(needle.iter())
+                    .all(|(left, right)| left.eq_ignore_ascii_case(right))
+        })
+}
+
+fn ascii_word_boundary_at(value: &[u8], index: usize) -> bool {
+    value
+        .get(index.wrapping_sub(1))
+        .is_none_or(|byte| !telegram_token_key_byte(*byte))
+        || index == 0
+}
+
+fn ascii_word_boundary_after(value: &[u8], index: usize) -> bool {
+    value
+        .get(index)
+        .is_none_or(|byte| !telegram_token_key_byte(*byte))
+}
+
 fn standalone_telegram_bot_token_has_bearer_context(detail: &str, cursor: usize) -> bool {
     let bytes = detail.as_bytes();
-    let cursor = if cursor > 0 && bytes[cursor - 1] == b':' {
+    let cursor = if cursor > 0 && matches!(bytes[cursor - 1], b':' | b'=') {
         trim_ascii_whitespace_left(bytes, cursor - 1)
     } else {
         cursor

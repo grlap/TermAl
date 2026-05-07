@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type ClipboardEvent as ReactClipboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type RefObject,
@@ -45,8 +46,7 @@ import { useConversationOverviewController } from "./conversation-overview-contr
 import {
   ConversationMarkerNavigator,
   ConversationMessageMarkers,
-  MarkerMenuIcon,
-  MarkerPlusIcon,
+  findConversationMarkerContextMenuTrigger,
   groupConversationMarkersByMessageId,
   shouldOpenConversationMarkerContextMenu,
   sortConversationMarkersForNavigation,
@@ -980,8 +980,6 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
   const {
     contextMenuNode: markerContextMenuNode,
-    contextMenuMessageId: markerContextMenuMessageId,
-    isContextMenuOpen: isMarkerContextMenuOpen,
     openContextMenu: openMarkerContextMenu,
   } = useConversationMarkerContextMenu({
     isActive,
@@ -1076,58 +1074,64 @@ const SessionConversationPage = memo(function SessionConversationPage({
           trigger: event.currentTarget,
         });
       };
-      const openMarkerActionsFromButton = (
-        event: ReactMouseEvent<HTMLButtonElement>,
+      const openMarkerMenuFromTrigger = (
+        trigger: HTMLElement,
+        clientX: number,
+        clientY: number,
       ) => {
-        const rect = event.currentTarget.getBoundingClientRect();
         openMarkerContextMenu({
           messageId: message.id,
-          clientX: rect.left,
-          clientY: rect.bottom,
-          trigger: event.currentTarget,
+          clientX,
+          clientY,
+          trigger,
         });
+      };
+      const handleMarkerTriggerClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+        if (!canOpenMarkerMenu || event.button !== 0) {
+          return;
+        }
+        const trigger = findConversationMarkerContextMenuTrigger(
+          event.currentTarget,
+          event.target,
+        );
+        if (!trigger) {
+          return;
+        }
+        event.preventDefault();
+        openMarkerMenuFromTrigger(trigger, event.clientX, event.clientY);
+      };
+      const handleMarkerTriggerKeyDown = (
+        event: ReactKeyboardEvent<HTMLDivElement>,
+      ) => {
+        if (!canOpenMarkerMenu) {
+          return;
+        }
+        if (
+          event.key !== "Enter" &&
+          event.key !== " " &&
+          event.key !== "ContextMenu"
+        ) {
+          return;
+        }
+        const trigger = findConversationMarkerContextMenuTrigger(
+          event.currentTarget,
+          event.target,
+        );
+        if (!trigger) {
+          return;
+        }
+        event.preventDefault();
+        const rect = trigger.getBoundingClientRect();
+        openMarkerMenuFromTrigger(trigger, rect.left, rect.bottom);
       };
       return (
         <div
           className={`conversation-message-marker-shell${canOpenMarkerMenu ? " can-open-marker-menu" : ""}`}
           tabIndex={canOpenMarkerMenu ? -1 : undefined}
+          onClick={handleMarkerTriggerClick}
           onContextMenu={handleMarkerContextMenu}
+          onKeyDown={handleMarkerTriggerKeyDown}
         >
-          <div
-            className="conversation-message-marker-toolbar"
-            role="toolbar"
-            aria-label={
-              canOpenMarkerMenu
-                ? "Assistant message marker actions"
-                : "Message marker actions"
-            }
-          >
-            {canOpenMarkerMenu ? (
-              <button
-                type="button"
-                className="ghost-button conversation-message-marker-action-button"
-                title="Open marker actions"
-                aria-label="Open marker actions"
-                aria-haspopup="menu"
-                aria-expanded={
-                  isMarkerContextMenuOpen &&
-                  markerContextMenuMessageId === message.id
-                }
-                onClick={openMarkerActionsFromButton}
-              >
-                <MarkerMenuIcon />
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="ghost-button conversation-message-marker-add-button"
-              title="Add checkpoint marker"
-              aria-label="Add checkpoint marker"
-              onClick={() => onCreateConversationMarker(session.id, message.id)}
-            >
-              <MarkerPlusIcon />
-            </button>
-          </div>
           {messageMarkers.length > 0 ? (
             <ConversationMessageMarkers
               markers={messageMarkers}
@@ -1143,12 +1147,8 @@ const SessionConversationPage = memo(function SessionConversationPage({
       activeMarkerId,
       jumpToMarker,
       markersByMessageId,
-      onCreateConversationMarker,
       openMarkerContextMenu,
-      isMarkerContextMenuOpen,
-      markerContextMenuMessageId,
       renderMessageCard,
-      session.id,
     ],
   );
 

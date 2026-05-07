@@ -578,7 +578,11 @@ fn handle_claude_task_result(
 
     if let Some(agent) = state.parallel_agents.get_mut(tool_use_id) {
         agent.detail = Some(summarized_detail.clone());
-        agent.source = ParallelAgentSource::Tool;
+        debug_assert_eq!(
+            agent.source,
+            ParallelAgentSource::Tool,
+            "Claude Task progress entries must remain tool-sourced",
+        );
         agent.status = status;
         if agent.title.trim().is_empty() {
             agent.title = title.clone();

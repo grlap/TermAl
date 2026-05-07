@@ -358,8 +358,8 @@ export function shouldOpenConversationMarkerContextMenu(
   event: ReactMouseEvent<HTMLElement>,
 ) {
   const root = event.currentTarget;
-  const target = event.target;
-  if (!(target instanceof Element)) {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) {
     return false;
   }
   if (hasSelectedTextInside(root)) {
@@ -367,13 +367,23 @@ export function shouldOpenConversationMarkerContextMenu(
   }
   // Keep marker actions on an explicit header affordance. The assistant body
   // keeps the native context menu for copy/select/link/code interactions.
-  const trigger = target.closest(
-    CONVERSATION_MARKER_CONTEXT_MENU_TRIGGER_SELECTOR,
-  );
-  if (!trigger || !root.contains(trigger)) {
+  if (!findConversationMarkerContextMenuTrigger(root, target)) {
     return false;
   }
   return target.closest(NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR) === null;
+}
+
+export function findConversationMarkerContextMenuTrigger(
+  root: HTMLElement,
+  target: EventTarget | null,
+) {
+  if (!(target instanceof Element)) {
+    return null;
+  }
+  const trigger = target.closest<HTMLElement>(
+    CONVERSATION_MARKER_CONTEXT_MENU_TRIGGER_SELECTOR,
+  );
+  return trigger && root.contains(trigger) ? trigger : null;
 }
 
 export function useConversationMarkerContextMenu({

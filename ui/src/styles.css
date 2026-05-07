@@ -4042,49 +4042,14 @@ textarea {
   min-width: 0;
 }
 
-.conversation-message-marker-toolbar {
-  position: absolute;
-  top: var(--space-sm);
-  right: var(--space-sm);
-  z-index: 2;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 140ms ease;
-}
-
-.conversation-message-marker-shell:hover .conversation-message-marker-toolbar,
-.conversation-message-marker-shell:focus-within .conversation-message-marker-toolbar {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-@media (hover: none), (pointer: coarse) {
-  .conversation-message-marker-toolbar {
-    opacity: 1;
-    pointer-events: auto;
-  }
-}
-
-.conversation-message-marker-action-button,
-.conversation-message-marker-add-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--control-size-sm);
-  height: var(--control-size-sm);
-  padding: 0;
-  background: color-mix(in srgb, var(--surface-elevated) 92%, transparent);
-  box-shadow: 0 0.4rem 1rem color-mix(in srgb, var(--shadow-color, black) 18%, transparent);
-}
-
-.conversation-message-marker-action-button svg,
-.conversation-message-marker-add-button svg {
-  width: var(--icon-size-sm);
-  height: var(--icon-size-sm);
-}
-
 .conversation-message-marker-shell.can-open-marker-menu [data-conversation-marker-menu-trigger="true"] {
+  border-radius: calc(var(--control-radius) - 2px);
   cursor: context-menu;
+}
+
+.conversation-message-marker-shell.can-open-marker-menu [data-conversation-marker-menu-trigger="true"]:focus-visible {
+  outline: 2px solid var(--signal-blue);
+  outline-offset: 2px;
 }
 
 .conversation-marker-context-menu {

@@ -607,11 +607,142 @@ fn parent_delegation_card_has_status(
                     Message::ParallelAgents { agents, .. }
                         if agents
                             .iter()
-                            .any(|agent| agent.id == delegation_id && agent.status == status)
+                            .any(|agent| agent.id == delegation_id
+                                && agent.source == ParallelAgentSource::Delegation
+                                && agent.status == status)
                 )
             })
         })
         .unwrap_or(false)
+}
+
+fn assert_single_parent_delegation_agent_status(
+    inner: &StateInner,
+    parent_session_id: &str,
+    delegation_id: &str,
+    status: ParallelAgentStatus,
+) {
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_session_id)
+        .expect("parent session should exist");
+    let matching_agents: Vec<&ParallelAgentProgress> = parent
+        .session
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::ParallelAgents { agents, .. } => Some(agents),
+            _ => None,
+        })
+        .flat_map(|agents| agents.iter())
+        .filter(|agent| agent.id == delegation_id)
+        .collect();
+    assert_eq!(
+        matching_agents.len(),
+        1,
+        "parent card should have exactly one row for the delegation id"
+    );
+    let agent = matching_agents[0];
+    assert_eq!(
+        agent.source,
+        ParallelAgentSource::Delegation,
+        "parent card row for a delegation id must be delegation-sourced"
+    );
+    assert_eq!(agent.status, status);
+}
+
+#[test]
+fn delegation_parent_card_update_ignores_tool_source_id_collision() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Exercise parent card source matching.".to_owned(),
+                title: Some("Source Collision".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let parent_index = inner
+            .find_session_index(&parent_session_id)
+            .expect("parent session should exist");
+        let parent = inner
+            .session_mut_by_index(parent_index)
+            .expect("parent session index should be valid");
+        let parent_agents = parent
+            .session
+            .messages
+            .iter_mut()
+            .rev()
+            .find_map(|message| match message {
+                Message::ParallelAgents { agents, .. } => Some(agents),
+                _ => None,
+            })
+            .expect("parent delegation card should exist");
+        parent_agents.insert(
+            0,
+            ParallelAgentProgress {
+                detail: Some("Tool row must not be touched".to_owned()),
+                id: created.delegation.id.clone(),
+                source: ParallelAgentSource::Tool,
+                status: ParallelAgentStatus::Running,
+                title: "Tool collision".to_owned(),
+            },
+        );
+
+        let delegation_index = inner
+            .find_delegation_index(&created.delegation.id)
+            .expect("delegation should exist");
+        mark_delegation_failed_locked(&mut inner, delegation_index, "delegation failed")
+            .expect("running delegation should fail");
+
+        let parent = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == parent_session_id)
+            .expect("parent session should exist");
+        let agents: Vec<&ParallelAgentProgress> = parent
+            .session
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::ParallelAgents { agents, .. } => Some(agents),
+                _ => None,
+            })
+            .flat_map(|agents| agents.iter())
+            .filter(|agent| agent.id == created.delegation.id)
+            .collect();
+        let tool_agent = agents
+            .iter()
+            .find(|agent| agent.source == ParallelAgentSource::Tool)
+            .expect("tool-source collision row should remain");
+        assert_eq!(tool_agent.status, ParallelAgentStatus::Running);
+        assert_eq!(
+            tool_agent.detail.as_deref(),
+            Some("Tool row must not be touched")
+        );
+        let delegation_agent = agents
+            .iter()
+            .find(|agent| agent.source == ParallelAgentSource::Delegation)
+            .expect("delegation-source row should remain");
+        assert_eq!(delegation_agent.status, ParallelAgentStatus::Error);
+        assert_eq!(
+            delegation_agent.detail.as_deref(),
+            Some("delegation failed")
+        );
+    }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 #[test]
@@ -1213,6 +1344,7 @@ fn delegated_child_completion_refreshes_through_production_lifecycle_hook() {
             } if session_id == parent_session_id
                 && agents.iter().any(|agent|
                     agent.id == created.delegation.id
+                        && agent.source == ParallelAgentSource::Delegation
                         && agent.status == ParallelAgentStatus::Completed
                 )
         );
@@ -1240,12 +1372,12 @@ fn delegated_child_completion_refreshes_through_production_lifecycle_hook() {
             .map(|result| result.summary.as_str()),
         Some("Lifecycle hook completed.")
     );
-    assert!(parent_delegation_card_has_status(
+    assert_single_parent_delegation_agent_status(
         &inner,
         &parent_session_id,
         &created.delegation.id,
         ParallelAgentStatus::Completed,
-    ));
+    );
     drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -1714,6 +1846,7 @@ fn delegation_result_is_derived_from_completed_child_session() {
             Message::ParallelAgents { agents, .. }
                 if agents.iter().any(|agent|
                     agent.id == created.delegation.id
+                        && agent.source == ParallelAgentSource::Delegation
                         && agent.status == ParallelAgentStatus::Completed
                 )
         )),
