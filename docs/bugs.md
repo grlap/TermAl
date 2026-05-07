@@ -24,19 +24,20 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 
 ## Remote proxy delegation actions can re-enable when project metadata is missing
 
-**Severity:** Medium - `ui/src/SessionPaneView.tsx:538-544` derives local delegation action capability only from `activeSession.projectId -> project.remoteId`.
+**Severity:** Medium - `ui/src/SessionPaneView.tsx:554` derives local delegation action capability only from `activeSession.projectId -> project.remoteId`.
 
-When a remote proxy session loses its project record or has `projectId` cleared, `activeSessionProject?.remoteId` becomes `undefined`; `isLocalRemoteId(undefined)` currently evaluates as local. That can re-enable Open / Insert / Cancel actions for remote-only `source: "delegation"` rows and route their ids to local delegation endpoints.
+When a remote proxy session loses its project record or has `projectId` cleared, `activeSessionProject?.remoteId` becomes `undefined`; `isLocalRemoteId(undefined)` currently evaluates as local. That can re-enable Open / Insert / Cancel actions for remote-only `source: "delegation"` rows and the composer Delegate action for remote-backed parents, routing ids or spawn requests to local delegation endpoints.
 
 **Current behavior:**
 - Local delegation action gating depends on project lookup.
 - Missing project metadata falls back through `isLocalRemoteId(undefined)`.
 - Projectless remote proxy sessions can expose local delegation actions for ids this server does not own.
+- The composer Delegate button uses the same project-derived capability gate.
 
 **Proposal:**
 - Add a session-level remote/proxy capability to the wire contract, or pass explicit delegation action capability from state.
 - Keep delegation actions disabled for remote proxy sessions even when their project metadata is missing.
-- Cover a remote proxy session with `projectId: null` or a missing project record.
+- Cover a remote proxy session with `projectId: null` or a missing project record, including the composer Delegate action.
 
 ## Conversation marker creation is now assistant-message only
 
@@ -52,6 +53,175 @@ Conversation markers are message-scoped transcript annotations, not assistant-me
 **Proposal:**
 - Preserve a user-message marker creation affordance, either through safe user metadata activation or another explicit per-message add action.
 - If assistant-only markers are intentional, update the feature contract and tests to match.
+
+## `activeSessionIdRef.current = activeSessionId` assigned in render body (concurrent-rendering unsafe)
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:1510`. The new ref publish happens inside the render body, not in `useEffect`/`useLayoutEffect`. React 18+ concurrent rendering may execute the render body multiple times before commit, so a ref published from render can briefly hold a value that never makes it to the DOM.
+
+The session-switch race guard at line 2156 (`activeSessionIdRef.current !== requestSessionId`) depends on this ref. In concurrent mode, a discarded render could prime the ref with the new session id while the commit picks the old one — making the guard read incorrect data after `await`.
+
+**Current behavior:**
+- `activeSessionIdRef.current = activeSessionId` runs in render body.
+- The follow-up effect at `:1570-1575` cannot recover the prior value.
+- Session-switch race guard depends on this ref but the publish is unsafe.
+
+**Proposal:**
+- Move the ref assignment into a `useEffect` or `useLayoutEffect` keyed on `activeSessionId`.
+- Or replace with a state read at await-resume time.
+
+## `handleSpawnDelegationFromFooter` load-bearing remote-detection logic is untested
+
+**Severity:** Medium - `ui/src/SessionPaneView.tsx:1032-1069`. The handler carries the runtime defense for the projectless-remote-proxy gap ("Session is no longer available", "Delegations are unavailable until the session project is loaded", "Delegations are available only for local sessions"). None of these branches are covered by tests; the 3 new AgentSessionPanel tests stop at the footer wiring.
+
+The runtime defense is the only thing protecting users from misrouted delegation creates when the visibility-side gating (still based on `enableLocalDelegationActions`) lets a button through.
+
+**Current behavior:**
+- Three error branches in `handleSpawnDelegationFromFooter`.
+- No SessionPaneView-level tests cover them.
+- Footer wiring tests exercise only the success path (and one rejection).
+
+**Proposal:**
+- Add SessionPaneView-level tests (or extract the handler body into a testable helper) covering: (a) missing parent session, (b) projectId set but project missing, (c) non-local remoteId, (d) successful local path forwards expected request shape.
+
+## `delegationTitleFromPrompt` is an untested pure helper buried in SessionPaneView.tsx
+
+**Severity:** Medium - `ui/src/SessionPaneView.tsx:178-186`. The function shapes the user-visible title for every spawned composer-Delegate delegation but has no tests. Edge cases include: empty/whitespace-only input → "Delegated review" fallback, exactly-80-char input → no truncation, 81-char input → 77-char prefix + "...", multi-line/multi-whitespace input → collapsed to single space, surrogate-pair boundary handling.
+
+The function lives inside `SessionPaneView.tsx` where it cannot be unit-tested without rendering the full pane. The companion module `ui/src/delegation-commands.ts` would be a more natural home.
+
+**Current behavior:**
+- Pure helper inside SessionPaneView.tsx component file.
+- No unit tests.
+- `normalized.slice(0, 77) + "..."` can split UTF-16 surrogate pairs (emoji at the boundary).
+
+**Proposal:**
+- Move `delegationTitleFromPrompt` and `DELEGATION_COMPOSER_TITLE_MAX_CHARS` into `delegation-commands.ts`.
+- Add focused unit tests for empty/whitespace, exactly-80, 81+, multi-line, and astral-character boundary cases.
+
+## `composerDelegateDisabled` vs `composerSendDisabled` diverge on slash-palette interaction
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1554-1568`. `composerDelegateDisabled` excludes `slashPalette.kind !== "none"` so the Delegate button hides during slash autocomplete, but `composerSendDisabled` only disables Send when `slashPalette.kind !== "none" && slashPalette.items.length === 0`. The two buttons disagree on slash-palette interaction (Send stays enabled if a slash item exists, Delegate is always disabled). Two near-identical disabled flags with subtly different semantics tend to drift.
+
+**Current behavior:**
+- Send: enabled if slash palette has items.
+- Delegate: always disabled when slash palette is open.
+- Divergence not documented in code.
+
+**Proposal:**
+- Add a one-line comment explaining why Delegate is unconditionally disabled when the slash palette is open.
+
+## `Delegate` button has no `aria-busy` / `aria-label`
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:2383-2395`. The Delegate button has no `aria-busy`, `aria-label`, or `title`. While spawning, it visually says "Delegating..." but the previous text-only label does not announce a busy state to assistive tech.
+
+**Current behavior:**
+- Visual text changes from "Delegate" to "Delegating..." during spawn.
+- No `aria-busy` or status role.
+- Screen readers announce only the visible text label.
+
+**Proposal:**
+- Add `aria-busy={isDelegationSpawning}` and consider an `aria-label="Spawn read-only delegation from current draft"`.
+
+## `delegationTitleFromPrompt` `slice(0, 77)` can split surrogate pairs
+
+**Severity:** Note - `ui/src/SessionPaneView.tsx:180-186`. The truncation uses `normalized.slice(0, 77) + "..."`. UTF-16 `slice` can split a surrogate pair (e.g., emoji), producing an invalid leading high-surrogate before the ellipsis. The backend title cap (200 chars) is enforced via `Array.from(value).length` (code points) elsewhere, but the truncation itself can produce malformed UTF-16.
+
+**Current behavior:**
+- `slice(0, 77)` may split astral characters.
+- Resulting string may contain a lone high-surrogate.
+- Renders as a replacement character at the truncation boundary.
+
+**Proposal:**
+- Use `Array.from(normalized).slice(0, 77).join("") + "..."`.
+- Or run `String.prototype.normalize("NFC")` first and check the boundary before slicing.
+
+## `///` doc on `update_parent_delegation_card_locked` mentions source but not full `(parent_session, agent_id, source)` triple
+
+**Severity:** Note - `src/delegations.rs:1138-1142`. Round 68 moved the comment to `///` doc syntax (closes round-67 finding) but mentions only `ParallelAgentSource::Delegation` participation. The disambiguating-key invariant `(parent_session, agent_id, source)` referenced in the bug-ledger entry is only partly surfaced — `agent.id` is matched at line 1160 but the doc does not describe the full triple.
+
+**Current behavior:**
+- `///` doc mentions source variant.
+- Doc does not name the full triple.
+- Future readers may miss the agent-id component.
+
+**Proposal:**
+- Mention the full triple `(parent_session, agent_id, source)` in the doc comment.
+- Cross-link to the architecture doc where the invariant is documented.
+
+## `telegram_standalone_token_ignores_foreign_token_keys` still bundles 2 assertions
+
+**Severity:** Low - `src/tests/telegram.rs:771-786`. Round 68 split most bundled telegram redaction tests but left this one with two cases (`accessToken=...` and `csrfToken : ...`) inside a single `#[test]`. The bug-ledger entry "Bundled telegram redaction tests keep growing" is partly closed but this case keeps the anti-pattern alive.
+
+**Current behavior:**
+- Two cases bundled.
+- Failure messages still cluster.
+
+**Proposal:**
+- Split into two `#[test]`s along the same shape as the other round-68 splits.
+
+## `telegram_generic_token_redaction_requires_telegram_or_bot_word_context` still bundles 9 cases
+
+**Severity:** Low - `src/tests/telegram.rs:883-917`. Round 68 split sibling bundled tests but did not touch this one. It bundles 4 negative-context iterations plus 5 positive-context assertions in one `#[test]`. Failure messages still cluster, and adding a sixth positive-context case will continue to grow it.
+
+**Current behavior:**
+- Single test with 9 distinct assertions.
+- Other bundled redaction tests have been split.
+- This case remains bundled.
+
+**Proposal:**
+- Promote each of the 5 positive-context cases to its own `#[test]`.
+- Use a parameterized helper for the negative-context iteration.
+
+## 3 new delegation tests miss in-flight spinner, rejection, slash-palette, and race coverage
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:6852-6919`. The new tests do not exercise: the in-flight spinner ("Delegating..." label flip — covered visually by `isDelegationSpawning` but no assertion pins it); the `try/catch` swallowing of an `onSpawnDelegation` rejection (current tests resolve with `false`, never throw); the `slashPalette.kind !== "none"` disabled state; the unmount-during-await race; the session-switch-during-await race using the `activeSessionIdRef` guard.
+
+**Current behavior:**
+- Tests cover wiring and basic success/failure outcomes.
+- Race conditions and disabled-state branches uncovered.
+
+**Proposal:**
+- Add deferred-promise tests using a `let resolveSpawn` pattern.
+- Add a "rejects with thrown error → draft preserved" test.
+- Add a "spawn while slash palette open → button is disabled" test.
+
+## Native-control rejection test only covers `<button>`, not other selectors in `NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR`
+
+**Severity:** Low - `ui/src/panels/conversation-markers.test.ts:186-200`. The new `findActivatableConversationMarkerContextMenuTrigger` test pins the nested-button rejection but does not cover other native control selectors mentioned in `NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR` (e.g., `<a>`, `<input>`, `<select>`, `<textarea>`, contenteditable). Nor does it cover the `target === trigger` case where the target is the trigger element itself.
+
+**Current behavior:**
+- `<button>` rejection tested.
+- Other native controls untested.
+- `target === trigger` case untested.
+
+**Proposal:**
+- Add `it.each([...])` over the native control tags.
+- Or restructure to a matrix that mirrors the selector.
+
+## Validation errors and transport errors share `onComposerError` channel without distinction
+
+**Severity:** Note - `ui/src/SessionPaneView.tsx:1061-1063`. On `result.outcome === "error"`, the handler routes `result.error.message` directly to `onComposerError`. The error packet is already sanitized by `safeSpawnDelegationFailureMessage`. Validation errors (e.g., "delegation prompt cannot be empty") and transport errors flow through the same composer-error channel with no distinction.
+
+Users may need different recovery for "your prompt is too long" (fix the prompt) vs. "the backend is unavailable" (retry).
+
+**Current behavior:**
+- Both error kinds → `onComposerError(message)`.
+- No branch on `result.error.kind` ("validation-failed" vs "spawn-failed").
+
+**Proposal:**
+- Optionally branch on `result.error.kind` to drive different UX.
+- Or document the lumping inline.
+
+## Composer Delegate `mode: "reviewer"` and `writePolicy: { kind: "readOnly" }` fixed values not documented in code
+
+**Severity:** Note - `ui/src/SessionPaneView.tsx:1053-1060`. The spawn request sets `mode: "reviewer"` and `writePolicy: { kind: "readOnly" }` as fixed values. The agent-delegation-sessions doc describes the composer Delegate as "spawns a read-only child", but the implementation file has no comment.
+
+**Current behavior:**
+- Fixed values inline in spawn request.
+- Constraint documented in feature brief, not code.
+
+**Proposal:**
+- Add a one-line comment above the call: `// composer Delegate is read-only reviewer by design — see docs/features/agent-delegation-sessions.md`.
 
 ## Delegation result fences ignore indented Markdown closing fences
 
@@ -93,30 +263,6 @@ Markdown closing fences may be indented by up to three spaces. A child result co
 **Proposal:**
 - Document the all-or-nothing semantic in a comment.
 - Or restructure as an action-config object the parent fills.
-
-## `MessageMeta` duplicate implementations now diverge intentionally; banner comment is stale
-
-**Severity:** Note - round 67 removed the marker attributes from `ui/src/panels/session-message-leaves.tsx:53-79` but the duplicate component bodies persist and now serve different roles (panel-internal pending prompts vs. the marker-aware card ladder). The doc comment in `session-message-leaves.tsx:30-35` still describes them as kept "in sync" while the new code intentionally diverges.
-
-**Current behavior:**
-- Two `MessageMeta` impls exist with intentional divergence (marker attrs only on `message-cards.tsx` copy).
-- The "in sync" doc comment in `session-message-leaves.tsx` is stale.
-
-**Proposal:**
-- Consolidate into a single `MessageMeta` component with a `marker` prop or context.
-- Or update the leaves file's banner comment to state "this is the panel-internal copy and deliberately does NOT carry marker semantics."
-
-## `update_parent_delegation_card_locked` comment uses `//` not `///` — still not on rustdoc surface
-
-**Severity:** Note - the round-66 ledger entry asked for a `///` doc comment so rustdoc surfaces the contract on the function signature. Round 67 added a comment but used `//` (line-level) at `src/delegations.rs:1154-1158` inside the function body. The "(message_id, agent_id, source) disambiguating key" contract still isn't on the function's doc surface.
-
-**Current behavior:**
-- `//` comment block before/inside the matcher.
-- No `///` doc comment on `fn update_parent_delegation_card_locked` signature.
-- Rustdoc will not surface the contract.
-
-**Proposal:**
-- Move the comment to `///` doc comments above the `fn update_parent_delegation_card_locked(` signature.
 
 ## Round 67 boundary helpers no longer mirror each other
 
@@ -180,29 +326,20 @@ Markdown closing fences may be indented by up to three spaces. A child result co
 - Either pass the composite identity to the handler.
 - Or document the gating contract on `runAgentAction` / the per-action callbacks.
 
-## `///` doc comments on TS predicates aren't JSDoc and won't surface in IDE hover
+## Marker-menu trigger is announced as an "Agent" button
 
-**Severity:** Note - `ui/src/panels/conversation-markers.tsx:357-374` and `:393-408`. The round-66 ledger asked for "`///` docs"; round 67 wrote literal `///`-prefixed lines, which TypeScript reads as plain `//` line comments. IDE hover and TS docgen tooling won't pick them up as rich JSDoc.
+**Severity:** Low - `ui/src/message-cards.tsx:739-740` gives the custom marker-menu trigger button semantics, but its accessible name comes from the visible author label.
 
-**Current behavior:**
-- `///`-prefixed lines on the predicates.
-- TS treats them as plain comments.
-- IDE hover shows nothing.
-
-**Proposal:**
-- Convert to `/** ... */` JSDoc blocks so VS Code / WebStorm hover surfaces them.
-
-## `MessageMetaMarkerMenuContext` boolean default with no value-bound provider
-
-**Severity:** Note - `ui/src/message-cards.tsx:167-179`. The context is created with default `false` and the provider unconditionally sets it to `true`. There is no value-bound provider, so any future additional state on the context (e.g., an open-handler ref) would require redefining the context shape.
+The trigger uses `role="button"` and `aria-haspopup="menu"` on the author span. Screen readers announce the control by its visible text, such as "Agent", while `title="Open marker actions"` is not a reliable accessible name. Keyboard and screen-reader users get a button label that describes the message author rather than the action.
 
 **Current behavior:**
-- Boolean-shaped context.
-- Provider value is the literal `true`.
+- Assistant message author text is the marker-menu trigger.
+- The trigger is exposed as a menu button named by the author label.
+- The action name is only in the `title` attribute.
 
 **Proposal:**
-- Document the binary contract in a comment.
-- Or extract a typed hook `useIsMessageMetaMarkerMenuTrigger(): boolean`.
+- Add an explicit accessible name such as `aria-label="Open marker actions"`.
+- Add an accessibility assertion for the marker-menu trigger name.
 
 ## Only one of five `delegationChildUnavailableStatusLabel` outcomes exercised in tests
 
@@ -229,19 +366,6 @@ The pending-state contract `agent.source:agent.id:cancel` is the load-bearing fi
 **Proposal:**
 - Trigger two sequential actions on the same source/id pair, assert one is rejected as pending.
 - Mirror the wrapping pattern from sibling tests for the provider.
-
-## `findActivatableConversationMarkerContextMenuTrigger` rejection branch unreachable from current markup
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:1048-1100`. The test exercises the trailing button "Show tasks"/"Hide tasks" but the trigger element is now `.message-meta-author` span. The `findActivatableConversationMarkerContextMenuTrigger` rejection path (target inside the trigger AND matching a native control selector) is structurally unreachable with current markup because the trigger span has no `<button>`/`<a>` descendants.
-
-The new helper is only load-bearing if a future change puts a native control inside the trigger element.
-
-**Current behavior:**
-- Trigger span has no native-control descendants.
-- New helper's rejection branch never fires from current markup.
-
-**Proposal:**
-- Add a regression test that uses a `renderMessageCard` returning a custom `<span data-conversation-marker-menu-trigger="true"><button>nested</button></span>` to exercise the new helper's nested-control rejection.
 
 ## Tilde-fence escape test doesn't cover non-summary fields or higher tilde counts
 
@@ -3269,7 +3393,9 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Cover delegation result prompt indented-fence escaping:
   include child summaries, findings, commands, and notes containing indented tilde fences such as `   ~~~`, and assert the formatter chooses a boundary those lines cannot close.
 - [ ] P2: Cover SessionPaneView remote delegation action capability wiring:
-  render `SessionPaneView` with an active remote proxy session whose project has a non-local `remoteId`, plus a projectless/missing-project remote proxy case, and assert local delegation Open / Insert / Cancel actions stay hidden while local-project sessions keep them.
+  render `SessionPaneView` with an active remote proxy session whose project has a non-local `remoteId`, plus a projectless/missing-project remote proxy case, and assert local delegation Open / Insert / Cancel / Delegate actions stay hidden while local-project sessions keep them.
+- [ ] P2: Cover SessionPaneView composer delegation spawn wiring:
+  mock `spawnDelegationCommand`, click the composer Delegate action through `SessionPaneView`, and assert title truncation, parent agent/model, reviewer mode, read-only write policy, blank prompt handling, remote/missing-project gating, and command-error handling.
 - [ ] P2: Pin `event.target === node` mousedown guard with negative case:
   add a sibling test that fires `mouseDown` on a child of `scrollNode` (e.g., a virtualized message slot) and asserts hydration does NOT occur. Round-63's isolated test only fires mouseDown directly on the scrollNode.
 - [ ] P2: Cover MessageCard pending-action across all action types:
@@ -3306,6 +3432,8 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add a regression test that renders an assistant card with a trailing button (e.g., `parallel-agents-toggle`), clicks the trailing button, and asserts the marker menu does NOT open. Same for Enter/Space keyboard activation on the toggle.
 - [ ] P2: Cover marker creation from user messages:
   render a transcript with a user prompt, activate its marker affordance, and assert `onCreateConversationMarker` receives that user message id.
+- [ ] P2: Add marker-menu trigger accessible-name coverage:
+  render an assistant marker trigger and assert the exposed menu button is named by the action, such as "Open marker actions", rather than the author label.
 - [ ] P2: Assert SSE-envelope source in the `parallelAgentsUpdate` create event:
   parse the first event in `state_events_route_streams_parallel_agents_update_sources` instead of consuming via `let _ = ...`, asserting `agents[0].source` and `agents[1].source`. Or add a sibling test scoped to the create path.
 - [ ] P2: Cover production-path tool/delegation id collision:
@@ -3314,17 +3442,23 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add a `delegation` → `tool` source-flip case alongside the existing `tool` → `delegation` case, or note the symmetry assumption in the test.
 - [ ] P2: Split `cancelDelegation` `it.each` running/completed/canceled identical-pin into focused tests:
   add a comment explaining the test pin is the current-but-flagged behavior, or split `running` into its own test scoped to the bugs.md follow-up.
-- [ ] P2: Promote ARIA/role attribute parity check between MessageMeta copies:
-  add a runtime/test assertion that the two `MessageMeta` callsites (`message-cards.tsx` and `panels/session-message-leaves.tsx`) render identical role/aria attributes for the assistant case, until the consolidation lands.
 - [ ] P2: Cover all five `delegationChildUnavailableStatusLabel` outcomes:
   use `it.each([...])` over the five `(status, expectedPhrase)` pairs (canceled/already canceled, completed/already completed, failed/already failed, queued/still queued, running/still running). Round 67 only covers `canceled`.
 - [ ] P2: Pin pending-key composite contract in mixed-source MessageCard tests:
   trigger two sequential actions on the same source/id pair, assert one is rejected as pending. Add a test that flips a tool row to a delegation row across rerenders and asserts no row reuse. Also wrap with `DeferredHeavyContentActivationProvider` per sibling test pattern.
-- [ ] P2: Pin the new `findActivatableConversationMarkerContextMenuTrigger` rejection branch:
-  add a regression test using a custom `renderMessageCard` that returns `<span data-conversation-marker-menu-trigger="true"><button>nested</button></span>` to exercise the new helper's nested-control rejection. Otherwise the new safety net is unguarded against regression.
 - [ ] P2: Broaden tilde-fence escape coverage:
   add focused cases for line-start tildes in `findings[].message`, `notes[]`, `commandsRun[].command`. Add a 5-tilde-in-summary case and a mixed 3+5 tilde case to verify the escape walks the joined `bodySections`.
 - [ ] P2: Strengthen "renders remote delegation progress as display-only" test:
   add `expect(params.onComposerError).not.toHaveBeenCalled()` after rendering, exercise a flag flip mid-test, or split into per-action coverage so a regression that drops only one of the three guards surfaces.
 - [ ] P2: Reframe `mask_telegram_bot_token` assertion to contract-shape:
   replace `revealed.chars().count() == token.chars().count().min(4)` with a contract assertion ("never expose more than 4 trailing chars") so a future implementation tweak doesn't silently pass.
+- [ ] P2: Add SessionPaneView-level tests for `handleSpawnDelegationFromFooter` error branches:
+  cover (a) missing parent session, (b) projectId set but project missing, (c) non-local remoteId, (d) successful local path forwards expected request shape. Or extract the handler body into a testable helper and unit-test each branch.
+- [ ] P2: Add unit tests for `delegationTitleFromPrompt`:
+  cover empty/whitespace-only → "Delegated review" fallback, exactly-80-char no truncation, 81-char prefix-with-ellipsis, multi-line collapse, surrogate-pair boundary handling.
+- [ ] P2: Cover delegation-spawn race conditions and slash-palette disabled state:
+  add deferred-promise tests using `let resolveSpawn` pattern for in-flight spinner pin, unmount-during-await, and session-switch-during-await. Add a "spawn while slash palette open → button disabled" test. Add a "rejection via thrown error" test verifying draft preservation.
+- [ ] P2: Broaden `findActivatableConversationMarkerContextMenuTrigger` test coverage:
+  add `it.each([...])` over the native control tags in `NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR` (`<a>`, `<input>`, `<select>`, `<textarea>`, contenteditable). Add a `target === trigger` case where the target is the trigger element itself.
+- [ ] P2: Split remaining bundled telegram redaction tests:
+  split `telegram_standalone_token_ignores_foreign_token_keys` (2 cases) and `telegram_generic_token_redaction_requires_telegram_or_bot_word_context` (9 cases) into focused per-shape `#[test]`s. Same shape as round-68's split style.

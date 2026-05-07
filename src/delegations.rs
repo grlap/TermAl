@@ -1135,6 +1135,11 @@ fn add_parent_delegation_card_locked(
     })
 }
 
+/// Updates the parent parallel-agent card for a delegation lifecycle change.
+///
+/// The parent-card lookup key includes `ParallelAgentSource::Delegation`.
+/// Tool-sourced rows can share the same visible id shape, but delegation
+/// lifecycle updates only own delegation-sourced rows.
 fn update_parent_delegation_card_locked(
     inner: &mut StateInner,
     delegation: &DelegationRecord,
@@ -1151,9 +1156,6 @@ fn update_parent_delegation_card_locked(
         let Message::ParallelAgents { id, agents, .. } = message else {
             continue;
         };
-        // Delegation lifecycle updates only own delegation-sourced rows. Tool
-        // tasks can share the same visible id shape, so source is part of the
-        // parent-card lookup key.
         let Some(agent) = agents.iter_mut().find(|agent| {
             agent.id == delegation.id && agent.source == ParallelAgentSource::Delegation
         }) else {

@@ -33,14 +33,16 @@
 //     split deliberately keeps the panel-internal copies separate
 //     from that ladder — consolidation is a future cleanup, not a
 //     pure code move.
+//     The panel-internal `MessageMeta` deliberately does not carry
+//     conversation-marker trigger semantics; the marker-aware copy
+//     lives in `../message-cards` behind `MessageMetaMarkerMenuProvider`.
 //   - Search-highlight rendering (`renderHighlightedText`) and
 //     highlight-tone types — live in `../search-highlight`.
 //   - Image-attachment / session types — live in `../types`.
 //
-// Split out of `ui/src/panels/AgentSessionPanel.tsx`. Same markup,
-// same class names, same formatter boundaries (1 KB = 1024 B, MB
-// threshold at 1 MiB), same "1 image attached" / "N images
-// attached" pluralization.
+// Split out of `ui/src/panels/AgentSessionPanel.tsx`. Same formatter
+// boundaries (1 KB = 1024 B, MB threshold at 1 MiB), same "1 image
+// attached" / "N images attached" pluralization.
 
 import type { ReactNode } from "react";
 import { renderHighlightedText, type SearchHighlightTone } from "../search-highlight";

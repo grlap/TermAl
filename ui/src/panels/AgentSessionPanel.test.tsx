@@ -6444,6 +6444,8 @@ function renderFooter({
   onRefreshSessionModelOptions = vi.fn(),
   onRefreshAgentCommands = vi.fn(),
   onSend = vi.fn(() => true),
+  canSpawnDelegation = false,
+  onSpawnDelegation,
   onSessionSettingsChange = vi.fn(),
 }: {
   isPaneActive?: boolean;
@@ -6466,6 +6468,8 @@ function renderFooter({
   onRefreshSessionModelOptions?: (sessionId: string) => void;
   onRefreshAgentCommands?: (sessionId: string) => void;
   onSend?: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
+  canSpawnDelegation?: boolean;
+  onSpawnDelegation?: (sessionId: string, prompt: string) => Promise<boolean>;
   onSessionSettingsChange?: (sessionId: string, field: string, value: string) => void;
 }) {
   syncComposerSessionsStore({
@@ -6498,6 +6502,8 @@ function renderFooter({
       onRefreshSessionModelOptions={onRefreshSessionModelOptions}
       onRefreshAgentCommands={onRefreshAgentCommands}
       onSend={onSend}
+      canSpawnDelegation={canSpawnDelegation}
+      onSpawnDelegation={onSpawnDelegation}
       onSessionSettingsChange={onSessionSettingsChange}
       onStopSession={() => {}}
       onPaste={() => {}}
@@ -6841,6 +6847,75 @@ describe("AgentSessionPanelFooter", () => {
       "session-a",
       "use the newest sender",
     );
+  });
+
+  it("spawns a delegation from the current draft without sending it", async () => {
+    const onSend = vi.fn(() => true);
+    const onSpawnDelegation = vi.fn(async () => true);
+    render(
+      renderFooter({
+        session: makeSession("session-a"),
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onSend,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, {
+      target: { value: "  Review the staged frontend change.  " },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    expect(onSpawnDelegation).toHaveBeenCalledWith(
+      "session-a",
+      "Review the staged frontend change.",
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("keeps the draft when delegation spawn is rejected", async () => {
+    const onSpawnDelegation = vi.fn(async () => false);
+    render(
+      renderFooter({
+        session: makeSession("session-a"),
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, {
+      target: { value: "Review this before I send it." },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    expect(onSpawnDelegation).toHaveBeenCalledWith(
+      "session-a",
+      "Review this before I send it.",
+    );
+    expect(textarea).toHaveValue("Review this before I send it.");
+  });
+
+  it("hides the delegation action when local delegation is unavailable", () => {
+    render(
+      renderFooter({
+        session: makeSession("session-a"),
+        canSpawnDelegation: false,
+        onSpawnDelegation: vi.fn(async () => true),
+      }),
+    );
+
+    expect(screen.queryByRole("button", { name: "Delegate" })).not.toBeInTheDocument();
   });
 
   it("does not recompute the composer slash palette during assistant-only session churn", () => {

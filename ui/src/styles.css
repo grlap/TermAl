@@ -8513,6 +8513,11 @@ textarea {
   white-space: nowrap;
 }
 
+.composer-delegate-button {
+  min-width: 6.5rem;
+  white-space: nowrap;
+}
+
 .new-session-button:disabled,
 .send-button:disabled,
 .approval-button:disabled,
@@ -9165,6 +9170,7 @@ textarea {
   }
 
   .composer-stop-button,
+  .composer-delegate-button,
   .send-button {
     width: 100%;
   }

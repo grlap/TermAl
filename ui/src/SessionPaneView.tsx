@@ -169,9 +169,21 @@ import {
   streamingAssistantTextMessageIdForSession,
   useSessionRenderCallbacks,
 } from "./SessionPaneView.render-callbacks";
+import {
+  spawnDelegationCommand,
+} from "./delegation-commands";
 import { isLocalRemoteId } from "./remotes";
 
 const SESSION_PAGE_JUMP_VIEWPORT_FACTOR = 0.45;
+const DELEGATION_COMPOSER_TITLE_MAX_CHARS = 80;
+
+function delegationTitleFromPrompt(prompt: string) {
+  const normalized = prompt.replace(/\s+/gu, " ").trim();
+  if (normalized.length <= DELEGATION_COMPOSER_TITLE_MAX_CHARS) {
+    return normalized || "Delegated review";
+  }
+  return `${normalized.slice(0, DELEGATION_COMPOSER_TITLE_MAX_CHARS - 3)}...`;
+}
 
 export function SessionPaneView({
   pane,
@@ -1017,6 +1029,44 @@ export function SessionPaneView({
     onRefreshAgentCommands,
   );
   const handleSendFromFooter = useStableEvent(onSend);
+  const handleSpawnDelegationFromFooter = useStableEvent(
+    async (sessionId: string, prompt: string) => {
+      const parentSession = sessionLookup.get(sessionId);
+      if (!parentSession) {
+        onComposerError("Session is no longer available.");
+        return false;
+      }
+
+      const parentProject =
+        parentSession.projectId != null
+          ? (projectLookup.get(parentSession.projectId) ?? null)
+          : null;
+      if (parentSession.projectId != null && !parentProject) {
+        onComposerError("Delegations are unavailable until the session project is loaded.");
+        return false;
+      }
+      if (!isLocalRemoteId(parentProject?.remoteId)) {
+        onComposerError("Delegations are available only for local sessions.");
+        return false;
+      }
+
+      const result = await spawnDelegationCommand(sessionId, {
+        title: delegationTitleFromPrompt(prompt),
+        prompt,
+        agent: parentSession.agent,
+        model: parentSession.model,
+        mode: "reviewer",
+        writePolicy: { kind: "readOnly" },
+      });
+      if (result.outcome === "error") {
+        onComposerError(result.error.message);
+        return false;
+      }
+
+      onComposerError(null);
+      return true;
+    },
+  );
   const handleSessionSettingsChangeFromFooter = useStableEvent(
     onSessionSettingsChange,
   );
@@ -3277,6 +3327,8 @@ export function SessionPaneView({
           onRefreshSessionModelOptions={handleRefreshSessionModelOptionsFromFooter}
           onRefreshAgentCommands={handleRefreshAgentCommandsFromFooter}
           onSend={handleSendFromFooter}
+          canSpawnDelegation={enableLocalDelegationActions}
+          onSpawnDelegation={handleSpawnDelegationFromFooter}
           onSessionSettingsChange={handleSessionSettingsChangeFromFooter}
           onStopSession={handleStopSessionFromFooter}
           onPaste={handleComposerPasteFromFooter}

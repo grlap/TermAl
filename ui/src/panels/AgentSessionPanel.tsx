@@ -597,6 +597,8 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
   onRefreshSessionModelOptions,
   onRefreshAgentCommands,
   onSend,
+  canSpawnDelegation = false,
+  onSpawnDelegation,
   onSessionSettingsChange,
   onStopSession,
   onPaste,
@@ -624,6 +626,8 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
   onRefreshSessionModelOptions: (sessionId: string) => void;
   onRefreshAgentCommands: (sessionId: string) => void;
   onSend: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
+  canSpawnDelegation?: boolean;
+  onSpawnDelegation?: (sessionId: string, prompt: string) => Promise<boolean>;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -656,6 +660,8 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
         onRefreshSessionModelOptions={onRefreshSessionModelOptions}
         onRefreshAgentCommands={onRefreshAgentCommands}
         onSend={onSend}
+        canSpawnDelegation={canSpawnDelegation}
+        onSpawnDelegation={onSpawnDelegation}
         onSessionSettingsChange={onSessionSettingsChange}
         onStopSession={onStopSession}
         onPaste={onPaste}
@@ -1411,6 +1417,8 @@ const SessionComposer = memo(function SessionComposer({
   onRefreshSessionModelOptions,
   onRefreshAgentCommands,
   onSend,
+  canSpawnDelegation = false,
+  onSpawnDelegation,
   onSessionSettingsChange,
   onStopSession,
   onPaste,
@@ -1436,6 +1444,8 @@ const SessionComposer = memo(function SessionComposer({
   onRefreshSessionModelOptions: (sessionId: string) => void;
   onRefreshAgentCommands: (sessionId: string) => void;
   onSend: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
+  canSpawnDelegation?: boolean;
+  onSpawnDelegation?: (sessionId: string, prompt: string) => Promise<boolean>;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -1489,11 +1499,15 @@ const SessionComposer = memo(function SessionComposer({
   >({});
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashNavModality, setSlashNavModality] = useState<"keyboard" | "mouse">("keyboard");
+  const [isDelegationSpawning, setIsDelegationSpawning] = useState(false);
+  const isMountedRef = useRef(true);
+  const activeSessionIdRef = useRef<string | null>(null);
 
   // `activeSessionId` is a best-effort identity for draft bookkeeping while
   // the store snapshot catches up. Callers that need capability/session fields
   // must still check `session`.
   const activeSessionId = session?.id ?? sessionId;
+  activeSessionIdRef.current = activeSessionId;
   const committedDraft = session?.committedDraft ?? "";
   const draftAttachments = session?.draftAttachments ?? EMPTY_COMPOSER_ATTACHMENTS;
   const promptHistory = session?.promptHistory ?? EMPTY_COMPOSER_PROMPT_HISTORY;
@@ -1543,6 +1557,22 @@ const SessionComposer = memo(function SessionComposer({
     isStopping ||
     isUpdating ||
     (slashPalette.kind !== "none" && slashPalette.items.length === 0);
+  const composerDelegateDisabled =
+    !session ||
+    !canSpawnDelegation ||
+    !onSpawnDelegation ||
+    isSending ||
+    isStopping ||
+    isUpdating ||
+    isDelegationSpawning ||
+    slashPalette.kind !== "none";
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   function cancelScheduledComposerResize() {
     if (composerResizeAnimationFrameRef.current == null) {
@@ -2089,6 +2119,50 @@ const SessionComposer = memo(function SessionComposer({
     focusComposerInput();
   }
 
+  async function handleComposerDelegationSpawn() {
+    if (composerDelegateDisabled || !activeSessionId || !onSpawnDelegation) {
+      focusComposerInput();
+      return;
+    }
+
+    const prompt = getComposerDraftValue().trim();
+    if (!prompt) {
+      focusComposerInput();
+      return;
+    }
+
+    const requestSessionId = activeSessionId;
+    setIsDelegationSpawning(true);
+    let accepted = false;
+    try {
+      accepted = await onSpawnDelegation(requestSessionId, prompt);
+    } catch {
+      accepted = false;
+    } finally {
+      if (isMountedRef.current) {
+        setIsDelegationSpawning(false);
+      }
+    }
+
+    if (!isMountedRef.current) {
+      return;
+    }
+
+    if (!accepted) {
+      focusComposerInput();
+      return;
+    }
+
+    if (activeSessionIdRef.current !== requestSessionId) {
+      return;
+    }
+
+    resetPromptHistory(requestSessionId);
+    updateLocalDraft(requestSessionId, "");
+    commitDraft(requestSessionId, "");
+    focusComposerInput();
+  }
+
   function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (!activeSessionId) {
       return;
@@ -2304,6 +2378,19 @@ const SessionComposer = memo(function SessionComposer({
               disabled={isStopping}
             >
               {isStopping ? "Stopping..." : "Stop"}
+            </button>
+          ) : null}
+          {session && onSpawnDelegation && canSpawnDelegation ? (
+            <button
+              className="ghost-button composer-delegate-button"
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault();
+              }}
+              onClick={() => void handleComposerDelegationSpawn()}
+              disabled={composerDelegateDisabled}
+            >
+              {isDelegationSpawning ? "Delegating..." : "Delegate"}
             </button>
           ) : null}
           <button

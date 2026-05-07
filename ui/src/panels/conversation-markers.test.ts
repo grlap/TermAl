@@ -4,6 +4,7 @@ import { createElement, useEffect, useRef } from "react";
 
 import {
   ConversationMarkerNavigator,
+  findActivatableConversationMarkerContextMenuTrigger,
   findMountedConversationMessageSlot,
   groupConversationMarkersByMessageId,
   sortConversationMarkersForNavigation,
@@ -180,6 +181,22 @@ describe("conversation marker helpers", () => {
       matching.remove();
       unrelated.remove();
     }
+  });
+
+  it("rejects nested native controls inside custom marker-menu triggers", () => {
+    const root = document.createElement("section");
+    const trigger = document.createElement("span");
+    const nestedButton = document.createElement("button");
+    trigger.dataset.conversationMarkerMenuTrigger = "true";
+    trigger.append(nestedButton);
+    root.append(trigger);
+
+    expect(
+      findActivatableConversationMarkerContextMenuTrigger(root, trigger),
+    ).toBe(trigger);
+    expect(
+      findActivatableConversationMarkerContextMenuTrigger(root, nestedButton),
+    ).toBeNull();
   });
 
   it("sorts markers by mounted message order before persisted index hints", () => {

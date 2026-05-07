@@ -166,11 +166,17 @@ let mermaidDiagramIdCounter = 0;
 
 const MessageMetaMarkerMenuContext = createContext(false);
 
+function useIsMessageMetaMarkerMenuTriggerEnabled() {
+  return useContext(MessageMetaMarkerMenuContext);
+}
+
 export function MessageMetaMarkerMenuProvider({
   children,
 }: {
   children: ReactNode;
 }) {
+  // Binary opt-in: only the conversation panel wraps assistant cards that
+  // should expose the marker-menu affordance on their metadata author label.
   return (
     <MessageMetaMarkerMenuContext.Provider value={true}>
       {children}
@@ -724,7 +730,7 @@ function MessageMeta({
   trailing?: ReactNode;
 }) {
   const isUser = author === "you";
-  const enableMarkerMenuTrigger = useContext(MessageMetaMarkerMenuContext);
+  const enableMarkerMenuTrigger = useIsMessageMetaMarkerMenuTriggerEnabled();
   const isMarkerMenuTrigger = enableMarkerMenuTrigger && !isUser;
 
   return (

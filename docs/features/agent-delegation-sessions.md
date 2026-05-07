@@ -755,6 +755,7 @@ Files Inspected:
 ## UI Placement
 
 V1 can be minimal:
+- composer "Delegate" action that spawns a read-only child from the current draft
 - parent transcript delegation card
 - child session opens as an ordinary tab
 - session header shows parent link

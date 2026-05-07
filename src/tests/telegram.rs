@@ -627,8 +627,20 @@ fn telegram_message_not_modified_classifier_requires_telegram_400_error() {
     assert!(!telegram_error_is_message_not_modified(&untyped));
 }
 
+fn telegram_redaction_token() -> &'static str {
+    "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+}
+
+fn telegram_redaction_secret_35() -> &'static str {
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+}
+
+fn telegram_redaction_secret_34() -> &'static str {
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh"
+}
+
 #[test]
-fn telegram_log_sanitizer_redacts_bot_tokens_and_truncates() {
+fn telegram_log_sanitizer_redacts_bot_url_and_truncates() {
     let token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi";
     let detail = format!(
         "request failed for https://api.telegram.org/bot{token}/getUpdates: {}",
@@ -640,87 +652,155 @@ fn telegram_log_sanitizer_redacts_bot_tokens_and_truncates() {
     assert!(sanitized.contains("/bot<redacted>/getUpdates"));
     assert!(sanitized.ends_with("..."));
     assert!(sanitized.chars().count() <= 259);
+}
+
+#[test]
+fn telegram_log_sanitizer_redacts_standalone_key_value_token() {
+    let token = telegram_redaction_token();
 
     let standalone =
         sanitize_telegram_log_detail(&format!("Telegram token rejected: botToken={token}."));
     assert!(!standalone.contains(token));
     assert!(standalone.contains("botToken=<redacted>."));
+}
+
+#[test]
+fn telegram_log_sanitizer_redacts_colon_delimited_key_token() {
+    let token = telegram_redaction_token();
 
     let colon_delimited = sanitize_telegram_log_detail(&format!(
         "Telegram token rejected: botToken:{token}: invalid"
     ));
     assert!(!colon_delimited.contains(token));
     assert!(colon_delimited.contains("botToken:<redacted>: invalid"));
+}
 
+#[test]
+fn telegram_log_sanitizer_preserves_benign_token_like_values() {
     let benign = "trace [12345:67890123] pid 12345:abcdefgh version 12345:6.7.8.9";
     assert_eq!(sanitize_telegram_log_detail(benign), benign);
+}
 
+#[test]
+fn telegram_log_sanitizer_preserves_malformed_bot_url() {
     let malformed_url = "request failed for https://api.telegram.org/bot/bot/getMe";
     assert_eq!(sanitize_telegram_log_detail(malformed_url), malformed_url);
 }
 
 #[test]
-fn telegram_standalone_token_redaction_respects_context_and_thresholds() {
-    let secret_35 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi";
-    let secret_34 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh";
-    let six_digit_token = format!("123456:{secret_35}");
-    let eight_digit_token = format!("12345678:{secret_35}");
+fn telegram_standalone_token_redacts_documented_key_context() {
+    let token = telegram_redaction_token();
 
-    let documented = sanitize_telegram_log_detail(&format!("botToken={six_digit_token}"));
+    let documented = sanitize_telegram_log_detail(&format!("botToken={token}"));
     assert_eq!(documented, "botToken=<redacted>");
+}
 
-    let quoted_json = sanitize_telegram_log_detail(&format!("\"botToken\":\"{six_digit_token}\""));
+#[test]
+fn telegram_standalone_token_redacts_quoted_json_key_context() {
+    let token = telegram_redaction_token();
+
+    let quoted_json = sanitize_telegram_log_detail(&format!("\"botToken\":\"{token}\""));
     assert_eq!(quoted_json, "\"botToken\":\"<redacted>\"");
+}
 
-    let spaced = sanitize_telegram_log_detail(&format!("botToken = {six_digit_token}"));
+#[test]
+fn telegram_standalone_token_redacts_spaced_key_context() {
+    let token = telegram_redaction_token();
+
+    let spaced = sanitize_telegram_log_detail(&format!("botToken = {token}"));
     assert_eq!(spaced, "botToken = <redacted>");
+}
 
-    let snake_quoted = sanitize_telegram_log_detail(&format!("bot_token\": \"{six_digit_token}\""));
+#[test]
+fn telegram_standalone_token_redacts_snake_quoted_key_context() {
+    let token = telegram_redaction_token();
+
+    let snake_quoted = sanitize_telegram_log_detail(&format!("bot_token\": \"{token}\""));
     assert_eq!(snake_quoted, "bot_token\": \"<redacted>\"");
+}
 
-    let bearer =
-        sanitize_telegram_log_detail(&format!("Authorization: Bearer {eight_digit_token}"));
+#[test]
+fn telegram_standalone_token_redacts_bearer_context() {
+    let token = format!("12345678:{}", telegram_redaction_secret_35());
+
+    let bearer = sanitize_telegram_log_detail(&format!("Authorization: Bearer {token}"));
     assert_eq!(bearer, "Authorization: Bearer <redacted>");
+}
+
+#[test]
+fn telegram_standalone_token_redacts_multiple_contextual_tokens() {
+    let six_digit_token = telegram_redaction_token();
+    let eight_digit_token = format!("12345678:{}", telegram_redaction_secret_35());
 
     let multi = sanitize_telegram_log_detail(&format!(
         "botToken={six_digit_token} telegramBotToken:{eight_digit_token}"
     ));
     assert_eq!(multi, "botToken=<redacted> telegramBotToken:<redacted>");
+}
+
+#[test]
+fn telegram_standalone_token_ignores_short_bot_id() {
+    let secret_35 = telegram_redaction_secret_35();
 
     let short_bot_id = format!("12345:{secret_35}");
     assert_eq!(
         sanitize_telegram_log_detail(&format!("botToken={short_bot_id}")),
         format!("botToken={short_bot_id}")
     );
+}
+
+#[test]
+fn telegram_standalone_token_ignores_short_secret() {
+    let secret_34 = telegram_redaction_secret_34();
 
     let short_secret = format!("12345678:{secret_34}");
     assert_eq!(
         sanitize_telegram_log_detail(&format!("botToken={short_secret}")),
         format!("botToken={short_secret}")
     );
+}
 
-    let unanchored = format!("trace value {six_digit_token}");
+#[test]
+fn telegram_standalone_token_ignores_unanchored_value() {
+    let token = telegram_redaction_token();
+
+    let unanchored = format!("trace value {token}");
     assert_eq!(sanitize_telegram_log_detail(&unanchored), unanchored);
+}
 
-    let foreign_token_key = format!("accessToken={six_digit_token}");
+#[test]
+fn telegram_standalone_token_ignores_foreign_token_keys() {
+    let token = telegram_redaction_token();
+
+    let foreign_token_key = format!("accessToken={token}");
     assert_eq!(
         sanitize_telegram_log_detail(&foreign_token_key),
         foreign_token_key
     );
 
-    let foreign_spaced_token_key = format!("csrfToken : {six_digit_token}");
+    let foreign_spaced_token_key = format!("csrfToken : {token}");
     assert_eq!(
         sanitize_telegram_log_detail(&foreign_spaced_token_key),
         foreign_spaced_token_key
     );
+}
 
-    let ambiguous_token_key = format!("token={six_digit_token}");
+#[test]
+fn telegram_standalone_token_ignores_generic_token_without_context() {
+    let token = telegram_redaction_token();
+
+    let ambiguous_token_key = format!("token={token}");
     assert_eq!(
         sanitize_telegram_log_detail(&ambiguous_token_key),
         ambiguous_token_key
     );
+}
 
-    let false_bearer_prefix = format!("notbearer {six_digit_token}");
+#[test]
+fn telegram_standalone_token_ignores_false_bearer_prefix() {
+    let token = telegram_redaction_token();
+
+    let false_bearer_prefix = format!("notbearer {token}");
     assert_eq!(
         sanitize_telegram_log_detail(&false_bearer_prefix),
         false_bearer_prefix
@@ -728,33 +808,73 @@ fn telegram_standalone_token_redaction_respects_context_and_thresholds() {
 }
 
 #[test]
-fn telegram_standalone_token_redaction_handles_escaped_and_telegram_specific_contexts() {
-    let token = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi";
+fn telegram_standalone_token_redacts_escaped_json_context() {
+    let token = telegram_redaction_token();
 
     let escaped_json = sanitize_telegram_log_detail(&format!("\\\"botToken\\\": \\\"{token}\\\""));
     assert_eq!(escaped_json, "\\\"botToken\\\": \\\"<redacted>\\\"");
+}
+
+#[test]
+fn telegram_standalone_token_redacts_bearer_colon_context() {
+    let token = telegram_redaction_token();
 
     let bearer_colon = sanitize_telegram_log_detail(&format!("Authorization: Bearer: {token}"));
     assert_eq!(bearer_colon, "Authorization: Bearer: <redacted>");
+}
+
+#[test]
+fn telegram_standalone_token_redacts_lower_bearer_colon_context() {
+    let token = telegram_redaction_token();
 
     let lower_bearer_colon = sanitize_telegram_log_detail(&format!("bearer:{token}"));
     assert_eq!(lower_bearer_colon, "bearer:<redacted>");
+}
+
+#[test]
+fn telegram_standalone_token_redacts_bearer_equals_context() {
+    let token = telegram_redaction_token();
 
     let bearer_equals = sanitize_telegram_log_detail(&format!("Authorization: Bearer = {token}"));
     assert_eq!(bearer_equals, "Authorization: Bearer = <redacted>");
+}
+
+#[test]
+fn telegram_standalone_token_redacts_authorization_equals_bearer_context() {
+    let token = telegram_redaction_token();
 
     let authorization_equals =
         sanitize_telegram_log_detail(&format!("Authorization=Bearer {token}"));
     assert_eq!(authorization_equals, "Authorization=Bearer <redacted>");
+}
+
+#[test]
+fn telegram_standalone_token_redacts_lower_bearer_equals_context() {
+    let token = telegram_redaction_token();
 
     let lower_bearer_equals = sanitize_telegram_log_detail(&format!("bearer={token}"));
     assert_eq!(lower_bearer_equals, "bearer=<redacted>");
+}
+
+#[test]
+fn telegram_standalone_token_redacts_snake_telegram_key_context() {
+    let token = telegram_redaction_token();
 
     let snake = sanitize_telegram_log_detail(&format!("telegram_bot_token={token}"));
     assert_eq!(snake, "telegram_bot_token=<redacted>");
+}
+
+#[test]
+fn telegram_standalone_token_redacts_camel_telegram_key_context() {
+    let token = telegram_redaction_token();
 
     let camel = sanitize_telegram_log_detail(&format!("telegramBotToken={token}"));
     assert_eq!(camel, "telegramBotToken=<redacted>");
+}
+
+#[test]
+fn telegram_standalone_token_redacts_env_var_key_context() {
+    let token = telegram_redaction_token();
 
     let env = sanitize_telegram_log_detail(&format!("TERMAL_TELEGRAM_BOT_TOKEN={token}"));
     assert_eq!(env, "TERMAL_TELEGRAM_BOT_TOKEN=<redacted>");
