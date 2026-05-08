@@ -1037,28 +1037,74 @@ fn telegram_status_response_keeps_empty_project_list_on_wire() {
 }
 
 #[test]
-fn telegram_token_mask_only_exposes_short_suffix() {
-    assert_eq!(
-        mask_telegram_bot_token("123456:abcdefghi").as_deref(),
-        Some("****fghi")
-    );
+fn telegram_status_response_serializes_in_process_lifecycle() {
+    let value = serde_json::to_value(TelegramStatusResponse {
+        configured: true,
+        enabled: true,
+        running: true,
+        lifecycle: TelegramLifecycle::InProcess,
+        linked_chat_id: None,
+        bot_token_masked: Some("****oken".to_owned()),
+        subscribed_project_ids: vec!["project-1".to_owned()],
+        default_project_id: Some("project-1".to_owned()),
+        default_session_id: None,
+    })
+    .expect("response should serialize");
+
+    assert_eq!(value["lifecycle"], json!("inProcess"));
+    assert_eq!(value["running"], json!(true));
+}
+
+#[test]
+fn telegram_token_mask_omits_empty_token() {
     assert_eq!(mask_telegram_bot_token(""), None);
+}
+
+#[test]
+fn telegram_token_mask_omits_whitespace_only_token() {
     assert_eq!(mask_telegram_bot_token("   \t\n"), None);
+}
+
+#[test]
+fn telegram_token_mask_exposes_short_token_suffix() {
     assert_eq!(mask_telegram_bot_token("ab").as_deref(), Some("****ab"));
+}
+
+#[test]
+fn telegram_token_mask_exposes_exactly_four_char_token() {
     assert_eq!(mask_telegram_bot_token("abcd").as_deref(), Some("****abcd"));
+}
+
+#[test]
+fn telegram_token_mask_exposes_trimmed_token_suffix() {
     assert_eq!(
         mask_telegram_bot_token(" abcdef ").as_deref(),
         Some("****cdef")
     );
+}
 
+#[test]
+fn telegram_token_mask_exposes_full_token_suffix() {
+    assert_eq!(
+        mask_telegram_bot_token("123456:abcdefghi").as_deref(),
+        Some("****fghi")
+    );
+}
+
+fn assert_telegram_token_mask_suffix_contract(token: &str) {
+    let masked = mask_telegram_bot_token(token).expect("non-empty token should mask");
+    let revealed = masked
+        .strip_prefix("****")
+        .expect("mask should keep fixed redaction prefix");
+    assert!(!revealed.is_empty());
+    assert!(revealed.chars().count() <= 4);
+    assert!(token.trim().ends_with(revealed));
+}
+
+#[test]
+fn telegram_token_mask_contract_limits_visible_suffix() {
     for token in ["a", "ab", "abc", "abcd", "abcde", "123456:abcdefghi"] {
-        let masked = mask_telegram_bot_token(token).expect("non-empty token should mask");
-        let revealed = masked
-            .strip_prefix("****")
-            .expect("mask should keep fixed redaction prefix");
-        assert!(!revealed.is_empty());
-        assert!(revealed.chars().count() <= 4);
-        assert!(token.trim().ends_with(revealed));
+        assert_telegram_token_mask_suffix_contract(token);
     }
 }
 

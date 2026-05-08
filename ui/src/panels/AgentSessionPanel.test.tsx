@@ -875,10 +875,17 @@ describe("AgentSessionPanel conversation caching", () => {
     fireEvent.click(
       within(reopenedAddMenu).getByRole("menuitem", { name: "Add checkpoint marker" }),
     );
+    const markerLabelInput = screen.getByLabelText("Marker label");
+    expect(markerLabelInput).toHaveValue("Checkpoint");
+    fireEvent.change(markerLabelInput, {
+      target: { value: "Review later" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create marker" }));
 
     expect(onCreateConversationMarker).toHaveBeenCalledWith(
       "session-1",
       "message-2",
+      { name: "Review later" },
     );
 
     fireEvent.contextMenu(screen.getByText("Agent message-2"));
@@ -1167,10 +1174,12 @@ describe("AgentSessionPanel conversation caching", () => {
     fireEvent.click(
       screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
     );
+    fireEvent.click(screen.getByRole("button", { name: "Create marker" }));
 
     expect(onCreateConversationMarker).toHaveBeenCalledWith(
       "session-1",
       "message-1",
+      { name: "Checkpoint" },
     );
   });
 
@@ -1225,6 +1234,7 @@ describe("AgentSessionPanel conversation caching", () => {
     fireEvent.click(
       screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
     );
+    fireEvent.click(screen.getByRole("button", { name: "Create marker" }));
 
     fireEvent.contextMenu(assistantMeta!);
     expect(
@@ -1234,6 +1244,7 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(onCreateConversationMarker).toHaveBeenCalledWith(
       "session-1",
       "message-1",
+      { name: "Checkpoint" },
     );
   });
 
@@ -1298,22 +1309,26 @@ describe("AgentSessionPanel conversation caching", () => {
     fireEvent.click(
       screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
     );
+    fireEvent.click(screen.getByRole("button", { name: "Create marker" }));
 
     assistantMeta!.focus();
     await user.keyboard("{Enter}");
     fireEvent.click(
       screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
     );
+    fireEvent.click(screen.getByRole("button", { name: "Create marker" }));
 
     expect(onCreateConversationMarker).toHaveBeenNthCalledWith(
       1,
       "session-1",
       "message-2",
+      { name: "Checkpoint" },
     );
     expect(onCreateConversationMarker).toHaveBeenNthCalledWith(
       2,
       "session-1",
       "message-2",
+      { name: "Checkpoint" },
     );
   });
 

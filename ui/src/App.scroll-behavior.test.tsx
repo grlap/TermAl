@@ -997,6 +997,35 @@ describe("App scroll behaviour", () => {
           await flushUiWork();
         });
         scrollToMock.mockClear();
+        let growSecondAssistantAfterFirstFollow = true;
+        scrollToMock.mockImplementation(function (
+          this: HTMLElement,
+          options?: ScrollToOptions | number,
+          y?: number,
+        ) {
+          if (
+            typeof options === "object" &&
+            options !== null &&
+            typeof options.top === "number"
+          ) {
+            this.scrollTop = options.top;
+            // Simulate rendered message content measuring taller after the
+            // first follow scroll.
+            if (
+              growSecondAssistantAfterFirstFollow &&
+              options.behavior === "smooth" &&
+              options.top === 900
+            ) {
+              growSecondAssistantAfterFirstFollow = false;
+              scrollHeight = 1200;
+            }
+            return;
+          }
+
+          if (typeof options === "number" && typeof y === "number") {
+            this.scrollTop = y;
+          }
+        });
 
         scrollHeight = 1100;
         await dispatchStateEvent(latestEventSource(), {
@@ -1037,6 +1066,9 @@ describe("App scroll behaviour", () => {
 
         expect(
           filterScrollToCallsAt(scrollToMock, 900, "smooth").length,
+        ).toBeGreaterThan(0);
+        expect(
+          filterScrollToCallsAt(scrollToMock, 1000, "smooth").length,
         ).toBeGreaterThan(0);
         expect(
           screen.queryByRole("button", { name: "New response" }),

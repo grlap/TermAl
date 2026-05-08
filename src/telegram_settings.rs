@@ -74,6 +74,8 @@ impl AppState {
         // cannot leave references that the next status read would hide.
         file.config = self.sanitize_telegram_config_for_current_state(file.config);
         self.persist_telegram_bot_file(&file)?;
+        #[cfg(not(test))]
+        self.reconcile_telegram_relay_for_loaded_file(&file);
 
         Ok(self.telegram_status_from_file(file))
     }
@@ -114,10 +116,8 @@ impl AppState {
         TelegramStatusResponse {
             configured,
             enabled: config.enabled,
-            // Phase 0 only persists configuration. The supervised in-process
-            // relay will flip this once lifecycle ownership moves into the backend.
-            running: false,
-            lifecycle: TelegramLifecycle::Manual,
+            running: telegram_relay_running(),
+            lifecycle: telegram_relay_lifecycle(),
             linked_chat_id: file.state.chat_id,
             bot_token_masked: config.bot_token.as_deref().and_then(mask_telegram_bot_token),
             subscribed_project_ids: config.subscribed_project_ids,
@@ -295,6 +295,32 @@ impl AppState {
         }
 
         config
+    }
+
+    #[cfg(not(test))]
+    fn reconcile_telegram_relay_from_saved_settings(&self) {
+        let _guard = telegram_settings_file_guard();
+        match self.load_telegram_bot_file() {
+            Ok(file) => self.reconcile_telegram_relay_for_loaded_file(&file),
+            Err(err) => {
+                eprintln!(
+                    "telegram settings> failed to load relay config for startup: {}",
+                    sanitize_telegram_log_detail(&err.message)
+                );
+                stop_telegram_relay_runtime();
+            }
+        }
+    }
+
+    #[cfg(not(test))]
+    fn reconcile_telegram_relay_for_loaded_file(&self, file: &TelegramBotFile) {
+        let mut file = file.clone();
+        file.config = self.sanitize_telegram_config_for_current_state(file.config);
+        if let Some(config) = TelegramBotConfig::from_ui_file(&self.default_workdir, &file) {
+            start_telegram_relay_runtime(config);
+        } else {
+            stop_telegram_relay_runtime();
+        }
     }
 }
 

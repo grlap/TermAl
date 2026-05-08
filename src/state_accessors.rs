@@ -209,42 +209,61 @@ mod visible_session_hydration_error_tests {
         )
         .expect("test state should initialize");
 
-        let session_id = {
+        let (remote_session_id, local_session_id) = {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
-            let record = inner.create_session(
+            let remote_record = inner.create_session(
                 Agent::Codex,
                 Some("Remote Proxy".to_owned()),
                 root.path().to_string_lossy().into_owned(),
                 None,
                 None,
             );
-            let session_id = record.session.id.clone();
+            let remote_session_id = remote_record.session.id.clone();
             let index = inner
-                .find_session_index(&session_id)
+                .find_session_index(&remote_session_id)
                 .expect("created session should exist");
             inner.sessions[index].remote_id = Some("ssh-lab".to_owned());
             inner.sessions[index].remote_session_id = Some("remote-session-1".to_owned());
-            session_id
+            let local_record = inner.create_session(
+                Agent::Codex,
+                Some("Local Session".to_owned()),
+                root.path().to_string_lossy().into_owned(),
+                None,
+                None,
+            );
+            (remote_session_id, local_record.session.id.clone())
         };
 
         let summary = state.summary_snapshot();
-        let summary_session = summary
+        let remote_summary_session = summary
             .sessions
             .iter()
-            .find(|session| session.id == session_id)
-            .expect("summary session should exist");
-        assert_eq!(summary_session.remote_id.as_deref(), Some("ssh-lab"));
+            .find(|session| session.id == remote_session_id)
+            .expect("remote summary session should exist");
+        assert_eq!(remote_summary_session.remote_id.as_deref(), Some("ssh-lab"));
+        let local_summary_session = summary
+            .sessions
+            .iter()
+            .find(|session| session.id == local_session_id)
+            .expect("local summary session should exist");
+        assert!(local_summary_session.remote_id.is_none());
 
-        let full = state
-            .get_session(&session_id)
-            .expect("full session should be available");
-        assert_eq!(full.session.remote_id.as_deref(), Some("ssh-lab"));
+        let remote_full = state
+            .get_session(&remote_session_id)
+            .expect("remote full session should be available");
+        assert_eq!(remote_full.session.remote_id.as_deref(), Some("ssh-lab"));
+        let local_full = state
+            .get_session(&local_session_id)
+            .expect("local full session should be available");
+        assert!(local_full.session.remote_id.is_none());
     }
 }
 
 impl AppState {
     fn wire_session_from_record(record: &SessionRecord) -> Session {
         let mut session = record.session.clone();
+        // The record owns remote-proxy identity; the wire field is a derived
+        // UI/API projection and embedded session snapshots are not authoritative.
         session.remote_id = record.remote_id.clone();
         session.messages_loaded = record.session.messages_loaded;
         session.message_count = session_message_count(record);
@@ -272,6 +291,8 @@ impl AppState {
             agent: session.agent,
             workdir: session.workdir.clone(),
             project_id: session.project_id.clone(),
+            // Keep this in sync with `wire_session_from_record`: record metadata
+            // is the source of truth for remote-proxy ownership.
             remote_id: record.remote_id.clone(),
             model: session.model.clone(),
             model_options: session.model_options.clone(),

@@ -642,7 +642,7 @@ export type TelegramStatusResponse = {
   configured: boolean;
   enabled: boolean;
   running: boolean;
-  lifecycle: "manual";
+  lifecycle: "manual" | "inProcess";
   linkedChatId?: number | null;
   botTokenMasked?: string | null;
   subscribedProjectIds: string[];

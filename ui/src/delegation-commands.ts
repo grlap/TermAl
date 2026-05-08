@@ -14,7 +14,7 @@ import {
   type DelegationResultResponse,
   type DelegationStatusResponse,
 } from "./api";
-import { isLocalRemoteId } from "./remotes";
+import { isLocalSessionRemote } from "./remotes";
 import {
   mismatchedDelegationIdErrorPacket,
   mixedServerInstanceErrorPacket,
@@ -287,7 +287,7 @@ export function resolveComposerDelegationAvailability(
       message: "Delegations are unavailable until the session project is loaded.",
     };
   }
-  if (!isLocalRemoteId(parentSession.remoteId ?? parentProject?.remoteId)) {
+  if (!isLocalSessionRemote(parentSession, parentProject)) {
     return {
       outcome: "error",
       message: "Delegations are available only for local sessions.",

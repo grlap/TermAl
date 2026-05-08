@@ -77,7 +77,7 @@ export type SessionSummarySnapshot = Readonly<{
   modelOptions?: readonly SessionModelOption[];
   name: string;
   projectId?: string | null;
-  remoteId?: string | null;
+  remoteId?: string;
   reasoningEffort?: CodexReasoningEffort | null;
   sandboxMode?: Session["sandboxMode"];
   status: Session["status"];

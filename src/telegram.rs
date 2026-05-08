@@ -22,7 +22,14 @@ fn run_telegram_bot() -> Result<()> {
         .to_str()
         .context("current directory is not valid UTF-8")?
         .to_owned();
-    let mut config = TelegramBotConfig::from_env(&cwd)?;
+    let config = TelegramBotConfig::from_env(&cwd)?;
+    run_telegram_bot_with_config(config, None)
+}
+
+fn run_telegram_bot_with_config(
+    mut config: TelegramBotConfig,
+    shutdown: Option<Arc<AtomicBool>>,
+) -> Result<()> {
     let termal = TermalApiClient::new(&config.api_base_url)?;
     let telegram = TelegramApiClient::new(&config.bot_token, config.poll_timeout_secs)?;
     let bot = telegram.get_me().map_err(|err| {
@@ -60,18 +67,21 @@ fn run_telegram_bot() -> Result<()> {
         ),
     }
 
-    loop {
+    while !telegram_relay_shutdown_requested(&shutdown) {
         let updates = match telegram.get_updates(state.next_update_id, config.poll_timeout_secs) {
             Ok(updates) => updates,
             Err(err) => {
                 log_telegram_error("failed to poll updates", &err);
-                std::thread::sleep(TELEGRAM_ERROR_RETRY_DELAY);
+                telegram_relay_sleep(TELEGRAM_ERROR_RETRY_DELAY, &shutdown);
                 continue;
             }
         };
 
         let mut dirty = false;
         for update in updates {
+            if telegram_relay_shutdown_requested(&shutdown) {
+                break;
+            }
             let next_update_id = update.update_id.saturating_add(1);
             if state.next_update_id != Some(next_update_id) {
                 state.next_update_id = Some(next_update_id);
@@ -84,16 +94,34 @@ fn run_telegram_bot() -> Result<()> {
             }
         }
 
-        if let Some(chat_id) = effective_telegram_chat_id(&config, &state) {
-            match sync_telegram_digest(&telegram, &termal, &config, &mut state, chat_id) {
-                Ok(changed) => dirty |= changed,
-                Err(err) => log_telegram_error("failed to sync digest", &err),
+        if !telegram_relay_shutdown_requested(&shutdown) {
+            if let Some(chat_id) = effective_telegram_chat_id(&config, &state) {
+                match sync_telegram_digest(&telegram, &termal, &config, &mut state, chat_id) {
+                    Ok(changed) => dirty |= changed,
+                    Err(err) => log_telegram_error("failed to sync digest", &err),
+                }
             }
         }
 
         if dirty {
             persist_telegram_bot_state(&config.state_path, &state)?;
         }
+    }
+    Ok(())
+}
+
+fn telegram_relay_shutdown_requested(shutdown: &Option<Arc<AtomicBool>>) -> bool {
+    shutdown
+        .as_ref()
+        .is_some_and(|value| value.load(Ordering::Relaxed))
+}
+
+fn telegram_relay_sleep(duration: Duration, shutdown: &Option<Arc<AtomicBool>>) {
+    let mut remaining = duration;
+    while !remaining.is_zero() && !telegram_relay_shutdown_requested(shutdown) {
+        let chunk = remaining.min(Duration::from_millis(100));
+        std::thread::sleep(chunk);
+        remaining = remaining.saturating_sub(chunk);
     }
 }
 
@@ -148,6 +176,151 @@ impl TelegramBotConfig {
             state_path,
         })
     }
+
+    #[cfg(not(test))]
+    fn from_ui_file(default_workdir: &str, file: &TelegramBotFile) -> Option<Self> {
+        if !file.config.enabled {
+            return None;
+        }
+        let bot_token = file
+            .config
+            .bot_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?
+            .to_owned();
+        let project_id = file
+            .config
+            .default_project_id
+            .as_deref()
+            .or_else(|| file.config.subscribed_project_ids.first().map(String::as_str))?
+            .to_owned();
+        let state_path = resolve_termal_data_dir(default_workdir).join("telegram-bot.json");
+
+        Some(Self {
+            api_base_url: default_termal_api_base_url(),
+            bot_username: None,
+            bot_token,
+            chat_id: file.state.chat_id,
+            poll_timeout_secs: TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS,
+            project_id,
+            public_base_url: None,
+            state_path,
+        })
+    }
+}
+
+#[cfg(not(test))]
+#[derive(Default)]
+struct TelegramRelayRuntime {
+    config_fingerprint: Option<String>,
+    shutdown: Option<Arc<AtomicBool>>,
+}
+
+#[cfg(not(test))]
+static TELEGRAM_RELAY_RUNTIME: LazyLock<Mutex<TelegramRelayRuntime>> =
+    LazyLock::new(|| Mutex::new(TelegramRelayRuntime::default()));
+#[cfg(not(test))]
+static TELEGRAM_RELAY_RUNNING: AtomicBool = AtomicBool::new(false);
+#[cfg(not(test))]
+static TELEGRAM_RELAY_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(not(test))]
+fn start_telegram_relay_runtime(config: TelegramBotConfig) {
+    let fingerprint = telegram_relay_config_fingerprint(&config);
+    let mut runtime = TELEGRAM_RELAY_RUNTIME
+        .lock()
+        .expect("telegram relay runtime mutex poisoned");
+    if runtime.config_fingerprint.as_deref() == Some(fingerprint.as_str())
+        && TELEGRAM_RELAY_RUNNING.load(Ordering::Relaxed)
+    {
+        return;
+    }
+
+    if let Some(shutdown) = runtime.shutdown.take() {
+        shutdown.store(true, Ordering::Relaxed);
+    }
+
+    let shutdown = Arc::new(AtomicBool::new(false));
+    runtime.shutdown = Some(shutdown.clone());
+    runtime.config_fingerprint = Some(fingerprint);
+    let generation = TELEGRAM_RELAY_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+    TELEGRAM_RELAY_RUNNING.store(true, Ordering::Relaxed);
+    drop(runtime);
+
+    if let Err(err) = std::thread::Builder::new()
+        .name("termal-telegram-relay".to_owned())
+        .spawn(move || {
+            let result = run_telegram_bot_with_config(config, Some(shutdown));
+            if let Err(err) = result {
+                eprintln!(
+                    "telegram> in-process relay stopped: {}",
+                    sanitize_telegram_log_detail(&err.to_string())
+                );
+            }
+            if TELEGRAM_RELAY_GENERATION.load(Ordering::Relaxed) == generation {
+                TELEGRAM_RELAY_RUNNING.store(false, Ordering::Relaxed);
+            }
+        })
+    {
+        TELEGRAM_RELAY_RUNNING.store(false, Ordering::Relaxed);
+        eprintln!(
+            "telegram> failed to start in-process relay: {}",
+            sanitize_telegram_log_detail(&err.to_string())
+        );
+    }
+}
+
+#[cfg(not(test))]
+fn stop_telegram_relay_runtime() {
+    let mut runtime = TELEGRAM_RELAY_RUNTIME
+        .lock()
+        .expect("telegram relay runtime mutex poisoned");
+    if let Some(shutdown) = runtime.shutdown.take() {
+        shutdown.store(true, Ordering::Relaxed);
+    }
+    runtime.config_fingerprint = None;
+    TELEGRAM_RELAY_GENERATION.fetch_add(1, Ordering::Relaxed);
+    TELEGRAM_RELAY_RUNNING.store(false, Ordering::Relaxed);
+}
+
+#[cfg(not(test))]
+fn telegram_relay_running() -> bool {
+    TELEGRAM_RELAY_RUNNING.load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+fn telegram_relay_running() -> bool {
+    false
+}
+
+#[cfg(not(test))]
+fn telegram_relay_lifecycle() -> TelegramLifecycle {
+    TelegramLifecycle::InProcess
+}
+
+#[cfg(test)]
+fn telegram_relay_lifecycle() -> TelegramLifecycle {
+    TelegramLifecycle::Manual
+}
+
+#[cfg(not(test))]
+fn telegram_relay_config_fingerprint(config: &TelegramBotConfig) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(config.api_base_url.as_bytes());
+    hasher.update([0]);
+    hasher.update(config.bot_token.as_bytes());
+    hasher.update([0]);
+    hasher.update(config.chat_id.unwrap_or_default().to_le_bytes());
+    hasher.update([0]);
+    hasher.update(config.poll_timeout_secs.to_le_bytes());
+    hasher.update([0]);
+    hasher.update(config.project_id.as_bytes());
+    hasher.update([0]);
+    if let Some(public_base_url) = config.public_base_url.as_deref() {
+        hasher.update(public_base_url.as_bytes());
+    }
+    format!("{:x}", hasher.finalize())
 }
 
 /// Tracks Telegram bot state.

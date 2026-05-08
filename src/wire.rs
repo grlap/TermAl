@@ -1033,6 +1033,7 @@ struct TelegramUiConfig {
 #[serde(rename_all = "camelCase")]
 enum TelegramLifecycle {
     Manual,
+    InProcess,
 }
 
 /// Represents the Telegram settings response payload.

@@ -96,7 +96,7 @@ async fn run_server() -> Result<()> {
 
     let state = AppState::new(cwd.clone())?;
     let shutdown_state = state.clone();
-    let app = app_router(state).fallback_service(
+    let app = app_router(state.clone()).fallback_service(
         ServeDir::new(ui_dist_dir).not_found_service(ServeFile::new(ui_index_file)),
     );
 
@@ -112,6 +112,8 @@ async fn run_server() -> Result<()> {
     println!("listening: http://{bound}");
     println!("default cwd: {cwd}");
     println!("ui proxy target: /api");
+    #[cfg(not(test))]
+    state.reconcile_telegram_relay_from_saved_settings();
 
     // Compose the graceful-shutdown future:
     //   1. Wait for Ctrl+C / SIGTERM.
@@ -139,6 +141,8 @@ async fn run_server() -> Result<()> {
         .with_graceful_shutdown(graceful_shutdown_future)
         .await
         .context("backend server failed");
+    #[cfg(not(test))]
+    stop_telegram_relay_runtime();
 
     // Graceful-shutdown drain: block until the background persist thread
     // has written every queued mutation to SQLite. Without this the

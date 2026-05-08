@@ -51,6 +51,7 @@ import {
 import type {
   ApprovalDecision,
   CodexState,
+  CreateConversationMarkerOptions,
   DiffMessage,
   JsonValue,
   McpElicitationAction,
@@ -343,6 +344,7 @@ export function WorkspaceNodeView({
   onCreateConversationMarker: (
     sessionId: string,
     messageId: string,
+    options?: CreateConversationMarkerOptions,
   ) => void;
   onDeleteConversationMarker: (
     sessionId: string,

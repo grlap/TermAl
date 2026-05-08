@@ -86,6 +86,7 @@ import type {
   SandboxMode,
   Session,
   ConversationMarker,
+  CreateConversationMarkerOptions,
 } from "../types";
 import type { PaneViewMode } from "../workspace";
 
@@ -502,7 +503,11 @@ export function AgentSessionPanel({
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
-  onCreateConversationMarker?: (sessionId: string, messageId: string) => void;
+  onCreateConversationMarker?: (
+    sessionId: string,
+    messageId: string,
+    options?: CreateConversationMarkerOptions,
+  ) => void;
   onDeleteConversationMarker?: (sessionId: string, markerId: string) => void;
   onSessionSettingsChange: (
       sessionId: string,
@@ -722,7 +727,11 @@ const SessionBody = memo(function SessionBody({
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
-  onCreateConversationMarker: (sessionId: string, messageId: string) => void;
+  onCreateConversationMarker: (
+    sessionId: string,
+    messageId: string,
+    options?: CreateConversationMarkerOptions,
+  ) => void;
   onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
   onSessionSettingsChange: (
     sessionId: string,
@@ -918,7 +927,11 @@ const SessionConversationPage = memo(function SessionConversationPage({
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
-  onCreateConversationMarker: (sessionId: string, messageId: string) => void;
+  onCreateConversationMarker: (
+    sessionId: string,
+    messageId: string,
+    options?: CreateConversationMarkerOptions,
+  ) => void;
   onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
   conversationSearchQuery: string;
   conversationSearchMatchedItemKeys: ReadonlySet<string>;

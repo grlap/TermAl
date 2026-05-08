@@ -20,7 +20,11 @@ import { createPortal } from "react-dom";
 import { DiffNavArrow } from "./DiffPanelIcons";
 import type { VirtualizedConversationMessageListHandle } from "./VirtualizedConversationMessageList";
 import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
-import type { ConversationMarker, Message } from "../types";
+import type {
+  ConversationMarker,
+  CreateConversationMarkerOptions,
+  Message,
+} from "../types";
 
 type ConversationMarkerContextMenuState = {
   messageId: string;
@@ -29,6 +33,8 @@ type ConversationMarkerContextMenuState = {
   left: number;
   top: number;
   trigger: HTMLElement | null;
+  mode: "actions" | "create";
+  draftName: string;
 };
 
 const NATIVE_MESSAGE_CONTEXT_MENU_SELECTOR = [
@@ -53,6 +59,8 @@ const NATIVE_MESSAGE_CONTEXT_MENU_SELECTOR = [
 const CONVERSATION_MARKER_CONTEXT_MENU_TRIGGER_SELECTOR =
   "[data-conversation-marker-menu-trigger='true']";
 const CONVERSATION_MARKER_CONTEXT_MENU_VIEWPORT_MARGIN_PX = 8;
+const DEFAULT_CONVERSATION_MARKER_NAME = "Checkpoint";
+const CONVERSATION_MARKER_NAME_MAX_LENGTH = 120;
 
 export function groupConversationMarkersByMessageId(
   markers: readonly ConversationMarker[],
@@ -436,7 +444,11 @@ export function useConversationMarkerContextMenu({
   isActive: boolean;
   isMarkerPanelVisible: boolean;
   markersByMessageId: ReadonlyMap<string, readonly ConversationMarker[]>;
-  onCreateConversationMarker: (sessionId: string, messageId: string) => void;
+  onCreateConversationMarker: (
+    sessionId: string,
+    messageId: string,
+    options?: CreateConversationMarkerOptions,
+  ) => void;
   onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
   onSetMarkerPanelVisible: (isVisible: boolean) => void;
   scrollContainerRef: RefObject<HTMLElement | null>;
@@ -448,6 +460,7 @@ export function useConversationMarkerContextMenu({
   const contextMenuRef = useRef<ConversationMarkerContextMenuState | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const firstMenuItemRef = useRef<HTMLButtonElement | null>(null);
+  const createNameInputRef = useRef<HTMLInputElement | null>(null);
   const focusRestoreFrameRef = useRef<number | null>(null);
   const isContextMenuOpen = contextMenu !== null;
   contextMenuRef.current = contextMenu;
@@ -495,6 +508,8 @@ export function useConversationMarkerContextMenu({
         top: clientY,
         messageId,
         trigger,
+        mode: "actions",
+        draftName: DEFAULT_CONVERSATION_MARKER_NAME,
       });
     },
     [],
@@ -526,12 +541,17 @@ export function useConversationMarkerContextMenu({
       return;
     }
     const frameId = window.requestAnimationFrame(() => {
+      if (contextMenu?.mode === "create") {
+        createNameInputRef.current?.focus();
+        createNameInputRef.current?.select();
+        return;
+      }
       firstMenuItemRef.current?.focus();
     });
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [isContextMenuOpen, contextMenu?.messageId]);
+  }, [isContextMenuOpen, contextMenu?.messageId, contextMenu?.mode]);
 
   useLayoutEffect(() => {
     if (!contextMenu || !menuRef.current) {
@@ -609,6 +629,32 @@ export function useConversationMarkerContextMenu({
   const contextMenuMarkers = contextMenu
     ? markersByMessageId.get(contextMenu.messageId) ?? []
     : [];
+  const createMarkerName = contextMenu?.draftName.trim() ?? "";
+  const updateCreateMarkerName = (name: string) => {
+    setContextMenu((current) =>
+      current ? { ...current, draftName: name } : current,
+    );
+  };
+  const showCreateMarkerForm = () => {
+    setContextMenu((current) =>
+      current
+        ? {
+            ...current,
+            mode: "create",
+            draftName: current.draftName || DEFAULT_CONVERSATION_MARKER_NAME,
+          }
+        : current,
+    );
+  };
+  const submitCreateMarker = () => {
+    if (!contextMenu || !createMarkerName) {
+      return;
+    }
+    onCreateConversationMarker(sessionId, contextMenu.messageId, {
+      name: createMarkerName,
+    });
+    closeContextMenu({ restoreFocus: true });
+  };
   const contextMenuNode = contextMenu
     ? createPortal(
         <div
@@ -634,13 +680,46 @@ export function useConversationMarkerContextMenu({
             type="button"
             role="menuitem"
             className="conversation-marker-context-menu-item"
-            onClick={() => {
-              onCreateConversationMarker(sessionId, contextMenu.messageId);
-              closeContextMenu();
-            }}
+            onClick={showCreateMarkerForm}
           >
             Add checkpoint marker
           </button>
+          {contextMenu.mode === "create" ? (
+            <form
+              className="conversation-marker-context-menu-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitCreateMarker();
+              }}
+            >
+              <label className="conversation-marker-context-menu-label">
+                <span>Marker label</span>
+                <input
+                  ref={createNameInputRef}
+                  className="conversation-marker-context-menu-input"
+                  value={contextMenu.draftName}
+                  maxLength={CONVERSATION_MARKER_NAME_MAX_LENGTH}
+                  onChange={(event) => updateCreateMarkerName(event.target.value)}
+                />
+              </label>
+              <div className="conversation-marker-context-menu-form-actions">
+                <button
+                  type="submit"
+                  className="conversation-marker-context-menu-action"
+                  disabled={!createMarkerName}
+                >
+                  Create marker
+                </button>
+                <button
+                  type="button"
+                  className="conversation-marker-context-menu-action"
+                  onClick={() => closeContextMenu({ restoreFocus: true })}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : null}
           {contextMenuMarkers.length > 0 ? (
             <>
               <div className="conversation-marker-context-menu-separator" role="separator" />
@@ -761,6 +840,13 @@ function handleConversationMarkerContextMenuKeyDown(
   menu: HTMLDivElement | null,
   closeMenu: () => void,
 ) {
+  if (
+    event.target instanceof HTMLInputElement &&
+    event.target.closest(".conversation-marker-context-menu-form") &&
+    event.key !== "Escape"
+  ) {
+    return;
+  }
   if (event.key === "Escape") {
     event.preventDefault();
     event.stopPropagation();

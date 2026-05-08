@@ -448,6 +448,51 @@ describe("useAppSessionActions", () => {
     expect(params.setters.setRequestError).toHaveBeenCalledWith(null);
   });
 
+  it("uses the provided checkpoint marker label when creating markers", async () => {
+    const marker = makeConversationMarker({
+      name: "Review later",
+    });
+    const session = makeSession("session-1", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          author: "assistant",
+          text: "Decision point",
+          timestamp: "10:00",
+        },
+      ],
+      markers: [],
+    });
+    const createConversationMarkerSpy = vi
+      .spyOn(api, "createConversationMarker")
+      .mockResolvedValue({
+        marker,
+        revision: 6,
+        serverInstanceId: "server-a",
+        sessionMutationStamp: 6,
+      });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[session.id, session]]);
+    params.refs.sessionsRef.current = [session];
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleCreateConversationMarker("session-1", "message-1", {
+        name: "  Review later  ",
+      }),
+    ).resolves.toBe(true);
+
+    expect(createConversationMarkerSpy).toHaveBeenCalledWith("session-1", {
+      kind: "checkpoint",
+      name: "Review later",
+      body: null,
+      color: "#3b82f6",
+      messageId: "message-1",
+      endMessageId: null,
+    });
+  });
+
   it("treats stale same-instance marker success as a no-op", async () => {
     const currentMarker = makeConversationMarker();
     const responseMarker = { ...currentMarker };

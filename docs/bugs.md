@@ -7,6 +7,111 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Telegram relay routes to an implicit first subscribed project when no default is set
+
+**Severity:** Medium - `src/telegram.rs:196`, `src/telegram_settings.rs:319` fall back to the first `subscribedProjectIds` entry even when `/api/telegram/status` reports `defaultProjectId: null`.
+
+That makes subscribed-project array order part of the Telegram execution contract without exposing the active target to API clients. A user or client can see "no default project" in status while Telegram prompts and actions still route to an implicit project.
+
+**Current behavior:**
+- In-process relay can start with `defaultProjectId: null`.
+- Prompt/action routing silently chooses the first subscribed project.
+- `/api/telegram/status` does not expose that effective target.
+
+**Proposal:**
+- Require an explicit default or active project before starting the relay.
+- Or expose/normalize an `activeProjectId` in Telegram status and route through that field.
+
+## Deleted Telegram projects do not reconcile the running relay
+
+**Severity:** Medium - `src/session_crud.rs:525`, `src/telegram_settings.rs:259` prune deleted-project references from the saved Telegram config but do not stop or restart an already-running in-process relay.
+
+After `DELETE /api/projects/{id}`, the running relay can keep polling with the deleted project id captured in its `TelegramBotConfig`, while status continues to report `running: true`.
+
+**Current behavior:**
+- Project deletion prunes Telegram config on disk.
+- Existing in-process relay keeps its previously captured config.
+- Status can report a running relay after its target project was deleted.
+
+**Proposal:**
+- After a successful prune, reconcile the relay through the same stop/restart path used by `/api/telegram/config`.
+- Add a deletion-path regression that proves the running relay no longer uses the deleted project id.
+
+## Telegram relay stop/restart does not wait for old thread quiescence
+
+**Severity:** Medium - `src/main.rs:145`, `src/telegram.rs:240` signal the Telegram relay to stop but do not join the old relay thread or otherwise wait until it has stopped using its captured config.
+
+After shutdown, disable, or config retargeting, a relay that already passed its shutdown check can briefly continue polling or handling Telegram updates with the old bot/project configuration. During process shutdown this can also exit before update cursors or state-file work has quiesced.
+
+**Current behavior:**
+- Stop/restart flips a shutdown flag for the old relay.
+- The old detached thread is not joined.
+- Replacement or shutdown can proceed before the old relay is fully idle.
+
+**Proposal:**
+- Retain a relay `JoinHandle` and join with a bounded timeout during restart and graceful shutdown.
+- Or gate update/action side effects on a runtime generation check immediately before each side effect.
+
+## Remote delta replay fingerprints include ignored inbound `remote_id`
+
+**Severity:** Medium - `src/remote_routes.rs:529` fingerprints the full inbound `Session` for replay suppression even though `localize_remote_session` intentionally clears untrusted inbound `remote_id` before applying state.
+
+Two same-revision remote `SessionCreated` events that differ only by attacker-chosen or stale `remoteId` are semantically identical after localization, but they can produce different replay keys and bypass duplicate suppression.
+
+**Current behavior:**
+- Replay key includes inbound `Session.remote_id`.
+- Localization discards inbound `remote_id`.
+- Same-revision duplicates that only differ by `remoteId` can republish duplicate local deltas.
+
+**Proposal:**
+- Fingerprint the normalized/localizable session payload, clearing `remote_id` before hashing.
+- Add a same-revision replay test where only inbound `remoteId` differs.
+
+## Summary reconciliation can ignore `remoteId`-only ownership changes
+
+**Severity:** Medium - `ui/src/session-reconcile.ts:149` can return the previous summary session on equal `sessionMutationStamp` before comparing the new `remoteId`.
+
+A state snapshot that changes only session remote ownership can be ignored in the frontend, leaving delegation gates and tab tooltips using stale local/project ownership.
+
+**Current behavior:**
+- Equal `sessionMutationStamp` can trigger the fast path.
+- `remoteId` changes are not part of that fast-path guard.
+- UI ownership-dependent behavior can stay stale after a summary-only ownership update.
+
+**Proposal:**
+- Include `remoteId` in the summary reconciliation fast-path comparison.
+- Or ensure backend remote-owner changes always bump the stamp used by this guard.
+
+## Marker context-menu focus restore targets the message shell
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:1143` stores the message shell as the right-click marker menu focus-restore target instead of the actual marker metadata trigger.
+
+Focus restoration can land on a `tabIndex=-1` wrapper with no role or label, and keyboard activation from that wrapper cannot reopen the marker menu.
+
+**Current behavior:**
+- Context-menu open paths can store the message shell as the restore target.
+- The shell is programmatically focusable but not an operable, labelled trigger.
+- Restored keyboard users can be stranded away from the marker menu trigger.
+
+**Proposal:**
+- Pass the resolved marker trigger element for context-menu opens.
+- Or make the shell itself a real labelled trigger with equivalent keyboard behavior.
+
+## Telegram preferences copy hides stopped in-process relay state
+
+**Severity:** Low - `ui/src/preferences-panels.tsx:1198`. The frontend type now accepts `TelegramStatusResponse.lifecycle === "inProcess"`, but the status label still only distinguishes `running` from generic linked/configured states.
+
+With backend-supervised relay ownership, `enabled && lifecycle === "inProcess" && !running` can indicate a failed or stopped relay. Presenting that state as merely configured/linked gives the user no actionable signal.
+
+**Current behavior:**
+- `lifecycle: "inProcess"` is accepted by the API type.
+- Running state gets distinct copy.
+- Stopped in-process relay state falls through to generic configured/linked copy.
+
+**Proposal:**
+- Add explicit stopped/failed supervised-relay copy such as "Relay stopped".
+- Add preferences-panel coverage for both running and non-running `inProcess` states.
+
 ## Telegram bot token is persisted as plaintext in `telegram-bot.json`
 
 **Severity:** Medium - `TelegramUiConfig.bot_token` is serialized directly into `~/.termal/telegram-bot.json`.
@@ -22,93 +127,178 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 - Move the token to an OS secret store, or keep token configuration env-only until protected storage exists.
 - If file persistence stays, add explicit Windows ACL handling and document backup/sync exposure.
 
-## Session tab tooltip ignores session-level remote ownership
+## Marker create form uses menu semantics for form controls
 
-**Severity:** Low - `ui/src/panels/session-tab-status-tooltip.tsx:160` derives session location from `session.projectId -> project.remoteId` even though session summaries now carry `remoteId`.
+**Severity:** Medium - `ui/src/panels/conversation-markers.tsx:663`. The marker popup keeps `role="menu"` while rendering a marker-label form with an `<input>` and normal buttons.
 
-Projectless or missing-project remote proxy sessions can still display as local or unknown in tab tooltips. The delegation gate now correctly prefers session-level ownership, but the tooltip continues to reflect the older project-only mental model.
+ARIA menus should contain menu items, not arbitrary form controls. The current split-mode menu/form hybrid can produce inconsistent assistive-technology and keyboard behavior, especially while create mode is active.
 
 **Current behavior:**
-- Session summaries expose `remoteId`.
-- Tab tooltip location still looks up the project first.
-- Projectless or missing-project remote proxy sessions can display the wrong location.
+- Create form renders inside the same `role="menu"` container as action menuitems.
+- Form input and buttons are ordinary form controls, not menuitems.
+- Other menu actions can remain present while the draft name is being edited.
 
 **Proposal:**
-- Prefer `session.remoteId` when formatting session location.
-- Fall back to project remote metadata only when the session has no remote owner.
-- Add tooltip coverage for projectless and missing-project remote proxy sessions.
+- Switch create mode to dialog/popover semantics.
+- Or scope/remove the menu role so only the action-list state is exposed as a menu.
+- Keep focus contained to one interaction model while the draft name is being edited.
 
-## Session remote ownership precedence is duplicated across UI gates
+## Three sites must keep the marker name 120-char limit in sync
 
-**Severity:** Low - `ui/src/SessionPaneView.tsx:547` and `ui/src/delegation-commands.ts:290` both encode the local-vs-remote owner rule as `session.remoteId ?? project.remoteId`.
-
-That precedence is now the capability boundary for local delegation actions. Keeping it duplicated invites drift between visibility gating and spawn-time validation.
+**Severity:** Note - `ui/src/panels/conversation-markers.tsx:62-63, 632, 644` defines `DEFAULT_CONVERSATION_MARKER_NAME = "Checkpoint"` and `CONVERSATION_MARKER_NAME_MAX_LENGTH = 120` as module-level constants. The Rust backend enforces the same at `src/session_markers.rs:8` (`CONVERSATION_MARKER_NAME_MAX_CHARS: usize = 120`) with default-name fallback at `app-session-actions.ts:2216`. Three sites must stay in sync.
 
 **Current behavior:**
-- `SessionPaneView` gates delegation action visibility with one copy of the precedence rule.
-- `resolveComposerDelegationAvailability` validates composer delegation with a second copy.
-- Future changes to the owner rule must be mirrored manually.
+- TS module constants for default-name and max-length.
+- Rust enforces same limits via separate constant.
+- TS fallback at `app-session-actions.ts:2216` echoes the same default name.
+- A future change to the limit on the server would silently truncate UI input until the constants are updated.
 
 **Proposal:**
-- Centralize the rule in a helper such as `resolveSessionOwnerRemoteId(session, project)` or `canUseLocalDelegation(session, project)`.
-- Reuse that helper for button gating, composer availability, and any tooltip/location callers.
+- Document the contract in a comment at the constant definition site.
+- Or expose the limit via the wire protocol (e.g., `serverCapabilities.markerNameMaxLength`).
 
-## Session remote owner wire projection invariant is implicit
+## `localize_remote_session` defensive comment doesn't grep-discoverably name `wire_session_from_record`
 
-**Severity:** Low - `src/wire.rs:491`, `src/state_accessors.rs:248`, and `src/remote_sync.rs:534` split remote ownership between authoritative `SessionRecord.remote_id` metadata and `Session.remote_id` wire projection.
-
-The design is correct, but subtle: `Session.remote_id` is client-facing owner metadata, while durable proxy ownership remains on `SessionRecord`. Future code could accidentally treat the embedded `record.session.remote_id` as authoritative or forget to clear upstream remote metadata during localization.
+**Severity:** Note - `src/remote_sync.rs:531-535`. Round 72's added comment correctly explains intent ("Never trust an upstream wire `remote_id`...wire helpers re-project it"), but refers to "wire helpers re-project it for local clients" without naming `wire_session_from_record` directly. Cross-referencing the helper function name would make the contract grep-discoverable.
 
 **Current behavior:**
-- Wire sessions project `SessionRecord.remote_id` into `Session.remoteId`.
-- Remote localization clears the cloned embedded session's `remote_id`.
-- No nearby comment names `SessionRecord.remote_id` as the source of truth.
+- Comment explains the trust boundary.
+- Doesn't name the specific helper function.
 
 **Proposal:**
-- Add a short invariant comment near the wire projection and localization helpers.
-- Or wrap projection/clearing in a named helper that makes the source-of-truth boundary explicit.
+- Mention `wire_session_from_record` (and `wire_session_summary_from_record`) by name in the comment.
 
-## Remote architecture docs still describe routing as project-only
+## `resolveSessionRemoteId` uses `??` while `resolveProjectRemoteId` uses `||` — divergent empty-string semantics
 
-**Severity:** Note - `docs/architecture.md:424` still describes remote routing primarily through `Project.remoteId`, but this change adds `Session.remoteId` as the owner signal for remote-proxy sessions.
+**Severity:** Low - `ui/src/remotes.ts:32`. `resolveSessionRemoteId` uses `??` (nullish coalescing) on `session?.remoteId`, so an explicit empty-string `session.remoteId === ""` is treated as "session declares local" and suppresses project fallback. `resolveProjectRemoteId` (line 24) uses `||` (treats empty string as falsy and falls through).
 
-The old project-only model is exactly what caused delegation capability drift. The docs should distinguish project-scoped creation routing from session-scoped remote ownership.
+The protocol contract is that the wire only sends `Option<String>` (omitted or non-empty), so `""` shouldn't reach this helper from the backend. The `remotes.test.ts:64` test pins this empty-string-overrides-project semantic, but the protocol contract doesn't promise it.
 
 **Current behavior:**
-- Architecture docs describe remote routing through projects.
-- Session-level remote owner metadata is not documented.
-- Future readers may reuse project metadata for capability checks.
+- `resolveSessionRemoteId` uses `??` (`""` overrides project fallback).
+- `resolveProjectRemoteId` uses `||` (`""` falls through to default).
+- Two divergent helpers for symmetric concerns.
 
 **Proposal:**
-- Document that `Project.remoteId` selects execution target for project-scoped creation.
-- Document that `Session.remoteId` identifies a remote-proxy session owner and should take precedence for local capability checks.
+- Either use `||` to match `resolveProjectRemoteId`'s behavior.
+- Or add a comment documenting why `??` is intentional ("explicit empty-string session.remoteId means session-declared local").
 
-## `wire_session_from_record` and `wire_session_summary_from_record` parallel paths could diverge
+## Marker name input HTML `maxLength` counts UTF-16 vs server counts codepoints
 
-**Severity:** Note - `src/state_accessors.rs:246-298`. `wire_session_from_record` mutates a cloned wire Session by copying `record.remote_id` into the wire field; `wire_session_summary_from_record` lists fields explicitly. Two parallel code paths now construct the wire Session and both must remember to populate `remote_id`. A future field added on the record could be added in one place but not the other.
+**Severity:** Note - `ui/src/panels/conversation-markers.tsx:701`. The new input uses `maxLength={CONVERSATION_MARKER_NAME_MAX_LENGTH}` (120). HTML `maxLength` counts UTF-16 code units, not Unicode codepoints. The Rust validator at `src/session_markers.rs:526` uses `.chars().count() > 120` (codepoints). For supplementary-plane characters (e.g., emoji), the UI is more conservative than the server (allowing only ~60 emoji vs. server's 120 codepoints).
 
 **Current behavior:**
-- Two helpers diverge in how they assemble the wire Session.
-- Summary form lists fields explicitly; full form uses clone-and-modify.
-- New `record.foo` fields will silently miss the summary path.
+- HTML `maxLength` counts UTF-16 code units.
+- Rust validator counts codepoints.
+- Emoji input is cut off in UI before server limit is reached.
+
+**Proposal:**
+- Use a controlled-input length check on the codepoint count.
+- Or document the intentional UI-side conservatism.
+
+## `window.resize` close-handler interacts awkwardly with mobile soft keyboards
+
+**Severity:** Note - `ui/src/panels/conversation-markers.tsx:613`. The pointer/keyboard menu-dismissal effect installs a `window.addEventListener("resize", handleViewportMove)`. With the form mode now exposing a text input, mobile-browser keyboard popups (which fire `resize`) would close the menu mid-typing.
+
+On desktop this is rare, but it's a regression from the pre-form behavior where typing wasn't possible inside the menu.
+
+**Current behavior:**
+- Resize event closes menu.
+- Mobile soft keyboard fires resize on appearance.
+- Form mode would close mid-typing on mobile.
+
+**Proposal:**
+- Skip the resize/scroll close handlers when `contextMenu.mode === "create"`.
+- Or add a small-resize tolerance.
+
+## Form keyDown guard only short-circuits HTMLInputElement, not buttons
+
+**Severity:** Note - `ui/src/panels/conversation-markers.tsx:838-849`. `handleConversationMarkerContextMenuKeyDown` only short-circuits for `HTMLInputElement` targets, not for `HTMLButtonElement` (the submit/cancel buttons). When focus is on the `Create marker` or `Cancel` button, pressing arrow keys falls through to `getConversationMarkerContextMenuItems(menu)` and moves focus to other menuitems, breaking the form's local focus context.
+
+**Current behavior:**
+- Input target → short-circuit (form-local focus).
+- Button target → falls through to menuitem navigation.
+- Keyboard users tabbing to submit button and pressing Down jump unexpectedly.
+
+**Proposal:**
+- Extend the early-return guard to include any focus target inside `.conversation-marker-context-menu-form` (matches `closest()`).
+
+## `Session.remoteId` type lacks "non-empty when present" comment
+
+**Severity:** Note - `ui/src/types.ts:290`, `ui/src/session-store.ts:80`. Round 72 dropped `| null` from `remoteId` (matches Rust contract). However, no centralized comment documents that the field is "either present and non-empty, or absent" — the single contract a TS reader should know.
+
+Future contributors might re-add `| null` if they encounter `null` in a test fixture or local-only path.
+
+**Current behavior:**
+- TS type is `remoteId?: string`.
+- Rust contract is "field-or-missing, never empty".
+- Contract not documented in TS.
+
+**Proposal:**
+- Add a brief comment on the field: `// non-empty when the session is remote-proxy; absent otherwise (Rust never emits null).`
+
+## Marker create form coverage gaps in `AgentSessionPanel.test.tsx`
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:875-883`. Only one test exercises the custom-name path. There is no focused test for: (a) whitespace-only input keeping submit disabled; (b) initial input focus/select; (c) pressing `Cancel` without invoking `onCreateConversationMarker`; (d) pressing `Escape` inside the input canceling and restoring focus to the trigger; (e) whitespace trim mid-string (`"  Review later  "` produces `"Review later"`); (f) non-empty draftName persistence vs reset across menu close-reopen.
+
+**Current behavior:**
+- One custom-name test.
+- Several form-behavior branches uncovered.
+
+**Proposal:**
+- Add per-behavior tests.
+
+## `session-tab-status-tooltip.test.ts` missing remote-config edge cases
+
+**Severity:** Low - `ui/src/panels/session-tab-status-tooltip.test.ts:45-92`. The new test file covers four scenarios (session+project both local/remote, projectless, missing-project, missing-project+no-session-remote). It does not cover: (a) session has `remoteId: "ssh-removed"` (not in `remoteLookup`) → expected "ssh-removed (missing remote)"; (b) session has empty-string `remoteId: ""` with a missing project; (c) session has both project and `remoteId` pointing at different remotes (conflict scenario).
+
+**Current behavior:**
+- 4 scenarios covered.
+- "Missing remote" branch in `formatSessionTooltipRemoteLabel` is unexercised.
+- Conflict scenario unverified.
+- Rendered tab-tooltip behavior is not pinned for these ownership cases.
+
+**Proposal:**
+- Extend the test file with the missing-remote and conflict scenarios.
+- Add rendered tab tooltip coverage for session-owned remote labels, not only helper-level expectations.
+
+## `remotes.test.ts` "resolves session remote ownership" bundles 7 expects in one `it()`
+
+**Severity:** Note - `ui/src/remotes.test.ts:64-72`. Single `it("resolves session remote ownership before project remote ownership")` block bundles four `expect` assertions for `resolveSessionRemoteId` and three for `isLocalSessionRemote`. Same bundling pattern flagged elsewhere.
+
+**Current behavior:**
+- 7 assertions in one `it()`.
+- Failure messages cluster.
+
+**Proposal:**
+- Split into per-case tests.
+
+## `App.scroll-behavior.test.tsx` mid-test mock override needs documenting comment
+
+**Severity:** Note - `ui/src/App.scroll-behavior.test.tsx:1000-1028`. The test now overrides `scrollToMock.mockImplementation` mid-test to add stateful scrollHeight growth. The override persists for the remainder of the `it` block but is replaced by the next test's `mockScrollToAndApplyTop()` call. If a future contributor adds another assertion expecting the standard apply-top behavior in the same test, the stateful mock could mislead.
+
+**Current behavior:**
+- Mid-test mock override.
+- No comment explaining the divergence.
+
+**Proposal:**
+- Add a one-liner comment near the mock override explaining why it deliberately diverges from the harness default.
+
+## `wire_session_from_record` and `wire_session_summary_from_record` parallel paths still risk drift
+
+**Severity:** Note - `src/state_accessors.rs:285-318`. Round 72 added comments to both helpers reminding callers to keep them in sync, but the structural risk remains: any new field added to wire `Session` must be remembered in the explicit struct literal at `wire_session_summary_from_record`. The first proposal (refactor to a single field list) was not adopted; the second (debug-assert summary equals full for shared fields) was also not adopted.
+
+Comments are documentation-only mitigation — they don't fail when the contract drifts.
+
+**Current behavior:**
+- Round 72 added sync-reminder comments at both call sites.
+- Summary form still lists fields explicitly; full form uses clone-and-modify.
+- New `record.foo` fields can silently miss the summary path.
 
 **Proposal:**
 - Add a debug-assert that the summary form's output equals the full form's output for shared fields.
-- Or refactor to share a single field list.
-
-## `localize_remote_session` defensive `remote_id` clear lacks contract comment
-
-**Severity:** Note - `src/remote_sync.rs:534`. The function defensively zeroes the wire `remote_id` so that the inbound value from the remote is not trusted. The SessionRecord then re-derives the truthful value via `wire_session_from_record`. The round-trip contract (wire field is a derived projection; record field is source of truth) is not documented in code.
-
-A future contributor may be tempted to keep the inbound wire value, breaking the trust boundary.
-
-**Current behavior:**
-- Defensive clear at `localize_remote_session`.
-- Wire field is re-populated from `record.remote_id` on serialization.
-- No code comment explains the defensive intent.
-
-**Proposal:**
-- Add a one-line comment: "wire `remote_id` is populated from `record.remote_id` by `wire_session_from_record`; the inbound value from the remote is not trusted."
+- Or refactor `wire_session_summary_from_record` to call `wire_session_from_record` and then strip messages/messages_loaded.
+- Or introduce a separate `SessionSummary` wire struct that omits `messages`/`messages_loaded` (eliminates the duplicate field list naturally).
 
 ## `exposesMarkerMenu = true` constant leaves dead conditional branches
 
@@ -187,29 +377,30 @@ In practice `windows().enumerate()` only matches alphanumeric needles ("telegram
 
 ## Cross-remote `remote_id` information leak in wire responses to remotes
 
-**Severity:** Note - `src/wire.rs:490-491`. Adding `remote_id: Option<String>` to wire Session means the field is now in every API response that returns a Session, including responses we serve to remotes. If we proxy a session for remote A and remote B asks us for that proxy session, the wire would emit `remote_id: "remote-a-id"`, leaking our naming for A to B.
+**Severity:** Low - `src/wire.rs:490-491`, `src/state_accessors.rs:267`. Adding `remote_id: Option<String>` to wire Session means the field is now in every API response that returns a Session, including `/api/state`, session responses, SSE `SessionCreated` payloads, and responses we serve to remotes. If we proxy a session for remote A and remote B asks us for that proxy session, the wire would emit `remote_id: "remote-a-id"`, leaking our naming for A to B.
 
 The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but it's now visible across remotes. Phase 1 trust model may waive this.
 
 **Current behavior:**
-- `remote_id` exposed in all wire Session responses.
+- `remote_id` exposed in broad wire Session responses.
 - `localize_remote_session` clears the field on inbound (correct).
 - Outbound responses to remotes still include OUR alias for OTHER remotes.
 
 **Proposal:**
 - When serving wire Sessions to remotes (vs. to local UI), strip the `remote_id` field.
-- Or accept the leak as Phase 1 trust model.
+- Or explicitly document that local remote aliases/session-to-remote ownership are non-sensitive shared metadata under the Phase 1 trust model.
 
 ## No test for inbound attacker-chosen `remote_id` in `localize_remote_session`
 
-**Severity:** Note - `src/remote_sync.rs:534`. The defensive clear of inbound wire `remote_id` is correct, but no test covers the case where a remote sends `remote_id` set to an attacker-chosen value. The `apply_remote_session_to_record` path overwrites with the trusted `remote_id` from the connection, so this is safe — but the defense is implicit.
+**Severity:** Note - `src/remote_sync.rs:534`. The defensive clear of inbound wire `remote_id` is correct, but no test covers the case where a remote snapshot sends `remote_id` set to an attacker-chosen value. The `apply_remote_session_to_record` path should overwrite with the trusted `remote_id` from the connection, so this is safe only if that production ingestion path is exercised.
 
 **Current behavior:**
 - Defensive clear is correct.
-- No test exercises the attacker-claim case.
+- Existing coverage can set record metadata directly instead of feeding an inbound remote snapshot.
+- No test exercises the attacker-claim case through the production localization/ingestion path.
 
 **Proposal:**
-- Add a Rust test that simulates a remote sending `Session` with `remote_id: Some("OTHER-REMOTE")` and asserts the resulting `record.remote_id` is the trusted connection id.
+- Add a Rust test that simulates a remote snapshot sending `Session` with `remote_id: Some("OTHER-REMOTE")` and asserts the resulting `record.remote_id` is the trusted connection id while embedded wire metadata is cleared.
 
 ## Bundled `delegation-commands.test.ts` `resolveComposerDelegationAvailability` test grew larger
 
@@ -234,28 +425,6 @@ This is already on the bug-ledger backlog as a P2 split task. Round 71 made the 
 
 **Proposal:**
 - Construct a marker with a color produced by `DEFAULT_CONVERSATION_MARKER_COLOR` (the contract value) and assert that color round-trips through normalization.
-
-## `wire_sessions_expose_remote_owner_metadata` test covers Some(remote_id) but not None
-
-**Severity:** Note - `src/state_accessors.rs:200-242`. The new test covers the `Some(remote_id)` case but not the `None` (local session) case. A regression where the wire helper unconditionally wrote `Some("")` for non-proxy sessions would surface as a failure at consumer test sites but not at the new helper-level test.
-
-**Current behavior:**
-- Single-direction (Some) coverage.
-
-**Proposal:**
-- Add a sibling assertion that a session NOT marked as a proxy has `summary_session.remote_id.is_none()` AND `full.session.remote_id.is_none()`.
-
-## TS `Session.remoteId` declares `| null` but Rust never emits null
-
-**Severity:** Note - `src/wire.rs:490-491` uses `#[serde(default, skip_serializing_if = "Option::is_none")]`, so Rust never emits `remoteId: null` (only emits the field when present). The TS type at `ui/src/types.ts:286` declares `remoteId?: string | null`. Future contributors might assume `remoteId: null` is a meaningful state distinct from missing.
-
-**Current behavior:**
-- Rust emits field-or-missing.
-- TS allows `null`, undefined, or string.
-
-**Proposal:**
-- Drop `| null` from the TypeScript type if the protocol never emits it.
-- Or document that null and undefined are equivalent on the wire.
 
 ## Marker focus-restore test bundles two distinct focus paths in one `it()`
 
@@ -344,18 +513,6 @@ Per CLAUDE.md the project enforces split-file headers describing what each file 
 
 **Proposal:**
 - Add `// see docs/features/agent-delegation-sessions.md` (or whichever doc owns the invariant).
-
-## `telegram_token_mask_only_exposes_short_suffix` still bundles 6 cases
-
-**Severity:** Low - `src/tests/telegram.rs:1044-1052`. Round 69 reframed the assertion to a contract ("never expose more than 4 trailing chars") — closes the prior contract-shape concern. But the loop still iterates `["a", "ab", "abc", "abcd", "abcde", "123456:abcdefghi"]` in one `#[test]`. Bundled-assertion anti-pattern.
-
-**Current behavior:**
-- Contract-shaped assertion (good).
-- Loop bundles 6 boundary cases.
-- A regression at the 4-char or empty boundary surfaces inside one test failure.
-
-**Proposal:**
-- Keep the contract loop but split the explicit boundary cases (empty, 2-char, 4-char, 5-char, full) into individual `#[test]`s, mirroring the round-68 split style for bundled telegram tests.
 
 ## `aria-busy` on a `<button>` element is unconventional
 
@@ -590,17 +747,6 @@ A regression where `longestLineStartTildeRun` only walked the summary section bu
 - Add an assertion `expect(params.onComposerError).not.toHaveBeenCalled()` after rendering.
 - Exercise a flag flip mid-test.
 - Or split into per-action coverage.
-
-## `mask_telegram_bot_token` test pins implementation detail rather than contract
-
-**Severity:** Low - `src/tests/telegram.rs:867-886`. The broadened cases close a known coverage gap but the `for token in [...]` loop pins `revealed.chars().count() == token.chars().count().min(4)` which ties the test to the implementation detail that `mask_telegram_bot_token` reveals exactly `min(4, len)` characters. If the function ever shifts to "reveal at most 4 of the trimmed length" or "always pad to 4," the loop assertion needs updating.
-
-**Current behavior:**
-- Test asserts exact count match.
-- Implementation-shaped rather than contract-shaped.
-
-**Proposal:**
-- Pin the contract ("never expose more than 4 trailing chars") rather than the count.
 
 ## `agent-delegation-sessions.md` cancel doc doesn't link wire status to UX phrases
 
@@ -3399,7 +3545,7 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Add Telegram settings file concurrency regressions:
   simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
-  cover API error display, stale default-session clearing, default-project auto-subscription, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
+  cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
 - [ ] P2: Add Telegram assistant-forwarding ownership/order regressions:
   cover an already-active non-Telegram turn before a Telegram prompt, prompt POST failure after forwarding state is prepared, post-send digest failure, a digest primary-session switch before the armed Telegram reply settles, an armed session entering approval with no assistant text before its post-approval reply, and two sessions proving assistant-forwarding cursors are session-scoped.
 - [ ] P2: Add Telegram long-message chunk retry and UTF-16 chunking coverage:
@@ -3534,8 +3680,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   five separate skip conditions (lines 767-783): `allowDivergentTextRepairAfterNewerRevision === true`, session not found, `messagesLoaded !== false`, `messages.length > 0`, `messageCount` below threshold. Add at least one test per skip condition.
 - [ ] P2: Verify partial-adoption preserves `messageCount`:
   add `expect(sessionsRef.current[0]?.messageCount).toBe(150)` after the partial-adoption assertion in `app-live-state.test.ts`. A regression that drops or zeros `messageCount` in the partial path would still let the `messages.length === 100` assertion pass while breaking message-count rendering.
-- [ ] P2: Broaden `mask_telegram_bot_token` test cases:
-  current single happy-case is brittle. Add cases for empty, all-whitespace, < 4 chars (e.g., `"ab"` → `"****ab"`), trimmed-whitespace, full-length token; and an explicit "exactly 4 chars revealed" assertion across input lengths.
 - [ ] P2: Cover `check_telegram_test_rate_limit` cooldown expiration and 60s retain TTL:
   current test covers only "first OK, second rejected". Add cases for (a) third call after >2s passes (cooldown actually expires), (b) entries pruned after 60s `TELEGRAM_TEST_RATE_LIMIT_RETAIN`. Use injected clock or `tokio::time::pause`.
 - [ ] P2: Cover `prune_telegram_config_for_deleted_project` no-op early-return:
@@ -3588,14 +3732,28 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   use deferred promises for open/insert/cancel/rejection paths, switching panes and unmounting before settlement, and assert no stale open/insert/error callback fires afterward.
 - [ ] P2: Cover delegation result prompt indented-fence escaping:
   include child summaries, findings, commands, and notes containing indented tilde fences such as `   ~~~`, and assert the formatter chooses a boundary those lines cannot close.
+- [ ] P2: Cover Telegram relay active-project reconciliation:
+  start an in-process relay with subscribed projects but no default and assert startup fails or status exposes the effective `activeProjectId`; delete a project used by a running relay and assert the relay is stopped or restarted without the deleted id.
+- [ ] P2: Cover Telegram relay runtime lifecycle seam:
+  add an injectable or testable relay runtime so startup from saved settings, invalid/missing config stop, config-save start/stop/restart, runtime status `running: true` + `inProcess`, and graceful-shutdown stop are covered despite the production path's `#[cfg(not(test))]` guards.
+- [ ] P2: Cover Telegram relay stop/restart quiescence:
+  simulate disable or config retarget while an old relay is in flight and assert stale-generation polling/action handling cannot continue after status reports the replacement or stopped state.
+- [ ] P2: Cover remote SessionCreated replay identity normalization:
+  send two same-revision remote `SessionCreated` payloads that differ only by inbound `remoteId` and assert replay suppression treats them as duplicates after localization.
+- [ ] P2: Cover summary reconciliation of remote-owner-only changes:
+  feed `reconcileSummarySession` equal-stamp summaries whose only material difference is `remoteId` and assert the returned object updates ownership instead of reusing the stale previous summary.
 - [ ] P2: Cover SessionPaneView remote delegation action capability wiring:
-  render `SessionPaneView` with local, remote-project, missing-project, projectless remote-proxy, and conflicting `session.remoteId = "ssh-lab"` plus local-project scenarios; assert delegation row Open / Insert / Cancel actions and the composer Delegate action follow the production `activeSession.remoteId ?? project.remoteId` wiring, not only helper-level availability checks.
-- [ ] P2: Cover session tab tooltip remote-owner display:
-  render tab tooltips for projectless and missing-project remote proxy sessions whose summaries carry `remoteId`, and assert the tooltip prefers session-level ownership before falling back to project metadata.
+  render `SessionPaneView` with local, remote-project, missing-project, projectless remote-proxy, and conflicting `session.remoteId = "ssh-lab"` plus local-project scenarios; assert delegation row Open / Insert / Cancel actions and the composer Delegate action follow the production `isLocalSessionRemote(...)` wiring, not only helper-level availability checks.
+- [ ] P2: Add component-level session tab tooltip remote-owner coverage:
+  render tab tooltips for projectless, missing-project, missing-remote, and conflicting session/project remote proxy sessions whose summaries carry `remoteId`, complementing formatter-level coverage for session-owner precedence.
 - [ ] P2: Cover SessionPaneView composer delegation click-through:
   mock `spawnDelegationCommand`, click the composer Delegate action through `SessionPaneView`, and assert the active parent session drives the payload, success clears the draft, command-error handling preserves it, and composer errors surface.
 - [ ] P2: Cover remote-sync embedded remote-owner clearing:
-  seed a remote snapshot session with `remoteId`, localize it, and assert `SessionRecord.remote_id` metadata is preserved while the embedded `record.session.remote_id` is cleared.
+  seed a remote snapshot session with attacker-chosen `remoteId`, localize it, and assert trusted `SessionRecord.remote_id` metadata is preserved while the embedded `record.session.remote_id` is cleared and local wire projections re-emit only trusted ownership.
+- [ ] P2: Cover marker create-form edge behavior:
+  assert whitespace-only labels keep submit disabled, the input receives focus/select, trimmed labels are submitted, Cancel does not create a marker, Escape cancels and restores focus, and draft state resets or persists only by the documented rules.
+- [ ] P2: Cover marker context-menu restore target and create-mode semantics:
+  open a marker menu via right-click and keyboard trigger, close it, and assert focus returns to the actual labelled trigger; add an accessibility regression for create mode so form controls are not exposed as invalid menu children.
 - [ ] P2: Cover marker-window focus-restore cancellation:
   mock `requestAnimationFrame` / `cancelAnimationFrame`, close the floating marker window, switch sessions or unmount before the frame flushes, and assert the scheduled focus restore is canceled.
 - [ ] P2: Pin `event.target === node` mousedown guard with negative case:
@@ -3646,8 +3804,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add focused cases for line-start tildes in `findings[].message`, `notes[]`, `commandsRun[].command`. Add a 5-tilde-in-summary case and a mixed 3+5 tilde case to verify the escape walks the joined `bodySections`.
 - [ ] P2: Strengthen "renders remote delegation progress as display-only" test:
   add `expect(params.onComposerError).not.toHaveBeenCalled()` after rendering, exercise a flag flip mid-test, or split into per-action coverage so a regression that drops only one of the three guards surfaces.
-- [ ] P2: Reframe `mask_telegram_bot_token` assertion to contract-shape:
-  replace `revealed.chars().count() == token.chars().count().min(4)` with a contract assertion ("never expose more than 4 trailing chars") so a future implementation tweak doesn't silently pass.
 - [ ] P2: Clean up AgentSessionPanel `act(...)` warnings:
   targeted AgentSessionPanel Vitest still emits React `act(...)` warnings around async rerenders/events; identify the warned updates and wrap or await them so timing-sensitive failures are not hidden by noisy test output.
 - [ ] P2: Strengthen race-condition delegation tests:
@@ -3656,5 +3812,3 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `await waitFor(() => expect(busyButton).toHaveAttribute("aria-busy", "true"))` instead of the synchronous expect after `Promise.resolve()`. Removes brittleness against future React batching changes.
 - [ ] P2: Split bundled `delegation-commands.test.ts` tests:
   split `delegationTitleFromPrompt` (4 cases) and `resolveComposerDelegationAvailability` (4 outcomes) into single-case `it`s or restructure as `it.each([...])`.
-- [ ] P2: Split `telegram_token_mask_only_exposes_short_suffix` boundary cases:
-  keep the contract loop but split the explicit boundary cases (empty, 2-char, 4-char, 5-char, full) into individual `#[test]`s.

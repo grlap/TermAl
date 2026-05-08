@@ -114,6 +114,7 @@ import type {
   AgentCommand,
   CommandMessage,
   CodexState,
+  CreateConversationMarkerOptions,
   DiffMessage,
   JsonValue,
   McpElicitationAction,
@@ -174,7 +175,7 @@ import {
   resolveComposerDelegationAvailability,
   spawnDelegationCommand,
 } from "./delegation-commands";
-import { isLocalRemoteId } from "./remotes";
+import { isLocalSessionRemote } from "./remotes";
 
 const SESSION_PAGE_JUMP_VIEWPORT_FACTOR = 0.45;
 
@@ -437,6 +438,7 @@ export function SessionPaneView({
   onCreateConversationMarker: (
     sessionId: string,
     messageId: string,
+    options?: CreateConversationMarkerOptions,
   ) => void;
   onDeleteConversationMarker: (
     sessionId: string,
@@ -544,8 +546,9 @@ export function SessionPaneView({
     activeSession?.projectId != null
       ? (projectLookup.get(activeSession.projectId) ?? null)
       : null;
-  const enableLocalDelegationActions = isLocalRemoteId(
-    activeSession?.remoteId ?? activeSessionProject?.remoteId,
+  const enableLocalDelegationActions = isLocalSessionRemote(
+    activeSession,
+    activeSessionProject,
   );
   const allKnownSessions = useMemo(
     () => Array.from(sessionLookup.values()),
@@ -2035,13 +2038,11 @@ export function SessionPaneView({
     }
 
     setNewResponseIndicator(scrollStateKey, false);
-    const frameId = window.requestAnimationFrame(() => {
-      scrollToLatestMessage("smooth", false, "bottom_follow");
+    return scheduleSettledScrollToBottom("smooth", {
+      maxAttempts: 24,
+      minAttempts: 4,
+      scrollKind: "bottom_follow",
     });
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-    };
   }, [
     activeSession,
     hasSessionFindQuery,

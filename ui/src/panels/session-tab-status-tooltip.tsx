@@ -30,7 +30,7 @@
 //     all of that stays in `./PaneTabs.tsx`.
 //   - Remote display primitives (`createBuiltinLocalRemote`,
 //     `isLocalRemoteId`, `remoteConnectionLabel`,
-//     `remoteDisplayName`, `resolveProjectRemoteId`) — live in
+//     `remoteDisplayName`, `resolveSessionRemoteId`) — live in
 //     `../remotes`.
 //   - Session model option resolution — lives in
 //     `../session-model-options`.
@@ -44,7 +44,7 @@ import {
   isLocalRemoteId,
   remoteConnectionLabel,
   remoteDisplayName,
-  resolveProjectRemoteId,
+  resolveSessionRemoteId,
 } from "../remotes";
 import { matchingSessionModelOption } from "../session-model-options";
 import type { SessionSummarySnapshot } from "../session-store";
@@ -158,28 +158,32 @@ export function formatSessionTooltipLocationLabel(
   remoteLookup: ReadonlyMap<string, RemoteConfig>,
 ) {
   const projectId = session.projectId?.trim() ?? "";
+  const project = projectId ? (projectLookup.get(projectId) ?? null) : null;
   if (projectId) {
-    const project = projectLookup.get(projectId);
-    if (!project) {
+    const sessionRemoteId = session.remoteId?.trim() ?? "";
+    if (!project && !sessionRemoteId) {
       return "Unknown (missing project)";
     }
-
-    const remoteId = resolveProjectRemoteId(project);
-    const remote = remoteLookup.get(remoteId);
-    if (!remote) {
-      if (isLocalRemoteId(remoteId)) {
-        const localRemote = createBuiltinLocalRemote();
-        return `${remoteDisplayName(localRemote, localRemote.id)} (${remoteConnectionLabel(localRemote)})`;
-      }
-
-      return `${remoteId} (missing remote)`;
-    }
-
-    return `${remoteDisplayName(remote, remoteId)} (${remoteConnectionLabel(remote)})`;
   }
 
-  const localRemote = createBuiltinLocalRemote();
-  return `${remoteDisplayName(localRemote, localRemote.id)} (${remoteConnectionLabel(localRemote)})`;
+  return formatSessionTooltipRemoteLabel(resolveSessionRemoteId(session, project), remoteLookup);
+}
+
+function formatSessionTooltipRemoteLabel(
+  remoteId: string,
+  remoteLookup: ReadonlyMap<string, RemoteConfig>,
+) {
+  const remote = remoteLookup.get(remoteId);
+  if (!remote) {
+    if (isLocalRemoteId(remoteId)) {
+      const localRemote = createBuiltinLocalRemote();
+      return `${remoteDisplayName(localRemote, localRemote.id)} (${remoteConnectionLabel(localRemote)})`;
+    }
+
+    return `${remoteId} (missing remote)`;
+  }
+
+  return `${remoteDisplayName(remote, remoteId)} (${remoteConnectionLabel(remote)})`;
 }
 
 export type SessionTooltipRow = {

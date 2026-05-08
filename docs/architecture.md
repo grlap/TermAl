@@ -505,13 +505,17 @@ The local server is therefore both:
 
 ### Project-Scoped Routing
 
-Remote ownership is assigned at the project level.
+Remote routing has two related owner signals:
 
-- Each project has a `remoteId`.
-- Each session belongs to a project.
-- Each session inherits its routing from the owning project.
-- File, directory, git, review, terminal, and session creation flows route by
-  project ownership.
+- `Project.remoteId` selects the execution target for project-scoped creation
+  and workspace actions.
+- `Session.remoteId` identifies the owner of a browser-facing remote-proxy
+  session after state aggregation.
+- Session-level ownership takes precedence for local-only capability checks,
+  because remote-proxy sessions can be projectless or can outlive/miss local
+  project metadata.
+- File, directory, git, review, terminal, and session creation flows still route
+  by project ownership when no existing session owner is available.
 
 This avoids teaching the UI to choose a backend for every action. The user
 chooses a remote when creating a project, and the rest of the routing follows

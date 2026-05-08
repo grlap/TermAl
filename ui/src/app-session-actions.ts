@@ -86,6 +86,7 @@ import type {
   ClaudeApprovalMode,
   ClaudeEffortLevel,
   CodexReasoningEffort,
+  CreateConversationMarkerOptions,
   CursorMode,
   GeminiApprovalMode,
   JsonValue,
@@ -318,6 +319,7 @@ export type UseAppSessionActionsReturn = {
   handleCreateConversationMarker: (
     sessionId: string,
     messageId: string,
+    options?: CreateConversationMarkerOptions,
   ) => Promise<boolean>;
   handleUpdateConversationMarker: (
     sessionId: string,
@@ -2205,11 +2207,13 @@ export function useAppSessionActions(
   async function handleCreateConversationMarker(
     sessionId: string,
     messageId: string,
+    options: CreateConversationMarkerOptions = {},
   ) {
     const session = sessionLookup.get(sessionId);
     if (!session || !session.messages.some((message) => message.id === messageId)) {
       return false;
     }
+    const markerName = options.name?.trim() || "Checkpoint";
 
     setUpdatingSessionIds((current) =>
       setSessionFlag(current, sessionId, true),
@@ -2217,7 +2221,7 @@ export function useAppSessionActions(
     try {
       const response = await createConversationMarker(sessionId, {
         kind: "checkpoint",
-        name: "Checkpoint",
+        name: markerName,
         body: null,
         color: "#3b82f6",
         messageId,

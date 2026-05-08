@@ -4,9 +4,11 @@ import {
   LOCAL_REMOTE_ID,
   createBuiltinLocalRemote,
   isLocalRemoteId,
+  isLocalSessionRemote,
   normalizeRemoteConfigs,
   remoteConnectionLabel,
   resolveProjectRemoteId,
+  resolveSessionRemoteId,
 } from "./remotes";
 
 describe("remotes", () => {
@@ -53,6 +55,22 @@ describe("remotes", () => {
     expect(isLocalRemoteId()).toBe(true);
     expect(isLocalRemoteId("local")).toBe(true);
     expect(isLocalRemoteId("ssh-lab")).toBe(false);
+  });
+
+  it("resolves session remote ownership before project remote ownership", () => {
+    expect(resolveSessionRemoteId({ remoteId: "ssh-lab" }, { remoteId: "local" })).toBe(
+      "ssh-lab",
+    );
+    expect(resolveSessionRemoteId({ remoteId: "" }, { remoteId: "ssh-lab" })).toBe(
+      LOCAL_REMOTE_ID,
+    );
+    expect(resolveSessionRemoteId({}, { remoteId: "ssh-project" })).toBe("ssh-project");
+    expect(resolveSessionRemoteId()).toBe(LOCAL_REMOTE_ID);
+
+    expect(isLocalSessionRemote({ remoteId: "ssh-lab" }, { remoteId: "local" })).toBe(
+      false,
+    );
+    expect(isLocalSessionRemote({}, { remoteId: "local" })).toBe(true);
   });
 
   it("describes local and ssh connection labels", () => {

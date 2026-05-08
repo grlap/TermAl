@@ -1,4 +1,4 @@
-import type { Project, RemoteConfig } from "./types";
+import type { Project, RemoteConfig, Session } from "./types";
 
 export const LOCAL_REMOTE_ID = "local";
 export const DEFAULT_SSH_REMOTE_PORT = 22;
@@ -23,6 +23,22 @@ export function isLocalRemoteId(remoteId?: string | null): boolean {
 export function resolveProjectRemoteId(project?: Pick<Project, "remoteId"> | null): string {
   const remoteId = project?.remoteId?.trim();
   return isLocalRemoteId(remoteId) ? LOCAL_REMOTE_ID : remoteId!;
+}
+
+export function resolveSessionRemoteId(
+  session?: Pick<Session, "remoteId"> | null,
+  project?: Pick<Project, "remoteId"> | null,
+): string {
+  const remoteId = session?.remoteId ?? project?.remoteId;
+  const normalized = remoteId?.trim();
+  return isLocalRemoteId(normalized) ? LOCAL_REMOTE_ID : normalized!;
+}
+
+export function isLocalSessionRemote(
+  session?: Pick<Session, "remoteId"> | null,
+  project?: Pick<Project, "remoteId"> | null,
+): boolean {
+  return isLocalRemoteId(resolveSessionRemoteId(session, project));
 }
 
 export function normalizeRemoteConfigs(remotes?: RemoteConfig[] | null): RemoteConfig[] {

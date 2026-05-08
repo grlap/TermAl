@@ -123,6 +123,10 @@ export type ConversationMarker = {
   createdBy: ConversationMarkerAuthor;
 };
 
+export type CreateConversationMarkerOptions = {
+  name?: string;
+};
+
 export type CodexRateLimitWindow = {
   resetsAt?: number | null;
   usedPercent?: number | null;
@@ -283,7 +287,7 @@ export type Session = {
   agent: AgentType;
   workdir: string;
   projectId?: string | null;
-  remoteId?: string | null;
+  remoteId?: string;
   model: string;
   modelOptions?: SessionModelOption[];
   approvalPolicy?: ApprovalPolicy | null;

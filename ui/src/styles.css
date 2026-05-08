@@ -4127,6 +4127,68 @@ textarea {
   color: var(--signal-red);
 }
 
+.conversation-marker-context-menu-form {
+  display: grid;
+  gap: var(--space-xs);
+  padding: var(--space-xs);
+}
+
+.conversation-marker-context-menu-label {
+  display: grid;
+  gap: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.conversation-marker-context-menu-input {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  padding: 0.45rem 0.55rem;
+  background: var(--surface-white-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.conversation-marker-context-menu-input:focus {
+  border-color: var(--signal-blue);
+  outline: 2px solid color-mix(in srgb, var(--signal-blue) 34%, transparent);
+  outline-offset: 1px;
+}
+
+.conversation-marker-context-menu-form-actions {
+  display: flex;
+  gap: var(--space-xs);
+  justify-content: flex-end;
+}
+
+.conversation-marker-context-menu-action {
+  min-height: var(--control-size-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  padding: 0.35rem 0.55rem;
+  background: var(--surface-white-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.conversation-marker-context-menu-action:hover:not(:disabled),
+.conversation-marker-context-menu-action:focus-visible {
+  border-color: var(--accent-blue-border);
+  background: var(--accent-blue-soft);
+  outline: none;
+}
+
+.conversation-marker-context-menu-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .conversation-marker-context-menu-separator {
   height: 1px;
   margin: 0.28rem 0;
