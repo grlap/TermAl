@@ -113,11 +113,12 @@ impl AppState {
             .bot_token
             .as_deref()
             .is_some_and(|token| !token.trim().is_empty());
+        let relay = telegram_relay_status_snapshot();
         TelegramStatusResponse {
             configured,
             enabled: config.enabled,
-            running: telegram_relay_running(),
-            lifecycle: telegram_relay_lifecycle(),
+            running: relay.running,
+            lifecycle: relay.lifecycle,
             linked_chat_id: file.state.chat_id,
             bot_token_masked: config.bot_token.as_deref().and_then(mask_telegram_bot_token),
             subscribed_project_ids: config.subscribed_project_ids,
@@ -256,7 +257,10 @@ impl AppState {
             return Ok(());
         }
 
-        self.persist_telegram_bot_file(&file)
+        self.persist_telegram_bot_file(&file)?;
+        #[cfg(not(test))]
+        self.reconcile_telegram_relay_for_loaded_file(&file);
+        Ok(())
     }
 
     fn sanitize_telegram_config_for_current_state(

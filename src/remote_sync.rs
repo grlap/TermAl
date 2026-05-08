@@ -532,7 +532,8 @@ fn localize_remote_session(
     session.id = local_session_id.to_owned();
     session.project_id = local_project_id;
     // Never trust an upstream wire `remote_id`; local SessionRecord metadata
-    // stores proxy ownership and wire helpers re-project it for local clients.
+    // stores proxy ownership, and `wire_session_from_record` /
+    // `wire_session_summary_from_record` re-project it for local clients.
     session.remote_id = None;
     session.markers = remote_session
         .markers

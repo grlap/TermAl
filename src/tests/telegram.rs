@@ -1056,6 +1056,47 @@ fn telegram_status_response_serializes_in_process_lifecycle() {
 }
 
 #[test]
+fn telegram_ui_file_requires_default_project_for_relay_config() {
+    let file = TelegramBotFile {
+        config: TelegramUiConfig {
+            enabled: true,
+            bot_token: Some("123456:secret".to_owned()),
+            subscribed_project_ids: vec!["project-1".to_owned()],
+            default_project_id: None,
+            ..TelegramUiConfig::default()
+        },
+        state: TelegramBotState::default(),
+    };
+
+    assert!(TelegramBotConfig::from_ui_file("/tmp", &file).is_none());
+
+    let with_blank_default = TelegramBotFile {
+        config: TelegramUiConfig {
+            default_project_id: Some("   ".to_owned()),
+            ..file.config.clone()
+        },
+        state: TelegramBotState::default(),
+    };
+    assert!(TelegramBotConfig::from_ui_file("/tmp", &with_blank_default).is_none());
+
+    let with_default = TelegramBotFile {
+        config: TelegramUiConfig {
+            default_project_id: Some(" project-1 ".to_owned()),
+            ..file.config
+        },
+        state: TelegramBotState {
+            chat_id: Some(42),
+            ..TelegramBotState::default()
+        },
+    };
+    let config = TelegramBotConfig::from_ui_file("/tmp", &with_default)
+        .expect("default project should produce relay config");
+
+    assert_eq!(config.project_id, "project-1");
+    assert_eq!(config.chat_id, Some(42));
+}
+
+#[test]
 fn telegram_token_mask_omits_empty_token() {
     assert_eq!(mask_telegram_bot_token(""), None);
 }

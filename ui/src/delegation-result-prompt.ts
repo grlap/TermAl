@@ -64,8 +64,8 @@ function formatCommand(command: DelegationCommandResult) {
 
 function longestLineStartTildeRun(value: string) {
   return value.split("\n").reduce((longest, line) => {
-    const match = /^~+/.exec(line);
-    return Math.max(longest, match?.[0].length ?? 0);
+    const match = /^ {0,3}(~+)/.exec(line);
+    return Math.max(longest, match?.[1].length ?? 0);
   }, 0);
 }
 

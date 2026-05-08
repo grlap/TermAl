@@ -122,6 +122,9 @@ const MonacoDiffEditor = lazy(() =>
   import("../MonacoDiffEditor").then(({ MonacoDiffEditor }) => ({ default: MonacoDiffEditor })),
 );
 
+const LARGE_MARKDOWN_FULL_RENDER_CHAR_LIMIT = 120_000;
+const LARGE_MARKDOWN_FULL_RENDER_LINE_LIMIT = 1_200;
+
 type DiffViewScrollPositions = Record<DiffViewMode, number>;
 
 type ReviewState = {
@@ -142,6 +145,24 @@ function createInitialDiffViewScrollPositions(): DiffViewScrollPositions {
     rendered: 0,
     raw: 0,
   };
+}
+
+function isLargeMarkdownDocumentContent(content: string) {
+  if (content.length > LARGE_MARKDOWN_FULL_RENDER_CHAR_LIMIT) {
+    return true;
+  }
+
+  let lineCount = 1;
+  for (let index = 0; index < content.length; index += 1) {
+    if (content.charCodeAt(index) === 10) {
+      lineCount += 1;
+      if (lineCount > LARGE_MARKDOWN_FULL_RENDER_LINE_LIMIT) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 export function DiffPanel({
@@ -202,6 +223,8 @@ export function DiffPanel({
   const hasScope = Boolean(normalizedSessionId || normalizedProjectId);
   const [editValue, setEditValue] = useState("");
   const [markdownEditContent, setMarkdownEditContent] = useState<string | null>(null);
+  const [renderLargeMarkdownFullDocument, setRenderLargeMarkdownFullDocument] =
+    useState(false);
   // Tracks which rendered Markdown sections currently hold uncommitted
   // contentEditable drafts. Per-keystroke drafts intentionally stay local to
   // the section DOM so the rendered diff does not remount while the user is
@@ -364,16 +387,46 @@ export function DiffPanel({
   }, [markdownEditContent]);
 
   const isMarkdownTarget = isMarkdownDocument(language, filePath);
+  const isLargeCompleteMarkdownDocument =
+    isMarkdownTarget &&
+    Boolean(documentContent?.isCompleteDocument) &&
+    Boolean(
+      documentContent &&
+        (isLargeMarkdownDocumentContent(documentContent.before.content) ||
+          isLargeMarkdownDocumentContent(documentContent.after.content)),
+    );
+  const shouldDeferLargeMarkdownFullDocument =
+    isLargeCompleteMarkdownDocument && !renderLargeMarkdownFullDocument;
   const previewSourceContent =
     documentContent?.after.content ?? visualBaseContent ?? (latestFile.status === "ready" ? latestFile.content : null);
   const preview = useMemo(
     () => buildDiffPreviewModel(diff, changeType, previewSourceContent),
     [changeType, diff, previewSourceContent],
   );
-  const markdownPreview = useMemo(
-    () => buildMarkdownDiffPreview(documentContent, documentEnrichmentNote, preview, changeType),
-    [changeType, documentContent, documentEnrichmentNote, preview],
+  const patchOnlyPreview = useMemo(
+    () => buildDiffPreviewModel(diff, changeType),
+    [changeType, diff],
   );
+  const markdownPreview = useMemo(
+    () =>
+      buildMarkdownDiffPreview(
+        shouldDeferLargeMarkdownFullDocument ? null : documentContent,
+        documentEnrichmentNote,
+        shouldDeferLargeMarkdownFullDocument ? patchOnlyPreview : preview,
+        changeType,
+      ),
+    [
+      changeType,
+      documentContent,
+      documentEnrichmentNote,
+      patchOnlyPreview,
+      preview,
+      shouldDeferLargeMarkdownFullDocument,
+    ],
+  );
+  const markdownSegmentPreview = shouldDeferLargeMarkdownFullDocument
+    ? patchOnlyPreview
+    : preview;
   const canShowMarkdownView = isMarkdownTarget && markdownPreview !== null;
   // Phase 4 of `docs/features/source-renderers.md`: for non-Markdown
   // files whose after-side content has at least one renderable
@@ -439,11 +492,14 @@ export function DiffPanel({
       return null;
     }
 
-    const afterContent =
-      markdownEditContent ??
-      (latestFile.status === "ready" && editValue !== latestFile.content
-        ? editValue
-        : markdownPreview.after.content);
+    const canUseEditableMarkdownContent =
+      markdownPreview.after.completeness === "full";
+    const afterContent = canUseEditableMarkdownContent
+      ? markdownEditContent ??
+        (latestFile.status === "ready" && editValue !== latestFile.content
+          ? editValue
+          : markdownPreview.after.content)
+      : markdownPreview.after.content;
 
     return {
       ...markdownPreview,
@@ -452,7 +508,13 @@ export function DiffPanel({
         content: afterContent,
       },
     };
-  }, [editValue, latestFile.content, latestFile.status, markdownEditContent, markdownPreview]);
+  }, [
+    editValue,
+    latestFile.content,
+    latestFile.status,
+    markdownEditContent,
+    markdownPreview,
+  ]);
   const preferMarkdownView =
     canShowMarkdownView && Boolean(gitSectionId && documentContent?.isCompleteDocument);
   const [viewMode, setViewMode] = useState<DiffViewMode>(() =>
@@ -556,6 +618,7 @@ export function DiffPanel({
     setIsReloadingFile(false);
     setIsSavingReview(false);
     setMarkdownEditContentState(null);
+    setRenderLargeMarkdownFullDocument(false);
     clearRenderedMarkdownDraftSegments();
   }, [diffMessageId, filePath]);
 
@@ -769,12 +832,14 @@ export function DiffPanel({
   const renderedMarkdownEditBlockedReason = isStagedMarkdownDiff
     ? documentContent?.editBlockedReason ?? "Staged Markdown diffs are read-only. Use the unstaged worktree diff to edit this file."
     : documentContent?.editBlockedReason ?? null;
-  const canEditRenderedMarkdown =
+  const canEditRenderedMarkdownAfterFullRender =
     Boolean(filePath) &&
     !isStagedMarkdownDiff &&
     latestFile.status === "ready" &&
-    markdownDisplayPreview?.after.completeness === "full" &&
     (documentContent?.canEdit ?? true);
+  const canEditRenderedMarkdown =
+    canEditRenderedMarkdownAfterFullRender &&
+    markdownDisplayPreview?.after.completeness === "full";
   const hasVisualNavigation = viewMode === "all" && visualEditorStatus.changeCount > 0;
   // `isDirty` reflects both committed draft state (editValue ≠ disk content)
   // and any uncommitted rendered-Markdown section draft that has not yet been
@@ -1742,9 +1807,14 @@ export function DiffPanel({
           <MarkdownDiffView
             appearance={appearance}
             canEdit={canEditRenderedMarkdown}
+            canEditDeferredFullDocument={
+              shouldDeferLargeMarkdownFullDocument &&
+              canEditRenderedMarkdownAfterFullRender
+            }
             documentPath={filePath}
             editBlockedReason={renderedMarkdownEditBlockedReason}
             gitSectionId={gitSectionId}
+            isFullDocumentDeferred={shouldDeferLargeMarkdownFullDocument}
             isDirty={isDirty}
             isSaving={isSaving}
             markdownPreview={markdownDisplayPreview}
@@ -1752,9 +1822,10 @@ export function DiffPanel({
             onCommitRenderedMarkdownSectionDraft={stableCommitRenderedMarkdownSectionDraft}
             onOpenSourceLink={stableHandleOpenMarkdownSourceLink}
             onRegisterRenderedMarkdownCommitter={registerRenderedMarkdownCommitter}
+            onRenderFullDocument={() => setRenderLargeMarkdownFullDocument(true)}
             onRenderedMarkdownSectionDraftChange={stableHandleRenderedMarkdownSectionDraftChange}
             onSave={handleSave}
-            preview={preview}
+            preview={markdownSegmentPreview}
             saveStateLabel={saveStateLabel}
             scrollRef={markdownDiffScrollRef}
             workspaceRoot={workspaceRoot}

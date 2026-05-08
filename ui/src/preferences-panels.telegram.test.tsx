@@ -136,6 +136,20 @@ describe("TelegramPreferencesPanel", () => {
     });
   });
 
+  it("labels a configured in-process relay as stopped when it is not polling", async () => {
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      enabled: true,
+      lifecycle: "inProcess",
+      botTokenMasked: "****oken",
+    });
+
+    render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
+
+    expect(await screen.findByText("Stopped")).toBeInTheDocument();
+  });
+
   it("keeps handler state updates enabled after React StrictMode remount checks", async () => {
     fetchTelegramStatusMock.mockResolvedValue({
       ...emptyTelegramStatus,

@@ -29,8 +29,7 @@ export function resolveSessionRemoteId(
   session?: Pick<Session, "remoteId"> | null,
   project?: Pick<Project, "remoteId"> | null,
 ): string {
-  const remoteId = session?.remoteId ?? project?.remoteId;
-  const normalized = remoteId?.trim();
+  const normalized = session?.remoteId?.trim() || project?.remoteId?.trim();
   return isLocalRemoteId(normalized) ? LOCAL_REMOTE_ID : normalized!;
 }
 

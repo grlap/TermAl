@@ -91,9 +91,11 @@ type MarkdownDiffSaveHandler = () => Promise<void> | void;
 export function MarkdownDiffView({
   appearance,
   canEdit,
+  canEditDeferredFullDocument = false,
   documentPath,
   editBlockedReason,
   gitSectionId,
+  isFullDocumentDeferred = false,
   isDirty,
   isSaving,
   markdownPreview,
@@ -102,6 +104,7 @@ export function MarkdownDiffView({
   onOpenSourceLink,
   onCommitRenderedMarkdownDrafts,
   onRegisterRenderedMarkdownCommitter,
+  onRenderFullDocument,
   onSave,
   preview,
   saveStateLabel,
@@ -110,9 +113,11 @@ export function MarkdownDiffView({
 }: {
   appearance: MonacoAppearance;
   canEdit: boolean;
+  canEditDeferredFullDocument?: boolean;
   documentPath: string | null;
   editBlockedReason: string | null;
   gitSectionId: GitDiffSection | null;
+  isFullDocumentDeferred?: boolean;
   isDirty: boolean;
   isSaving: boolean;
   markdownPreview: MarkdownDiffPreviewModel;
@@ -124,6 +129,7 @@ export function MarkdownDiffView({
   onOpenSourceLink: (target: MarkdownFileLinkTarget) => void;
   onCommitRenderedMarkdownDrafts: () => boolean;
   onRegisterRenderedMarkdownCommitter: (committer: () => RenderedMarkdownSectionCommit | null) => () => void;
+  onRenderFullDocument?: () => void;
   onSave: MarkdownDiffSaveHandler;
   preview: ReturnType<typeof buildDiffPreviewModel>;
   saveStateLabel: string | null;
@@ -273,14 +279,26 @@ export function MarkdownDiffView({
           {gitSectionLabel ? <span className="chip">{gitSectionLabel}</span> : null}
           <span className="chip">One document</span>
           {canEdit ? <span className="chip">Editable</span> : null}
+          {isFullDocumentDeferred ? <span className="chip">Full document deferred</span> : null}
           <span className="chip">{formatMarkdownSideSource(markdownPreview.after.source)}</span>
         </div>
-        {canEdit ? (
+        {canEdit || isFullDocumentDeferred ? (
           <div className="source-editor-actions markdown-diff-edit-actions">
+            {isFullDocumentDeferred && onRenderFullDocument ? (
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={onRenderFullDocument}
+              >
+                {canEditDeferredFullDocument ? "Edit full document" : "Render full document"}
+              </button>
+            ) : null}
             {saveStateLabel ? <span className="support-copy markdown-diff-save-state">{saveStateLabel}</span> : null}
-            <button className="ghost-button" type="button" disabled={!isDirty || isSaving} onClick={() => void onSave()}>
-              {isSaving ? "Saving..." : isDirty ? "Save Markdown" : "Saved"}
-            </button>
+            {canEdit ? (
+              <button className="ghost-button" type="button" disabled={!isDirty || isSaving} onClick={() => void onSave()}>
+                {isSaving ? "Saving..." : isDirty ? "Save Markdown" : "Saved"}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>

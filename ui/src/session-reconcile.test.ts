@@ -1139,5 +1139,77 @@ describe("reconcileSessions", () => {
     expect(merged[0].remoteId).toBe("ssh-lab");
   });
 
+  it("replaces a full session when only the remote owner changes with the same stamp", () => {
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: true,
+        preview: "ready",
+        sessionMutationStamp: 42,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Ready",
+          },
+        ],
+      }),
+    ];
+
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: true,
+        preview: "ready",
+        remoteId: "ssh-lab",
+        sessionMutationStamp: 42,
+        messages: [structuredClone(previous[0].messages[0])],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0]).not.toBe(previous[0]);
+    expect(merged[0].remoteId).toBe("ssh-lab");
+    expect(merged[0].messages).toBe(previous[0].messages);
+  });
+
+  it("replaces a summary session when only the remote owner changes with the same stamp", () => {
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: true,
+        preview: "ready",
+        sessionMutationStamp: 42,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Ready",
+          },
+        ],
+      }),
+    ];
+
+    const next = [
+      makeSession("session-a", {
+        messageCount: 1,
+        messagesLoaded: false,
+        preview: "ready",
+        remoteId: "ssh-lab",
+        sessionMutationStamp: 42,
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0]).not.toBe(previous[0]);
+    expect(merged[0].remoteId).toBe("ssh-lab");
+    expect(merged[0].messages).toBe(previous[0].messages);
+  });
+
 });
 

@@ -7,39 +7,275 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Telegram relay routes to an implicit first subscribed project when no default is set
+## `start_telegram_relay_runtime` parallel `spawning`/`running` booleans should be a state enum
 
-**Severity:** Medium - `src/telegram.rs:196`, `src/telegram_settings.rs:319` fall back to the first `subscribedProjectIds` entry even when `/api/telegram/status` reports `defaultProjectId: null`.
-
-That makes subscribed-project array order part of the Telegram execution contract without exposing the active target to API clients. A user or client can see "no default project" in status while Telegram prompts and actions still route to an implicit project.
+**Severity:** Note - `src/telegram.rs:222-302`. Round 74 consolidated the relay state into `TelegramRelayRuntime` with parallel `spawning` and `running` booleans. The snapshot rule `running && !spawning` is implicit. A future contributor adding a new flag (e.g., `stopping`) needs to remember to combine all three correctly in the snapshot.
 
 **Current behavior:**
-- In-process relay can start with `defaultProjectId: null`.
-- Prompt/action routing silently chooses the first subscribed project.
-- `/api/telegram/status` does not expose that effective target.
+- Two parallel booleans for state.
+- Snapshot rule encoded inline.
+- No enforcement of valid state transitions.
 
 **Proposal:**
-- Require an explicit default or active project before starting the relay.
-- Or expose/normalize an `activeProjectId` in Telegram status and route through that field.
+- Replace the two booleans with a `RelayState` enum (`Idle | Spawning | Running`) and centralize the `running()` accessor on it.
 
-## Deleted Telegram projects do not reconcile the running relay
+## `from_ui_file` trim divergence between `default_project_id` and `subscribed_project_ids`
 
-**Severity:** Medium - `src/session_crud.rs:525`, `src/telegram_settings.rs:259` prune deleted-project references from the saved Telegram config but do not stop or restart an already-running in-process relay.
-
-After `DELETE /api/projects/{id}`, the running relay can keep polling with the deleted project id captured in its `TelegramBotConfig`, while status continues to report `running: true`.
+**Severity:** Note - `src/telegram.rs:181-213`. The function trims `default_project_id` while `subscribed_project_ids` are NOT trimmed at the same site. A subscribed project id that arrives with leading whitespace can fail downstream lookups while the default project id passes the same check after trimming.
 
 **Current behavior:**
-- Project deletion prunes Telegram config on disk.
-- Existing in-process relay keeps its previously captured config.
-- Status can report a running relay after its target project was deleted.
+- `default_project_id` is trimmed and empty-filtered.
+- `subscribed_project_ids` entries are not trimmed.
+- Two collections share configuration semantics but diverge on whitespace handling.
 
 **Proposal:**
-- After a successful prune, reconcile the relay through the same stop/restart path used by `/api/telegram/config`.
-- Add a deletion-path regression that proves the running relay no longer uses the deleted project id.
+- Apply the same trim/empty filter to entries in `subscribed_project_ids` either in `from_ui_file` or upstream in the validate/normalize path.
+
+## `start_telegram_relay_runtime` `else` branch redundantly clears `spawning` after spawn succeeds
+
+**Severity:** Low - `src/telegram.rs:294-301`. In the `else` branch (`spawn` succeeded), the parent thread re-acquires the mutex purely to clear `spawning = false`. The spawned thread can have already cleaned up state if it ran to completion before this branch fires; the parent's write is then redundant. Additionally, if the spawned thread starts running BEFORE this `else` branch acquires the lock, the snapshot reports `running && !spawning` momentarily.
+
+**Current behavior:**
+- Parent thread re-acquires mutex post-spawn to clear `spawning`.
+- Spawned thread may have already completed full cleanup.
+- Brief window where snapshot can show `running` true based on lock acquisition order.
+
+**Proposal:**
+- Move the `spawning = false` write into the spawned thread's first action (before the run loop starts) and drop the parent's `else` branch entirely.
+
+## `from_ui_file` returns `Option<Self>` for three distinct disabled-relay reasons
+
+**Severity:** Note - `src/telegram.rs:181-213`. The function returns `Option<Self>` for THREE distinct disabled-relay reasons (disabled flag, missing/empty token, missing/empty default project). The caller cannot tell why the relay isn't started. A typed reason would help diagnostics and let the UI surface a more accurate "Stopped" reason.
+
+The new "Stopped" UI label is broad. If the user thinks they enabled the relay but configured an invalid project, they get the same "Stopped" copy as if they merely toggled the relay off.
+
+**Current behavior:**
+- Three disabled paths collapse to `None`.
+- Caller cannot distinguish.
+
+**Proposal:**
+- Return a `Result<Self, RelayDisabledReason>` and route the reason through to status / preferences UI.
+
+## `isLargeCompleteMarkdownDocument` not memoized — char-by-char walk per render
+
+**Severity:** Low - `ui/src/panels/DiffPanel.tsx:389-399`. `isLargeCompleteMarkdownDocument` is computed every render without `useMemo`. `isLargeMarkdownDocumentContent` is called on both `documentContent.before.content` and `documentContent.after.content`; each call iterates char-by-char until it either passes the line threshold or exhausts the string. For a 119k-char file with 1199 lines, the loop runs 119k times per render on each side.
+
+DiffPanel re-renders on a wide range of state updates. A 240k-char-per-render walk on every state update is wasteful for users on large repos / Markdown docs.
+
+**Current behavior:**
+- Per-render call to `isLargeMarkdownDocumentContent`.
+- Iterates entire content per side until threshold.
+- Wasted work on subsequent renders.
+
+**Proposal:**
+- Wrap with `useMemo(..., [documentContent])` — deps are reference-stable already.
+
+## `markdown-diff-view.tsx` would render dual buttons if `canEdit && isFullDocumentDeferred`
+
+**Severity:** Low - `ui/src/panels/markdown-diff-view.tsx:285-303`. When `canEdit && isFullDocumentDeferred` are both true, the action area would render BOTH the "Edit full document" button AND the (potentially disabled) "Save Markdown" button. In practice `canEdit` is gated on `markdownDisplayPreview.after.completeness === "full"`, which is `"patch"` while deferred, so `canEdit` is false — but this dependency is implicit and a future change to `canEdit`'s gating could expose a confusing dual-button state.
+
+**Current behavior:**
+- Visual contract relies on a chain of memos.
+- Nothing in `MarkdownDiffView` enforces it locally.
+
+**Proposal:**
+- Either branch on `isFullDocumentDeferred` first and pick exactly one action region.
+- Or assert/document that `canEdit && isFullDocumentDeferred` is unreachable.
+
+## `setRenderLargeMarkdownFullDocument` reset semantics undocumented
+
+**Severity:** Note - `ui/src/panels/DiffPanel.tsx:226-227, 607-623`. `setRenderLargeMarkdownFullDocument(false)` is reset only on the `[diffMessageId, filePath]` effect. If `documentContent` updates such that `isLargeCompleteMarkdownDocument` becomes false AND later updates again to a large state, the user's prior "render full document" toggle is preserved. Probably intended behavior but isn't documented and isn't covered by a test.
+
+**Current behavior:**
+- Toggle survives same-tab `documentContent` updates.
+- Resets only on tab/file identity changes.
+- Implicit invariant.
+
+**Proposal:**
+- Add a one-line comment near `renderLargeMarkdownFullDocument` declaration documenting the reset contract.
+
+## `||` change in `resolveSessionRemoteId` flips behavior for `session.remoteId === ""`
+
+**Severity:** Note - `ui/src/remotes.ts:32`. The contract change from `??` to `||` (closes round-73 ledger entry) is correct per the protocol, but it changes observable behavior for `session.remoteId === ""`. If any backend path or test fixture ever produces an empty string, routing flips from "session declares local" (pre-round-74) to "fall through to project" (round-74).
+
+The protocol contract is unwritten in code — only the comment in `types.ts:290` references it. Backend regressions that emit `""` would now route remote-owned where they previously routed local.
+
+**Current behavior:**
+- `||` treats `""` as falsy.
+- Behavior change is silent.
+- Only the helper-level test catches it.
+
+**Proposal:**
+- Add a runtime assert (in dev) or a wire-decode validation that rejects `Session.remoteId === ""` so the contract is enforced at the boundary.
+
+## SHA-256 fingerprint JSON intermediate held in memory until end-of-function
+
+**Severity:** Note - `src/telegram.rs:338-352`. The SHA-256 fingerprint includes `bot_token` in its JSON-encoded input. The hash is one-way, but the JSON intermediate (`encoded`) is held in `Vec<u8>` until the `hasher.update(encoded)` call returns. A heap dump or coredump could expose the token in JSON form briefly.
+
+**Current behavior:**
+- JSON intermediate buffer holds the bot token until end-of-function.
+- No `Zeroize` on the buffer.
+- Marginal degradation of process secret hygiene.
+
+**Proposal:**
+- Either zeroize the `encoded` buffer after `hasher.update`.
+- Or revert to per-field byte feeds (no intermediate JSON buffer) for the secret-bearing fields.
+
+## `prune_telegram_config_for_deleted_project` reconcile path is `#[cfg(not(test))]`
+
+**Severity:** Low - `src/telegram_settings.rs:243-264`. Round 74 wired the relay reconcile into `prune_telegram_config_for_deleted_project` (closes the round-73 deleted-project entry) but the reconcile path is `#[cfg(not(test))]`. The persistence side is tested, the reconcile side is not.
+
+**Current behavior:**
+- Reconcile call is `#[cfg(not(test))]`.
+- Production restart path is structurally untested.
+
+**Proposal:**
+- Add a non-`cfg`-gated abstraction so a Rust test can verify the reconcile is invoked after a successful prune.
+
+## `telegram_ui_file_requires_default_project_for_relay_config` bundles 3 scenarios
+
+**Severity:** Low - `src/tests/telegram.rs:1058-1097`. Bundles three scenarios (no default, blank-only default, valid trimmed default) into one `it()`. Same anti-pattern flagged elsewhere in the bug ledger. Also missing: `bot_token` blank/missing variant; `enabled = false` with valid token + project; bot_token being whitespace-only.
+
+**Current behavior:**
+- Three scenarios bundled.
+- Coverage gaps for the bot_token disable path.
+
+**Proposal:**
+- Split into per-case tests (`it.each` over `(file_config, expected_outcome)` pairs).
+
+## "Defers full-document rendering for large Markdown diffs" only covers `canEdit: true`
+
+**Severity:** Low - `ui/src/panels/DiffPanel.test.tsx:2473-2533`. Covers only the `canEdit: true` path. Missing: `canEdit: false` path (button label should read "Render full document", not "Edit full document"); reset on `diffMessageId` / `filePath` change; no second click to verify idempotence.
+
+**Current behavior:**
+- `canEdit: true` covered.
+- Read-only path uncovered.
+
+**Proposal:**
+- Add a sibling test for staged Markdown (`canEdit: false`) and a test that asserts the toggle resets when `diffMessageId` changes.
+
+## "Stopped" preferences test covers only one combination, no negative cases
+
+**Severity:** Low - `ui/src/preferences-panels.telegram.test.tsx:139-151`. The new "Stopped" test only fires for the exact `(inProcess, enabled, configured, !running)` combination. Adjacent paths are not pinned: `lifecycle: "manual"` with same other fields → should NOT show "Stopped"; `enabled: false` with same other fields → should NOT show "Stopped".
+
+A regression that broadens the condition to `lifecycle === "inProcess" && configured` would still pass.
+
+**Current behavior:**
+- Single positive case covered.
+- No negative permutations.
+
+**Proposal:**
+- Add `it.each` rows covering the four negative permutations and assert the label is NOT "Stopped".
+
+## Wire `TelegramStatusResponse` lacks derived `state` field; "Stopped" derivation lives in UI
+
+**Severity:** Low - `ui/src/api.ts:644-646` and `ui/src/preferences-panels.tsx:1205`. The new comment documents the intent but does not state the relationship: `lifecycle === "inProcess" && enabled && configured && !running` ≡ "Stopped". This protocol-level invariant lives entirely in UI code.
+
+A backend refactor (e.g., adding a `failed: bool` field) cannot consult the wire contract to know the UI's "Stopped" derivation.
+
+**Current behavior:**
+- "Stopped" derivation lives in UI only.
+- Wire contract has no derived `state` field.
+
+**Proposal:**
+- Add a derived `state: "stopped" | "polling" | "linked" | "configured" | "notConfigured"` to the wire response (single source of truth).
+- Or document the derivation rules in the `TelegramStatusResponse` JSDoc.
+
+## `session-reconcile.test.ts` doesn't cover `remoteId === undefined` on both sides
+
+**Severity:** Note - `ui/src/session-reconcile.test.ts:1142-1212`. The two new tests pin the remote-owner reconciliation but assert via reference identity. They do not cover the case where `remoteId === undefined` on both sides (current local-only behavior) — the OLD fast-path retained `previous` exactly. Without a regression test, a refactor that accidentally changed the comparison semantics for `undefined === undefined` could flow through.
+
+**Current behavior:**
+- Two new tests cover changed-remoteId cases.
+- No assertion for the undefined-on-both-sides fast-path.
+
+**Proposal:**
+- Add a sibling test that asserts `reconcileSessions(previous, next)` returns `previous` when `remoteId` is undefined on both sides AND stamps match.
+
+## `remotes.test.ts` `it.each` refactor dropped `isLocalSessionRemote` empty-string-session case
+
+**Severity:** Note - `ui/src/remotes.test.ts:60-80`. The `it.each` refactor splits the previous bundle (closes round-73 entry) but drops the `isLocalSessionRemote` empty-string-session case from the bundle. The contract change for `""` semantics is the load-bearing behavior change of round 74; only one of the two helpers is covered.
+
+**Current behavior:**
+- `it.each` covers `resolveSessionRemoteId` empty-string case.
+- `isLocalSessionRemote` empty-string case dropped.
+
+**Proposal:**
+- Add `[{ remoteId: "" }, { remoteId: "ssh-lab" }, false]` to the `isLocalSessionRemote` it.each table.
+
+## `delegation-result-prompt.test.ts` "scans findings, commands, and notes" bundles 3 field types
+
+**Severity:** Note - `ui/src/delegation-result-prompt.test.ts:296-336`. The new "scans findings, commands, and notes for the longest indented tilde fence" test is good but bundles three field types (findings, commandsRun, notes) plus the `~~~~~~` outer fence assertion in one `it()`.
+
+**Current behavior:**
+- Three field types bundled.
+- Per-field signal lost on regression.
+
+**Proposal:**
+- Split into per-field `it()` blocks.
+
+## `TelegramRelayStatusSnapshot` directly maps to wire shape with no transformation layer
+
+**Severity:** Note - `src/telegram.rs:216-220, 318-335`. The new `TelegramRelayStatusSnapshot` is internal but its fields directly populate the wire shape `TelegramStatusResponse { running, lifecycle, ... }`. The struct sits between the runtime accessor and the wire serializer with no transformation layer, so any change to the snapshot fields cascades into the wire contract.
+
+**Current behavior:**
+- Snapshot fields → wire fields, one-to-one.
+- No transformation layer.
+
+**Proposal:**
+- Either rename the struct to a wire-prefixed name.
+- Or add a thin builder method on `TelegramStatusResponse` that takes the snapshot explicitly.
+
+## Supervised in-process Telegram relay status is untestable in production due to `#[cfg(test)]` fallback
+
+**Severity:** Medium - `src/telegram.rs:220-331`. `telegram_relay_status_snapshot()` has a production implementation backed by the live relay runtime and a test fallback that always returns `running: false` / `lifecycle: Manual`. The wire-shape tests can assert `InProcess` serialization statically, but no integration test exercises the live status endpoint while the in-process relay is running.
+
+**Current behavior:**
+- Relay status snapshot has `#[cfg(not(test))]`/`#[cfg(test)]` parallel implementations.
+- Tests always see `running: false` / `lifecycle: Manual`.
+- Production behavior is structurally untested.
+
+**Proposal:**
+- Add a non-`cfg(test)` "test mode" environment variable that lets a Rust integration test boot the runtime in a no-op mode and assert `running` flips.
+- Or refactor the runtime so the status accessors take a `&Self` parameter that tests can inject.
+
+## CLI `termal telegram` mode and in-process relay are not mutually exclusive
+
+**Severity:** Note - `src/main.rs:75-77, 115-116`. The `Mode::Telegram` (CLI) path invokes `run_telegram_bot()` directly, NOT the in-process runtime. If a user starts both `termal server` and `termal telegram`, both would race against `~/.termal/telegram-bot.json` state file with no coordination. Two separate processes hitting Telegram polling against the same `next_update_id` cursor will alternately leapfrog and lose updates.
+
+**Current behavior:**
+- `termal server` boots the in-process relay.
+- `termal telegram` starts a separate bot directly.
+- No mutual-exclusion check.
+
+**Proposal:**
+- Document the mutual-exclusion contract in `docs/features/telegram-ui-integration.md`.
+- Or detect a running in-process relay (via the state file) and refuse to start the CLI mode.
+
+## `TelegramRelayRuntime` is a file-level global rather than `AppState`-owned state
+
+**Severity:** Note - `src/telegram.rs:220-331`. `TelegramRelayRuntime` and `TELEGRAM_RELAY_RUNTIME` are file-level globals (`LazyLock<Mutex<...>>`). `AppState` has no visibility into the relay's running state, so any future health-monitor, restart-on-error, or readiness-signaling logic ends up reading globals instead of methods on `AppState`.
+
+**Current behavior:**
+- Runtime state lives in module-level statics.
+- Test injection is harder; production-vs-test parity is structural.
+
+**Proposal:**
+- Move the runtime into `AppState` and own its lifecycle on the state object.
+
+## `reconcile_telegram_relay_from_saved_settings` is synchronous on main task at startup
+
+**Severity:** Note - `src/main.rs:115-116`. The reconcile runs synchronously on the main task, blocking after "listening: http://" is printed but before the server starts accepting requests. With corrupt-file backup paths the reconcile could spend time on filesystem operations before the server is fully responsive.
+
+**Current behavior:**
+- Synchronous reconcile after server bind, before request handling.
+
+**Proposal:**
+- Spawn the reconcile as a `tokio::spawn` so the server responds immediately.
 
 ## Telegram relay stop/restart does not wait for old thread quiescence
 
-**Severity:** Medium - `src/main.rs:145`, `src/telegram.rs:240` signal the Telegram relay to stop but do not join the old relay thread or otherwise wait until it has stopped using its captured config.
+**Severity:** Medium - `src/main.rs:145`, `src/telegram.rs:248-315` signal the Telegram relay to stop but do not join the old relay thread or otherwise wait until it has stopped using its captured config.
 
 After shutdown, disable, or config retargeting, a relay that already passed its shutdown check can briefly continue polling or handling Telegram updates with the old bot/project configuration. During process shutdown this can also exit before update cursors or state-file work has quiesced.
 
@@ -52,9 +288,24 @@ After shutdown, disable, or config retargeting, a relay that already passed its 
 - Retain a relay `JoinHandle` and join with a bounded timeout during restart and graceful shutdown.
 - Or gate update/action side effects on a runtime generation check immediately before each side effect.
 
+## Telegram relay status can report running before initialization succeeds
+
+**Severity:** Low - `src/telegram.rs:257-324`. `start_telegram_relay_runtime()` sets `runtime.running = true` before the spawned worker has completed Telegram bot initialization, then `telegram_relay_status_snapshot()` reports `running: runtime.running && !runtime.spawning` after the spawn call clears `spawning`.
+
+That means `/api/telegram/status` can briefly report `running: true` while `run_telegram_bot_with_config()` is still blocked in startup work such as `getMe`, or is about to fail and clear the state.
+
+**Current behavior:**
+- Runtime state flips to `running = true` before the worker enters and completes bot initialization.
+- `spawning` is cleared immediately after the OS thread is spawned, not after the relay is ready to poll.
+- Status can present the relay as running before readiness is proven.
+
+**Proposal:**
+- Track a distinct `starting`/`ready` state in `TelegramRelayRuntime`.
+- Or have the worker signal readiness only after initialization succeeds, then expose `running: true`.
+
 ## Remote delta replay fingerprints include ignored inbound `remote_id`
 
-**Severity:** Medium - `src/remote_routes.rs:529` fingerprints the full inbound `Session` for replay suppression even though `localize_remote_session` intentionally clears untrusted inbound `remote_id` before applying state.
+**Severity:** Low - `src/remote_routes.rs:527-529` fingerprints the full inbound `Session` for replay suppression even though `localize_remote_session` intentionally clears untrusted inbound `remote_id` before applying state.
 
 Two same-revision remote `SessionCreated` events that differ only by attacker-chosen or stale `remoteId` are semantically identical after localization, but they can produce different replay keys and bypass duplicate suppression.
 
@@ -67,21 +318,6 @@ Two same-revision remote `SessionCreated` events that differ only by attacker-ch
 - Fingerprint the normalized/localizable session payload, clearing `remote_id` before hashing.
 - Add a same-revision replay test where only inbound `remoteId` differs.
 
-## Summary reconciliation can ignore `remoteId`-only ownership changes
-
-**Severity:** Medium - `ui/src/session-reconcile.ts:149` can return the previous summary session on equal `sessionMutationStamp` before comparing the new `remoteId`.
-
-A state snapshot that changes only session remote ownership can be ignored in the frontend, leaving delegation gates and tab tooltips using stale local/project ownership.
-
-**Current behavior:**
-- Equal `sessionMutationStamp` can trigger the fast path.
-- `remoteId` changes are not part of that fast-path guard.
-- UI ownership-dependent behavior can stay stale after a summary-only ownership update.
-
-**Proposal:**
-- Include `remoteId` in the summary reconciliation fast-path comparison.
-- Or ensure backend remote-owner changes always bump the stamp used by this guard.
-
 ## Marker context-menu focus restore targets the message shell
 
 **Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:1143` stores the message shell as the right-click marker menu focus-restore target instead of the actual marker metadata trigger.
@@ -92,25 +328,11 @@ Focus restoration can land on a `tabIndex=-1` wrapper with no role or label, and
 - Context-menu open paths can store the message shell as the restore target.
 - The shell is programmatically focusable but not an operable, labelled trigger.
 - Restored keyboard users can be stranded away from the marker menu trigger.
+- The current test asserts focus returns to the shell, codifying the weaker behavior.
 
 **Proposal:**
 - Pass the resolved marker trigger element for context-menu opens.
 - Or make the shell itself a real labelled trigger with equivalent keyboard behavior.
-
-## Telegram preferences copy hides stopped in-process relay state
-
-**Severity:** Low - `ui/src/preferences-panels.tsx:1198`. The frontend type now accepts `TelegramStatusResponse.lifecycle === "inProcess"`, but the status label still only distinguishes `running` from generic linked/configured states.
-
-With backend-supervised relay ownership, `enabled && lifecycle === "inProcess" && !running` can indicate a failed or stopped relay. Presenting that state as merely configured/linked gives the user no actionable signal.
-
-**Current behavior:**
-- `lifecycle: "inProcess"` is accepted by the API type.
-- Running state gets distinct copy.
-- Stopped in-process relay state falls through to generic configured/linked copy.
-
-**Proposal:**
-- Add explicit stopped/failed supervised-relay copy such as "Relay stopped".
-- Add preferences-panel coverage for both running and non-running `inProcess` states.
 
 ## Telegram bot token is persisted as plaintext in `telegram-bot.json`
 
@@ -157,32 +379,6 @@ ARIA menus should contain menu items, not arbitrary form controls. The current s
 - Document the contract in a comment at the constant definition site.
 - Or expose the limit via the wire protocol (e.g., `serverCapabilities.markerNameMaxLength`).
 
-## `localize_remote_session` defensive comment doesn't grep-discoverably name `wire_session_from_record`
-
-**Severity:** Note - `src/remote_sync.rs:531-535`. Round 72's added comment correctly explains intent ("Never trust an upstream wire `remote_id`...wire helpers re-project it"), but refers to "wire helpers re-project it for local clients" without naming `wire_session_from_record` directly. Cross-referencing the helper function name would make the contract grep-discoverable.
-
-**Current behavior:**
-- Comment explains the trust boundary.
-- Doesn't name the specific helper function.
-
-**Proposal:**
-- Mention `wire_session_from_record` (and `wire_session_summary_from_record`) by name in the comment.
-
-## `resolveSessionRemoteId` uses `??` while `resolveProjectRemoteId` uses `||` — divergent empty-string semantics
-
-**Severity:** Low - `ui/src/remotes.ts:32`. `resolveSessionRemoteId` uses `??` (nullish coalescing) on `session?.remoteId`, so an explicit empty-string `session.remoteId === ""` is treated as "session declares local" and suppresses project fallback. `resolveProjectRemoteId` (line 24) uses `||` (treats empty string as falsy and falls through).
-
-The protocol contract is that the wire only sends `Option<String>` (omitted or non-empty), so `""` shouldn't reach this helper from the backend. The `remotes.test.ts:64` test pins this empty-string-overrides-project semantic, but the protocol contract doesn't promise it.
-
-**Current behavior:**
-- `resolveSessionRemoteId` uses `??` (`""` overrides project fallback).
-- `resolveProjectRemoteId` uses `||` (`""` falls through to default).
-- Two divergent helpers for symmetric concerns.
-
-**Proposal:**
-- Either use `||` to match `resolveProjectRemoteId`'s behavior.
-- Or add a comment documenting why `??` is intentional ("explicit empty-string session.remoteId means session-declared local").
-
 ## Marker name input HTML `maxLength` counts UTF-16 vs server counts codepoints
 
 **Severity:** Note - `ui/src/panels/conversation-markers.tsx:701`. The new input uses `maxLength={CONVERSATION_MARKER_NAME_MAX_LENGTH}` (120). HTML `maxLength` counts UTF-16 code units, not Unicode codepoints. The Rust validator at `src/session_markers.rs:526` uses `.chars().count() > 120` (codepoints). For supplementary-plane characters (e.g., emoji), the UI is more conservative than the server (allowing only ~60 emoji vs. server's 120 codepoints).
@@ -223,20 +419,6 @@ On desktop this is rare, but it's a regression from the pre-form behavior where 
 **Proposal:**
 - Extend the early-return guard to include any focus target inside `.conversation-marker-context-menu-form` (matches `closest()`).
 
-## `Session.remoteId` type lacks "non-empty when present" comment
-
-**Severity:** Note - `ui/src/types.ts:290`, `ui/src/session-store.ts:80`. Round 72 dropped `| null` from `remoteId` (matches Rust contract). However, no centralized comment documents that the field is "either present and non-empty, or absent" — the single contract a TS reader should know.
-
-Future contributors might re-add `| null` if they encounter `null` in a test fixture or local-only path.
-
-**Current behavior:**
-- TS type is `remoteId?: string`.
-- Rust contract is "field-or-missing, never empty".
-- Contract not documented in TS.
-
-**Proposal:**
-- Add a brief comment on the field: `// non-empty when the session is remote-proxy; absent otherwise (Rust never emits null).`
-
 ## Marker create form coverage gaps in `AgentSessionPanel.test.tsx`
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:875-883`. Only one test exercises the custom-name path. There is no focused test for: (a) whitespace-only input keeping submit disabled; (b) initial input focus/select; (c) pressing `Cancel` without invoking `onCreateConversationMarker`; (d) pressing `Escape` inside the input canceling and restoring focus to the trigger; (e) whitespace trim mid-string (`"  Review later  "` produces `"Review later"`); (f) non-empty draftName persistence vs reset across menu close-reopen.
@@ -247,31 +429,6 @@ Future contributors might re-add `| null` if they encounter `null` in a test fix
 
 **Proposal:**
 - Add per-behavior tests.
-
-## `session-tab-status-tooltip.test.ts` missing remote-config edge cases
-
-**Severity:** Low - `ui/src/panels/session-tab-status-tooltip.test.ts:45-92`. The new test file covers four scenarios (session+project both local/remote, projectless, missing-project, missing-project+no-session-remote). It does not cover: (a) session has `remoteId: "ssh-removed"` (not in `remoteLookup`) → expected "ssh-removed (missing remote)"; (b) session has empty-string `remoteId: ""` with a missing project; (c) session has both project and `remoteId` pointing at different remotes (conflict scenario).
-
-**Current behavior:**
-- 4 scenarios covered.
-- "Missing remote" branch in `formatSessionTooltipRemoteLabel` is unexercised.
-- Conflict scenario unverified.
-- Rendered tab-tooltip behavior is not pinned for these ownership cases.
-
-**Proposal:**
-- Extend the test file with the missing-remote and conflict scenarios.
-- Add rendered tab tooltip coverage for session-owned remote labels, not only helper-level expectations.
-
-## `remotes.test.ts` "resolves session remote ownership" bundles 7 expects in one `it()`
-
-**Severity:** Note - `ui/src/remotes.test.ts:64-72`. Single `it("resolves session remote ownership before project remote ownership")` block bundles four `expect` assertions for `resolveSessionRemoteId` and three for `isLocalSessionRemote`. Same bundling pattern flagged elsewhere.
-
-**Current behavior:**
-- 7 assertions in one `it()`.
-- Failure messages cluster.
-
-**Proposal:**
-- Split into per-case tests.
 
 ## `App.scroll-behavior.test.tsx` mid-test mock override needs documenting comment
 
@@ -588,22 +745,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 - Keep the composer-scoped naming and add a note that other delegation kinds should add their own builder.
 - Or rename to `createReadOnlyReviewerDelegationRequest` to make the constraint explicit.
 
-## Delegation result fences ignore indented Markdown closing fences
-
-**Severity:** Medium - `ui/src/delegation-result-prompt.ts:65-73` chooses the untrusted-output fence by scanning only tilde runs that begin at column 0.
-
-Markdown closing fences may be indented by up to three spaces. A child result containing a line such as `   ~~~` can close the generated `~~~ untrusted-delegation-output` block and make following child-controlled text look like ordinary parent prompt instructions.
-
-**Current behavior:**
-- Fence length is based on `^~+` matches only.
-- Child summaries, findings, commands, and notes can contain indented tilde fences.
-- Indented closers can escape the intended untrusted-output block.
-
-**Proposal:**
-- Compute fence length after formatting and scan for `^ {0,3}(~+)`.
-- Or use a non-Markdown boundary such as JSON or length-prefixed data.
-- Add tests for indented tilde runs in summaries, findings, commands, and notes.
-
 ## `delegationChildUnavailableStatusLabel` lacks default/assertNever clause
 
 **Severity:** Note - the switch at `ui/src/SessionPaneView.render-callbacks.tsx:81-94` exhaustively maps all current `DelegationStatus` values but has no `default` / `assertNever` clause. A new status added to the union later returns `undefined`, which would surface as the literal string "undefined" inside the user-visible message ("Delegation child session is unavailable (undefined)."). The same shape exists for `cancelDelegationTerminalErrorMessage` (line 65-79).
@@ -719,20 +860,6 @@ The pending-state contract `agent.source:agent.id:cancel` is the load-bearing fi
 **Proposal:**
 - Trigger two sequential actions on the same source/id pair, assert one is rejected as pending.
 - Mirror the wrapping pattern from sibling tests for the provider.
-
-## Tilde-fence escape test doesn't cover non-summary fields or higher tilde counts
-
-**Severity:** Low - `ui/src/delegation-result-prompt.test.ts:252-272`. The new "uses a longer fence when child output contains tildes" test pins the 3-tilde escape case but doesn't cover (a) inputs with 4-tilde lines, (b) inputs with mixed 3-tilde and 5-tilde lines, (c) line-start tildes in fields OTHER than `summary` (e.g., `findings[].message`, `notes[]`, `commandsRun[].command`).
-
-A regression where `longestLineStartTildeRun` only walked the summary section but ignored notes/commands/findings would still pass.
-
-**Current behavior:**
-- Single-summary 3-tilde case covered.
-- Other fields untested.
-- Multi-tilde counts untested.
-
-**Proposal:**
-- Add focused cases for each non-summary field plus a 5-tilde-in-summary case.
 
 ## "Renders remote delegation progress as display-only" test under-covers regression surface
 
@@ -3545,7 +3672,7 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Add Telegram settings file concurrency regressions:
   simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
-  cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
+  cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
 - [ ] P2: Add Telegram assistant-forwarding ownership/order regressions:
   cover an already-active non-Telegram turn before a Telegram prompt, prompt POST failure after forwarding state is prepared, post-send digest failure, a digest primary-session switch before the armed Telegram reply settles, an armed session entering approval with no assistant text before its post-approval reply, and two sessions proving assistant-forwarding cursors are session-scoped.
 - [ ] P2: Add Telegram long-message chunk retry and UTF-16 chunking coverage:
@@ -3600,6 +3727,10 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   create many Mermaid/math rendered regions and assert the preview applies the same document-level caps as a single `MarkdownContent` document.
 - [ ] P2: Add single-target rendered diff navigation coverage:
   assert prev/next scrolls the only Markdown diff change and the only rendered diff region even though the selected index does not change.
+- [ ] P2: Cover large Markdown full-document deferral by character count:
+  add a low-line Markdown document over `LARGE_MARKDOWN_FULL_RENDER_CHAR_LIMIT` and assert the deferred state plus full-render transition. The current test covers only the line-count trigger.
+- [ ] P2: Cover read-only deferred Markdown full-document rendering:
+  render a staged or otherwise read-only large Markdown diff, assert `Render full document` appears, clicking it renders the full document, and save/edit affordances remain absent.
 - [ ] P2: Route the new lagged-recovery reconnect test through the textDelta fast-path it documents:
   the new `App.live-state.reconnect.test.tsx` test exercises the revision-gap branch (the `messageCreated` delta omits `sessionMutationStamp` so it falls into the resync fallback). Add `sessionMutationStamp` so the delta routes through the matched-stamp fast-path that the surrounding `handleDeltaEvent` comment is most concerned about, OR rename the test to clarify it covers the revision-gap branch specifically and add a sibling test for the textDelta fast-path.
 - [ ] P2: Split the bad-live-event + workspaceFilesChanged test into isolated arrange-act-assert phases:
@@ -3730,18 +3861,14 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   promote each of the nine assertions (escaped JSON, Bearer `:`, lowercase bearer-colon, Bearer `=`, `Authorization=Bearer`, lowercase bearer-equals, snake-case key, camel-case key, env-var key) to its own `#[test]`. Same for the prior bundled sanitizer tests and the `ambiguous_token_key` behavior flip.
 - [ ] P2: Add deferred delegation handler stale-guard tests:
   use deferred promises for open/insert/cancel/rejection paths, switching panes and unmounting before settlement, and assert no stale open/insert/error callback fires afterward.
-- [ ] P2: Cover delegation result prompt indented-fence escaping:
-  include child summaries, findings, commands, and notes containing indented tilde fences such as `   ~~~`, and assert the formatter chooses a boundary those lines cannot close.
 - [ ] P2: Cover Telegram relay active-project reconciliation:
   start an in-process relay with subscribed projects but no default and assert startup fails or status exposes the effective `activeProjectId`; delete a project used by a running relay and assert the relay is stopped or restarted without the deleted id.
 - [ ] P2: Cover Telegram relay runtime lifecycle seam:
-  add an injectable or testable relay runtime so startup from saved settings, invalid/missing config stop, config-save start/stop/restart, runtime status `running: true` + `inProcess`, and graceful-shutdown stop are covered despite the production path's `#[cfg(not(test))]` guards.
+  add an injectable or testable relay runtime so startup from saved settings, implicit first subscribed-project fallback, invalid/missing config stop, config-save start/stop/restart, deleted-project reconciliation, runtime status `running: true` + `inProcess`, and graceful-shutdown stop are covered despite the production path's `#[cfg(not(test))]` guards.
 - [ ] P2: Cover Telegram relay stop/restart quiescence:
   simulate disable or config retarget while an old relay is in flight and assert stale-generation polling/action handling cannot continue after status reports the replacement or stopped state.
 - [ ] P2: Cover remote SessionCreated replay identity normalization:
   send two same-revision remote `SessionCreated` payloads that differ only by inbound `remoteId` and assert replay suppression treats them as duplicates after localization.
-- [ ] P2: Cover summary reconciliation of remote-owner-only changes:
-  feed `reconcileSummarySession` equal-stamp summaries whose only material difference is `remoteId` and assert the returned object updates ownership instead of reusing the stale previous summary.
 - [ ] P2: Cover SessionPaneView remote delegation action capability wiring:
   render `SessionPaneView` with local, remote-project, missing-project, projectless remote-proxy, and conflicting `session.remoteId = "ssh-lab"` plus local-project scenarios; assert delegation row Open / Insert / Cancel actions and the composer Delegate action follow the production `isLocalSessionRemote(...)` wiring, not only helper-level availability checks.
 - [ ] P2: Add component-level session tab tooltip remote-owner coverage:
@@ -3753,7 +3880,7 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Cover marker create-form edge behavior:
   assert whitespace-only labels keep submit disabled, the input receives focus/select, trimmed labels are submitted, Cancel does not create a marker, Escape cancels and restores focus, and draft state resets or persists only by the documented rules.
 - [ ] P2: Cover marker context-menu restore target and create-mode semantics:
-  open a marker menu via right-click and keyboard trigger, close it, and assert focus returns to the actual labelled trigger; add an accessibility regression for create mode so form controls are not exposed as invalid menu children.
+  open a marker menu via right-click and keyboard trigger, close it, and assert focus returns to the actual labelled trigger and Enter/Space can reopen the menu; add an accessibility regression for create mode so form controls are not exposed as invalid menu children.
 - [ ] P2: Cover marker-window focus-restore cancellation:
   mock `requestAnimationFrame` / `cancelAnimationFrame`, close the floating marker window, switch sessions or unmount before the frame flushes, and assert the scheduled focus restore is canceled.
 - [ ] P2: Pin `event.target === node` mousedown guard with negative case:
@@ -3800,8 +3927,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   use `it.each([...])` over the five `(status, expectedPhrase)` pairs (canceled/already canceled, completed/already completed, failed/already failed, queued/still queued, running/still running). Round 67 only covers `canceled`.
 - [ ] P2: Pin pending-key composite contract in mixed-source MessageCard tests:
   trigger two sequential actions on the same source/id pair, assert one is rejected as pending. Add a test that flips a tool row to a delegation row across rerenders and asserts no row reuse. Also wrap with `DeferredHeavyContentActivationProvider` per sibling test pattern.
-- [ ] P2: Broaden tilde-fence escape coverage:
-  add focused cases for line-start tildes in `findings[].message`, `notes[]`, `commandsRun[].command`. Add a 5-tilde-in-summary case and a mixed 3+5 tilde case to verify the escape walks the joined `bodySections`.
 - [ ] P2: Strengthen "renders remote delegation progress as display-only" test:
   add `expect(params.onComposerError).not.toHaveBeenCalled()` after rendering, exercise a flag flip mid-test, or split into per-action coverage so a regression that drops only one of the three guards surfaces.
 - [ ] P2: Clean up AgentSessionPanel `act(...)` warnings:

@@ -1202,6 +1202,9 @@ function telegramStatusLabel(status: TelegramStatusResponse | null): string {
   if (status.running) {
     return "Polling";
   }
+  if (status.lifecycle === "inProcess" && status.enabled && status.configured) {
+    return "Stopped";
+  }
   if (status.linkedChatId !== null && status.linkedChatId !== undefined) {
     return "Linked";
   }

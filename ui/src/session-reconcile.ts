@@ -115,6 +115,7 @@ function reconcileSession(
     previous.sessionMutationStamp !== null &&
     previous.sessionMutationStamp !== undefined &&
     previous.sessionMutationStamp === next.sessionMutationStamp &&
+    previous.remoteId === next.remoteId &&
     (next.messagesLoaded !== true || previous.messagesLoaded === true)
   ) {
     return previous;
@@ -151,7 +152,8 @@ function reconcileSummarySession(
     !options?.forceMessagesUnloaded &&
     previous.sessionMutationStamp !== null &&
     previous.sessionMutationStamp !== undefined &&
-    previous.sessionMutationStamp === next.sessionMutationStamp
+    previous.sessionMutationStamp === next.sessionMutationStamp &&
+    previous.remoteId === next.remoteId
   ) {
     return previous;
   }

@@ -77,6 +77,7 @@ export type SessionSummarySnapshot = Readonly<{
   modelOptions?: readonly SessionModelOption[];
   name: string;
   projectId?: string | null;
+  // Mirrors Session.remoteId: non-empty when present; absent for local sessions.
   remoteId?: string;
   reasoningEffort?: CodexReasoningEffort | null;
   sandboxMode?: Session["sandboxMode"];

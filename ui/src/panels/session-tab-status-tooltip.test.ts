@@ -46,6 +46,7 @@ describe("session tab status tooltip location", () => {
   const remoteLookup = new Map<string, RemoteConfig>([
     ["local", createBuiltinLocalRemote()],
     ["ssh-lab", createRemote()],
+    ["ssh-build", createRemote({ id: "ssh-build", name: "Build Box", user: "builder" })],
   ]);
 
   it("prefers session remote ownership over local project ownership", () => {
@@ -87,6 +88,39 @@ describe("session tab status tooltip location", () => {
 
     expect(formatSessionTooltipLocationLabel(session, new Map(), remoteLookup)).toBe(
       "Unknown (missing project)",
+    );
+  });
+
+  it("reports a missing remote when the session owner is no longer configured", () => {
+    const session = createSessionSummary({ remoteId: "ssh-removed" });
+
+    expect(formatSessionTooltipLocationLabel(session, new Map(), remoteLookup)).toBe(
+      "ssh-removed (missing remote)",
+    );
+  });
+
+  it("falls back to missing-project when a blank session owner has no project metadata", () => {
+    const session = createSessionSummary({
+      projectId: "missing-project",
+      remoteId: "",
+    });
+
+    expect(formatSessionTooltipLocationLabel(session, new Map(), remoteLookup)).toBe(
+      "Unknown (missing project)",
+    );
+  });
+
+  it("prefers a conflicting session remote owner over project ownership", () => {
+    const session = createSessionSummary({
+      projectId: "project-1",
+      remoteId: "ssh-build",
+    });
+    const projectLookup = new Map([
+      ["project-1", createProject({ remoteId: "ssh-lab" })],
+    ]);
+
+    expect(formatSessionTooltipLocationLabel(session, projectLookup, remoteLookup)).toBe(
+      "Build Box (builder@lab.internal:2222)",
     );
   });
 });

@@ -57,21 +57,27 @@ describe("remotes", () => {
     expect(isLocalRemoteId("ssh-lab")).toBe(false);
   });
 
-  it("resolves session remote ownership before project remote ownership", () => {
-    expect(resolveSessionRemoteId({ remoteId: "ssh-lab" }, { remoteId: "local" })).toBe(
-      "ssh-lab",
-    );
-    expect(resolveSessionRemoteId({ remoteId: "" }, { remoteId: "ssh-lab" })).toBe(
-      LOCAL_REMOTE_ID,
-    );
-    expect(resolveSessionRemoteId({}, { remoteId: "ssh-project" })).toBe("ssh-project");
-    expect(resolveSessionRemoteId()).toBe(LOCAL_REMOTE_ID);
+  it.each([
+    [{ remoteId: "ssh-lab" }, { remoteId: "local" }, "ssh-lab"],
+    [{ remoteId: "" }, { remoteId: "ssh-lab" }, "ssh-lab"],
+    [{}, { remoteId: "ssh-project" }, "ssh-project"],
+    [undefined, undefined, LOCAL_REMOTE_ID],
+  ] as const)(
+    "resolves session remote ownership for case %#",
+    (session, project, expected) => {
+      expect(resolveSessionRemoteId(session, project)).toBe(expected);
+    },
+  );
 
-    expect(isLocalSessionRemote({ remoteId: "ssh-lab" }, { remoteId: "local" })).toBe(
-      false,
-    );
-    expect(isLocalSessionRemote({}, { remoteId: "local" })).toBe(true);
-  });
+  it.each([
+    [{ remoteId: "ssh-lab" }, { remoteId: "local" }, false],
+    [{}, { remoteId: "local" }, true],
+  ] as const)(
+    "detects local session remote ownership for case %#",
+    (session, project, expected) => {
+      expect(isLocalSessionRemote(session, project)).toBe(expected);
+    },
+  );
 
   it("describes local and ssh connection labels", () => {
     expect(remoteConnectionLabel(createBuiltinLocalRemote())).toBe("This machine");

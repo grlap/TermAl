@@ -287,6 +287,7 @@ export type Session = {
   agent: AgentType;
   workdir: string;
   projectId?: string | null;
+  // Non-empty when present; omitted for local sessions. Rust never emits null.
   remoteId?: string;
   model: string;
   modelOptions?: SessionModelOption[];
