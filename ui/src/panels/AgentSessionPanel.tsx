@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type ClipboardEvent as ReactClipboardEvent,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -44,8 +45,7 @@ import {
 } from "./ConversationOverviewRail";
 import { useConversationOverviewController } from "./conversation-overview-controller";
 import {
-  ConversationMarkerNavigator,
-  ConversationMessageMarkers,
+  ConversationMarkerFloatingWindow,
   findActivatableConversationMarkerContextMenuTrigger,
   findConversationMarkerContextMenuTrigger,
   groupConversationMarkersByMessageId,
@@ -66,6 +66,7 @@ import {
 } from "../session-store";
 import { useStableEvent } from "./use-stable-event";
 import { MessageMetaMarkerMenuProvider } from "../message-cards";
+import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
 import type {
   ApprovalDecision,
   AgentCommand,
@@ -986,14 +987,21 @@ const SessionConversationPage = memo(function SessionConversationPage({
     [visibleMarkers, visibleMessages],
   );
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
+  const [markerPanelVisibilityOverride, setMarkerPanelVisibilityOverride] =
+    useState<boolean | null>(null);
+  const isMarkerPanelVisible =
+    markerPanelVisibilityOverride ?? sortedMarkers.length > 0;
   const {
     contextMenuNode: markerContextMenuNode,
     openContextMenu: openMarkerContextMenu,
   } = useConversationMarkerContextMenu({
     isActive,
+    isMarkerPanelVisible,
     markersByMessageId,
     onCreateConversationMarker,
     onDeleteConversationMarker,
+    onSetMarkerPanelVisible: (isVisible) =>
+      setMarkerPanelVisibilityOverride(isVisible),
     scrollContainerRef,
     sessionId: session.id,
     visibleMessageIds,
@@ -1016,6 +1024,10 @@ const SessionConversationPage = memo(function SessionConversationPage({
       setActiveMarkerId(null);
     }
   }, [activeMarkerId, visibleMarkers]);
+
+  useEffect(() => {
+    setMarkerPanelVisibilityOverride(null);
+  }, [session.id]);
 
   const jumpToMarker = useCallback(
     (marker: ConversationMarker) => {
@@ -1062,11 +1074,22 @@ const SessionConversationPage = memo(function SessionConversationPage({
         onMessageMcpElicitationSubmit,
         onMessageCodexAppRequestSubmit,
       );
-      const messageMarkers = markersByMessageId.get(message.id) ?? [];
       if (!rendered) {
         return null;
       }
-      const canOpenMarkerMenu = message.author === "assistant";
+      const activeMessageMarker = activeMarkerId
+        ? markersByMessageId
+            .get(message.id)
+            ?.find((marker) => marker.id === activeMarkerId) ?? null
+        : null;
+      const markerShellStyle = activeMessageMarker
+        ? ({
+            "--conversation-active-marker-color":
+              normalizeConversationMarkerColor(activeMessageMarker.color),
+          } as CSSProperties)
+        : undefined;
+      const canOpenMarkerMenu =
+        message.author === "assistant" || message.author === "you";
       const handleMarkerContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
         if (
           !canOpenMarkerMenu ||
@@ -1134,19 +1157,13 @@ const SessionConversationPage = memo(function SessionConversationPage({
       };
       return (
         <div
-          className={`conversation-message-marker-shell${canOpenMarkerMenu ? " can-open-marker-menu" : ""}`}
+          className={`conversation-message-marker-shell${canOpenMarkerMenu ? " can-open-marker-menu" : ""}${activeMessageMarker ? " is-active-marker" : ""}`}
+          style={markerShellStyle}
           tabIndex={canOpenMarkerMenu ? -1 : undefined}
           onClick={handleMarkerTriggerClick}
           onContextMenu={handleMarkerContextMenu}
           onKeyDown={handleMarkerTriggerKeyDown}
         >
-          {messageMarkers.length > 0 ? (
-            <ConversationMessageMarkers
-              markers={messageMarkers}
-              activeMarkerId={activeMarkerId}
-              onMarkerClick={jumpToMarker}
-            />
-          ) : null}
           {canOpenMarkerMenu ? (
             <MessageMetaMarkerMenuProvider>
               {rendered}
@@ -1161,7 +1178,6 @@ const SessionConversationPage = memo(function SessionConversationPage({
       // The marker menu owns session/create/delete state internally; keep this
       // callback keyed only to the rendered card and marker lookup surfaces.
       activeMarkerId,
-      jumpToMarker,
       markersByMessageId,
       openMarkerContextMenu,
       renderMessageCard,
@@ -1234,10 +1250,11 @@ const SessionConversationPage = memo(function SessionConversationPage({
       />
     </MessageSlot>
   ));
-  const markerNavigation = sortedMarkers.length > 0 ? (
-    <ConversationMarkerNavigator
+  const markerNavigation = isMarkerPanelVisible ? (
+    <ConversationMarkerFloatingWindow
       markers={sortedMarkers}
       activeMarkerId={activeMarkerId}
+      onClose={() => setMarkerPanelVisibilityOverride(false)}
       onJump={jumpToMarker}
       onNavigatePrevious={() => navigateMarkerByOffset(-1)}
       onNavigateNext={() => navigateMarkerByOffset(1)}
@@ -1507,7 +1524,10 @@ const SessionComposer = memo(function SessionComposer({
   // the store snapshot catches up. Callers that need capability/session fields
   // must still check `session`.
   const activeSessionId = session?.id ?? sessionId;
-  activeSessionIdRef.current = activeSessionId;
+  useLayoutEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
   const committedDraft = session?.committedDraft ?? "";
   const draftAttachments = session?.draftAttachments ?? EMPTY_COMPOSER_ATTACHMENTS;
   const promptHistory = session?.promptHistory ?? EMPTY_COMPOSER_PROMPT_HISTORY;
@@ -1565,6 +1585,8 @@ const SessionComposer = memo(function SessionComposer({
     isStopping ||
     isUpdating ||
     isDelegationSpawning ||
+    // Delegate treats slash text as plain task instructions, so do not let it
+    // bypass the slash palette while the user is choosing a command/model.
     slashPalette.kind !== "none";
 
   useEffect(() => {
@@ -2389,6 +2411,8 @@ const SessionComposer = memo(function SessionComposer({
               }}
               onClick={() => void handleComposerDelegationSpawn()}
               disabled={composerDelegateDisabled}
+              aria-busy={isDelegationSpawning}
+              title="Spawn read-only delegation from current draft"
             >
               {isDelegationSpawning ? "Delegating..." : "Delegate"}
             </button>

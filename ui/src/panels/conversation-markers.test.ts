@@ -183,19 +183,71 @@ describe("conversation marker helpers", () => {
     }
   });
 
-  it("rejects nested native controls inside custom marker-menu triggers", () => {
+  it.each([
+    ["button", () => document.createElement("button")],
+    [
+      "link",
+      () => {
+        const link = document.createElement("a");
+        link.href = "https://example.test";
+        return link;
+      },
+    ],
+    ["input", () => document.createElement("input")],
+    ["select", () => document.createElement("select")],
+    ["option", () => document.createElement("option")],
+    ["textarea", () => document.createElement("textarea")],
+    [
+      "contenteditable",
+      () => {
+        const editable = document.createElement("span");
+        editable.setAttribute("contenteditable", "true");
+        return editable;
+      },
+    ],
+    [
+      "empty contenteditable",
+      () => {
+        const editable = document.createElement("span");
+        editable.setAttribute("contenteditable", "");
+        return editable;
+      },
+    ],
+    ["code", () => document.createElement("code")],
+    ["pre", () => document.createElement("pre")],
+    ["img", () => document.createElement("img")],
+    ["picture", () => document.createElement("picture")],
+    ["video", () => document.createElement("video")],
+    ["audio", () => document.createElement("audio")],
+    ["canvas", () => document.createElement("canvas")],
+    [
+      "svg",
+      () => document.createElementNS("http://www.w3.org/2000/svg", "svg"),
+    ],
+    [
+      "data-native-context-menu",
+      () => {
+        const customNative = document.createElement("span");
+        customNative.dataset.nativeContextMenu = "true";
+        return customNative;
+      },
+    ],
+  ])("rejects nested %s controls inside custom marker-menu triggers", (
+    _label,
+    makeNativeTarget,
+  ) => {
     const root = document.createElement("section");
     const trigger = document.createElement("span");
-    const nestedButton = document.createElement("button");
+    const nativeTarget = makeNativeTarget();
     trigger.dataset.conversationMarkerMenuTrigger = "true";
-    trigger.append(nestedButton);
+    trigger.append(nativeTarget);
     root.append(trigger);
 
     expect(
       findActivatableConversationMarkerContextMenuTrigger(root, trigger),
     ).toBe(trigger);
     expect(
-      findActivatableConversationMarkerContextMenuTrigger(root, nestedButton),
+      findActivatableConversationMarkerContextMenuTrigger(root, nativeTarget),
     ).toBeNull();
   });
 

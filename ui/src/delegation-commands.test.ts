@@ -4,7 +4,10 @@ import { ApiRequestError } from "./api";
 import type { SpawnDelegationTransportFailurePacket } from "./delegation-error-packets";
 import {
   cancelDelegationCommand,
+  createComposerDelegationRequest,
   createDelegationCommands,
+  DELEGATION_COMPOSER_TITLE_MAX_CHARS,
+  delegationTitleFromPrompt,
   delegationCommands,
   getDelegationResultCommand,
   getDelegationStatusCommand,
@@ -18,6 +21,7 @@ import {
   MAX_DELEGATION_WAIT_IDS,
   MAX_DELEGATION_WAIT_TIMEOUT_MS,
   MIN_DELEGATION_WAIT_INTERVAL_MS,
+  resolveComposerDelegationAvailability,
   type DelegationCommandTransport,
   type SpawnReviewerBatchFailure,
   type SpawnReviewerBatchCommandResult,
@@ -221,6 +225,71 @@ describe("delegation command surface", () => {
     expect(delegationCommands.cancel_delegation).toBeTypeOf("function");
     expect(delegationCommands.wait_delegations).toBeTypeOf("function");
     expect(delegationCommands).not.toHaveProperty("wait_delegation");
+  });
+
+  it("builds composer delegation titles from prompt text", () => {
+    expect(delegationTitleFromPrompt("   \n\t  ")).toBe("Delegated review");
+    expect(delegationTitleFromPrompt("  Review\n\nthis\tchange  ")).toBe(
+      "Review this change",
+    );
+
+    const exactTitle = "x".repeat(DELEGATION_COMPOSER_TITLE_MAX_CHARS);
+    expect(delegationTitleFromPrompt(exactTitle)).toBe(exactTitle);
+
+    expect(
+      delegationTitleFromPrompt("x".repeat(DELEGATION_COMPOSER_TITLE_MAX_CHARS + 1)),
+    ).toBe(`${"x".repeat(DELEGATION_COMPOSER_TITLE_MAX_CHARS - 3)}...`);
+  });
+
+  it("does not split surrogate pairs when truncating composer delegation titles", () => {
+    const prompt = `${"a".repeat(DELEGATION_COMPOSER_TITLE_MAX_CHARS - 4)}🙂bbbb`;
+
+    expect(delegationTitleFromPrompt(prompt)).toBe(
+      `${"a".repeat(DELEGATION_COMPOSER_TITLE_MAX_CHARS - 4)}🙂...`,
+    );
+  });
+
+  it("builds the fixed read-only reviewer request for composer delegation", () => {
+    const request = createComposerDelegationRequest(
+      makeSession({
+        agent: "Claude",
+        model: "claude-sonnet-4.5",
+      }),
+      "Review the current diff.",
+    );
+
+    expect(request).toEqual({
+      title: "Review the current diff.",
+      prompt: "Review the current diff.",
+      agent: "Claude",
+      model: "claude-sonnet-4.5",
+      mode: "reviewer",
+      writePolicy: { kind: "readOnly" },
+    });
+  });
+
+  it("resolves composer delegation availability before spawning", () => {
+    const localSession = makeSession({
+      id: "parent-1",
+      projectId: "project-1",
+    });
+    expect(
+      resolveComposerDelegationAvailability(localSession, { remoteId: "local" }),
+    ).toEqual({ outcome: "available", parentSession: localSession });
+    expect(resolveComposerDelegationAvailability(null, null)).toEqual({
+      outcome: "error",
+      message: "Session is no longer available.",
+    });
+    expect(resolveComposerDelegationAvailability(localSession, null)).toEqual({
+      outcome: "error",
+      message: "Delegations are unavailable until the session project is loaded.",
+    });
+    expect(
+      resolveComposerDelegationAvailability(localSession, { remoteId: "ssh-lab" }),
+    ).toEqual({
+      outcome: "error",
+      message: "Delegations are available only for local sessions.",
+    });
   });
 
   it("keeps wait and spawn-batch results discriminated by outcome", () => {

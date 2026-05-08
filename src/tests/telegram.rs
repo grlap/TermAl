@@ -769,7 +769,7 @@ fn telegram_standalone_token_ignores_unanchored_value() {
 }
 
 #[test]
-fn telegram_standalone_token_ignores_foreign_token_keys() {
+fn telegram_standalone_token_ignores_access_token_key() {
     let token = telegram_redaction_token();
 
     let foreign_token_key = format!("accessToken={token}");
@@ -777,6 +777,11 @@ fn telegram_standalone_token_ignores_foreign_token_keys() {
         sanitize_telegram_log_detail(&foreign_token_key),
         foreign_token_key
     );
+}
+
+#[test]
+fn telegram_standalone_token_ignores_csrf_token_key() {
+    let token = telegram_redaction_token();
 
     let foreign_spaced_token_key = format!("csrfToken : {token}");
     assert_eq!(
@@ -880,36 +885,76 @@ fn telegram_standalone_token_redacts_env_var_key_context() {
     assert_eq!(env, "TERMAL_TELEGRAM_BOT_TOKEN=<redacted>");
 }
 
-#[test]
-fn telegram_generic_token_redaction_requires_telegram_or_bot_word_context() {
-    let token = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi";
+fn assert_generic_token_context_is_preserved(context: &str) {
+    let token = telegram_redaction_token();
+    let detail = format!("{context} token={token}");
+    assert_eq!(sanitize_telegram_log_detail(&detail), detail);
+}
 
-    for context in [
-        "robot pipeline",
-        "bottom panel",
-        "slackbot relay",
-        "botanical job",
-    ] {
-        let detail = format!("{context} token={token}");
-        assert_eq!(sanitize_telegram_log_detail(&detail), detail);
-    }
+#[test]
+fn telegram_generic_token_ignores_robot_context() {
+    assert_generic_token_context_is_preserved("robot pipeline");
+}
+
+#[test]
+fn telegram_generic_token_ignores_bottom_context() {
+    assert_generic_token_context_is_preserved("bottom panel");
+}
+
+#[test]
+fn telegram_generic_token_ignores_slackbot_context() {
+    assert_generic_token_context_is_preserved("slackbot relay");
+}
+
+#[test]
+fn telegram_generic_token_ignores_botanical_context() {
+    assert_generic_token_context_is_preserved("botanical job");
+}
+
+#[test]
+fn telegram_generic_token_redacts_telegram_api_context() {
+    let token = telegram_redaction_token();
 
     assert_eq!(
         sanitize_telegram_log_detail(&format!("Telegram API error token={token}")),
         "Telegram API error token=<redacted>"
     );
+}
+
+#[test]
+fn telegram_generic_token_redacts_bot_word_context() {
+    let token = telegram_redaction_token();
+
     assert_eq!(
         sanitize_telegram_log_detail(&format!("bot config token:{token}")),
         "bot config token:<redacted>"
     );
+}
+
+#[test]
+fn telegram_generic_token_redacts_snake_namespace_context() {
+    let token = telegram_redaction_token();
+
     assert_eq!(
         sanitize_telegram_log_detail(&format!("telegram_bot: {{ token: {token} }}")),
         "telegram_bot: { token: <redacted> }"
     );
+}
+
+#[test]
+fn telegram_generic_token_redacts_hyphen_namespace_context() {
+    let token = telegram_redaction_token();
+
     assert_eq!(
         sanitize_telegram_log_detail(&format!("telegram-bot token={token}")),
         "telegram-bot token=<redacted>"
     );
+}
+
+#[test]
+fn telegram_generic_token_redacts_camel_namespace_context() {
+    let token = telegram_redaction_token();
+
     assert_eq!(
         sanitize_telegram_log_detail(&format!("telegramBot token={token}")),
         "telegramBot token=<redacted>"
@@ -1001,8 +1046,9 @@ fn telegram_token_mask_only_exposes_short_suffix() {
         let revealed = masked
             .strip_prefix("****")
             .expect("mask should keep fixed redaction prefix");
-        assert_eq!(revealed.chars().count(), token.chars().count().min(4));
-        assert!(token.ends_with(revealed));
+        assert!(!revealed.is_empty());
+        assert!(revealed.chars().count() <= 4);
+        assert!(token.trim().ends_with(revealed));
     }
 }
 

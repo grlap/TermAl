@@ -94,7 +94,7 @@ Rules:
 
 - `messageId` is the primary anchor.
 - `messageIndexHint` is a recovery hint only. It is not authoritative.
-- `name` is the short user-facing label shown in marker chips, lists, and
+- `name` is the short user-facing label shown in marker rows, lists, and
   navigation controls.
 - `color` is required and should be stored as a theme token or validated CSS
   color, not inferred only from marker kind.
@@ -153,15 +153,17 @@ Markers should be visible but not noisy.
 
 Recommended v1 rendering:
 
-- small marker chip above or beside the anchored message
-- marker icon, name, and color accent
-- hover/focus reveals full body and actions
+- marker actions live in the anchored message header context menu
+- the context menu can show or hide a pane-scoped floating marker window
+- the floating window shows marker name, kind, and color accent without
+  consuming transcript message space
 - range markers show a start chip and subtle end boundary
-- active marker highlight uses the marker color for the chip and message
+- active marker highlight uses the marker color for the marker row and message
   outline
 
 Actions:
 
+- `Show markers window` / `Hide markers window`
 - `Edit marker`
 - `Copy marker link`
 - `Jump to marker`
@@ -170,7 +172,8 @@ Actions:
 
 ### Marker list
 
-Add a compact marker list in the session side area or transcript toolbar.
+Add a compact floating marker window inside the session pane. It should stay
+within the tab pane view, not portal to global app chrome.
 
 List item fields:
 
@@ -373,8 +376,8 @@ Rules:
 - Add marker types to backend and frontend.
 - Add required marker `name` and `color` fields.
 - Persist markers under sessions.
-- Render marker chips on anchored messages.
-- Add marker list with jump support for loaded transcripts.
+- Add message-header context-menu marker actions.
+- Add floating marker window with jump support for loaded transcripts.
 
 ### Phase 2: marker CRUD
 
@@ -410,8 +413,8 @@ Backend:
 
 Frontend:
 
-- marker chip renders on anchored message
-- marker chip renders the configured name and color
+- message header context menu exposes marker create/remove actions
+- floating marker window renders configured marker name and color
 - marker list filters by kind
 - clicking a marker jumps to the message
 - previous/next marker controls wrap and skip unresolved markers
@@ -435,7 +438,7 @@ Agent workflow:
 - A user can create a marker on a conversation message.
 - A marker has a required user-visible name and color.
 - The marker persists across reload.
-- The marker is visible in the transcript and marker list.
+- The marker is visible in the transcript context menu and marker list.
 - Clicking the marker list item scrolls to and highlights the anchored message.
 - Previous/next marker controls jump between resolved markers in transcript
   order.

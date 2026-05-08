@@ -1137,9 +1137,9 @@ fn add_parent_delegation_card_locked(
 
 /// Updates the parent parallel-agent card for a delegation lifecycle change.
 ///
-/// The parent-card lookup key includes `ParallelAgentSource::Delegation`.
+/// The parent-card lookup key is `(parent_session, agent_id, source)`.
 /// Tool-sourced rows can share the same visible id shape, but delegation
-/// lifecycle updates only own delegation-sourced rows.
+/// lifecycle updates only own rows whose source is `ParallelAgentSource::Delegation`.
 fn update_parent_delegation_card_locked(
     inner: &mut StateInner,
     delegation: &DelegationRecord,

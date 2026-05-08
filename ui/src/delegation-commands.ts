@@ -14,6 +14,7 @@ import {
   type DelegationResultResponse,
   type DelegationStatusResponse,
 } from "./api";
+import { isLocalRemoteId } from "./remotes";
 import {
   mismatchedDelegationIdErrorPacket,
   mixedServerInstanceErrorPacket,
@@ -33,6 +34,7 @@ import type {
   DelegationResult,
   DelegationSummary,
   DelegationStatus,
+  Project,
   Session,
 } from "./types";
 
@@ -58,11 +60,14 @@ export const MAX_DELEGATION_TITLE_CHARS = 200;
 // prompt payloads. Keep in sync with `MAX_DELEGATION_MODEL_CHARS` in
 // `src/delegations.rs`.
 export const MAX_DELEGATION_MODEL_CHARS = 200;
+export const DELEGATION_COMPOSER_TITLE_MAX_CHARS = 80;
 // Keep in sync with `MAX_RUNNING_DELEGATIONS_PER_PARENT` in
 // `src/delegations.rs`. The backend remains authoritative when a parent already
 // has active delegations; this only caps one helper call.
 export const MAX_REVIEWER_BATCH_SIZE = 4;
 const UNSAFE_TRANSPORT_ID_PATTERN = /[/?#\u0000-\u001f\u007f]/u;
+const DELEGATION_COMPOSER_FALLBACK_TITLE = "Delegated review";
+const DELEGATION_COMPOSER_TITLE_ELLIPSIS = "...";
 
 // These client-side wait limits compose to at most 20 status requests/sec per
 // wait call. They intentionally do not mirror backend delegation fan-out limits;
@@ -226,6 +231,69 @@ export type WaitDelegationsOptions = {
 
 export function delegationStatusIsTerminal(status: DelegationStatus) {
   return status === "completed" || status === "failed" || status === "canceled";
+}
+
+export function delegationTitleFromPrompt(prompt: string) {
+  const normalized = prompt.replace(/\s+/gu, " ").trim();
+  const codePoints = Array.from(normalized);
+  if (codePoints.length === 0) {
+    return DELEGATION_COMPOSER_FALLBACK_TITLE;
+  }
+  if (codePoints.length <= DELEGATION_COMPOSER_TITLE_MAX_CHARS) {
+    return normalized;
+  }
+  return `${codePoints
+    .slice(
+      0,
+      DELEGATION_COMPOSER_TITLE_MAX_CHARS -
+        DELEGATION_COMPOSER_TITLE_ELLIPSIS.length,
+    )
+    .join("")}${DELEGATION_COMPOSER_TITLE_ELLIPSIS}`;
+}
+
+export function createComposerDelegationRequest(
+  parentSession: Pick<Session, "agent" | "model">,
+  prompt: string,
+): CreateDelegationRequest {
+  // The composer Delegate action is intentionally the read-only reviewer path.
+  // Worker/write delegation needs explicit ownership controls before exposure.
+  return {
+    title: delegationTitleFromPrompt(prompt),
+    prompt,
+    agent: parentSession.agent,
+    model: parentSession.model,
+    mode: "reviewer",
+    writePolicy: { kind: "readOnly" },
+  };
+}
+
+export type ComposerDelegationAvailability =
+  | { outcome: "available"; parentSession: Session }
+  | { outcome: "error"; message: string };
+
+export function resolveComposerDelegationAvailability(
+  parentSession: Session | null | undefined,
+  parentProject: Pick<Project, "remoteId"> | null | undefined,
+): ComposerDelegationAvailability {
+  if (!parentSession) {
+    return {
+      outcome: "error",
+      message: "Session is no longer available.",
+    };
+  }
+  if (parentSession.projectId != null && !parentProject) {
+    return {
+      outcome: "error",
+      message: "Delegations are unavailable until the session project is loaded.",
+    };
+  }
+  if (!isLocalRemoteId(parentProject?.remoteId)) {
+    return {
+      outcome: "error",
+      message: "Delegations are available only for local sessions.",
+    };
+  }
+  return { outcome: "available", parentSession };
 }
 
 export async function spawnDelegationCommand(

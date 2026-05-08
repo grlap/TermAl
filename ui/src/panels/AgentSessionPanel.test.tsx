@@ -395,6 +395,21 @@ describe("AgentSessionPanel conversation caching", () => {
           name: "Jump to Decision marker Accepted direction",
         }),
       ).toHaveClass("is-active");
+      expect(
+        screen
+          .getByText("message-1")
+          .closest(".conversation-message-marker-shell"),
+      ).toHaveClass("is-active-marker");
+      expect(
+        screen
+          .getByText("message-1")
+          .closest(".conversation-message-marker-shell"),
+      ).toHaveStyle({ "--conversation-active-marker-color": "#22c55e" });
+      expect(
+        screen
+          .getByText("message-3")
+          .closest(".conversation-message-marker-shell"),
+      ).not.toHaveClass("is-active-marker");
     } finally {
       if (originalScrollIntoView) {
         Element.prototype.scrollIntoView = originalScrollIntoView;
@@ -876,6 +891,82 @@ describe("AgentSessionPanel conversation caching", () => {
     );
   });
 
+  it("toggles the floating marker window from the message context menu", () => {
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(4),
+      markers: [
+        makeConversationMarker({
+          id: "marker-1",
+          messageId: "message-2",
+          name: "Review point",
+        }),
+        makeConversationMarker({
+          id: "marker-2",
+          messageId: "message-4",
+          name: "Follow-up point",
+        }),
+      ],
+    });
+    const { container } = renderSessionPanelWithDefaults({
+      activeSession,
+      renderMessageCard: (message) => (
+        <MessageCard
+          message={message}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />
+      ),
+    });
+
+    expect(container.querySelector(".conversation-message-markers")).toBeNull();
+    expect(
+      screen.getByRole("navigation", { name: "Conversation markers" }),
+    ).toBeInTheDocument();
+
+    const assistantMeta = Array.from(
+      container.querySelectorAll<HTMLElement>(".message-meta-author-agent"),
+    ).find((meta) => meta.textContent?.includes("Agent"));
+
+    expect(assistantMeta).toBeTruthy();
+    fireEvent.contextMenu(assistantMeta!);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Hide markers window" }),
+    );
+
+    expect(
+      screen.queryByRole("navigation", { name: "Conversation markers" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(assistantMeta!);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Show markers window" }),
+    );
+
+    const markerWindow = screen.getByRole("navigation", {
+      name: "Conversation markers",
+    });
+    expect(
+      within(markerWindow).getByRole("button", {
+        name: "Jump to Decision marker Review point",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(markerWindow).getByRole("button", {
+        name: "Jump to Decision marker Follow-up point",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.contextMenu(assistantMeta!);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Hide markers window" }),
+    );
+
+    expect(
+      screen.queryByRole("navigation", { name: "Conversation markers" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("preserves native context menu behavior for selected text, links, and code", () => {
     const onCreateConversationMarker = vi.fn();
     const activeSession = makeSession("session-1", {
@@ -948,12 +1039,14 @@ describe("AgentSessionPanel conversation caching", () => {
     );
   });
 
-  it("exposes the marker context-menu trigger only on real assistant message headers", () => {
+  it("exposes marker context-menu triggers on real message headers", () => {
+    const onCreateConversationMarker = vi.fn();
     const activeSession = makeSession("session-1", {
       messages: makeTextMessages(2),
     });
     const { container } = renderSessionPanelWithDefaults({
       activeSession,
+      onCreateConversationMarker,
       renderMessageCard: (message) => (
         <MessageCard
           message={message}
@@ -976,23 +1069,57 @@ describe("AgentSessionPanel conversation caching", () => {
 
     expect(userMeta).toBeTruthy();
     expect(assistantMeta).toBeTruthy();
-    expect(userMeta).not.toHaveAttribute(
+    expect(userMeta).toHaveAttribute(
       "data-conversation-marker-menu-trigger",
+      "true",
     );
     expect(assistantMeta).toHaveAttribute(
       "data-conversation-marker-menu-trigger",
       "true",
     );
+    expect(userMeta).toHaveAttribute("aria-label", "Open marker actions");
+    expect(assistantMeta).toHaveAttribute("aria-label", "Open marker actions");
 
     fireEvent.contextMenu(userMeta!);
-    expect(
-      screen.queryByRole("menu", { name: "Conversation marker actions" }),
-    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
 
     fireEvent.contextMenu(assistantMeta!);
     expect(
       screen.getByRole("menu", { name: "Conversation marker actions" }),
     ).toBeInTheDocument();
+
+    expect(onCreateConversationMarker).toHaveBeenCalledWith(
+      "session-1",
+      "message-1",
+    );
+  });
+
+  it("names marker trigger buttons by action rather than author", () => {
+    const { container } = renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-1", {
+        messages: makeTextMessages(2),
+      }),
+      renderMessageCard: (message) => (
+        <MessageCard
+          message={message}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />
+      ),
+    });
+
+    const assistantMeta = Array.from(
+      container.querySelectorAll<HTMLElement>(".message-meta-author-agent"),
+    ).find((meta) => meta.textContent?.includes("Agent"));
+
+    expect(assistantMeta).toBeTruthy();
+    expect(assistantMeta).toHaveAccessibleName("Open marker actions");
+    expect(
+      screen.queryByRole("button", { name: "Agent" }),
+    ).not.toBeInTheDocument();
   });
 
   it("opens marker actions from the assistant header click and keyboard trigger", async () => {
@@ -1021,6 +1148,7 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(assistantMeta).toHaveAttribute("role", "button");
     expect(assistantMeta).toHaveAttribute("tabindex", "0");
     expect(assistantMeta).toHaveAttribute("aria-haspopup", "menu");
+    expect(assistantMeta).toHaveAttribute("aria-label", "Open marker actions");
 
     fireEvent.click(assistantMeta!, { clientX: 140, clientY: 80 });
     fireEvent.click(
@@ -1097,6 +1225,15 @@ describe("AgentSessionPanel conversation caching", () => {
       screen.queryByRole("menu", { name: "Conversation marker actions" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show tasks" })).toBeInTheDocument();
+
+    const showTasksAgain = screen.getByRole("button", { name: "Show tasks" });
+    showTasksAgain.focus();
+    await user.keyboard(" ");
+
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide tasks" })).toBeInTheDocument();
   });
 
   it("does not render the removed right-side marker toolbar", () => {
@@ -1109,9 +1246,6 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Open marker actions" }),
-    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Add checkpoint marker" }),
     ).not.toBeInTheDocument();
@@ -1358,7 +1492,7 @@ describe("AgentSessionPanel conversation caching", () => {
 
   it.each([
     ["ArrowDown", "Add checkpoint marker"],
-    ["ArrowUp", "Remove Review point"],
+    ["ArrowUp", "Hide markers window"],
   ])(
     "starts marker-menu %s navigation from the nearest boundary when focus is outside menu items",
     (key, expectedItemName) => {
@@ -6511,6 +6645,16 @@ function renderFooter({
   );
 }
 
+function deferredValue<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("getAdjustedVirtualizedScrollTopForHeightChange", () => {
   it("preserves the viewport anchor when a measured message above the viewport changes height", () => {
     expect(
@@ -6916,6 +7060,163 @@ describe("AgentSessionPanelFooter", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Delegate" })).not.toBeInTheDocument();
+  });
+
+  it("marks the delegation action busy while the spawn is in flight", async () => {
+    const pendingSpawn = deferredValue<boolean>();
+    const onSpawnDelegation = vi.fn(() => pendingSpawn.promise);
+    render(
+      renderFooter({
+        session: makeSession("session-a"),
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, {
+      target: { value: "Review while I keep typing." },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    const busyButton = screen.getByRole("button", { name: "Delegating..." });
+    expect(busyButton).toBeDisabled();
+    expect(busyButton).toHaveAttribute("aria-busy", "true");
+    expect(busyButton).toHaveAttribute(
+      "title",
+      "Spawn read-only delegation from current draft",
+    );
+
+    await act(async () => {
+      pendingSpawn.resolve(true);
+      await pendingSpawn.promise;
+    });
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("keeps the draft when delegation spawn throws", async () => {
+    const onSpawnDelegation = vi.fn(async () => {
+      throw new Error("spawn failed");
+    });
+    render(
+      renderFooter({
+        session: makeSession("session-a"),
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, {
+      target: { value: "Keep this if spawn rejects." },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    expect(onSpawnDelegation).toHaveBeenCalledWith(
+      "session-a",
+      "Keep this if spawn rejects.",
+    );
+    expect(textarea).toHaveValue("Keep this if spawn rejects.");
+  });
+
+  it("disables delegation while the slash palette is open", () => {
+    const onSpawnDelegation = vi.fn(async () => true);
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          modelOptions: [{ label: "gpt-5.4", value: "gpt-5.4" }],
+        }),
+        committedDraft: "/model",
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+      }),
+    );
+
+    const delegateButton = screen.getByRole("button", { name: "Delegate" });
+    expect(delegateButton).toBeDisabled();
+    fireEvent.click(delegateButton);
+    expect(onSpawnDelegation).not.toHaveBeenCalled();
+  });
+
+  it("does not clear the original draft when a delegation resolves after a session switch", async () => {
+    const pendingSpawn = deferredValue<boolean>();
+    const onSpawnDelegation = vi.fn(() => pendingSpawn.promise);
+    const onDraftCommit = vi.fn();
+    const { rerender } = render(
+      renderFooter({
+        session: makeSession("session-a"),
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onDraftCommit,
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "Review after switch." },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      rerender(
+        renderFooter({
+          session: makeSession("session-b"),
+          canSpawnDelegation: true,
+          onSpawnDelegation,
+          onDraftCommit,
+        }),
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      pendingSpawn.resolve(true);
+      await pendingSpawn.promise;
+    });
+
+    expect(onDraftCommit).toHaveBeenCalledWith(
+      "session-a",
+      "Review after switch.",
+    );
+    expect(onDraftCommit).not.toHaveBeenCalledWith("session-a", "");
+  });
+
+  it("ignores delegation completion after the footer unmounts", async () => {
+    const pendingSpawn = deferredValue<boolean>();
+    const onDraftCommit = vi.fn();
+    const { unmount } = render(
+      renderFooter({
+        session: makeSession("session-a"),
+        canSpawnDelegation: true,
+        onSpawnDelegation: vi.fn(() => pendingSpawn.promise),
+        onDraftCommit,
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "Unmount before completion." },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    unmount();
+    await act(async () => {
+      pendingSpawn.resolve(true);
+      await pendingSpawn.promise;
+    });
+
+    expect(onDraftCommit).not.toHaveBeenCalledWith("session-a", "");
   });
 
   it("does not recompute the composer slash palette during assistant-only session churn", () => {

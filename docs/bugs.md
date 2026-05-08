@@ -24,204 +24,359 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 
 ## Remote proxy delegation actions can re-enable when project metadata is missing
 
-**Severity:** Medium - `ui/src/SessionPaneView.tsx:554` derives local delegation action capability only from `activeSession.projectId -> project.remoteId`.
+**Severity:** Medium - `ui/src/SessionPaneView.tsx:547` and `ui/src/delegation-commands.ts:284-290` derive local delegation action capability only from `activeSession.projectId -> project.remoteId`, while `src/delegations.rs:276` rejects remote-backed parents.
 
-When a remote proxy session loses its project record or has `projectId` cleared, `activeSessionProject?.remoteId` becomes `undefined`; `isLocalRemoteId(undefined)` currently evaluates as local. That can re-enable Open / Insert / Cancel actions for remote-only `source: "delegation"` rows and the composer Delegate action for remote-backed parents, routing ids or spawn requests to local delegation endpoints.
+When a remote proxy session loses its project record or has `projectId` cleared, `activeSessionProject?.remoteId` becomes `undefined`; `isLocalRemoteId(undefined)` currently evaluates as local. The extracted composer availability helper repeats the same inference with `parentProject?.remoteId`, so Open / Insert / Cancel actions and the composer Delegate action can become available for remote-backed sessions this host cannot own.
 
 **Current behavior:**
 - Local delegation action gating depends on project lookup.
 - Missing project metadata falls back through `isLocalRemoteId(undefined)`.
 - Projectless remote proxy sessions can expose local delegation actions for ids this server does not own.
-- The composer Delegate button uses the same project-derived capability gate.
+- The composer Delegate availability helper uses the same project-derived capability gate.
+- The backend still rejects remote-backed delegation attempts, so the UI/backend contract mismatch surfaces only at action time.
 
 **Proposal:**
 - Add a session-level remote/proxy capability to the wire contract, or pass explicit delegation action capability from state.
 - Keep delegation actions disabled for remote proxy sessions even when their project metadata is missing.
 - Cover a remote proxy session with `projectId: null` or a missing project record, including the composer Delegate action.
 
-## Conversation marker creation is now assistant-message only
+## Marker-menu comments still describe assistant-only triggers
 
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:1063` sets `canOpenMarkerMenu = message.author === "assistant"`, and the removed marker toolbar was the visible per-message creation affordance.
+**Severity:** Note - `ui/src/message-cards.tsx:178`, `ui/src/panels/conversation-markers.tsx:34`, and `ui/src/panels/conversation-markers.tsx:420` still describe marker-menu trigger ownership as assistant-specific after the current behavior expanded triggers to user messages too.
 
-Conversation markers are message-scoped transcript annotations, not assistant-message-only annotations. User prompts can no longer receive checkpoint markers, which removes an important resume-point workflow and narrows the feature contract without a documented product change.
-
-**Current behavior:**
-- Assistant message headers can open marker actions.
-- User message headers cannot open the marker menu.
-- The removed toolbar no longer provides an alternate "Add checkpoint marker" path for user prompts.
-
-**Proposal:**
-- Preserve a user-message marker creation affordance, either through safe user metadata activation or another explicit per-message add action.
-- If assistant-only markers are intentional, update the feature contract and tests to match.
-
-## `activeSessionIdRef.current = activeSessionId` assigned in render body (concurrent-rendering unsafe)
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:1510`. The new ref publish happens inside the render body, not in `useEffect`/`useLayoutEffect`. React 18+ concurrent rendering may execute the render body multiple times before commit, so a ref published from render can briefly hold a value that never makes it to the DOM.
-
-The session-switch race guard at line 2156 (`activeSessionIdRef.current !== requestSessionId`) depends on this ref. In concurrent mode, a discarded render could prime the ref with the new session id while the commit picks the old one — making the guard read incorrect data after `await`.
+The marker feature is message-scoped again, but the provider comment and native-control selector naming still point readers toward an assistant-only model. That stale contract language can cause future changes to reintroduce assistant-only assumptions around marker creation.
 
 **Current behavior:**
-- `activeSessionIdRef.current = activeSessionId` runs in render body.
-- The follow-up effect at `:1570-1575` cannot recover the prior value.
-- Session-switch race guard depends on this ref but the publish is unsafe.
+- User and assistant message headers can expose marker-menu triggers.
+- The provider comment still mentions wrapping assistant cards.
+- Native selector and helper names still use assistant-specific wording.
 
 **Proposal:**
-- Move the ref assignment into a `useEffect` or `useLayoutEffect` keyed on `activeSessionId`.
-- Or replace with a state read at await-resume time.
+- Update the comments and names to describe message metadata / marker-trigger controls generically.
+- Or explicitly document that both user and assistant headers are covered by the provider.
 
-## `handleSpawnDelegationFromFooter` load-bearing remote-detection logic is untested
+## Marker floating window close button shows literal letter `x`
 
-**Severity:** Medium - `ui/src/SessionPaneView.tsx:1032-1069`. The handler carries the runtime defense for the projectless-remote-proxy gap ("Session is no longer available", "Delegations are unavailable until the session project is loaded", "Delegations are available only for local sessions"). None of these branches are covered by tests; the 3 new AgentSessionPanel tests stop at the footer wiring.
+**Severity:** Medium - `ui/src/panels/conversation-markers.tsx:386`. The new floating window's close affordance renders the bare ASCII letter `"x"` between `<button>` tags. With CSS scaling/font/loading variations, this can be visually ambiguous (especially if the user has different fonts or font-loading delays). Compare to the navigator's prev/next which use `<DiffNavArrow>` SVG icons.
 
-The runtime defense is the only thing protecting users from misrouted delegation creates when the visibility-side gating (still based on `enableLocalDelegationActions`) lets a button through.
+The `aria-label="Hide markers window"` provides screen-reader semantics, but visible text "x" looks unfinished.
 
 **Current behavior:**
-- Three error branches in `handleSpawnDelegationFromFooter`.
-- No SessionPaneView-level tests cover them.
-- Footer wiring tests exercise only the success path (and one rejection).
+- Close button visible text: literal `x`.
+- Aria label: "Hide markers window".
+- No icon component or unicode multiplication sign.
 
 **Proposal:**
-- Add SessionPaneView-level tests (or extract the handler body into a testable helper) covering: (a) missing parent session, (b) projectId set but project missing, (c) non-local remoteId, (d) successful local path forwards expected request shape.
+- Replace `x` with an SVG icon (e.g., a close-X glyph component).
+- Or use the unicode multiplication sign `×` which is conventionally rendered by browsers.
+- Wrap the visible glyph in `aria-hidden="true"` since `aria-label` already carries the accessible name.
 
-## `delegationTitleFromPrompt` is an untested pure helper buried in SessionPaneView.tsx
+## `NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR` is now scoped to both authors but still named "assistant"
 
-**Severity:** Medium - `ui/src/SessionPaneView.tsx:178-186`. The function shapes the user-visible title for every spawned composer-Delegate delegation but has no tests. Edge cases include: empty/whitespace-only input → "Delegated review" fallback, exactly-80-char input → no truncation, 81-char input → 77-char prefix + "...", multi-line/multi-whitespace input → collapsed to single space, surrogate-pair boundary handling.
-
-The function lives inside `SessionPaneView.tsx` where it cannot be unit-tested without rendering the full pane. The companion module `ui/src/delegation-commands.ts` would be a more natural home.
+**Severity:** Note - `ui/src/panels/conversation-markers.tsx:34`. Round 69 expanded `canOpenMarkerMenu` to include both `"you"` and `"assistant"`; round 70 added `aria-label` to user `MessageMeta` so the affordance is exposed for both. The constant is now used to gate native control rejection for both user and assistant marker triggers, but its name still primes future readers with assistant-only mental model.
 
 **Current behavior:**
-- Pure helper inside SessionPaneView.tsx component file.
-- No unit tests.
-- `normalized.slice(0, 77) + "..."` can split UTF-16 surrogate pairs (emoji at the boundary).
+- Selector used for both user and assistant marker triggers.
+- Name still scoped to "assistant".
+- Future contributors might miss the broader role.
 
 **Proposal:**
-- Move `delegationTitleFromPrompt` and `DELEGATION_COMPOSER_TITLE_MAX_CHARS` into `delegation-commands.ts`.
-- Add focused unit tests for empty/whitespace, exactly-80, 81+, multi-line, and astral-character boundary cases.
+- Rename to `NATIVE_MESSAGE_CONTEXT_MENU_SELECTOR` or `NATIVE_INTERACTIVE_CONTROL_SELECTOR`.
 
-## `composerDelegateDisabled` vs `composerSendDisabled` diverge on slash-palette interaction
+## `conversation-markers.tsx` header still describes "marker chip/nav rendering" but chips were removed
 
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1554-1568`. `composerDelegateDisabled` excludes `slashPalette.kind !== "none"` so the Delegate button hides during slash autocomplete, but `composerSendDisabled` only disables Send when `slashPalette.kind !== "none" && slashPalette.items.length === 0`. The two buttons disagree on slash-palette interaction (Send stays enabled if a slash item exists, Delegate is always disabled). Two near-identical disabled flags with subtly different semantics tend to drift.
+**Severity:** Note - `ui/src/panels/conversation-markers.tsx:1-5`. The file header advertises chip-rendering ownership (`ConversationMessageMarkers` per-message chips) that no longer exists. Round 70 replaced per-message marker chips with a floating marker window; the header was not updated.
+
+CLAUDE.md mandates header comments accurately describe what each module owns.
 
 **Current behavior:**
-- Send: enabled if slash palette has items.
-- Delegate: always disabled when slash palette is open.
-- Divergence not documented in code.
+- Header says "marker chip/nav rendering".
+- Per-message chip component removed in round 70.
+- New `ConversationMarkerFloatingWindow` owns marker rendering.
 
 **Proposal:**
-- Add a one-line comment explaining why Delegate is unconditionally disabled when the slash palette is open.
+- Replace "marker chip/nav rendering" with "marker floating window/nav rendering".
+- Acknowledge that per-message marker chip rendering was removed.
 
-## `Delegate` button has no `aria-busy` / `aria-label`
+## `markerPanelVisibilityOverride ?? sortedMarkers.length > 0` ternary semantics not documented
 
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:2383-2395`. The Delegate button has no `aria-busy`, `aria-label`, or `title`. While spawning, it visually says "Delegating..." but the previous text-only label does not announce a busy state to assistive tech.
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:990-993`. The expression couples user-explicit override (`true|false`) with auto-show heuristic (`null` → length-based) in one expression. Future contributors adding a "default hidden" preference or session-scoped persistence will need to reason about three states without any comment explaining the null-as-auto contract.
 
 **Current behavior:**
-- Visual text changes from "Delegate" to "Delegating..." during spawn.
-- No `aria-busy` or status role.
-- Screen readers announce only the visible text label.
+- `null` value triggers auto-show heuristic.
+- Explicit `true|false` overrides.
+- No comment explains the contract.
 
 **Proposal:**
-- Add `aria-busy={isDelegationSpawning}` and consider an `aria-label="Spawn read-only delegation from current draft"`.
+- Add an inline comment: `// null = follow auto-show heuristic; explicit boolean = user override from menu`.
 
-## `delegationTitleFromPrompt` `slice(0, 77)` can split surrogate pairs
+## `ConversationMarkerNavigator` may be dead code with diverged disabled-state behavior
 
-**Severity:** Note - `ui/src/SessionPaneView.tsx:180-186`. The truncation uses `normalized.slice(0, 77) + "..."`. UTF-16 `slice` can split a surrogate pair (e.g., emoji), producing an invalid leading high-surrogate before the ellipsis. The backend title cap (200 chars) is enforced via `Array.from(value).length` (code points) elsewhere, but the truncation itself can produce malformed UTF-16.
+**Severity:** Note - `ui/src/panels/conversation-markers.tsx:334`. `ConversationMarkerFloatingWindow` and `ConversationMarkerNavigator` duplicate header structure (count/copy/nav controls) but have diverged disabled-state behavior. `ConversationMarkerFloatingWindow` disables prev/next when markers.length === 0; `ConversationMarkerNavigator` has no disabled state. The duplicated header is a copy-paste with subtle differences.
+
+`ConversationMarkerNavigator` may now be dead code or only reused in tests.
 
 **Current behavior:**
-- `slice(0, 77)` may split astral characters.
-- Resulting string may contain a lone high-surrogate.
-- Renders as a replacement character at the truncation boundary.
+- Two near-duplicate header components.
+- Diverged disabled-state behavior.
+- ConversationMarkerNavigator usage scope unclear.
 
 **Proposal:**
-- Use `Array.from(normalized).slice(0, 77).join("") + "..."`.
-- Or run `String.prototype.normalize("NFC")` first and check the boundary before slicing.
+- Either extract a shared `ConversationMarkerHeader` component.
+- Or remove `ConversationMarkerNavigator` if no longer used.
 
-## `///` doc on `update_parent_delegation_card_locked` mentions source but not full `(parent_session, agent_id, source)` triple
+## Marker floating window `onClose` does not restore focus
 
-**Severity:** Note - `src/delegations.rs:1138-1142`. Round 68 moved the comment to `///` doc syntax (closes round-67 finding) but mentions only `ParallelAgentSource::Delegation` participation. The disambiguating-key invariant `(parent_session, agent_id, source)` referenced in the bug-ledger entry is only partly surfaced — `agent.id` is matched at line 1160 but the doc does not describe the full triple.
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1257`. Pressing the close button (or selecting "Hide markers window" from context menu) hides the floating window but leaves keyboard focus on the now-detached close button. The user is left without a focused element. The marker-menu close path uses `closeContextMenu({ restoreFocus: true })`; the close-button path does not.
 
 **Current behavior:**
-- `///` doc mentions source variant.
-- Doc does not name the full triple.
-- Future readers may miss the agent-id component.
+- Close button click → window unmounts.
+- No focus restoration.
+- Context-menu "Hide markers window" path uses existing context-menu close logic (does restore).
 
 **Proposal:**
-- Mention the full triple `(parent_session, agent_id, source)` in the doc comment.
-- Cross-link to the architecture doc where the invariant is documented.
+- When `onClose` fires from the close button, capture an explicit "where focus came from" or restore focus to a known anchor.
 
-## `telegram_standalone_token_ignores_foreign_token_keys` still bundles 2 assertions
+## Session-change `markerPanelVisibilityOverride` reset effect not pinned by test
 
-**Severity:** Low - `src/tests/telegram.rs:771-786`. Round 68 split most bundled telegram redaction tests but left this one with two cases (`accessToken=...` and `csrfToken : ...`) inside a single `#[test]`. The bug-ledger entry "Bundled telegram redaction tests keep growing" is partly closed but this case keeps the anti-pattern alive.
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1028-1030`. The new effect resets `markerPanelVisibilityOverride` on session change. The reset is correct but does not have a test pinning it; a regression that drops the dependency would silently carry the override across sessions.
 
 **Current behavior:**
-- Two cases bundled.
-- Failure messages still cluster.
+- Effect at `:1028-1030` resets override on session change.
+- No test asserts the reset occurs.
 
 **Proposal:**
-- Split into two `#[test]`s along the same shape as the other round-68 splits.
+- Add a test that asserts the override is reset across session switches.
 
-## `telegram_generic_token_redaction_requires_telegram_or_bot_word_context` still bundles 9 cases
+## Inline arrow `(isVisible) => setMarkerPanelVisibilityOverride(isVisible)` re-allocates per render
 
-**Severity:** Low - `src/tests/telegram.rs:883-917`. Round 68 split sibling bundled tests but did not touch this one. It bundles 4 negative-context iterations plus 5 positive-context assertions in one `#[test]`. Failure messages still cluster, and adding a sixth positive-context case will continue to grow it.
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1003-1004`. `setMarkerPanelVisibilityOverride` is a stable setter; passing a re-allocated arrow defeats memoization in the consumer hook. The hook receives `onSetMarkerPanelVisible` and creates a context-menu node that depends on this prop — every render allocates a new arrow.
 
 **Current behavior:**
-- Single test with 9 distinct assertions.
-- Other bundled redaction tests have been split.
-- This case remains bundled.
+- Inline arrow per render.
+- Stable setter wrapped unnecessarily.
+- Consumer hook's context-menu node re-allocates per render.
 
 **Proposal:**
-- Promote each of the 5 positive-context cases to its own `#[test]`.
-- Use a parameterized helper for the negative-context iteration.
+- Pass the setter directly: `onSetMarkerPanelVisible: setMarkerPanelVisibilityOverride`.
+- Or wrap with `useCallback`.
 
-## 3 new delegation tests miss in-flight spinner, rejection, slash-palette, and race coverage
+## "toggles the floating marker window from the message context menu" doesn't pin auto-show heuristic
 
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:6852-6919`. The new tests do not exercise: the in-flight spinner ("Delegating..." label flip — covered visually by `isDelegationSpawning` but no assertion pins it); the `try/catch` swallowing of an `onSpawnDelegation` rejection (current tests resolve with `false`, never throw); the `slashPalette.kind !== "none"` disabled state; the unmount-during-await race; the session-switch-during-await race using the `activeSessionIdRef` guard.
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:893-968`. The test assumes initial state has `isMarkerPanelVisible === true` (because `sortedMarkers.length > 0`), but doesn't assert the "Hide markers window" appears (vs. "Show markers window") in the menu before the first toggle. A regression that flipped the auto-show heuristic to default-hidden would still pass.
 
 **Current behavior:**
-- Tests cover wiring and basic success/failure outcomes.
-- Race conditions and disabled-state branches uncovered.
+- Test exercises one direction (Hide → Show).
+- Auto-show default-true contract not asserted.
 
 **Proposal:**
-- Add deferred-promise tests using a `let resolveSpawn` pattern.
-- Add a "rejects with thrown error → draft preserved" test.
-- Add a "spawn while slash palette open → button is disabled" test.
+- Add `expect(screen.getByRole("menuitem", { name: "Hide markers window" })).toBeInTheDocument()` before the first click.
+- Add a parallel test that starts with empty markers, asserts the floating window is absent, then opens via "Show markers window".
 
-## Native-control rejection test only covers `<button>`, not other selectors in `NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR`
+## "keeps the draft when delegation spawn throws" doesn't assert busy state was cleared
 
-**Severity:** Low - `ui/src/panels/conversation-markers.test.ts:186-200`. The new `findActivatableConversationMarkerContextMenuTrigger` test pins the nested-button rejection but does not cover other native control selectors mentioned in `NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR` (e.g., `<a>`, `<input>`, `<select>`, `<textarea>`, contenteditable). Nor does it cover the `target === trigger` case where the target is the trigger element itself.
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7101-7128`. The `finally` arm clears `setIsDelegationSpawning(false)` only when mounted. The test exercises the throw path but does not assert `screen.queryByRole("button", { name: "Delegating..." })` is gone — only that the textarea retained the draft.
+
+A regression that left the button stuck in "Delegating..." after a thrown error would not be caught here.
 
 **Current behavior:**
-- `<button>` rejection tested.
-- Other native controls untested.
-- `target === trigger` case untested.
+- Tests draft preservation.
+- Doesn't assert button label flipped back.
 
 **Proposal:**
-- Add `it.each([...])` over the native control tags.
-- Or restructure to a matrix that mirrors the selector.
+- Add `expect(screen.queryByRole("button", { name: "Delegating..." })).not.toBeInTheDocument()` or assert "Delegate" is back as the button name.
 
-## Validation errors and transport errors share `onComposerError` channel without distinction
+## "disables delegation while slash palette is open" doesn't pin which palette state
 
-**Severity:** Note - `ui/src/SessionPaneView.tsx:1061-1063`. On `result.outcome === "error"`, the handler routes `result.error.message` directly to `onComposerError`. The error packet is already sanitized by `safeSpawnDelegationFailureMessage`. Validation errors (e.g., "delegation prompt cannot be empty") and transport errors flow through the same composer-error channel with no distinction.
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7130-7147`. The test sets `committedDraft: "/model"` and asserts the Delegate button is disabled, but doesn't assert what `slashPalette.kind` is at that point. If the slash-palette state machine changed and `/model` no longer triggered `kind: "choice"`, the test would still pass for the wrong reason.
 
-Users may need different recovery for "your prompt is too long" (fix the prompt) vs. "the backend is unavailable" (retry).
+`composerDelegateDisabled` has multiple disable reasons (no session, isDelegationSpawning, slash palette open). The test exercises one input that triggers the slash branch in the current implementation but doesn't pin which branch is asserted.
 
 **Current behavior:**
-- Both error kinds → `onComposerError(message)`.
-- No branch on `result.error.kind` ("validation-failed" vs "spawn-failed").
+- Single input string `/model` triggers disabled.
+- Disable reason not pinned.
 
 **Proposal:**
-- Optionally branch on `result.error.kind` to drive different UX.
-- Or document the lumping inline.
+- Either render with explicit `slashPalette` state via dependency injection.
+- Or assert the specific item-list state of the palette.
 
-## Composer Delegate `mode: "reviewer"` and `writePolicy: { kind: "readOnly" }` fixed values not documented in code
+## Marker boundary test pinned new "Hide markers window" item, dropping "Remove" boundary coverage
 
-**Severity:** Note - `ui/src/SessionPaneView.tsx:1053-1060`. The spawn request sets `mode: "reviewer"` and `writePolicy: { kind: "readOnly" }` as fixed values. The agent-delegation-sessions doc describes the composer Delegate as "spawns a read-only child", but the implementation file has no comment.
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:1493-1496`. Round 70 added the new menu item at the bottom of the marker context menu. The prior boundary test (which used the last menu item) shifts to the new "Hide markers window" label. Behavior is preserved, but the test no longer pins the "Remove ..." removal item as a boundary navigation target — a regression that re-ordered menu items so "Remove Review point" ended up first or middle would not surface here.
 
 **Current behavior:**
-- Fixed values inline in spawn request.
-- Constraint documented in feature brief, not code.
+- Boundary test now asserts "Hide markers window" as the last item.
+- "Remove ..." item navigation coverage is now indirect.
 
 **Proposal:**
-- Add a one-line comment above the call: `// composer Delegate is read-only reviewer by design — see docs/features/agent-delegation-sessions.md`.
+- Add a sibling test with markers but specifying the remove item is at the expected index in `getConversationMarkerContextMenuItems`.
+
+## New marker-shell active-color test pins literal hex `#22c55e` (implementation-shaped)
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:404-411`. The test pins `--conversation-active-marker-color: "#22c55e"`. If the color normalizer changes (e.g., adds rgba conversion or theme-token resolution), this test breaks for an unrelated reason.
+
+**Current behavior:**
+- Test asserts literal hex value.
+- Implementation-shaped rather than contract-shaped.
+
+**Proposal:**
+- Pin the contract: assert the variable is set and matches what `normalizeConversationMarkerColor("#22c55e")` returns at the time, rather than the literal hex.
+
+## `aria-label="Open marker actions"` on `MessageMeta` strips visible author name from accessible name
+
+**Severity:** Medium - `ui/src/message-cards.tsx:738-749`. The `MessageMeta` `aria-label="Open marker actions"` overrides the visible "You" / "Agent" text for screen-reader users. With user-message marker triggers now enabled (round 69 allows both authors), screen-reader users encountering a message pair hear two adjacent buttons named "Open marker actions" with no author context.
+
+Sighted users still see "You"/"Agent" as the visible label, so the visible vs. announced names diverge — a WCAG 2.5.3 (Label in Name) issue. ATs cannot disambiguate which message's marker menu they are about to open.
+
+**Current behavior:**
+- `aria-label="Open marker actions"` set on the trigger.
+- Visible text: "You" / "Agent".
+- Screen reader announces only "Open marker actions".
+- Two adjacent triggers per message pair are indistinguishable to ATs.
+
+**Proposal:**
+- Use `aria-label="Open marker actions for your message"` / `"Open marker actions for assistant message"` so the announced name carries author context.
+- Or drop `aria-label` and use `aria-describedby` pointing at a hidden span that says "Open marker actions" — keeps the visible "You"/"Agent" as the primary accessible name.
+
+## `delegation-commands.ts` header comment doesn't reflect new composer helpers
+
+**Severity:** Note - `ui/src/delegation-commands.ts:1-4`. Round 69 extracted composer-delegation helpers (`delegationTitleFromPrompt`, `createComposerDelegationRequest`, `resolveComposerDelegationAvailability`) into this file, but the file header still scopes the file to "Phase 2/3 delegation command surface that UI/MCP wrappers can bind to" — composer wiring helpers are not strictly transport.
+
+Per CLAUDE.md the project enforces split-file headers describing what each file owns vs. doesn't own. The new public API surface is a distinct contract from "MCP wrapper command bindings".
+
+**Current behavior:**
+- Header still scopes file to MCP wrapper bindings.
+- Composer-side helpers added without header update.
+- Future readers won't know whether to add new composer helpers here or in the panel.
+
+**Proposal:**
+- Extend the file header to call out "composer-side delegation availability/title/request helpers".
+- Link the consumer (`SessionPaneView.tsx`).
+
+## `resolveComposerDelegationAvailability` round-trips `parentSession` in success outcome
+
+**Severity:** Note - `ui/src/delegation-commands.ts:274-297`. The function accepts `parentSession: Session` and returns it back via the success branch (`{ outcome: "available", parentSession }`). The caller already holds a `Session`. This reads like the helper is producing data, but it's just a type-narrowing convenience. Future callers who already hold a `Session` may shadow it confusingly.
+
+**Current behavior:**
+- Caller passes `parentSession`.
+- Success outcome returns the same `parentSession`.
+- Round-trip is type-narrowing only.
+
+**Proposal:**
+- Drop `parentSession` from the success outcome (caller already has it) and only return `{ outcome: "available" }`.
+- Or document why it is round-tripped (e.g., "narrowed for ergonomic destructure").
+
+## `///` doc on `update_parent_delegation_card_locked` lacks cross-link to architecture doc
+
+**Severity:** Note - `src/delegations.rs:1138-1142`. Round 69 spelled the full triple `(parent_session, agent_id, source)` (closes the round-68 finding), but the original proposal also asked for a cross-link to the architecture doc that describes the invariant. That part is not done.
+
+**Current behavior:**
+- Triple invariant documented in `///` doc.
+- No `// see docs/...` cross-link.
+
+**Proposal:**
+- Add `// see docs/features/agent-delegation-sessions.md` (or whichever doc owns the invariant).
+
+## `telegram_token_mask_only_exposes_short_suffix` still bundles 6 cases
+
+**Severity:** Low - `src/tests/telegram.rs:1044-1052`. Round 69 reframed the assertion to a contract ("never expose more than 4 trailing chars") — closes the prior contract-shape concern. But the loop still iterates `["a", "ab", "abc", "abcd", "abcde", "123456:abcdefghi"]` in one `#[test]`. Bundled-assertion anti-pattern.
+
+**Current behavior:**
+- Contract-shaped assertion (good).
+- Loop bundles 6 boundary cases.
+- A regression at the 4-char or empty boundary surfaces inside one test failure.
+
+**Proposal:**
+- Keep the contract loop but split the explicit boundary cases (empty, 2-char, 4-char, 5-char, full) into individual `#[test]`s, mirroring the round-68 split style for bundled telegram tests.
+
+## `canOpenMarkerMenu` predicate name no longer captures meaningful filtering
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1069-1070`. The new `canOpenMarkerMenu = "assistant" || "you"` allows both authors. Today the only `MessageAuthor` values are likely `"you"` and `"assistant"` so this is fine — but the predicate name no longer captures meaningful filtering.
+
+A future addition of a system/info author would silently expose the marker menu without contributor noticing.
+
+**Current behavior:**
+- Whitelist of two authors.
+- All current authors covered.
+- Future system/info authors would auto-expose.
+
+**Proposal:**
+- Replace explicit author whitelist with `canOpenMarkerMenu = true` and document that all `MessageAuthor`s are eligible.
+- Or add an exhaustive default-arm switch keyed on `message.author`.
+
+## `aria-busy` on a `<button>` element is unconventional
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:2398-2399`. `aria-busy` is specified for live regions / containers, not buttons. Most ATs do read it, but the load-bearing user-facing signal is the textual flip "Delegate" → "Delegating...". Combined with `disabled` the busy indication is functional, but `aria-busy` may be redundant noise on a button. Some screen readers double-announce as "busy, Delegating, button" which can be verbose.
+
+**Current behavior:**
+- `aria-busy={isDelegationSpawning}` on button.
+- Text flips to "Delegating...".
+- Some ATs may double-announce.
+
+**Proposal:**
+- Consider dropping `aria-busy` and relying on the text flip + `disabled`.
+- If kept, this is fine.
+
+## Session-switch race test doesn't assert no commit on the new session
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7149`. The "does not clear the original draft when a delegation resolves after a session switch" test verifies the absence of `onDraftCommit("session-a", "")`. It does NOT assert that the new active session ("session-b") was NOT spuriously committed either. A regression that committed `("session-b", "")` to the wrong session would still pass.
+
+**Current behavior:**
+- Negative assertion on original session id.
+- No assertion on new session id.
+
+**Proposal:**
+- Add `expect(onDraftCommit).not.toHaveBeenCalledWith("session-b", "")`.
+
+## Unmount race test relies on console error suppression for `act` warnings
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7102-7129`. "Ignores delegation completion after the footer unmounts" exercises only the unmount-during-await path. It does NOT verify (a) `setIsDelegationSpawning(false)` is gated by `isMountedRef.current` so the React `act` warning never appears (covered indirectly by lack of console error), or (b) `focusComposerInput()` is not called after unmount (a pending rAF could try to focus a detached node).
+
+A regression that drops the `isMountedRef.current` check inside `finally` would not be caught directly — `act` warnings only surface in CI and may be flaky.
+
+**Current behavior:**
+- Unmount-during-await path covered.
+- `isMountedRef.current` guard not directly asserted.
+- `focusComposerInput()` post-unmount not verified.
+
+**Proposal:**
+- Assert `console.error` was not called with "act"/"unmounted" warnings during the test.
+- Or stub `setIsDelegationSpawning` via spy and verify it isn't invoked post-unmount.
+
+## Busy-state test relies on `Promise.resolve()` flush timing
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:6974-7008`. "Marks the delegation action busy while the spawn is in flight" relies on `await act(async () => { fireEvent.click(...); await Promise.resolve() })` to flush the busy-state commit. This is brittle to React batching changes; if a future React version delays the `setState` commit one more microtask, the test will assert the busy button before it appears.
+
+**Current behavior:**
+- Single `Promise.resolve()` flush.
+- Synchronous `expect` after click.
+
+**Proposal:**
+- Use `await waitFor(() => expect(busyButton).toHaveAttribute("aria-busy", "true"))` instead of the immediate `expect`.
+
+## `delegationTitleFromPrompt` and `resolveComposerDelegationAvailability` tests bundle multiple cases
+
+**Severity:** Note - `ui/src/delegation-commands.test.ts:230-251` (`delegationTitleFromPrompt` bundles 4 cases) and `:271-293` (`resolveComposerDelegationAvailability` bundles 4 outcomes) each pack multiple cases into one `it`. Same bundled-test anti-pattern previously called out for the Rust telegram tests.
+
+**Current behavior:**
+- Two new test files bundle 4 cases each.
+- Failure messages cluster.
+
+**Proposal:**
+- Split into single-case `it`s, or restructure as `it.each([...])`.
+
+## `createComposerDelegationRequest` is composer-scoped but generic name
+
+**Severity:** Note - `ui/src/delegation-commands.ts:254-268`. The helper accepts `Pick<Session, "agent" | "model">` and emits a fixed `mode: "reviewer"` / `writePolicy: { kind: "readOnly" }`. The current name implies "any composer-driven delegation" but the request shape is read-only-reviewer-only. A future consumer (e.g., MCP wrapper) wanting a non-reviewer or write-policy variant would mis-name intent if they reused this builder.
+
+**Current behavior:**
+- Composer-scoped name.
+- Fixed reviewer/readOnly request shape.
+- No comment guiding alternative builders.
+
+**Proposal:**
+- Keep the composer-scoped naming and add a note that other delegation kinds should add their own builder.
+- Or rename to `createReadOnlyReviewerDelegationRequest` to make the constraint explicit.
 
 ## Delegation result fences ignore indented Markdown closing fences
 
@@ -325,21 +480,6 @@ Markdown closing fences may be indented by up to three spaces. A child result co
 **Proposal:**
 - Either pass the composite identity to the handler.
 - Or document the gating contract on `runAgentAction` / the per-action callbacks.
-
-## Marker-menu trigger is announced as an "Agent" button
-
-**Severity:** Low - `ui/src/message-cards.tsx:739-740` gives the custom marker-menu trigger button semantics, but its accessible name comes from the visible author label.
-
-The trigger uses `role="button"` and `aria-haspopup="menu"` on the author span. Screen readers announce the control by its visible text, such as "Agent", while `title="Open marker actions"` is not a reliable accessible name. Keyboard and screen-reader users get a button label that describes the message author rather than the action.
-
-**Current behavior:**
-- Assistant message author text is the marker-menu trigger.
-- The trigger is exposed as a menu button named by the author label.
-- The action name is only in the `title` attribute.
-
-**Proposal:**
-- Add an explicit accessible name such as `aria-label="Open marker actions"`.
-- Add an accessibility assertion for the marker-menu trigger name.
 
 ## Only one of five `delegationChildUnavailableStatusLabel` outcomes exercised in tests
 
@@ -3199,7 +3339,7 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Add Telegram settings API/security regressions:
   cover plaintext token-at-rest exposure, corrupt-backup permission hardening, Windows ACL/secret-store fallback behavior, global/concurrent rate limiting that cannot be bypassed by rotating token strings, and bounded rate-limit cache retention.
 - [ ] P2: Cover post-validation Telegram settings sanitization:
-  delete a project/session after validation but before the second sanitize path, or extract a deterministic helper seam, and assert the persisted response cannot retain stale references. The current stale-reference test seeds invalid state before validation, so removing the second sanitize would still pass.
+  delete a project/session after validation but before the second sanitize path, or extract a deterministic helper seam, and assert the persisted response cannot retain stale references. The current stale-reference test at `src/tests/telegram.rs:1573` seeds invalid state before validation, so removing the post-validation sanitize in `src/telegram_settings.rs:73` would still pass.
 - [ ] P2: Add Telegram settings file concurrency regressions:
   simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
@@ -3393,9 +3533,9 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Cover delegation result prompt indented-fence escaping:
   include child summaries, findings, commands, and notes containing indented tilde fences such as `   ~~~`, and assert the formatter chooses a boundary those lines cannot close.
 - [ ] P2: Cover SessionPaneView remote delegation action capability wiring:
-  render `SessionPaneView` with an active remote proxy session whose project has a non-local `remoteId`, plus a projectless/missing-project remote proxy case, and assert local delegation Open / Insert / Cancel / Delegate actions stay hidden while local-project sessions keep them.
-- [ ] P2: Cover SessionPaneView composer delegation spawn wiring:
-  mock `spawnDelegationCommand`, click the composer Delegate action through `SessionPaneView`, and assert title truncation, parent agent/model, reviewer mode, read-only write policy, blank prompt handling, remote/missing-project gating, and command-error handling.
+  render `SessionPaneView` with local, remote, missing-project, and projectless remote-proxy scenarios; assert delegation row Open / Insert / Cancel actions and the composer Delegate action follow the production `activeSession -> projectLookup -> enableLocalDelegationActions` wiring, not only the helper-level availability checks.
+- [ ] P2: Cover SessionPaneView composer delegation click-through:
+  mock `spawnDelegationCommand`, click the composer Delegate action through `SessionPaneView`, and assert the active parent session drives the payload, success clears the draft, command-error handling preserves it, and composer errors surface.
 - [ ] P2: Pin `event.target === node` mousedown guard with negative case:
   add a sibling test that fires `mouseDown` on a child of `scrollNode` (e.g., a virtualized message slot) and asserts hydration does NOT occur. Round-63's isolated test only fires mouseDown directly on the scrollNode.
 - [ ] P2: Cover MessageCard pending-action across all action types:
@@ -3428,12 +3568,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   the existing test asserts only the visible button-re-enabled side-effect (which `.finally()` alone satisfies). Add `process.on("unhandledRejection", ...)` capture or `vi.spyOn(console, "error")` to pin the `.catch(() => undefined)` round-65 fix.
 - [ ] P2: Add `app-utils.test.ts` coverage for non-source marker fields:
   confirm sibling coverage exists for id/status/detail-only marker changes; if not, add focused tests so a regression that drops other fields from `messageChangeMarker` is caught.
-- [ ] P2: Cover marker menu negative case for trailing-slot interactive descendants:
-  add a regression test that renders an assistant card with a trailing button (e.g., `parallel-agents-toggle`), clicks the trailing button, and asserts the marker menu does NOT open. Same for Enter/Space keyboard activation on the toggle.
-- [ ] P2: Cover marker creation from user messages:
-  render a transcript with a user prompt, activate its marker affordance, and assert `onCreateConversationMarker` receives that user message id.
-- [ ] P2: Add marker-menu trigger accessible-name coverage:
-  render an assistant marker trigger and assert the exposed menu button is named by the action, such as "Open marker actions", rather than the author label.
 - [ ] P2: Assert SSE-envelope source in the `parallelAgentsUpdate` create event:
   parse the first event in `state_events_route_streams_parallel_agents_update_sources` instead of consuming via `let _ = ...`, asserting `agents[0].source` and `agents[1].source`. Or add a sibling test scoped to the create path.
 - [ ] P2: Cover production-path tool/delegation id collision:
@@ -3452,13 +3586,15 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add `expect(params.onComposerError).not.toHaveBeenCalled()` after rendering, exercise a flag flip mid-test, or split into per-action coverage so a regression that drops only one of the three guards surfaces.
 - [ ] P2: Reframe `mask_telegram_bot_token` assertion to contract-shape:
   replace `revealed.chars().count() == token.chars().count().min(4)` with a contract assertion ("never expose more than 4 trailing chars") so a future implementation tweak doesn't silently pass.
-- [ ] P2: Add SessionPaneView-level tests for `handleSpawnDelegationFromFooter` error branches:
-  cover (a) missing parent session, (b) projectId set but project missing, (c) non-local remoteId, (d) successful local path forwards expected request shape. Or extract the handler body into a testable helper and unit-test each branch.
-- [ ] P2: Add unit tests for `delegationTitleFromPrompt`:
-  cover empty/whitespace-only → "Delegated review" fallback, exactly-80-char no truncation, 81-char prefix-with-ellipsis, multi-line collapse, surrogate-pair boundary handling.
-- [ ] P2: Cover delegation-spawn race conditions and slash-palette disabled state:
-  add deferred-promise tests using `let resolveSpawn` pattern for in-flight spinner pin, unmount-during-await, and session-switch-during-await. Add a "spawn while slash palette open → button disabled" test. Add a "rejection via thrown error" test verifying draft preservation.
-- [ ] P2: Broaden `findActivatableConversationMarkerContextMenuTrigger` test coverage:
-  add `it.each([...])` over the native control tags in `NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR` (`<a>`, `<input>`, `<select>`, `<textarea>`, contenteditable). Add a `target === trigger` case where the target is the trigger element itself.
-- [ ] P2: Split remaining bundled telegram redaction tests:
-  split `telegram_standalone_token_ignores_foreign_token_keys` (2 cases) and `telegram_generic_token_redaction_requires_telegram_or_bot_word_context` (9 cases) into focused per-shape `#[test]`s. Same shape as round-68's split style.
+- [ ] P2: Clean up AgentSessionPanel `act(...)` warnings:
+  run the targeted AgentSessionPanel tests, identify the async rerenders/events/timer-driven updates that emit React `act(...)` warnings, and wrap or await them so timing-sensitive failures are not hidden by noisy test output.
+- [ ] P2: Extend `findActivatableConversationMarkerContextMenuTrigger` test matrix:
+  the new `it.each` covers 9 of 16 selectors. Add the remaining `option`, `img`, `picture`, `video`, `audio`, `canvas`, `svg` tags from `NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR`. Add a `target === trigger` case where the target is the trigger element itself.
+- [ ] P2: Strengthen race-condition delegation tests:
+  the session-switch race test should also assert `expect(onDraftCommit).not.toHaveBeenCalledWith("session-b", "")` (negative on new session id). The unmount race test should assert `console.error` was not called with `act`/`unmounted` warnings, or stub `setIsDelegationSpawning` to verify it isn't invoked post-unmount.
+- [ ] P2: Replace immediate `expect` with `waitFor` in busy-state delegation test:
+  `await waitFor(() => expect(busyButton).toHaveAttribute("aria-busy", "true"))` instead of the synchronous expect after `Promise.resolve()`. Removes brittleness against future React batching changes.
+- [ ] P2: Split bundled `delegation-commands.test.ts` tests:
+  split `delegationTitleFromPrompt` (4 cases) and `resolveComposerDelegationAvailability` (4 outcomes) into single-case `it`s or restructure as `it.each([...])`.
+- [ ] P2: Split `telegram_token_mask_only_exposes_short_suffix` boundary cases:
+  keep the contract loop but split the explicit boundary cases (empty, 2-char, 4-char, 5-char, full) into individual `#[test]`s.

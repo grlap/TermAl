@@ -331,26 +331,78 @@ export function ConversationMarkerNavigator({
   );
 }
 
-export function ConversationMessageMarkers({
+export function ConversationMarkerFloatingWindow({
   markers,
   activeMarkerId,
-  onMarkerClick,
+  onClose,
+  onJump,
+  onNavigatePrevious,
+  onNavigateNext,
 }: {
   markers: readonly ConversationMarker[];
   activeMarkerId: string | null;
-  onMarkerClick: (marker: ConversationMarker) => void;
+  onClose: () => void;
+  onJump: (marker: ConversationMarker) => void;
+  onNavigatePrevious: () => void;
+  onNavigateNext: () => void;
 }) {
   return (
-    <div className="conversation-message-markers">
-      {markers.map((marker) => (
-        <ConversationMarkerChip
-          key={marker.id}
-          marker={marker}
-          isActive={marker.id === activeMarkerId}
-          onClick={() => onMarkerClick(marker)}
-        />
-      ))}
-    </div>
+    <nav
+      className="conversation-marker-floating-window"
+      aria-label="Conversation markers"
+    >
+      <div className="conversation-marker-floating-header">
+        <div className="conversation-marker-navigator-copy">
+          <span className="card-label">Markers</span>
+          <span className="conversation-marker-count">{markers.length}</span>
+        </div>
+        <div className="conversation-marker-nav-controls">
+          <button
+            type="button"
+            className="ghost-button conversation-marker-nav-button"
+            aria-label="Previous marker"
+            title="Previous marker"
+            disabled={markers.length === 0}
+            onClick={onNavigatePrevious}
+          >
+            <DiffNavArrow direction="up" />
+          </button>
+          <button
+            type="button"
+            className="ghost-button conversation-marker-nav-button"
+            aria-label="Next marker"
+            title="Next marker"
+            disabled={markers.length === 0}
+            onClick={onNavigateNext}
+          >
+            <DiffNavArrow direction="down" />
+          </button>
+          <button
+            type="button"
+            className="ghost-button conversation-marker-nav-button"
+            aria-label="Hide markers window"
+            title="Hide markers window"
+            onClick={onClose}
+          >
+            x
+          </button>
+        </div>
+      </div>
+      {markers.length > 0 ? (
+        <div className="conversation-marker-floating-list">
+          {markers.map((marker) => (
+            <ConversationMarkerChip
+              key={marker.id}
+              marker={marker}
+              isActive={marker.id === activeMarkerId}
+              onClick={() => onJump(marker)}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="conversation-marker-floating-empty">No markers yet.</p>
+      )}
+    </nav>
   );
 }
 
@@ -414,17 +466,21 @@ export function findActivatableConversationMarkerContextMenuTrigger(
 
 export function useConversationMarkerContextMenu({
   isActive,
+  isMarkerPanelVisible,
   markersByMessageId,
   onCreateConversationMarker,
   onDeleteConversationMarker,
+  onSetMarkerPanelVisible,
   scrollContainerRef,
   sessionId,
   visibleMessageIds,
 }: {
   isActive: boolean;
+  isMarkerPanelVisible: boolean;
   markersByMessageId: ReadonlyMap<string, readonly ConversationMarker[]>;
   onCreateConversationMarker: (sessionId: string, messageId: string) => void;
   onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
+  onSetMarkerPanelVisible: (isVisible: boolean) => void;
   scrollContainerRef: RefObject<HTMLElement | null>;
   sessionId: string;
   visibleMessageIds: ReadonlySet<string>;
@@ -646,6 +702,18 @@ export function useConversationMarkerContextMenu({
               ))}
             </>
           ) : null}
+          <div className="conversation-marker-context-menu-separator" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            className="conversation-marker-context-menu-item"
+            onClick={() => {
+              onSetMarkerPanelVisible(!isMarkerPanelVisible);
+              closeContextMenu();
+            }}
+          >
+            {isMarkerPanelVisible ? "Hide markers window" : "Show markers window"}
+          </button>
         </div>,
       document.body,
     )

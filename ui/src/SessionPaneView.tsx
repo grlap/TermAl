@@ -170,20 +170,13 @@ import {
   useSessionRenderCallbacks,
 } from "./SessionPaneView.render-callbacks";
 import {
+  createComposerDelegationRequest,
+  resolveComposerDelegationAvailability,
   spawnDelegationCommand,
 } from "./delegation-commands";
 import { isLocalRemoteId } from "./remotes";
 
 const SESSION_PAGE_JUMP_VIEWPORT_FACTOR = 0.45;
-const DELEGATION_COMPOSER_TITLE_MAX_CHARS = 80;
-
-function delegationTitleFromPrompt(prompt: string) {
-  const normalized = prompt.replace(/\s+/gu, " ").trim();
-  if (normalized.length <= DELEGATION_COMPOSER_TITLE_MAX_CHARS) {
-    return normalized || "Delegated review";
-  }
-  return `${normalized.slice(0, DELEGATION_COMPOSER_TITLE_MAX_CHARS - 3)}...`;
-}
 
 export function SessionPaneView({
   pane,
@@ -1032,33 +1025,26 @@ export function SessionPaneView({
   const handleSpawnDelegationFromFooter = useStableEvent(
     async (sessionId: string, prompt: string) => {
       const parentSession = sessionLookup.get(sessionId);
-      if (!parentSession) {
-        onComposerError("Session is no longer available.");
-        return false;
-      }
-
       const parentProject =
-        parentSession.projectId != null
+        parentSession?.projectId != null
           ? (projectLookup.get(parentSession.projectId) ?? null)
           : null;
-      if (parentSession.projectId != null && !parentProject) {
-        onComposerError("Delegations are unavailable until the session project is loaded.");
-        return false;
-      }
-      if (!isLocalRemoteId(parentProject?.remoteId)) {
-        onComposerError("Delegations are available only for local sessions.");
+      const availability = resolveComposerDelegationAvailability(
+        parentSession,
+        parentProject,
+      );
+      if (availability.outcome === "error") {
+        onComposerError(availability.message);
         return false;
       }
 
-      const result = await spawnDelegationCommand(sessionId, {
-        title: delegationTitleFromPrompt(prompt),
-        prompt,
-        agent: parentSession.agent,
-        model: parentSession.model,
-        mode: "reviewer",
-        writePolicy: { kind: "readOnly" },
-      });
+      const result = await spawnDelegationCommand(
+        sessionId,
+        createComposerDelegationRequest(availability.parentSession, prompt),
+      );
       if (result.outcome === "error") {
+        // Command wrappers already sanitize validation and transport failures;
+        // the composer intentionally shows one retry/fix prompt channel for now.
         onComposerError(result.error.message);
         return false;
       }

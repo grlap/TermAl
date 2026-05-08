@@ -731,7 +731,7 @@ function MessageMeta({
 }) {
   const isUser = author === "you";
   const enableMarkerMenuTrigger = useIsMessageMetaMarkerMenuTriggerEnabled();
-  const isMarkerMenuTrigger = enableMarkerMenuTrigger && !isUser;
+  const isMarkerMenuTrigger = enableMarkerMenuTrigger;
 
   return (
     <div className="message-meta">
@@ -740,6 +740,7 @@ function MessageMeta({
         role={isMarkerMenuTrigger ? "button" : undefined}
         tabIndex={isMarkerMenuTrigger ? 0 : undefined}
         aria-haspopup={isMarkerMenuTrigger ? "menu" : undefined}
+        aria-label={isMarkerMenuTrigger ? "Open marker actions" : undefined}
         title={isMarkerMenuTrigger ? "Open marker actions" : undefined}
         data-conversation-marker-menu-trigger={
           isMarkerMenuTrigger ? true : undefined

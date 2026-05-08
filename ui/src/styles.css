@@ -3935,6 +3935,7 @@ textarea {
 }
 
 .session-conversation-page {
+  position: relative;
   display: grid;
   gap: var(--message-stack-gap);
 }
@@ -3981,8 +3982,7 @@ textarea {
 
 .conversation-marker-navigator-copy,
 .conversation-marker-nav-controls,
-.conversation-marker-list,
-.conversation-message-markers {
+.conversation-marker-list {
   display: flex;
   align-items: center;
 }
@@ -4021,8 +4021,7 @@ textarea {
   height: var(--icon-size-sm);
 }
 
-.conversation-marker-list,
-.conversation-message-markers {
+.conversation-marker-list {
   gap: var(--space-xs);
   min-width: 0;
 }
@@ -4032,14 +4031,72 @@ textarea {
   scrollbar-width: thin;
 }
 
-.conversation-message-markers {
-  flex-wrap: wrap;
-  margin: 0 0 var(--space-xs) var(--message-card-padding-x);
-}
-
 .conversation-message-marker-shell {
+  --conversation-active-marker-color: var(--signal-blue);
+
   position: relative;
   min-width: 0;
+}
+
+.conversation-message-marker-shell.is-active-marker > .message-card {
+  border-color: color-mix(in srgb, var(--conversation-active-marker-color) 74%, var(--line));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--conversation-active-marker-color) 48%, transparent),
+    0 0 0 0.3rem color-mix(in srgb, var(--conversation-active-marker-color) 18%, transparent);
+}
+
+.conversation-marker-floating-window {
+  position: sticky;
+  top: var(--space-sm);
+  z-index: 12;
+  justify-self: end;
+  display: grid;
+  gap: var(--space-xs);
+  width: min(22rem, 100%);
+  max-height: min(22rem, calc(100vh - 8rem));
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  padding: var(--space-sm);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--paper-strong) 94%, var(--surface-white) 6%),
+      var(--paper-strong)
+    );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--surface-white) 18%, transparent),
+    0 18px 34px color-mix(in srgb, var(--shadow-color, black) 28%, transparent);
+}
+
+.conversation-marker-floating-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.conversation-marker-floating-list {
+  display: grid;
+  gap: var(--space-xs);
+  min-width: 0;
+  max-height: 16rem;
+  overflow: auto;
+  padding: 0.1rem;
+  scrollbar-width: thin;
+}
+
+.conversation-marker-floating-list .conversation-marker-chip {
+  width: 100%;
+  max-width: 100%;
+}
+
+.conversation-marker-floating-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
 }
 
 .conversation-message-marker-shell.can-open-marker-menu [data-conversation-marker-menu-trigger="true"] {
