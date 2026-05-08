@@ -5808,6 +5808,17 @@ textarea {
   max-width: none;
 }
 
+.source-renderer-preview .source-rendered-markdown-section.markdown-diff-section-fill-mermaid,
+.source-renderer-preview .markdown-copy-shell-fill-mermaid {
+  width: 100%;
+  max-width: 100%;
+}
+
+.source-renderer-preview .markdown-copy-shell-fill-mermaid .markdown-copy {
+  width: 100%;
+  max-width: none;
+}
+
 .source-markdown-editor-pane .monaco-code-editor {
   min-height: 0;
 }
@@ -5857,6 +5868,16 @@ textarea {
 }
 
 .markdown-document-scroll .markdown-copy-shell .markdown-copy {
+  max-width: none;
+}
+
+.markdown-document-scroll .markdown-copy-shell-fill-mermaid {
+  width: 100%;
+  max-width: 100%;
+}
+
+.markdown-document-scroll .markdown-copy-shell-fill-mermaid .markdown-copy {
+  width: 100%;
   max-width: none;
 }
 
@@ -7498,6 +7519,10 @@ textarea {
 
 .markdown-copy-shell {
   min-width: 0;
+}
+
+.markdown-copy-shell-fill-mermaid {
+  width: 100%;
 }
 
 .markdown-copy-shell-with-line-numbers {

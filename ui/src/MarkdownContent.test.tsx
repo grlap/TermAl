@@ -600,6 +600,30 @@ describe("MarkdownContent Mermaid diagrams", () => {
     expect(frame.style.aspectRatio).toBe("302 / 104");
   });
 
+  it("lets preview callers shrink wide Mermaid frames without upscaling simple diagrams", async () => {
+    mermaidRenderMock.mockResolvedValueOnce({
+      diagramType: "flowchart",
+      svg: '<svg data-testid="mermaid-svg" viewBox="0 0 300 80"><text>ok</text></svg>',
+    });
+
+    const { container } = render(
+      <MarkdownContent
+        fillMermaidAvailableSpace
+        markdown={["```mermaid", "flowchart TD", "  A --> B", "```"].join("\n")}
+      />,
+    );
+
+    const frame = await screen.findByTestId("mermaid-frame");
+    expect(frame.style.width).toBe("302px");
+    expect(frame.style.maxWidth).toBe("100%");
+    expect(frame.style.height).toBe("auto");
+    expect(frame.style.aspectRatio).toBe("302 / 104");
+    expect((frame as HTMLIFrameElement).srcdoc).toContain(
+      "svg{display:block;max-width:100%;height:auto",
+    );
+    expect(container.querySelector(".markdown-copy-shell-fill-mermaid")).not.toBeNull();
+  });
+
   it("scales wide Mermaid iframe height when max-width constrains the frame", async () => {
     mermaidRenderMock.mockResolvedValueOnce({
       diagramType: "er",

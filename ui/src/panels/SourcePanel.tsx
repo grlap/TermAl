@@ -1114,6 +1114,7 @@ function EditableMarkdownPreviewPane({
         className="source-rendered-markdown-section markdown-diff-normal-section"
         documentPath={documentPath}
         editableAriaLabel={editableAriaLabel}
+        fillMermaidAvailableSpace
         onCommitDrafts={onCommitDrafts}
         onCommitSectionDraft={onCommitSectionDraft}
         onDraftChange={onDraftChange}

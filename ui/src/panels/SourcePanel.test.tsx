@@ -264,6 +264,45 @@ describe("SourcePanel", () => {
     expect(screen.getByText("Done")).toBeInTheDocument();
   });
 
+  it("lets Mermaid diagrams use the full rendered Markdown preview width", async () => {
+    const { container } = render(
+      <SourcePanel
+        editorAppearance={editorAppearance}
+        editorFontSizePx={14}
+        fileState={{
+          ...readyFileState,
+          path: "/repo/docs/readme.md",
+          content: [
+            "# Diagram",
+            "",
+            "```mermaid",
+            "flowchart TD",
+            "  A --> B",
+            "```",
+          ].join("\n"),
+          language: "markdown",
+        }}
+        sourcePath="/repo/docs/readme.md"
+        workspaceRoot="/repo"
+        onSaveFile={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(await screen.findByRole("heading", { name: "Diagram" })).toBeInTheDocument();
+    expect(
+      container.querySelector(
+        ".source-renderer-preview-editable .source-rendered-markdown-section.markdown-diff-section-fill-mermaid",
+      ),
+    ).not.toBeNull();
+    expect(
+      container.querySelector(
+        ".source-renderer-preview-editable .markdown-copy-shell-fill-mermaid",
+      ),
+    ).not.toBeNull();
+  });
+
   it("edits Markdown source from rendered Preview and saves the shared buffer", async () => {
     const onSaveFile = vi.fn().mockResolvedValue(undefined);
 
@@ -1351,7 +1390,7 @@ describe("SourcePanel", () => {
   // region, so the mode toolbar appears and the chip reports the
   // renderer kind instead of just "Markdown".
   it("exposes Preview/Split for dedicated `.mmd` files and labels the chip as Mermaid", async () => {
-    render(
+    const { container } = render(
       <SourcePanel
         editorAppearance={editorAppearance}
         editorFontSizePx={14}
@@ -1379,6 +1418,9 @@ describe("SourcePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     expect(await screen.findByLabelText("Rendered preview")).toBeInTheDocument();
     expect(await screen.findByText(/Lines 1.*3/)).toBeInTheDocument();
+    expect(
+      container.querySelector(".source-renderer-preview .markdown-copy-shell-fill-mermaid"),
+    ).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Split" }));
     expect(await screen.findByLabelText("Source editor for /repo/diagrams/flow.mmd")).toBeInTheDocument();

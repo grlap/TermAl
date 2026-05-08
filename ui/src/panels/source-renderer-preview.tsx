@@ -107,6 +107,7 @@ export function RendererPreviewPane({
       <MarkdownDocumentView
         appearance={appearance}
         documentPath={documentPath}
+        fillMermaidAvailableSpace
         markdown={content}
         onOpenSourceLink={onOpenSourceLink}
         workspaceRoot={workspaceRoot}
@@ -126,6 +127,7 @@ export function RendererPreviewPane({
       <MarkdownContent
         appearance={appearance}
         documentPath={documentPath}
+        fillMermaidAvailableSpace
         markdown={synthetic}
         onOpenSourceLink={onOpenSourceLink}
         workspaceRoot={workspaceRoot}

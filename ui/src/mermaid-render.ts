@@ -77,7 +77,19 @@ export type MermaidConfigInput = NonNullable<
   Parameters<MermaidModule["initialize"]>[0]
 >;
 
-export function buildMermaidDiagramFrameSrcDoc(svg: string) {
+export function buildMermaidDiagramFrameSrcDoc(
+  svg: string,
+  options: { fitToFrame?: boolean } = {},
+) {
+  const scrollRootCss = options.fitToFrame
+    ? "html{overflow:hidden;}"
+    : "html{overflow-x:auto;overflow-y:hidden;}";
+  const bodyCss = options.fitToFrame
+    ? "body{display:block;width:100%;min-width:0;font-size:0;line-height:0;}"
+    : "body{display:inline-block;min-width:100%;font-size:0;line-height:0;}";
+  const svgCss = options.fitToFrame
+    ? "svg{display:block;max-width:100%;height:auto;margin:0 auto;vertical-align:top;}"
+    : "svg{display:block;max-width:none;height:auto;margin:0 auto;vertical-align:top;}";
   return [
     "<!doctype html>",
     '<html><head><meta charset="utf-8">',
@@ -89,19 +101,20 @@ export function buildMermaidDiagramFrameSrcDoc(svg: string) {
     // the iframe's own font metrics (Mermaid's internal pass uses a
     // temp-DOM with subtly different rendering). Hiding the vertical
     // axis keeps the frame tight against the diagram and avoids a
-    // spurious scrollbar on every render. `overflow-x: auto` stays so
-    // diagrams wider than the iframe can still scroll horizontally
-    // inside the frame instead of being silently cropped.
-    "html{overflow-x:auto;overflow-y:hidden;}",
+    // spurious scrollbar on every render. Default frames keep
+    // `overflow-x: auto` so diagrams wider than the iframe can still
+    // scroll horizontally inside the frame; preview fit mode scales
+    // the SVG to the iframe instead.
+    scrollRootCss,
     "html,body{margin:0;padding:0;background:transparent;color:inherit;}",
-    // `display: inline-block` lets the body shrink-wrap wide SVGs so the
-    // iframe can scroll horizontally when needed, but it also carries
-    // an inline-text descender (~4-5px of line-height space below the
-    // SVG) that makes the iframe scroll vertically even when the
-    // diagram fits. Zero the font + line-height + vertical-align so
-    // the body's outer height matches the SVG exactly.
-    "body{display:inline-block;min-width:100%;font-size:0;line-height:0;}",
-    "svg{display:block;max-width:none;height:auto;margin:0 auto;vertical-align:top;}",
+    // The default body can shrink-wrap wide SVGs for horizontal
+    // scrolling. Fit mode uses a block body and max-width:100% SVG so
+    // wide preview diagrams shrink to the pane without upscaling
+    // simpler diagrams past their natural Mermaid size. In both
+    // modes, zero the font + line-height + vertical-align so the
+    // body's outer height matches the SVG exactly.
+    bodyCss,
+    svgCss,
     TERMAL_MERMAID_THEME_CSS,
     "</style></head><body>",
     svg,

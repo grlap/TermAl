@@ -7,6 +7,122 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## `telegram_prompt_error_text_sanitizes_and_truncates_detail` test places token at the end so truncation masks sanitization
+
+**Severity:** Medium - `src/tests/telegram.rs:175-186`. With 400 `x` chars + ` token={token}` placed at the end, truncation alone removes the token. The test asserts `!text.contains(&token)`, which passes even if `sanitize_telegram_log_detail` is a no-op (a regression that disabled sanitization would still pass because truncation removed the token).
+
+The test name claims "sanitizes" but doesn't actually pin sanitization. The "and truncates" half is redundant — the truncation alone already passes the assertion.
+
+**Current behavior:**
+- Token placed at end of input.
+- Truncation removes the token regardless of sanitization.
+- Test does not exercise the sanitizer independently.
+
+**Proposal:**
+- Place the token BEFORE the long tail (e.g., `"token={token} {x*400}"`) so truncation cannot mask sanitization.
+- Also assert `text.contains("<redacted>")`.
+
+## Telegram renderer tests don't exercise `> 12 sessions` overflow message
+
+**Severity:** Low - `src/tests/telegram.rs:188-245`. `render_telegram_project_sessions` appends "More sessions exist in TermAl." when more than 12 project-scoped sessions are present. The test fixture uses 2 project-1 sessions; the overflow branch is structurally untested.
+
+A regression that flipped `> 12` to `>= 12` or removed the trailing line would silently pass.
+
+**Current behavior:**
+- Test fixture has 2 sessions per project.
+- >12 sessions case uncovered.
+
+**Proposal:**
+- Add a fixture with 13+ project-scoped sessions.
+- Assert the overflow line is present plus that exactly 12 session entries appear.
+
+## Telegram renderer tests don't exercise empty-preview skip path
+
+**Severity:** Low - `src/tests/telegram.rs:188-245`. `telegram_session_preview_line` returns `None` for empty previews; the renderer skips the preview line. The test fixture has non-empty previews on every session — the empty-preview branch is structurally untested.
+
+**Current behavior:**
+- Every test fixture session has non-empty preview.
+- Empty-preview skip path uncovered.
+
+**Proposal:**
+- Add a fixture session with `preview = ""` and assert the rendered text does not include a preview line for it.
+
+## Composer height test asserts on `transition: "none"` writes without ordering pin
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7789-7950`. The "keeps multiline composer height steady when deleting text inside a line" test asserts `heightWrites.toContainEqual({ value: "1px", transition: "none" })` and `heightWrites.toContainEqual({ value: "96px", transition: "none" })`. The full ordering is not validated, so a regression that re-orders the writes (e.g., setting `96px` first and then `1px`) would still pass even though the visible behavior would differ.
+
+**Current behavior:**
+- `toContainEqual` matches in any order.
+- A regression that flipped write order would pass.
+
+**Proposal:**
+- Assert on the full `heightWrites` array order, not just `toContainEqual`.
+- Or use `toEqual([...])` with the full expected sequence.
+
+## Project digest error-state branch still uses outer `primary_session_id` (delegation child possible)
+
+**Severity:** Note - `src/api.rs:393-414`. Round 76 fixed dirty + clean idle branches to route prompts to the non-delegation parent. The error-state branch was missed and still proposes `FixIt` whenever `primary_session_id` is present. If that primary is a terminal delegation child, dispatch can fail or route to a read-only child.
+
+This overlaps with the active "Project `Fix It` action can target a terminal delegation child" entry but specifically calls out the unfixed branch.
+
+**Current behavior:**
+- Error-state branch uses outer `primary_session_id`.
+- Dirty/idle branches use `prompt_target_session_id`.
+- Asymmetry not documented.
+
+**Proposal:**
+- Apply the same `prompt_target_session_id.is_some()` test and rebinding in the error branch.
+
+## `digest.deep_link` derivation now branch-local in two places (same triple-shadow as `primary_session_id`)
+
+**Severity:** Note - `src/api.rs:308-484`. Round 76 added two new `let deep_link = Some(build_project_deep_link(...))` rebindings inside the `worktree_dirty` and idle branches. The outer `deep_link` (line 329-332) is now used only by the four upper branches. Same triple-shadow problem as `primary_session_id`. Wire-contract callers cannot tell from `deep_link` alone which target it points at.
+
+**Current behavior:**
+- Three layers of `deep_link` semantics in one function.
+- Shadows in dirty/idle branches.
+- Wire contract docs don't distinguish.
+
+**Proposal:**
+- As with `primary_session_id`, lift the per-branch `deep_link` derivation into a helper that takes the action-target session id explicitly.
+
+## `TelegramStateSessionsResponse` lacks documentation tying it to `/api/state`
+
+**Severity:** Note - `src/telegram.rs:1176-1204`. The struct is a narrow projection of `/api/state`, but unlike `TelegramSessionFetchResponse` (which has explicit doc comments at lines 1206-1210, 1239-1249), `TelegramStateSessionsResponse` has none. Future readers cannot tell why this struct exists, what fields it depends on, or whether `/api/state` is the intentional source.
+
+**Current behavior:**
+- No `///` doc on the struct.
+- Sibling `TelegramSessionFetchResponse` has docs.
+- Inconsistent documentation across the relay's wire projections.
+
+**Proposal:**
+- Add a doc comment matching the style of `TelegramSessionFetchResponse`: explain the relay's data needs, document why `/api/state` is used over a narrower endpoint, and pin the camelCase wire contract.
+
+## `digest.primary_session_id` semantics drift between branches without wire-level documentation
+
+**Severity:** Note - `src/api.rs:308-484`. Round 76 deliberately changed `primary_session_id` in `worktree_dirty` and `idle` branches to be the non-delegation prompt target, while `pending_approval`, `pending_interaction`, `error_session`, and `active_session` branches keep the original "most-relevant session" semantics. The wire contract `ProjectDigestResponse.primary_session_id` is unchanged and undocumented. Consumers cannot tell which definition applies in which branch.
+
+**Current behavior:**
+- Per-branch divergent semantics.
+- Wire contract unchanged.
+- Consumers cannot disambiguate.
+
+**Proposal:**
+- Document the per-branch contract on `ProjectDigestResponse.primary_session_id` in `wire_project_digest.rs`.
+- Or split the wire field into `summary_session_id` (always source of `done_summary`) and `action_target_session_id` (always dispatch target).
+
+## Three Telegram user-error formatters with three formats but shared truncation helper
+
+**Severity:** Note - `src/telegram.rs:2299-2336`. `telegram_action_error_text` (multi-line with "Send /status" footer), `telegram_callback_action_error_text` (one-line "X failed: Y"), and `telegram_prompt_error_text` (multi-line "Could not forward that message." + detail). Three user-visible string formats mean a UI-level message-style consistency check is missing. A future contributor changing one might forget the others.
+
+**Current behavior:**
+- Three formatters with three formats.
+- Shared truncation helper but divergent prefix/footer styles.
+- No JSDoc-style block declaring contract for each.
+
+**Proposal:**
+- Either consolidate into a single `format_telegram_user_error(action_kind, err)` enum-driven formatter.
+- Or add a JSDoc-style block above each declaring the contract.
+
 ## Project `Fix It` action can target a terminal delegation child
 
 **Severity:** Medium - `src/api.rs:397`. `build_project_digest_summary()` now uses a non-delegation prompt target for dirty and clean idle branches, but the error-state branch still proposes `Fix It` whenever `primary_session_id` is present. If the selected primary session is a terminal delegation child, the digest/action contract can advertise `fix-it` even though the follow-up prompt cannot be dispatched there.
@@ -74,7 +190,7 @@ the Implementation Tasks section.
 
 ## `TelegramStateSession.status` is stringly-typed where parallel projection uses typed enum
 
-**Severity:** Medium - `src/telegram.rs:1199`. `TelegramStateSession.status: String` is stringly-typed where the parallel `TelegramSessionFetchSession.status` uses a typed `TelegramSessionStatus` enum with `#[serde(other)]`. The wire contract is `"active" | "idle" | "approval" | "error"` (per `wire.rs:712-719`) — closed enum on the server side.
+**Severity:** Note - `src/telegram.rs:1199`. `TelegramStateSession.status: String` is stringly-typed where the parallel `TelegramSessionFetchSession.status` uses a typed `TelegramSessionStatus` enum with `#[serde(other)]`. The wire contract is `"active" | "idle" | "approval" | "error"` (per `wire.rs:712-719`) — closed enum on the server side.
 
 A future server adds a new status variant (`"queued"`, `"timing_out"`) silently slips through as `"unknown"` via `telegram_state_session_status_label`, and there is no compile-time check that the relay handles all wire status values.
 

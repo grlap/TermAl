@@ -193,6 +193,7 @@ export function EditableRenderedMarkdownSection({
   className,
   documentPath,
   editableAriaLabel,
+  fillMermaidAvailableSpace = false,
   onCommitDrafts,
   onCommitSectionDraft,
   onDraftChange,
@@ -212,6 +213,7 @@ export function EditableRenderedMarkdownSection({
   className: string;
   documentPath: string | null;
   editableAriaLabel: string;
+  fillMermaidAvailableSpace?: boolean;
   onCommitDrafts: () => boolean;
   onCommitSectionDraft: (commit: RenderedMarkdownSectionCommit) => boolean;
   onDraftChange: (segment: MarkdownDiffDocumentSegment, nextMarkdown: string) => void;
@@ -225,7 +227,7 @@ export function EditableRenderedMarkdownSection({
   workspaceRoot: string | null;
 }) {
   const canUseCaret = canEdit || allowReadOnlyCaret;
-  const classNames = `${className}${canUseCaret ? " markdown-diff-editable-section" : ""}${allowReadOnlyCaret && !canEdit ? " markdown-diff-readonly-caret-section" : ""}`;
+  const classNames = `${className}${canUseCaret ? " markdown-diff-editable-section" : ""}${allowReadOnlyCaret && !canEdit ? " markdown-diff-readonly-caret-section" : ""}${fillMermaidAvailableSpace ? " markdown-diff-section-fill-mermaid" : ""}`;
   const hasUncommittedUserEditRef = useRef(false);
   const draftSegmentRef = useRef<MarkdownDiffDocumentSegment | null>(null);
   const draftSourceContentRef = useRef<string | null>(null);
@@ -738,6 +740,7 @@ export function EditableRenderedMarkdownSection({
       <MarkdownContent
         appearance={appearance}
         documentPath={documentPath}
+        fillMermaidAvailableSpace={fillMermaidAvailableSpace}
         markdown={renderedSegment.markdown}
         onOpenSourceLink={onOpenSourceLink}
         preserveMermaidSource={canEdit}
@@ -751,6 +754,7 @@ export function EditableRenderedMarkdownSection({
       appearance,
       canEdit,
       documentPath,
+      fillMermaidAvailableSpace,
       onOpenSourceLink,
       renderedSegment.markdown,
       renderedSegmentLineNumber,

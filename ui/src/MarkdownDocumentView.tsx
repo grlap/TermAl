@@ -7,6 +7,7 @@ export function MarkdownDocumentView({
   appearance = "dark",
   completeness = "full",
   documentPath = null,
+  fillMermaidAvailableSpace = false,
   markdown,
   note = null,
   onOpenSourceLink,
@@ -16,6 +17,7 @@ export function MarkdownDocumentView({
   appearance?: MonacoAppearance;
   completeness?: MarkdownDocumentCompleteness;
   documentPath?: string | null;
+  fillMermaidAvailableSpace?: boolean;
   markdown: string;
   note?: string | null;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
@@ -44,6 +46,7 @@ export function MarkdownDocumentView({
           <MarkdownContent
             appearance={appearance}
             documentPath={documentPath}
+            fillMermaidAvailableSpace={fillMermaidAvailableSpace}
             markdown={markdown}
             onOpenSourceLink={onOpenSourceLink}
             showLineNumbers

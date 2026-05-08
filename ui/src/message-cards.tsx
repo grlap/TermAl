@@ -1176,11 +1176,13 @@ function HighlightedCodeBlock({
 function MermaidDiagram({
   appearance,
   code,
+  fillAvailableSpace = false,
   lineAttributes,
   showSourceOnError = true,
 }: {
   appearance: MonacoAppearance;
   code: string;
+  fillAvailableSpace?: boolean;
   lineAttributes?: MarkdownLineAttributes | null;
   showSourceOnError?: boolean;
 }) {
@@ -1236,12 +1238,21 @@ function MermaidDiagram({
   // mounting the iframe.
   const readySvg = renderState.status === "ready" ? renderState.svg : null;
   const iframeSrcDoc = useMemo(
-    () => (readySvg === null ? null : buildMermaidDiagramFrameSrcDoc(readySvg)),
-    [readySvg],
+    () =>
+      readySvg === null
+        ? null
+        : buildMermaidDiagramFrameSrcDoc(readySvg, {
+            fitToFrame: fillAvailableSpace,
+          }),
+    [fillAvailableSpace, readySvg],
   );
   const iframeStyle = useMemo(
-    () =>
-      readySvg === null ? undefined : getMermaidDiagramFrameStyle(readySvg),
+    () => {
+      if (readySvg === null) {
+        return undefined;
+      }
+      return getMermaidDiagramFrameStyle(readySvg);
+    },
     [readySvg],
   );
 
@@ -3610,6 +3621,7 @@ function createMarkdownTextNode(value: string): MarkdownAstNode {
 export function MarkdownContent({
   appearance = "dark",
   documentPath = null,
+  fillMermaidAvailableSpace = false,
   isStreaming = false,
   markdown,
   onOpenSourceLink,
@@ -3623,6 +3635,7 @@ export function MarkdownContent({
 }: {
   appearance?: MonacoAppearance;
   documentPath?: string | null;
+  fillMermaidAvailableSpace?: boolean;
   /**
    * When `true`, an in-flight trailing block (unclosed fenced code
    * block, unclosed `$$` math display block, or pipe-table that has
@@ -3988,6 +4001,7 @@ export function MarkdownContent({
                     <MermaidDiagram
                       appearance={appearance}
                       code={code}
+                      fillAvailableSpace={fillMermaidAvailableSpace}
                       lineAttributes={null}
                       showSourceOnError={false}
                     />
@@ -4008,6 +4022,7 @@ export function MarkdownContent({
                 <MermaidDiagram
                   appearance={appearance}
                   code={code}
+                  fillAvailableSpace={fillMermaidAvailableSpace}
                   lineAttributes={lineAttributes}
                 />
               );
@@ -4321,6 +4336,7 @@ export function MarkdownContent({
   }, [
     documentPath,
     appearance,
+    fillMermaidAvailableSpace,
     hasTooManyMathExpressions,
     hasTooManyMermaidDiagrams,
     settledMarkdown,
@@ -4337,7 +4353,7 @@ export function MarkdownContent({
 
   return (
     <div
-      className={`markdown-copy-shell${showLineNumbers ? " markdown-copy-shell-with-line-numbers" : ""}`}
+      className={`markdown-copy-shell${showLineNumbers ? " markdown-copy-shell-with-line-numbers" : ""}${fillMermaidAvailableSpace ? " markdown-copy-shell-fill-mermaid" : ""}`}
     >
       {showLineNumbers ? (
         <div
