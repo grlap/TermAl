@@ -490,22 +490,33 @@ fn ascii_bytes_contains_word_ignore_case(haystack: &[u8], needle: &[u8]) -> bool
 }
 
 fn ascii_word_boundary_at(value: &[u8], index: usize) -> bool {
-    if index == 0 {
-        return true;
-    }
-    let before = value[index - 1];
-    let current = value.get(index).copied();
-    !before.is_ascii_alphanumeric()
-        || current.is_some_and(|byte| before.is_ascii_lowercase() && byte.is_ascii_uppercase())
+    ascii_word_boundary_between(
+        index
+            .checked_sub(1)
+            .and_then(|index| value.get(index).copied()),
+        value.get(index).copied(),
+    )
 }
 
 fn ascii_word_boundary_after(value: &[u8], index: usize) -> bool {
-    match value.get(index).copied() {
-        None => true,
-        Some(after) if !after.is_ascii_alphanumeric() => true,
-        Some(after) => value
-            .get(index.saturating_sub(1))
-            .is_some_and(|before| before.is_ascii_lowercase() && after.is_ascii_uppercase()),
+    ascii_word_boundary_between(
+        index.checked_sub(1).and_then(|index| value.get(index).copied()),
+        value.get(index).copied(),
+    )
+}
+
+fn ascii_word_boundary_between(before: Option<u8>, after: Option<u8>) -> bool {
+    match (before, after) {
+        (None, _) | (_, None) => true,
+        (Some(before), Some(after)) => {
+            let separated = !before.is_ascii_alphanumeric() || !after.is_ascii_alphanumeric();
+            // Treat conventional camelCase lower->upper transitions as word
+            // boundaries. Upper->lower transitions stay joined so all-caps
+            // prefixes do not turn values like `BOTanical` into a `bot`
+            // context match.
+            let camel_case_boundary = before.is_ascii_lowercase() && after.is_ascii_uppercase();
+            separated || camel_case_boundary
+        }
     }
 }
 

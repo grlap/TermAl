@@ -175,8 +175,8 @@ export function MessageMetaMarkerMenuProvider({
 }: {
   children: ReactNode;
 }) {
-  // Binary opt-in: only the conversation panel wraps assistant cards that
-  // should expose the marker-menu affordance on their metadata author label.
+  // Binary opt-in: only the conversation panel wraps message cards that should
+  // expose the marker-menu affordance on their metadata author label.
   return (
     <MessageMetaMarkerMenuContext.Provider value={true}>
       {children}
@@ -732,6 +732,12 @@ function MessageMeta({
   const isUser = author === "you";
   const enableMarkerMenuTrigger = useIsMessageMetaMarkerMenuTriggerEnabled();
   const isMarkerMenuTrigger = enableMarkerMenuTrigger;
+  const markerMenuLabel = isUser
+    ? "You, open marker actions"
+    : "Agent, open marker actions";
+  const markerMenuTitle = isUser
+    ? "Open marker actions for your message"
+    : "Open marker actions for assistant message";
 
   return (
     <div className="message-meta">
@@ -740,8 +746,8 @@ function MessageMeta({
         role={isMarkerMenuTrigger ? "button" : undefined}
         tabIndex={isMarkerMenuTrigger ? 0 : undefined}
         aria-haspopup={isMarkerMenuTrigger ? "menu" : undefined}
-        aria-label={isMarkerMenuTrigger ? "Open marker actions" : undefined}
-        title={isMarkerMenuTrigger ? "Open marker actions" : undefined}
+        aria-label={isMarkerMenuTrigger ? markerMenuLabel : undefined}
+        title={isMarkerMenuTrigger ? markerMenuTitle : undefined}
         data-conversation-marker-menu-trigger={
           isMarkerMenuTrigger ? true : undefined
         }

@@ -290,6 +290,19 @@ describe("delegation command surface", () => {
       outcome: "error",
       message: "Delegations are available only for local sessions.",
     });
+    expect(
+      resolveComposerDelegationAvailability(
+        makeSession({
+          id: "remote-parent",
+          projectId: null,
+          remoteId: "ssh-lab",
+        }),
+        null,
+      ),
+    ).toEqual({
+      outcome: "error",
+      message: "Delegations are available only for local sessions.",
+    });
   });
 
   it("keeps wait and spawn-batch results discriminated by outcome", () => {

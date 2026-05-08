@@ -487,6 +487,8 @@ struct Session {
     workdir: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    remote_id: Option<String>,
     model: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     model_options: Vec<SessionModelOption>,

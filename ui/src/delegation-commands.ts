@@ -287,7 +287,7 @@ export function resolveComposerDelegationAvailability(
       message: "Delegations are unavailable until the session project is loaded.",
     };
   }
-  if (!isLocalRemoteId(parentProject?.remoteId)) {
+  if (!isLocalRemoteId(parentSession.remoteId ?? parentProject?.remoteId)) {
     return {
       outcome: "error",
       message: "Delegations are available only for local sessions.",

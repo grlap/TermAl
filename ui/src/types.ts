@@ -283,6 +283,7 @@ export type Session = {
   agent: AgentType;
   workdir: string;
   projectId?: string | null;
+  remoteId?: string | null;
   model: string;
   modelOptions?: SessionModelOption[];
   approvalPolicy?: ApprovalPolicy | null;

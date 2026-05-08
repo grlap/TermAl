@@ -1,7 +1,7 @@
-// Owns marker grouping, ordering, mounted-slot lookup, marker chip/nav
-// rendering, and local marker action menus for AgentSessionPanel
-// conversations. Does not own marker fetching, mutation requests,
-// overview-rail projection, or transcript virtualization.
+// Owns marker grouping, ordering, mounted-slot lookup, marker floating-window
+// and navigation rendering, and local marker action menus for
+// AgentSessionPanel conversations. Does not own marker fetching, mutation
+// requests, overview-rail projection, or transcript virtualization.
 // Split out of AgentSessionPanel.tsx during the round-39 marker extraction.
 
 import {
@@ -31,7 +31,7 @@ type ConversationMarkerContextMenuState = {
   trigger: HTMLElement | null;
 };
 
-const NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR = [
+const NATIVE_MESSAGE_CONTEXT_MENU_SELECTOR = [
   "a[href]",
   "button",
   "input",
@@ -278,56 +278,14 @@ export function MarkerMenuIcon() {
   );
 }
 
-export function ConversationMarkerNavigator({
-  markers,
-  activeMarkerId,
-  onJump,
-  onNavigatePrevious,
-  onNavigateNext,
-}: {
-  markers: readonly ConversationMarker[];
-  activeMarkerId: string | null;
-  onJump: (marker: ConversationMarker) => void;
-  onNavigatePrevious: () => void;
-  onNavigateNext: () => void;
-}) {
+export function MarkerCloseIcon() {
   return (
-    <nav className="conversation-marker-navigator" aria-label="Conversation markers">
-      <div className="conversation-marker-navigator-copy">
-        <span className="card-label">Markers</span>
-        <span className="conversation-marker-count">{markers.length}</span>
-      </div>
-      <div className="conversation-marker-nav-controls">
-        <button
-          type="button"
-          className="ghost-button conversation-marker-nav-button"
-          aria-label="Previous marker"
-          title="Previous marker"
-          onClick={onNavigatePrevious}
-        >
-          <DiffNavArrow direction="up" />
-        </button>
-        <button
-          type="button"
-          className="ghost-button conversation-marker-nav-button"
-          aria-label="Next marker"
-          title="Next marker"
-          onClick={onNavigateNext}
-        >
-          <DiffNavArrow direction="down" />
-        </button>
-      </div>
-      <div className="conversation-marker-list">
-        {markers.map((marker) => (
-          <ConversationMarkerChip
-            key={marker.id}
-            marker={marker}
-            isActive={marker.id === activeMarkerId}
-            onClick={() => onJump(marker)}
-          />
-        ))}
-      </div>
-    </nav>
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="m4.22 3.16 3.78 3.78 3.78-3.78 1.06 1.06L9.06 8l3.78 3.78-1.06 1.06L8 9.06l-3.78 3.78-1.06-1.06L6.94 8 3.16 4.22Z"
+        fill="currentColor"
+      />
+    </svg>
   );
 }
 
@@ -384,7 +342,7 @@ export function ConversationMarkerFloatingWindow({
             title="Hide markers window"
             onClick={onClose}
           >
-            x
+            <MarkerCloseIcon />
           </button>
         </div>
       </div>
@@ -417,12 +375,12 @@ export function shouldOpenConversationMarkerContextMenu(
   if (hasSelectedTextInside(root)) {
     return false;
   }
-  // Keep marker actions on an explicit header affordance. The assistant body
-  // keeps the native context menu for copy/select/link/code interactions.
+  // Keep marker actions on an explicit message-header affordance. Message
+  // bodies keep the native context menu for copy/select/link/code interactions.
   if (!findConversationMarkerContextMenuTrigger(root, target)) {
     return false;
   }
-  return target.closest(NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR) === null;
+  return target.closest(NATIVE_MESSAGE_CONTEXT_MENU_SELECTOR) === null;
 }
 
 /**
@@ -458,7 +416,7 @@ export function findActivatableConversationMarkerContextMenuTrigger(
   if (!trigger || !(target instanceof Element)) {
     return null;
   }
-  const nativeTarget = target.closest(NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR);
+  const nativeTarget = target.closest(NATIVE_MESSAGE_CONTEXT_MENU_SELECTOR);
   return nativeTarget && nativeTarget !== trigger && trigger.contains(nativeTarget)
     ? null
     : trigger;
@@ -709,7 +667,7 @@ export function useConversationMarkerContextMenu({
             className="conversation-marker-context-menu-item"
             onClick={() => {
               onSetMarkerPanelVisible(!isMarkerPanelVisible);
-              closeContextMenu();
+              closeContextMenu({ restoreFocus: true });
             }}
           >
             {isMarkerPanelVisible ? "Hide markers window" : "Show markers window"}

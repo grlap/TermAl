@@ -912,6 +912,16 @@ fn telegram_generic_token_ignores_botanical_context() {
 }
 
 #[test]
+fn telegram_generic_token_ignores_upper_lower_telegrambot_context() {
+    assert_generic_token_context_is_preserved("TELEGRAMbot relay");
+}
+
+#[test]
+fn telegram_generic_token_ignores_upper_lower_botanical_context() {
+    assert_generic_token_context_is_preserved("BOTanical job");
+}
+
+#[test]
 fn telegram_generic_token_redacts_telegram_api_context() {
     let token = telegram_redaction_token();
 

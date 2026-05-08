@@ -545,7 +545,7 @@ export function SessionPaneView({
       ? (projectLookup.get(activeSession.projectId) ?? null)
       : null;
   const enableLocalDelegationActions = isLocalRemoteId(
-    activeSessionProject?.remoteId,
+    activeSession?.remoteId ?? activeSessionProject?.remoteId,
   );
   const allKnownSessions = useMemo(
     () => Array.from(sessionLookup.values()),

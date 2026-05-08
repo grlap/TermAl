@@ -132,6 +132,7 @@ impl StateInner {
                 agent,
                 workdir,
                 project_id,
+                remote_id: None,
                 model: model.unwrap_or_else(|| agent.default_model().to_owned()),
                 model_options: Vec::new(),
                 approval_policy: None,

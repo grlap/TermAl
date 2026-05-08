@@ -417,6 +417,27 @@ describe("session-store summary snapshots", () => {
     expect(secondSummary).not.toBe(firstSummary);
     expect(secondSummary?.status).toBe("active");
   });
+
+  it("updates the summary when the session remote owner changes", () => {
+    const initialSession = createSession();
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [initialSession],
+    });
+    const firstSummary = getSessionSummarySnapshotForTesting(initialSession.id);
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [createSession({ remoteId: "ssh-lab" })],
+    });
+    const secondSummary = getSessionSummarySnapshotForTesting(initialSession.id);
+
+    expect(secondSummary).not.toBe(firstSummary);
+    expect(secondSummary?.remoteId).toBe("ssh-lab");
+  });
 });
 
 describe("session-store record snapshots", () => {

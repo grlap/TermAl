@@ -989,6 +989,10 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
   const [markerPanelVisibilityOverride, setMarkerPanelVisibilityOverride] =
     useState<boolean | null>(null);
+  const conversationPageRef = useRef<HTMLDivElement | null>(null);
+  const markerPanelFocusRestoreFrameRef = useRef<number | null>(null);
+  // null follows the auto-show heuristic; explicit booleans come from the
+  // message-header context menu.
   const isMarkerPanelVisible =
     markerPanelVisibilityOverride ?? sortedMarkers.length > 0;
   const {
@@ -1000,8 +1004,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
     markersByMessageId,
     onCreateConversationMarker,
     onDeleteConversationMarker,
-    onSetMarkerPanelVisible: (isVisible) =>
-      setMarkerPanelVisibilityOverride(isVisible),
+    onSetMarkerPanelVisible: setMarkerPanelVisibilityOverride,
     scrollContainerRef,
     sessionId: session.id,
     visibleMessageIds,
@@ -1028,6 +1031,27 @@ const SessionConversationPage = memo(function SessionConversationPage({
   useEffect(() => {
     setMarkerPanelVisibilityOverride(null);
   }, [session.id]);
+
+  const cancelMarkerPanelFocusRestore = useCallback(() => {
+    if (markerPanelFocusRestoreFrameRef.current !== null) {
+      window.cancelAnimationFrame(markerPanelFocusRestoreFrameRef.current);
+      markerPanelFocusRestoreFrameRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => cancelMarkerPanelFocusRestore, [
+    cancelMarkerPanelFocusRestore,
+    session.id,
+  ]);
+
+  const hideMarkerPanelAndRestoreFocus = useCallback(() => {
+    setMarkerPanelVisibilityOverride(false);
+    cancelMarkerPanelFocusRestore();
+    markerPanelFocusRestoreFrameRef.current = window.requestAnimationFrame(() => {
+      markerPanelFocusRestoreFrameRef.current = null;
+      conversationPageRef.current?.focus({ preventScroll: true });
+    });
+  }, [cancelMarkerPanelFocusRestore]);
 
   const jumpToMarker = useCallback(
     (marker: ConversationMarker) => {
@@ -1088,11 +1112,12 @@ const SessionConversationPage = memo(function SessionConversationPage({
               normalizeConversationMarkerColor(activeMessageMarker.color),
           } as CSSProperties)
         : undefined;
-      const canOpenMarkerMenu =
-        message.author === "assistant" || message.author === "you";
+      // Markers are message-scoped, so all rendered message authors are
+      // eligible. Nested native controls still keep their own context menu.
+      const exposesMarkerMenu = true;
       const handleMarkerContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
         if (
-          !canOpenMarkerMenu ||
+          !exposesMarkerMenu ||
           !shouldOpenConversationMarkerContextMenu(event)
         ) {
           return;
@@ -1118,7 +1143,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
         });
       };
       const handleMarkerTriggerClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-        if (!canOpenMarkerMenu || event.button !== 0) {
+        if (!exposesMarkerMenu || event.button !== 0) {
           return;
         }
         const trigger = findActivatableConversationMarkerContextMenuTrigger(
@@ -1134,7 +1159,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       const handleMarkerTriggerKeyDown = (
         event: ReactKeyboardEvent<HTMLDivElement>,
       ) => {
-        if (!canOpenMarkerMenu) {
+        if (!exposesMarkerMenu) {
           return;
         }
         if (
@@ -1157,14 +1182,14 @@ const SessionConversationPage = memo(function SessionConversationPage({
       };
       return (
         <div
-          className={`conversation-message-marker-shell${canOpenMarkerMenu ? " can-open-marker-menu" : ""}${activeMessageMarker ? " is-active-marker" : ""}`}
+          className={`conversation-message-marker-shell${exposesMarkerMenu ? " can-open-marker-menu" : ""}${activeMessageMarker ? " is-active-marker" : ""}`}
           style={markerShellStyle}
-          tabIndex={canOpenMarkerMenu ? -1 : undefined}
+          tabIndex={exposesMarkerMenu ? -1 : undefined}
           onClick={handleMarkerTriggerClick}
           onContextMenu={handleMarkerContextMenu}
           onKeyDown={handleMarkerTriggerKeyDown}
         >
-          {canOpenMarkerMenu ? (
+          {exposesMarkerMenu ? (
             <MessageMetaMarkerMenuProvider>
               {rendered}
             </MessageMetaMarkerMenuProvider>
@@ -1254,7 +1279,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
     <ConversationMarkerFloatingWindow
       markers={sortedMarkers}
       activeMarkerId={activeMarkerId}
-      onClose={() => setMarkerPanelVisibilityOverride(false)}
+      onClose={hideMarkerPanelAndRestoreFocus}
       onJump={jumpToMarker}
       onNavigatePrevious={() => navigateMarkerByOffset(-1)}
       onNavigateNext={() => navigateMarkerByOffset(1)}
@@ -1273,7 +1298,12 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const conversationPageClassName = `session-conversation-page${isActive ? " is-active" : ""}${conversationOverview.shouldRender ? " has-conversation-overview-scroll" : ""}`;
 
   return (
-    <div className={conversationPageClassName} hidden={!isActive}>
+    <div
+      ref={conversationPageRef}
+      className={conversationPageClassName}
+      hidden={!isActive}
+      tabIndex={-1}
+    >
       {conversationOverview.shouldRender ? (
         <div className="conversation-with-overview">
           <div className="conversation-overview-content">

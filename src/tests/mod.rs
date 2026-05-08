@@ -886,6 +886,7 @@ fn sample_remote_orchestrator_state(
                 agent,
                 workdir: root_path.to_owned(),
                 project_id: Some(remote_project_id.to_owned()),
+                remote_id: None,
                 model: template_session
                     .model
                     .clone()

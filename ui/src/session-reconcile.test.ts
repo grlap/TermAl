@@ -1122,5 +1122,22 @@ describe("reconcileSessions", () => {
     expect(merged[0].projectId).toBe("project-b");
   });
 
+  it("replaces a session when the remote owner changes", () => {
+    const previous = [makeSession("session-a", { preview: "ready" })];
+
+    const next = [
+      makeSession("session-a", {
+        preview: "ready",
+        remoteId: "ssh-lab",
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0]).not.toBe(previous[0]);
+    expect(merged[0].remoteId).toBe("ssh-lab");
+  });
+
 });
 

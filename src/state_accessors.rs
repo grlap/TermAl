@@ -196,11 +196,56 @@ mod visible_session_hydration_error_tests {
         assert_eq!(err.status, StatusCode::NOT_FOUND);
         assert_eq!(err.kind, Some(ApiErrorKind::LocalSessionMissing));
     }
+
+    #[test]
+    fn wire_sessions_expose_remote_owner_metadata() {
+        let root = TempStateDir::new("termal-remote-owner-wire");
+        let state_path = root.path().join("state.json");
+        let templates_path = root.path().join("orchestrators.json");
+        let state = AppState::new_with_paths(
+            root.path().to_string_lossy().into_owned(),
+            state_path,
+            templates_path,
+        )
+        .expect("test state should initialize");
+
+        let session_id = {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let record = inner.create_session(
+                Agent::Codex,
+                Some("Remote Proxy".to_owned()),
+                root.path().to_string_lossy().into_owned(),
+                None,
+                None,
+            );
+            let session_id = record.session.id.clone();
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("created session should exist");
+            inner.sessions[index].remote_id = Some("ssh-lab".to_owned());
+            inner.sessions[index].remote_session_id = Some("remote-session-1".to_owned());
+            session_id
+        };
+
+        let summary = state.summary_snapshot();
+        let summary_session = summary
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("summary session should exist");
+        assert_eq!(summary_session.remote_id.as_deref(), Some("ssh-lab"));
+
+        let full = state
+            .get_session(&session_id)
+            .expect("full session should be available");
+        assert_eq!(full.session.remote_id.as_deref(), Some("ssh-lab"));
+    }
 }
 
 impl AppState {
     fn wire_session_from_record(record: &SessionRecord) -> Session {
         let mut session = record.session.clone();
+        session.remote_id = record.remote_id.clone();
         session.messages_loaded = record.session.messages_loaded;
         session.message_count = session_message_count(record);
         session.session_mutation_stamp = Some(record.mutation_stamp);
@@ -227,6 +272,7 @@ impl AppState {
             agent: session.agent,
             workdir: session.workdir.clone(),
             project_id: session.project_id.clone(),
+            remote_id: record.remote_id.clone(),
             model: session.model.clone(),
             model_options: session.model_options.clone(),
             approval_policy: session.approval_policy,

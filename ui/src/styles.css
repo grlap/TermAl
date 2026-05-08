@@ -3963,26 +3963,8 @@ textarea {
     0 0 0 0.3rem var(--accent-blue-soft);
 }
 
-.conversation-marker-navigator {
-  position: sticky;
-  top: var(--space-sm);
-  z-index: 10;
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: center;
-  gap: var(--space-sm);
-  width: min(100%, 42rem);
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--control-radius-button);
-  padding: var(--space-xs);
-  background: color-mix(in srgb, var(--surface-elevated) 92%, transparent);
-  box-shadow: 0 0.55rem 1.2rem color-mix(in srgb, var(--shadow-color, black) 16%, transparent);
-}
-
 .conversation-marker-navigator-copy,
-.conversation-marker-nav-controls,
-.conversation-marker-list {
+.conversation-marker-nav-controls {
   display: flex;
   align-items: center;
 }
@@ -4019,16 +4001,6 @@ textarea {
 .conversation-marker-nav-button svg {
   width: var(--icon-size-sm);
   height: var(--icon-size-sm);
-}
-
-.conversation-marker-list {
-  gap: var(--space-xs);
-  min-width: 0;
-}
-
-.conversation-marker-list {
-  overflow-x: auto;
-  scrollbar-width: thin;
 }
 
 .conversation-message-marker-shell {

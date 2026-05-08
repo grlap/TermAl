@@ -77,6 +77,7 @@ export type SessionSummarySnapshot = Readonly<{
   modelOptions?: readonly SessionModelOption[];
   name: string;
   projectId?: string | null;
+  remoteId?: string | null;
   reasoningEffort?: CodexReasoningEffort | null;
   sandboxMode?: Session["sandboxMode"];
   status: Session["status"];
@@ -506,6 +507,7 @@ function buildSessionSummarySnapshot(
     previous.agent === session.agent &&
     previous.workdir === session.workdir &&
     previous.projectId === session.projectId &&
+    previous.remoteId === session.remoteId &&
     previous.status === session.status &&
     previous.model === session.model &&
     previous.modelOptions === nextModelOptions &&
@@ -540,6 +542,7 @@ function buildSessionSummarySnapshot(
     modelOptions: nextModelOptions,
     name: session.name,
     projectId: session.projectId,
+    remoteId: session.remoteId,
     reasoningEffort: session.reasoningEffort,
     sandboxMode: session.sandboxMode,
     status: session.status,

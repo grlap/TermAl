@@ -22,156 +22,262 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 - Move the token to an OS secret store, or keep token configuration env-only until protected storage exists.
 - If file persistence stays, add explicit Windows ACL handling and document backup/sync exposure.
 
-## Remote proxy delegation actions can re-enable when project metadata is missing
+## Session tab tooltip ignores session-level remote ownership
 
-**Severity:** Medium - `ui/src/SessionPaneView.tsx:547` and `ui/src/delegation-commands.ts:284-290` derive local delegation action capability only from `activeSession.projectId -> project.remoteId`, while `src/delegations.rs:276` rejects remote-backed parents.
+**Severity:** Low - `ui/src/panels/session-tab-status-tooltip.tsx:160` derives session location from `session.projectId -> project.remoteId` even though session summaries now carry `remoteId`.
 
-When a remote proxy session loses its project record or has `projectId` cleared, `activeSessionProject?.remoteId` becomes `undefined`; `isLocalRemoteId(undefined)` currently evaluates as local. The extracted composer availability helper repeats the same inference with `parentProject?.remoteId`, so Open / Insert / Cancel actions and the composer Delegate action can become available for remote-backed sessions this host cannot own.
-
-**Current behavior:**
-- Local delegation action gating depends on project lookup.
-- Missing project metadata falls back through `isLocalRemoteId(undefined)`.
-- Projectless remote proxy sessions can expose local delegation actions for ids this server does not own.
-- The composer Delegate availability helper uses the same project-derived capability gate.
-- The backend still rejects remote-backed delegation attempts, so the UI/backend contract mismatch surfaces only at action time.
-
-**Proposal:**
-- Add a session-level remote/proxy capability to the wire contract, or pass explicit delegation action capability from state.
-- Keep delegation actions disabled for remote proxy sessions even when their project metadata is missing.
-- Cover a remote proxy session with `projectId: null` or a missing project record, including the composer Delegate action.
-
-## Marker-menu comments still describe assistant-only triggers
-
-**Severity:** Note - `ui/src/message-cards.tsx:178`, `ui/src/panels/conversation-markers.tsx:34`, and `ui/src/panels/conversation-markers.tsx:420` still describe marker-menu trigger ownership as assistant-specific after the current behavior expanded triggers to user messages too.
-
-The marker feature is message-scoped again, but the provider comment and native-control selector naming still point readers toward an assistant-only model. That stale contract language can cause future changes to reintroduce assistant-only assumptions around marker creation.
+Projectless or missing-project remote proxy sessions can still display as local or unknown in tab tooltips. The delegation gate now correctly prefers session-level ownership, but the tooltip continues to reflect the older project-only mental model.
 
 **Current behavior:**
-- User and assistant message headers can expose marker-menu triggers.
-- The provider comment still mentions wrapping assistant cards.
-- Native selector and helper names still use assistant-specific wording.
+- Session summaries expose `remoteId`.
+- Tab tooltip location still looks up the project first.
+- Projectless or missing-project remote proxy sessions can display the wrong location.
 
 **Proposal:**
-- Update the comments and names to describe message metadata / marker-trigger controls generically.
-- Or explicitly document that both user and assistant headers are covered by the provider.
+- Prefer `session.remoteId` when formatting session location.
+- Fall back to project remote metadata only when the session has no remote owner.
+- Add tooltip coverage for projectless and missing-project remote proxy sessions.
 
-## Marker floating window close button shows literal letter `x`
+## Session remote ownership precedence is duplicated across UI gates
 
-**Severity:** Medium - `ui/src/panels/conversation-markers.tsx:386`. The new floating window's close affordance renders the bare ASCII letter `"x"` between `<button>` tags. With CSS scaling/font/loading variations, this can be visually ambiguous (especially if the user has different fonts or font-loading delays). Compare to the navigator's prev/next which use `<DiffNavArrow>` SVG icons.
+**Severity:** Low - `ui/src/SessionPaneView.tsx:547` and `ui/src/delegation-commands.ts:290` both encode the local-vs-remote owner rule as `session.remoteId ?? project.remoteId`.
 
-The `aria-label="Hide markers window"` provides screen-reader semantics, but visible text "x" looks unfinished.
+That precedence is now the capability boundary for local delegation actions. Keeping it duplicated invites drift between visibility gating and spawn-time validation.
 
 **Current behavior:**
-- Close button visible text: literal `x`.
-- Aria label: "Hide markers window".
-- No icon component or unicode multiplication sign.
+- `SessionPaneView` gates delegation action visibility with one copy of the precedence rule.
+- `resolveComposerDelegationAvailability` validates composer delegation with a second copy.
+- Future changes to the owner rule must be mirrored manually.
 
 **Proposal:**
-- Replace `x` with an SVG icon (e.g., a close-X glyph component).
-- Or use the unicode multiplication sign `×` which is conventionally rendered by browsers.
-- Wrap the visible glyph in `aria-hidden="true"` since `aria-label` already carries the accessible name.
+- Centralize the rule in a helper such as `resolveSessionOwnerRemoteId(session, project)` or `canUseLocalDelegation(session, project)`.
+- Reuse that helper for button gating, composer availability, and any tooltip/location callers.
 
-## `NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR` is now scoped to both authors but still named "assistant"
+## Session remote owner wire projection invariant is implicit
 
-**Severity:** Note - `ui/src/panels/conversation-markers.tsx:34`. Round 69 expanded `canOpenMarkerMenu` to include both `"you"` and `"assistant"`; round 70 added `aria-label` to user `MessageMeta` so the affordance is exposed for both. The constant is now used to gate native control rejection for both user and assistant marker triggers, but its name still primes future readers with assistant-only mental model.
+**Severity:** Low - `src/wire.rs:491`, `src/state_accessors.rs:248`, and `src/remote_sync.rs:534` split remote ownership between authoritative `SessionRecord.remote_id` metadata and `Session.remote_id` wire projection.
+
+The design is correct, but subtle: `Session.remote_id` is client-facing owner metadata, while durable proxy ownership remains on `SessionRecord`. Future code could accidentally treat the embedded `record.session.remote_id` as authoritative or forget to clear upstream remote metadata during localization.
 
 **Current behavior:**
-- Selector used for both user and assistant marker triggers.
-- Name still scoped to "assistant".
-- Future contributors might miss the broader role.
+- Wire sessions project `SessionRecord.remote_id` into `Session.remoteId`.
+- Remote localization clears the cloned embedded session's `remote_id`.
+- No nearby comment names `SessionRecord.remote_id` as the source of truth.
 
 **Proposal:**
-- Rename to `NATIVE_MESSAGE_CONTEXT_MENU_SELECTOR` or `NATIVE_INTERACTIVE_CONTROL_SELECTOR`.
+- Add a short invariant comment near the wire projection and localization helpers.
+- Or wrap projection/clearing in a named helper that makes the source-of-truth boundary explicit.
 
-## `conversation-markers.tsx` header still describes "marker chip/nav rendering" but chips were removed
+## Remote architecture docs still describe routing as project-only
 
-**Severity:** Note - `ui/src/panels/conversation-markers.tsx:1-5`. The file header advertises chip-rendering ownership (`ConversationMessageMarkers` per-message chips) that no longer exists. Round 70 replaced per-message marker chips with a floating marker window; the header was not updated.
+**Severity:** Note - `docs/architecture.md:424` still describes remote routing primarily through `Project.remoteId`, but this change adds `Session.remoteId` as the owner signal for remote-proxy sessions.
 
-CLAUDE.md mandates header comments accurately describe what each module owns.
+The old project-only model is exactly what caused delegation capability drift. The docs should distinguish project-scoped creation routing from session-scoped remote ownership.
 
 **Current behavior:**
-- Header says "marker chip/nav rendering".
-- Per-message chip component removed in round 70.
-- New `ConversationMarkerFloatingWindow` owns marker rendering.
+- Architecture docs describe remote routing through projects.
+- Session-level remote owner metadata is not documented.
+- Future readers may reuse project metadata for capability checks.
 
 **Proposal:**
-- Replace "marker chip/nav rendering" with "marker floating window/nav rendering".
-- Acknowledge that per-message marker chip rendering was removed.
+- Document that `Project.remoteId` selects execution target for project-scoped creation.
+- Document that `Session.remoteId` identifies a remote-proxy session owner and should take precedence for local capability checks.
 
-## `markerPanelVisibilityOverride ?? sortedMarkers.length > 0` ternary semantics not documented
+## `wire_session_from_record` and `wire_session_summary_from_record` parallel paths could diverge
 
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:990-993`. The expression couples user-explicit override (`true|false`) with auto-show heuristic (`null` → length-based) in one expression. Future contributors adding a "default hidden" preference or session-scoped persistence will need to reason about three states without any comment explaining the null-as-auto contract.
+**Severity:** Note - `src/state_accessors.rs:246-298`. `wire_session_from_record` mutates a cloned wire Session by copying `record.remote_id` into the wire field; `wire_session_summary_from_record` lists fields explicitly. Two parallel code paths now construct the wire Session and both must remember to populate `remote_id`. A future field added on the record could be added in one place but not the other.
 
 **Current behavior:**
-- `null` value triggers auto-show heuristic.
-- Explicit `true|false` overrides.
-- No comment explains the contract.
+- Two helpers diverge in how they assemble the wire Session.
+- Summary form lists fields explicitly; full form uses clone-and-modify.
+- New `record.foo` fields will silently miss the summary path.
 
 **Proposal:**
-- Add an inline comment: `// null = follow auto-show heuristic; explicit boolean = user override from menu`.
+- Add a debug-assert that the summary form's output equals the full form's output for shared fields.
+- Or refactor to share a single field list.
 
-## `ConversationMarkerNavigator` may be dead code with diverged disabled-state behavior
+## `localize_remote_session` defensive `remote_id` clear lacks contract comment
 
-**Severity:** Note - `ui/src/panels/conversation-markers.tsx:334`. `ConversationMarkerFloatingWindow` and `ConversationMarkerNavigator` duplicate header structure (count/copy/nav controls) but have diverged disabled-state behavior. `ConversationMarkerFloatingWindow` disables prev/next when markers.length === 0; `ConversationMarkerNavigator` has no disabled state. The duplicated header is a copy-paste with subtle differences.
+**Severity:** Note - `src/remote_sync.rs:534`. The function defensively zeroes the wire `remote_id` so that the inbound value from the remote is not trusted. The SessionRecord then re-derives the truthful value via `wire_session_from_record`. The round-trip contract (wire field is a derived projection; record field is source of truth) is not documented in code.
 
-`ConversationMarkerNavigator` may now be dead code or only reused in tests.
+A future contributor may be tempted to keep the inbound wire value, breaking the trust boundary.
 
 **Current behavior:**
-- Two near-duplicate header components.
-- Diverged disabled-state behavior.
-- ConversationMarkerNavigator usage scope unclear.
+- Defensive clear at `localize_remote_session`.
+- Wire field is re-populated from `record.remote_id` on serialization.
+- No code comment explains the defensive intent.
 
 **Proposal:**
-- Either extract a shared `ConversationMarkerHeader` component.
-- Or remove `ConversationMarkerNavigator` if no longer used.
+- Add a one-line comment: "wire `remote_id` is populated from `record.remote_id` by `wire_session_from_record`; the inbound value from the remote is not trusted."
 
-## Marker floating window `onClose` does not restore focus
+## `exposesMarkerMenu = true` constant leaves dead conditional branches
 
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1257`. Pressing the close button (or selecting "Hide markers window" from context menu) hides the floating window but leaves keyboard focus on the now-detached close button. The user is left without a focused element. The marker-menu close path uses `closeContextMenu({ restoreFocus: true })`; the close-button path does not.
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1115-1117`. Round 71 collapsed `canOpenMarkerMenu = "assistant" || "you"` to a hard-coded constant `exposesMarkerMenu = true` (closes round-70 finding). The conditional branches that gate on it (`exposesMarkerMenu ? -1 : undefined`, `exposesMarkerMenu ? <Provider> : rendered`, etc.) are now dead code paths that survive only as historical scaffolding.
 
 **Current behavior:**
-- Close button click → window unmounts.
-- No focus restoration.
-- Context-menu "Hide markers window" path uses existing context-menu close logic (does restore).
+- `exposesMarkerMenu` is unconditionally `true`.
+- Conditional branches still wrap the affordance.
+- Comment explains the intent but the code shape contradicts it.
 
 **Proposal:**
-- When `onClose` fires from the close button, capture an explicit "where focus came from" or restore focus to a known anchor.
+- Remove the conditionals (always wrap in provider, always set tabIndex).
+- Or reintroduce a meaningful predicate.
 
-## Session-change `markerPanelVisibilityOverride` reset effect not pinned by test
+## CSS class `conversation-marker-navigator-copy` is stale after Navigator removal
 
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1028-1030`. The new effect resets `markerPanelVisibilityOverride` on session change. The reset is correct but does not have a test pinning it; a regression that drops the dependency would silently carry the override across sessions.
+**Severity:** Note - `ui/src/styles.css:3966-3990`. The CSS class survives even though `ConversationMarkerNavigator` was deleted in round 71. The class name still references the removed component and is now used only by `ConversationMarkerFloatingWindow`.
 
 **Current behavior:**
-- Effect at `:1028-1030` resets override on session change.
-- No test asserts the reset occurs.
+- Class name references `Navigator`.
+- Only consumer is `ConversationMarkerFloatingWindow`.
+- Future readers will hunt for `Navigator` and find nothing.
 
 **Proposal:**
-- Add a test that asserts the override is reset across session switches.
+- Rename to `conversation-marker-floating-window-copy`.
 
-## Inline arrow `(isVisible) => setMarkerPanelVisibilityOverride(isVisible)` re-allocates per render
+## `ascii_word_boundary_between` widens accept set vs. pre-refactor helpers
 
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1003-1004`. `setMarkerPanelVisibilityOverride` is a stable setter; passing a re-allocated arrow defeats memoization in the consumer hook. The hook receives `onSetMarkerPanelVisible` and creates a context-menu node that depends on this prop — every render allocates a new arrow.
+**Severity:** Low - `src/telegram.rs:508-521`. `ascii_word_boundary_between` returns `true` whenever EITHER `before` or `after` is non-alphanumeric. The pre-refactor `ascii_word_boundary_at` returned false when `before` was alphanumeric AND `current` was non-alphanumeric.
+
+In practice `windows().enumerate()` only matches alphanumeric needles ("telegram"/"bot"), so the new `value[index]` byte will be alphanumeric and there's no current call-site regression — but the helper's name suggests a generic boundary check that no longer matches the original specialized behavior.
 
 **Current behavior:**
-- Inline arrow per render.
-- Stable setter wrapped unnecessarily.
-- Consumer hook's context-menu node re-allocates per render.
+- New helper widens the accept set.
+- No current call-site regression.
+- Helper name overstates generality.
 
 **Proposal:**
-- Pass the setter directly: `onSetMarkerPanelVisible: setMarkerPanelVisibilityOverride`.
-- Or wrap with `useCallback`.
+- Document that this helper assumes the needle starts and ends with alphanumeric bytes.
+- Or keep call-site-specific helpers.
 
-## "toggles the floating marker window from the message context menu" doesn't pin auto-show heuristic
+## Test bypasses internal mutation invariants for `wire_sessions_expose_remote_owner_metadata`
 
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:893-968`. The test assumes initial state has `isMarkerPanelVisible === true` (because `sortedMarkers.length > 0`), but doesn't assert the "Hide markers window" appears (vs. "Show markers window") in the menu before the first toggle. A regression that flipped the auto-show heuristic to default-hidden would still pass.
+**Severity:** Note - `src/state_accessors.rs:200-242`. The new test reaches into `state.inner.lock()` and directly mutates `inner.sessions[index].remote_id`. The test bypasses any normal mutation path (`session_mut_*`), so it doesn't exercise the mutation-stamp bookkeeping that real remote-proxy ingestion goes through.
 
 **Current behavior:**
-- Test exercises one direction (Hide → Show).
-- Auto-show default-true contract not asserted.
+- Test directly mutates record fields.
+- No public ingestion path exercised.
 
 **Proposal:**
-- Add `expect(screen.getByRole("menuitem", { name: "Hide markers window" })).toBeInTheDocument()` before the first click.
-- Add a parallel test that starts with empty markers, asserts the floating window is absent, then opens via "Show markers window".
+- Drive the same scenario through a public ingestion path (e.g., feed a remote state snapshot via `apply_remote_state_snapshot`).
+
+## Marker close-button cleanup-only effect uses cryptic arrow-implicit-return form
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1042-1045`. The cleanup-only effect `useEffect(() => cancelMarkerPanelFocusRestore, [...])` uses arrow-implicit-return where the body's evaluated value (the function reference) becomes the cleanup function. This is functionally correct but easy to misread as "the effect's body".
+
+**Current behavior:**
+- Arrow-implicit-return returns cleanup function.
+- A future contributor adding a body statement would need to switch to braces, easily breaking the cleanup wiring.
+
+**Proposal:**
+- Use the explicit form: `useEffect(() => { return cancelMarkerPanelFocusRestore; }, [...])`.
+- Or add an inline comment naming the pattern.
+
+## Empty-state branch lacks `ref` and `tabIndex` for marker focus restoration
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1212-1225`. The empty-state early return creates a different `<div className="session-conversation-page">` element WITHOUT `ref={conversationPageRef}` or `tabIndex={-1}`. The non-empty branch at line 1300-1306 has both. A focus-restore RAF that fires while in the empty branch has `conversationPageRef.current === null` and silently fails.
+
+**Current behavior:**
+- Empty-state div lacks ref/tabIndex.
+- Non-empty branch has both.
+- Focus-restore silently no-ops in empty branch.
+
+**Proposal:**
+- Consistently apply `ref={conversationPageRef}` and `tabIndex={-1}` to both branches.
+
+## Cross-remote `remote_id` information leak in wire responses to remotes
+
+**Severity:** Note - `src/wire.rs:490-491`. Adding `remote_id: Option<String>` to wire Session means the field is now in every API response that returns a Session, including responses we serve to remotes. If we proxy a session for remote A and remote B asks us for that proxy session, the wire would emit `remote_id: "remote-a-id"`, leaking our naming for A to B.
+
+The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but it's now visible across remotes. Phase 1 trust model may waive this.
+
+**Current behavior:**
+- `remote_id` exposed in all wire Session responses.
+- `localize_remote_session` clears the field on inbound (correct).
+- Outbound responses to remotes still include OUR alias for OTHER remotes.
+
+**Proposal:**
+- When serving wire Sessions to remotes (vs. to local UI), strip the `remote_id` field.
+- Or accept the leak as Phase 1 trust model.
+
+## No test for inbound attacker-chosen `remote_id` in `localize_remote_session`
+
+**Severity:** Note - `src/remote_sync.rs:534`. The defensive clear of inbound wire `remote_id` is correct, but no test covers the case where a remote sends `remote_id` set to an attacker-chosen value. The `apply_remote_session_to_record` path overwrites with the trusted `remote_id` from the connection, so this is safe — but the defense is implicit.
+
+**Current behavior:**
+- Defensive clear is correct.
+- No test exercises the attacker-claim case.
+
+**Proposal:**
+- Add a Rust test that simulates a remote sending `Session` with `remote_id: Some("OTHER-REMOTE")` and asserts the resulting `record.remote_id` is the trusted connection id.
+
+## Bundled `delegation-commands.test.ts` `resolveComposerDelegationAvailability` test grew larger
+
+**Severity:** Low - `ui/src/delegation-commands.test.ts:271-306`. The test bundles five separate availability outcomes into one `it()` block. Round 71 added a fifth assertion (the `projectId: null, remoteId: "ssh-lab"` case) extending the bundle. The first failing assertion masks subsequent ones.
+
+This is already on the bug-ledger backlog as a P2 split task. Round 71 made the bundle larger.
+
+**Current behavior:**
+- Five outcomes bundled in one `it()`.
+- Round 71 added the fifth case.
+
+**Proposal:**
+- Split into per-outcome `it()`s as the existing backlog item suggests.
+
+## New active-color test still pins literal hex `#22c55e` indirectly
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:404-411`. Round 71 changed the test to assert `normalizeConversationMarkerColor("#22c55e")` rather than the literal hex (closes prior brittleness finding). But the test still passes the literal `"#22c55e"` to the normalizer, so the test fails if the normalizer is changed to reject `#22c55e`. The fix moved the brittleness one layer deep.
+
+**Current behavior:**
+- Test asserts via `normalizeConversationMarkerColor("#22c55e")`.
+- Still hard-codes `"#22c55e"` as input.
+
+**Proposal:**
+- Construct a marker with a color produced by `DEFAULT_CONVERSATION_MARKER_COLOR` (the contract value) and assert that color round-trips through normalization.
+
+## `wire_sessions_expose_remote_owner_metadata` test covers Some(remote_id) but not None
+
+**Severity:** Note - `src/state_accessors.rs:200-242`. The new test covers the `Some(remote_id)` case but not the `None` (local session) case. A regression where the wire helper unconditionally wrote `Some("")` for non-proxy sessions would surface as a failure at consumer test sites but not at the new helper-level test.
+
+**Current behavior:**
+- Single-direction (Some) coverage.
+
+**Proposal:**
+- Add a sibling assertion that a session NOT marked as a proxy has `summary_session.remote_id.is_none()` AND `full.session.remote_id.is_none()`.
+
+## TS `Session.remoteId` declares `| null` but Rust never emits null
+
+**Severity:** Note - `src/wire.rs:490-491` uses `#[serde(default, skip_serializing_if = "Option::is_none")]`, so Rust never emits `remoteId: null` (only emits the field when present). The TS type at `ui/src/types.ts:286` declares `remoteId?: string | null`. Future contributors might assume `remoteId: null` is a meaningful state distinct from missing.
+
+**Current behavior:**
+- Rust emits field-or-missing.
+- TS allows `null`, undefined, or string.
+
+**Proposal:**
+- Drop `| null` from the TypeScript type if the protocol never emits it.
+- Or document that null and undefined are equivalent on the wire.
+
+## Marker focus-restore test bundles two distinct focus paths in one `it()`
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:893-985`. The "toggles the floating marker window from the message context menu" test now also asserts focus restoration. The test does both context-menu close → assistantShell focus AND close-button → conversation-page focus in a single `it()`. A regression in only one of the two paths would surface as one failing test, but the bundle is heavy.
+
+**Current behavior:**
+- Two focus-paths bundled.
+- Test name doesn't communicate both behaviors.
+
+**Proposal:**
+- Split into "context-menu close restores focus to trigger" and "close-button restores focus to conversation page" siblings.
+
+## Reset-override test only covers `false → null` direction
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:1032-1103`. "Resets explicit marker-window visibility when switching sessions" pins the round-70 finding's reset effect for the `false` (hidden override) case. The parallel `true` override case (set true via "Show markers window", switch session, observe reset) is not pinned.
+
+**Current behavior:**
+- `false → null` direction tested.
+- `true → null` direction unverified.
+
+**Proposal:**
+- Add a sibling test starting from `markerPanelVisibilityOverride = true` and verify the new session resets back to auto-show heuristic.
 
 ## "keeps the draft when delegation spawn throws" doesn't assert busy state was cleared
 
@@ -199,44 +305,6 @@ A regression that left the button stuck in "Delegating..." after a thrown error 
 **Proposal:**
 - Either render with explicit `slashPalette` state via dependency injection.
 - Or assert the specific item-list state of the palette.
-
-## Marker boundary test pinned new "Hide markers window" item, dropping "Remove" boundary coverage
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:1493-1496`. Round 70 added the new menu item at the bottom of the marker context menu. The prior boundary test (which used the last menu item) shifts to the new "Hide markers window" label. Behavior is preserved, but the test no longer pins the "Remove ..." removal item as a boundary navigation target — a regression that re-ordered menu items so "Remove Review point" ended up first or middle would not surface here.
-
-**Current behavior:**
-- Boundary test now asserts "Hide markers window" as the last item.
-- "Remove ..." item navigation coverage is now indirect.
-
-**Proposal:**
-- Add a sibling test with markers but specifying the remove item is at the expected index in `getConversationMarkerContextMenuItems`.
-
-## New marker-shell active-color test pins literal hex `#22c55e` (implementation-shaped)
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:404-411`. The test pins `--conversation-active-marker-color: "#22c55e"`. If the color normalizer changes (e.g., adds rgba conversion or theme-token resolution), this test breaks for an unrelated reason.
-
-**Current behavior:**
-- Test asserts literal hex value.
-- Implementation-shaped rather than contract-shaped.
-
-**Proposal:**
-- Pin the contract: assert the variable is set and matches what `normalizeConversationMarkerColor("#22c55e")` returns at the time, rather than the literal hex.
-
-## `aria-label="Open marker actions"` on `MessageMeta` strips visible author name from accessible name
-
-**Severity:** Medium - `ui/src/message-cards.tsx:738-749`. The `MessageMeta` `aria-label="Open marker actions"` overrides the visible "You" / "Agent" text for screen-reader users. With user-message marker triggers now enabled (round 69 allows both authors), screen-reader users encountering a message pair hear two adjacent buttons named "Open marker actions" with no author context.
-
-Sighted users still see "You"/"Agent" as the visible label, so the visible vs. announced names diverge — a WCAG 2.5.3 (Label in Name) issue. ATs cannot disambiguate which message's marker menu they are about to open.
-
-**Current behavior:**
-- `aria-label="Open marker actions"` set on the trigger.
-- Visible text: "You" / "Agent".
-- Screen reader announces only "Open marker actions".
-- Two adjacent triggers per message pair are indistinguishable to ATs.
-
-**Proposal:**
-- Use `aria-label="Open marker actions for your message"` / `"Open marker actions for assistant message"` so the announced name carries author context.
-- Or drop `aria-label` and use `aria-describedby` pointing at a hidden span that says "Open marker actions" — keeps the visible "You"/"Agent" as the primary accessible name.
 
 ## `delegation-commands.ts` header comment doesn't reflect new composer helpers
 
@@ -288,21 +356,6 @@ Per CLAUDE.md the project enforces split-file headers describing what each file 
 
 **Proposal:**
 - Keep the contract loop but split the explicit boundary cases (empty, 2-char, 4-char, 5-char, full) into individual `#[test]`s, mirroring the round-68 split style for bundled telegram tests.
-
-## `canOpenMarkerMenu` predicate name no longer captures meaningful filtering
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1069-1070`. The new `canOpenMarkerMenu = "assistant" || "you"` allows both authors. Today the only `MessageAuthor` values are likely `"you"` and `"assistant"` so this is fine — but the predicate name no longer captures meaningful filtering.
-
-A future addition of a system/info author would silently expose the marker menu without contributor noticing.
-
-**Current behavior:**
-- Whitelist of two authors.
-- All current authors covered.
-- Future system/info authors would auto-expose.
-
-**Proposal:**
-- Replace explicit author whitelist with `canOpenMarkerMenu = true` and document that all `MessageAuthor`s are eligible.
-- Or add an exhaustive default-arm switch keyed on `message.author`.
 
 ## `aria-busy` on a `<button>` element is unconventional
 
@@ -419,17 +472,20 @@ Markdown closing fences may be indented by up to three spaces. A child result co
 - Document the all-or-nothing semantic in a comment.
 - Or restructure as an action-config object the parent fills.
 
-## Round 67 boundary helpers no longer mirror each other
+## Round 71 boundary helpers `ascii_word_boundary_at` and `ascii_word_boundary_after` are now byte-identical
 
-**Severity:** Note - round 67 inlined the boundary helpers at `src/telegram.rs:492-510` but kept them as separate functions with subtly different shapes (`if index == 0 { return true }` early return vs. `match value.get(index)` pattern). Behavior is symmetric but the two helpers no longer mirror each other, making future tweaks asymmetric-friendly.
+**Severity:** Low - round 71 unified both helpers around `ascii_word_boundary_between(value[index-1], value[index])` (closing the round-67 ledger entry "no longer mirror each other"). However, the two functions now have **identical** call shapes — they differ only in their name. A reader sees `ascii_word_boundary_at(haystack, idx)` and `ascii_word_boundary_after(haystack, idx + needle.len())` and assumes different semantics, but the bodies are byte-identical.
+
+`src/telegram.rs:492-521`. `ascii_word_boundary_after`'s `before`/`after` reference the byte BEFORE the call's `index` — the same pair as `ascii_word_boundary_at(value, index)`.
 
 **Current behavior:**
-- `ascii_word_boundary_at` uses early-return for index==0.
-- `ascii_word_boundary_after` uses match.
-- Asymmetric implementation despite symmetric semantics.
+- Both helpers delegate to `ascii_word_boundary_between` with identical argument shapes.
+- Names suggest distinct semantics; bodies are identical.
+- Misleading for future contributors.
 
 **Proposal:**
-- Refactor both helpers around a single `ascii_word_boundary_between(prev_byte: Option<u8>, next_byte: Option<u8>) -> bool` predicate, then the at/after wrappers are one-liners.
+- Inline both helpers into a single call at `ascii_bytes_contains_word_ignore_case`.
+- Or keep one helper and have the other delegate with an explanatory comment about intent at the call site.
 
 ## `ascii_word_boundary_after` camelCase only handles lower→upper transitions
 
@@ -3533,9 +3589,15 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Cover delegation result prompt indented-fence escaping:
   include child summaries, findings, commands, and notes containing indented tilde fences such as `   ~~~`, and assert the formatter chooses a boundary those lines cannot close.
 - [ ] P2: Cover SessionPaneView remote delegation action capability wiring:
-  render `SessionPaneView` with local, remote, missing-project, and projectless remote-proxy scenarios; assert delegation row Open / Insert / Cancel actions and the composer Delegate action follow the production `activeSession -> projectLookup -> enableLocalDelegationActions` wiring, not only the helper-level availability checks.
+  render `SessionPaneView` with local, remote-project, missing-project, projectless remote-proxy, and conflicting `session.remoteId = "ssh-lab"` plus local-project scenarios; assert delegation row Open / Insert / Cancel actions and the composer Delegate action follow the production `activeSession.remoteId ?? project.remoteId` wiring, not only helper-level availability checks.
+- [ ] P2: Cover session tab tooltip remote-owner display:
+  render tab tooltips for projectless and missing-project remote proxy sessions whose summaries carry `remoteId`, and assert the tooltip prefers session-level ownership before falling back to project metadata.
 - [ ] P2: Cover SessionPaneView composer delegation click-through:
   mock `spawnDelegationCommand`, click the composer Delegate action through `SessionPaneView`, and assert the active parent session drives the payload, success clears the draft, command-error handling preserves it, and composer errors surface.
+- [ ] P2: Cover remote-sync embedded remote-owner clearing:
+  seed a remote snapshot session with `remoteId`, localize it, and assert `SessionRecord.remote_id` metadata is preserved while the embedded `record.session.remote_id` is cleared.
+- [ ] P2: Cover marker-window focus-restore cancellation:
+  mock `requestAnimationFrame` / `cancelAnimationFrame`, close the floating marker window, switch sessions or unmount before the frame flushes, and assert the scheduled focus restore is canceled.
 - [ ] P2: Pin `event.target === node` mousedown guard with negative case:
   add a sibling test that fires `mouseDown` on a child of `scrollNode` (e.g., a virtualized message slot) and asserts hydration does NOT occur. Round-63's isolated test only fires mouseDown directly on the scrollNode.
 - [ ] P2: Cover MessageCard pending-action across all action types:
@@ -3587,9 +3649,7 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Reframe `mask_telegram_bot_token` assertion to contract-shape:
   replace `revealed.chars().count() == token.chars().count().min(4)` with a contract assertion ("never expose more than 4 trailing chars") so a future implementation tweak doesn't silently pass.
 - [ ] P2: Clean up AgentSessionPanel `act(...)` warnings:
-  run the targeted AgentSessionPanel tests, identify the async rerenders/events/timer-driven updates that emit React `act(...)` warnings, and wrap or await them so timing-sensitive failures are not hidden by noisy test output.
-- [ ] P2: Extend `findActivatableConversationMarkerContextMenuTrigger` test matrix:
-  the new `it.each` covers 9 of 16 selectors. Add the remaining `option`, `img`, `picture`, `video`, `audio`, `canvas`, `svg` tags from `NATIVE_ASSISTANT_CONTEXT_MENU_SELECTOR`. Add a `target === trigger` case where the target is the trigger element itself.
+  targeted AgentSessionPanel Vitest still emits React `act(...)` warnings around async rerenders/events; identify the warned updates and wrap or await them so timing-sensitive failures are not hidden by noisy test output.
 - [ ] P2: Strengthen race-condition delegation tests:
   the session-switch race test should also assert `expect(onDraftCommit).not.toHaveBeenCalledWith("session-b", "")` (negative on new session id). The unmount race test should assert `console.error` was not called with `act`/`unmounted` warnings, or stub `setIsDelegationSpawning` to verify it isn't invoked post-unmount.
 - [ ] P2: Replace immediate `expect` with `waitFor` in busy-state delegation test:

@@ -80,6 +80,7 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.agent === next.agent &&
     previous.workdir === next.workdir &&
     previous.projectId === next.projectId &&
+    previous.remoteId === next.remoteId &&
     previous.model === next.model &&
     sameModelOptions(previous.modelOptions, next.modelOptions) &&
     previous.approvalPolicy === next.approvalPolicy &&

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { act, render } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { createElement, useEffect, useRef } from "react";
 
 import {
-  ConversationMarkerNavigator,
+  ConversationMarkerFloatingWindow,
   findActivatableConversationMarkerContextMenuTrigger,
   findMountedConversationMessageSlot,
   groupConversationMarkersByMessageId,
@@ -531,12 +531,13 @@ describe("conversation marker helpers", () => {
       color,
     });
     const { container } = render(
-      createElement(ConversationMarkerNavigator, {
+      createElement(ConversationMarkerFloatingWindow, {
         markers: [marker],
         activeMarkerId: null,
-        onJump: () => {},
-        onNavigatePrevious: () => {},
-        onNavigateNext: () => {},
+        onClose: vi.fn(),
+        onJump: vi.fn(),
+        onNavigatePrevious: vi.fn(),
+        onNavigateNext: vi.fn(),
       }),
     );
 
@@ -548,5 +549,25 @@ describe("conversation marker helpers", () => {
     expect(chip?.style.getPropertyValue("--conversation-marker-color")).toBe(
       DEFAULT_CONVERSATION_MARKER_COLOR,
     );
+  });
+
+  it("renders the floating-window close affordance as an icon-only button", () => {
+    render(
+      createElement(ConversationMarkerFloatingWindow, {
+        markers: [],
+        activeMarkerId: null,
+        onClose: vi.fn(),
+        onJump: vi.fn(),
+        onNavigatePrevious: vi.fn(),
+        onNavigateNext: vi.fn(),
+      }),
+    );
+
+    const closeButton = screen.getByRole("button", {
+      name: "Hide markers window",
+    });
+
+    expect(closeButton).not.toHaveTextContent("x");
+    expect(closeButton.querySelector("svg")).not.toBeNull();
   });
 });

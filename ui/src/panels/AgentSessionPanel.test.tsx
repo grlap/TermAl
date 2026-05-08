@@ -25,6 +25,7 @@ import {
   resetSessionStoreForTesting,
   syncComposerSessionsStore,
 } from "../session-store";
+import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
 import {
   VIRTUALIZED_MESSAGE_GAP_PX,
   buildVirtualizedMessageLayout,
@@ -404,7 +405,10 @@ describe("AgentSessionPanel conversation caching", () => {
         screen
           .getByText("message-1")
           .closest(".conversation-message-marker-shell"),
-      ).toHaveStyle({ "--conversation-active-marker-color": "#22c55e" });
+      ).toHaveStyle({
+        "--conversation-active-marker-color":
+          normalizeConversationMarkerColor("#22c55e"),
+      });
       expect(
         screen
           .getByText("message-3")
@@ -891,7 +895,7 @@ describe("AgentSessionPanel conversation caching", () => {
     );
   });
 
-  it("toggles the floating marker window from the message context menu", () => {
+  it("toggles the floating marker window from the message context menu", async () => {
     const activeSession = makeSession("session-1", {
       messages: makeTextMessages(4),
       markers: [
@@ -927,9 +931,16 @@ describe("AgentSessionPanel conversation caching", () => {
     const assistantMeta = Array.from(
       container.querySelectorAll<HTMLElement>(".message-meta-author-agent"),
     ).find((meta) => meta.textContent?.includes("Agent"));
+    const assistantShell = assistantMeta?.closest(
+      ".conversation-message-marker-shell",
+    );
 
     expect(assistantMeta).toBeTruthy();
+    expect(assistantShell).toBeTruthy();
     fireEvent.contextMenu(assistantMeta!);
+    expect(
+      screen.getByRole("menuitem", { name: "Hide markers window" }),
+    ).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("menuitem", { name: "Hide markers window" }),
     );
@@ -937,6 +948,9 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(
       screen.queryByRole("navigation", { name: "Conversation markers" }),
     ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(assistantShell).toHaveFocus();
+    });
 
     fireEvent.contextMenu(assistantMeta!);
     fireEvent.click(
@@ -957,14 +971,135 @@ describe("AgentSessionPanel conversation caching", () => {
       }),
     ).toBeInTheDocument();
 
-    fireEvent.contextMenu(assistantMeta!);
     fireEvent.click(
-      screen.getByRole("menuitem", { name: "Hide markers window" }),
+      within(markerWindow).getByRole("button", {
+        name: "Hide markers window",
+      }),
     );
 
     expect(
       screen.queryByRole("navigation", { name: "Conversation markers" }),
     ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(container.querySelector(".session-conversation-page")).toHaveFocus();
+    });
+  });
+
+  it("starts with the marker window hidden for empty marker sets and can show it from the context menu", () => {
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+      markers: [],
+    });
+    const { container } = renderSessionPanelWithDefaults({
+      activeSession,
+      renderMessageCard: (message) => (
+        <MessageCard
+          message={message}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />
+      ),
+    });
+
+    expect(
+      screen.queryByRole("navigation", { name: "Conversation markers" }),
+    ).not.toBeInTheDocument();
+
+    const assistantMeta = Array.from(
+      container.querySelectorAll<HTMLElement>(".message-meta-author-agent"),
+    ).find((meta) => meta.textContent?.includes("Agent"));
+
+    expect(assistantMeta).toBeTruthy();
+    fireEvent.contextMenu(assistantMeta!);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Show markers window" }),
+    );
+
+    const markerWindow = screen.getByRole("navigation", {
+      name: "Conversation markers",
+    });
+    expect(within(markerWindow).getByText("0")).toBeInTheDocument();
+    expect(within(markerWindow).getByText("No markers yet.")).toBeInTheDocument();
+    expect(
+      within(markerWindow).getByRole("button", { name: "Previous marker" }),
+    ).toBeDisabled();
+    expect(
+      within(markerWindow).getByRole("button", { name: "Next marker" }),
+    ).toBeDisabled();
+  });
+
+  it("resets explicit marker-window visibility when switching sessions", () => {
+    const renderMessageCard = (message: Message) => (
+      <MessageCard
+        message={message}
+        onApprovalDecision={() => {}}
+        onUserInputSubmit={() => {}}
+        onCodexAppRequestSubmit={() => {}}
+      />
+    );
+    const firstSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+      markers: [
+        makeConversationMarker({
+          id: "marker-1",
+          messageId: "message-2",
+          name: "First marker",
+        }),
+      ],
+    });
+    const secondSession = makeSession("session-2", {
+      messages: makeTextMessages(2),
+      markers: [
+        makeConversationMarker({
+          id: "marker-2",
+          messageId: "message-2",
+          name: "Second marker",
+          sessionId: "session-2",
+        }),
+      ],
+    });
+
+    const { container, rerender } = render(
+      createAgentSessionPanelHarness({
+        activeSession: firstSession,
+        renderMessageCard,
+      })(),
+    );
+
+    const assistantMeta = Array.from(
+      container.querySelectorAll<HTMLElement>(".message-meta-author-agent"),
+    ).find((meta) => meta.textContent?.includes("Agent"));
+    expect(assistantMeta).toBeTruthy();
+    act(() => {
+      fireEvent.contextMenu(assistantMeta!);
+    });
+    act(() => {
+      fireEvent.click(
+        screen.getByRole("menuitem", { name: "Hide markers window" }),
+      );
+    });
+    expect(
+      screen.queryByRole("navigation", { name: "Conversation markers" }),
+    ).not.toBeInTheDocument();
+
+    act(() => {
+      rerender(
+        createAgentSessionPanelHarness({
+          activeSession: secondSession,
+          renderMessageCard,
+        })(),
+      );
+    });
+
+    const markerWindow = screen.getByRole("navigation", {
+      name: "Conversation markers",
+    });
+    expect(
+      within(markerWindow).getByRole("button", {
+        name: "Jump to Decision marker Second marker",
+      }),
+    ).toBeInTheDocument();
   });
 
   it("preserves native context menu behavior for selected text, links, and code", () => {
@@ -1077,8 +1212,14 @@ describe("AgentSessionPanel conversation caching", () => {
       "data-conversation-marker-menu-trigger",
       "true",
     );
-    expect(userMeta).toHaveAttribute("aria-label", "Open marker actions");
-    expect(assistantMeta).toHaveAttribute("aria-label", "Open marker actions");
+    expect(userMeta).toHaveAttribute(
+      "aria-label",
+      "You, open marker actions",
+    );
+    expect(assistantMeta).toHaveAttribute(
+      "aria-label",
+      "Agent, open marker actions",
+    );
 
     fireEvent.contextMenu(userMeta!);
     fireEvent.click(
@@ -1096,7 +1237,7 @@ describe("AgentSessionPanel conversation caching", () => {
     );
   });
 
-  it("names marker trigger buttons by action rather than author", () => {
+  it("names marker trigger buttons by author and action", () => {
     const { container } = renderSessionPanelWithDefaults({
       activeSession: makeSession("session-1", {
         messages: makeTextMessages(2),
@@ -1116,7 +1257,7 @@ describe("AgentSessionPanel conversation caching", () => {
     ).find((meta) => meta.textContent?.includes("Agent"));
 
     expect(assistantMeta).toBeTruthy();
-    expect(assistantMeta).toHaveAccessibleName("Open marker actions");
+    expect(assistantMeta).toHaveAccessibleName("Agent, open marker actions");
     expect(
       screen.queryByRole("button", { name: "Agent" }),
     ).not.toBeInTheDocument();
@@ -1148,7 +1289,10 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(assistantMeta).toHaveAttribute("role", "button");
     expect(assistantMeta).toHaveAttribute("tabindex", "0");
     expect(assistantMeta).toHaveAttribute("aria-haspopup", "menu");
-    expect(assistantMeta).toHaveAttribute("aria-label", "Open marker actions");
+    expect(assistantMeta).toHaveAttribute(
+      "aria-label",
+      "Agent, open marker actions",
+    );
 
     fireEvent.click(assistantMeta!, { clientX: 140, clientY: 80 });
     fireEvent.click(
@@ -1541,6 +1685,52 @@ describe("AgentSessionPanel conversation caching", () => {
       ).toHaveFocus();
     },
   );
+
+  it("keeps marker removal items between add and window visibility actions", () => {
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+      markers: [
+        makeConversationMarker({
+          id: "marker-1",
+          messageId: "message-2",
+          name: "Review point",
+        }),
+      ],
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      renderMessageCard: (message) => (
+        <article className="message-card">
+          <div
+            className="message-meta"
+            data-conversation-marker-menu-trigger={
+              message.author === "assistant" ? true : undefined
+            }
+          >
+            <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+            <span>{message.timestamp}</span>
+          </div>
+          <p>{`${message.id} body`}</p>
+        </article>
+      ),
+    });
+
+    fireEvent.contextMenu(screen.getByText("Agent message-2"));
+    const menu = screen.getByRole("menu", {
+      name: "Conversation marker actions",
+    });
+
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent?.trim()),
+    ).toEqual([
+      "Add checkpoint marker",
+      "Remove Review point",
+      "Hide markers window",
+    ]);
+  });
 
   it("dispatches visible message actions through the latest parent callbacks", async () => {
     const initialApproval = vi.fn();
