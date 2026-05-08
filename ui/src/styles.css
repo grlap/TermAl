@@ -4556,6 +4556,16 @@ textarea {
   background: var(--activity-bg);
 }
 
+.conversation-live-tail {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: grid;
+  gap: var(--message-stack-gap);
+  align-content: start;
+  padding-bottom: 1px;
+}
+
 .activity-card-live {
   position: relative;
   overflow: visible;
@@ -8396,6 +8406,12 @@ textarea {
   background: var(--surface-white);
   padding: 0.95rem 1rem;
   color: var(--ink);
+  transition:
+    height 140ms ease,
+    background 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease;
 }
 
 .composer-slash-menu {

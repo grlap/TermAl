@@ -341,6 +341,95 @@ describe("AgentSessionPanel conversation caching", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("keeps the live-turn tail calm while assistant output grows above queued prompts", () => {
+    const scrollNode = document.createElement("section");
+    let scrollTop = 120;
+    const scrollWrites: number[] = [];
+    const userMessage: Message = {
+      id: "message-user",
+      type: "text",
+      timestamp: "10:00",
+      author: "you",
+      text: "Current prompt",
+    };
+    const pendingPrompt = {
+      id: "pending-prompt",
+      timestamp: "10:02",
+      text: "Queued follow-up",
+    };
+
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 600,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+        scrollWrites.push(nextValue);
+      },
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        status: "active",
+        messages: [
+          userMessage,
+          {
+            id: "message-assistant",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Partial reply",
+          },
+        ],
+        pendingPrompts: [pendingPrompt],
+      }),
+      scrollContainerRef: { current: scrollNode },
+      showWaitingIndicator: true,
+      waitingIndicatorPrompt: "Current prompt",
+    });
+
+    const liveTail = screen
+      .getByText("Live turn")
+      .closest(".conversation-live-tail");
+    const queuedPromptCard = screen
+      .getByText("Queued follow-up")
+      .closest(".pending-prompt-card");
+    expect(liveTail).not.toBeNull();
+    expect(queuedPromptCard).not.toBeNull();
+    expect(liveTail).toContainElement(queuedPromptCard as HTMLElement);
+    expect(scrollTop).toBe(120);
+    scrollWrites.length = 0;
+
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [
+          makeSession("session-a", {
+            status: "active",
+            messages: [
+              userMessage,
+              {
+                id: "message-assistant",
+                type: "text",
+                timestamp: "10:01",
+                author: "assistant",
+                text: "Partial reply with enough streamed content to grow above the live tail",
+              },
+            ],
+            pendingPrompts: [pendingPrompt],
+          }),
+        ],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+
+    expect(scrollTop).toBe(120);
+    expect(scrollWrites).toEqual([]);
+  });
+
   it("renders conversation marker chips and navigates between markers", () => {
     const scrollIntoView = vi.fn();
     const originalScrollIntoView = Element.prototype.scrollIntoView;
@@ -7700,6 +7789,7 @@ describe("AgentSessionPanelFooter", () => {
       queuedFrames.delete(id);
     });
     let unmount: ReturnType<typeof render>["unmount"] | null = null;
+    let sawZeroHeightProbe = false;
     const drainAnimationFrames = () => {
       while (queuedFrames.size > 0) {
         const callbacks = [...queuedFrames.values()];
@@ -7718,12 +7808,15 @@ describe("AgentSessionPanelFooter", () => {
       configurable: true,
       get() {
         const textarea = this as HTMLTextAreaElement;
+        if (textarea.style.height === "0px") {
+          sawZeroHeightProbe = true;
+        }
         if (
-          textarea.style.height !== "0px" &&
           !textarea.value.includes("line two") &&
-          textarea.value.length > 0
+          textarea.value.length > 0 &&
+          textarea.style.transition !== "none"
         ) {
-          return 40;
+          return 124;
         }
         return 40 + (textarea.value.split("\n").length - 1) * 28;
       },
@@ -7761,6 +7854,256 @@ describe("AgentSessionPanelFooter", () => {
       drainAnimationFrames();
 
       expect(textarea.style.height).toBe("96px");
+      expect(sawZeroHeightProbe).toBe(false);
+      expect(textarea.style.transition).not.toBe("none");
+    } finally {
+      act(() => {
+        unmount?.();
+      });
+      if (originalScrollHeightDescriptor) {
+        Object.defineProperty(
+          HTMLTextAreaElement.prototype,
+          "scrollHeight",
+          originalScrollHeightDescriptor,
+        );
+      } else {
+        delete (
+          HTMLTextAreaElement.prototype as unknown as {
+            scrollHeight?: number;
+          }
+        ).scrollHeight;
+      }
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
+  it("keeps multiline composer height steady when deleting text inside a line", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "scrollHeight",
+    );
+    const originalHeightDescriptor = Object.getOwnPropertyDescriptor(
+      CSSStyleDeclaration.prototype,
+      "height",
+    );
+    let nextFrameId = 0;
+    const queuedFrames = new Map<number, FrameRequestCallback>();
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      const id = ++nextFrameId;
+      queuedFrames.set(id, callback);
+      return id;
+    });
+    const cancelAnimationFrameMock = vi.fn((id: number) => {
+      queuedFrames.delete(id);
+    });
+    const heightWrites: { value: string; transition: string }[] = [];
+    const drainAnimationFrames = () => {
+      while (queuedFrames.size > 0) {
+        const callbacks = [...queuedFrames.values()];
+        queuedFrames.clear();
+        act(() => {
+          callbacks.forEach((callback) => callback(0));
+        });
+      }
+    };
+    let unmount: ReturnType<typeof render>["unmount"] | null = null;
+
+    window.requestAnimationFrame =
+      requestAnimationFrameMock as unknown as typeof requestAnimationFrame;
+    window.cancelAnimationFrame =
+      cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame;
+    Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        const textarea = this as HTMLTextAreaElement;
+        return 40 + (textarea.value.split("\n").length - 1) * 28;
+      },
+    });
+    Object.defineProperty(CSSStyleDeclaration.prototype, "height", {
+      configurable: true,
+      get() {
+        if (originalHeightDescriptor?.get) {
+          return originalHeightDescriptor.get.call(this);
+        }
+        return this.getPropertyValue("height");
+      },
+      set(value: string) {
+        heightWrites.push({ value, transition: this.transition });
+        if (originalHeightDescriptor?.set) {
+          originalHeightDescriptor.set.call(this, value);
+        } else {
+          this.setProperty("height", value);
+        }
+      },
+    });
+
+    try {
+      ({ unmount } = render(
+        renderFooter({
+          session: makeSession("session-a"),
+        }),
+      ));
+      drainAnimationFrames();
+
+      const textarea = screen.getByLabelText("Message session-a");
+      if (!(textarea instanceof HTMLTextAreaElement)) {
+        throw new Error("Composer textarea not found");
+      }
+
+      act(() => {
+        fireEvent.change(textarea, {
+          target: { value: "line one\nline two\nline three" },
+        });
+      });
+      drainAnimationFrames();
+      expect(textarea.style.height).toBe("96px");
+
+      heightWrites.length = 0;
+      act(() => {
+        fireEvent.change(textarea, {
+          target: { value: "line one\nline tw\nline three" },
+        });
+      });
+      drainAnimationFrames();
+
+      expect(textarea.style.height).toBe("96px");
+      expect(heightWrites).toContainEqual({
+        value: "1px",
+        transition: "none",
+      });
+      expect(heightWrites).toContainEqual({
+        value: "96px",
+        transition: "none",
+      });
+      expect(heightWrites).not.toContainEqual({
+        value: "96px",
+        transition: "",
+      });
+    } finally {
+      act(() => {
+        unmount?.();
+      });
+      if (originalScrollHeightDescriptor) {
+        Object.defineProperty(
+          HTMLTextAreaElement.prototype,
+          "scrollHeight",
+          originalScrollHeightDescriptor,
+        );
+      } else {
+        delete (
+          HTMLTextAreaElement.prototype as unknown as {
+            scrollHeight?: number;
+          }
+        ).scrollHeight;
+      }
+      if (originalHeightDescriptor) {
+        Object.defineProperty(
+          CSSStyleDeclaration.prototype,
+          "height",
+          originalHeightDescriptor,
+        );
+      } else {
+        delete (
+          CSSStyleDeclaration.prototype as unknown as {
+            height?: string;
+          }
+        ).height;
+      }
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
+  it("shrinks multiline composer height after an accepted send", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "scrollHeight",
+    );
+    let nextFrameId = 0;
+    const queuedFrames = new Map<number, FrameRequestCallback>();
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      const id = ++nextFrameId;
+      queuedFrames.set(id, callback);
+      return id;
+    });
+    const cancelAnimationFrameMock = vi.fn((id: number) => {
+      queuedFrames.delete(id);
+    });
+    const drainAnimationFrames = () => {
+      while (queuedFrames.size > 0) {
+        const callbacks = [...queuedFrames.values()];
+        queuedFrames.clear();
+        act(() => {
+          callbacks.forEach((callback) => callback(0));
+        });
+      }
+    };
+    const onSend = vi.fn(() => true);
+    let unmount: ReturnType<typeof render>["unmount"] | null = null;
+    let sawZeroHeightProbe = false;
+
+    window.requestAnimationFrame =
+      requestAnimationFrameMock as unknown as typeof requestAnimationFrame;
+    window.cancelAnimationFrame =
+      cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame;
+    Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        const textarea = this as HTMLTextAreaElement;
+        if (textarea.style.height === "0px") {
+          sawZeroHeightProbe = true;
+        }
+        if (
+          textarea.value === "" &&
+          textarea.style.height === "96px" &&
+          textarea.style.transition !== "none"
+        ) {
+          return 96;
+        }
+        return 40 + (textarea.value.split("\n").length - 1) * 28;
+      },
+    });
+
+    try {
+      ({ unmount } = render(
+        renderFooter({
+          onSend,
+          session: makeSession("session-a"),
+        }),
+      ));
+      drainAnimationFrames();
+
+      const textarea = screen.getByLabelText("Message session-a");
+      if (!(textarea instanceof HTMLTextAreaElement)) {
+        throw new Error("Composer textarea not found");
+      }
+
+      act(() => {
+        fireEvent.change(textarea, {
+          target: { value: "line one\nline two\nline three" },
+        });
+      });
+      drainAnimationFrames();
+      expect(textarea.style.height).toBe("96px");
+
+      act(() => {
+        fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      });
+      drainAnimationFrames();
+
+      expect(onSend).toHaveBeenCalledWith(
+        "session-a",
+        "line one\nline two\nline three",
+      );
+      expect(textarea).toHaveValue("");
+      expect(textarea.style.height).toBe("40px");
+      expect(sawZeroHeightProbe).toBe(false);
+      expect(textarea.style.transition).not.toBe("none");
     } finally {
       act(() => {
         unmount?.();
@@ -7813,6 +8156,7 @@ describe("AgentSessionPanelFooter", () => {
     let resizeCallback: ResizeObserverCallback | null = null;
     let isWide = false;
     let unmount: ReturnType<typeof render>["unmount"] | null = null;
+    let sawZeroHeightProbe = false;
 
     class ResizeObserverMock {
       constructor(callback: ResizeObserverCallback) {
@@ -7832,10 +8176,13 @@ describe("AgentSessionPanelFooter", () => {
       configurable: true,
       get() {
         const textarea = this as HTMLTextAreaElement;
-        if (isWide && textarea.style.height === "0px") {
-          return 40;
+        if (textarea.style.height === "0px") {
+          sawZeroHeightProbe = true;
         }
-        return 96;
+        if (!isWide) {
+          return 96;
+        }
+        return textarea.style.transition === "none" ? 40 : 96;
       },
     });
 
@@ -7875,6 +8222,8 @@ describe("AgentSessionPanelFooter", () => {
       drainAnimationFrames();
 
       expect(textarea.style.height).toBe("40px");
+      expect(sawZeroHeightProbe).toBe(false);
+      expect(textarea.style.transition).not.toBe("none");
     } finally {
       act(() => {
         unmount?.();

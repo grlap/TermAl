@@ -1288,6 +1288,14 @@ const SessionConversationPage = memo(function SessionConversationPage({
       />
     </MessageSlot>
   ));
+  const liveTail =
+    liveTurnCard || pendingPromptCards.length > 0 ? (
+      <div className="conversation-live-tail">
+        {liveTurnCard}
+        {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
+        {pendingPromptCards}
+      </div>
+    ) : null;
   const markerNavigation = isMarkerPanelVisible ? (
     <ConversationMarkerFloatingWindow
       markers={sortedMarkers}
@@ -1303,9 +1311,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       {markerNavigation}
       {conversationMessages}
       {markerContextMenuNode}
-      {liveTurnCard}
-      {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
-      {pendingPromptCards}
+      {liveTail}
     </>
   );
   const conversationPageClassName = `session-conversation-page${isActive ? " is-active" : ""}${conversationOverview.shouldRender ? " has-conversation-overview-scroll" : ""}`;
@@ -1695,8 +1701,15 @@ const SessionComposer = memo(function SessionComposer({
     const shouldAllowShrink =
       forceRefreshMetrics ||
       currentDraftLength < composerLastMeasuredDraftLengthRef.current;
+    const previousInlineTransition = textarea.style.transition;
+    const previousMeasuredHeight =
+      composerLastAppliedHeightRef.current ??
+      (parseFloat(textarea.style.height) ||
+        textarea.getBoundingClientRect().height ||
+        null);
     if (shouldAllowShrink) {
-      textarea.style.height = "0px";
+      textarea.style.transition = "none";
+      textarea.style.height = `${Math.max(sizingState.minHeight, 1)}px`;
       composerLastAppliedHeightRef.current = null;
     }
 
@@ -1704,6 +1717,25 @@ const SessionComposer = memo(function SessionComposer({
     const nextHeight = Math.min(Math.max(contentHeight, sizingState.minHeight), maxHeight);
     const nextOverflowY: "auto" | "hidden" =
       contentHeight > maxHeight + 1 ? "auto" : "hidden";
+
+    if (shouldAllowShrink) {
+      const hasPreviousMeasuredHeight = previousMeasuredHeight != null;
+      const heightChanged =
+        !hasPreviousMeasuredHeight ||
+        Math.abs(previousMeasuredHeight - nextHeight) > 0.5;
+      if (hasPreviousMeasuredHeight) {
+        textarea.style.height = `${previousMeasuredHeight}px`;
+        void textarea.offsetHeight;
+      }
+      if (previousInlineTransition) {
+        textarea.style.transition = previousInlineTransition;
+      } else {
+        textarea.style.removeProperty("transition");
+      }
+      if (!heightChanged) {
+        composerLastAppliedHeightRef.current = nextHeight;
+      }
+    }
 
     if (composerLastAppliedHeightRef.current !== nextHeight) {
       textarea.style.height = `${nextHeight}px`;

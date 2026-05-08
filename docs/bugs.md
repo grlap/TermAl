@@ -7,6 +7,250 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Project `Fix It` action can target a terminal delegation child
+
+**Severity:** Medium - `src/api.rs:397`. `build_project_digest_summary()` now uses a non-delegation prompt target for dirty and clean idle branches, but the error-state branch still proposes `Fix It` whenever `primary_session_id` is present. If the selected primary session is a terminal delegation child, the digest/action contract can advertise `fix-it` even though the follow-up prompt cannot be dispatched there.
+
+**Current behavior:**
+- Error-state digest selection can choose a delegation child as `primary_session_id`.
+- The digest can advertise `fix-it`.
+- Executing the action can route to a read-only delegation child or fail with a conflict instead of targeting the parent/non-delegation session.
+
+**Proposal:**
+- Use the non-delegation prompt target for every prompt-producing project action (`FixIt`, `Continue`, `AskAgentToCommit`, `KeepIterating`).
+- Keep the delegation child available only for summary/source-message context.
+
+## Project digest `primary_session_id` mixes summary source and action target semantics
+
+**Severity:** Low - `src/api.rs:440-476`. The dirty and clean idle digest branches can compute summary text from one session while replacing `primary_session_id` and `deep_link` with the non-delegation prompt target. Consumers cannot tell whether `primary_session_id` names the session that produced the digest summary or the session that should receive follow-up actions.
+
+**Current behavior:**
+- `primary_session_id` is used as the action target by `execute_project_action()`.
+- The same field is also serialized to clients as the digest's primary/deep-link session.
+- Dirty/idle branches can derive summary context from a delegation child while returning the parent/non-delegation session id.
+
+**Proposal:**
+- Split the internal digest model into explicit `summary_session_id` and `action_target_session_id` fields.
+- Document which field drives links, summaries, and prompt-producing actions.
+
+## `SessionPaneView` pending-prompt scroll exemption misses `showWaitingIndicator` dependency
+
+**Severity:** Low - `ui/src/SessionPaneView.tsx:2015-2075`. The scroll effect now checks `showWaitingIndicator` inside the `onlyPendingPromptsChanged` branch, but the effect dependency list does not include `showWaitingIndicator`.
+
+**Current behavior:**
+- `showWaitingIndicator` can change through sending/busy state.
+- The scroll effect can keep using a stale closure for the pending-prompt scroll exemption.
+- Pending-prompt scroll behavior can be out of sync with the current render.
+
+**Proposal:**
+- Add `showWaitingIndicator` to the effect dependency array.
+- Or derive the exemption only from values already included in the dependency list.
+
+## Telegram `/sessions` output is not chunked
+
+**Severity:** Low - `src/telegram.rs:2020-2028`. `send_telegram_project_sessions()` renders up to 12 sessions and sends the result as one Telegram message. Telegram rejects oversized messages, and session/project names plus previews are not bounded tightly enough to guarantee the response stays below Telegram's limit.
+
+**Current behavior:**
+- `/sessions` builds one text response.
+- The response is sent through a single `send_message()` call.
+- If Telegram rejects it for length, the command produces no chat response and only logs the error.
+
+**Proposal:**
+- Reuse `chunk_telegram_message_text()` for `/sessions` output.
+- Or cap rendered names/previews tightly enough to guarantee one response fits.
+
+## Telegram `/sessions` exposes session previews to Telegram
+
+**Severity:** Low - `src/telegram.rs:2238`. The new `/sessions` command includes `session.preview` for up to 12 project sessions. Session previews can contain user/assistant conversation content, local paths, snippets, or secrets.
+
+**Current behavior:**
+- `/sessions` exports preview text, not just metadata.
+- The preview is sent to Telegram without a dedicated data-minimization or redaction pass.
+- This expands the relay from project/status metadata into broader transcript-content disclosure.
+
+**Proposal:**
+- Omit previews by default.
+- Or gate preview output behind an explicit verbose mode and apply stronger redaction before sending.
+
+## `TelegramStateSession.status` is stringly-typed where parallel projection uses typed enum
+
+**Severity:** Medium - `src/telegram.rs:1199`. `TelegramStateSession.status: String` is stringly-typed where the parallel `TelegramSessionFetchSession.status` uses a typed `TelegramSessionStatus` enum with `#[serde(other)]`. The wire contract is `"active" | "idle" | "approval" | "error"` (per `wire.rs:712-719`) — closed enum on the server side.
+
+A future server adds a new status variant (`"queued"`, `"timing_out"`) silently slips through as `"unknown"` via `telegram_state_session_status_label`, and there is no compile-time check that the relay handles all wire status values.
+
+**Current behavior:**
+- `TelegramStateSession.status` is `String`.
+- `telegram_state_session_status_label` maps unknown to `"unknown"`.
+- Two parallel projections of the same `Session.status` field have inconsistent typing rigor.
+
+**Proposal:**
+- Replace `String` with a re-used `TelegramSessionStatus` enum that uses `#[serde(other)]` (mirroring `TelegramSessionFetchSession`).
+
+## Project digest test doesn't assert `deep_link`/`source_message_ids` consistency or sibling actions
+
+**Severity:** Medium - `src/tests/project_digest.rs:147-229`. The new `project_digest_routes_dirty_project_prompts_to_non_delegation_session` test verifies that `KeepIterating` routes to the parent session, but does NOT assert: (a) `digest.deep_link` contains the parent's session id, (b) `digest.source_message_ids` (if non-empty) reference messages in the parent (not the child), (c) the same routing applies to `AskAgentToCommit` (the second action that was newly added).
+
+The fix touches three sites (worktree_dirty: AskAgentToCommit, KeepIterating; idle: Continue) but the test exercises only `keep-iterating` end-to-end. A regression that only fixed one branch would still pass.
+
+**Current behavior:**
+- One test for `keep-iterating`.
+- No assertion on `deep_link` or `source_message_ids`.
+- `ask-agent-to-commit` and idle `continue` branches uncovered.
+
+**Proposal:**
+- Add `assert!(digest.deep_link.as_deref().unwrap().contains(parent_session_id))`.
+- Add a sibling test exercising `ask-agent-to-commit`.
+- Add a sibling test for the fully-idle branch with `continue`.
+
+## Duplicate `let primary_session_id` rebindings in `src/api.rs` digest branches
+
+**Severity:** Note - `src/api.rs:432-470`. Duplicate `let primary_session_id = ...` and `let deep_link = ...` rebindings inside both `worktree_dirty` and idle branches shadow the outer bindings. The function now has three different layers of `primary_session_id` semantics: the original "most-recent-by-activity-rank", the rebinding to `prompt_target_session_id`, and the proposed-actions test `prompt_target_session_id.is_some()` already done before rebinding.
+
+**Current behavior:**
+- Three layers of `primary_session_id` semantics in one function.
+- Future readers will struggle to keep these straight.
+
+**Proposal:**
+- Lift the prompt-target-vs-primary distinction into a single named variable at the top of the function.
+- Or extract the dirty/idle branches into helpers that take both sessions explicitly.
+
+## `paneMessageContentSignaturesRef` lifetime divergence vs `paneContentSignaturesRef`
+
+**Severity:** Note - `ui/src/SessionPaneView.tsx:672`. `paneMessageContentSignaturesRef` is a per-instance ref while `paneContentSignaturesRef` is hoisted to App.tsx and threaded through. When `SessionPaneView` remounts (e.g., on a layout split), `paneMessageContentSignaturesRef` resets to `{}` while `paneContentSignaturesRef` persists. After remount, `previousMessageContentSignature` will be `undefined` for one render but `previousSignature` will be the prior live value.
+
+**Current behavior:**
+- Two refs with divergent lifetimes for related concerns.
+- Mismatch may be invisible today but the lifetime divergence is a footgun.
+
+**Proposal:**
+- Hoist `paneMessageContentSignaturesRef` to App.tsx and pass it through alongside `paneContentSignaturesRef`.
+- Or document why the divergence is intentional with a header comment.
+
+## `latest_project_prompt_target_session` selects without health check
+
+**Severity:** Note - `src/api.rs:525-530`. `latest_project_prompt_target_session` selects the latest non-delegation session regardless of `status`, so a parent session in `Error` will be chosen as the prompt target while a healthy delegation child sits idle. Callers downstream of `dispatch_project_action` will retry against an errored session.
+
+**Current behavior:**
+- Picks structurally rather than by health.
+- Errored parent overrides healthy non-parent.
+
+**Proposal:**
+- Document the structural-vs-functional design trade-off in the function `///` doc.
+- Or additionally filter on `status != Error`.
+
+## `truncate_telegram_text_chars` produces output longer than `max_chars` when `max_chars < 3`
+
+**Severity:** Low - `src/telegram.rs:2275-2285`. For `max_chars = 2`, the function returns `".."` + `"."` = `"..."` (3 chars) instead of `<= 2` chars. Current call sites use 96/180/240, so no immediate impact, but the helper's contract is broken on small inputs.
+
+**Current behavior:**
+- Ellipsis suffix unconditionally appended after truncation.
+- For `max_chars < 3`, output exceeds the limit.
+
+**Proposal:**
+- Branch on `max_chars >= 3` to apply the ellipsis suffix and otherwise return at most `max_chars` characters.
+
+## `render_telegram_project_sessions` re-runs filter twice
+
+**Severity:** Note - `src/telegram.rs:2202-2252`. Re-runs `state.sessions.iter().filter(...).count()` after the take-12 to detect "more sessions exist", duplicating the filter logic. Two scans of the same vec when a single capture would suffice.
+
+**Current behavior:**
+- Filter predicate runs twice.
+- Negligible CPU on small N.
+- Future drift risk if filter predicates diverge.
+
+**Proposal:**
+- Compute the filtered count once before the take(12) and reuse it.
+
+## 3 `style.height` writes per resize cause unnecessary layout thrash
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1726-1729`. `textarea.style.height = previousMeasuredHeight + "px"` reassigns the height immediately after setting it to `Math.max(minHeight, 1)`. The `void textarea.offsetHeight` reflow forces layout twice per resize when only one height is needed.
+
+Each `resizeComposerInput()` call now causes 3 `style.height` writes (1px → previousMeasuredHeight → finalHeight) when shrinking is allowed. Combined with the rAF-coalesced `scheduleComposerResize`, busy typing will show up in DevTools layout-thrash profiles.
+
+**Current behavior:**
+- 3 height writes per resize.
+- 2 forced reflows per resize.
+
+**Proposal:**
+- Skip the snapshot-and-restore intermediate write when `previousMeasuredHeight === nextHeight`.
+
+## `useEffect` consumes `paneMessageContentSignaturesRef` before predicate fires
+
+**Severity:** Low - `ui/src/SessionPaneView.tsx:1979-2076`. The lookup at line 1986-1989 is ref-based, so it doesn't trigger re-runs. But the assignment back-writes `paneMessageContentSignaturesRef.current[scrollStateKey] = visibleMessageContentSignature` happens BEFORE the early-return check at line 1990. If the early return fires, the back-write happened, but the side-effect logic that reads it is in a later branch.
+
+This means the effect "consumes" the previous-message-content-signature once per call regardless of whether the predicate ran.
+
+**Current behavior:**
+- Back-write happens before predicate evaluation.
+- Consecutive same-signature renders lose the previous value.
+
+**Proposal:**
+- Compute `onlyPendingPromptsChanged` BEFORE writing the next ref value.
+- Or add a test asserting the predicate fires on the second render in a row when only the assistant text grew.
+
+## anyhow chain in user-visible Telegram error messages may leak filesystem layout
+
+**Severity:** Low - `src/telegram.rs:2299-2305`. `telegram_action_error_text` puts the (sanitized but possibly long) anyhow detail directly into the user-visible Telegram message after "Could not run X.\n". Anyhow error chains can include filesystem paths, internal session ids, project ids, and other state-shape information.
+
+The sanitizer only redacts Telegram tokens. A backend error like `"failed to load session 7af3-...: file not found at /Users/foo/.termal/sessions/7af3.json"` ships filesystem layout to a Telegram chat. The Phase 1 trust model accepts local users, but the Telegram chat is by definition not local.
+
+**Current behavior:**
+- Full anyhow chain forwarded to Telegram chat.
+- Sanitizer only redacts tokens.
+
+**Proposal:**
+- Either curate user-visible error text per ApiError kind (mapping known kinds to safe text).
+- Or document the trust assumption in `docs/features/telegram-ui-integration.md`.
+
+## Live-tail `null` transition not tested
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1291-1298`. When neither `liveTurnCard` nor `pendingPromptCards` is present, `liveTail` is `null`. The `position: sticky` element is removed from the DOM when becoming null. Without a test that asserts no reflow loop, a regression that recreates the wrapper on every render (e.g., changing the `liveTail` ternary to always render the wrapper) is undetectable.
+
+**Current behavior:**
+- Live-tail renders conditionally.
+- Transition out of the live-tail state not pinned by a test.
+
+**Proposal:**
+- Add a test that asserts the live-tail wrapper appears AND disappears as `showWaitingIndicator`/`pendingPrompts` toggle.
+
+## `mermaid-demo.md` accidental edits: title typo and undefined node
+
+**Severity:** Note - `docs/mermaid-demo.md:1, 9`. Title was changed from `# Mermaid Demo` to `# Mermaid Demoa` (typo) and the diagram edge `Edit --> Stop` was changed to `Edit --> Stop2` (an undefined node). Both edits look like accidental input rather than deliberate. The mermaid diagram now references an undefined node `Stop2` which Mermaid renders as a degenerate empty rectangle.
+
+**Current behavior:**
+- Title contains typo.
+- Edge references undefined node.
+
+**Proposal:**
+- Revert if accidental.
+- Or if intentional (e.g., testing fault-tolerance), add a comment in the file explaining the test scenario.
+
+## `dispatch_project_action` error handling asymmetric between message and callback paths
+
+**Severity:** Note - `src/telegram.rs:1442-1457`. `dispatch_project_action` failure in callback-query handler calls `answer_callback_query` THEN `send_message`. If `send_message` returns Err, it bubbles via `?` and the function returns Err — but `answer_callback_query` already fired (with `let _ =`).
+
+The order acknowledges first then reports, which is correct (Telegram's callback_query MUST be answered within ~30s). But if `send_message` errors, the caller's surrounding loop logs the error AND has no way to know the user already saw the toast.
+
+**Current behavior:**
+- Acknowledge-then-report order.
+- send_message error bubbles even though toast already fired.
+
+**Proposal:**
+- Document the "answer toast first, then explanatory message" intent inline.
+
+## Telegram `/sessions` couples the relay to full `/api/state`
+
+**Severity:** Note - `src/telegram.rs:1025, 2020-2240`. The relay calls full `/api/state` and reconstructs a Telegram-specific project-session list locally. That couples Telegram command behavior to the broad state snapshot shape instead of a narrow project-scoped session summary contract.
+
+**Current behavior:**
+- `get_state_sessions()` deserializes a subset of `/api/state`.
+- Telegram-specific project/session filtering and rendering happens inside the relay.
+- No source comment documents why this broad state contract is intentional.
+
+**Proposal:**
+- Prefer a narrow project-scoped session summary API/contract.
+- Or add a source comment documenting why the relay intentionally owns this `/api/state` projection and which fields it depends on.
+
 ## `start_telegram_relay_runtime` parallel `spawning`/`running` booleans should be a state enum
 
 **Severity:** Note - `src/telegram.rs:222-302`. Round 74 consolidated the relay state into `TelegramRelayRuntime` with parallel `spawning` and `running` booleans. The snapshot rule `running && !spawning` is implicit. A future contributor adding a new flag (e.g., `stopping`) needs to remember to combine all three correctly in the snapshot.
@@ -3677,6 +3921,14 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   cover an already-active non-Telegram turn before a Telegram prompt, prompt POST failure after forwarding state is prepared, post-send digest failure, a digest primary-session switch before the armed Telegram reply settles, an armed session entering approval with no assistant text before its post-approval reply, and two sessions proving assistant-forwarding cursors are session-scoped.
 - [ ] P2: Add Telegram long-message chunk retry and UTF-16 chunking coverage:
   fail a later chunk after an earlier chunk is sent and assert retry does not duplicate it; add emoji/surrogate-pair-heavy text proving chunks respect Telegram's UTF-16 code-unit limit.
+- [ ] P2: Cover project digest non-delegation prompt targets in clean and error branches:
+  add clean-worktree `continue` and error-state `fix-it` cases where the newest relevant session is a delegation child; assert prompt dispatch and deep links target the parent/non-delegation session.
+- [ ] P2: Cover Telegram `/sessions` state contract and command dispatch:
+  add a serde sample for the `/api/state` projection (`projectId`, `messageCount`) and a command-path test proving `/sessions` calls the state endpoint and sends the rendered list.
+- [ ] P2: Cover Telegram callback action failure handling:
+  drive a dispatch failure through `handle_telegram_callback_query` or an extracted seam and assert callback answer text, chat error text, and no digest refresh.
+- [ ] P2: Strengthen Telegram prompt-error redaction test:
+  place the token before the long truncation tail or assert `<redacted>` appears so the test fails if sanitization regresses but truncation still removes the raw token.
 - [ ] P2: Add focused-composer overview projection scheduler coverage:
   mock repeated low-time `requestIdleCallback` deadlines while the composer remains focused, advance any hard timeout/fallback, and assert the latest rerendered messages/markers/tail items drive the rail projection without requiring blur.
 - [ ] P2: Add `messageCreatedDeltaIsNoOp` semantic-change negatives:

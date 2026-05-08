@@ -144,6 +144,90 @@ fn project_digest_prefers_review_actions_for_dirty_idle_project() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
+#[test]
+fn project_digest_routes_dirty_project_prompts_to_non_delegation_session() {
+    let state = test_app_state();
+    let repo_root = std::env::temp_dir().join(format!(
+        "termal-project-delegation-target-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(repo_root.join("src")).unwrap();
+    fs::write(
+        repo_root.join("src/lib.rs"),
+        "pub fn value() -> u32 { 1 }\n",
+    )
+    .unwrap();
+
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "."]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    fs::write(
+        repo_root.join("src/lib.rs"),
+        "pub fn value() -> u32 { 2 }\n",
+    )
+    .unwrap();
+
+    let project_id = create_test_project(&state, &repo_root, "Delegation Target Project");
+    let parent_session_id =
+        create_test_project_session(&state, Agent::Codex, &project_id, &repo_root);
+    let child_session_id =
+        create_test_project_session(&state, Agent::Codex, &project_id, &repo_root);
+    state
+        .push_message(
+            &child_session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: state.allocate_message_id(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Delegation result should inform the summary but not receive prompts."
+                    .to_owned(),
+                expanded_text: None,
+            },
+        )
+        .unwrap();
+    let (runtime, input_rx) = test_codex_runtime_handle("project-delegation-target");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let parent_index = inner.find_session_index(&parent_session_id).unwrap();
+        inner.sessions[parent_index].runtime = SessionRuntime::Codex(runtime);
+        let child_index = inner.find_session_index(&child_session_id).unwrap();
+        inner.sessions[child_index].session.parent_delegation_id =
+            Some("delegation-finished".to_owned());
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    let digest = state.project_digest(&project_id).unwrap();
+
+    assert_eq!(
+        digest.primary_session_id.as_deref(),
+        Some(parent_session_id.as_str())
+    );
+
+    state
+        .execute_project_action(&project_id, "keep-iterating")
+        .unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::Prompt {
+            session_id,
+            command,
+        } => {
+            assert_eq!(session_id, parent_session_id);
+            assert_eq!(
+                command.prompt,
+                ProjectActionId::KeepIterating.prompt().unwrap()
+            );
+        }
+        _ => panic!("expected parent prompt dispatch"),
+    }
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
 // Pins that dispatching the `approve` action on a project finds the
 // session with the pending Codex approval, forwards an accept response
 // to that runtime on the correct `request_id`, and then returns a

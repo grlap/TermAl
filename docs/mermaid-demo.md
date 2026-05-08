@@ -1,5 +1,4 @@
-# Mermaid Demo
-
+# Mermaid Demoa
 ```mermaid
 flowchart TD
   Start([Open Markdown file]) --> Detect{Contains Mermaid fence?}
@@ -7,10 +6,11 @@ flowchart TD
   Detect -- no --> Code[Show normal code block]
   Render --> Edit[Edit source in Markdown diff editor]
   Code --> End([Done])
-  Edit --> Stop
+  Edit --> Stop2
 ```
 
 ### Bare Mermaid-like text smoke case
 
 <!-- Smoke case: bare Mermaid-like text must remain normal Markdown text. -->
+
 a=>b

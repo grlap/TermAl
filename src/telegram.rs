@@ -15,6 +15,8 @@ const TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS: u64 = 5;
 const TELEGRAM_ERROR_RETRY_DELAY: Duration = Duration::from_secs(2);
 const TELEGRAM_GET_UPDATES_LIMIT: i64 = 25;
 const TELEGRAM_RELAY_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const TELEGRAM_USER_ERROR_MAX_CHARS: usize = 240;
+const TELEGRAM_CALLBACK_ERROR_MAX_CHARS: usize = 180;
 
 /// Runs Telegram bot.
 fn run_telegram_bot() -> Result<()> {
@@ -1020,6 +1022,10 @@ impl TermalApiClient {
         )
     }
 
+    fn get_state_sessions(&self) -> Result<TelegramStateSessionsResponse> {
+        self.request_json(Method::GET, "/api/state", None)
+    }
+
     /// Dispatches project action.
     fn dispatch_project_action(
         &self,
@@ -1165,6 +1171,36 @@ struct TelegramChat {
     id: i64,
     #[serde(rename = "type")]
     _kind: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TelegramStateSessionsResponse {
+    #[serde(default)]
+    projects: Vec<TelegramStateProject>,
+    #[serde(default)]
+    sessions: Vec<TelegramStateSession>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TelegramStateProject {
+    id: String,
+    name: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TelegramStateSession {
+    id: String,
+    name: String,
+    #[serde(default)]
+    project_id: Option<String>,
+    status: String,
+    #[serde(default)]
+    preview: String,
+    #[serde(default)]
+    message_count: u32,
 }
 
 /// Narrow projection of `/api/sessions/{id}` used for forwarding
@@ -1324,9 +1360,26 @@ fn handle_telegram_message(
             TelegramIncomingCommand::Status => {
                 send_fresh_telegram_digest(telegram, termal, config, state, chat_id)
             }
+            TelegramIncomingCommand::Sessions => {
+                send_telegram_project_sessions(telegram, termal, config, chat_id)
+            }
             TelegramIncomingCommand::Action(action_id) => {
-                let digest = termal.dispatch_project_action(&config.project_id, action_id.as_str())?;
-                send_fresh_telegram_digest_from_response(telegram, config, state, chat_id, &digest)
+                match termal.dispatch_project_action(&config.project_id, action_id.as_str()) {
+                    Ok(digest) => {
+                        send_fresh_telegram_digest_from_response(
+                            telegram, config, state, chat_id, &digest,
+                        )
+                    }
+                    Err(err) => {
+                        log_telegram_error("failed to dispatch Telegram action", &err);
+                        telegram.send_message(
+                            chat_id,
+                            &telegram_action_error_text(action_id, &err),
+                            None,
+                        )?;
+                        Ok(false)
+                    }
+                }
             }
         };
     }
@@ -1343,7 +1396,14 @@ fn handle_telegram_message(
         return Ok(false);
     }
 
-    forward_telegram_text_to_project(telegram, termal, config, state, chat_id, text)
+    match forward_telegram_text_to_project(telegram, termal, config, state, chat_id, text) {
+        Ok(changed) => Ok(changed),
+        Err(err) => {
+            log_telegram_error("failed to forward Telegram prompt", &err);
+            telegram.send_message(chat_id, &telegram_prompt_error_text(&err), None)?;
+            Ok(false)
+        }
+    }
 }
 
 /// Handles Telegram callback query.
@@ -1379,7 +1439,22 @@ fn handle_telegram_callback_query(
             return Ok(false);
         }
     };
-    let digest = termal.dispatch_project_action(&config.project_id, action_id.as_str())?;
+    let digest = match termal.dispatch_project_action(&config.project_id, action_id.as_str()) {
+        Ok(digest) => digest,
+        Err(err) => {
+            log_telegram_error("failed to dispatch Telegram callback action", &err);
+            let _ = telegram.answer_callback_query(
+                &callback_query.id,
+                &telegram_callback_action_error_text(action_id, &err),
+            );
+            telegram.send_message(
+                chat_id,
+                &telegram_action_error_text(action_id, &err),
+                None,
+            )?;
+            return Ok(false);
+        }
+    };
     let _ = telegram.answer_callback_query(&callback_query.id, action_id.label());
     send_or_edit_telegram_digest_from_response(
         telegram,
@@ -1942,6 +2017,18 @@ fn send_fresh_telegram_digest(
     send_fresh_telegram_digest_from_response(telegram, config, state, chat_id, &digest)
 }
 
+fn send_telegram_project_sessions(
+    telegram: &TelegramApiClient,
+    termal: &TermalApiClient,
+    config: &TelegramBotConfig,
+    chat_id: i64,
+) -> Result<bool> {
+    let state = termal.get_state_sessions()?;
+    let text = render_telegram_project_sessions(&config.project_id, &state);
+    telegram.send_message(chat_id, &text, None)?;
+    Ok(false)
+}
+
 /// Handles send fresh Telegram digest from response.
 fn send_fresh_telegram_digest_from_response(
     telegram: &TelegramApiClient,
@@ -2112,16 +2199,140 @@ fn telegram_deep_link_url(
     Some(format!("{base}{deep_link}"))
 }
 
+fn render_telegram_project_sessions(
+    project_id: &str,
+    state: &TelegramStateSessionsResponse,
+) -> String {
+    let project_label = state
+        .projects
+        .iter()
+        .find(|project| project.id == project_id)
+        .map(|project| project.name.as_str())
+        .unwrap_or(project_id);
+    let mut sessions = state
+        .sessions
+        .iter()
+        .filter(|session| session.project_id.as_deref() == Some(project_id))
+        .collect::<Vec<_>>();
+    sessions.reverse();
+
+    if sessions.is_empty() {
+        return format!(
+            "No sessions are attached to project `{project_label}` yet. Start one in TermAl first."
+        );
+    }
+
+    let mut lines = vec![format!("Sessions for {project_label}:")];
+    for session in sessions.iter().take(12) {
+        let status = telegram_state_session_status_label(&session.status);
+        let message_count = match session.message_count {
+            0 => "0 messages".to_owned(),
+            1 => "1 message".to_owned(),
+            count => format!("{count} messages"),
+        };
+        lines.push(format!(
+            "- {} ({status}, {message_count})",
+            session.name.trim()
+        ));
+        lines.push(format!("  id: {}", session.id));
+        if let Some(preview) = telegram_session_preview_line(&session.preview) {
+            lines.push(format!("  {preview}"));
+        }
+    }
+    if state
+        .sessions
+        .iter()
+        .filter(|session| session.project_id.as_deref() == Some(project_id))
+        .count()
+        > 12
+    {
+        lines.push("More sessions exist in TermAl.".to_owned());
+    }
+    lines.join("\n")
+}
+
+fn telegram_state_session_status_label(status: &str) -> &'static str {
+    match status {
+        "active" => "active",
+        "idle" => "idle",
+        "approval" => "approval",
+        "error" => "error",
+        _ => "unknown",
+    }
+}
+
+fn telegram_session_preview_line(preview: &str) -> Option<String> {
+    let normalized = preview
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if normalized.is_empty() {
+        return None;
+    }
+    Some(truncate_telegram_text_chars(&normalized, 96))
+}
+
+fn truncate_telegram_text_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_owned();
+    }
+    let mut value = text
+        .chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
+    value.push_str("...");
+    value
+}
+
 /// Handles Telegram help text.
 fn telegram_help_text(config: &TelegramBotConfig) -> String {
     [
         format!("TermAl Telegram relay for project `{}`.", config.project_id),
         "Commands:".to_owned(),
-        "/status, /approve, /reject, /continue, /fix, /commit, /iterate, /stop, /review"
+        "/status, /sessions, /approve, /reject, /continue, /fix, /commit, /iterate, /stop, /review"
             .to_owned(),
         "Reply with free text to forward it into the active project session.".to_owned(),
     ]
     .join("\n")
+}
+
+fn telegram_action_error_text(action_id: ProjectActionId, err: &anyhow::Error) -> String {
+    format!(
+        "Could not run {}.\n{}\nSend /status to see the actions available right now.",
+        action_id.label(),
+        telegram_user_error_detail(err, TELEGRAM_USER_ERROR_MAX_CHARS)
+    )
+}
+
+fn telegram_callback_action_error_text(action_id: ProjectActionId, err: &anyhow::Error) -> String {
+    format!(
+        "{} failed: {}",
+        action_id.label(),
+        telegram_user_error_detail(err, TELEGRAM_CALLBACK_ERROR_MAX_CHARS)
+    )
+}
+
+fn telegram_prompt_error_text(err: &anyhow::Error) -> String {
+    format!(
+        "Could not forward that message.\n{}",
+        telegram_user_error_detail(err, TELEGRAM_USER_ERROR_MAX_CHARS)
+    )
+}
+
+fn telegram_user_error_detail(err: &anyhow::Error, max_chars: usize) -> String {
+    let detail = sanitize_telegram_log_detail(&err.to_string());
+    truncate_telegram_user_error_detail(&detail, max_chars)
+}
+
+fn truncate_telegram_user_error_detail(detail: &str, max_chars: usize) -> String {
+    let trimmed = detail.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_owned();
+    }
+
+    let mut truncated = trimmed.chars().take(max_chars.saturating_sub(3)).collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 /// Represents a Telegram parsed command.
@@ -2137,6 +2348,7 @@ enum TelegramIncomingCommand {
     Start,
     Help,
     Status,
+    Sessions,
     Action(ProjectActionId),
 }
 
@@ -2170,6 +2382,7 @@ fn parse_telegram_command_for_bot<'a>(
         "start" => TelegramIncomingCommand::Start,
         "help" => TelegramIncomingCommand::Help,
         "status" => TelegramIncomingCommand::Status,
+        "sessions" => TelegramIncomingCommand::Sessions,
         "approve" => TelegramIncomingCommand::Action(ProjectActionId::Approve),
         "reject" => TelegramIncomingCommand::Action(ProjectActionId::Reject),
         "continue" => TelegramIncomingCommand::Action(ProjectActionId::Continue),

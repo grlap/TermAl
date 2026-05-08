@@ -130,6 +130,9 @@ fn telegram_command_parser_supports_suffixes_and_aliases() {
     let parsed = parse_telegram_command("/status").expect("status should parse");
     assert_eq!(parsed.command, TelegramIncomingCommand::Status);
 
+    let parsed = parse_telegram_command("/sessions").expect("sessions should parse");
+    assert_eq!(parsed.command, TelegramIncomingCommand::Sessions);
+
     assert!(parse_telegram_command("/commit@termal_bot now please").is_none());
     assert!(
         parse_telegram_command_for_bot("/commit@other_bot now please", Some("termal_bot"))
@@ -153,6 +156,92 @@ fn telegram_command_parser_supports_suffixes_and_aliases() {
 #[test]
 fn telegram_command_parser_rejects_unknown_slash_commands() {
     assert!(parse_telegram_command("/unknown").is_none());
+}
+
+#[test]
+fn telegram_action_error_text_sanitizes_detail_and_points_to_status() {
+    let token = telegram_redaction_token();
+    let err = anyhow!("action `ask-agent-to-commit` is not currently available; bot token={token}");
+
+    let text = telegram_action_error_text(ProjectActionId::AskAgentToCommit, &err);
+
+    assert!(text.contains("Could not run Ask Agent to Commit."));
+    assert!(text.contains("not currently available"));
+    assert!(text.contains("Send /status"));
+    assert!(text.contains("<redacted>"));
+    assert!(!text.contains(&token));
+}
+
+#[test]
+fn telegram_prompt_error_text_sanitizes_and_truncates_detail() {
+    let token = telegram_redaction_token();
+    let err = anyhow!("{} token={token}", "x".repeat(400));
+
+    let text = telegram_prompt_error_text(&err);
+
+    assert!(text.starts_with("Could not forward that message."));
+    assert!(text.contains("..."));
+    assert!(!text.contains(&token));
+    assert!(text.chars().count() <= "Could not forward that message.\n".chars().count() + 243);
+}
+
+#[test]
+fn telegram_sessions_renderer_lists_project_sessions_newest_first() {
+    let state = TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![
+            TelegramStateSession {
+                id: "session-1".to_owned(),
+                name: "Older".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: "idle".to_owned(),
+                preview: "Ready".to_owned(),
+                message_count: 2,
+            },
+            TelegramStateSession {
+                id: "session-other".to_owned(),
+                name: "Other Project".to_owned(),
+                project_id: Some("project-2".to_owned()),
+                status: "active".to_owned(),
+                preview: "Ignore me".to_owned(),
+                message_count: 1,
+            },
+            TelegramStateSession {
+                id: "session-2".to_owned(),
+                name: "Current".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: "active".to_owned(),
+                preview: "Working on the Telegram sessions list".to_owned(),
+                message_count: 7,
+            },
+        ],
+    };
+
+    let text = render_telegram_project_sessions("project-1", &state);
+
+    assert!(text.starts_with("Sessions for TermAl:\n- Current"));
+    assert!(text.contains("id: session-2"));
+    assert!(text.contains("Working on the Telegram sessions list"));
+    assert!(text.contains("- Older (idle, 2 messages)"));
+    assert!(!text.contains("Other Project"));
+}
+
+#[test]
+fn telegram_sessions_renderer_handles_empty_project() {
+    let state = TelegramStateSessionsResponse {
+        projects: Vec::new(),
+        sessions: Vec::new(),
+    };
+
+    let text = render_telegram_project_sessions("project-1", &state);
+
+    assert_eq!(
+        text,
+        "No sessions are attached to project `project-1` yet. Start one in TermAl first."
+    );
 }
 
 // Pins the outgoing digest shape: the rendered text exposes the project

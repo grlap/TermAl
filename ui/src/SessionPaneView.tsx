@@ -669,6 +669,7 @@ export function SessionPaneView({
   const messageStackRef = useRef<HTMLElement | null>(null);
   const paneRootRef = useRef<HTMLElement | null>(null);
   const settledScrollToBottomCancelRef = useRef<(() => void) | null>(null);
+  const paneMessageContentSignaturesRef = useRef<Record<string, string>>({});
   const paneProgrammaticBottomFollowRef = useRef<{
     key: string | null;
     until: number;
@@ -869,6 +870,13 @@ export function SessionPaneView({
         ? sessionConversationSignature
         : buildMessageListSignature(visibleMessages),
     [pane.viewMode, sessionConversationSignature, visibleMessages],
+  );
+  const visibleMessageContentSignature = useMemo(
+    () =>
+      pane.viewMode === "session" && activeSession
+        ? buildMessageListSignature(activeSession.messages)
+        : buildMessageListSignature(visibleMessages),
+    [activeSession, pane.viewMode, visibleMessages],
   );
   const visibleLastMessageAuthor = useMemo(
     () =>
@@ -1975,6 +1983,10 @@ export function SessionPaneView({
 
     const previousSignature = paneContentSignatures[scrollStateKey];
     paneContentSignatures[scrollStateKey] = visibleContentSignature;
+    const previousMessageContentSignature =
+      paneMessageContentSignaturesRef.current[scrollStateKey];
+    paneMessageContentSignaturesRef.current[scrollStateKey] =
+      visibleMessageContentSignature;
     if (previousSignature === visibleContentSignature) {
       return;
     }
@@ -1997,6 +2009,15 @@ export function SessionPaneView({
           preferVirtualizedBoundary: true,
         });
       }
+      return;
+    }
+
+    const onlyPendingPromptsChanged =
+      pane.viewMode === "session" &&
+      showWaitingIndicator &&
+      previousMessageContentSignature === visibleMessageContentSignature;
+    if (onlyPendingPromptsChanged) {
+      setNewResponseIndicator(scrollStateKey, false);
       return;
     }
 
@@ -2051,6 +2072,7 @@ export function SessionPaneView({
     scrollStateKey,
     visibleContentSignature,
     visibleLastMessageAuthor,
+    visibleMessageContentSignature,
   ]);
 
   useEffect(() => {

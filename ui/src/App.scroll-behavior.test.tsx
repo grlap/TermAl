@@ -1207,6 +1207,141 @@ describe("App scroll behaviour", () => {
     });
   });
 
+  it("keeps the live turn anchored when queued prompts append below it", async () => {
+    await withSuppressedActWarnings(async () => {
+      let scrollHeight = 1000;
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: () => scrollHeight,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+
+      try {
+        const messageStack = Array.from(
+          document.querySelectorAll(".message-stack"),
+        ).find(
+          (candidate): candidate is HTMLElement =>
+            candidate instanceof HTMLElement &&
+            !candidate.classList.contains("control-panel-stack"),
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 2,
+          projects: [
+            {
+              id: "project-termal",
+              name: "TermAl",
+              rootPath: "/projects/termal",
+            },
+          ],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              status: "active",
+              preview: "Current turn partial.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "Current prompt",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Current turn partial.",
+                },
+              ],
+            }),
+          ],
+        });
+        await settleAsyncUi();
+
+        messageStack.scrollTop = 800;
+        await act(async () => {
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+        scrollToMock.mockClear();
+
+        scrollHeight = 1120;
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 3,
+          projects: [
+            {
+              id: "project-termal",
+              name: "TermAl",
+              rootPath: "/projects/termal",
+            },
+          ],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              status: "active",
+              preview: "Current turn partial.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "Current prompt",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Current turn partial.",
+                },
+              ],
+              pendingPrompts: [
+                {
+                  id: "pending-prompt-1",
+                  timestamp: "10:02",
+                  text: "Queued follow-up",
+                },
+              ],
+            }),
+          ],
+        });
+        await settleAsyncUi();
+
+        const liveTurnCard = screen
+          .getByText("Live turn")
+          .closest(".activity-card-live");
+        const queuedPromptCard = screen
+          .getByText("Queued follow-up")
+          .closest(".pending-prompt-card");
+        expect(liveTurnCard).not.toBeNull();
+        expect(queuedPromptCard).not.toBeNull();
+        expect(
+          Boolean(
+            liveTurnCard!.compareDocumentPosition(queuedPromptCard!) &
+              Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        ).toBe(true);
+        expect(filterScrollToCallsAt(scrollToMock, 920, "smooth")).toEqual([]);
+        expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
+        expect(messageStack.scrollTop).toBe(800);
+      } finally {
+        context.cleanup();
+        restoreScrollGeometry();
+      }
+    });
+  });
+
   it("resolves settled-scroll minimum attempts from the fallback threshold and explicit clamp", () => {
     expect(resolveSettledScrollMinimumAttempts(60)).toBe(8);
     expect(resolveSettledScrollMinimumAttempts(13)).toBe(8);

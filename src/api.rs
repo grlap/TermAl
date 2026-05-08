@@ -308,6 +308,7 @@ impl AppState {
         } else {
             None
         };
+        let prompt_target_session = latest_project_prompt_target_session(&inputs.sessions);
         let primary_session = pending_approval
             .as_ref()
             .map(|(record, _)| *record)
@@ -323,6 +324,8 @@ impl AppState {
             })
             .or_else(|| inputs.sessions.last());
         let primary_session_id = primary_session.map(|record| record.session.id.clone());
+        let prompt_target_session_id =
+            prompt_target_session.map(|record| record.session.id.clone());
         let deep_link = Some(build_project_deep_link(
             &inputs.project.id,
             primary_session_id.as_deref(),
@@ -430,10 +433,15 @@ impl AppState {
             let (done_summary, source_message_ids) =
                 select_project_done_summary(primary_session, git_status.as_ref(), true);
             let mut proposed_actions = vec![ProjectActionId::ReviewInTermal];
-            if primary_session_id.is_some() {
+            if prompt_target_session_id.is_some() {
                 proposed_actions.push(ProjectActionId::AskAgentToCommit);
                 proposed_actions.push(ProjectActionId::KeepIterating);
             }
+            let primary_session_id = prompt_target_session_id.clone();
+            let deep_link = Some(build_project_deep_link(
+                &inputs.project.id,
+                primary_session_id.as_deref(),
+            ));
             return Ok(ProjectDigestSummary {
                 headline: inputs.project.name,
                 project_id: inputs.project.id,
@@ -452,6 +460,11 @@ impl AppState {
 
         let (done_summary, source_message_ids) =
             select_project_done_summary(primary_session, git_status.as_ref(), false);
+        let primary_session_id = prompt_target_session_id;
+        let deep_link = Some(build_project_deep_link(
+            &inputs.project.id,
+            primary_session_id.as_deref(),
+        ));
         let proposed_actions = if primary_session_id.is_some() {
             vec![ProjectActionId::Continue, ProjectActionId::ReviewInTermal]
         } else {
@@ -507,6 +520,13 @@ impl AppState {
         )
         .ok()
     }
+}
+
+fn latest_project_prompt_target_session(sessions: &[SessionRecord]) -> Option<&SessionRecord> {
+    sessions
+        .iter()
+        .rev()
+        .find(|record| record.session.parent_delegation_id.is_none())
 }
 
 /// Runs blocking API.
