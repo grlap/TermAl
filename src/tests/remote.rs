@@ -4122,6 +4122,23 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         }),
         "identical SessionCreated inputs must produce stable keys"
     );
+    let mut session_with_remote_a = session_a.clone();
+    let mut session_with_remote_b = session_a.clone();
+    session_with_remote_a.remote_id = Some("attacker-remote-a".to_owned());
+    session_with_remote_b.remote_id = Some("attacker-remote-b".to_owned());
+    assert_eq!(
+        replay_key(DeltaEvent::SessionCreated {
+            revision: 3,
+            session_id: session_with_remote_a.id.clone(),
+            session: session_with_remote_a,
+        }),
+        replay_key(DeltaEvent::SessionCreated {
+            revision: 3,
+            session_id: session_with_remote_b.id.clone(),
+            session: session_with_remote_b,
+        }),
+        "SessionCreated replay identity must ignore inbound remote_id because localization discards it"
+    );
     assert_ne!(
         replay_key(DeltaEvent::SessionCreated {
             revision: 3,

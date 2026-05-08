@@ -687,6 +687,9 @@ export function SessionPaneView({
   const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
     Record<string, true | undefined>
   >({});
+  const [liveTailPinnedByKey, setLiveTailPinnedByKey] = useState<
+    Record<string, boolean | undefined>
+  >({});
 
   useEffect(() => {
     fileStateRef.current = fileState;
@@ -949,6 +952,7 @@ export function SessionPaneView({
   const paneContentSignatures =
     paneContentSignaturesRef.current[pane.id] ??
     (paneContentSignaturesRef.current[pane.id] = {});
+  const savedScrollPosition = paneScrollPositions[scrollStateKey];
 
   function getShouldStickToBottom() {
     return paneShouldStickToBottomRef.current[pane.id] ?? true;
@@ -956,7 +960,21 @@ export function SessionPaneView({
 
   function setShouldStickToBottom(nextValue: boolean) {
     paneShouldStickToBottomRef.current[pane.id] = nextValue;
+    setLiveTailPinnedByKey((current) => {
+      if (current[scrollStateKey] === nextValue) {
+        return current;
+      }
+      return {
+        ...current,
+        [scrollStateKey]: nextValue,
+      };
+    });
   }
+
+  const liveTailPinned =
+    liveTailPinnedByKey[scrollStateKey] ??
+    savedScrollPosition?.shouldStick ??
+    getShouldStickToBottom();
 
   function beginPaneProgrammaticBottomFollow() {
     paneProgrammaticBottomFollowRef.current = {
@@ -3272,6 +3290,7 @@ export function SessionPaneView({
           <AgentSessionPanel
             paneId={pane.id}
             viewMode={pane.viewMode}
+            liveTailPinned={liveTailPinned}
             scrollContainerRef={messageStackRef}
             activeSessionId={activeSession?.id ?? null}
             isLoading={isLoading}

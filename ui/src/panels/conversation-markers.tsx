@@ -59,6 +59,8 @@ const NATIVE_MESSAGE_CONTEXT_MENU_SELECTOR = [
 const CONVERSATION_MARKER_CONTEXT_MENU_TRIGGER_SELECTOR =
   "[data-conversation-marker-menu-trigger='true']";
 const CONVERSATION_MARKER_CONTEXT_MENU_VIEWPORT_MARGIN_PX = 8;
+// Keep these in sync with src/session_markers.rs validation so the UI mirrors
+// server-side defaults and codepoint length limits.
 const DEFAULT_CONVERSATION_MARKER_NAME = "Checkpoint";
 const CONVERSATION_MARKER_NAME_MAX_LENGTH = 120;
 
@@ -318,7 +320,7 @@ export function ConversationMarkerFloatingWindow({
       aria-label="Conversation markers"
     >
       <div className="conversation-marker-floating-header">
-        <div className="conversation-marker-navigator-copy">
+        <div className="conversation-marker-floating-window-copy">
           <span className="card-label">Markers</span>
           <span className="conversation-marker-count">{markers.length}</span>
         </div>
@@ -481,7 +483,7 @@ export function useConversationMarkerContextMenu({
         focusRestoreFrameRef.current = window.requestAnimationFrame(() => {
           focusRestoreFrameRef.current = null;
           if (trigger.isConnected) {
-            trigger.focus();
+            focusConversationMarkerContextMenuTrigger(trigger);
           }
         });
       }
@@ -610,7 +612,12 @@ export function useConversationMarkerContextMenu({
         closeContextMenu();
       }
     };
-    const handleViewportMove = () => closeContextMenu();
+    const handleViewportMove = () => {
+      if (contextMenuRef.current?.mode === "create") {
+        return;
+      }
+      closeContextMenu();
+    };
 
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
@@ -632,7 +639,14 @@ export function useConversationMarkerContextMenu({
   const createMarkerName = contextMenu?.draftName.trim() ?? "";
   const updateCreateMarkerName = (name: string) => {
     setContextMenu((current) =>
-      current ? { ...current, draftName: name } : current,
+      current
+        ? {
+            ...current,
+            draftName: Array.from(name)
+              .slice(0, CONVERSATION_MARKER_NAME_MAX_LENGTH)
+              .join(""),
+          }
+        : current,
     );
   };
   const showCreateMarkerForm = () => {
@@ -660,8 +674,12 @@ export function useConversationMarkerContextMenu({
         <div
           ref={menuRef}
           className="conversation-marker-context-menu"
-          role="menu"
-          aria-label="Conversation marker actions"
+          role={contextMenu.mode === "create" ? "dialog" : "menu"}
+          aria-label={
+            contextMenu.mode === "create"
+              ? "Create conversation marker"
+              : "Conversation marker actions"
+          }
           style={{
             left: contextMenu.left,
             top: contextMenu.top,
@@ -675,15 +693,6 @@ export function useConversationMarkerContextMenu({
             )
           }
         >
-          <button
-            ref={firstMenuItemRef}
-            type="button"
-            role="menuitem"
-            className="conversation-marker-context-menu-item"
-            onClick={showCreateMarkerForm}
-          >
-            Add checkpoint marker
-          </button>
           {contextMenu.mode === "create" ? (
             <form
               className="conversation-marker-context-menu-form"
@@ -698,7 +707,6 @@ export function useConversationMarkerContextMenu({
                   ref={createNameInputRef}
                   className="conversation-marker-context-menu-input"
                   value={contextMenu.draftName}
-                  maxLength={CONVERSATION_MARKER_NAME_MAX_LENGTH}
                   onChange={(event) => updateCreateMarkerName(event.target.value)}
                 />
               </label>
@@ -719,38 +727,50 @@ export function useConversationMarkerContextMenu({
                 </button>
               </div>
             </form>
-          ) : null}
-          {contextMenuMarkers.length > 0 ? (
+          ) : (
             <>
+              <button
+                ref={firstMenuItemRef}
+                type="button"
+                role="menuitem"
+                className="conversation-marker-context-menu-item"
+                onClick={showCreateMarkerForm}
+              >
+                Add checkpoint marker
+              </button>
+              {contextMenuMarkers.length > 0 ? (
+                <>
+                  <div className="conversation-marker-context-menu-separator" role="separator" />
+                  {contextMenuMarkers.map((marker) => (
+                    <button
+                      key={marker.id}
+                      type="button"
+                      role="menuitem"
+                      className="conversation-marker-context-menu-item conversation-marker-context-menu-item-danger"
+                      onClick={() => {
+                        onDeleteConversationMarker(sessionId, marker.id);
+                        closeContextMenu();
+                      }}
+                    >
+                      Remove {marker.name || "marker"}
+                    </button>
+                  ))}
+                </>
+              ) : null}
               <div className="conversation-marker-context-menu-separator" role="separator" />
-              {contextMenuMarkers.map((marker) => (
-                <button
-                  key={marker.id}
-                  type="button"
-                  role="menuitem"
-                  className="conversation-marker-context-menu-item conversation-marker-context-menu-item-danger"
-                  onClick={() => {
-                    onDeleteConversationMarker(sessionId, marker.id);
-                    closeContextMenu();
-                  }}
-                >
-                  Remove {marker.name || "marker"}
-                </button>
-              ))}
+              <button
+                type="button"
+                role="menuitem"
+                className="conversation-marker-context-menu-item"
+                onClick={() => {
+                  onSetMarkerPanelVisible(!isMarkerPanelVisible);
+                  closeContextMenu({ restoreFocus: true });
+                }}
+              >
+                {isMarkerPanelVisible ? "Hide markers window" : "Show markers window"}
+              </button>
             </>
-          ) : null}
-          <div className="conversation-marker-context-menu-separator" role="separator" />
-          <button
-            type="button"
-            role="menuitem"
-            className="conversation-marker-context-menu-item"
-            onClick={() => {
-              onSetMarkerPanelVisible(!isMarkerPanelVisible);
-              closeContextMenu({ restoreFocus: true });
-            }}
-          >
-            {isMarkerPanelVisible ? "Hide markers window" : "Show markers window"}
-          </button>
+          )}
         </div>,
       document.body,
     )
@@ -841,7 +861,7 @@ function handleConversationMarkerContextMenuKeyDown(
   closeMenu: () => void,
 ) {
   if (
-    event.target instanceof HTMLInputElement &&
+    event.target instanceof HTMLElement &&
     event.target.closest(".conversation-marker-context-menu-form") &&
     event.key !== "Escape"
   ) {
@@ -886,6 +906,17 @@ function handleConversationMarkerContextMenuKeyDown(
   }
   event.preventDefault();
   menuItems[nextIndex]?.focus();
+}
+
+function focusConversationMarkerContextMenuTrigger(trigger: HTMLElement) {
+  const hadTabIndex = trigger.hasAttribute("tabindex");
+  if (!hadTabIndex) {
+    trigger.tabIndex = -1;
+  }
+  trigger.focus({ preventScroll: true });
+  if (!hadTabIndex) {
+    trigger.removeAttribute("tabindex");
+  }
 }
 
 function clampConversationMarkerContextMenuPosition(

@@ -122,7 +122,7 @@ describe("ConversationOverviewRail", () => {
   it("keeps the previous projection while the composer prompt is focused", () => {
     vi.useFakeTimers();
     const composer = document.createElement("textarea");
-    composer.className = "composer-input";
+    composer.dataset.conversationComposerInput = "true";
     document.body.appendChild(composer);
 
     try {
@@ -184,6 +184,116 @@ describe("ConversationOverviewRail", () => {
     } finally {
       document.body.removeChild(composer);
       vi.useRealTimers();
+    }
+  });
+
+  it("bounds focused projection deferral when idle callbacks keep reporting low time", () => {
+    const composer = document.createElement("textarea");
+    composer.dataset.conversationComposerInput = "true";
+    document.body.appendChild(composer);
+    const originalRequestIdleCallback = window.requestIdleCallback;
+    const originalCancelIdleCallback = window.cancelIdleCallback;
+    const idleCallbacks = new Map<number, IdleRequestCallback>();
+    const idleOptions: Array<IdleRequestOptions | undefined> = [];
+    let nextIdleHandle = 1;
+    Object.defineProperty(window, "requestIdleCallback", {
+      configurable: true,
+      value: vi.fn(
+        (
+          callback: IdleRequestCallback,
+          options?: IdleRequestOptions,
+        ) => {
+          const handle = nextIdleHandle;
+          nextIdleHandle += 1;
+          idleCallbacks.set(handle, callback);
+          idleOptions.push(options);
+          return handle;
+        },
+      ),
+    });
+    Object.defineProperty(window, "cancelIdleCallback", {
+      configurable: true,
+      value: vi.fn((handle: number) => {
+        idleCallbacks.delete(handle);
+      }),
+    });
+
+    try {
+      const messages = textMessages(5);
+      const updatedMessages = messages.map((message, index) =>
+        index === 0 && message.type === "text"
+          ? { ...message, text: "Updated prompt sample" }
+          : message,
+      );
+      act(() => {
+        composer.focus();
+        fireEvent.focusIn(composer);
+      });
+
+      const { rerender } = render(
+        <ConversationOverviewRail
+          messages={messages}
+          layoutSnapshot={layoutSnapshot(messages)}
+          minMessages={4}
+          maxHeightPx={250}
+          onNavigate={() => {}}
+        />,
+      );
+
+      rerender(
+        <ConversationOverviewRail
+          messages={updatedMessages}
+          layoutSnapshot={layoutSnapshot(updatedMessages)}
+          minMessages={4}
+          maxHeightPx={250}
+          onNavigate={() => {}}
+        />,
+      );
+
+      expect(screen.getByLabelText(/User prompt 1: Message 1/)).toBeInTheDocument();
+      expect(idleOptions[0]).toEqual({ timeout: 240 });
+
+      act(() => {
+        idleCallbacks.get(1)?.({
+          didTimeout: false,
+          timeRemaining: () => 0,
+        } as IdleDeadline);
+      });
+
+      expect(screen.getByLabelText(/User prompt 1: Message 1/)).toBeInTheDocument();
+      expect(
+        screen.queryByLabelText(/User prompt 1: Updated prompt sample/),
+      ).not.toBeInTheDocument();
+      expect(idleOptions[1]).toEqual({ timeout: 240 });
+
+      act(() => {
+        idleCallbacks.get(2)?.({
+          didTimeout: true,
+          timeRemaining: () => 0,
+        } as IdleDeadline);
+      });
+
+      expect(
+        screen.getByLabelText(/User prompt 1: Updated prompt sample/),
+      ).toBeInTheDocument();
+    } finally {
+      if (originalRequestIdleCallback) {
+        Object.defineProperty(window, "requestIdleCallback", {
+          configurable: true,
+          value: originalRequestIdleCallback,
+        });
+      } else {
+        delete (window as { requestIdleCallback?: unknown }).requestIdleCallback;
+      }
+      if (originalCancelIdleCallback) {
+        Object.defineProperty(window, "cancelIdleCallback", {
+          configurable: true,
+          value: originalCancelIdleCallback,
+        });
+      } else {
+        delete (window as { cancelIdleCallback?: unknown }).cancelIdleCallback;
+      }
+      document.body.removeChild(composer);
     }
   });
 
@@ -288,6 +398,13 @@ describe("ConversationOverviewRail", () => {
     expect(
       container.querySelectorAll(".conversation-overview-visual-segment").length,
     ).toBeLessThanOrEqual(96);
+    expect(rail).toHaveAttribute("role", "slider");
+    expect(rail).toHaveAccessibleName("Conversation overview");
+    expect(rail).toHaveAttribute("aria-orientation", "vertical");
+    expect(rail).toHaveAttribute("aria-valuemin", "1");
+    expect(rail).toHaveAttribute("aria-valuemax");
+    expect(rail).toHaveAttribute("aria-valuenow");
+    expect(rail).toHaveAttribute("aria-valuetext");
     expect(rail).toHaveAttribute("tabIndex", "0");
 
     fireEvent.pointerDown(rail, {
@@ -296,6 +413,7 @@ describe("ConversationOverviewRail", () => {
       pointerId: 11,
     });
 
+    expect(rail).toHaveFocus();
     expect(onNavigate).toHaveBeenCalledWith(
       expect.objectContaining({
         messageId: "command-message-1",
@@ -483,14 +601,20 @@ describe("ConversationOverviewRail", () => {
     fireEvent.keyDown(firstItem, { key: "ArrowDown" });
 
     expect(secondItem).toHaveFocus();
+    expect(firstItem).toHaveAttribute("tabIndex", "-1");
+    expect(secondItem).toHaveAttribute("tabIndex", "0");
 
     fireEvent.keyDown(secondItem, { key: "End" });
 
     expect(lastItem).toHaveFocus();
+    expect(secondItem).toHaveAttribute("tabIndex", "-1");
+    expect(lastItem).toHaveAttribute("tabIndex", "0");
 
     fireEvent.keyDown(lastItem, { key: "Home" });
 
     expect(firstItem).toHaveFocus();
+    expect(firstItem).toHaveAttribute("tabIndex", "0");
+    expect(lastItem).toHaveAttribute("tabIndex", "-1");
   });
 
   it("renders and navigates live-turn tail items", () => {

@@ -7,20 +7,376 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## `telegram_prompt_error_text_sanitizes_and_truncates_detail` test places token at the end so truncation masks sanitization
+## `remember_assistant_forwarding_cursor` unconditionally write-throughs the legacy mirror
 
-**Severity:** Medium - `src/tests/telegram.rs:175-186`. With 400 `x` chars + ` token={token}` placed at the end, truncation alone removes the token. The test asserts `!text.contains(&token)`, which passes even if `sanitize_telegram_log_detail` is a no-op (a regression that disabled sanitization would still pass because truncation removed the token).
+**Severity:** Medium - `src/telegram.rs:1668-1697`. Round 78 introduced `assistant_forwarding_cursors: HashMap<SessionId, TelegramAssistantForwardingCursor>` as the authoritative per-session cursor, but `remember_assistant_forwarding_cursor` still unconditionally writes `state.last_forwarded_assistant_message_id` and `_text_chars` from the *passed-in* cursor on every call, regardless of which session is being updated.
 
-The test name claims "sanitizes" but doesn't actually pin sanitization. The "and truncates" half is redundant — the truncation alone already passes the assertion.
+Two interleaved sessions clobber each other's legacy mirror. Combined with the fallback at `:1653-1666` that returns the legacy mirror for unknown sessions, the fallback path is non-deterministic in the multi-session case — it returns "the most recently mutated session's cursor".
 
 **Current behavior:**
-- Token placed at end of input.
-- Truncation removes the token regardless of sanitization.
-- Test does not exercise the sanitizer independently.
+- Per-session map holds authoritative cursors.
+- Legacy mirror unconditionally write-through on every call.
+- Two interleaved sessions clobber each other's mirror.
+- Fallback for unknown sessions returns the latest-touched session's cursor.
 
 **Proposal:**
-- Place the token BEFORE the long tail (e.g., `"token={token} {x*400}"`) so truncation cannot mask sanitization.
-- Also assert `text.contains("<redacted>")`.
+- Stop unconditionally mirroring.
+- Mirror only when the session id matches a designated "primary" session id.
+- Or drop runtime use of the mirror entirely (read-once at startup).
+
+## `resend_if_grown` fabricated as `true` in legacy-mirror fallback
+
+**Severity:** Low - `src/telegram.rs:1660-1665`. In the per-session cursor fallback, `resend_if_grown: state.last_forwarded_assistant_message_id.is_some()` derives a per-session resend flag from a global mirror that may belong to an unrelated session. Setting it to `true` for a session that has no real cursor means a spurious id collision could trigger a complete re-forward of the wrong message.
+
+**Current behavior:**
+- Fallback synthesizes `resend_if_grown: true` from a global signal.
+- Per-session intent silently mis-applied.
+
+**Proposal:**
+- For the fallback, hard-code `resend_if_grown: false`.
+
+## ConversationOverviewRail `focusedSegmentIndex` clamps only on `segments.length` change
+
+**Severity:** Medium - `ui/src/panels/ConversationOverviewRail.tsx:121-125`. The `useEffect` clamps `focusedSegmentIndex` only on `segments.length` change, but during the render *between* a length shrink and the effect firing, no segment carries `tabIndex={0}` (the focused index points beyond the array).
+
+For one render frame after segments shrink, the rail has no tab stop. If `segments.length` stays the same but the *segments at indices* change (re-keyed), `focusedSegmentIndex` stays stale.
+
+**Current behavior:**
+- Clamp runs in effect, not in render.
+- One-frame staleness window after shrink.
+- Index-only-changed segments don't trigger clamp.
+
+**Proposal:**
+- Compute the clamped index inline (`const clampedIndex = Math.min(focusedSegmentIndex, segments.length - 1)`) and use it for both the tabIndex render and the displayed slider state.
+
+## ConversationOverviewRail compact-mode `aria-valuenow` lags behind keyboard input
+
+**Severity:** Medium - `ui/src/panels/ConversationOverviewRail.tsx:255-322`. In compact mode, the rail has `role="slider"` plus `aria-valuemin/max/now/text`, but the actual *navigation* (Enter/Space/Arrow keys) doesn't update `aria-valuenow` until the parent receives the `onNavigate` event AND re-snapshots its viewport AND that flows back through `viewportProjection.viewportTopPx`.
+
+A screen reader announcing the slider's current position will lag visible focus by one or more renders. Pressing Down doesn't update the announced position immediately.
+
+**Current behavior:**
+- `aria-valuenow` derived from viewport projection.
+- Keyboard input must round-trip through parent state.
+- Multi-render lag in announced position.
+
+**Proposal:**
+- Track an "intended" segment index synchronously when handlers fire, surface it in `aria-valuenow`, and let the viewport-derived value override only when the parent has caught up.
+
+## ConversationOverviewRail "deferred build" test doesn't exercise hard-timeout path
+
+**Severity:** Medium - `ui/src/panels/ConversationOverviewRail.test.tsx:188-285`. The new "bounds focused projection deferral when idle callbacks keep reporting low time" test stubs `requestIdleCallback` to capture callbacks but never verifies the *hard timeout* path (`setTimeout(runOnce, 240)`).
+
+The fix added two safety nets: (a) `requestIdleCallback({ timeout: 240 })` honoring `didTimeout`, and (b) a parallel `setTimeout(runOnce, 240)` that races the idle callback. The test covers (a). A regression that removes (b) (and breaks browsers that ignore the `timeout` option) would still pass.
+
+**Current behavior:**
+- Test exercises `didTimeout: true` branch.
+- Timer-only fallback path uncovered.
+
+**Proposal:**
+- Add a variant where `requestIdleCallback` never invokes the callback at all (timer-only).
+- Advance fake timers by 240ms.
+- Assert the rebuild fires.
+
+## `assistant_forwarding_cursors` HashMap never reaped on session deletion
+
+**Severity:** Low - `src/telegram.rs:392-395`. The new HashMap has no eviction/cleanup tied to session deletion; entries accumulate indefinitely in `~/.termal/telegram-bot.json`. A long-lived install accumulates cursor entries for every Telegram-touched session ever, including deleted ones.
+
+**Current behavior:**
+- HashMap entries persist beyond session lifetime.
+- No reaping on session deletion.
+- State file grows monotonically.
+
+**Proposal:**
+- Hook session deletion to remove the corresponding cursor.
+- Or prune entries in the relay's existing cleanup paths whenever it observes a foreign session id absent from current state.
+
+## `isComposerPromptFocused` data-attribute coupling identical in shape to old CSS-class coupling
+
+**Severity:** Low - `ui/src/panels/ConversationOverviewRail.tsx:481-487`. The round-77 finding is closed by switching to a data attribute (`dataset.conversationComposerInput`). The new coupling is identical in shape (string-on-string), just on a different attribute. A rename of `data-conversation-composer-input` would silently break focus-aware deferral.
+
+**Current behavior:**
+- Data attribute coupling between two unrelated components.
+- No exported constant.
+
+**Proposal:**
+- Export `CONVERSATION_COMPOSER_INPUT_DATASET_KEY` from a shared module and reference it from both call sites.
+
+## SessionPaneView delegation-actions test uses tautological `isLocalSessionRemote` assertion
+
+**Severity:** Note - `ui/src/SessionPaneView.delegation-actions.test.tsx:15-103`. The new test mocks both `AgentSessionPanel` and `AgentSessionPanelFooter`, then asserts a *re-derived* `isLocalSessionRemote(session, project)` matches the props the mocks observe. It doesn't actually assert that `SessionPaneView` produces the correct derivation when the project lookup is missing or when remote ownership is embedded vs. trusted at the session level.
+
+A regression in `SessionPaneView` (e.g., consulting a different lookup or omitting the project parameter) would still pass because the assertion compares the helper's output to the mock-observed flag, both fed from the same `(session, project)` pair.
+
+**Current behavior:**
+- Test mirrors helper output back to mocked prop.
+- Independent regression check missing.
+
+**Proposal:**
+- Drop the `expect(isLocalSessionRemote(...)).toBe(expectedEnabled)` line.
+- Instead assert that, e.g., a session with `remoteId: "ssh-lab"` on a *local* project does NOT enable delegation.
+
+## Marker name 120-char limit comment names only two of three sync sites
+
+**Severity:** Note - `ui/src/panels/conversation-markers.tsx:62-65`. The new comment says "Keep these in sync with `src/session_markers.rs` validation" but doesn't reference the matching constant name (`CONVERSATION_MARKER_NAME_MAX_CHARS`) nor mention the third codepoint-aware fallback site at `app-session-actions.ts`.
+
+**Current behavior:**
+- Comment names two sync sites.
+- Third site (`app-session-actions.ts`) absent.
+
+**Proposal:**
+- Extend the comment to enumerate the three sites.
+- Or expose the limit via wire protocol so all three become derived.
+
+## `focusConversationMarkerContextMenuTrigger` tabindex add-then-remove hack obscures intent
+
+**Severity:** Note - `ui/src/panels/conversation-markers.tsx:911-920`. `focusConversationMarkerContextMenuTrigger` adds `tabindex="-1"`, focuses, then *removes* the attribute. The helper's "add then remove" hack hides the assumption that the focused element is intentionally not a tab stop.
+
+**Current behavior:**
+- Add `tabindex="-1"` → focus → remove.
+- Looks like DOM is unchanged but briefly mutates during a focus cycle.
+- Future contributor reading just the helper sees `trigger.focus()`.
+
+**Proposal:**
+- Either keep `tabindex="-1"` permanently on the trigger via React markup (declarative).
+- Or document the helper as "focus a non-tabbable element via temporary tabindex" with a comment.
+
+## Codepoint-paste truncation in marker create form has no user feedback
+
+**Severity:** Note - `ui/src/panels/conversation-markers.tsx:644-649`. `updateCreateMarkerName` is called from `onChange` and slices the input. During paste of >120 codepoints the user sees their input truncated to 120 with no indication that more was discarded. The behavior is now codepoint-correct but lost the browser's "input-length-limit" affordance.
+
+**Current behavior:**
+- Paste truncates silently.
+- No visual count or limit indicator.
+
+**Proposal:**
+- Add a tooltip / live-region count showing `currentLength/120` near the input.
+- Or surface a brief toast when truncation actually happens.
+
+## `TelegramAssistantForwardingPlan` is a single-variant enum
+
+**Severity:** Note - `src/telegram.rs:1721-1727`. The `TelegramAssistantForwardingPlan` enum now has only one variant (`Baseline`); the `Skip` variant was removed because the gating moved into the caller's logic. The `let Plan::Baseline { ... } = plan else { ... };` pattern at `apply_assistant_forwarding_plan` is now an irrefutable destructure.
+
+**Current behavior:**
+- Single-variant enum with a single irrefutable destructure pattern.
+- Structurally pointless.
+
+**Proposal:**
+- Replace the enum with a struct.
+- Or document the future-extensibility intent.
+
+## `assistant_forwarding_cursors` persisted schema undocumented
+
+**Severity:** Note - `src/telegram.rs:392-395`. `assistant_forwarding_cursors` joins the persisted state file with serde camelCase. The on-disk schema now includes `assistantForwardingCursors: { "<session-id>": { messageId, textChars, resendIfGrown? } }`. No documentation of the new schema in `docs/features/`.
+
+**Current behavior:**
+- Persisted-state schema bumped non-trivially.
+- A future migration or external tool reading the file has no spec.
+
+**Proposal:**
+- Add a brief schema note to a Telegram feature brief.
+- Or inline doc comment naming the wire shape.
+
+## `telegram_assistant_forwarding_cursors_are_scoped_per_session` doesn't exercise legacy fallback
+
+**Severity:** Low - `src/tests/telegram.rs:544-587`. The new test puts session-1 in the HashMap with default-empty legacy fields, then forwards for session-2. It doesn't exercise the *fallback* to legacy fields for an unknown session, so the most concerning failure mode is not pinned.
+
+**Current behavior:**
+- Explicit-entry case covered.
+- Implicit-fallback case untested.
+
+**Proposal:**
+- Add a sister test that pre-populates legacy fields with session-1 data, forwards for session-2, and asserts session-2's baseline does not inherit session-1's cursor data.
+
+## Marker dialog-semantics test bundles 6+ behaviors in one `it()`
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:1024-1121`. The new "uses dialog semantics and local keyboard behavior" test combines six behaviors (dialog role, input focus/select, codepoint truncation, whitespace-disabled submit, button-keydown short-circuit, resize-doesn't-close-during-edit, trim, cancel restores focus, escape restores focus). One test asserting six behaviors fails opaquely.
+
+**Current behavior:**
+- 6+ assertions in one `it()`.
+- Failure messages cluster at one line.
+
+**Proposal:**
+- Consider splitting once the test grows further.
+- Current 6-in-1 is acceptable but the pattern should not expand.
+
+## Telegram assistant forwarding can arm an active session before its first assistant reply
+
+**Severity:** Medium - `src/telegram.rs:1733`. `prepare_assistant_forwarding_for_telegram_prompt` can baseline an already-active session even when that session has not emitted assistant text yet. With no assistant cursor, `apply_assistant_forwarding_baseline` arms `forward_next_assistant_message_session_id`; when the pre-existing active turn settles, its first assistant reply can be forwarded as if it were the Telegram-originated reply queued behind that turn.
+
+**Current behavior:**
+- Active sessions with no assistant text can be armed for the next assistant reply.
+- The next reply may belong to the pre-existing turn, not the Telegram prompt.
+- Telegram can receive a response for the wrong turn.
+
+**Proposal:**
+- Restore a skip/defer path for active sessions that have no assistant baseline yet.
+- Or track a stronger post-prompt boundary than "next settled assistant message."
+- Add a regression covering active session, no assistant text, Telegram prompt queued, then the pre-existing turn settling.
+
+## `OrchestratorsUpdated` remote replay keys still include untrusted embedded session ownership
+
+**Severity:** Low - `src/remote_routes.rs:709`. The staged replay-key fix normalizes `SessionCreated` by clearing inbound `remoteId` before hashing, but `OrchestratorsUpdated` also carries embedded `Session` values through the same remote-localization boundary. Same-revision duplicates that differ only by untrusted or derived `remoteId` can still miss replay suppression for this delta variant.
+
+**Current behavior:**
+- `SessionCreated` replay identity clears embedded `remote_id` before hashing.
+- `OrchestratorsUpdated` session payloads still hash embedded sessions without the same normalization.
+- Duplicate same-revision remote updates can be treated as distinct when only ignored wire ownership differs.
+
+**Proposal:**
+- Reuse one normalized session fingerprint helper for every replay payload that hashes `Session` values.
+- Include `OrchestratorsUpdated.sessions` in the remote ownership normalization test coverage.
+
+## Telegram assistant forwarding cursors remain session-keyed but the armed gate is global
+
+**Severity:** Low - `src/telegram.rs:1609`. `assistant_forwarding_cursors` is now session-keyed, but `forward_next_assistant_message_session_id` remains one global `Option`. `forward_relevant_assistant_messages` checks the armed session first and returns after that path, so an armed session that is paused on approval or otherwise makes no assistant-message progress can keep the digest primary session from being checked.
+
+**Current behavior:**
+- Forwarded cursor progress is tracked per session.
+- The "next assistant reply" armed state is still a singleton session id.
+- If the singleton armed session makes no progress, forwarding for the current digest primary can be skipped.
+
+**Proposal:**
+- Make armed-next-reply state session-keyed as well.
+- Drain a bounded set of armed sessions before the digest primary, or fall through to the digest primary when the armed session made no progress.
+
+## Mermaid `getMermaidDiagramFrameStyle` keeps 24px aspect-ratio slack in fit-to-frame mode
+
+**Severity:** Low - `ui/src/mermaid-render.ts:133-169`. The frame's `aspect-ratio: 302/104` was tuned to absorb a 16-20px horizontal scrollbar plus a few pixels of font-metrics drift in the default mode where the iframe is allowed to scroll horizontally. In the new fit mode (`fitToFrame: true`), the SVG has `max-width: 100%; height: auto` and there is no horizontal scrollbar — the slack manifests as 24px of empty iframe area at the bottom that bleeds the parent background through.
+
+For a viewBox 300×80 in fit mode, the SVG's natural rendered height would be about 80, but the iframe is 104, leaving ~24px of unused vertical space. Real diagrams in a narrow source pane can show a noticeable gap below the diagram.
+
+**Current behavior:**
+- `getMermaidDiagramFrameStyle` is mode-agnostic.
+- 24px slack carried into fit mode where there's no scrollbar.
+- Visible gap below diagram in narrow source preview.
+
+**Proposal:**
+- Pass `{ fitToFrame }` through to `getMermaidDiagramFrameStyle` and drop the +24 slack when in fit mode (use `aspectRatio: ${frameWidth} / ${Math.ceil(dimensions.height) + 2}`).
+- Or document the residual slack as an intentional buffer for foreignObject font drift in fit mode.
+
+## SourcePanel fit-mode test verifies CSS classes but not iframe srcdoc CSS
+
+**Severity:** Low - `ui/src/panels/SourcePanel.test.tsx:267-304`. The new "lets Mermaid diagrams use the full rendered Markdown preview width" test verifies CSS classes are wired (`markdown-diff-section-fill-mermaid` and `markdown-copy-shell-fill-mermaid`) but does NOT verify the Mermaid iframe srcdoc actually contains fit-mode CSS.
+
+A regression that makes `fillMermaidAvailableSpace` a no-op for the iframe srcdoc would still pass this test.
+
+**Current behavior:**
+- Class assertions cover SourcePanel-side wiring.
+- Iframe srcdoc CSS substring not asserted.
+- Component-level wiring (`MermaidDiagram fillAvailableSpace` → `buildMermaidDiagramFrameSrcDoc({ fitToFrame: true })`) untested at this layer.
+
+**Proposal:**
+- Wait for the iframe to render and assert `(frame as HTMLIFrameElement).srcdoc` contains the fit-mode SVG CSS string `svg{display:block;max-width:100%;height:auto`.
+
+## `MarkdownContent.test.tsx` fit-mode test only validates srcdoc against a NARROW diagram
+
+**Severity:** Low - `ui/src/MarkdownContent.test.tsx:603-625`. The new test "lets preview callers shrink wide Mermaid frames..." validates fit-mode srcdoc CSS only against a narrow diagram (300×80 viewBox). The "shrinks wide Mermaid frames" claim in the test name is not directly proved — a wide-viewBox test (e.g., 2340×926) plus a constrained-parent wrapper would actually exercise the shrink-without-upscale contract end-to-end.
+
+The companion test for default mode at line 627 uses a 2340-wide diagram; fit mode does not have an equivalent wide test.
+
+**Current behavior:**
+- Test uses 300×80 viewBox.
+- Wide-diagram shrink contract not exercised.
+- Test name promises behavior beyond what it asserts.
+
+**Proposal:**
+- Add a second fit-mode test using a wide viewBox like `viewBox="0 0 2340 926"` inside a constrained parent (e.g., `style={{ width: "400px" }}`).
+- Assert the iframe shrinks while srcdoc contains the fit-mode SVG CSS.
+
+## `buildMermaidDiagramFrameSrcDoc` has no unit test for the new fit-mode option
+
+**Severity:** Low - `ui/src/mermaid-render.test.ts`. The new `buildMermaidDiagramFrameSrcDoc(svg, options)` API has no direct unit test (only integration coverage via `MarkdownContent.test.tsx`). The existing `mermaid-render.test.ts` covers `isMermaidErrorVisualizationSvg` and `renderTermalMermaidDiagram` but not the srcdoc builder.
+
+**Current behavior:**
+- Builder exercised only via integration test.
+- Unit-level CSS-string assertion absent.
+- A regression in builder isolation would not surface until rendering.
+
+**Proposal:**
+- Add a `describe("buildMermaidDiagramFrameSrcDoc")` block with one test per mode asserting on the returned string's CSS substrings (overflow rules, body display, svg max-width).
+
+## `MarkdownDocumentView` is dead-reachable through the `RendererPreviewPane` `isMarkdownSource` branch
+
+**Severity:** Note - `ui/src/MarkdownDocumentView.tsx`. SourcePanel only routes `RendererPreviewPane` when `!(isMarkdownSource && renderedMarkdownSegment)`. `renderedMarkdownSegment` is always non-null when `isMarkdownSource && fileState.status === "ready"`. `RendererPreviewPane` itself bails on `fileState.status !== "ready"`. So the inner `if (isMarkdownSource) return <MarkdownDocumentView .../>` branch in `RendererPreviewPane` cannot fire from this caller.
+
+Threading `fillMermaidAvailableSpace` through dead code does not cost anything but obscures the actual call graph. Round 77 expanded the dead surface area by adding a new prop.
+
+**Current behavior:**
+- Dead branch threads a new prop.
+- No test exercises the path.
+- Live caller graph unclear.
+
+**Proposal:**
+- Either delete the dead branch in `RendererPreviewPane` (and inline `MarkdownDocumentView` into its only live caller, if any).
+- Or explicitly document that the branch exists for future non-SourcePanel callers and add a test that exercises the path.
+
+## `fillMermaidAvailableSpace` widens the whole Markdown shell without documenting that contract
+
+**Severity:** Note - `ui/src/message-cards.tsx:3624-3662, 4356` and `ui/src/panels/markdown-diff-change-section.tsx:188-228`. The new `fillMermaidAvailableSpace` prop is undocumented while `isStreaming` (just below it) has a detailed multi-paragraph comment explaining contract and consumers. The name is Mermaid-specific, but enabling it adds `markdown-copy-shell-fill-mermaid`, and the CSS widens the whole markdown shell/copy area rather than only Mermaid blocks.
+
+A future contributor cannot tell from the type alone whether the prop applies only to Mermaid, what "fill" means visually, which caller decides to enable it, or whether non-Mermaid prose/code/table layout is intentionally affected in source previews.
+
+**Current behavior:**
+- Prop has no JSDoc and reads as Mermaid-only.
+- Enabling it also applies a full-width markdown shell/copy layout class.
+- Sibling `isStreaming` has detailed contract documentation.
+
+**Proposal:**
+- Scope the full-width override to Mermaid blocks if the broader markdown layout change is accidental.
+- Or rename/document the prop as a preview-wide full-width markdown mode, including the fit-to-frame Mermaid behavior, layout interaction with `markdown-copy-shell-fill-mermaid`, and call sites.
+
+## `buildMermaidDiagramFrameSrcDoc` `fitToFrame` option lacks contract documentation
+
+**Severity:** Note - `ui/src/mermaid-render.ts:80-123`. `buildMermaidDiagramFrameSrcDoc` now takes an `{ fitToFrame?: boolean }` options bag but no source comment explains what semantic the new mode means or which call site passes it.
+
+The header section above the function describes "What this file owns" but the new fit-mode contract (when does a caller want it, what does it do to wide vs narrow diagrams, how does it interact with `getMermaidDiagramFrameStyle`'s 24px slack) is not documented in source.
+
+**Current behavior:**
+- Option-bag parameter added with no JSDoc.
+- Inline implementation differs by mode but contract is implicit.
+
+**Proposal:**
+- Add a JSDoc block above the function explaining: default mode (overflow-x scroll for wide diagrams), fit mode (max-width:100% SVG to shrink wide diagrams without upscaling, used by source-preview pane), and the deliberate choice to leave `getMermaidDiagramFrameStyle` independent of the option.
+
+## `iframeStyle` `useMemo` block-form rewrite is stylistic churn with no behavior change
+
+**Severity:** Note - `ui/src/message-cards.tsx:1249-1257`. The `iframeStyle` `useMemo` was rewritten from a one-line ternary into a block-form arrow but is functionally identical. Both forms return the same value with the same dependency list `[readySvg]`.
+
+This counts against the "preserve public behaviour exactly during refactors" guidance in CLAUDE.md (this is a feature round, but the unrelated refactor adds noise).
+
+**Current behavior:**
+- Block-form arrow with no behavioral difference.
+- Pure stylistic churn in a Round 77 staged diff.
+
+**Proposal:**
+- Either revert the `iframeStyle` block to its original ternary.
+- Or, if the block is preferred, lift the same style to other helpers in the file for consistency.
+
+## `MarkdownDocumentView.tsx` lacks header comment despite Round 77 expanding its surface
+
+**Severity:** Note - `ui/src/MarkdownDocumentView.tsx:1-2`. CLAUDE.md says modules should have header comments explaining what they own / don't own / split provenance. `MarkdownDocumentView.tsx` is not new but Round 77 expanded its contract by threading `fillMermaidAvailableSpace` from non-Markdown / Markdown source preview through this component.
+
+Sibling files like `panels/source-renderer-preview.tsx` and `panels/markdown-diff-change-section.tsx` have detailed header comments.
+
+**Current behavior:**
+- File has no header comment.
+- Round 77 expanded its public-prop surface.
+- Documentation inconsistent with siblings.
+
+**Proposal:**
+- Add a brief header comment describing the read-only Markdown document chrome (header + scroll body) and pin the relationship to the editable preview path used by SourcePanel.
+
+## `fillMermaidAvailableSpace` feature has no `docs/features/*.md` entry
+
+**Severity:** Note - `docs/features/source-renderers.md` (or a new file). CLAUDE.md says feature briefs live under `docs/features/`. Round 77 introduces a meaningful behavior split (fit-to-frame Mermaid in source preview panes vs scroll-on-overflow elsewhere). A feature brief would document the intent ("smaller diagrams keep natural size; wide diagrams shrink to pane width without horizontal scrollbar in source preview") and the trade-off (24px vertical slack from `getMermaidDiagramFrameStyle` survives even though no scrollbar appears in fit mode).
+
+**Current behavior:**
+- No feature brief documents the dual mode.
+- Implementation behavior split across multiple files without narrative.
+
+**Proposal:**
+- Add a section to `docs/features/source-renderers.md` covering the fit-to-frame Mermaid mode, when each call site picks it, and the residual aspect-ratio slack consideration.
 
 ## Telegram renderer tests don't exercise `> 12 sessions` overflow message
 
@@ -58,20 +414,6 @@ A regression that flipped `> 12` to `>= 12` or removed the trailing line would s
 **Proposal:**
 - Assert on the full `heightWrites` array order, not just `toContainEqual`.
 - Or use `toEqual([...])` with the full expected sequence.
-
-## Project digest error-state branch still uses outer `primary_session_id` (delegation child possible)
-
-**Severity:** Note - `src/api.rs:393-414`. Round 76 fixed dirty + clean idle branches to route prompts to the non-delegation parent. The error-state branch was missed and still proposes `FixIt` whenever `primary_session_id` is present. If that primary is a terminal delegation child, dispatch can fail or route to a read-only child.
-
-This overlaps with the active "Project `Fix It` action can target a terminal delegation child" entry but specifically calls out the unfixed branch.
-
-**Current behavior:**
-- Error-state branch uses outer `primary_session_id`.
-- Dirty/idle branches use `prompt_target_session_id`.
-- Asymmetry not documented.
-
-**Proposal:**
-- Apply the same `prompt_target_session_id.is_some()` test and rebinding in the error branch.
 
 ## `digest.deep_link` derivation now branch-local in two places (same triple-shadow as `primary_session_id`)
 
@@ -123,27 +465,14 @@ This overlaps with the active "Project `Fix It` action can target a terminal del
 - Either consolidate into a single `format_telegram_user_error(action_kind, err)` enum-driven formatter.
 - Or add a JSDoc-style block above each declaring the contract.
 
-## Project `Fix It` action can target a terminal delegation child
-
-**Severity:** Medium - `src/api.rs:397`. `build_project_digest_summary()` now uses a non-delegation prompt target for dirty and clean idle branches, but the error-state branch still proposes `Fix It` whenever `primary_session_id` is present. If the selected primary session is a terminal delegation child, the digest/action contract can advertise `fix-it` even though the follow-up prompt cannot be dispatched there.
-
-**Current behavior:**
-- Error-state digest selection can choose a delegation child as `primary_session_id`.
-- The digest can advertise `fix-it`.
-- Executing the action can route to a read-only delegation child or fail with a conflict instead of targeting the parent/non-delegation session.
-
-**Proposal:**
-- Use the non-delegation prompt target for every prompt-producing project action (`FixIt`, `Continue`, `AskAgentToCommit`, `KeepIterating`).
-- Keep the delegation child available only for summary/source-message context.
-
 ## Project digest `primary_session_id` mixes summary source and action target semantics
 
-**Severity:** Low - `src/api.rs:440-476`. The dirty and clean idle digest branches can compute summary text from one session while replacing `primary_session_id` and `deep_link` with the non-delegation prompt target. Consumers cannot tell whether `primary_session_id` names the session that produced the digest summary or the session that should receive follow-up actions.
+**Severity:** Low - `src/api.rs:397-476`. The error, dirty, and clean idle digest branches can compute summary text/status from one session while replacing `primary_session_id` and `deep_link` with the non-delegation prompt target. Consumers cannot tell whether `primary_session_id` names the session that produced the digest summary/status or the session that should receive follow-up actions.
 
 **Current behavior:**
 - `primary_session_id` is used as the action target by `execute_project_action()`.
 - The same field is also serialized to clients as the digest's primary/deep-link session.
-- Dirty/idle branches can derive summary context from a delegation child while returning the parent/non-delegation session id.
+- Error, dirty, and idle branches can derive summary/status context from a delegation child while returning the parent/non-delegation session id.
 
 **Proposal:**
 - Split the internal digest model into explicit `summary_session_id` and `action_target_session_id` fields.
@@ -151,7 +480,7 @@ This overlaps with the active "Project `Fix It` action can target a terminal del
 
 ## `SessionPaneView` pending-prompt scroll exemption misses `showWaitingIndicator` dependency
 
-**Severity:** Low - `ui/src/SessionPaneView.tsx:2015-2075`. The scroll effect now checks `showWaitingIndicator` inside the `onlyPendingPromptsChanged` branch, but the effect dependency list does not include `showWaitingIndicator`.
+**Severity:** Low - `ui/src/SessionPaneView.tsx:2035`. The scroll effect now checks `showWaitingIndicator` inside the `onlyPendingPromptsChanged` branch, but the effect dependency list does not include `showWaitingIndicator`.
 
 **Current behavior:**
 - `showWaitingIndicator` can change through sending/busy state.
@@ -201,22 +530,6 @@ A future server adds a new status variant (`"queued"`, `"timing_out"`) silently 
 
 **Proposal:**
 - Replace `String` with a re-used `TelegramSessionStatus` enum that uses `#[serde(other)]` (mirroring `TelegramSessionFetchSession`).
-
-## Project digest test doesn't assert `deep_link`/`source_message_ids` consistency or sibling actions
-
-**Severity:** Medium - `src/tests/project_digest.rs:147-229`. The new `project_digest_routes_dirty_project_prompts_to_non_delegation_session` test verifies that `KeepIterating` routes to the parent session, but does NOT assert: (a) `digest.deep_link` contains the parent's session id, (b) `digest.source_message_ids` (if non-empty) reference messages in the parent (not the child), (c) the same routing applies to `AskAgentToCommit` (the second action that was newly added).
-
-The fix touches three sites (worktree_dirty: AskAgentToCommit, KeepIterating; idle: Continue) but the test exercises only `keep-iterating` end-to-end. A regression that only fixed one branch would still pass.
-
-**Current behavior:**
-- One test for `keep-iterating`.
-- No assertion on `deep_link` or `source_message_ids`.
-- `ask-agent-to-commit` and idle `continue` branches uncovered.
-
-**Proposal:**
-- Add `assert!(digest.deep_link.as_deref().unwrap().contains(parent_session_id))`.
-- Add a sibling test exercising `ask-agent-to-commit`.
-- Add a sibling test for the fully-idle branch with `continue`.
 
 ## Duplicate `let primary_session_id` rebindings in `src/api.rs` digest branches
 
@@ -678,22 +991,6 @@ Two same-revision remote `SessionCreated` events that differ only by attacker-ch
 - Fingerprint the normalized/localizable session payload, clearing `remote_id` before hashing.
 - Add a same-revision replay test where only inbound `remoteId` differs.
 
-## Marker context-menu focus restore targets the message shell
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:1143` stores the message shell as the right-click marker menu focus-restore target instead of the actual marker metadata trigger.
-
-Focus restoration can land on a `tabIndex=-1` wrapper with no role or label, and keyboard activation from that wrapper cannot reopen the marker menu.
-
-**Current behavior:**
-- Context-menu open paths can store the message shell as the restore target.
-- The shell is programmatically focusable but not an operable, labelled trigger.
-- Restored keyboard users can be stranded away from the marker menu trigger.
-- The current test asserts focus returns to the shell, codifying the weaker behavior.
-
-**Proposal:**
-- Pass the resolved marker trigger element for context-menu opens.
-- Or make the shell itself a real labelled trigger with equivalent keyboard behavior.
-
 ## Telegram bot token is persisted as plaintext in `telegram-bot.json`
 
 **Severity:** Medium - `TelegramUiConfig.bot_token` is serialized directly into `~/.termal/telegram-bot.json`.
@@ -708,87 +1005,6 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 **Proposal:**
 - Move the token to an OS secret store, or keep token configuration env-only until protected storage exists.
 - If file persistence stays, add explicit Windows ACL handling and document backup/sync exposure.
-
-## Marker create form uses menu semantics for form controls
-
-**Severity:** Medium - `ui/src/panels/conversation-markers.tsx:663`. The marker popup keeps `role="menu"` while rendering a marker-label form with an `<input>` and normal buttons.
-
-ARIA menus should contain menu items, not arbitrary form controls. The current split-mode menu/form hybrid can produce inconsistent assistive-technology and keyboard behavior, especially while create mode is active.
-
-**Current behavior:**
-- Create form renders inside the same `role="menu"` container as action menuitems.
-- Form input and buttons are ordinary form controls, not menuitems.
-- Other menu actions can remain present while the draft name is being edited.
-
-**Proposal:**
-- Switch create mode to dialog/popover semantics.
-- Or scope/remove the menu role so only the action-list state is exposed as a menu.
-- Keep focus contained to one interaction model while the draft name is being edited.
-
-## Three sites must keep the marker name 120-char limit in sync
-
-**Severity:** Note - `ui/src/panels/conversation-markers.tsx:62-63, 632, 644` defines `DEFAULT_CONVERSATION_MARKER_NAME = "Checkpoint"` and `CONVERSATION_MARKER_NAME_MAX_LENGTH = 120` as module-level constants. The Rust backend enforces the same at `src/session_markers.rs:8` (`CONVERSATION_MARKER_NAME_MAX_CHARS: usize = 120`) with default-name fallback at `app-session-actions.ts:2216`. Three sites must stay in sync.
-
-**Current behavior:**
-- TS module constants for default-name and max-length.
-- Rust enforces same limits via separate constant.
-- TS fallback at `app-session-actions.ts:2216` echoes the same default name.
-- A future change to the limit on the server would silently truncate UI input until the constants are updated.
-
-**Proposal:**
-- Document the contract in a comment at the constant definition site.
-- Or expose the limit via the wire protocol (e.g., `serverCapabilities.markerNameMaxLength`).
-
-## Marker name input HTML `maxLength` counts UTF-16 vs server counts codepoints
-
-**Severity:** Note - `ui/src/panels/conversation-markers.tsx:701`. The new input uses `maxLength={CONVERSATION_MARKER_NAME_MAX_LENGTH}` (120). HTML `maxLength` counts UTF-16 code units, not Unicode codepoints. The Rust validator at `src/session_markers.rs:526` uses `.chars().count() > 120` (codepoints). For supplementary-plane characters (e.g., emoji), the UI is more conservative than the server (allowing only ~60 emoji vs. server's 120 codepoints).
-
-**Current behavior:**
-- HTML `maxLength` counts UTF-16 code units.
-- Rust validator counts codepoints.
-- Emoji input is cut off in UI before server limit is reached.
-
-**Proposal:**
-- Use a controlled-input length check on the codepoint count.
-- Or document the intentional UI-side conservatism.
-
-## `window.resize` close-handler interacts awkwardly with mobile soft keyboards
-
-**Severity:** Note - `ui/src/panels/conversation-markers.tsx:613`. The pointer/keyboard menu-dismissal effect installs a `window.addEventListener("resize", handleViewportMove)`. With the form mode now exposing a text input, mobile-browser keyboard popups (which fire `resize`) would close the menu mid-typing.
-
-On desktop this is rare, but it's a regression from the pre-form behavior where typing wasn't possible inside the menu.
-
-**Current behavior:**
-- Resize event closes menu.
-- Mobile soft keyboard fires resize on appearance.
-- Form mode would close mid-typing on mobile.
-
-**Proposal:**
-- Skip the resize/scroll close handlers when `contextMenu.mode === "create"`.
-- Or add a small-resize tolerance.
-
-## Form keyDown guard only short-circuits HTMLInputElement, not buttons
-
-**Severity:** Note - `ui/src/panels/conversation-markers.tsx:838-849`. `handleConversationMarkerContextMenuKeyDown` only short-circuits for `HTMLInputElement` targets, not for `HTMLButtonElement` (the submit/cancel buttons). When focus is on the `Create marker` or `Cancel` button, pressing arrow keys falls through to `getConversationMarkerContextMenuItems(menu)` and moves focus to other menuitems, breaking the form's local focus context.
-
-**Current behavior:**
-- Input target → short-circuit (form-local focus).
-- Button target → falls through to menuitem navigation.
-- Keyboard users tabbing to submit button and pressing Down jump unexpectedly.
-
-**Proposal:**
-- Extend the early-return guard to include any focus target inside `.conversation-marker-context-menu-form` (matches `closest()`).
-
-## Marker create form coverage gaps in `AgentSessionPanel.test.tsx`
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:875-883`. Only one test exercises the custom-name path. There is no focused test for: (a) whitespace-only input keeping submit disabled; (b) initial input focus/select; (c) pressing `Cancel` without invoking `onCreateConversationMarker`; (d) pressing `Escape` inside the input canceling and restoring focus to the trigger; (e) whitespace trim mid-string (`"  Review later  "` produces `"Review later"`); (f) non-empty draftName persistence vs reset across menu close-reopen.
-
-**Current behavior:**
-- One custom-name test.
-- Several form-behavior branches uncovered.
-
-**Proposal:**
-- Add per-behavior tests.
 
 ## `App.scroll-behavior.test.tsx` mid-test mock override needs documenting comment
 
@@ -817,31 +1033,6 @@ Comments are documentation-only mitigation — they don't fail when the contract
 - Or refactor `wire_session_summary_from_record` to call `wire_session_from_record` and then strip messages/messages_loaded.
 - Or introduce a separate `SessionSummary` wire struct that omits `messages`/`messages_loaded` (eliminates the duplicate field list naturally).
 
-## `exposesMarkerMenu = true` constant leaves dead conditional branches
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1115-1117`. Round 71 collapsed `canOpenMarkerMenu = "assistant" || "you"` to a hard-coded constant `exposesMarkerMenu = true` (closes round-70 finding). The conditional branches that gate on it (`exposesMarkerMenu ? -1 : undefined`, `exposesMarkerMenu ? <Provider> : rendered`, etc.) are now dead code paths that survive only as historical scaffolding.
-
-**Current behavior:**
-- `exposesMarkerMenu` is unconditionally `true`.
-- Conditional branches still wrap the affordance.
-- Comment explains the intent but the code shape contradicts it.
-
-**Proposal:**
-- Remove the conditionals (always wrap in provider, always set tabIndex).
-- Or reintroduce a meaningful predicate.
-
-## CSS class `conversation-marker-navigator-copy` is stale after Navigator removal
-
-**Severity:** Note - `ui/src/styles.css:3966-3990`. The CSS class survives even though `ConversationMarkerNavigator` was deleted in round 71. The class name still references the removed component and is now used only by `ConversationMarkerFloatingWindow`.
-
-**Current behavior:**
-- Class name references `Navigator`.
-- Only consumer is `ConversationMarkerFloatingWindow`.
-- Future readers will hunt for `Navigator` and find nothing.
-
-**Proposal:**
-- Rename to `conversation-marker-floating-window-copy`.
-
 ## `ascii_word_boundary_between` widens accept set vs. pre-refactor helpers
 
 **Severity:** Low - `src/telegram.rs:508-521`. `ascii_word_boundary_between` returns `true` whenever EITHER `before` or `after` is non-alphanumeric. The pre-refactor `ascii_word_boundary_at` returned false when `before` was alphanumeric AND `current` was non-alphanumeric.
@@ -867,30 +1058,6 @@ In practice `windows().enumerate()` only matches alphanumeric needles ("telegram
 
 **Proposal:**
 - Drive the same scenario through a public ingestion path (e.g., feed a remote state snapshot via `apply_remote_state_snapshot`).
-
-## Marker close-button cleanup-only effect uses cryptic arrow-implicit-return form
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1042-1045`. The cleanup-only effect `useEffect(() => cancelMarkerPanelFocusRestore, [...])` uses arrow-implicit-return where the body's evaluated value (the function reference) becomes the cleanup function. This is functionally correct but easy to misread as "the effect's body".
-
-**Current behavior:**
-- Arrow-implicit-return returns cleanup function.
-- A future contributor adding a body statement would need to switch to braces, easily breaking the cleanup wiring.
-
-**Proposal:**
-- Use the explicit form: `useEffect(() => { return cancelMarkerPanelFocusRestore; }, [...])`.
-- Or add an inline comment naming the pattern.
-
-## Empty-state branch lacks `ref` and `tabIndex` for marker focus restoration
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1212-1225`. The empty-state early return creates a different `<div className="session-conversation-page">` element WITHOUT `ref={conversationPageRef}` or `tabIndex={-1}`. The non-empty branch at line 1300-1306 has both. A focus-restore RAF that fires while in the empty branch has `conversationPageRef.current === null` and silently fails.
-
-**Current behavior:**
-- Empty-state div lacks ref/tabIndex.
-- Non-empty branch has both.
-- Focus-restore silently no-ops in empty branch.
-
-**Proposal:**
-- Consistently apply `ref={conversationPageRef}` and `tabIndex={-1}` to both branches.
 
 ## Cross-remote `remote_id` information leak in wire responses to remotes
 
@@ -2262,49 +2429,6 @@ The new design fixes the false-positive Low (verified by `accessToken=` and `csr
 **Proposal:**
 - Split into `pure_validate_telegram_config(...) -> Result<TelegramConfigNormalization, ApiError>` + `apply_telegram_config_normalization(...)` outside the lock.
 
-## ConversationOverviewRail "deferred build" test never exercises the deferred path
-
-**Severity:** Medium - uses `vi.useFakeTimers()` but never advances them past `CONVERSATION_OVERVIEW_FOCUSED_PROMPT_FALLBACK_DELAY_MS`. JSDOM lacks `requestIdleCallback`. The whole 50+ line scheduler is untested.
-
-`ui/src/panels/ConversationOverviewRail.test.tsx:122-188`. The test verifies "stale projection while focused" but not "deferred catch-up". A regression that never fires the rebuild would still pass.
-
-**Current behavior:**
-- `vi.useFakeTimers()` set but never advanced.
-- `setTimeout` fallback never fires during test.
-- Idle-callback path can't be tested under JSDOM.
-
-**Proposal:**
-- Explicitly assert the timer was scheduled, then advance with `act(() => vi.runAllTimers())` and verify the rebuild result.
-- Add a `delete window.requestIdleCallback` test variant exercising the `setTimeout` fallback.
-
-## ConversationOverviewRail roving tabindex still pinned to first segment
-
-**Severity:** Medium - `tabIndex={index === 0 ? 0 : -1}` is a single-tab-stop pattern, not true roving. Tab-out and Tab-back lands on first segment, not most-recently-focused.
-
-`ui/src/panels/ConversationOverviewRail.tsx:298`. The round-53 finding was NOT actually closed. Existing test only checks arrow-key focus moves; doesn't assert `tabIndex` updates after focus changes nor a Tab-out/Tab-back round trip.
-
-**Current behavior:**
-- `tabIndex` is purely a function of rendered index.
-- Arrow-key focus moves don't update tabIndex.
-- Tab-out and Tab-back resets focus to first segment.
-
-**Proposal:**
-- Track `focusedSegmentIndex` in state, set it on segment focus, render `tabIndex={index === focusedSegmentIndex ? 0 : -1}`.
-
-## `isComposerPromptFocused` couples ConversationOverviewRail to `.composer-input` CSS class
-
-**Severity:** Medium - matches `HTMLTextAreaElement` with `classList.contains("composer-input")`. Any rename of `.composer-input` silently breaks the focus-aware projection deferral.
-
-`ui/src/panels/ConversationOverviewRail.tsx:60-66`. CSS-class-based coupling between two unrelated components.
-
-**Current behavior:**
-- ConversationOverviewRail reads `.composer-input` class to detect focus.
-- AgentSessionPanel owns the class.
-- No shared constant or contract.
-
-**Proposal:**
-- Add a `data-conversation-composer-input="true"` attribute on the textarea, or export a `COMPOSER_INPUT_CLASS_NAME` constant from a shared module.
-
 ## `POST /api/telegram/test` 429 missing `Retry-After` header / cooldown duration
 
 **Severity:** Low - body says "Try again in a moment." but doesn't include a numeric duration nor an HTTP `Retry-After` header.
@@ -2675,68 +2799,6 @@ The new design fixes the false-positive Low (verified by `accessToken=` and `csr
 - Fold the Telegram config bag into `UpdateAppSettingsRequest` with a `telegram: Option<UpdateTelegramConfigRequest>` field, returning `StateResponse` like every other setting.
 - Or document explicitly in `docs/features/` why Telegram is intentionally separated (e.g., "secret tokens kept out of the broadcast snapshot").
 
-## Focused-composer overview projection deferral can stay stale indefinitely
-
-**Severity:** Medium - the rail can keep using an old projection while the composer is focused and the browser keeps reporting low idle time.
-
-`ui/src/panels/ConversationOverviewRail.tsx:480` reschedules `requestIdleCallback` when the composer is focused and `deadline.timeRemaining() < 8`, but the request has no timeout and does not honor `deadline.didTimeout`. In browsers with `requestIdleCallback`, Chrome never uses the 240 ms `setTimeout` fallback, so steady typing, streaming, or a busy main thread can leave new messages, markers, tail items, and navigation targets out of the overview until blur or a sufficiently idle frame.
-
-**Current behavior:**
-- Focused composer state causes the hook to return the previous projection.
-- The `requestIdleCallback` path can reschedule indefinitely on low-time deadlines.
-- Marker/layout/tail/transcript changes are all deferred through the same path.
-
-**Proposal:**
-- Bound idle deferral with `requestIdleCallback(..., { timeout })` and honor `deadline.didTimeout`, or pair it with a hard timeout.
-- Rebuild immediately for marker/layout/tail or message identity changes when the prior projection is no longer valid.
-- Add timer and low-time `requestIdleCallback` coverage proving the latest projection appears while focus remains in the composer.
-
-## `ConversationOverviewRail` roving tabindex stuck on the first segment
-
-**Severity:** Medium - keyboard focus continuity is broken. `tabIndex={index === 0 ? 0 : -1}` is purely a function of the rendered index, not of "currently focused". After arrow-key navigation focuses a non-first segment, Tab-leaving and Tab-returning resets focus to the first segment.
-
-`ui/src/panels/ConversationOverviewRail.tsx:288`. The standard roving tabindex pattern requires the focused element to carry `tabIndex=0` while all others carry `-1`. As implemented, the rail does not track which segment is focused, so Tab-out-and-back loses position. Combined with the documented arrow-key navigation, this is a regression for keyboard users navigating long transcripts.
-
-**Current behavior:**
-- Only segment index 0 carries `tabIndex=0`; all others carry `-1`.
-- Arrow-key navigation moves focus but doesn't update tabIndex.
-- Tab-out-and-back returns focus to segment 0, not the last interacted segment.
-
-**Proposal:**
-- Track `focusedSegmentIndex` in state, set it on segment focus, render `tabIndex={index === focusedSegmentIndex ? 0 : -1}`.
-- Add coverage that focuses a non-first segment, blurs the rail, refocuses, and asserts focus restores to the previously-interacted segment.
-
-## `ConversationOverviewRail` `event.preventDefault()` in compact-mode pointerdown blocks default focus
-
-**Severity:** Medium - in compact mode the outer rail has `tabIndex={0}` to enable keyboard navigation, but `handleRailPointerDown` calls `event.preventDefault()` unconditionally, suppressing the default focus assignment on pointerdown. Click-then-arrow-keys interaction is broken; the user must Tab to the rail first.
-
-`ui/src/panels/ConversationOverviewRail.tsx:115-131`. The preventDefault is needed to suppress text selection during drag, but it also blocks the browser from moving focus to the rail. Clicking on the compact rail navigates to the chosen segment but leaves focus elsewhere; subsequent arrow keys do not reach `handleCompactRailKeyDown`.
-
-**Current behavior:**
-- Rail has `tabIndex={0}` in compact mode.
-- `handleRailPointerDown` calls `event.preventDefault()` unconditionally.
-- Click does not move focus to the rail; arrow keys after click don't navigate.
-
-**Proposal:**
-- Conditionally call `event.preventDefault()` only when not in compact mode.
-- Or explicitly call `event.currentTarget.focus()` after preventDefault in compact mode.
-- Add coverage that clicks the compact rail and asserts subsequent ArrowDown navigates.
-
-## Compact `ConversationOverviewRail` hides operable semantics behind a navigation landmark
-
-**Severity:** Low - compact mode makes the rail keyboard-focusable and operable, but screen readers only receive a `navigation` landmark with hidden segment semantics.
-
-`ui/src/panels/ConversationOverviewRail.tsx:235`. Once the overview crosses the compact threshold, per-segment buttons collapse into a single focusable rail. Keyboard handlers still make it an interactive control, but the element keeps `role="navigation"` and no equivalent current-position or segment-label semantics are exposed.
-
-**Current behavior:**
-- Compact mode has keyboard behavior on the outer rail.
-- Segment semantics are no longer represented as individual buttons.
-- Assistive tech sees a navigation landmark rather than an operable widget with position/selection state.
-
-**Proposal:**
-- Model compact mode with an appropriate widget role and ARIA state, or preserve accessible reduced segment buttons while using the compact visual track.
-- Add accessibility-focused coverage for compact mode role/name/state.
-
 ## `validate_telegram_config` does TOCTOU between in-memory validation and on-disk persistence
 
 **Severity:** Low - the validation reads `inner.projects` and `inner.sessions` while holding the state mutex, releases the lock, then `persist_telegram_bot_file(&file)?` writes. Between release and write, another thread could delete the validated project, leaving a persisted config that references a now-missing project.
@@ -2896,53 +2958,6 @@ The new design fixes the false-positive Low (verified by `accessToken=` and `csr
 - Or snapshot and roll back forwarding state on prompt-send failure.
 - Add send-failure and post-send digest-failure regressions.
 
-## Telegram assistant forwarding can capture a pre-existing active turn
-
-**Severity:** Medium - a Telegram-originated prompt can cause the relay to later forward assistant text from an already-active desktop/local turn.
-
-`src/telegram.rs:854` arms assistant forwarding by fetching the current session and recording the latest assistant text cursor before the Telegram prompt is accepted. If that cursor points at a partially streaming assistant message from an existing local turn, later growth of that message can look like a truncated Telegram-forwarded message and be sent to the linked Telegram chat even though it predates the Telegram prompt.
-
-**Current behavior:**
-- `arm_assistant_forwarding_for_telegram_prompt` baselines the latest assistant text from the current primary session.
-- It can run while the session is already active for a non-Telegram turn.
-- Later growth of that pre-existing assistant text can be treated as reply text to forward.
-
-**Proposal:**
-- Only baseline settled assistant text, or store an explicit pre-prompt boundary that skips the currently active turn without enabling truncated-resend forwarding.
-- Add coverage where a desktop/local turn is already streaming before a Telegram prompt is forwarded.
-
-## Armed Telegram forwarding is cleared when approval pauses before assistant text
-
-**Severity:** High - `Approval` is treated as settled even when the armed session has not produced assistant text yet, so a Telegram-originated turn that pauses for approval can lose its forwarding arm before the real reply arrives.
-
-`src/telegram.rs:1308`. The current drain path clears `forward_next_assistant_message_session_id` when the armed session reaches an approval-like settled state with no assistant `Text`. Approval pauses can occur before the assistant reply, so the eventual post-approval message is later treated as an unarmed first-seen message and baselined instead of forwarded to Telegram.
-
-**Current behavior:**
-- `forward_relevant_assistant_messages` prioritizes the armed session over the digest primary.
-- An armed session entering `Approval` with no assistant text clears the armed id.
-- The post-approval assistant reply is no longer associated with the Telegram prompt.
-- The first reply after approval can be baselined instead of forwarded.
-
-**Proposal:**
-- Do not clear the armed id on `Approval` without assistant text.
-- Track an explicit "armed through approval" / pending state so the first post-approval assistant text still forwards while unrelated sessions cannot starve forever.
-- Add a regression for "armed Telegram session enters approval with no assistant text, then forwards the post-approval reply."
-
-## Telegram assistant forwarding cursor state is global rather than per-session
-
-**Severity:** Medium - forwarding is armed for a specific session via `forward_next_assistant_message_session_id`, but the `last_forwarded_assistant_message_id` / `_text_chars` cursor is a single global value. Polling another primary can overwrite the baseline.
-
-`src/telegram.rs`. Round 55 added `forward_relevant_assistant_messages` which correctly drains the armed session first, then falls back to the digest primary. The armed-vs-primary routing is now correct, but the underlying cursor state still has a single bucket. If the digest primary changes after baseline capture, polling the new primary overwrites the cursor for the armed session.
-
-**Current behavior:**
-- Telegram prompt forwarding can involve both an armed session and the digest primary.
-- Assistant forwarding cursor state is global rather than keyed by session.
-- Polling a different session can overwrite or invalidate another session's baseline.
-
-**Proposal:**
-- Track assistant-forwarding cursors per session id.
-- Or have the forwarder carry an explicit `{ session_id, cursor }` state object.
-
 ## Telegram long-message forwarding loses chunk-level progress on failure
 
 **Severity:** Medium - a failure after one chunk of a long assistant message causes the next retry to resend already-delivered chunks.
@@ -2973,6 +2988,20 @@ The new design fixes the false-positive Low (verified by `accessToken=` and `csr
 - Promote the shared shell + item rules into a base `.context-menu` set.
 - Let `.pane-tab-context-menu` and `.conversation-marker-context-menu` carry only their unique tweaks (`min-width`, `border-radius`, `border`, separator).
 - Defer if the variations are deliberately divergent — but mark this as a known cluster so the third instance triggers extraction.
+
+## Create-marker dialog survives viewport resize without reclamping
+
+**Severity:** Low - `ui/src/panels/conversation-markers.tsx:615`. The marker action menu used to close on window resize or viewport movement. Create mode now intentionally stays open so mobile soft-keyboard resize does not dismiss the form, but the fixed-position dialog is only clamped when `contextMenu` state changes. A viewport shrink, zoom change, or mobile keyboard resize can leave the dialog partly off-screen with input or buttons unreachable.
+
+**Current behavior:**
+- Create mode ignores resize/viewport-move events.
+- The stored fixed position is not recomputed on that event.
+- The dialog can remain outside the viewport margins after the viewport changes.
+
+**Proposal:**
+- Re-clamp and update the stored `left`/`top` position while staying open in create mode.
+- Or close the create dialog with focus restore on viewport movement.
+- Add a regression test that shrinks the viewport and asserts the create dialog remains within margins.
 
 ## `SessionPaneView.tsx` near-bottom early-out is captured at `isSending` flip, not reactive
 
@@ -4025,6 +4054,18 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
+- [ ] P2: Cover Telegram assistant-forwarding active-session no-baseline behavior:
+  add a regression where a Telegram prompt is queued behind an already-active session with no assistant text, then the pre-existing turn settles; assert the old turn is not forwarded as the Telegram reply.
+- [ ] P2: Cover Telegram assistant-forwarding cursor persistence:
+  add a load/persist or serde round-trip test with non-empty `assistantForwardingCursors`, including the intended empty-map serialization behavior.
+- [ ] P2: Cover real composer-to-overview focus detection:
+  render the real composer/overview path or assert the real composer emits `data-conversation-composer-input`, so `ConversationOverviewRail` deferral does not depend only on synthetic test fixtures.
+- [ ] P2: Cover `OrchestratorsUpdated` remote replay ownership normalization:
+  send duplicate same-revision orchestrator updates whose embedded sessions differ only by inbound `remoteId`, and assert replay suppression treats them as duplicates after localization.
+- [ ] P2: Cover fit-to-frame Mermaid preview behavior with wide diagrams:
+  add a `MarkdownContent` test using `fillMermaidAvailableSpace` with a wide Mermaid `viewBox` inside a constrained parent, and assert the fit-mode iframe `srcdoc` plus frame sizing contract.
+- [ ] P2: Cover editable SourcePanel Mermaid fit-mode iframe wiring:
+  drive the `preserveMermaidSource` branch through SourcePanel or `MarkdownContent` and assert the Mermaid iframe `srcdoc` contains fit-mode SVG CSS, not just wrapper classes.
 - [ ] P2: Add Telegram settings API/security regressions:
   cover plaintext token-at-rest exposure, corrupt-backup permission hardening, Windows ACL/secret-store fallback behavior, global/concurrent rate limiting that cannot be bypassed by rotating token strings, and bounded rate-limit cache retention.
 - [ ] P2: Cover post-validation Telegram settings sanitization:
@@ -4034,19 +4075,13 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Add Telegram preferences panel RTL coverage:
   cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
 - [ ] P2: Add Telegram assistant-forwarding ownership/order regressions:
-  cover an already-active non-Telegram turn before a Telegram prompt, prompt POST failure after forwarding state is prepared, post-send digest failure, a digest primary-session switch before the armed Telegram reply settles, an armed session entering approval with no assistant text before its post-approval reply, and two sessions proving assistant-forwarding cursors are session-scoped.
+  cover prompt POST failure after forwarding state is prepared, post-send digest failure, and a digest primary-session switch before the armed Telegram reply settles.
 - [ ] P2: Add Telegram long-message chunk retry and UTF-16 chunking coverage:
   fail a later chunk after an earlier chunk is sent and assert retry does not duplicate it; add emoji/surrogate-pair-heavy text proving chunks respect Telegram's UTF-16 code-unit limit.
-- [ ] P2: Cover project digest non-delegation prompt targets in clean and error branches:
-  add clean-worktree `continue` and error-state `fix-it` cases where the newest relevant session is a delegation child; assert prompt dispatch and deep links target the parent/non-delegation session.
 - [ ] P2: Cover Telegram `/sessions` state contract and command dispatch:
   add a serde sample for the `/api/state` projection (`projectId`, `messageCount`) and a command-path test proving `/sessions` calls the state endpoint and sends the rendered list.
 - [ ] P2: Cover Telegram callback action failure handling:
   drive a dispatch failure through `handle_telegram_callback_query` or an extracted seam and assert callback answer text, chat error text, and no digest refresh.
-- [ ] P2: Strengthen Telegram prompt-error redaction test:
-  place the token before the long truncation tail or assert `<redacted>` appears so the test fails if sanitization regresses but truncation still removes the raw token.
-- [ ] P2: Add focused-composer overview projection scheduler coverage:
-  mock repeated low-time `requestIdleCallback` deadlines while the composer remains focused, advance any hard timeout/fallback, and assert the latest rerendered messages/markers/tail items drive the rail projection without requiring blur.
 - [ ] P2: Add `messageCreatedDeltaIsNoOp` semantic-change negatives:
   keep id/index/preview/count/stamp equal while changing message payload and assert a material apply; include same-id pending prompt cleanup coverage.
 - [ ] P2: Add near-bottom prompt-send early-return scroll coverage:
@@ -4139,8 +4174,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   mount an overview-controller harness, flush one or two frames so a queued second-rAF or FIFO task is alive, then unmount and flush the remaining frames asserting that `setIsRailReady(true)` was never observed and the FIFO is empty. The current test never unmounts mid-pending so the rAF cancellation paths and FIFO splice-by-task-id are unexercised.
 - [ ] P2: Finish splitting the remaining marker-menu create/remove test:
   the marker-menu coverage now has focused cases for keyboard trigger, portal cleanup, scroll/resize close, explicit trigger contract, and clamp fallback. The original create/remove test still combines add/remove, Escape focus restore, ArrowDown navigation, and rect-based clamp behavior; split the remaining assertions if it grows again.
-- [ ] P2: Add compact `ConversationOverviewRail` accessibility coverage:
-  assert the compact rail exposes an operable role, accessible name, and current/position state instead of only a `navigation` landmark with hidden segment semantics.
 - [ ] P2: Add `ConversationOverviewRail` compact-mode keyboard navigation coverage:
   cover `Enter`, `Space`, `ArrowDown`, `ArrowUp`, `Home` in compact mode (the existing `End` test only covers one key path). The `Enter`/`Space` path goes through `navigateToSegmentIndex(currentIndex)` and is meaningfully different from the arrow-key path; the arrow-key path resolves the *current* segment from `viewportProjection.viewportTopPx`. Cover the `viewportProjection.viewportTopPx → currentItem → currentIndex → findOverviewSegmentIndexForItemIndex` chain so a regression that broke it is caught.
 - [ ] P2: Pin the `ConversationOverviewRail` compact-vs-per-segment threshold boundary:
@@ -4159,8 +4192,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   extend `AgentSessionPanel.test.tsx:1493-1525` so the first render includes a newest-tail message and excludes an early message, then assert the early/full transcript appears only after the scheduled hydration delay.
 - [ ] P2: Add intermediate-checkpoint assertion to the deferred-tail-window test:
   `AgentSessionPanel.test.tsx:1493-1525` asserts only that the rail is absent immediately and present after 1.5s of advanced timers. A regression that made the rail render *immediately* (defeating the deferral) would still pass the post-advance assertion. Add an intermediate `act(() => vi.advanceTimersByTime(100))` checkpoint asserting the rail is *still* absent. Or assert directly on a transcript-hydration symptom (count of mounted message slots is small at t=0 and large at t=1500ms).
-- [ ] P2: Cover roving tabindex update in `ConversationOverviewRail`:
-  the per-segment buttons render with `tabIndex={index === 0 ? 0 : -1}` regardless of focus. Add a test that focuses a non-first segment via keyboard, then blurs and refocuses the rail, and asserts focus restores to the previously-interacted segment (currently fails because tabIndex is purely a function of index).
 - [ ] P2: Add `get_session_tail` boundary and error coverage:
   `src/tests/http_routes.rs:138` covers only happy path (`tail=3` on 5 messages). Add cases for (a) `tail=0` on a populated session asserting `messages: [], messages_loaded: false`, (b) `tail >= len(messages)` where `start_index == 0` asserting `messages_loaded` propagates from the source, (c) `tail > SESSION_TAIL_HYDRATION_MAX_MESSAGES = 500` asserting the silent cap (and ideally fail-loud after the cap-disclosure fix lands), (d) missing session id 404, (e) hidden session, (f) `?tail=abc` malformed value, (g) tail-then-full id-overlap proving the wire-level guarantee.
 - [ ] P2: Add `get_session_tail` remote-proxy hydration coverage:
@@ -4235,18 +4266,12 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add an injectable or testable relay runtime so startup from saved settings, implicit first subscribed-project fallback, invalid/missing config stop, config-save start/stop/restart, deleted-project reconciliation, runtime status `running: true` + `inProcess`, and graceful-shutdown stop are covered despite the production path's `#[cfg(not(test))]` guards.
 - [ ] P2: Cover Telegram relay stop/restart quiescence:
   simulate disable or config retarget while an old relay is in flight and assert stale-generation polling/action handling cannot continue after status reports the replacement or stopped state.
-- [ ] P2: Cover remote SessionCreated replay identity normalization:
-  send two same-revision remote `SessionCreated` payloads that differ only by inbound `remoteId` and assert replay suppression treats them as duplicates after localization.
-- [ ] P2: Cover SessionPaneView remote delegation action capability wiring:
-  render `SessionPaneView` with local, remote-project, missing-project, projectless remote-proxy, and conflicting `session.remoteId = "ssh-lab"` plus local-project scenarios; assert delegation row Open / Insert / Cancel actions and the composer Delegate action follow the production `isLocalSessionRemote(...)` wiring, not only helper-level availability checks.
 - [ ] P2: Add component-level session tab tooltip remote-owner coverage:
   render tab tooltips for projectless, missing-project, missing-remote, and conflicting session/project remote proxy sessions whose summaries carry `remoteId`, complementing formatter-level coverage for session-owner precedence.
 - [ ] P2: Cover SessionPaneView composer delegation click-through:
   mock `spawnDelegationCommand`, click the composer Delegate action through `SessionPaneView`, and assert the active parent session drives the payload, success clears the draft, command-error handling preserves it, and composer errors surface.
 - [ ] P2: Cover remote-sync embedded remote-owner clearing:
   seed a remote snapshot session with attacker-chosen `remoteId`, localize it, and assert trusted `SessionRecord.remote_id` metadata is preserved while the embedded `record.session.remote_id` is cleared and local wire projections re-emit only trusted ownership.
-- [ ] P2: Cover marker create-form edge behavior:
-  assert whitespace-only labels keep submit disabled, the input receives focus/select, trimmed labels are submitted, Cancel does not create a marker, Escape cancels and restores focus, and draft state resets or persists only by the documented rules.
 - [ ] P2: Cover marker context-menu restore target and create-mode semantics:
   open a marker menu via right-click and keyboard trigger, close it, and assert focus returns to the actual labelled trigger and Enter/Space can reopen the menu; add an accessibility regression for create mode so form controls are not exposed as invalid menu children.
 - [ ] P2: Cover marker-window focus-restore cancellation:

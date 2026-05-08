@@ -3963,13 +3963,13 @@ textarea {
     0 0 0 0.3rem var(--accent-blue-soft);
 }
 
-.conversation-marker-navigator-copy,
+.conversation-marker-floating-window-copy,
 .conversation-marker-nav-controls {
   display: flex;
   align-items: center;
 }
 
-.conversation-marker-navigator-copy {
+.conversation-marker-floating-window-copy {
   gap: var(--space-xs);
   min-width: 0;
 }
@@ -4557,13 +4557,16 @@ textarea {
 }
 
 .conversation-live-tail {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
   display: grid;
   gap: var(--message-stack-gap);
   align-content: start;
   padding-bottom: 1px;
+}
+
+.conversation-live-tail.is-pinned {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
 }
 
 .activity-card-live {

@@ -206,6 +206,19 @@ fn project_digest_routes_dirty_project_prompts_to_non_delegation_session() {
         digest.primary_session_id.as_deref(),
         Some(parent_session_id.as_str())
     );
+    assert_eq!(
+        digest.deep_link.as_deref(),
+        Some(format!("/?projectId={project_id}&sessionId={parent_session_id}").as_str())
+    );
+    assert!(digest.source_message_ids.is_empty());
+    assert_eq!(
+        digest
+            .proposed_actions
+            .iter()
+            .map(|action| action.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["review-in-termal", "ask-agent-to-commit", "keep-iterating"]
+    );
 
     state
         .execute_project_action(&project_id, "keep-iterating")
@@ -226,6 +239,160 @@ fn project_digest_routes_dirty_project_prompts_to_non_delegation_session() {
     }
 
     fs::remove_dir_all(repo_root).unwrap();
+}
+
+#[test]
+fn project_digest_routes_clean_continue_to_non_delegation_session() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!(
+        "termal-project-clean-delegation-target-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    let project_id = create_test_project(&state, &root, "Clean Delegation Target Project");
+    let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let child_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let child_message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &child_session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: child_message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Delegation found no changes to make.".to_owned(),
+                expanded_text: None,
+            },
+        )
+        .unwrap();
+    let (runtime, input_rx) = test_codex_runtime_handle("project-clean-delegation-target");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let parent_index = inner.find_session_index(&parent_session_id).unwrap();
+        inner.sessions[parent_index].runtime = SessionRuntime::Codex(runtime);
+        let child_index = inner.find_session_index(&child_session_id).unwrap();
+        inner.sessions[child_index].session.parent_delegation_id =
+            Some("delegation-finished".to_owned());
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    let digest = state.project_digest(&project_id).unwrap();
+
+    assert_eq!(
+        digest.primary_session_id.as_deref(),
+        Some(parent_session_id.as_str())
+    );
+    assert_eq!(
+        digest.deep_link.as_deref(),
+        Some(format!("/?projectId={project_id}&sessionId={parent_session_id}").as_str())
+    );
+    assert_eq!(digest.source_message_ids, vec![child_message_id]);
+    assert_eq!(
+        digest
+            .proposed_actions
+            .iter()
+            .map(|action| action.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["continue", "review-in-termal"]
+    );
+
+    state
+        .execute_project_action(&project_id, "continue")
+        .unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::Prompt {
+            session_id,
+            command,
+        } => {
+            assert_eq!(session_id, parent_session_id);
+            assert_eq!(command.prompt, ProjectActionId::Continue.prompt().unwrap());
+        }
+        _ => panic!("expected parent prompt dispatch"),
+    }
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn project_digest_routes_error_fix_it_to_non_delegation_session() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!(
+        "termal-project-error-delegation-target-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    let project_id = create_test_project(&state, &root, "Error Delegation Target Project");
+    let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let child_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let child_message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &child_session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: child_message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Delegation failed while checking the project.".to_owned(),
+                expanded_text: None,
+            },
+        )
+        .unwrap();
+    let (runtime, input_rx) = test_codex_runtime_handle("project-error-delegation-target");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let parent_index = inner.find_session_index(&parent_session_id).unwrap();
+        inner.sessions[parent_index].runtime = SessionRuntime::Codex(runtime);
+        let child_index = inner.find_session_index(&child_session_id).unwrap();
+        inner.sessions[child_index].session.parent_delegation_id =
+            Some("delegation-failed".to_owned());
+        inner.sessions[child_index].session.status = SessionStatus::Error;
+        inner.sessions[child_index].session.preview =
+            "Delegation child failed after review.".to_owned();
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    let digest = state.project_digest(&project_id).unwrap();
+
+    assert_eq!(
+        digest.primary_session_id.as_deref(),
+        Some(parent_session_id.as_str())
+    );
+    assert_eq!(
+        digest.deep_link.as_deref(),
+        Some(format!("/?projectId={project_id}&sessionId={parent_session_id}").as_str())
+    );
+    assert_eq!(digest.current_status, "Delegation child failed after review.");
+    assert_eq!(digest.source_message_ids, vec![child_message_id]);
+    assert_eq!(
+        digest
+            .proposed_actions
+            .iter()
+            .map(|action| action.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["fix-it", "review-in-termal"]
+    );
+
+    state
+        .execute_project_action(&project_id, "fix-it")
+        .unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::Prompt {
+            session_id,
+            command,
+        } => {
+            assert_eq!(session_id, parent_session_id);
+            assert_eq!(command.prompt, ProjectActionId::FixIt.prompt().unwrap());
+        }
+        _ => panic!("expected parent prompt dispatch"),
+    }
+
+    fs::remove_dir_all(root).unwrap();
 }
 
 // Pins that dispatching the `approve` action on a project finds the

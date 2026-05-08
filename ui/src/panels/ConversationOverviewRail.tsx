@@ -77,6 +77,7 @@ export function ConversationOverviewRail({
   const dragPointerIdRef = useRef<number | null>(null);
   const dragStartedItemRef = useRef<HTMLElement | null>(null);
   const suppressNextClickRef = useRef(false);
+  const [focusedSegmentIndex, setFocusedSegmentIndex] = useState(0);
   const projection = useConversationOverviewProjection({
     layoutSnapshot,
     markers,
@@ -94,6 +95,18 @@ export function ConversationOverviewRail({
   );
   const shouldCompactSegments =
     segments.length > CONVERSATION_OVERVIEW_COMPACT_SEGMENT_THRESHOLD;
+  const currentViewportItem = findConversationOverviewItemAtY(
+    projection,
+    viewportProjection.viewportTopPx,
+  );
+  const currentViewportItemIndex = currentViewportItem
+    ? projection.items.indexOf(currentViewportItem)
+    : 0;
+  const currentSegmentIndex = findOverviewSegmentIndexForItemIndex(
+    segments,
+    currentViewportItemIndex,
+  );
+  const currentSegment = segments[currentSegmentIndex] ?? segments[0] ?? null;
   const compactVisualSegments = useMemo(
     () =>
       shouldCompactSegments
@@ -104,6 +117,12 @@ export function ConversationOverviewRail({
         : EMPTY_COMPACT_OVERVIEW_VISUAL_SEGMENTS,
     [projection.totalHeightPx, segments, shouldCompactSegments],
   );
+
+  useEffect(() => {
+    setFocusedSegmentIndex((index) =>
+      Math.min(index, Math.max(segments.length - 1, 0)),
+    );
+  }, [segments.length]);
 
   if (messages.length < minMessages || projection.items.length === 0) {
     return null;
@@ -137,6 +156,9 @@ export function ConversationOverviewRail({
       event.currentTarget.setPointerCapture(event.pointerId);
     }
     event.preventDefault();
+    if (shouldCompactSegments) {
+      event.currentTarget.focus({ preventScroll: true });
+    }
     navigateFromClientY(event.clientY);
   };
 
@@ -173,6 +195,7 @@ export function ConversationOverviewRail({
   };
 
   const focusOverviewSegmentAtIndex = (index: number) => {
+    setFocusedSegmentIndex(index);
     railRef.current
       ?.querySelector<HTMLButtonElement>(
         `[data-conversation-overview-index="${index}"]`,
@@ -211,30 +234,18 @@ export function ConversationOverviewRail({
   };
 
   const handleCompactRailKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const currentItem = findConversationOverviewItemAtY(
-      projection,
-      viewportProjection.viewportTopPx,
-    );
-    const currentItemIndex = currentItem
-      ? projection.items.indexOf(currentItem)
-      : 0;
-    const currentIndex = findOverviewSegmentIndexForItemIndex(
-      segments,
-      currentItemIndex,
-    );
-
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      navigateToSegmentIndex(currentIndex);
+      navigateToSegmentIndex(currentSegmentIndex);
       return;
     }
 
     const nextIndex = resolveOverviewSegmentKeyboardIndex(
       event.key,
-      currentIndex,
+      currentSegmentIndex,
       segments.length,
     );
-    if (nextIndex === null || nextIndex === currentIndex) {
+    if (nextIndex === null || nextIndex === currentSegmentIndex) {
       return;
     }
     event.preventDefault();
@@ -244,8 +255,17 @@ export function ConversationOverviewRail({
   return (
     <div
       aria-label="Conversation overview"
+      aria-orientation={shouldCompactSegments ? "vertical" : undefined}
+      aria-valuemax={shouldCompactSegments ? segments.length : undefined}
+      aria-valuemin={shouldCompactSegments ? 1 : undefined}
+      aria-valuenow={shouldCompactSegments ? currentSegmentIndex + 1 : undefined}
+      aria-valuetext={
+        shouldCompactSegments && currentSegment
+          ? overviewSegmentLabel(currentSegment, projection.items)
+          : undefined
+      }
       className="conversation-overview-rail"
-      role="navigation"
+      role={shouldCompactSegments ? "slider" : "navigation"}
       ref={railRef}
       onPointerDown={handleRailPointerDown}
       onPointerMove={handleRailPointerMove}
@@ -295,7 +315,8 @@ export function ConversationOverviewRail({
               top: `${segment.mapTopPx}px`,
               height: `${segment.mapHeightPx}px`,
             }}
-            tabIndex={index === 0 ? 0 : -1}
+            onFocus={() => setFocusedSegmentIndex(index)}
+            tabIndex={index === focusedSegmentIndex ? 0 : -1}
           />
         ))
       )}
@@ -461,14 +482,17 @@ function isComposerPromptFocused() {
   const activeElement = document.activeElement;
   return (
     activeElement instanceof HTMLTextAreaElement &&
-    activeElement.classList.contains("composer-input")
+    activeElement.dataset.conversationComposerInput === "true"
   );
 }
 
 function scheduleConversationOverviewProjectionBuild(run: () => void) {
   const idleWindow = window as Window &
     typeof globalThis & {
-      requestIdleCallback?: (callback: IdleRequestCallback) => number;
+      requestIdleCallback?: (
+        callback: IdleRequestCallback,
+        options?: IdleRequestOptions,
+      ) => number;
       cancelIdleCallback?: (handle: number) => void;
     };
 
@@ -477,20 +501,53 @@ function scheduleConversationOverviewProjectionBuild(run: () => void) {
     typeof idleWindow.cancelIdleCallback === "function"
   ) {
     let idleHandle: number | null = null;
-    const runWhenIdle: IdleRequestCallback = (deadline) => {
-      idleHandle = null;
-      if (isComposerPromptFocused() && deadline.timeRemaining() < 8) {
-        idleHandle = idleWindow.requestIdleCallback?.(runWhenIdle) ?? null;
-        return;
-      }
-      run();
-    };
-
-    idleHandle = idleWindow.requestIdleCallback(runWhenIdle);
-    return () => {
+    let timeoutId: number | null = null;
+    let didRun = false;
+    const clearScheduled = () => {
       if (idleHandle !== null) {
         idleWindow.cancelIdleCallback?.(idleHandle);
+        idleHandle = null;
       }
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+    const runOnce = () => {
+      if (didRun) {
+        return;
+      }
+      didRun = true;
+      clearScheduled();
+      run();
+    };
+    function scheduleIdle() {
+      idleHandle =
+        idleWindow.requestIdleCallback?.(runWhenIdle, {
+          timeout: CONVERSATION_OVERVIEW_FOCUSED_PROMPT_FALLBACK_DELAY_MS,
+        }) ?? null;
+    }
+    const runWhenIdle: IdleRequestCallback = (deadline) => {
+      idleHandle = null;
+      if (
+        isComposerPromptFocused() &&
+        deadline.timeRemaining() < 8 &&
+        !deadline.didTimeout
+      ) {
+        scheduleIdle();
+        return;
+      }
+      runOnce();
+    };
+
+    timeoutId = window.setTimeout(
+      runOnce,
+      CONVERSATION_OVERVIEW_FOCUSED_PROMPT_FALLBACK_DELAY_MS,
+    );
+    scheduleIdle();
+    return () => {
+      didRun = true;
+      clearScheduled();
     };
   }
 

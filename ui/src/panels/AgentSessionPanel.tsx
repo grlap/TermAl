@@ -464,6 +464,7 @@ export function AgentSessionPanel({
   paneId,
   viewMode,
   activeSessionId,
+  liveTailPinned = true,
   isLoading,
   isUpdating,
   showWaitingIndicator,
@@ -491,6 +492,7 @@ export function AgentSessionPanel({
   paneId: string;
   viewMode: PaneViewMode;
   activeSessionId: string | null;
+  liveTailPinned?: boolean;
   isLoading: boolean;
   isUpdating: boolean;
   showWaitingIndicator: boolean;
@@ -553,6 +555,7 @@ export function AgentSessionPanel({
       viewMode={viewMode}
       scrollContainerRef={scrollContainerRef}
       activeSessionId={activeSessionId}
+      liveTailPinned={liveTailPinned}
       isLoading={isLoading}
       isUpdating={isUpdating}
       showWaitingIndicator={showWaitingIndicator}
@@ -689,6 +692,7 @@ const SessionBody = memo(function SessionBody({
   viewMode,
   scrollContainerRef,
   activeSessionId,
+  liveTailPinned,
   isLoading,
   isUpdating,
   showWaitingIndicator,
@@ -716,6 +720,7 @@ const SessionBody = memo(function SessionBody({
   viewMode: PaneViewMode;
   scrollContainerRef: RefObject<HTMLElement | null>;
   activeSessionId: string | null;
+  liveTailPinned: boolean;
   isLoading: boolean;
   isUpdating: boolean;
   showWaitingIndicator: boolean;
@@ -795,6 +800,7 @@ const SessionBody = memo(function SessionBody({
           key={activeSession.id}
           renderMessageCard={renderMessageCard}
           session={activeSession}
+          liveTailPinned={liveTailPinned}
           scrollContainerRef={scrollContainerRef}
           isActive
           isLoading={isLoading}
@@ -861,6 +867,7 @@ const SessionBody = memo(function SessionBody({
   previous.viewMode === next.viewMode &&
   previous.scrollContainerRef === next.scrollContainerRef &&
   previous.activeSessionId === next.activeSessionId &&
+  previous.liveTailPinned === next.liveTailPinned &&
   previous.isLoading === next.isLoading &&
   previous.isUpdating === next.isUpdating &&
   previous.showWaitingIndicator === next.showWaitingIndicator &&
@@ -898,6 +905,7 @@ const SessionBody = memo(function SessionBody({
 const SessionConversationPage = memo(function SessionConversationPage({
   renderMessageCard,
   session,
+  liveTailPinned,
   scrollContainerRef,
   isActive,
   isLoading,
@@ -917,6 +925,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
 }: {
   renderMessageCard: RenderMessageCard;
   session: Session;
+  liveTailPinned: boolean;
   scrollContainerRef: RefObject<HTMLElement | null>;
   isActive: boolean;
   isLoading: boolean;
@@ -1052,10 +1061,9 @@ const SessionConversationPage = memo(function SessionConversationPage({
     }
   }, []);
 
-  useEffect(() => cancelMarkerPanelFocusRestore, [
-    cancelMarkerPanelFocusRestore,
-    session.id,
-  ]);
+  useEffect(() => {
+    return cancelMarkerPanelFocusRestore;
+  }, [cancelMarkerPanelFocusRestore, session.id]);
 
   const hideMarkerPanelAndRestoreFocus = useCallback(() => {
     setMarkerPanelVisibilityOverride(false);
@@ -1127,12 +1135,15 @@ const SessionConversationPage = memo(function SessionConversationPage({
         : undefined;
       // Markers are message-scoped, so all rendered message authors are
       // eligible. Nested native controls still keep their own context menu.
-      const exposesMarkerMenu = true;
       const handleMarkerContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
-        if (
-          !exposesMarkerMenu ||
-          !shouldOpenConversationMarkerContextMenu(event)
-        ) {
+        if (!shouldOpenConversationMarkerContextMenu(event)) {
+          return;
+        }
+        const trigger = findConversationMarkerContextMenuTrigger(
+          event.currentTarget,
+          event.target,
+        );
+        if (!trigger) {
           return;
         }
         event.preventDefault();
@@ -1140,7 +1151,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
           messageId: message.id,
           clientX: event.clientX,
           clientY: event.clientY,
-          trigger: event.currentTarget,
+          trigger,
         });
       };
       const openMarkerMenuFromTrigger = (
@@ -1156,7 +1167,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
         });
       };
       const handleMarkerTriggerClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-        if (!exposesMarkerMenu || event.button !== 0) {
+        if (event.button !== 0) {
           return;
         }
         const trigger = findActivatableConversationMarkerContextMenuTrigger(
@@ -1172,9 +1183,6 @@ const SessionConversationPage = memo(function SessionConversationPage({
       const handleMarkerTriggerKeyDown = (
         event: ReactKeyboardEvent<HTMLDivElement>,
       ) => {
-        if (!exposesMarkerMenu) {
-          return;
-        }
         if (
           event.key !== "Enter" &&
           event.key !== " " &&
@@ -1195,20 +1203,16 @@ const SessionConversationPage = memo(function SessionConversationPage({
       };
       return (
         <div
-          className={`conversation-message-marker-shell${exposesMarkerMenu ? " can-open-marker-menu" : ""}${activeMessageMarker ? " is-active-marker" : ""}`}
+          className={`conversation-message-marker-shell can-open-marker-menu${activeMessageMarker ? " is-active-marker" : ""}`}
           style={markerShellStyle}
-          tabIndex={exposesMarkerMenu ? -1 : undefined}
+          tabIndex={-1}
           onClick={handleMarkerTriggerClick}
           onContextMenu={handleMarkerContextMenu}
           onKeyDown={handleMarkerTriggerKeyDown}
         >
-          {exposesMarkerMenu ? (
-            <MessageMetaMarkerMenuProvider>
-              {rendered}
-            </MessageMetaMarkerMenuProvider>
-          ) : (
-            rendered
-          )}
+          <MessageMetaMarkerMenuProvider>
+            {rendered}
+          </MessageMetaMarkerMenuProvider>
         </div>
       );
     },
@@ -1224,7 +1228,12 @@ const SessionConversationPage = memo(function SessionConversationPage({
 
   if (visibleMessages.length === 0 && visiblePendingPrompts.length === 0 && !showWaitingIndicator) {
     return (
-      <div className={`session-conversation-page${isActive ? " is-active" : ""}`} hidden={!isActive}>
+      <div
+        ref={conversationPageRef}
+        className={`session-conversation-page${isActive ? " is-active" : ""}`}
+        hidden={!isActive}
+        tabIndex={-1}
+      >
         <PanelEmptyState
           title={isLoading ? "Connecting to backend" : "Live session is ready"}
           body={
@@ -1290,7 +1299,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   ));
   const liveTail =
     liveTurnCard || pendingPromptCards.length > 0 ? (
-      <div className="conversation-live-tail">
+      <div className={`conversation-live-tail${liveTailPinned ? " is-pinned" : ""}`}>
         {liveTurnCard}
         {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
         {pendingPromptCards}
@@ -1354,6 +1363,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
 }, (previous, next) =>
   previous.renderMessageCard === next.renderMessageCard &&
   previous.session === next.session &&
+  previous.liveTailPinned === next.liveTailPinned &&
   previous.scrollContainerRef === next.scrollContainerRef &&
   previous.isActive === next.isActive &&
   previous.isLoading === next.isLoading &&
@@ -2456,6 +2466,7 @@ const SessionComposer = memo(function SessionComposer({
           id={`prompt-${paneId}`}
           ref={composerInputRef}
           className="composer-input"
+          data-conversation-composer-input="true"
           aria-label={session ? `Message ${session.name}` : "Message session"}
           defaultValue={initialComposerDraft}
           onChange={(event) => handleComposerChange(event.target.value)}

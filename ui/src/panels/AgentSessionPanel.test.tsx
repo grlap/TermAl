@@ -430,6 +430,36 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(scrollWrites).toEqual([]);
   });
 
+  it("only pins the live-turn tail while bottom follow is active", () => {
+    const activeSession = makeSession("session-a", {
+      status: "active",
+      messages: [
+        {
+          id: "message-user",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Current prompt",
+        },
+      ],
+    });
+    const renderPanel = createAgentSessionPanelHarness({
+      activeSession,
+      showWaitingIndicator: true,
+      waitingIndicatorPrompt: "Current prompt",
+    });
+    const { rerender } = render(renderPanel({ liveTailPinned: true }));
+
+    const liveTail = screen
+      .getByText("Live turn")
+      .closest(".conversation-live-tail");
+    expect(liveTail).not.toBeNull();
+    expect(liveTail).toHaveClass("is-pinned");
+
+    rerender(renderPanel({ liveTailPinned: false }));
+    expect(liveTail).not.toHaveClass("is-pinned");
+  });
+
   it("renders conversation marker chips and navigates between markers", () => {
     const scrollIntoView = vi.fn();
     const originalScrollIntoView = Element.prototype.scrollIntoView;
@@ -870,9 +900,9 @@ describe("AgentSessionPanel conversation caching", () => {
       clientX: 123,
       clientY: 234,
     });
-    const assistantShell = screen
+    const assistantTrigger = screen
       .getByText("Agent message-2")
-      .closest(".conversation-message-marker-shell") as HTMLElement;
+      .closest("[data-conversation-marker-menu-trigger='true']") as HTMLElement;
     const addMenu = screen.getByRole("menu", {
       name: "Conversation marker actions",
     });
@@ -895,7 +925,7 @@ describe("AgentSessionPanel conversation caching", () => {
       screen.queryByRole("menu", { name: "Conversation marker actions" }),
     ).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(assistantShell).toHaveFocus();
+      expect(assistantTrigger).toHaveFocus();
     });
 
     const originalInnerWidth = window.innerWidth;
@@ -991,6 +1021,105 @@ describe("AgentSessionPanel conversation caching", () => {
     );
   });
 
+  it("uses dialog semantics and local keyboard behavior for marker label creation", async () => {
+    const onCreateConversationMarker = vi.fn();
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      onCreateConversationMarker,
+      renderMessageCard: (message) => (
+        <article className="message-card">
+          <div
+            className="message-meta"
+            data-conversation-marker-menu-trigger={
+              message.author === "assistant" ? true : undefined
+            }
+          >
+            <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+            <span>{message.timestamp}</span>
+          </div>
+          <p>{`${message.id} body`}</p>
+        </article>
+      ),
+    });
+
+    const trigger = screen
+      .getByText("Agent message-2")
+      .closest("[data-conversation-marker-menu-trigger='true']") as HTMLElement;
+    fireEvent.contextMenu(trigger);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+
+    expect(
+      screen.queryByRole("menu", { name: "Conversation marker actions" }),
+    ).not.toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", {
+      name: "Create conversation marker",
+    });
+    expect(dialog).toBeInTheDocument();
+    const markerLabelInput = screen.getByLabelText(
+      "Marker label",
+    ) as HTMLInputElement;
+    await waitFor(() => {
+      expect(markerLabelInput).toHaveFocus();
+    });
+    expect(markerLabelInput.selectionStart).toBe(0);
+    expect(markerLabelInput.selectionEnd).toBe("Checkpoint".length);
+
+    const submitButton = screen.getByRole("button", { name: "Create marker" });
+    fireEvent.change(markerLabelInput, { target: { value: "🙂".repeat(121) } });
+    expect(Array.from(markerLabelInput.value)).toHaveLength(120);
+    fireEvent.change(markerLabelInput, { target: { value: "   " } });
+    expect(submitButton).toBeDisabled();
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    cancelButton.focus();
+    fireEvent.keyDown(cancelButton, { key: "ArrowDown" });
+    expect(cancelButton).toHaveFocus();
+
+    fireEvent.change(markerLabelInput, {
+      target: { value: "  Review later  " },
+    });
+    fireEvent.resize(window);
+    expect(
+      screen.getByRole("dialog", { name: "Create conversation marker" }),
+    ).toBeInTheDocument();
+    fireEvent.click(submitButton);
+
+    expect(onCreateConversationMarker).toHaveBeenCalledWith(
+      "session-1",
+      "message-2",
+      { name: "Review later" },
+    );
+
+    fireEvent.contextMenu(trigger);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onCreateConversationMarker).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(trigger).toHaveFocus();
+    });
+
+    fireEvent.contextMenu(trigger);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+    fireEvent.keyDown(screen.getByLabelText("Marker label"), { key: "Escape" });
+
+    expect(
+      screen.queryByRole("dialog", { name: "Create conversation marker" }),
+    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(trigger).toHaveFocus();
+    });
+  });
+
   it("toggles the floating marker window from the message context menu", async () => {
     const activeSession = makeSession("session-1", {
       messages: makeTextMessages(4),
@@ -1045,7 +1174,7 @@ describe("AgentSessionPanel conversation caching", () => {
       screen.queryByRole("navigation", { name: "Conversation markers" }),
     ).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(assistantShell).toHaveFocus();
+      expect(assistantMeta).toHaveFocus();
     });
 
     fireEvent.contextMenu(assistantMeta!);

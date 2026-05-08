@@ -394,6 +394,11 @@ impl AppState {
             let (done_summary, source_message_ids) =
                 select_project_done_summary(primary_session, git_status.as_ref(), false);
             let mut proposed_actions = vec![ProjectActionId::ReviewInTermal];
+            let primary_session_id = prompt_target_session_id.clone();
+            let deep_link = Some(build_project_deep_link(
+                &inputs.project.id,
+                primary_session_id.as_deref(),
+            ));
             if primary_session_id.is_some() {
                 proposed_actions.insert(0, ProjectActionId::FixIt);
             }
