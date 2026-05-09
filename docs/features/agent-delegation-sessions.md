@@ -30,14 +30,14 @@ small patches with explicit file ownership.
 
 - Let a parent session spawn one or more child sessions for bounded subtasks.
 - Make child work visible and auditable in the UI.
-- Let agents and humans query status, wait for completion, cancel work, and
-  retrieve a compact result.
+- Let agents and humans query status, schedule backend-owned waits, cancel work,
+  and retrieve a compact result.
 - Keep child sessions as normal TermAl sessions so existing transcript,
   persistence, SSE, stop, and approval behavior still apply.
 - Support read-only reviewer/explorer tasks first.
 - Support worker tasks only with explicit ownership and isolation rules.
-- Let the parent resume from a structured result instead of reading the entire
-  child transcript.
+- Let the parent yield while children run, then resume from a structured fan-in
+  result instead of polling or reading the entire child transcript.
 
 ## Non-goals for v1
 
@@ -62,11 +62,35 @@ Parent session
 ```
 
 The child session receives a bounded prompt, runs independently, then records a
-structured result. The parent can continue local work while children run, then
-poll or wait for results.
+structured result. The parent can either continue local work or explicitly yield
+on a backend-owned wait. When the wait condition is met, TermAl queues a resume
+prompt and wakes the parent through the normal queued-prompt dispatcher.
 
 Delegations are not special agent runtimes. They are metadata and control
 surfaces around ordinary sessions.
+
+## Value To Parent Agents
+
+Delegation is useful to a parent agent even when that agent already has an
+internal subagent mechanism. Internal subagents are scoped to one runtime and
+usually disappear into that runtime's transcript. TermAl delegations make the
+parallel work a durable application feature:
+
+- **Cross-agent fan-out**: a parent can ask Claude, Codex, Cursor, and Gemini to
+  inspect the same work independently, instead of being limited to one
+  provider's internal helper model.
+- **Durable child sessions**: delegated work is persisted as normal TermAl
+  sessions with openable transcripts, lifecycle state, cancellation, and result
+  packets.
+- **Backend fan-in**: a parent can yield on `all` or `any` delegation waits and
+  let TermAl resume it with a consolidated result prompt instead of polling or
+  manually copying summaries.
+- **Enforced isolation**: read-only mode, isolated worktrees, ownership scopes,
+  parent settings, and project context are enforced by TermAl rather than only
+  by prompt discipline.
+- **Human visibility and control**: delegated work remains visible in the UI so
+  the user can inspect child sessions, follow progress, cancel work, or act on a
+  result before the parent continues.
 
 ## Terminology
 
@@ -77,6 +101,11 @@ surfaces around ordinary sessions.
 - **Worker delegation**: child task allowed to modify files inside an explicit
   ownership scope.
 - **Result packet**: compact, structured output returned to the parent.
+- **Delegation wait**: durable parent-owned fan-in record that watches one or
+  more delegations and resumes the parent when `any` or `all` are terminal.
+- **Yielding parent**: a parent session with at least one pending delegation wait
+  and no active turn. The parent is idle from the agent runtime's perspective,
+  but TermAl shows that it is waiting for delegated work.
 
 ## Product Model
 
@@ -197,14 +226,76 @@ response.
 For v1, the result can be derived from the child final response using a clear
 prompt contract. Later, TermAl can add a native structured result message type.
 
-### 4. Resume
+### 4. Resume / Yield
 
 The parent can consume the result in one of three ways:
 - human opens the card and reads it
 - human inserts the result packet into the composer
 - agent calls `get_delegation_result` and chooses how to continue
 
-Automatic parent prompting should be opt-in.
+Automatic parent prompting is opt-in through a delegation wait. A wait records a
+parent session, one or more delegation ids, and a fan-in mode:
+
+- `any`: resume the parent when the first watched delegation reaches a terminal
+  state.
+- `all`: resume the parent only after every watched delegation reaches a
+  terminal state.
+
+When the wait is scheduled, the parent can yield the current turn instead of
+polling. TermAl persists the wait and exposes it through `/api/state` and SSE so
+the UI can show "waiting for delegations" even after reload.
+
+When the wait is satisfied, TermAl queues a synthesized prompt to the parent
+session and removes the wait from the pending-wait list. If the parent is idle,
+the prompt dispatches immediately. If the parent is still in a turn, the prompt
+waits behind the current turn and resumes the parent through the existing
+queued-prompt path.
+
+The resume prompt is deliberately close to orchestration's consolidated
+transition prompt: it includes the wait id, mode, watched delegation statuses,
+and one result section per terminal child. `all` waits produce a full fan-in
+bundle; `any` waits produce the first terminal result plus the current status of
+the remaining children.
+
+Delegation waits reuse the orchestration scheduling model conceptually: child
+delegations are completion sources and the parent is the destination session.
+`all` corresponds to orchestration's `Consolidate` input mode; `any`
+corresponds to ordinary queued transition delivery. The delegation API keeps
+this ad hoc so users do not need to author a reusable orchestration template for
+one-off reviewer batches.
+
+Example flow:
+
+```text
+spawn_delegation(agent="Claude", prompt="Review backend resolver") -> delegation-a
+spawn_delegation(agent="Codex", prompt="Review frontend composer") -> delegation-b
+resume_after_delegations(parentSessionId, [delegation-a, delegation-b], mode="all")
+
+...parent yields; TermAl shows a pending all-mode delegation wait...
+
+...both children finish...
+
+TermAl queues a parent resume prompt containing both results and starts the
+parent if it is idle.
+```
+
+For reviewer fan-out, callers can combine spawn and fan-in scheduling:
+
+```text
+spawn_reviewer_batch(parentSessionId, requests, { mode: "all", title: "Review fan-in" })
+
+...TermAl creates child sessions, stores one delegation wait for successful spawns...
+
+...the parent yields...
+
+TermAl queues the parent resume prompt when all successful children finish.
+```
+
+The reviewer-batch path is the preferred API for "spawn several reviewers and
+wait for all of them." It creates all successful child sessions first, then
+stores one `all` wait covering those delegation ids. Partial spawn batches still
+schedule the wait for successful children; failed spawn items are returned in
+the batch result so the parent can decide whether to retry.
 
 ### 5. Cancel
 
@@ -216,6 +307,29 @@ Cancel responses return the server's latest delegation status. The UI treats a
 errored delegation. `completed` and `canceled` are idempotent terminal no-ops,
 while `queued` and `running` can occur while the cancel request has been accepted
 but follow-up state is still arriving through SSE.
+
+### 6. Delegate Agent Commands
+
+Delegating a slash command or future skill must not bypass command-template
+resolution. The regular-send path and delegation path should both call the
+backend command resolver described in
+[`agent-slash-commands.md`](agent-slash-commands.md).
+
+Required contract:
+
+- The frontend passes `command`, `arguments`, optional `note`, and
+  `intent: "delegate"` to the backend resolver.
+- The backend loads the command/skill template, replaces `$ARGUMENTS` with the
+  `arguments` field, and appends a `## Additional User Note` block when `note`
+  is present.
+- The backend returns the resolved delegation prompt plus command-derived
+  defaults such as `mode`, `title`, and `writePolicy`.
+- `spawn_delegation` receives the already-resolved prompt and the resolver's
+  write policy. React components must not special-case command names such as
+  `review-local`.
+
+This keeps `/fix-bug`, `/review-local`, and future Claude skills consistent
+whether the user sends them in the parent session or delegates them to a child.
 
 ## Command And Tool Surface
 
@@ -229,11 +343,12 @@ sanitization lives in `ui/src/delegation-error-packets.ts`.
 
 ```text
 spawn_delegation(parentSessionId, request) -> SpawnDelegationCommandResult
-spawn_reviewer_batch(parentSessionId, requests) -> SpawnReviewerBatchCommandResult
+spawn_reviewer_batch(parentSessionId, requests, resumeAfter?) -> SpawnReviewerBatchCommandResult
 get_delegation_status(parentSessionId, delegationId) -> DelegationStatusCommandResult
 get_delegation_result(parentSessionId, delegationId) -> DelegationResultPacket
 cancel_delegation(parentSessionId, delegationId) -> DelegationStatusCommandResult
 wait_delegations(parentSessionId, delegationIds, options?) -> WaitDelegationsResult
+resume_after_delegations(parentSessionId, delegationIds, options?) -> DelegationWaitResponse
 ```
 
 `spawn_reviewer_batch` is the first Phase 3 helper. It fans out several
@@ -265,10 +380,27 @@ there is no baseline to report. Within each group, `delegationIds` and
 delegation id they contain, with `serverInstanceId` as the tie-breaker.
 Revisions are per server instance and must not be compared across groups.
 
+`spawn_reviewer_batch` can also take a third `resumeAfter` argument with the
+same shape as `resume_after_delegations` options. When supplied, successful
+spawns are followed by a backend resume wait for those delegation ids. Partial
+spawn batches schedule the wait for only the successful child sessions and keep
+the failed items in the batch result. Mixed-server-instance batches do not
+schedule a wait because their successful ids came from different backend
+instances.
+
+`resume_after_delegations` does not poll in the caller. It schedules a durable
+backend delegation wait for the parent session and returns the created wait
+record. When the selected `any` or `all` condition is satisfied, the backend
+queues a synthesized resume prompt to the parent through the normal
+queued-prompt dispatcher. The default mode is `all`. Callers should treat a
+successful scheduled wait as a yield point: do not poll in the same parent turn
+unless the user explicitly asks for synchronous status. TermAl will re-activate
+the parent when the wait completes.
+
 Spawn commands return client-side validation failures as `outcome: "error"`
-with `error.kind === "validation-failed"`. `wait_delegations` is different:
+with `error.kind === "validation-failed"`. Wait commands are different:
 invalid parent/delegation ids or wait options throw `TypeError`/`RangeError`
-before polling starts.
+before polling or scheduling starts.
 
 Spawn validation packet messages are intentionally allow-listed. Unknown spawn
 validation exceptions collapse to `"Invalid delegation request."`; wrapper UX
@@ -308,6 +440,9 @@ wrapper diagnostics:
 - `delegation id must not contain /, ?, #, or control characters`
 - `wait_delegations requires at least one delegation id`
 - `wait_delegations accepts at most <MAX_DELEGATION_WAIT_IDS> ids`
+- `resume_after_delegations requires at least one delegation id`
+- `resume_after_delegations accepts at most <MAX_DELEGATION_WAIT_IDS> ids`
+- `delegation transport does not support backend-scheduled resume waits`
 - `pollIntervalMs must be a finite positive duration`
 - `timeoutMs must be a finite positive duration`
 - `pollIntervalMs must be at least <MIN_DELEGATION_WAIT_INTERVAL_MS>ms`
@@ -326,7 +461,8 @@ runtime strings:
 - `MAX_DELEGATION_WAIT_TIMEOUT_MS = 1800000`
 - `DEFAULT_DELEGATION_WAIT_INTERVAL_MS = 1000`
 - `DEFAULT_DELEGATION_WAIT_TIMEOUT_MS = 300000`
-Grouped parent-card UI and result consolidation remain separate Phase 3 work.
+Grouped parent-card UI remains separate Phase 3 work. Backend-scheduled result
+fan-in is available through `resume_after_delegations`.
 
 ### MCP Tools
 
@@ -339,6 +475,7 @@ termal_spawn_session
 termal_get_session_status
 termal_get_session_result
 termal_cancel_session
+termal_resume_after_delegations
 ```
 
 Tool results should include enough information for a parent agent to continue
@@ -373,10 +510,18 @@ POST /api/sessions/{parentSessionId}/delegations
 GET  /api/sessions/{parentSessionId}/delegations/{delegationId}
 GET  /api/sessions/{parentSessionId}/delegations/{delegationId}/result
 POST /api/sessions/{parentSessionId}/delegations/{delegationId}/cancel
+POST /api/sessions/{parentSessionId}/delegation-waits
 ```
 
-There is no wait endpoint in Phase 1. A future internal command wrapper may
-layer wait semantics over status polling or SSE recovery.
+The `delegation-waits` endpoint schedules backend-owned parent resume prompts.
+The polling `wait_delegations` helper remains client-side and does not mutate
+parent session state.
+
+`GET /api/state` includes pending `delegationWaits` so reloads and other tabs can
+render the parent waiting state. Wait records are removed from the snapshot when
+they are consumed. The synchronous `DelegationWaitResponse` still returns the
+created wait even if it is instantly satisfied and consumed by a follow-up
+revision.
 
 Delegation lifecycle changes should be revisioned delta events so normal SSE
 gap detection and `/api/state` repair keep working:
@@ -384,6 +529,13 @@ gap detection and `/api/state` repair keep working:
 ```typescript
 type DelegationDeltaEvent =
   | { type: "delegationCreated"; revision: number; delegation: DelegationSummary }
+  | { type: "delegationWaitCreated"; revision: number; wait: DelegationWaitRecord }
+  | {
+      type: "delegationWaitConsumed";
+      revision: number;
+      waitId: string;
+      parentSessionId: string;
+    }
   | {
       type: "delegationUpdated";
       revision: number;
@@ -550,6 +702,46 @@ type SpawnReviewerBatchFailure = {
   restartRequired: boolean | null;
 };
 
+type DelegationWaitRecord = {
+  id: string;
+  parentSessionId: string;
+  delegationIds: string[];
+  mode: "any" | "all";
+  createdAt: string;
+  title?: string | null;
+};
+
+type StateResponse = {
+  // Other fields omitted.
+  delegations?: DelegationSummary[];
+  delegationWaits?: DelegationWaitRecord[];
+};
+
+type SpawnReviewerBatchResumeWaitResult =
+  | {
+      outcome: "scheduled";
+      wait: DelegationWaitRecord;
+      queuedResume: boolean;
+      revision: number;
+      serverInstanceId: string;
+    }
+  | {
+      outcome: "skipped";
+      reason: "mixed-server-instance" | "no-successful-spawns";
+      message: string;
+    }
+  | {
+      outcome: "error";
+      error: {
+        kind: "resume-wait-failed";
+        name: string;
+        message: string;
+        apiErrorKind: ApiRequestErrorKind | null;
+        status: number | null;
+        restartRequired: boolean | null;
+      };
+    };
+
 type SpawnReviewerBatchBaseResult = {
   spawned: SpawnDelegationCommandSuccessResult[];
   failed: SpawnReviewerBatchFailure[];
@@ -557,6 +749,7 @@ type SpawnReviewerBatchBaseResult = {
   childSessionIds: string[];
   revision: number | null;
   serverInstanceId: string | null;
+  resumeWait?: SpawnReviewerBatchResumeWaitResult;
 };
 
 type SpawnReviewerBatchCommandResult =
@@ -802,8 +995,10 @@ quick review/explorer tasks too heavy.
 
 - Add helper command to spawn several read-only reviewers in parallel.
 - Add grouped parent card.
-- Add result consolidation affordance.
-- Keep consolidation human- or parent-agent-driven.
+- Add backend-scheduled result fan-in through parent resume waits, including a
+  one-call reviewer-batch path.
+- Keep UI result insertion human-driven unless the parent explicitly schedules a
+  resume wait.
 
 ### Phase 4: Worker Delegation
 
@@ -837,7 +1032,9 @@ Frontend:
 MCP/internal commands:
 - spawn returns delegation and child ids
 - status works while running and after reload
-- future wait support returns on completion or timeout
+- polling wait support returns on completion or timeout
+- resume wait support queues a parent prompt after `any` or `all` child
+  delegations finish
 - result is unavailable until completion
 - cancel is idempotent
 

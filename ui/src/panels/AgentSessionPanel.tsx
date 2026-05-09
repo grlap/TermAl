@@ -17,12 +17,16 @@ import {
 import { ExpandedPromptPanel } from "../ExpandedPromptPanel";
 import {
   buildSlashPaletteState,
-  normalizedAgentCommandKind,
   parseAgentCommandDraft,
   supportsAgentSlashCommands,
   supportsLiveSessionModelOptions,
   type SlashPaletteItem,
 } from "./session-slash-palette";
+import {
+  resolveAgentCommand,
+  type CreateDelegationRequest,
+  type ResolveAgentCommandResponse,
+} from "../api";
 import {
   MessageSlot,
   PanelEmptyState,
@@ -134,12 +138,15 @@ type AgentCommandSlashPaletteItem = Extract<
 type AgentCommandSubmissionResolution =
   | { kind: "expand"; nextDraft: string }
   | {
-      expandedPrompt: string | null;
+      argumentsText: string;
+      commandName: string;
       kind: "submit";
-      visiblePrompt: string;
+      noteText?: string;
     };
 
 type SpawnDelegationOptions = {
+  title?: string;
+  mode?: CreateDelegationRequest["mode"];
   writePolicy?: DelegationWritePolicy;
 };
 
@@ -149,27 +156,36 @@ type SpawnDelegationHandler = (
   options?: SpawnDelegationOptions,
 ) => Promise<boolean>;
 
-function agentCommandDelegationOptions(
-  item: AgentCommandSlashPaletteItem,
-): SpawnDelegationOptions | undefined {
-  const commandName = item.name.trim().toLowerCase();
-  const commandSource = item.command.source.replace(/\\/g, "/").toLowerCase();
-  if (
-    commandName === "review-local" ||
-    commandSource.endsWith("/.claude/commands/review-local.md")
-  ) {
-    return {
-      writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
-    };
+function splitAgentCommandResolverTail(argumentsText: string): {
+  argumentsText: string;
+  noteText?: string;
+} {
+  const trimmed = argumentsText.trim();
+  if (!trimmed) {
+    return { argumentsText: "" };
   }
-  return undefined;
+  if (trimmed.startsWith("-- ")) {
+    const noteText = trimmed.slice(3).trim();
+    return noteText ? { argumentsText: "", noteText } : { argumentsText: "" };
+  }
+
+  const separator = " -- ";
+  const separatorIndex = trimmed.indexOf(separator);
+  if (separatorIndex < 0) {
+    return { argumentsText: trimmed };
+  }
+
+  const noteText = trimmed.slice(separatorIndex + separator.length).trim();
+  return {
+    argumentsText: trimmed.slice(0, separatorIndex).trim(),
+    ...(noteText ? { noteText } : {}),
+  };
 }
 
-function resolveAgentCommandSubmission(
+function prepareAgentCommandSubmission(
   item: AgentCommandSlashPaletteItem,
   draft: string,
 ): AgentCommandSubmissionResolution {
-  const agentCommand = item.command;
   const parsedDraft = parseAgentCommandDraft(draft);
   const matchesSelectedCommand =
     parsedDraft?.commandName.toLowerCase() === item.name.toLowerCase();
@@ -177,19 +193,15 @@ function resolveAgentCommandSubmission(
     return { kind: "expand", nextDraft: `/${item.name} ` };
   }
 
-  const visiblePrompt = (matchesSelectedCommand
-    ? draft
-    : `/${item.name}`).trim();
-  if (normalizedAgentCommandKind(agentCommand) === "nativeSlash") {
-    return { expandedPrompt: null, kind: "submit", visiblePrompt };
-  }
+  const { argumentsText, noteText } = splitAgentCommandResolverTail(
+    matchesSelectedCommand ? (parsedDraft?.argumentsText ?? "") : "",
+  );
 
   return {
-    expandedPrompt: agentCommand.content.split("$ARGUMENTS").join(
-      matchesSelectedCommand ? (parsedDraft?.argumentsText ?? "") : "",
-    ),
+    argumentsText,
+    commandName: item.name,
     kind: "submit",
-    visiblePrompt,
+    ...(noteText ? { noteText } : {}),
   };
 }
 
@@ -200,11 +212,27 @@ function sendResolvedAgentCommandSubmission(
     expandedText?: string | null,
   ) => boolean,
   sessionId: string,
-  resolution: Extract<AgentCommandSubmissionResolution, { kind: "submit" }>,
+  resolution: ResolveAgentCommandResponse,
 ) {
   return resolution.expandedPrompt == null
     ? onSend(sessionId, resolution.visiblePrompt)
     : onSend(sessionId, resolution.visiblePrompt, resolution.expandedPrompt);
+}
+
+function spawnDelegationOptionsFromResolvedCommand(
+  resolved: ResolveAgentCommandResponse,
+): SpawnDelegationOptions | undefined {
+  const title = resolved.delegation?.title ?? resolved.title ?? undefined;
+  const mode = resolved.delegation?.mode ?? undefined;
+  const writePolicy = resolved.delegation?.writePolicy ?? undefined;
+  if (!title && !mode && !writePolicy) {
+    return undefined;
+  }
+  return {
+    ...(title ? { title } : {}),
+    ...(mode ? { mode } : {}),
+    ...(writePolicy ? { writePolicy } : {}),
+  };
 }
 
 // The transcript virtualizer and overview rail intentionally share the same
@@ -1091,6 +1119,9 @@ const SessionConversationPage = memo(function SessionConversationPage({
     [visibleMarkers, visibleMessages],
   );
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
+  const [activeMarkerMessageId, setActiveMarkerMessageId] = useState<
+    string | null
+  >(null);
   const [markerPanelVisibilityOverride, setMarkerPanelVisibilityOverride] =
     useState<boolean | null>(null);
   const conversationPageRef = useRef<HTMLDivElement | null>(null);
@@ -1099,6 +1130,20 @@ const SessionConversationPage = memo(function SessionConversationPage({
   // message-header context menu.
   const isMarkerPanelVisible =
     markerPanelVisibilityOverride ?? sortedMarkers.length > 0;
+  const handleCreateConversationMarker = useCallback(
+    (
+      targetSessionId: string,
+      messageId: string,
+      options?: CreateConversationMarkerOptions,
+    ) => {
+      if (targetSessionId === session.id) {
+        setActiveMarkerId(null);
+        setActiveMarkerMessageId(messageId);
+      }
+      onCreateConversationMarker(targetSessionId, messageId, options);
+    },
+    [onCreateConversationMarker, session.id],
+  );
   const {
     contextMenuNode: markerContextMenuNode,
     openContextMenu: openMarkerContextMenu,
@@ -1106,7 +1151,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
     isActive,
     isMarkerPanelVisible,
     markersByMessageId,
-    onCreateConversationMarker,
+    onCreateConversationMarker: handleCreateConversationMarker,
     onDeleteConversationMarker,
     onSetMarkerPanelVisible: setMarkerPanelVisibilityOverride,
     scrollContainerRef,
@@ -1129,10 +1174,13 @@ const SessionConversationPage = memo(function SessionConversationPage({
       !visibleMarkers.some((marker) => marker.id === activeMarkerId)
     ) {
       setActiveMarkerId(null);
+      setActiveMarkerMessageId(null);
     }
   }, [activeMarkerId, visibleMarkers]);
 
   useEffect(() => {
+    setActiveMarkerId(null);
+    setActiveMarkerMessageId(null);
     setMarkerPanelVisibilityOverride(null);
   }, [session.id]);
 
@@ -1159,6 +1207,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const jumpToMarker = useCallback(
     (marker: ConversationMarker) => {
       setActiveMarkerId(marker.id);
+      setActiveMarkerMessageId(marker.messageId);
       jumpToConversationMarker(marker);
     },
     [jumpToConversationMarker],
@@ -1204,15 +1253,19 @@ const SessionConversationPage = memo(function SessionConversationPage({
       if (!rendered) {
         return null;
       }
+      const messageMarkers = markersByMessageId.get(message.id) ?? [];
       const activeMessageMarker = activeMarkerId
-        ? markersByMessageId
-            .get(message.id)
-            ?.find((marker) => marker.id === activeMarkerId) ?? null
+        ? messageMarkers.find((marker) => marker.id === activeMarkerId) ?? null
         : null;
-      const markerShellStyle = activeMessageMarker
+      const isActiveMarkerMessage =
+        activeMessageMarker !== null || activeMarkerMessageId === message.id;
+      const activeMarkerColor =
+        activeMessageMarker?.color ??
+        (activeMarkerMessageId === message.id ? messageMarkers[0]?.color : null);
+      const markerShellStyle = isActiveMarkerMessage
         ? ({
             "--conversation-active-marker-color":
-              normalizeConversationMarkerColor(activeMessageMarker.color),
+              normalizeConversationMarkerColor(activeMarkerColor),
           } as CSSProperties)
         : undefined;
       // Markers are message-scoped, so all rendered message authors are
@@ -1285,7 +1338,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       };
       return (
         <div
-          className={`conversation-message-marker-shell can-open-marker-menu${activeMessageMarker ? " is-active-marker" : ""}`}
+          className={`conversation-message-marker-shell can-open-marker-menu${isActiveMarkerMessage ? " is-active-marker" : ""}`}
           style={markerShellStyle}
           tabIndex={-1}
           onClick={handleMarkerTriggerClick}
@@ -1302,6 +1355,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       // The marker menu owns session/create/delete state internally; keep this
       // callback keyed only to the rendered card and marker lookup surfaces.
       activeMarkerId,
+      activeMarkerMessageId,
       markersByMessageId,
       openMarkerContextMenu,
       renderMessageCard,
@@ -1337,6 +1391,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       sessionId={session.id}
       messages={visibleMessages}
       scrollContainerRef={scrollContainerRef}
+      tailFollowIntent={liveTailPinned}
       virtualizerHandleRef={
         // Marker jumps need the virtualizer handle whenever the transcript is
         // virtualized, even while the overview rail is still deferred.
@@ -1468,6 +1523,7 @@ function ConversationMessageList({
   sessionId,
   messages,
   scrollContainerRef,
+  tailFollowIntent,
   virtualizerHandleRef,
   isActive,
   onApprovalDecision,
@@ -1484,6 +1540,7 @@ function ConversationMessageList({
   sessionId: string;
   messages: Message[];
   scrollContainerRef: RefObject<HTMLElement | null>;
+  tailFollowIntent: boolean;
   virtualizerHandleRef?: { current: VirtualizedConversationMessageListHandle | null };
   isActive: boolean;
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
@@ -1539,6 +1596,7 @@ function ConversationMessageList({
       sessionId={sessionId}
       messages={messages}
       scrollContainerRef={scrollContainerRef}
+      tailFollowIntent={tailFollowIntent}
       preferInitialEstimatedBottomViewport
       virtualizerHandleRef={virtualizerHandleRef}
       conversationSearchQuery={conversationSearchQuery}
@@ -1663,6 +1721,8 @@ const SessionComposer = memo(function SessionComposer({
   >({});
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashNavModality, setSlashNavModality] = useState<"keyboard" | "mouse">("keyboard");
+  const [isAgentCommandResolving, setIsAgentCommandResolving] = useState(false);
+  const isAgentCommandResolvingRef = useRef(false);
   const [isDelegationSpawning, setIsDelegationSpawning] = useState(false);
   const isMountedRef = useRef(true);
   const activeSessionIdRef = useRef<string | null>(null);
@@ -1725,6 +1785,7 @@ const SessionComposer = memo(function SessionComposer({
     isSending ||
     isStopping ||
     isUpdating ||
+    isAgentCommandResolving ||
     (slashPalette.kind !== "none" && slashPalette.items.length === 0);
   const composerDelegateDisabled =
     !session ||
@@ -1733,6 +1794,7 @@ const SessionComposer = memo(function SessionComposer({
     isSending ||
     isStopping ||
     isUpdating ||
+    isAgentCommandResolving ||
     isDelegationSpawning ||
     (slashPalette.kind !== "none" && !canDelegateActiveSlashCommand);
 
@@ -1752,6 +1814,22 @@ const SessionComposer = memo(function SessionComposer({
 
     window.cancelAnimationFrame(composerResizeAnimationFrameRef.current);
     composerResizeAnimationFrameRef.current = null;
+  }
+
+  function beginAgentCommandResolution() {
+    if (isAgentCommandResolvingRef.current) {
+      return false;
+    }
+    isAgentCommandResolvingRef.current = true;
+    setIsAgentCommandResolving(true);
+    return true;
+  }
+
+  function finishAgentCommandResolution() {
+    isAgentCommandResolvingRef.current = false;
+    if (isMountedRef.current) {
+      setIsAgentCommandResolving(false);
+    }
   }
 
   function restoreComposerInputTransition(
@@ -2286,8 +2364,17 @@ const SessionComposer = memo(function SessionComposer({
     commitDraft(activeSessionId, getComposerDraftValue());
   }
 
-  function applySlashPaletteItem(item: SlashPaletteItem, keepPaletteOpen = false) {
-    if (!activeSessionId || !session || isSending || isStopping) {
+  async function applySlashPaletteItem(
+    item: SlashPaletteItem,
+    keepPaletteOpen = false,
+  ) {
+    if (
+      !activeSessionId ||
+      !session ||
+      isSending ||
+      isStopping ||
+      isAgentCommandResolvingRef.current
+    ) {
       return;
     }
 
@@ -2305,7 +2392,7 @@ const SessionComposer = memo(function SessionComposer({
         return;
       }
 
-      const resolution = resolveAgentCommandSubmission(
+      const resolution = prepareAgentCommandSubmission(
         item,
         getComposerDraftValue(),
       );
@@ -2316,19 +2403,45 @@ const SessionComposer = memo(function SessionComposer({
         return;
       }
 
+      const requestSessionId = activeSessionId;
+      let resolved: ResolveAgentCommandResponse;
+      if (!beginAgentCommandResolution()) {
+        return;
+      }
+      try {
+        resolved = await resolveAgentCommand(
+          requestSessionId,
+          resolution.commandName,
+          {
+            arguments: resolution.argumentsText,
+            ...(resolution.noteText ? { note: resolution.noteText } : {}),
+            intent: "send",
+          },
+        );
+      } catch {
+        focusComposerInput();
+        return;
+      } finally {
+        finishAgentCommandResolution();
+      }
+
+      if (!isMountedRef.current || activeSessionIdRef.current !== requestSessionId) {
+        return;
+      }
+
       const accepted = sendResolvedAgentCommandSubmission(
         onSend,
-        activeSessionId,
-        resolution,
+        requestSessionId,
+        resolved,
       );
       if (!accepted) {
         focusComposerInput();
         return;
       }
 
-      resetPromptHistory(activeSessionId);
-      updateLocalDraft(activeSessionId, "", { animateHeight: false });
-      commitDraft(activeSessionId, "");
+      resetPromptHistory(requestSessionId);
+      updateLocalDraft(requestSessionId, "", { animateHeight: false });
+      commitDraft(requestSessionId, "");
       focusComposerInput();
       return;
     }
@@ -2349,8 +2462,13 @@ const SessionComposer = memo(function SessionComposer({
     }
   }
 
-  function handleComposerSend() {
-    if (!activeSessionId || isSending || isStopping) {
+  async function handleComposerSend() {
+    if (
+      !activeSessionId ||
+      isSending ||
+      isStopping ||
+      isAgentCommandResolvingRef.current
+    ) {
       return;
     }
 
@@ -2360,7 +2478,7 @@ const SessionComposer = memo(function SessionComposer({
           focusComposerInput(getComposerDraftValue().length);
           return;
         }
-        applySlashPaletteItem(activeSlashItem);
+        await applySlashPaletteItem(activeSlashItem);
       }
       return;
     }
@@ -2396,8 +2514,7 @@ const SessionComposer = memo(function SessionComposer({
         focusComposerInput(getComposerDraftValue().length);
         return;
       }
-      delegationOptions = agentCommandDelegationOptions(activeSlashItem);
-      const resolution = resolveAgentCommandSubmission(
+      const resolution = prepareAgentCommandSubmission(
         activeSlashItem,
         getComposerDraftValue(),
       );
@@ -2407,7 +2524,25 @@ const SessionComposer = memo(function SessionComposer({
         focusComposerInput(resolution.nextDraft.length);
         return;
       }
-      prompt = (resolution.expandedPrompt ?? resolution.visiblePrompt).trim();
+      let resolved: ResolveAgentCommandResponse;
+      if (!beginAgentCommandResolution()) {
+        focusComposerInput();
+        return;
+      }
+      try {
+        resolved = await resolveAgentCommand(activeSessionId, resolution.commandName, {
+          arguments: resolution.argumentsText,
+          ...(resolution.noteText ? { note: resolution.noteText } : {}),
+          intent: "delegate",
+        });
+      } catch {
+        focusComposerInput();
+        return;
+      } finally {
+        finishAgentCommandResolution();
+      }
+      prompt = (resolved.expandedPrompt ?? resolved.visiblePrompt).trim();
+      delegationOptions = spawnDelegationOptionsFromResolvedCommand(resolved);
     } else {
       prompt = getComposerDraftValue().trim();
     }
@@ -2466,7 +2601,7 @@ const SessionComposer = memo(function SessionComposer({
 
       if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
         event.preventDefault();
-        handleComposerSend();
+        void handleComposerSend();
         return;
       }
 
@@ -2480,10 +2615,10 @@ const SessionComposer = memo(function SessionComposer({
         if (activeSlashItem) {
           if (activeSlashItem.kind === "choice") {
             event.preventDefault();
-            applySlashPaletteItem(activeSlashItem, true);
+            void applySlashPaletteItem(activeSlashItem, true);
           } else if (activeSlashItem.kind === "command") {
             event.preventDefault();
-            applySlashPaletteItem(activeSlashItem);
+            void applySlashPaletteItem(activeSlashItem);
           } else {
             const parsedDraft = parseAgentCommandDraft(getComposerDraftValue());
             const matchesSelectedCommand =
@@ -2527,7 +2662,7 @@ const SessionComposer = memo(function SessionComposer({
 
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      handleComposerSend();
+      void handleComposerSend();
       return;
     }
 
@@ -2702,7 +2837,7 @@ const SessionComposer = memo(function SessionComposer({
             onMouseDown={(event) => {
               event.preventDefault();
             }}
-            onClick={handleComposerSend}
+            onClick={() => void handleComposerSend()}
             disabled={composerSendDisabled}
           >
             {isSending
@@ -2812,7 +2947,7 @@ const SessionComposer = memo(function SessionComposer({
                           setSlashActiveIndex(index);
                         }
                       }}
-                      onClick={() => applySlashPaletteItem(item)}
+                      onClick={() => void applySlashPaletteItem(item)}
                       disabled={(item.kind === "choice" || item.kind === "agent-command") && isUpdating}
                     >
                       <span className="composer-slash-option-copy">

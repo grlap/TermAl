@@ -3,6 +3,7 @@ import type {
   AgentType,
   AgentReadiness,
   AgentCommand,
+  AgentCommandKind,
   ApprovalPolicy,
   AppPreferences,
   ClaudeApprovalMode,
@@ -66,6 +67,7 @@ export type StateResponse = {
   workspaces: WorkspaceLayoutSummary[];
   sessions: Session[];
   delegations?: DelegationSummary[];
+  delegationWaits?: DelegationWaitRecord[];
 };
 
 export type CreateSessionResponse = {
@@ -454,6 +456,52 @@ export type AgentCommandsResponse = {
   commands: AgentCommand[];
 };
 
+export type ResolveAgentCommandIntent = "send" | "delegate";
+
+export type ResolveAgentCommandRequest = {
+  arguments?: string;
+  note?: string;
+  intent?: ResolveAgentCommandIntent;
+};
+
+export type ResolveAgentCommandResponse = {
+  name: string;
+  source: string;
+  kind: AgentCommandKind;
+  visiblePrompt: string;
+  expandedPrompt?: string | null;
+  title?: string | null;
+  delegation?: {
+    mode?: CreateDelegationRequest["mode"];
+    title?: string | null;
+    writePolicy?: CreateDelegationRequest["writePolicy"] | null;
+  } | null;
+};
+
+export type DelegationWaitMode = "any" | "all";
+
+export type CreateDelegationWaitRequest = {
+  delegationIds: string[];
+  mode?: DelegationWaitMode;
+  title?: string;
+};
+
+export type DelegationWaitRecord = {
+  id: string;
+  parentSessionId: string;
+  delegationIds: string[];
+  mode: DelegationWaitMode;
+  createdAt: string;
+  title?: string | null;
+};
+
+export type DelegationWaitResponse = {
+  revision: number;
+  wait: DelegationWaitRecord;
+  queuedResume: boolean;
+  serverInstanceId: string;
+};
+
 export type ApiRequestErrorKind = "backend-unavailable" | "request-failed";
 
 export class ApiRequestError extends Error {
@@ -743,6 +791,19 @@ export function cancelDelegation(parentSessionId: string, delegationId: string) 
     `/api/sessions/${parent}/delegations/${delegation}/cancel`,
     {
       method: "POST",
+    },
+  );
+}
+
+export function createDelegationWait(
+  parentSessionId: string,
+  payload: CreateDelegationWaitRequest,
+) {
+  return request<DelegationWaitResponse>(
+    `/api/sessions/${encodeURIComponent(parentSessionId)}/delegation-waits`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
     },
   );
 }
@@ -1070,6 +1131,20 @@ export function rollbackCodexThread(sessionId: string, numTurns: number) {
 export function fetchAgentCommands(sessionId: string) {
   return request<AgentCommandsResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/agent-commands`,
+  );
+}
+
+export function resolveAgentCommand(
+  sessionId: string,
+  commandName: string,
+  payload: ResolveAgentCommandRequest,
+) {
+  return request<ResolveAgentCommandResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/agent-commands/${encodeURIComponent(commandName)}/resolve`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
   );
 }
 

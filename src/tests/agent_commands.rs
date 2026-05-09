@@ -407,3 +407,186 @@ fn returns_not_found_for_missing_agent_command_session() {
     assert_eq!(error.status, StatusCode::NOT_FOUND);
     assert_eq!(error.message, "session not found");
 }
+
+// Pins backend-owned prompt-template resolution to replacing `$ARGUMENTS`
+// and appending the optional user note as a standard block. This keeps
+// regular sends and delegations from drifting back to frontend-only template
+// expansion.
+#[test]
+fn resolves_prompt_template_arguments_and_note() {
+    let root =
+        std::env::temp_dir().join(format!("termal-agent-command-resolve-{}", Uuid::new_v4()));
+    let commands_dir = root.join(".claude").join("commands");
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("fix-bug.md"),
+        "Fix the requested bug:\n\n$ARGUMENTS\n\nVerify the fix.\n",
+    )
+    .unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Codex Session".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "fix-bug",
+            ResolveAgentCommandRequest {
+                arguments: Some("1024".to_owned()),
+                note: Some("Please add integration tests.".to_owned()),
+                intent: AgentCommandResolveIntent::Send,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(response.name, "fix-bug");
+    assert_eq!(response.kind, AgentCommandKind::PromptTemplate);
+    assert_eq!(response.visible_prompt, "/fix-bug 1024");
+    assert_eq!(response.title.as_deref(), Some("Fix bug 1024"));
+    assert_eq!(
+        response.expanded_prompt.as_deref(),
+        Some(
+            "Fix the requested bug:\n\n1024\n\nVerify the fix.\n\n## Additional User Note\n\nPlease add integration tests."
+        )
+    );
+    assert_eq!(response.delegation, None);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+// Pins resolver-owned delegation policy for `/review-local`. React should
+// not hard-code the isolated-worktree special case; the backend returns the
+// default when the command is resolved with delegate intent.
+#[test]
+fn resolves_review_local_delegation_defaults() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-command-resolve-review-local-{}",
+        Uuid::new_v4()
+    ));
+    let commands_dir = root.join(".claude").join("commands");
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("review-local.md"),
+        "Review staged and unstaged changes.\n",
+    )
+    .unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Codex Session".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: None,
+                note: None,
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(response.visible_prompt, "/review-local");
+    assert_eq!(
+        response.expanded_prompt.as_deref(),
+        Some("Review staged and unstaged changes.\n")
+    );
+    assert_eq!(
+        response.delegation,
+        Some(ResolvedAgentCommandDelegationDefaults {
+            mode: Some(DelegationMode::Reviewer),
+            title: Some("Review staged and unstaged changes.".to_owned()),
+            write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                owned_paths: Vec::new(),
+                worktree_path: None,
+            }),
+        })
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+// Pins native slash resolution to rejecting notes until TermAl owns a safe
+// conversion path. Native runtimes accept literal slash prompts, not appended
+// markdown blocks.
+#[test]
+fn rejects_note_for_native_slash_command_resolution() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    state
+        .sync_session_agent_commands(
+            &created.session_id,
+            vec![AgentCommand {
+                kind: AgentCommandKind::NativeSlash,
+                name: "review".to_owned(),
+                description: "Review the current changes.".to_owned(),
+                content: "/review".to_owned(),
+                source: "Claude bundled command".to_owned(),
+                argument_hint: Some("[scope]".to_owned()),
+            }],
+        )
+        .unwrap();
+
+    let error = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review",
+            ResolveAgentCommandRequest {
+                arguments: Some("staged".to_owned()),
+                note: Some("Include integration-test advice.".to_owned()),
+                intent: AgentCommandResolveIntent::Send,
+            },
+        )
+        .unwrap_err();
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "native slash commands do not support additional notes"
+    );
+}

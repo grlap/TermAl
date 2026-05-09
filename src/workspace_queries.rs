@@ -145,6 +145,32 @@ impl AppState {
         Ok(AgentCommandsResponse { commands })
     }
 
+    /// Resolves a discovered agent command into the concrete payload used by
+    /// regular sends and delegation sends. Remote-backed sessions forward the
+    /// whole resolution request so command template behavior stays owned by
+    /// the host that owns the session workdir.
+    fn resolve_agent_command(
+        &self,
+        session_id: &str,
+        command_name: &str,
+        request: ResolveAgentCommandRequest,
+    ) -> Result<ResolveAgentCommandResponse, ApiError> {
+        let command_name = normalize_optional_identifier(Some(command_name))
+            .ok_or_else(|| ApiError::bad_request("agent command name is required"))?;
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_resolve_agent_command(session_id, command_name, request);
+        }
+
+        let command = self
+            .list_agent_commands(session_id)?
+            .commands
+            .into_iter()
+            .find(|command| command.name.eq_ignore_ascii_case(command_name))
+            .ok_or_else(|| ApiError::not_found("agent command not found"))?;
+
+        resolve_agent_command_payload(command, request)
+    }
+
     /// Phrase-searches instruction / system-prompt files under the
     /// session's workdir and returns match locations for the UI's
     /// slash-command autocomplete. Remote-backed sessions forward to
@@ -168,4 +194,148 @@ impl AppState {
 
         search_instruction_phrase(FsPath::new(&session.workdir), query)
     }
+}
+
+fn resolve_agent_command_payload(
+    command: AgentCommand,
+    request: ResolveAgentCommandRequest,
+) -> Result<ResolveAgentCommandResponse, ApiError> {
+    let arguments = request
+        .arguments
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
+    let note = request
+        .note
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
+    let visible_prompt = resolved_agent_command_visible_prompt(&command, arguments);
+    let title = resolved_agent_command_title(&command, arguments, &visible_prompt);
+
+    let expanded_prompt = match command.kind {
+        AgentCommandKind::PromptTemplate => {
+            let expanded = command.content.split("$ARGUMENTS").collect::<Vec<_>>().join(arguments);
+            Some(append_resolved_agent_command_note(expanded, note))
+        }
+        AgentCommandKind::NativeSlash => {
+            if !note.is_empty() {
+                return Err(ApiError::bad_request(
+                    "native slash commands do not support additional notes",
+                ));
+            }
+            None
+        }
+    };
+
+    let delegation = (request.intent == AgentCommandResolveIntent::Delegate)
+        .then(|| resolved_agent_command_delegation_defaults(&command, &title))
+        .flatten();
+
+    Ok(ResolveAgentCommandResponse {
+        name: command.name,
+        source: command.source,
+        kind: command.kind,
+        visible_prompt,
+        expanded_prompt,
+        title: Some(title),
+        delegation,
+    })
+}
+
+fn resolved_agent_command_visible_prompt(command: &AgentCommand, arguments: &str) -> String {
+    let slash_command = if command.kind == AgentCommandKind::NativeSlash {
+        let content = command.content.trim();
+        if content.starts_with('/') && !content.contains('\n') {
+            content.to_owned()
+        } else {
+            format!("/{}", command.name.trim())
+        }
+    } else {
+        format!("/{}", command.name.trim())
+    };
+
+    if arguments.is_empty() {
+        slash_command
+    } else {
+        format!("{slash_command} {arguments}")
+    }
+}
+
+fn append_resolved_agent_command_note(mut prompt: String, note: &str) -> String {
+    if note.is_empty() {
+        return prompt;
+    }
+
+    if !prompt.ends_with('\n') {
+        prompt.push_str("\n\n");
+    } else if !prompt.ends_with("\n\n") {
+        prompt.push('\n');
+    }
+    prompt.push_str("## Additional User Note\n\n");
+    prompt.push_str(note);
+    prompt
+}
+
+fn resolved_agent_command_title(
+    command: &AgentCommand,
+    arguments: &str,
+    visible_prompt: &str,
+) -> String {
+    if command.name.eq_ignore_ascii_case("fix-bug") {
+        if let Some(first_argument) = arguments.split_whitespace().next() {
+            return truncate_resolved_agent_command_title(&format!("Fix bug {first_argument}"));
+        }
+    }
+
+    let title = command
+        .description
+        .trim()
+        .split('\n')
+        .next()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(visible_prompt);
+    truncate_resolved_agent_command_title(title)
+}
+
+fn truncate_resolved_agent_command_title(value: &str) -> String {
+    const MAX_AGENT_COMMAND_TITLE_CHARS: usize = 200;
+    if value.chars().count() <= MAX_AGENT_COMMAND_TITLE_CHARS {
+        return value.to_owned();
+    }
+
+    value
+        .chars()
+        .take(MAX_AGENT_COMMAND_TITLE_CHARS.saturating_sub(3))
+        .chain("...".chars())
+        .collect()
+}
+
+fn resolved_agent_command_delegation_defaults(
+    command: &AgentCommand,
+    title: &str,
+) -> Option<ResolvedAgentCommandDelegationDefaults> {
+    if !is_review_local_agent_command(command) {
+        return None;
+    }
+
+    Some(ResolvedAgentCommandDelegationDefaults {
+        mode: Some(DelegationMode::Reviewer),
+        title: Some(title.to_owned()),
+        write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+            owned_paths: Vec::new(),
+            worktree_path: None,
+        }),
+    })
+}
+
+fn is_review_local_agent_command(command: &AgentCommand) -> bool {
+    let normalized_name = command.name.trim().to_ascii_lowercase();
+    if normalized_name == "review-local" {
+        return true;
+    }
+
+    let normalized_source = command.source.replace('\\', "/").to_ascii_lowercase();
+    normalized_source.ends_with("/.claude/commands/review-local.md")
+        || normalized_source == ".claude/commands/review-local.md"
 }

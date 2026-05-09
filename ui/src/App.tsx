@@ -21,6 +21,7 @@ import {
   pauseOrchestratorInstance,
   resumeOrchestratorInstance,
   stopOrchestratorInstance,
+  type DelegationWaitRecord,
   type GitDiffRequestPayload,
   type GitDiffSection,
   type OpenPathOptions,
@@ -254,6 +255,9 @@ export default function App() {
   const [orchestrators, setOrchestrators] = useState<OrchestratorInstance[]>(
     [],
   );
+  const [delegationWaits, setDelegationWaits] = useState<
+    DelegationWaitRecord[]
+  >([]);
   const [codexState, setCodexState] = useState<CodexState>({});
   const [agentReadiness, setAgentReadiness] = useState<AgentReadiness[]>([]);
   const initialWorkspaceBootstrapRef = useRef<ReturnType<
@@ -471,6 +475,7 @@ export default function App() {
   const agentReadinessRef = useRef(agentReadiness);
   const projectsRef = useRef(projects);
   const orchestratorsRef = useRef(orchestrators);
+  const delegationWaitsRef = useRef(delegationWaits);
   const latestStateRevisionRef = useRef<number | null>(null);
   // The `serverInstanceId` the client last adopted, plus every
   // non-empty instance id this tab has already accepted. Different ids are
@@ -780,6 +785,7 @@ export default function App() {
       agentReadinessRef,
       projectsRef,
       orchestratorsRef,
+      delegationWaitsRef,
       workspaceSummariesRef,
       refreshingAgentCommandSessionIdsRef,
       confirmedUnknownModelSendsRef,
@@ -793,6 +799,7 @@ export default function App() {
       setAgentReadiness,
       setProjects,
       setOrchestrators,
+      setDelegationWaits,
       setWorkspaceSummaries,
       setDraftsBySessionId,
       setDraftAttachmentsBySessionId,
@@ -1521,7 +1528,8 @@ export default function App() {
     agentReadinessRef.current = agentReadiness;
     projectsRef.current = projects;
     orchestratorsRef.current = orchestrators;
-  }, [agentReadiness, codexState, orchestrators, projects]);
+    delegationWaitsRef.current = delegationWaits;
+  }, [agentReadiness, codexState, delegationWaits, orchestrators, projects]);
 
   useEffect(() => {
     draftsRef.current = draftsBySessionId;
@@ -1940,6 +1948,7 @@ export default function App() {
               codexState={codexState}
               projectLookup={projectLookup}
               remoteLookup={remoteLookup}
+              delegationWaits={delegationWaits}
               paneLookup={paneLookup}
               sessionLookup={sessionLookup}
               activePaneId={workspace.activePaneId}

@@ -366,6 +366,9 @@ impl AppState {
             inner: inner_arc,
         };
         state.seed_hidden_claude_spares();
+        if let Err(err) = state.reconcile_delegation_waits_after_boot() {
+            eprintln!("delegation wait> failed reconciling pending waits after boot: {err:#}");
+        }
         {
             let inner = state.inner.lock().expect("state mutex poisoned");
             state.persist_internal_locked(&inner)?;

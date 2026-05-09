@@ -73,6 +73,7 @@ import {
   fetchState,
   isBackendUnavailableError,
   type CreateSessionResponse,
+  type DelegationWaitRecord,
   type StateResponse,
 } from "./api";
 import {
@@ -187,6 +188,8 @@ type DelegationDeltaEvent = Extract<
   {
     type:
       | "delegationCreated"
+      | "delegationWaitCreated"
+      | "delegationWaitConsumed"
       | "delegationUpdated"
       | "delegationCompleted"
       | "delegationFailed"
@@ -222,6 +225,8 @@ function isSameRevisionReplayableSessionDelta(
 function isDelegationDeltaEvent(delta: DeltaEvent): delta is DelegationDeltaEvent {
   return (
     delta.type === "delegationCreated" ||
+    delta.type === "delegationWaitCreated" ||
+    delta.type === "delegationWaitConsumed" ||
     delta.type === "delegationUpdated" ||
     delta.type === "delegationCompleted" ||
     delta.type === "delegationFailed" ||
@@ -376,6 +381,7 @@ export type UseAppLiveStateAdoptionRefs = {
   agentReadinessRef: MutableRefObject<AgentReadiness[]>;
   projectsRef: MutableRefObject<Project[]>;
   orchestratorsRef: MutableRefObject<OrchestratorInstance[]>;
+  delegationWaitsRef: MutableRefObject<DelegationWaitRecord[]>;
   workspaceSummariesRef: MutableRefObject<WorkspaceLayoutSummary[]>;
   refreshingAgentCommandSessionIdsRef: MutableRefObject<SessionFlagMap>;
   confirmedUnknownModelSendsRef: MutableRefObject<Set<string>>;
@@ -390,6 +396,7 @@ export type UseAppLiveStateStateSetters = {
   setAgentReadiness: Dispatch<SetStateAction<AgentReadiness[]>>;
   setProjects: Dispatch<SetStateAction<Project[]>>;
   setOrchestrators: Dispatch<SetStateAction<OrchestratorInstance[]>>;
+  setDelegationWaits: Dispatch<SetStateAction<DelegationWaitRecord[]>>;
   setWorkspaceSummaries: Dispatch<SetStateAction<WorkspaceLayoutSummary[]>>;
   setDraftsBySessionId: Dispatch<SetStateAction<Record<string, string>>>;
   setDraftAttachmentsBySessionId: Dispatch<
@@ -504,6 +511,28 @@ function setContainsOnlyValuesFrom<T>(current: Set<T>, allowed: Set<T>) {
   return true;
 }
 
+function areDelegationWaitRecordsEqual(
+  current: readonly DelegationWaitRecord[],
+  next: readonly DelegationWaitRecord[],
+) {
+  if (current.length !== next.length) {
+    return false;
+  }
+  return current.every((record, index) => {
+    const candidate = next[index];
+    return (
+      candidate !== undefined &&
+      record.id === candidate.id &&
+      record.parentSessionId === candidate.parentSessionId &&
+      record.mode === candidate.mode &&
+      record.createdAt === candidate.createdAt &&
+      (record.title ?? null) === (candidate.title ?? null) &&
+      record.delegationIds.length === candidate.delegationIds.length &&
+      record.delegationIds.every((id, idIndex) => id === candidate.delegationIds[idIndex])
+    );
+  });
+}
+
 export function useAppLiveState(
   params: UseAppLiveStateParams,
 ): UseAppLiveStateReturn {
@@ -531,6 +560,7 @@ export function useAppLiveState(
     agentReadinessRef,
     projectsRef,
     orchestratorsRef,
+    delegationWaitsRef,
     workspaceSummariesRef,
     refreshingAgentCommandSessionIdsRef,
     confirmedUnknownModelSendsRef,
@@ -544,6 +574,7 @@ export function useAppLiveState(
     setAgentReadiness,
     setProjects,
     setOrchestrators,
+    setDelegationWaits,
     setWorkspaceSummaries,
     setDraftsBySessionId,
     setDraftAttachmentsBySessionId,
@@ -1615,6 +1646,11 @@ export function useAppLiveState(
     if (adoptedStateSlices.orchestrators !== currentOrchestrators) {
       orchestratorsRef.current = adoptedStateSlices.orchestrators;
       setOrchestrators(adoptedStateSlices.orchestrators);
+    }
+    const nextDelegationWaits = nextState.delegationWaits ?? [];
+    if (!areDelegationWaitRecordsEqual(delegationWaitsRef.current, nextDelegationWaits)) {
+      delegationWaitsRef.current = nextDelegationWaits;
+      setDelegationWaits(nextDelegationWaits);
     }
     if (adoptedStateSlices.workspaces !== currentWorkspaceSummaries) {
       workspaceSummariesRef.current = adoptedStateSlices.workspaces;

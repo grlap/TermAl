@@ -49,3 +49,9 @@ This is not full cross-agent slash-command parity. TermAl now discovers
 Claude's native slash commands from the live runtime when available and falls
 back to `.claude/commands` prompt templates, but it still does not have
 equivalent native-command discovery for Codex, Cursor, or Gemini.
+
+Project command templates and future Claude skills are owned by the backend
+agent-command resolver, not by this session-control layer. See
+[`agent-slash-commands.md`](agent-slash-commands.md) for `$ARGUMENTS`, optional
+`Additional User Note` handling, and the shared regular-send/delegation
+resolution contract.

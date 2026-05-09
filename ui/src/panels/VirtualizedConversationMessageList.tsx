@@ -446,6 +446,7 @@ export function VirtualizedConversationMessageList({
   sessionId,
   messages,
   scrollContainerRef,
+  tailFollowIntent = false,
   conversationSearchQuery = "",
   conversationSearchMatchedItemKeys = EMPTY_MATCHED_ITEM_KEYS,
   conversationSearchActiveItemKey = null,
@@ -462,6 +463,7 @@ export function VirtualizedConversationMessageList({
   sessionId: string;
   messages: Message[];
   scrollContainerRef: RefObject<HTMLElement | null>;
+  tailFollowIntent?: boolean;
   conversationSearchQuery?: string;
   conversationSearchMatchedItemKeys?: ReadonlySet<string>;
   conversationSearchActiveItemKey?: string | null;
@@ -575,6 +577,15 @@ export function VirtualizedConversationMessageList({
       current === nextValue ? current : nextValue,
     );
   }, []);
+
+  useLayoutEffect(() => {
+    if (!isActive || !tailFollowIntent) {
+      return;
+    }
+
+    shouldKeepBottomAfterLayoutRef.current = true;
+    isDetachedFromBottomRef.current = false;
+  }, [isActive, tailFollowIntent]);
   // Search navigation keeps the active result's page band mounted until the
   // reader takes control. `activeConversationSearchPinKey` includes the query
   // text so a live, unreleased selection can re-arm its mounted page band as
@@ -2653,6 +2664,7 @@ export function VirtualizedConversationMessageList({
             performance.now() + MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS;
           enterBottomFollowMode();
         } else {
+          const hadUserScrollInteraction = hasUserScrollInteractionRef.current;
           if (isMeasuringPostActivation) {
             cancelPostActivationBottomRestore();
           }
@@ -2660,17 +2672,25 @@ export function VirtualizedConversationMessageList({
           pendingDeferredLayoutAnchorRef.current = null;
           const scrollDelta = node.scrollTop - lastNativeScrollTopRef.current;
           lastNativeScrollTopRef.current = node.scrollTop;
+          const isPassiveTailFollowScroll =
+            tailFollowIntent &&
+            !hadUserScrollInteraction &&
+            !isDetachedFromBottomRef.current;
           if (lastUserScrollKindRef.current === null) {
             lastUserScrollKindRef.current = classifyScrollKind(
               scrollDelta,
               node.clientHeight,
             );
           }
-          releaseConversationSearchPinForUserScroll();
-          setHasUserScrollInteraction(true);
-          lastUserScrollInputTimeRef.current = performance.now();
-          captureLatestVisibleMessageAnchor(node);
-          scheduleIdleMountedRangeCompaction(VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
+          if (isPassiveTailFollowScroll) {
+            shouldKeepBottomAfterLayoutRef.current = true;
+          } else {
+            releaseConversationSearchPinForUserScroll();
+            setHasUserScrollInteraction(true);
+            lastUserScrollInputTimeRef.current = performance.now();
+            captureLatestVisibleMessageAnchor(node);
+            scheduleIdleMountedRangeCompaction(VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS);
+          }
           // Scrollbar-thumb drag and touch-inertia scrolls have no preceding
           // wheel/touch/key event, so `prewarmMountedRangeForUpwardWheel`
           // never runs for them. Without flush, `setMountedPageRange` batches
@@ -2683,7 +2703,9 @@ export function VirtualizedConversationMessageList({
           // keep the conditions symmetric so neither code path can outrun the
           // other.
           const isActiveUpwardNativeScroll =
-            scrollDelta < 0 && !isScrollContainerNearBottom(node);
+            !isPassiveTailFollowScroll &&
+            scrollDelta < 0 &&
+            !isScrollContainerNearBottom(node);
           reconcileMountedRangeForNativeScroll(
             node,
             scrollDelta,
@@ -2735,6 +2757,7 @@ export function VirtualizedConversationMessageList({
         shouldKeepBottomAfterLayoutRef.current &&
         !isBottomBoundaryRevealScroll &&
         !isProgrammaticBottomFollowScroll &&
+        !(tailFollowIntent && !hasUserScrollInteractionRef.current) &&
         !isScrollContainerNearBottom(node)
       ) {
         shouldKeepBottomAfterLayoutRef.current = false;
@@ -2986,8 +3009,14 @@ export function VirtualizedConversationMessageList({
     // the cooldown unconditionally on mousedown is correct: a click on message
     // content costs nothing (no native scroll fires), and a click on the
     // scrollbar correctly hands control back to the user.
-    const cancelBottomFollowOnMouseDown = () => {
+    const cancelBottomFollowOnMouseDown = (event: MouseEvent) => {
       pendingProgrammaticBottomFollowUntilRef.current = Number.NEGATIVE_INFINITY;
+      if (event.target === node) {
+        shouldKeepBottomAfterLayoutRef.current = false;
+        isDetachedFromBottomRef.current = true;
+        setHasUserScrollInteraction(true);
+        lastUserScrollInputTimeRef.current = performance.now();
+      }
     };
     const recordTouchStart = (event: TouchEvent) => {
       lastTouchClientYRef.current = event.touches[0]?.clientY ?? null;
@@ -3048,6 +3077,7 @@ export function VirtualizedConversationMessageList({
     scrollContainerRef,
     sessionId,
     syncViewportFromScrollNode,
+    tailFollowIntent,
   ]);
 
   useLayoutEffect(() => {

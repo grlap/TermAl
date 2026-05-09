@@ -7280,6 +7280,7 @@ textarea {
   font-size: var(--message-copy-size);
   line-height: 1.4;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-all;
   color: var(--ink);
 }
@@ -7339,6 +7340,12 @@ textarea {
 }
 
 .command-text code.hljs {
+  overflow-wrap: inherit;
+  word-break: inherit;
+}
+
+.command-text code.hljs * {
+  overflow-wrap: inherit;
   word-break: inherit;
 }
 
@@ -7605,6 +7612,8 @@ textarea {
 
 .plain-text-copy {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .prompt-expansion {

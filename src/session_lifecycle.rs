@@ -56,6 +56,7 @@ impl AppState {
             revision,
             delegation_lifecycle_deltas,
             delegation_child_transcript_deltas,
+            delegation_wait_refresh,
         ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -119,6 +120,7 @@ impl AppState {
                 inner.ignore_discovered_codex_thread(external_session_id.as_deref());
             }
             inner.normalize_orchestrator_instances();
+            let delegation_wait_refresh = refresh_delegation_waits_locked(&mut inner);
 
             let revision = self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
@@ -130,6 +132,7 @@ impl AppState {
                 revision,
                 delegation_reconciliation.lifecycle_deltas,
                 delegation_reconciliation.child_transcript_deltas,
+                delegation_wait_refresh,
             )
         };
 
@@ -158,6 +161,13 @@ impl AppState {
         for delta in delegation_lifecycle_deltas {
             self.publish_delegation_lifecycle_delta(revision, delta);
         }
+        if delegation_wait_refresh.did_mutate() {
+            self.publish_delegation_wait_consumed_deltas(
+                revision,
+                &delegation_wait_refresh.consumed_waits,
+            );
+        }
+        self.dispatch_delegation_wait_resumes(delegation_wait_refresh.dispatch_parents);
 
         self.resume_pending_orchestrator_transitions()
             .map_err(|err| {

@@ -712,6 +712,8 @@ impl AppState {
                     .collect::<Option<Vec<_>>>()?,
             },
             DeltaEvent::DelegationCreated { .. }
+            | DeltaEvent::DelegationWaitCreated { .. }
+            | DeltaEvent::DelegationWaitConsumed { .. }
             | DeltaEvent::DelegationUpdated { .. }
             | DeltaEvent::DelegationCompleted { .. }
             | DeltaEvent::DelegationFailed { .. }
@@ -2234,6 +2236,8 @@ impl AppState {
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
             }
             DeltaEvent::DelegationCreated { .. }
+            | DeltaEvent::DelegationWaitCreated { .. }
+            | DeltaEvent::DelegationWaitConsumed { .. }
             | DeltaEvent::DelegationUpdated { .. }
             | DeltaEvent::DelegationCompleted { .. }
             | DeltaEvent::DelegationFailed { .. }

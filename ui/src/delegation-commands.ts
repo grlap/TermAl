@@ -1,26 +1,33 @@
 // Owns the Phase 2/3 delegation command surface that UI/MCP wrappers can bind
-// to: spawn, reviewer batches, status, result, cancel, and polling wait helpers.
+// to: spawn, reviewer batches, status, result, cancel, polling waits,
+// backend-scheduled parent resume waits, and composer-side delegation request
+// helpers consumed by SessionPaneView/AgentSessionPanel.
 // Does not own route transport, live SSE adoption, or backend delegation
 // lifecycle rules. New module staged ahead of the TermAl MCP wrapper integration.
 
 import {
   cancelDelegation,
   createDelegation,
+  createDelegationWait,
   fetchDelegationResult,
   fetchDelegationStatus,
   type AbortableRequestOptions,
   type CreateDelegationRequest,
+  type CreateDelegationWaitRequest,
   type DelegationResponse,
   type DelegationResultResponse,
   type DelegationStatusResponse,
+  type DelegationWaitResponse,
 } from "./api";
 import { isLocalSessionRemote } from "./remotes";
 import {
   mismatchedDelegationIdErrorPacket,
   mixedServerInstanceErrorPacket,
+  resumeWaitFailurePacket,
   spawnDelegationFailurePacket,
   spawnDelegationValidationFailurePacket,
   statusFetchErrorPacket,
+  type DelegationResumeWaitFailurePacket,
   type MixedServerInstanceRecoveryGroup,
   type SpawnDelegationFailurePacket,
   type SpawnDelegationTransportFailurePacket,
@@ -70,7 +77,14 @@ const DELEGATION_COMPOSER_FALLBACK_TITLE = "Delegated review";
 const DELEGATION_COMPOSER_TITLE_ELLIPSIS = "...";
 
 export type CreateComposerDelegationOptions = {
+  title?: string;
+  mode?: CreateDelegationRequest["mode"];
   writePolicy?: CreateDelegationRequest["writePolicy"];
+};
+
+export type ResumeAfterDelegationsOptions = {
+  mode?: CreateDelegationWaitRequest["mode"];
+  title?: string;
 };
 
 // These client-side wait limits compose to at most 20 status requests/sec per
@@ -105,6 +119,10 @@ export type DelegationCommandTransport = {
     parentSessionId: string,
     delegationId: string,
   ) => Promise<DelegationStatusResponse>;
+  createDelegationWait?: (
+    parentSessionId: string,
+    request: CreateDelegationWaitRequest,
+  ) => Promise<DelegationWaitResponse>;
 };
 
 export const browserDelegationCommandTransport: DelegationCommandTransport = {
@@ -112,6 +130,7 @@ export const browserDelegationCommandTransport: DelegationCommandTransport = {
   fetchDelegationStatus,
   fetchDelegationResult,
   cancelDelegation,
+  createDelegationWait,
 };
 
 export type DelegationChildSessionSummary = {
@@ -151,6 +170,26 @@ export type SpawnReviewerBatchItem = Omit<
   "mode" | "writePolicy"
 >;
 
+export type SpawnReviewerBatchResumeWaitResult =
+  | {
+      outcome: "scheduled";
+      wait: DelegationWaitResponse["wait"];
+      queuedResume: boolean;
+      revision: number;
+      serverInstanceId: string;
+      error?: never;
+    }
+  | {
+      outcome: "skipped";
+      reason: "mixed-server-instance" | "no-successful-spawns";
+      message: string;
+      error?: never;
+    }
+  | {
+      outcome: "error";
+      error: DelegationResumeWaitFailurePacket;
+    };
+
 export type SpawnReviewerBatchFailure =
   SpawnDelegationTransportFailurePacket & {
     index: number;
@@ -166,6 +205,7 @@ export type SpawnReviewerBatchBaseResult = {
   childSessionIds: string[];
   revision: number | null;
   serverInstanceId: string | null;
+  resumeWait?: SpawnReviewerBatchResumeWaitResult;
 };
 
 export type SpawnReviewerBatchSuccessResult = SpawnReviewerBatchBaseResult & {
@@ -260,15 +300,15 @@ export function createComposerDelegationRequest(
   prompt: string,
   options: CreateComposerDelegationOptions = {},
 ): CreateDelegationRequest {
-  // The composer Delegate action defaults to read-only reviewer mode. Build-
-  // gated agent commands may override this with an isolated worktree policy.
-  // Worker/shared-write delegation still needs explicit ownership controls.
+  // The composer Delegate action defaults to read-only reviewer mode. Resolved
+  // commands can override mode/write policy when the backend provides explicit
+  // delegation defaults.
   return {
-    title: delegationTitleFromPrompt(prompt),
+    title: options.title?.trim() || delegationTitleFromPrompt(prompt),
     prompt,
     agent: parentSession.agent,
     model: parentSession.model,
-    mode: "reviewer",
+    mode: options.mode ?? "reviewer",
     writePolicy: options.writePolicy ?? { kind: "readOnly" },
   };
 }
@@ -343,11 +383,13 @@ async function spawnDelegationWithTransport(
 export async function spawnReviewerBatchCommand(
   parentSessionId: string,
   requests: readonly SpawnReviewerBatchItem[],
+  resumeAfter?: ResumeAfterDelegationsOptions,
 ): Promise<SpawnReviewerBatchCommandResult> {
   return spawnReviewerBatchWithTransport(
     browserDelegationCommandTransport,
     parentSessionId,
     requests,
+    resumeAfter,
   );
 }
 
@@ -355,6 +397,7 @@ async function spawnReviewerBatchWithTransport(
   transport: DelegationCommandTransport,
   parentSessionId: string,
   requests: readonly SpawnReviewerBatchItem[],
+  resumeAfter?: ResumeAfterDelegationsOptions,
 ): Promise<SpawnReviewerBatchCommandResult> {
   let normalizedParentSessionId: string;
   let normalizedRequests: ReturnType<typeof normalizeReviewerBatchRequests>;
@@ -398,9 +441,25 @@ async function spawnReviewerBatchWithTransport(
     }
   });
   const mixedServerInstanceError = mixedSpawnServerInstanceError(spawned);
-  const metadata = mixedServerInstanceError
+  let metadata = mixedServerInstanceError
     ? { revision: null, serverInstanceId: null }
     : newestSpawnMetadata(spawned);
+  const resumeWait =
+    resumeAfter === undefined
+      ? undefined
+      : await scheduleReviewerBatchResumeWait(
+          transport,
+          normalizedParentSessionId,
+          spawned,
+          resumeAfter,
+          mixedServerInstanceError !== null,
+        );
+  if (resumeWait?.outcome === "scheduled") {
+    metadata = {
+      revision: resumeWait.revision,
+      serverInstanceId: resumeWait.serverInstanceId,
+    };
+  }
   const base = {
     spawned,
     failed,
@@ -408,6 +467,7 @@ async function spawnReviewerBatchWithTransport(
     childSessionIds: spawned.map((result) => result.childSessionId),
     revision: metadata.revision,
     serverInstanceId: metadata.serverInstanceId,
+    ...(resumeWait ? { resumeWait } : {}),
   };
   if (mixedServerInstanceError) {
     return {
@@ -433,6 +493,52 @@ async function spawnReviewerBatchWithTransport(
     outcome: "error",
     error: allReviewerSpawnsFailedError(),
   };
+}
+
+async function scheduleReviewerBatchResumeWait(
+  transport: DelegationCommandTransport,
+  parentSessionId: string,
+  spawned: readonly SpawnDelegationCommandSuccessResult[],
+  options: ResumeAfterDelegationsOptions,
+  batchCrossedServerInstances: boolean,
+): Promise<SpawnReviewerBatchResumeWaitResult> {
+  if (batchCrossedServerInstances) {
+    return {
+      outcome: "skipped",
+      reason: "mixed-server-instance",
+      message:
+        "resume wait was not scheduled because reviewer spawns crossed backend instances",
+    };
+  }
+  const delegationIds = spawned.map((result) => result.delegationId);
+  if (delegationIds.length === 0) {
+    return {
+      outcome: "skipped",
+      reason: "no-successful-spawns",
+      message:
+        "resume wait was not scheduled because no reviewer spawns succeeded",
+    };
+  }
+  try {
+    const response = await resumeAfterDelegationsWithTransport(
+      transport,
+      parentSessionId,
+      delegationIds,
+      options,
+    );
+    return {
+      outcome: "scheduled",
+      wait: response.wait,
+      queuedResume: response.queuedResume,
+      revision: response.revision,
+      serverInstanceId: response.serverInstanceId,
+    };
+  } catch (error) {
+    return {
+      outcome: "error",
+      error: resumeWaitFailurePacket(error, { parentSessionId }),
+    };
+  }
 }
 
 function spawnDelegationCommandResult(
@@ -592,6 +698,53 @@ export async function waitDelegationsCommand(
     delegationIds,
     options,
   );
+}
+
+export async function resumeAfterDelegationsCommand(
+  parentSessionId: string,
+  delegationIds: readonly string[],
+  options: ResumeAfterDelegationsOptions = {},
+): Promise<DelegationWaitResponse> {
+  return resumeAfterDelegationsWithTransport(
+    browserDelegationCommandTransport,
+    parentSessionId,
+    delegationIds,
+    options,
+  );
+}
+
+async function resumeAfterDelegationsWithTransport(
+  transport: DelegationCommandTransport,
+  parentSessionId: string,
+  delegationIds: readonly string[],
+  options: ResumeAfterDelegationsOptions = {},
+): Promise<DelegationWaitResponse> {
+  const normalizedParentSessionId = normalizeTransportId(
+    parentSessionId,
+    "parent session id",
+  );
+  const ids = normalizeDelegationIds(delegationIds);
+  if (ids.length === 0) {
+    throw new RangeError(
+      "resume_after_delegations requires at least one delegation id",
+    );
+  }
+  if (ids.length > MAX_DELEGATION_WAIT_IDS) {
+    throw new RangeError(
+      `resume_after_delegations accepts at most ${MAX_DELEGATION_WAIT_IDS} ids`,
+    );
+  }
+  if (!transport.createDelegationWait) {
+    throw new TypeError(
+      "delegation transport does not support backend-scheduled resume waits",
+    );
+  }
+  const title = normalizeResumeWaitTitle(options.title);
+  return transport.createDelegationWait(normalizedParentSessionId, {
+    delegationIds: ids,
+    ...(options.mode ? { mode: options.mode } : {}),
+    ...(title ? { title } : {}),
+  });
 }
 
 async function waitDelegationsWithTransport(
@@ -783,7 +936,14 @@ export function createDelegationCommands(
     spawn_reviewer_batch: (
       parentSessionId: string,
       requests: readonly SpawnReviewerBatchItem[],
-    ) => spawnReviewerBatchWithTransport(transport, parentSessionId, requests),
+      resumeAfter?: ResumeAfterDelegationsOptions,
+    ) =>
+      spawnReviewerBatchWithTransport(
+        transport,
+        parentSessionId,
+        requests,
+        resumeAfter,
+      ),
     get_delegation_status: (parentSessionId: string, delegationId: string) =>
       getDelegationStatusWithTransport(
         transport,
@@ -804,6 +964,17 @@ export function createDelegationCommands(
       options?: WaitDelegationsOptions,
     ) =>
       waitDelegationsWithTransport(
+        transport,
+        parentSessionId,
+        delegationIds,
+        options,
+      ),
+    resume_after_delegations: (
+      parentSessionId: string,
+      delegationIds: readonly string[],
+      options?: ResumeAfterDelegationsOptions,
+    ) =>
+      resumeAfterDelegationsWithTransport(
         transport,
         parentSessionId,
         delegationIds,
@@ -1545,6 +1716,25 @@ function validateDelegationMetadataText(
       `${label} must be no longer than ${maxChars} characters`,
     );
   }
+}
+
+function normalizeResumeWaitTitle(value: string | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    throw new TypeError("title must be omitted instead of null");
+  }
+  if (typeof value !== "string") {
+    throw new TypeError("title must be a string");
+  }
+  const title = value.trim();
+  validateDelegationMetadataText(
+    title,
+    "title",
+    MAX_DELEGATION_TITLE_CHARS,
+  );
+  return title || undefined;
 }
 
 function normalizeDelegationPrompt(prompt: string) {

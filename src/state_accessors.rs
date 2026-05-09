@@ -656,6 +656,7 @@ impl AppState {
                 .iter()
                 .map(delegation_summary_from_record)
                 .collect(),
+            delegation_waits: inner.delegation_waits.clone(),
         }
     }
 
@@ -691,6 +692,7 @@ impl AppState {
                 .iter()
                 .map(delegation_summary_from_record)
                 .collect(),
+            delegation_waits: inner.delegation_waits.clone(),
         }
     }
 
@@ -725,6 +727,7 @@ impl AppState {
                 .iter()
                 .map(delegation_summary_from_record)
                 .collect(),
+            delegation_waits: inner.delegation_waits.clone(),
         }
     }
 

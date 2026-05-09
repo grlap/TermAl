@@ -33,6 +33,8 @@ fn delta_event_revision(event: &DeltaEvent) -> u64 {
         | DeltaEvent::CodexUpdated { revision, .. }
         | DeltaEvent::OrchestratorsUpdated { revision, .. }
         | DeltaEvent::DelegationCreated { revision, .. }
+        | DeltaEvent::DelegationWaitCreated { revision, .. }
+        | DeltaEvent::DelegationWaitConsumed { revision, .. }
         | DeltaEvent::DelegationUpdated { revision, .. }
         | DeltaEvent::DelegationCompleted { revision, .. }
         | DeltaEvent::DelegationFailed { revision, .. }

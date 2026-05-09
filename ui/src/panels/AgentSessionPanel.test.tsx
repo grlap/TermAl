@@ -187,7 +187,40 @@ afterEach(() => {
   act(() => {
     resetSessionStoreForTesting();
   });
+  vi.unstubAllGlobals();
 });
+
+function stubResolvedAgentCommand(response: {
+  name: string;
+  source: string;
+  kind: "promptTemplate" | "nativeSlash";
+  visiblePrompt: string;
+  expandedPrompt?: string | null;
+  title?: string | null;
+  delegation?: {
+    mode?: "reviewer" | "explorer" | "worker";
+    title?: string | null;
+    writePolicy?:
+      | { kind: "readOnly" }
+      | { kind: "sharedWorktree"; ownedPaths: string[] }
+      | { kind: "isolatedWorktree"; ownedPaths: string[]; worktreePath?: string };
+  } | null;
+}) {
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+    return new Response(JSON.stringify(response), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function lastJsonRequestBody(fetchMock: ReturnType<typeof stubResolvedAgentCommand>) {
+  const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+  const init = lastCall?.[1] as RequestInit | undefined;
+  return JSON.parse(String(init?.body ?? "{}")) as unknown;
+}
 
 describe("AgentSessionPanel conversation caching", () => {
   it("renders current same-id message updates at the active transcript tail", () => {
@@ -1026,6 +1059,52 @@ describe("AgentSessionPanel conversation caching", () => {
       "session-1",
       "marker-1",
     );
+  });
+
+  it("highlights the source message immediately after creating a marker", async () => {
+    const onCreateConversationMarker = vi.fn();
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      onCreateConversationMarker,
+      renderMessageCard: (message) => (
+        <article className="message-card">
+          <div
+            className="message-meta"
+            data-conversation-marker-menu-trigger={
+              message.author === "assistant" ? true : undefined
+            }
+          >
+            <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+            <span>{message.timestamp}</span>
+          </div>
+          <p>{`${message.id} body`}</p>
+        </article>
+      ),
+    });
+
+    const messageShell = screen
+      .getByText("message-2 body")
+      .closest(".conversation-message-marker-shell");
+    expect(messageShell).not.toHaveClass("is-active-marker");
+
+    fireEvent.contextMenu(screen.getByText("Agent message-2"));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create marker" }));
+
+    expect(onCreateConversationMarker).toHaveBeenCalledWith(
+      "session-1",
+      "message-2",
+      { name: "Checkpoint" },
+    );
+    await waitFor(() => {
+      expect(messageShell).toHaveClass("is-active-marker");
+    });
   });
 
   it("uses dialog semantics and local keyboard behavior for marker label creation", async () => {
@@ -8030,6 +8109,19 @@ describe("AgentSessionPanelFooter", () => {
   it("delegates a selected prompt-template agent command with expanded content", async () => {
     const onSend = vi.fn(() => true);
     const onSpawnDelegation = vi.fn(async () => true);
+    const fetchMock = stubResolvedAgentCommand({
+      name: "review-local",
+      source: ".claude/commands/review-local.md",
+      kind: "promptTemplate",
+      visiblePrompt: "/review-local",
+      expandedPrompt: "Expanded review command body.",
+      title: "Review staged and unstaged changes.",
+      delegation: {
+        mode: "reviewer",
+        title: "Review staged and unstaged changes.",
+        writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+      },
+    });
     render(
       renderFooter({
         session: makeSession("session-a", {
@@ -8066,9 +8158,15 @@ describe("AgentSessionPanelFooter", () => {
       "session-a",
       "Expanded review command body.",
       {
+        mode: "reviewer",
+        title: "Review staged and unstaged changes.",
         writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
       },
     );
+    expect(lastJsonRequestBody(fetchMock)).toEqual({
+      arguments: "",
+      intent: "delegate",
+    });
     expect(onSend).not.toHaveBeenCalled();
     await waitFor(() => expect(textarea).toHaveValue(""));
   });
@@ -8076,6 +8174,13 @@ describe("AgentSessionPanelFooter", () => {
   it("delegates native slash agent commands as slash prompts", async () => {
     const onSend = vi.fn(() => true);
     const onSpawnDelegation = vi.fn(async () => true);
+    stubResolvedAgentCommand({
+      name: "review",
+      source: "Claude bundled command",
+      kind: "nativeSlash",
+      visiblePrompt: "/review",
+      title: "Review the current changes.",
+    });
     render(
       renderFooter({
         session: makeSession("session-a", {
@@ -8105,14 +8210,157 @@ describe("AgentSessionPanelFooter", () => {
       await Promise.resolve();
     });
 
-    expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "/review");
+    expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "/review", {
+      title: "Review the current changes.",
+    });
     expect(onSend).not.toHaveBeenCalled();
     await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("forwards resolver-provided delegation mode to composer delegation", async () => {
+    const onSend = vi.fn(() => true);
+    const onSpawnDelegation = vi.fn(async () => true);
+    stubResolvedAgentCommand({
+      name: "explore",
+      source: ".claude/commands/explore.md",
+      kind: "promptTemplate",
+      visiblePrompt: "/explore",
+      expandedPrompt: "Explore the resolver path.",
+      title: "Explore resolver path",
+      delegation: {
+        mode: "explorer",
+        title: "Explore resolver path",
+      },
+    });
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+        agentCommands: [
+          {
+            kind: "promptTemplate",
+            name: "explore",
+            description: "Explore the resolver path.",
+            content: "Explore the resolver path.",
+            source: ".claude/commands/explore.md",
+          },
+        ],
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onSend,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/exp" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    expect(onSpawnDelegation).toHaveBeenCalledWith(
+      "session-a",
+      "Explore the resolver path.",
+      {
+        mode: "explorer",
+        title: "Explore resolver path",
+      },
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("ignores duplicate delegated agent commands while resolution is pending", async () => {
+    const onSend = vi.fn(() => true);
+    const onSpawnDelegation = vi.fn(async () => true);
+    const pendingResolve = deferredValue<Response>();
+    const fetchMock = vi.fn(() => pendingResolve.promise);
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+        agentCommands: [
+          {
+            kind: "nativeSlash",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "/review-local",
+            source: "Claude project command",
+          },
+        ],
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onSend,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+    const delegateButton = screen.getByRole("button", { name: "Delegate" });
+    await act(async () => {
+      fireEvent.click(delegateButton);
+      fireEvent.click(delegateButton);
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onSpawnDelegation).not.toHaveBeenCalled();
+    expect(delegateButton).toBeDisabled();
+
+    await act(async () => {
+      pendingResolve.resolve(
+        new Response(
+          JSON.stringify({
+            name: "review-local",
+            source: "Claude project command",
+            kind: "nativeSlash",
+            visiblePrompt: "/review-local",
+            title: "Review staged and unstaged changes.",
+            delegation: {
+              mode: "reviewer",
+              title: "Review staged and unstaged changes.",
+              writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      await pendingResolve.promise;
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "/review-local", {
+        mode: "reviewer",
+        title: "Review staged and unstaged changes.",
+        writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+      }),
+    );
+    expect(onSpawnDelegation).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("delegates review-local native slash commands in an isolated worktree", async () => {
     const onSend = vi.fn(() => true);
     const onSpawnDelegation = vi.fn(async () => true);
+    stubResolvedAgentCommand({
+      name: "review-local",
+      source: ".claude/commands/review-local.md",
+      kind: "nativeSlash",
+      visiblePrompt: "/review-local",
+      title: "Review staged and unstaged changes.",
+      delegation: {
+        mode: "reviewer",
+        title: "Review staged and unstaged changes.",
+        writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+      },
+    });
     render(
       renderFooter({
         session: makeSession("session-a", {
@@ -8143,6 +8391,8 @@ describe("AgentSessionPanelFooter", () => {
     });
 
     expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "/review-local", {
+      mode: "reviewer",
+      title: "Review staged and unstaged changes.",
       writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
     });
     expect(onSend).not.toHaveBeenCalled();
@@ -8151,6 +8401,14 @@ describe("AgentSessionPanelFooter", () => {
 
   it("expands argument-taking agent commands before delegation", async () => {
     const onSpawnDelegation = vi.fn(async () => true);
+    const fetchMock = stubResolvedAgentCommand({
+      name: "fix-bug",
+      source: ".claude/commands/fix-bug.md",
+      kind: "promptTemplate",
+      visiblePrompt: "/fix-bug 42",
+      expandedPrompt: "Fix:\n42",
+      title: "Fix bug 42",
+    });
     render(
       renderFooter({
         session: makeSession("session-a", {
@@ -8188,7 +8446,13 @@ describe("AgentSessionPanelFooter", () => {
       await Promise.resolve();
     });
 
-    expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "Fix:\n42");
+    expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "Fix:\n42", {
+      title: "Fix bug 42",
+    });
+    expect(lastJsonRequestBody(fetchMock)).toEqual({
+      arguments: "42",
+      intent: "delegate",
+    });
     await waitFor(() => expect(textarea).toHaveValue(""));
   });
 
@@ -9318,8 +9582,15 @@ describe("AgentSessionPanelFooter", () => {
     expect(screen.getByText("/model")).toBeInTheDocument();
   });
 
-  it("sends a no-argument agent command directly from the slash menu", () => {
+  it("sends a no-argument agent command directly from the slash menu", async () => {
     const onSend = vi.fn(() => true);
+    const fetchMock = stubResolvedAgentCommand({
+      name: "review-local",
+      source: "Claude project command",
+      kind: "nativeSlash",
+      visiblePrompt: "/review-local",
+      title: "Review staged and unstaged changes.",
+    });
 
     render(
       renderFooter({
@@ -9342,10 +9613,78 @@ describe("AgentSessionPanelFooter", () => {
 
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/rev" } });
-    fireEvent.keyDown(textarea, { key: "Enter" });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      await Promise.resolve();
+    });
 
-    expect(onSend).toHaveBeenCalledWith("session-a", "/review-local");
-    expect(textarea).toHaveValue("");
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("session-a", "/review-local"),
+    );
+    expect(lastJsonRequestBody(fetchMock)).toEqual({
+      arguments: "",
+      intent: "send",
+    });
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("ignores duplicate agent command sends while resolution is pending", async () => {
+    const onSend = vi.fn(() => true);
+    const pendingResolve = deferredValue<Response>();
+    const fetchMock = vi.fn(() => pendingResolve.promise);
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      renderFooter({
+        onSend,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+        agentCommands: [
+          {
+            kind: "nativeSlash",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "/review-local",
+            source: "Claude project command",
+          },
+        ],
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+
+    await act(async () => {
+      pendingResolve.resolve(
+        new Response(
+          JSON.stringify({
+            name: "review-local",
+            source: "Claude project command",
+            kind: "nativeSlash",
+            visiblePrompt: "/review-local",
+            title: "Review staged and unstaged changes.",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      await pendingResolve.promise;
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("session-a", "/review-local"),
+    );
+    expect(onSend).toHaveBeenCalledTimes(1);
   });
 
   it("expands a selected skill command on Space instead of running it", () => {
@@ -9410,8 +9749,24 @@ describe("AgentSessionPanelFooter", () => {
     expect(textarea).toHaveValue("/imagegen detailed prompt");
   });
 
-  it("expands an agent command with $ARGUMENTS and sends the substituted prompt", () => {
+  it("expands an agent command with $ARGUMENTS and sends the substituted prompt", async () => {
     const onSend = vi.fn(() => true);
+    const fetchMock = stubResolvedAgentCommand({
+      name: "fix-bug",
+      source: ".claude/commands/fix-bug.md",
+      kind: "promptTemplate",
+      visiblePrompt: "/fix-bug 3",
+      expandedPrompt: `Fix the requested bug:
+
+3
+
+Verify the fix.
+
+## Additional User Note
+
+Please add tests.`,
+      title: "Fix bug 3",
+    });
 
     render(
       renderFooter({
@@ -9438,26 +9793,52 @@ Verify the fix.`,
 
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/fix" } });
-    fireEvent.keyDown(textarea, { key: "Enter" });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      await Promise.resolve();
+    });
     expect(textarea).toHaveValue("/fix-bug ");
 
-    fireEvent.change(textarea, { target: { value: "/fix-bug 3" } });
-    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.change(textarea, {
+      target: { value: "/fix-bug 3 -- Please add tests." },
+    });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      await Promise.resolve();
+    });
 
-    expect(onSend).toHaveBeenCalledWith(
-      "session-a",
-      "/fix-bug 3",
-      `Fix the requested bug:
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith(
+        "session-a",
+        "/fix-bug 3",
+        `Fix the requested bug:
 
 3
 
-Verify the fix.`,
+Verify the fix.
+
+## Additional User Note
+
+Please add tests.`,
+      ),
     );
-    expect(textarea).toHaveValue("");
+    expect(lastJsonRequestBody(fetchMock)).toEqual({
+      arguments: "3",
+      note: "Please add tests.",
+      intent: "send",
+    });
+    await waitFor(() => expect(textarea).toHaveValue(""));
   });
 
-  it("expands a native Claude command with arguments and sends the slash prompt", () => {
+  it("expands a native Claude command with arguments and sends the slash prompt", async () => {
     const onSend = vi.fn(() => true);
+    const fetchMock = stubResolvedAgentCommand({
+      name: "review",
+      source: "Claude bundled command",
+      kind: "nativeSlash",
+      visiblePrompt: "/review staged files",
+      title: "Review the current changes.",
+    });
 
     render(
       renderFooter({
@@ -9481,15 +9862,27 @@ Verify the fix.`,
 
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/rev" } });
-    fireEvent.keyDown(textarea, { key: "Enter" });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      await Promise.resolve();
+    });
     expect(textarea).toHaveValue("/review ");
     expect(onSend).not.toHaveBeenCalled();
 
     fireEvent.change(textarea, { target: { value: "/review staged files" } });
-    fireEvent.keyDown(textarea, { key: "Enter" });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      await Promise.resolve();
+    });
 
-    expect(onSend).toHaveBeenCalledWith("session-a", "/review staged files");
-    expect(textarea).toHaveValue("");
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("session-a", "/review staged files"),
+    );
+    expect(lastJsonRequestBody(fetchMock)).toEqual({
+      arguments: "staged files",
+      intent: "send",
+    });
+    await waitFor(() => expect(textarea).toHaveValue(""));
   });
 
   it("applies a model slash command with keyboard navigation instead of sending a prompt", () => {

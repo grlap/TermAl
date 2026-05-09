@@ -83,6 +83,8 @@ export type SessionDeltaEvent = Exclude<
   | { type: "codexUpdated" }
   | { type: "orchestratorsUpdated" }
   | { type: "delegationCreated" }
+  | { type: "delegationWaitCreated" }
+  | { type: "delegationWaitConsumed" }
   | { type: "delegationUpdated" }
   | { type: "delegationCompleted" }
   | { type: "delegationFailed" }

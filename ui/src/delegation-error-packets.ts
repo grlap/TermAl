@@ -42,6 +42,15 @@ export type WaitDelegationErrorPacket =
 
 export type WaitDelegationErrorKind = WaitDelegationErrorPacket["kind"];
 
+export type DelegationResumeWaitFailurePacket = {
+  kind: "resume-wait-failed";
+  name: string;
+  message: string;
+  apiErrorKind: ApiRequestErrorKind | null;
+  status: number | null;
+  restartRequired: boolean | null;
+};
+
 export type SpawnDelegationFailurePacket =
   | SpawnDelegationTransportFailurePacket
   | SpawnDelegationValidationFailurePacket;
@@ -72,6 +81,8 @@ export type SpawnReviewerBatchErrorPacket =
 
 const GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE =
   "Delegation status fetch failed.";
+const GENERIC_DELEGATION_RESUME_WAIT_ERROR_MESSAGE =
+  "Delegation resume wait scheduling failed.";
 const GENERIC_SPAWN_DELEGATION_ERROR_MESSAGE = "Spawn delegation failed.";
 const GENERIC_SPAWN_DELEGATION_VALIDATION_ERROR_MESSAGE =
   "Invalid delegation request.";
@@ -86,8 +97,21 @@ const SAFE_SPAWN_DELEGATION_VALIDATION_NAMES = new Set([
 const SAFE_DELEGATION_STATUS_FETCH_MESSAGES = new Set([
   "The TermAl backend is unavailable.",
 ]);
+const SAFE_DELEGATION_RESUME_WAIT_MESSAGES = new Set([
+  "The TermAl backend is unavailable.",
+  "session not found",
+  "delegation not found",
+  "delegation wait ids cannot be empty",
+  "delegation wait requires at least one delegation id",
+]);
 const SAFE_DELEGATION_STATUS_FETCH_STATUS_PATTERN =
   /^Request failed with status \d+\.$/u;
+const SAFE_DELEGATION_RESUME_WAIT_PATTERNS = [
+  /^Request failed with status \d+\.$/u,
+  /^delegation wait accepts at most \d+ delegation ids$/u,
+  /^delegation wait title must be at most \d+ characters$/u,
+  /^delegation `[^`]+` does not belong to parent session `[^`]+`$/u,
+];
 const SAFE_SPAWN_DELEGATION_MESSAGES = new Set([
   "The TermAl backend is unavailable.",
   "parent session id is required",
@@ -147,6 +171,10 @@ type SpawnDelegationErrorContext = {
   parentSessionId: string;
 };
 
+type DelegationResumeWaitErrorContext = {
+  parentSessionId: string;
+};
+
 export function statusFetchErrorPacket(
   error: unknown,
   context: StatusFetchErrorContext,
@@ -170,6 +198,35 @@ export function statusFetchErrorPacket(
     kind: "status-fetch-failed",
     name,
     message: GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE,
+    apiErrorKind: null,
+    status: null,
+    restartRequired: null,
+  };
+}
+
+export function resumeWaitFailurePacket(
+  error: unknown,
+  context: DelegationResumeWaitErrorContext,
+): DelegationResumeWaitFailurePacket {
+  if (error instanceof ApiRequestError) {
+    return {
+      kind: "resume-wait-failed",
+      name: error.name,
+      message: safeDelegationResumeWaitMessage(
+        error.message,
+        context,
+        error.kind,
+      ),
+      apiErrorKind: error.kind,
+      status: error.status,
+      restartRequired: error.restartRequired,
+    };
+  }
+  const name = error instanceof Error ? error.name : "Error";
+  return {
+    kind: "resume-wait-failed",
+    name,
+    message: GENERIC_DELEGATION_RESUME_WAIT_ERROR_MESSAGE,
     apiErrorKind: null,
     status: null,
     restartRequired: null,
@@ -269,6 +326,28 @@ function safeDelegationStatusFetchMessage(
     return sanitized;
   }
   return GENERIC_DELEGATION_STATUS_FETCH_ERROR_MESSAGE;
+}
+
+function safeDelegationResumeWaitMessage(
+  message: string,
+  context: DelegationResumeWaitErrorContext,
+  apiErrorKind?: ApiRequestErrorKind,
+) {
+  const sanitized = sanitizeUserFacingErrorMessage(message);
+  if (
+    SAFE_DELEGATION_RESUME_WAIT_MESSAGES.has(sanitized) ||
+    SAFE_DELEGATION_RESUME_WAIT_PATTERNS.some((pattern) =>
+      pattern.test(sanitized),
+    ) ||
+    (apiErrorKind === "backend-unavailable" &&
+      isSafeUnavailableRouteDiagnostic(
+        sanitized,
+        `/api/sessions/${encodeURIComponent(context.parentSessionId)}/delegation-waits`,
+      ))
+  ) {
+    return sanitized;
+  }
+  return GENERIC_DELEGATION_RESUME_WAIT_ERROR_MESSAGE;
 }
 
 function safeSpawnDelegationFailureMessage(

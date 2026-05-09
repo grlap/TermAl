@@ -386,6 +386,17 @@ export type DelegationSummary = Omit<
   result?: DelegationResultSummary | null;
 };
 
+export type DelegationWaitMode = "any" | "all";
+
+export type DelegationWaitRecord = {
+  id: string;
+  parentSessionId: string;
+  delegationIds: string[];
+  mode: DelegationWaitMode;
+  createdAt: string;
+  title?: string | null;
+};
+
 export type Message =
   | TextMessage
   | ThinkingMessage
@@ -782,6 +793,19 @@ export type DelegationCreatedEvent = {
   delegation: DelegationSummary;
 };
 
+export type DelegationWaitCreatedEvent = {
+  type: "delegationWaitCreated";
+  revision: number;
+  wait: DelegationWaitRecord;
+};
+
+export type DelegationWaitConsumedEvent = {
+  type: "delegationWaitConsumed";
+  revision: number;
+  waitId: string;
+  parentSessionId: string;
+};
+
 export type DelegationUpdatedEvent = {
   type: "delegationUpdated";
   revision: number;
@@ -854,6 +878,8 @@ export type DeltaEvent =
   | CodexUpdatedEvent
   | OrchestratorsUpdatedEvent
   | DelegationCreatedEvent
+  | DelegationWaitCreatedEvent
+  | DelegationWaitConsumedEvent
   | DelegationUpdatedEvent
   | DelegationCompletedEvent
   | DelegationFailedEvent

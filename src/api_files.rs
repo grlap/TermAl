@@ -368,6 +368,19 @@ async fn list_agent_commands(
     Ok(Json(response))
 }
 
+/// Resolves an agent command into the prompt payload used for send/delegate.
+async fn resolve_agent_command(
+    AxumPath((session_id, command_name)): AxumPath<(String, String)>,
+    State(state): State<AppState>,
+    payload: std::result::Result<Json<ResolveAgentCommandRequest>, JsonRejection>,
+) -> Result<Json<ResolveAgentCommandResponse>, ApiError> {
+    let Json(request) = payload.map_err(|rejection| api_json_rejection("request", rejection))?;
+    let response =
+        run_blocking_api(move || state.resolve_agent_command(&session_id, &command_name, request))
+            .await?;
+    Ok(Json(response))
+}
+
 /// Searches instructions.
 async fn search_instructions(
     Query(query): Query<InstructionSearchQuery>,

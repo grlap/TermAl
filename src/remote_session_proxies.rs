@@ -177,29 +177,48 @@ impl AppState {
             &[],
             None,
         )?;
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let applied_remote_revision = apply_remote_state_if_newer_locked(
-            &mut inner,
-            &target.remote.id,
-            &remote_state,
-            Some(&target.remote_session_id),
-            false,
-        );
-        let removed = if let Some(index) = inner.find_session_index(&target.local_session_id) {
-            inner.remove_session_at(index);
-            true
-        } else {
-            false
+        let (snapshot, revision, wait_refresh) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let applied_remote_revision = apply_remote_state_if_newer_locked(
+                &mut inner,
+                &target.remote.id,
+                &remote_state,
+                Some(&target.remote_session_id),
+                false,
+            );
+            let removed = if let Some(index) = inner.find_session_index(&target.local_session_id) {
+                inner.remove_session_at(index);
+                true
+            } else {
+                false
+            };
+            let wait_refresh = if removed {
+                refresh_delegation_waits_locked(&mut inner)
+            } else {
+                DelegationWaitRefresh::default()
+            };
+            if applied_remote_revision {
+                inner.note_remote_applied_revision(&target.remote.id, remote_state.revision);
+            }
+            let revision = if applied_remote_revision || removed || wait_refresh.did_mutate() {
+                Some(self.commit_locked(&mut inner).map_err(|err| {
+                    ApiError::internal(format!("failed to persist remote session removal: {err:#}"))
+                })?)
+            } else {
+                None
+            };
+            (self.snapshot_from_inner(&inner), revision, wait_refresh)
         };
-        if applied_remote_revision {
-            inner.note_remote_applied_revision(&target.remote.id, remote_state.revision);
+        if let Some(revision) = revision {
+            if wait_refresh.did_mutate() {
+                self.publish_delegation_wait_consumed_deltas(
+                    revision,
+                    &wait_refresh.consumed_waits,
+                );
+            }
+            self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
         }
-        if applied_remote_revision || removed {
-            self.commit_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist remote session removal: {err:#}"))
-            })?;
-        }
-        Ok(self.snapshot_from_inner(&inner))
+        Ok(snapshot)
     }
 
     fn proxy_remote_update_approval(
@@ -318,6 +337,31 @@ impl AppState {
             ),
             &[],
             None,
+        )
+    }
+
+    fn proxy_remote_resolve_agent_command(
+        &self,
+        session_id: &str,
+        command_name: &str,
+        request: ResolveAgentCommandRequest,
+    ) -> Result<ResolveAgentCommandResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        let body = serde_json::to_value(request).map_err(|err| {
+            ApiError::internal(format!("failed to encode agent command resolve request: {err}"))
+        })?;
+        self.remote_registry.request_json(
+            &target.remote,
+            Method::POST,
+            &format!(
+                "/api/sessions/{}/agent-commands/{}/resolve",
+                encode_uri_component(&target.remote_session_id),
+                encode_uri_component(command_name)
+            ),
+            &[],
+            Some(body),
         )
     }
 

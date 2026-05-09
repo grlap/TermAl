@@ -224,7 +224,79 @@ describe("delegation command surface", () => {
     expect(delegationCommands.get_delegation_result).toBeTypeOf("function");
     expect(delegationCommands.cancel_delegation).toBeTypeOf("function");
     expect(delegationCommands.wait_delegations).toBeTypeOf("function");
+    expect(delegationCommands.resume_after_delegations).toBeTypeOf("function");
     expect(delegationCommands).not.toHaveProperty("wait_delegation");
+  });
+
+  it("schedules backend parent resume waits for delegation fan-in", async () => {
+    const createDelegationWait = vi.fn<
+      NonNullable<DelegationCommandTransport["createDelegationWait"]>
+    >(async (parentSessionId, request) => ({
+      revision: 42,
+      serverInstanceId: "server-a",
+      queuedResume: false,
+      wait: {
+        id: "delegation-wait-1",
+        parentSessionId,
+        delegationIds: request.delegationIds,
+        mode: request.mode ?? "all",
+        createdAt: "2026-05-09 10:00:00",
+        title: request.title ?? null,
+      },
+    }));
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+      createDelegationWait,
+    };
+
+    await expect(
+      createDelegationCommands(transport).resume_after_delegations(
+        " parent-1 ",
+        [" delegation-1 ", "delegation-1", "delegation-2"],
+        { mode: "all", title: "Reviewer fan-in" },
+      ),
+    ).resolves.toMatchObject({
+      revision: 42,
+      queuedResume: false,
+      wait: {
+        parentSessionId: "parent-1",
+        delegationIds: ["delegation-1", "delegation-2"],
+        mode: "all",
+        title: "Reviewer fan-in",
+      },
+    });
+    expect(createDelegationWait).toHaveBeenCalledWith("parent-1", {
+      delegationIds: ["delegation-1", "delegation-2"],
+      mode: "all",
+      title: "Reviewer fan-in",
+    });
+  });
+
+  it("validates backend resume wait titles before scheduling", async () => {
+    const createDelegationWait = vi.fn<
+      NonNullable<DelegationCommandTransport["createDelegationWait"]>
+    >();
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+      createDelegationWait,
+    };
+
+    await expect(
+      createDelegationCommands(transport).resume_after_delegations(
+        "parent-1",
+        ["delegation-1"],
+        { title: "x".repeat(MAX_DELEGATION_TITLE_CHARS + 1) },
+      ),
+    ).rejects.toThrow(
+      `title must be no longer than ${MAX_DELEGATION_TITLE_CHARS} characters`,
+    );
+    expect(createDelegationWait).not.toHaveBeenCalled();
   });
 
   it("builds composer delegation titles from prompt text", () => {
@@ -284,6 +356,24 @@ describe("delegation command surface", () => {
       model: "gpt-5.5",
       mode: "reviewer",
       writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+    });
+  });
+
+  it("preserves composer delegation mode overrides from resolved commands", () => {
+    const request = createComposerDelegationRequest(
+      makeSession({
+        agent: "Codex",
+        model: "gpt-5.5",
+      }),
+      "Explore the command resolver.",
+      { mode: "explorer", title: "Resolver exploration" },
+    );
+
+    expect(request).toMatchObject({
+      title: "Resolver exploration",
+      prompt: "Explore the command resolver.",
+      mode: "explorer",
+      writePolicy: { kind: "readOnly" },
     });
   });
 
@@ -743,6 +833,125 @@ describe("delegation command surface", () => {
       failed: [],
       revision: 4,
       serverInstanceId: "server-a",
+    });
+  });
+
+  it("can schedule a backend resume wait after reviewer batch fan-out", async () => {
+    const createDelegationWait = vi.fn<
+      NonNullable<DelegationCommandTransport["createDelegationWait"]>
+    >(async (parentSessionId, request) => ({
+      revision: 8,
+      serverInstanceId: "server-a",
+      queuedResume: false,
+      wait: {
+        id: "delegation-wait-1",
+        parentSessionId,
+        delegationIds: request.delegationIds,
+        mode: request.mode ?? "all",
+        createdAt: "2026-05-09 10:00:00",
+        title: request.title ?? null,
+      },
+    }));
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(async (_parentSessionId, request) => {
+        const title = request.title ?? "Review";
+        const isReact = title === "React review";
+        return {
+          revision: isReact ? 3 : 4,
+          serverInstanceId: "server-a",
+          delegation: makeDelegation({
+            id: isReact ? "delegation-1" : "delegation-2",
+            childSessionId: isReact ? "child-1" : "child-2",
+            title,
+          }),
+          childSession: makeSession({
+            id: isReact ? "child-1" : "child-2",
+            name: title,
+            parentDelegationId: isReact ? "delegation-1" : "delegation-2",
+          }),
+        };
+      }),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+      createDelegationWait,
+    };
+
+    await expect(
+      createDelegationCommands(transport).spawn_reviewer_batch(
+        "parent-1",
+        [
+          { prompt: "Review React.", title: "React review" },
+          { prompt: "Review Rust.", title: "Rust review" },
+        ],
+        { mode: "all", title: "Reviewer fan-in" },
+      ),
+    ).resolves.toMatchObject({
+      outcome: "completed",
+      delegationIds: ["delegation-1", "delegation-2"],
+      revision: 8,
+      serverInstanceId: "server-a",
+      resumeWait: {
+        outcome: "scheduled",
+        queuedResume: false,
+        revision: 8,
+        serverInstanceId: "server-a",
+        wait: {
+          id: "delegation-wait-1",
+          parentSessionId: "parent-1",
+          delegationIds: ["delegation-1", "delegation-2"],
+          mode: "all",
+          title: "Reviewer fan-in",
+        },
+      },
+    });
+    expect(createDelegationWait).toHaveBeenCalledWith("parent-1", {
+      delegationIds: ["delegation-1", "delegation-2"],
+      mode: "all",
+      title: "Reviewer fan-in",
+    });
+  });
+
+  it("reports resume wait scheduling failures without hiding spawned reviewers", async () => {
+    const transport: DelegationCommandTransport = {
+      createDelegation: vi.fn(async () => ({
+        revision: 3,
+        serverInstanceId: "server-a",
+        delegation: makeDelegation(),
+        childSession: makeSession({ parentDelegationId: "delegation-1" }),
+      })),
+      fetchDelegationStatus: vi.fn(),
+      fetchDelegationResult: vi.fn(),
+      cancelDelegation: vi.fn(),
+      createDelegationWait: vi.fn(async () => {
+        throw new ApiRequestError(
+          "backend-unavailable",
+          "The TermAl backend is unavailable.",
+          { status: 503, restartRequired: true },
+        );
+      }),
+    };
+
+    await expect(
+      createDelegationCommands(transport).spawn_reviewer_batch(
+        "parent-1",
+        [{ prompt: "Review React.", title: "React review" }],
+        { mode: "all" },
+      ),
+    ).resolves.toMatchObject({
+      outcome: "completed",
+      delegationIds: ["delegation-1"],
+      revision: 3,
+      serverInstanceId: "server-a",
+      resumeWait: {
+        outcome: "error",
+        error: {
+          kind: "resume-wait-failed",
+          message: "The TermAl backend is unavailable.",
+          status: 503,
+          restartRequired: true,
+        },
+      },
     });
   });
 

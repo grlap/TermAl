@@ -4,14 +4,20 @@ Backlog source: [`docs/bugs.md`](../bugs.md)
 
 ## Status
 
-Implemented. `GET /api/sessions/{id}/agent-commands` now serves:
+Implemented for discovery and backend-owned execution. `GET
+/api/sessions/{id}/agent-commands` now serves:
 
 - live Claude native slash commands discovered from Claude's initialize metadata
 - `.claude/commands/*.md` prompt templates from the session workdir
 
 The slash palette shows those commands alongside the existing session-control
 commands. Native Claude commands are sent as slash prompts such as `/review`,
-while markdown templates still expand `$ARGUMENTS` locally before send.
+while markdown templates are resolved through `POST
+/api/sessions/{id}/agent-commands/{name}/resolve`. The frontend passes
+`arguments` and optional `note`; the backend applies `$ARGUMENTS`, appends any
+note as a standard user-note block, and returns the resolved prompt and
+delegation defaults. Regular session sends and delegated sends use the same
+resolver.
 
 See [`slash-commands.md`](slash-commands.md) for the existing session-control implementation.
 
@@ -23,14 +29,19 @@ Claude exposes two useful command surfaces:
 - native slash commands advertised by the live runtime, such as `/review`,
   `/release-notes`, or `/security-review`
 
-TermAl now supports both for Claude sessions. This brief remains useful as the
-design record for that work.
+TermAl supports filesystem prompt templates for local sessions and merges live
+native-command metadata for Claude sessions when available. This brief remains
+useful as the design record for that work.
 
 ## Goals
 
 - Let the user type `/` in the composer and see agent commands alongside session controls.
 - Let the user select an agent command and have its `.md` content sent as the prompt.
 - Support command arguments (e.g., `/fix-bug 3`).
+- Support an optional user note that is appended to the resolved prompt without
+  requiring every command template to define its own note placeholder.
+- Use one backend resolver for regular sends and delegation sends so command
+  expansion, notes, and write policy cannot diverge between paths.
 - Keep the existing session-control commands working unchanged.
 
 ## Non-goals for v1
@@ -50,8 +61,10 @@ design record for that work.
   live native-command metadata from the initialized runtime and filesystem
   templates from `.claude/commands`.
 - Claude Code's command-template format remains simple: the filename (minus `.md`)
-  is the command name, the first line is the description, the full content is
-  the prompt, and `$ARGUMENTS` is replaced with user-provided arguments.
+  is the command name, the first line is the description, and the full content is
+  the prompt template.
+- Command execution calls the backend resolver. React only decides whether a
+  selected command first needs to expand in the composer for argument input.
 
 ### 1. Backend: command discovery endpoint
 
@@ -90,6 +103,83 @@ Implementation:
 - Return empty array if neither source is available.
 - Frontend caches results per session and invalidates on workdir change or explicit refresh.
 
+### 1a. Backend: command/skill resolution endpoint
+
+Target contract:
+
+```http
+POST /api/sessions/{id}/agent-commands/{name}/resolve
+```
+
+Request:
+
+```json
+{
+  "arguments": "1024",
+  "note": "Please add integration tests for Connectivity class.",
+  "intent": "send"
+}
+```
+
+`intent` is `"send"` for a normal session turn and `"delegate"` for child-session
+delegation. The resolver must use the same template expansion rules for both
+intents, but may return different execution defaults for delegation.
+
+Response:
+
+```json
+{
+  "name": "fix-bug",
+  "source": ".claude/commands/fix-bug.md",
+  "kind": "promptTemplate",
+  "visiblePrompt": "/fix-bug 1024",
+  "expandedPrompt": "Fix a bug from docs/bugs.md...\n\n1024\n\n## Additional User Note\n\nPlease add integration tests for Connectivity class.",
+  "title": "Fix bug 1024",
+  "delegation": {
+    "mode": "reviewer",
+    "writePolicy": { "kind": "isolatedWorktree", "ownedPaths": [] }
+  }
+}
+```
+
+Resolution rules:
+
+- The frontend sends `arguments` and optional `note` as separate fields. The
+  backend should not infer command-specific structure from a single free-form
+  string unless command metadata declares that structure.
+- `$ARGUMENTS` in prompt templates is replaced with `arguments` exactly after
+  trimming only outer whitespace.
+- `note` is never substituted into the template. If present after trimming outer
+  whitespace, append it to the resolved prompt as:
+
+  ```markdown
+  ## Additional User Note
+
+  <note text>
+  ```
+
+- If `note` is empty or omitted, the note block is omitted.
+- Preserve internal note formatting verbatim. The resolver should not parse
+  Markdown, redact content, or rewrite user intent.
+- Native slash commands (`kind: "nativeSlash"`) resolve to a literal
+  `visiblePrompt` such as `/review`. If a native runtime cannot accept appended
+  notes, the resolver must either reject `note` with a validation error or
+  convert the request to a prompt-template path that TermAl owns.
+- Command metadata may later provide argument arity, title generation,
+  delegation mode, and write policy. Until metadata exists, policies must live
+  in a backend resolver table, not in React components.
+
+Example user intent:
+
+```text
+/fix-bug 1024 -- Please add integration tests for Connectivity class.
+```
+
+The UI can parse this into `arguments: "1024"` and `note: "Please add
+integration tests for Connectivity class."`, then call the resolver. Without an
+unambiguous separator or metadata, the whole tail should be sent as
+`arguments`, with `note` omitted.
+
 ### 2. Frontend: agent command type
 
 Extend the slash palette to support agent commands.
@@ -104,7 +194,7 @@ type SlashPaletteItem =
       command: string;            // "/review-local"
       label: string;             // "/review-local"
       detail: string;            // first line of .md file
-      content: string;           // full .md content (the prompt to send)
+      content: string;           // full .md template content for display/compatibility
       hasArguments: boolean;     // true if content contains $ARGUMENTS
     };
 ```
@@ -155,21 +245,34 @@ User types "/rev"
 When an agent command is selected:
 
 **Without arguments** (`hasArguments: false`):
-- Send the full `.md` content as the prompt via `sendMessage()`.
+- Ask the backend resolver for the final prompt.
+- Send `visiblePrompt` and `expandedPrompt` through the normal session-send path.
 - Clear the composer.
 
 **With arguments** (`hasArguments: true`):
 - Expand the command in the composer: `/fix-bug ` (with trailing space).
 - User types the argument (e.g., `3`).
-- On Enter: replace `$ARGUMENTS` in the content with the user's input, send as prompt.
+- On Enter: send the command name, parsed `arguments`, and optional `note` to
+  the backend resolver, then send the resolved prompt.
 
-### 6. Argument substitution
+**Delegation**:
+- Use the same backend resolver with `intent: "delegate"`.
+- Spawn the child session with the resolver's `expandedPrompt`.
+- Apply resolver-provided delegation defaults such as `writePolicy`, `mode`,
+  and title. React components must not hard-code command names such as
+  `review-local` to choose write policy.
+
+### 6. Argument substitution and notes
 
 Claude Code's convention:
-- `$ARGUMENTS` in the `.md` content is replaced with whatever follows the command name.
-- Example: user types `/fix-bug 3` → content has `$ARGUMENTS` replaced with `3`.
+- `$ARGUMENTS` in the `.md` content is replaced with the resolver request's
+  `arguments` field.
+- Example: user types `/fix-bug 3`; the UI passes `arguments: "3"` and the
+  backend replaces `$ARGUMENTS` with `3`.
 - If no arguments provided and `$ARGUMENTS` is present, send with `$ARGUMENTS` replaced
   by empty string (matches Claude Code behavior).
+- Optional user notes are appended after template expansion as an `Additional
+  User Note` section. They are not substituted into `$ARGUMENTS`.
 
 ## UI plan
 
@@ -195,14 +298,22 @@ Claude Code's convention:
 
 ## API plan
 
-One new endpoint:
+Discovery endpoint:
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/sessions/{id}/agent-commands` | Discover agent commands for session's project |
 
-The response includes full command content so the frontend can send it as a prompt without
-a second round-trip. Command files are small (typically <5KB), so embedding content is fine.
+Resolution endpoint:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/sessions/{id}/agent-commands/{name}/resolve` | Resolve a command template/native command into the prompt and execution defaults for a regular send or delegation |
+
+The discovery response may continue to include command content for display and
+compatibility, but frontend execution should use the resolver as the source of
+truth. This keeps command/skill parsing, `$ARGUMENTS`, optional notes, and
+delegation policy on the backend.
 
 ## Implementation phases
 
@@ -226,9 +337,12 @@ a second round-trip. Command files are small (typically <5KB), so embedding cont
 ### Phase 3: command execution
 
 - Implement `applySlashPaletteItem` for `"agent-command"` kind.
-- Handle `$ARGUMENTS` substitution.
+- Add backend command resolution for `$ARGUMENTS` substitution and optional
+  notes.
 - Commands without arguments: send immediately on Enter.
 - Commands with arguments: expand in composer, send on second Enter.
+- Regular session sends and delegation sends both call the resolver.
+- Delegation uses resolver-provided `writePolicy`, not React hard-coding.
 
 ### Phase 4: polish
 
@@ -247,25 +361,38 @@ Backend:
 - Non-`.md` files in the directory → ignored.
 - Subdirectories in commands/ → ignored (flat list only).
 
+Backend resolver:
+- Resolver replaces `$ARGUMENTS` with the request `arguments`.
+- Resolver appends `## Additional User Note` only when `note` is non-empty.
+- Resolver returns delegation defaults for build-gated commands such as
+  `/review-local`.
+
 Frontend:
 - Slash palette shows agent commands when available.
 - Slash palette hides Agent Commands section when none exist.
 - Filtering works across both sections (agent commands + session controls).
-- Selecting a no-argument command sends the content as a prompt.
-- Selecting an argument command expands in composer, sends on Enter with substitution.
-- `$ARGUMENTS` replaced correctly in content.
 - Refresh button re-fetches commands.
 - Loading spinner shown during fetch.
 - Error state shown with retry on fetch failure.
+- Selecting a no-argument command resolves it through the backend and sends the
+  resolved prompt.
+- Selecting an argument command expands in composer, resolves through the
+  backend, and sends the resolved prompt.
+- Delegating a command uses the same resolved prompt and resolver-provided
+  delegation policy.
 
 ## Acceptance criteria
 
 - Typing `/` in the composer shows agent commands from `.claude/commands/` alongside
   session controls.
-- Selecting `/review-local` sends the full `review-local.md` content as the prompt to
-  the active Claude session.
+- Selecting `/review-local` resolves through the backend and sends the resolved
+  prompt to the active session.
 - Selecting `/fix-bug` expands to `/fix-bug ` in the composer; typing `3` and pressing
-  Enter sends the content with `$ARGUMENTS` replaced by `3`.
+  Enter resolves with `arguments: "3"` and sends the resolved prompt.
+- Passing a note appends an `Additional User Note` block without changing
+  `$ARGUMENTS`.
+- Delegating `/review-local` uses the same backend resolver as regular send and
+  receives the resolver-selected delegation write policy.
 - Commands are scoped to the session's workdir (different projects show different commands).
 - Adding a new `.md` file to `.claude/commands/` and clicking refresh shows the new command.
 - The existing session-control commands (`/model`, `/mode`, `/effort`) continue to work

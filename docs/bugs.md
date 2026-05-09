@@ -7,20 +7,463 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Read-only delegations cannot run build-gated slash review commands
+## Claude read-only delegations inherit auto-approve without enforced read-only semantics
 
-**Severity:** Medium - delegated agent commands such as `/review-local` can expand and spawn, but the child reviewer session is created with Codex read-only sandboxing. `/review-local` requires `cargo check` as its first build gate, and the delegated child stops immediately because the read-only policy rejects that command.
+**Severity:** High - `src/delegations.rs:1305-1318`. `configure_delegation_child_prompt_settings` forces Codex into `approvalPolicy: never` plus a sandbox, and forces Cursor/Gemini into plan mode, but Claude children keep the app's default Claude approval mode. The current test pins `AutoApprove` as the delegated Claude default.
 
-This prevents the existing unified command workflow from being reused for delegated reviews that need build or type-check commands, even when the review itself should not edit files.
+If the user default is `auto-approve`, a read-only Claude reviewer delegation can continue through write/tool requests unless another enforcement layer blocks them. That makes `writePolicy: readOnly` mean different things across agents.
 
 **Current behavior:**
-- Delegating `/review-local` spawns a read-only child with the expanded command prompt.
-- The child stops at Step 1 with `read-only session policy rejected cargo check`.
-- No diff collection or reviewer execution happens.
+- Read-only Claude children preserve the default Claude approval mode.
+- Cursor and Gemini children are forced to plan mode.
+- The delegation docs do not explain the Claude asymmetry or the alternate enforcement layer.
 
 **Proposal:**
-- Add a reviewer-safe execution mode for build checks, such as controlled writes to temporary build/cache directories or isolated worktree reviewer delegations.
-- Until that exists, surface or block slash commands that require build/test writes from read-only delegation.
+- Either force Claude read-only delegations into `ClaudeApprovalMode::Plan`.
+- Or document and test the concrete enforcement mechanism that prevents Claude read-only delegations from mutating the workspace while preserving the user's approval setting.
+
+## `SessionComposer` memo comparator omits delegation props
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:2990-3020`. `SessionComposer` receives `canSpawnDelegation` and `onSpawnDelegation`, but its custom `memo` comparator does not compare either prop.
+
+If delegation availability or the spawn handler changes without another compared prop changing, the composer can keep a stale Delegate button state or stale click handler.
+
+**Current behavior:**
+- `canSpawnDelegation` affects whether the Delegate button renders and whether it is disabled.
+- `onSpawnDelegation` is invoked by the Delegate action.
+- Neither prop participates in the memo equality check.
+
+**Proposal:**
+- Add `canSpawnDelegation` and `onSpawnDelegation` to the comparator.
+- Add a rerender test that toggles delegation availability or the handler without changing unrelated props.
+
+## Missing-record delegation wait prompts bypass the fan-in prompt size cap
+
+**Severity:** Medium - `src/delegations.rs:1395-1431`. `delegation_wait_resume_prompt_locked` applies `limit_delegation_wait_resume_prompt` to the normal terminal-result path, but the early-return path for disappeared delegation records returns an uncapped prompt.
+
+The current wait-id cap keeps this small, but future richer missing-record diagnostics or a larger wait cap could bypass the documented 64 KB resume-prompt ceiling.
+
+**Current behavior:**
+- Normal fan-in result prompts are capped.
+- Missing-record prompts are not capped.
+- Tests cover the happy-path cap but not the missing-record branch.
+
+**Proposal:**
+- Route the missing-record prompt through `limit_delegation_wait_resume_prompt`.
+- Add a regression test for the missing-record branch.
+
+## Delegation wait response metadata has ambiguous `queuedResume` semantics
+
+**Severity:** Medium - `src/delegations.rs:605-666` and `docs/features/agent-delegation-sessions.md`. `create_delegation_wait` can create and immediately consume a wait when all watched delegations are already terminal. The response returns the created wait and the later revision, but `queuedResume` is derived from whether the parent was dispatchable immediately, not whether a resume prompt was queued.
+
+For a busy parent, the backend can queue a fan-in prompt while returning `queuedResume: false`. Callers may read that as "no resume was queued" and start polling or retrying unnecessarily.
+
+**Current behavior:**
+- `queue_delegation_wait_resume_locked` queues the parent prompt whenever the parent exists.
+- Its boolean return is `true` only when the parent should dispatch immediately.
+- `DelegationWaitResponse.queuedResume` exposes that boolean under a name that implies queued-prompt creation.
+
+**Proposal:**
+- Rename or document the field as immediate-dispatch state.
+- Or return separate fields for "resume prompt queued" and "resume dispatch requested".
+- Add a test covering an already-terminal wait with a busy parent.
+
+## Delegation waits can silently disappear or orphan when the parent session is removed
+
+**Severity:** Medium - `src/delegations.rs:1373-1392` and `src/session_lifecycle.rs`. Wait refresh consumes satisfied waits even when `queue_delegation_wait_resume_locked` cannot find the parent. Waits that are not yet satisfied can remain pending after the parent session is removed.
+
+This breaks the delegation guarantee that TermAl will reactivate the parent. Observers see a wait disappear with no resume prompt, or keep seeing a wait that can never resume.
+
+**Current behavior:**
+- A satisfied wait with a missing parent is removed and emits a consumed delta.
+- An unsatisfied wait can survive parent removal.
+- No structured reason distinguishes "resumed" from "parent missing".
+
+**Proposal:**
+- Explicitly drop or mark all waits owned by a removed parent during session removal.
+- Publish a reasoned delta or retain audit metadata for parent-missing consumption.
+- Add tests for both satisfied and unsatisfied waits when the parent is removed.
+
+## Multi-wait parent indicator drops wait titles
+
+**Severity:** Low - `ui/src/SessionPaneView.tsx`. `delegationWaitIndicatorPrompt` includes the wait title for a single pending wait, but the multi-wait branch collapses to a generic "Waiting on N delegation waits covering X delegated sessions" message.
+
+When multiple waits are pending, the title is the clearest way to distinguish intent such as "review fan-in" versus "backend release gate".
+
+**Current behavior:**
+- Single wait: title can appear in the waiting indicator.
+- Multiple waits: all titles are omitted.
+
+**Proposal:**
+- Include the first wait title plus a "+N more" suffix in the multi-wait message.
+- Add an RTL test with two pending waits.
+
+## Delegation wait title-cap error is missing from the feature doc diagnostics list
+
+**Severity:** Note - `docs/features/agent-delegation-sessions.md` and `src/delegations.rs:619-625`. The backend rejects oversized delegation-wait titles with `delegation wait title must be at most N characters`, and the frontend redaction layer treats that message as safe, but the feature brief's diagnostics list omits it.
+
+Wrappers using the feature brief as the command/error contract will not know this wire-level error is expected.
+
+**Current behavior:**
+- Backend emits the title-cap error.
+- Frontend safe-list handles it.
+- Feature doc diagnostics list does not mention it.
+
+**Proposal:**
+- Add the title-cap message to the documented wait/resume diagnostics.
+
+## Delegate path skips active-session check after resolver await
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:2515-2548`. The send path captures `requestSessionId` before `await resolveAgentCommand` and bails if `activeSessionIdRef.current` changed after the await. The delegate path resolves first and captures `requestSessionId` afterward.
+
+If the user switches sessions during the resolver round-trip, the delegation can land on the new session with a prompt resolved against the previous session's command list and workdir.
+
+**Current behavior:**
+- Delegate path resolves the command, then captures the active session id.
+- Cross-session delegation is possible during slow resolver calls.
+
+**Proposal:**
+- Capture `const requestSessionId = activeSessionId` before awaiting `resolveAgentCommand`.
+- Bail immediately after the await if the mounted state or active session changed, mirroring the send path.
+
+## Composer textarea stays editable during resolver round-trip
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:1781-1790, 2438-2456`. `composerInputDisabled` is `!session || isStopping` and does not include `isAgentCommandResolving`, so the textarea remains editable while the resolver promise is in flight. After resolution, the post-send block clears the draft unconditionally.
+
+On a slow resolver, the user can type more text after pressing Enter; once resolution completes, that new text is silently discarded.
+
+**Current behavior:**
+- Textarea is editable during agent-command resolver round-trip.
+- Post-send draft clear unconditionally wipes the composer.
+
+**Proposal:**
+- Include `isAgentCommandResolving` in the composer disabled state.
+- Or compare the post-resolve draft to the prepared slash-command snapshot and skip clearing if the user typed more text.
+
+## Backend resolver still hard-codes `review-local` and `fix-bug` by name
+
+**Severity:** Medium - `src/workspace_queries.rs:280-298, 332-341`. The frontend special case moved to the backend, but the backend still uses command-name and source-path conditionals for `review-local`, plus a name special case for `fix-bug`.
+
+Adding another command with delegation defaults or title behavior still requires touching resolver code instead of updating declarative metadata.
+
+**Current behavior:**
+- `is_review_local_agent_command` matches by command name and source path suffix.
+- `resolved_agent_command_title` special-cases `fix-bug` by name.
+- A third command requires another resolver branch.
+
+**Proposal:**
+- Introduce a small command metadata table keyed by command name with write policy, mode, and title-generation hints.
+- Read from that table instead of adding more ad hoc branches.
+
+## `resumeWaitFailurePacket` redaction safe-list has only one happy-path test
+
+**Severity:** Medium - `ui/src/delegation-error-packets.ts:206`, `ui/src/delegation-commands.test.ts:891`. The new `resumeWaitFailurePacket` path has multiple safe literal messages and regex patterns, but only one backend-unavailable happy path is covered.
+
+By contrast, spawn-delegation failure redaction has parametric coverage. A regression that drops a safe entry, broadens a match, or stops redacting generic inputs could leak backend error text without a failing test.
+
+**Current behavior:**
+- Only one `ApiRequestError` path exercises the new packet helper.
+- Safe literals, safe regexes, generic fallback redaction, and non-`Error` throws are not covered.
+
+**Proposal:**
+- Add parametric coverage mirroring the spawn-failure redaction tests.
+- Cover every safe literal/pattern, unsafe inputs collapsing to the generic message, and the non-`Error` branch.
+
+## `splitAgentCommandResolverTail` only recognizes a literal ` -- ` separator
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:159-183`. Only the literal substring `" -- "` splits arguments from notes. Newline-prefixed `--`, tabbed `--`, or trailing-only `--` without a following space are silently absorbed into `argumentsText`.
+
+The wire shape becomes silently wrong, and the user has no signal that their intended note was treated as `$ARGUMENTS`.
+
+**Current behavior:**
+- Multi-line, tabbed, or no-space separators are absorbed into arguments.
+- Trimmed `"-- "` collapses to an argument-only `"--"`.
+
+**Proposal:**
+- Document the exact single-line, space-bounded separator contract.
+- Or expand the matcher to accept whitespace-delimited `--` forms and surface ambiguous input explicitly.
+
+## Resolver does not size-cap `arguments` or `note` request fields
+
+**Severity:** Low - `src/workspace_queries.rs:202-244`, `src/wire.rs:1041-1049`. `ResolveAgentCommandRequest` has no size caps on `arguments` or `note`; only the global body limit applies. `arguments` is interpolated by splitting the template on `$ARGUMENTS` and joining with the provided argument string, so a large argument and multiple placeholders can allocate substantially before any downstream prompt-size guard runs.
+
+The resolved prompt may flow into send-message paths or delegation creation after the resolver has already paid the allocation cost.
+
+**Current behavior:**
+- Resolver accepts arguments and notes up to the global body limit.
+- Oversized resolved prompts are rejected, if at all, only downstream.
+
+**Proposal:**
+- Cap `arguments` and `note` at resolver entry.
+- Reject oversized input with `400 bad_request`, matching existing delegation prompt behavior.
+
+## `create_delegation_wait` does not check parent eligibility for queued prompts
+
+**Severity:** Low - `src/delegations.rs:583-626`. The function validates that the parent is visible but does not explicitly validate that the parent can accept queued prompts. Later, `queue_delegation_wait_resume_locked` can silently no-op if the parent cannot be found or cannot be dispatched.
+
+This is easy to miss as more session kinds are added, especially hidden Claude spares, archived sessions, or proxy-mirrored sessions.
+
+**Current behavior:**
+- Only `find_visible_session_index` is called.
+- Parent queued-prompt eligibility is not checked directly.
+- Failures can surface later as silent no-ops.
+
+**Proposal:**
+- Add an explicit parent eligibility check for queued-prompt scheduling.
+- Or document why visibility is sufficient.
+
+## `dispatch_delegation_wait_resumes` errors are stderr-only without audit ledger
+
+**Severity:** Low - `src/delegations.rs:1131-1154`. Dispatch errors are written to stderr only. A wait that was consumed but failed to dispatch leaves no structured trace in state, deltas, or a retained wait record.
+
+Operators and the UI cannot tell that fan-in resume should have happened but did not.
+
+**Current behavior:**
+- Dispatch errors write to stderr only.
+- The wait has already been removed.
+- No audit ledger entry is created.
+
+**Proposal:**
+- Emit a structured warning event or retain dispatch error metadata.
+- Or document the best-effort policy and recovery expectations.
+
+## `api_json_rejection` label is bare `"request"` for the resolver endpoint
+
+**Severity:** Low - `src/api_files.rs:377`. Peer endpoints pass descriptive labels such as `"delegation request"` or `"delegation wait request"` to `api_json_rejection`. The resolver endpoint passes the bare label `"request"`, yielding a less useful user-facing JSON error.
+
+**Current behavior:**
+- Resolver malformed-JSON errors say `invalid request JSON`.
+- Peer endpoints include endpoint-specific labels.
+
+**Proposal:**
+- Use a label such as `"agent command resolve request"` for the resolver endpoint.
+
+## Two duplicate composer delegation option types kept in sync manually
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:152-156` and `ui/src/delegation-commands.ts:79-83`. `SpawnDelegationOptions` and `CreateComposerDelegationOptions` describe the same composer-delegation option shape, but they live in separate modules and are kept in sync manually.
+
+Adding another option field requires updating both types.
+
+**Current behavior:**
+- Two parallel option type definitions describe the same flow.
+- Synchronization is manual.
+
+**Proposal:**
+- Lift the shared option type into `delegation-commands.ts` or a nearby shared module and import it where needed.
+
+## Marker-create highlight color drifts from the just-created marker on messages with prior markers
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1232-1236`. When the user creates a marker and `activeMessageMarker` is null (because the parent has not yet pushed the new marker into `markersByMessageId`), the highlight-color derivation falls back to `messageMarkers[0]?.color`. If the message already has, say, a "Review point" (red) marker and the user creates a "Checkpoint" (blue) marker, the highlight will show red until the next render once the new marker reaches state.
+
+The intended user signal ("this is the marker I just created") is silently wrong on the very turn it was meant to highlight.
+
+**Current behavior:**
+- `activeMarkerMessageId` is set immediately on create.
+- `activeMessageMarker` is null until parent state updates.
+- Fallback to `messageMarkers[0]?.color` shows the first existing marker's color.
+- Wrong color flashes briefly until state syncs.
+
+**Proposal:**
+- When `activeMarkerMessageId === message.id` but no `activeMessageMarker` is found, look up the marker by id in `markersByMessageId`.
+- Or store the just-created color alongside `activeMarkerMessageId`.
+
+## `activeMarkerMessageId` cleanup gap when `activeMarkerId` is null
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1143-1151`. `handleCreateConversationMarker` sets `setActiveMarkerId(null)` and `setActiveMarkerMessageId(messageId)`. The cleanup effect at line 1143 guards on `activeMarkerId &&` — so when `activeMarkerId` is null (the create-driven path), the cleanup never runs. If the user then deletes the marker without navigating, `activeMarkerMessageId` survives and the message keeps its highlight even though no marker exists.
+
+**Current behavior:**
+- Create-driven highlight sets only `activeMarkerMessageId`.
+- Cleanup effect guards on `activeMarkerId &&`.
+- After deletion, the highlight survives.
+
+**Proposal:**
+- Split the cleanup into two effects.
+- Or generalize the cleanup so the message-id is cleared whenever the message no longer has any marker (`markersByMessageId.get(activeMarkerMessageId) === undefined`).
+
+## Two parallel `active marker` state pieces have undocumented intent
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1093-1117`. There are now two pieces of "active marker" state (`activeMarkerId` and `activeMarkerMessageId`) with different lifetimes (`jumpToMarker` sets both, `handleCreateConversationMarker` sets only the second). A future contributor cannot tell from the names which one drives the rail vs the message-shell highlight without tracing all call sites.
+
+**Current behavior:**
+- Two state values with subtle lifetime divergence.
+- No documentation of intent.
+
+**Proposal:**
+- Add a brief comment block above the two state declarations describing the intent: `activeMarkerId` is the rail's selected entry; `activeMarkerMessageId` is the message-shell highlight, which the create flow sets directly because the marker hasn't been added to state yet.
+
+## Marker-highlight test doesn't exercise color derivation path
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:1031-1075`. The test only exercises the `isActiveMarkerMessage` flag (the className `is-active-marker`). It uses a mocked `onCreateConversationMarker` so no real marker enters `markersByMessageId`. It does NOT exercise the color derivation path that uses `messageMarkers[0]?.color`, nor the `activeMessageMarker` resolution in the rerender.
+
+A regression where the new highlight overrides an existing marker's color (or fails to resolve to the just-created marker) is not caught.
+
+**Current behavior:**
+- Tests className flip only.
+- Color derivation untested.
+- No real marker enters state.
+
+**Proposal:**
+- Add a second test variant that drives a real `markers` update (parent sets `markers` after the create callback and re-renders) and asserts `style.--conversation-active-marker-color` matches the freshly-created marker's color.
+
+## Marker-highlight test doesn't cover create-then-delete cleanup path
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:1031-1075`. Combined with the cleanup-effect gap (`activeMarkerMessageId` not cleared when `activeMarkerId` is null), a regression where the highlight survives deletion would not be caught at this test layer.
+
+**Current behavior:**
+- Only the create + highlight path is tested.
+- Create-then-delete cleanup uncovered.
+
+**Proposal:**
+- Add a sibling test that creates a marker (mocked) followed by removing it.
+- Assert the message shell loses `is-active-marker`.
+
+## Marker-highlight `waitFor` may disguise sync regressions
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:1031-1075`. `await waitFor(...)` only validates the eventual class change. The change should occur synchronously after the click — `handleCreateConversationMarker` calls `setActiveMarkerMessageId`, and React's update should flush in the same `act` cycle.
+
+A `waitFor` around it disguises any latency or missing transition; if the change never actually happens, the test only fails after the default 1s timeout.
+
+**Current behavior:**
+- `waitFor` used for what should be synchronous.
+- Slow failure on regression.
+
+**Proposal:**
+- Replace `waitFor` with a direct synchronous assertion after the click.
+
+## Telegram inline callbacks can dispatch actions to the wrong active project
+
+**Severity:** High - `src/telegram.rs:1699` and `src/telegram.rs:2893`. Telegram digest inline buttons only carry the action id as `callback_data`, while the callback handler resolves the currently active project at click time.
+
+If the linked chat opens a digest for project A, switches to project B, and then taps an older project-A action button, the action can be dispatched against project B. Approval, stop, fix, or review actions can therefore operate on a different project than the message the user clicked.
+
+**Current behavior:**
+- Digest keyboards store only `action.id` in Telegram callback data.
+- Callback handling calls `resolve_telegram_active_project_id` before dispatch.
+- Project switches between message render and callback click can retarget old buttons.
+
+**Proposal:**
+- Bind callback data to its digest context with a short server-side token or validated project/action payload.
+- Reject stale or mismatched callbacks and refresh the digest for the project that produced the clicked message.
+
+## Isolated delegation worktree creation is not transactional
+
+**Severity:** Medium - `src/delegations.rs:336` and `src/delegations.rs:1775`. The API creates a detached git worktree before later fallible validation and before patch application is known to succeed.
+
+If agent setup, parent revalidation, delegation fan-out/depth checks, or patch application fails after `git worktree add`, the request returns an error but can leave a registered worktree and directory behind. Retrying with the same requested `worktreePath` can then fail because the target is no longer empty.
+
+**Current behavior:**
+- `prepare_isolated_delegation_worktree` runs before `validate_agent_session_setup` and active delegation admission checks.
+- `create_detached_git_worktree` has no rollback guard for later `git apply` or API rejection failures.
+- Failed requests can leave filesystem and git-worktree side effects with no delegation record to clean them up.
+
+**Proposal:**
+- Move all non-side-effect validation and admission checks before worktree creation.
+- Add a rollback guard after worktree creation that removes the git worktree and created parent directories on any later failure.
+
+## Isolated delegation worktree snapshots omit untracked files
+
+**Severity:** Medium - `src/delegations.rs:1764-1772`. The isolated worktree mirror captures staged and unstaged tracked changes with `git diff --cached --binary` and `git diff --binary`, but it does not include non-ignored untracked files.
+
+A delegated `/review-local` build or review can run against a child worktree missing newly created source files from the parent workspace. That can produce false review findings or false build failures.
+
+**Current behavior:**
+- Staged tracked changes are applied to the child worktree.
+- Unstaged tracked changes are applied to the child worktree.
+- Non-ignored untracked files are silently absent from the child worktree.
+
+**Proposal:**
+- Include `git ls-files --others --exclude-standard` files with path validation and size limits.
+- Or reject isolated-worktree delegation while unsupported untracked files are present and explain the limitation.
+
+## Isolated delegation patch capture has no cumulative size cap
+
+**Severity:** Medium - `src/delegations.rs:1764-1772`. The isolated-worktree path captures repository-wide binary diffs into memory before applying them to the child worktree.
+
+Large tracked binary changes can make the delegation endpoint allocate large patch buffers, spend substantial CPU in `git apply`, and consume disk in the generated worktree.
+
+**Current behavior:**
+- `git diff --cached --binary` output is collected into a `Vec<u8>`.
+- `git diff --binary` output is collected into a second `Vec<u8>`.
+- No cumulative byte limit is enforced before patch application.
+
+**Proposal:**
+- Enforce a cumulative patch byte limit before creating or applying an isolated worktree.
+- Return a clear 4xx error when dirty state is too large to materialize safely.
+
+## Slash-command delegation is mouse-only while the palette is open
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:2467`. The Delegate button is now enabled for selected agent slash commands, but the textarea still intercepts `Tab` and `Enter` while the slash palette is open.
+
+Keyboard users can select and send the slash command, but cannot move focus to the now-enabled Delegate button with `Tab`; `Enter` sends instead of delegates. The new slash-command delegation flow is therefore effectively mouse-only.
+
+**Current behavior:**
+- `Tab` is prevented and routed to `handleComposerSend` whenever the slash palette is open.
+- `Enter` also sends the selected slash command.
+- No keyboard gesture delegates the selected slash command.
+
+**Proposal:**
+- Allow normal tab navigation when the selected slash item can be delegated.
+- Or add an explicit keyboard command for delegating the active slash command and cover it with RTL tests.
+
+## Agent command resolver failures are invisible in the composer
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:2388` and `ui/src/panels/AgentSessionPanel.tsx:2491`. Resolver errors are caught and handled only by refocusing the composer.
+
+If the backend rejects a native slash command with an additional note, or the backend is unavailable, the user sees no validation or retry explanation. The draft remains, but there is no visible reason why pressing Enter or Delegate did nothing.
+
+**Current behavior:**
+- Resolver `catch` blocks call `focusComposerInput()` and return.
+- No error message is surfaced through the existing composer/session error channel.
+- Native slash note rejection and backend-unavailable failures look like no-ops.
+
+**Proposal:**
+- Thread an `onComposerError` callback or local inline error state into `AgentSessionPanelFooter` / `SessionComposer`.
+- Surface sanitized resolver failures the same way delegation spawn failures are surfaced.
+- Add tests for native-slash note rejection and backend-unavailable resolver failure.
+
+## Delegation architecture docs still describe isolated worktrees as unsupported
+
+**Severity:** Low - `docs/architecture.md:34` and `docs/architecture.md:205`. The backend now accepts `writePolicy.kind = "isolatedWorktree"`, but the architecture docs still describe writable delegation policies as returning `501`.
+
+The current-tree API contract is therefore inconsistent for clients and reviewers using the architecture docs as the source of truth.
+
+**Current behavior:**
+- `isolatedWorktree` is accepted by the API.
+- `sharedWorktree` remains unsupported.
+- The architecture docs still describe writable policies broadly as unsupported.
+
+**Proposal:**
+- Update `docs/architecture.md` to document `readOnly`, `isolatedWorktree`, optional/generated `worktreePath`, and the remaining unsupported `sharedWorktree` policy.
+
+## Telegram selection cleanup can be lost on informational early returns
+
+**Severity:** Low - `src/telegram.rs:1757` and `src/telegram.rs:2716`. Some command paths call `resolve_telegram_active_project_id`, which can normalize stale selected project/session state and mark the bot state dirty, then return `Ok(false)` after sending informational text.
+
+Those cleanup mutations are not persisted when the function returns `false`, so stale Telegram selection state can survive a command that already detected and cleared it in memory.
+
+**Current behavior:**
+- Telegram free-text forwarding with no active session can return `Ok(false)` after active-project cleanup.
+- `/session` with no arguments can return `Ok(false)` after active-project cleanup.
+- Dirty cleanup state is lost unless another path persists later.
+
+**Proposal:**
+- Return the accumulated `dirty` value from informational early-return paths.
+- Audit other early returns immediately after Telegram state-normalization helpers.
+
+## Delegation action generation guard can drop the first action after a session switch
+
+**Severity:** Low - `ui/src/SessionPaneView.render-callbacks.tsx:194`. `activeSessionGenerationRef` is advanced in a passive `useEffect`, so a delegation action started immediately after mount or session switch can capture the pre-effect generation.
+
+When the async action settles after the effect increments the generation, the result is treated as stale and silently dropped even though the user acted in the current session.
+
+**Current behavior:**
+- `activeSessionGenerationRef` increments after paint in `useEffect`.
+- Open/insert/cancel delegation actions capture the current generation at action time.
+- A narrow post-switch timing window can make the first action no-op.
+
+**Proposal:**
+- Update the active-session id/generation ref in `useLayoutEffect` or another pre-interaction path.
+- Add a regression test for an immediate delegation action after session switch.
 
 ## Active-baseline → settled transition can strand cursor when agent appends in-place to baselined message
 
@@ -4115,6 +4558,40 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
+- [ ] P2: Cover Claude read-only delegation approval semantics:
+  add a Rust test proving read-only Claude delegations either force plan mode or are protected by a concrete alternate write-blocking mechanism when the app default is `auto-approve`.
+- [ ] P2: Cover `SessionComposer` delegation props in memo comparison:
+  rerender with only `canSpawnDelegation` or `onSpawnDelegation` changed and assert the Delegate button/handler updates.
+- [ ] P2: Cover missing-record delegation wait prompt capping:
+  build a wait whose delegation record disappears and assert the generated resume prompt still flows through the 64 KB cap/truncation marker path.
+- [ ] P2: Cover already-terminal delegation waits against busy parents:
+  create an already-satisfied wait while the parent is active and assert the response metadata distinguishes prompt-queued from immediate-dispatch behavior.
+- [ ] P2: Cover parent-removal delegation wait reconciliation:
+  remove a parent with both satisfied and unsatisfied waits, then assert waits do not orphan and consumed/drop deltas carry recoverable semantics.
+- [ ] P2: Cover multi-wait waiting indicator titles:
+  render two pending waits for one parent and assert the UI preserves at least the first wait title plus a count for the remaining waits.
+- [ ] P2: Cover `resumeWaitFailurePacket` redaction parametrically:
+  add an `it.each(...)` block to `ui/src/delegation-error-packets.test.ts` mirroring `spawnDelegationFailurePacket` coverage. Pin each safe literal and regex, cover unsafe inputs collapsing to the generic message, and cover the non-`Error` throw branch.
+- [ ] P2: Decouple `delegation_wait_reconciles_after_restart_recovery` from recovery copy:
+  avoid asserting the exact `"TermAl restarted before this turn finished"` string from `src/messages.rs`; assert stable wait/delegation identifiers or finish the child with a deterministic result packet before simulated shutdown.
+- [ ] P2: Cover edge cases in delegation finding parsing:
+  add focused tests for `- None` filtering, no-separator findings mapping to the current fallback behavior, and multi-word severities such as `Code Style src/foo.rs:42 - msg`.
+- [ ] P2: Cover backend resolver native-slash plus delegate-intent boundary:
+  add a Rust test resolving a non-`review-local` native command with `intent: Delegate` and no note, asserting `response.delegation == None` and `response.expanded_prompt == None`.
+- [ ] P2: Switch resolver Rust temp-dir cleanup away from `unwrap()`:
+  replace end-of-test `fs::remove_dir_all(root).unwrap()` cleanup in `src/tests/agent_commands.rs` with `let _ = fs::remove_dir_all(...)` so assertion failures do not leak temp dirs or mask the original failure.
+- [ ] P2: Cover Telegram dirty-state cleanup on informational early returns:
+  seed stale selected project/session state, drive the no-active-session free-text path and `/session` with no arguments, and assert cleared selection state is persisted instead of returning `Ok(false)`.
+- [ ] P2: Cover `SessionPaneView` isolated-worktree delegation option pass-through:
+  trigger a delegated `/review-local` command through the component boundary and assert `spawnDelegationCommand` receives `writePolicy: { kind: "isolatedWorktree", ownedPaths: [] }`.
+- [ ] P2: Cover omitted `isolatedWorktree.worktreePath` JSON:
+  add a serde or route-level test using `{ "kind": "isolatedWorktree", "ownedPaths": [] }` and assert the backend accepts the omitted path and generates a TermAl-owned worktree path.
+- [ ] P2: Strengthen Telegram sessions chunking assertions:
+  replace negative assertions against text that never appears in the fixture with reconstructed-chunk assertions that every expected session id/name is preserved.
+- [ ] P2: Cover keyboard delegation for selected slash commands:
+  add RTL coverage proving keyboard users can delegate an active agent slash command while the palette is open, either through normal tab focus or an explicit delegation shortcut.
+- [ ] P2: Cover visible composer errors for resolver failures:
+  reject a resolver request for native-slash notes or backend-unavailable responses and assert the composer surfaces a user-visible sanitized error without clearing the draft.
 - [ ] P2: Cover real composer-to-overview focus detection:
   render the real composer/overview path or assert the real composer emits `data-conversation-composer-input`, so `ConversationOverviewRail` deferral does not depend only on synthetic test fixtures.
 - [ ] P2: Cover composer transition restore when a non-shrink resize races the send-shrink restore frame:

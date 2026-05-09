@@ -366,7 +366,10 @@ fn project_digest_routes_error_fix_it_to_non_delegation_session() {
         digest.deep_link.as_deref(),
         Some(format!("/?projectId={project_id}&sessionId={parent_session_id}").as_str())
     );
-    assert_eq!(digest.current_status, "Delegation child failed after review.");
+    assert_eq!(
+        digest.current_status,
+        "Delegation child failed after review."
+    );
     assert_eq!(digest.source_message_ids, vec![child_message_id]);
     assert_eq!(
         digest
@@ -377,9 +380,7 @@ fn project_digest_routes_error_fix_it_to_non_delegation_session() {
         vec!["fix-it", "review-in-termal"]
     );
 
-    state
-        .execute_project_action(&project_id, "fix-it")
-        .unwrap();
+    state.execute_project_action(&project_id, "fix-it").unwrap();
 
     match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
         CodexRuntimeCommand::Prompt {

@@ -18,6 +18,19 @@ Transitions connect card anchors and define trigger, result mode, and prompt
 template. Runtime instances create ordinary sessions and drive follow-up prompts
 when source sessions become prompt-ready.
 
+Delegation waits intentionally reuse the same runtime idea without requiring a
+visible template. When a parent asks TermAl to wait for delegated child sessions,
+those children behave like completion sources and the parent behaves like the
+destination session. A wait with `mode="all"` mirrors a `Consolidate` node: the
+parent receives one synthesized prompt after all watched delegations are
+terminal. A wait with `mode="any"` mirrors ordinary queued transition delivery:
+the parent resumes when the first watched delegation is terminal.
+
+Unlike orchestration templates, delegation waits are ad hoc and parent-owned.
+The parent session can yield after scheduling the wait; TermAl persists the wait,
+exposes it through state/SSE for UI visibility, and re-activates the parent by
+queueing the synthesized resume prompt when the fan-in condition is satisfied.
+
 ## The problem
 
 TermAl can already run many agent sessions in parallel, but the developer still does the routing:

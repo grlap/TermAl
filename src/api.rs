@@ -612,6 +612,21 @@ async fn cancel_delegation(
     Ok(Json(response))
 }
 
+/// Schedules a parent resume after one or more delegations become terminal.
+async fn create_delegation_wait(
+    AxumPath(parent_session_id): AxumPath<String>,
+    State(state): State<AppState>,
+    request: Result<Json<CreateDelegationWaitRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<DelegationWaitResponse>), ApiError> {
+    let Json(request) =
+        request.map_err(|rejection| api_json_rejection("delegation wait request", rejection))?;
+    let response = run_blocking_api(move || {
+        state.create_delegation_wait(&parent_session_id, request)
+    })
+    .await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
 /// Lists conversation markers for one session.
 async fn list_session_markers(
     AxumPath(session_id): AxumPath<String>,

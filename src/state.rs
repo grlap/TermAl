@@ -614,6 +614,8 @@ struct StateInner {
     orchestrator_instances: Vec<OrchestratorInstance>,
     /// Durable parent-child delegation links for ordinary sessions.
     delegations: Vec<DelegationRecord>,
+    /// Pending parent resumes waiting on one or more child delegation results.
+    delegation_waits: Vec<DelegationWaitRecord>,
     /// Runtime-only mutation stamps for delegation rows. The background persist
     /// worker compares these with its watermark to upsert only delegation rows
     /// that changed since the last successful write.
@@ -658,6 +660,7 @@ impl StateInner {
             sessions: Vec::new(),
             orchestrator_instances: Vec::new(),
             delegations: Vec::new(),
+            delegation_waits: Vec::new(),
             delegation_mutation_stamps: BTreeMap::new(),
             removed_delegation_ids: BTreeMap::new(),
             running_read_only_delegations: BTreeSet::new(),

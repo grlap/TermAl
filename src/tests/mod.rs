@@ -989,6 +989,7 @@ fn sample_remote_orchestrator_state(
         }],
         sessions,
         delegations: Vec::new(),
+        delegation_waits: Vec::new(),
     }
 }
 

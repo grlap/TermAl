@@ -33,6 +33,7 @@ import {
 import {
   type GitDiffRequestPayload,
   type GitDiffSection,
+  type DelegationWaitRecord,
   type OpenPathOptions,
   type StateResponse,
 } from "./api";
@@ -84,6 +85,7 @@ export function WorkspaceNodeView({
   codexState,
   projectLookup,
   remoteLookup,
+  delegationWaits,
   paneLookup,
   sessionLookup,
   activePaneId,
@@ -166,6 +168,7 @@ export function WorkspaceNodeView({
   codexState: CodexState;
   projectLookup: Map<string, Project>;
   remoteLookup: Map<string, RemoteConfig>;
+  delegationWaits: DelegationWaitRecord[];
   paneLookup: Map<string, WorkspacePane>;
   sessionLookup: Map<string, Session>;
   activePaneId: string | null;
@@ -374,6 +377,7 @@ export function WorkspaceNodeView({
         codexState={codexState}
         projectLookup={projectLookup}
         remoteLookup={remoteLookup}
+        delegationWaits={delegationWaits}
         sessionLookup={sessionLookup}
         isActive={pane.id === activePaneId}
         isLoading={isLoading}
@@ -552,6 +556,7 @@ export function WorkspaceNodeView({
           codexState={codexState}
           projectLookup={projectLookup}
           remoteLookup={remoteLookup}
+          delegationWaits={delegationWaits}
           paneLookup={paneLookup}
           sessionLookup={sessionLookup}
           activePaneId={activePaneId}
@@ -646,6 +651,7 @@ export function WorkspaceNodeView({
           codexState={codexState}
           projectLookup={projectLookup}
           remoteLookup={remoteLookup}
+          delegationWaits={delegationWaits}
           paneLookup={paneLookup}
           sessionLookup={sessionLookup}
           activePaneId={activePaneId}

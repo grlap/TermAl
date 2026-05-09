@@ -301,6 +301,10 @@ fn app_router(state: AppState) -> Router {
             post(cancel_delegation),
         )
         .route(
+            "/api/sessions/{id}/delegation-waits",
+            post(create_delegation_wait),
+        )
+        .route(
             "/api/sessions/{id}/markers",
             get(list_session_markers).post(create_session_marker),
         )
@@ -336,6 +340,10 @@ fn app_router(state: AppState) -> Router {
         .route(
             "/api/sessions/{id}/agent-commands",
             get(list_agent_commands),
+        )
+        .route(
+            "/api/sessions/{id}/agent-commands/{name}/resolve",
+            post(resolve_agent_command),
         )
         .route("/api/sessions/{id}/messages", post(send_message))
         .route(

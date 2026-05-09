@@ -40,12 +40,16 @@ import {
   useState,
   type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type TouchEvent as ReactTouchEvent,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import {
   fetchFile,
   saveFile,
   type GitDiffRequestPayload,
   type GitDiffSection,
+  type DelegationWaitRecord,
   type OpenPathOptions,
   type StateResponse,
 } from "./api";
@@ -180,11 +184,33 @@ import { isLocalSessionRemote } from "./remotes";
 
 const SESSION_PAGE_JUMP_VIEWPORT_FACTOR = 0.45;
 
+function delegationWaitIndicatorPrompt(waits: readonly DelegationWaitRecord[]) {
+  if (waits.length === 0) {
+    return null;
+  }
+  const first = waits[0];
+  const childCount = waits.reduce(
+    (count, wait) => count + wait.delegationIds.length,
+    0,
+  );
+  const childLabel =
+    childCount === 1 ? "1 delegated session" : `${childCount} delegated sessions`;
+  const mode = first.mode === "any" ? "any" : "all";
+  const title = first.title?.trim();
+  if (waits.length === 1) {
+    return title
+      ? `Waiting for ${mode} of ${childLabel}: ${title}`
+      : `Waiting for ${mode} of ${childLabel}`;
+  }
+  return `Waiting on ${waits.length} delegation waits covering ${childLabel}`;
+}
+
 export function SessionPaneView({
   pane,
   codexState,
   projectLookup,
   remoteLookup,
+  delegationWaits,
   sessionLookup,
   isActive,
   isLoading,
@@ -266,6 +292,7 @@ export function SessionPaneView({
   codexState: CodexState;
   projectLookup: Map<string, Project>;
   remoteLookup: Map<string, RemoteConfig>;
+  delegationWaits: DelegationWaitRecord[];
   sessionLookup: Map<string, Session>;
   isActive: boolean;
   isLoading: boolean;
@@ -675,6 +702,10 @@ export function SessionPaneView({
     key: string | null;
     until: number;
   }>({ key: null, until: Number.NEGATIVE_INFINITY });
+  const paneTailFollowUserEscapeByKeyRef = useRef<
+    Record<string, true | undefined>
+  >({});
+  const paneLastTouchClientYRef = useRef<number | null>(null);
   const paneTopRef = useRef<HTMLDivElement | null>(null);
   const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<
     TabDropPlacement,
@@ -786,11 +817,29 @@ export function SessionPaneView({
   );
   const isSessionBusy =
     activeSession?.status === "active" || activeSession?.status === "approval";
-  const showWaitingIndicator =
+  const activeDelegationWaits = useMemo(
+    () =>
+      activeSession
+        ? delegationWaits.filter(
+            (wait) => wait.parentSessionId === activeSession.id,
+          )
+        : [],
+    [activeSession, delegationWaits],
+  );
+  const showDelegationWaitIndicator =
+    isSessionTabActive &&
+    pane.viewMode === "session" &&
+    Boolean(activeSession) &&
+    !isSessionBusy &&
+    !isSending &&
+    activeDelegationWaits.length > 0;
+  const showLiveTurnWaitingIndicator =
     isSessionTabActive &&
     pane.viewMode === "session" &&
     Boolean(activeSession) &&
     (activeSession?.status === "active" || (!isSessionBusy && isSending));
+  const showWaitingIndicator =
+    showLiveTurnWaitingIndicator || showDelegationWaitIndicator;
   const canFindInSession =
     isSessionTabActive && pane.viewMode === "session" && Boolean(activeSession);
   const hasSessionFindQuery =
@@ -826,8 +875,11 @@ export function SessionPaneView({
     ? Math.min(sessionFindActiveIndex, sessionSearchMatches.length - 1)
     : -1;
   const waitingIndicatorPrompt = useMemo(() => {
+    if (showDelegationWaitIndicator) {
+      return delegationWaitIndicatorPrompt(activeDelegationWaits);
+    }
     if (
-      !showWaitingIndicator ||
+      !showLiveTurnWaitingIndicator ||
       !activeSession ||
       (!isSessionBusy && isSending)
     ) {
@@ -835,7 +887,14 @@ export function SessionPaneView({
     }
 
     return findLastUserPrompt(activeSession);
-  }, [activeSession, isSending, isSessionBusy, showWaitingIndicator]);
+  }, [
+    activeDelegationWaits,
+    activeSession,
+    isSending,
+    isSessionBusy,
+    showDelegationWaitIndicator,
+    showLiveTurnWaitingIndicator,
+  ]);
   const composerInputDisabled = !activeSession || isStopping;
   const composerSendDisabled = !activeSession || isSending || isStopping;
   const scrollStateKey = activeSourceTab
@@ -955,12 +1014,17 @@ export function SessionPaneView({
     (paneContentSignaturesRef.current[pane.id] = {});
   const savedScrollPosition = paneScrollPositions[scrollStateKey];
 
-  function getShouldStickToBottom() {
+  function getTailFollowIntent() {
     return paneShouldStickToBottomRef.current[pane.id] ?? true;
   }
 
-  function setShouldStickToBottom(nextValue: boolean) {
+  function setTailFollowIntent(nextValue: boolean) {
     paneShouldStickToBottomRef.current[pane.id] = nextValue;
+    if (nextValue) {
+      delete paneTailFollowUserEscapeByKeyRef.current[scrollStateKey];
+    } else {
+      paneTailFollowUserEscapeByKeyRef.current[scrollStateKey] = true;
+    }
     setLiveTailPinnedByKey((current) => {
       if (current[scrollStateKey] === nextValue) {
         return current;
@@ -972,10 +1036,28 @@ export function SessionPaneView({
     });
   }
 
-  const liveTailPinned =
+  const tailFollowIntent =
     liveTailPinnedByKey[scrollStateKey] ??
     savedScrollPosition?.shouldStick ??
-    getShouldStickToBottom();
+    getTailFollowIntent();
+  const liveTailPinned = tailFollowIntent;
+
+  function hasTailFollowUserEscape() {
+    return Boolean(paneTailFollowUserEscapeByKeyRef.current[scrollStateKey]);
+  }
+
+  function markTailFollowUserEscape() {
+    paneTailFollowUserEscapeByKeyRef.current[scrollStateKey] = true;
+    setTailFollowIntent(false);
+    cancelSettledScrollToBottom();
+  }
+
+  function keepPaneScrollPositionPinned(node: HTMLElement) {
+    paneScrollPositions[scrollStateKey] = {
+      top: node.scrollTop,
+      shouldStick: true,
+    };
+  }
 
   function beginPaneProgrammaticBottomFollow() {
     paneProgrammaticBottomFollowRef.current = {
@@ -1257,7 +1339,7 @@ export function SessionPaneView({
         scrollKind,
       });
     }
-    setShouldStickToBottom(true);
+    setTailFollowIntent(true);
     paneScrollPositions[scrollStateKey] = {
       top: nextScrollTop,
       shouldStick: true,
@@ -1287,7 +1369,7 @@ export function SessionPaneView({
       scrollKind: options.scrollKind ?? "bottom_pin",
       scrollSource: options.scrollSource,
     });
-    setShouldStickToBottom(true);
+    setTailFollowIntent(true);
     paneScrollPositions[scrollStateKey] = {
       top: Number.MAX_SAFE_INTEGER,
       shouldStick: true,
@@ -1317,6 +1399,10 @@ export function SessionPaneView({
       return;
     }
 
+    const isUpwardScroll = deltaY < -0.5;
+    if (isUpwardScroll) {
+      paneTailFollowUserEscapeByKeyRef.current[scrollStateKey] = true;
+    }
     cancelPaneProgrammaticBottomFollow();
     node.scrollTop = nextScrollTop;
     notifyMessageStackScrollWrite(node, {
@@ -1328,10 +1414,11 @@ export function SessionPaneView({
       scrollStateKey,
       paneScrollPositions,
     );
-    setShouldStickToBottom(shouldStick);
     if (shouldStick) {
+      setTailFollowIntent(true);
       setNewResponseIndicator(scrollStateKey, false);
     } else {
+      setTailFollowIntent(false);
       cancelSettledScrollToBottom();
     }
   }
@@ -1345,7 +1432,7 @@ export function SessionPaneView({
   }
 
   function followLatestMessageForPromptSend() {
-    if (isMessageStackNearBottom()) {
+    if (getTailFollowIntent() || isMessageStackNearBottom()) {
       scrollToLatestMessage("smooth", false, "bottom_follow");
       return undefined;
     }
@@ -1362,6 +1449,9 @@ export function SessionPaneView({
       return;
     }
 
+    if (direction < 0) {
+      markTailFollowUserEscape();
+    }
     const distance = Math.max(Math.round(node.clientHeight * 0.85), 160);
     node.scrollBy({
       top: distance * direction,
@@ -1420,7 +1510,7 @@ export function SessionPaneView({
       scrollKind: "seek",
       scrollSource: "user",
     });
-    setShouldStickToBottom(false);
+    setTailFollowIntent(false);
     paneScrollPositions[scrollStateKey] = {
       top: 0,
       shouldStick: false,
@@ -1830,8 +1920,55 @@ export function SessionPaneView({
     cancel?.();
   }
 
-  function handleMessageStackUserScrollIntent() {
+  function handleMessageStackTouchStart(event: ReactTouchEvent<HTMLElement>) {
+    paneLastTouchClientYRef.current = event.touches[0]?.clientY ?? null;
+  }
+
+  function isTailFollowEscapeInput(
+    event:
+      | ReactWheelEvent<HTMLElement>
+      | ReactTouchEvent<HTMLElement>
+      | ReactKeyboardEvent<HTMLElement>
+      | ReactMouseEvent<HTMLElement>,
+  ) {
+    if (event.type === "wheel" && "deltaY" in event) {
+      return event.deltaY < -0.5;
+    }
+
+    if (event.type === "touchmove" && "touches" in event) {
+      const currentTouchClientY = event.touches[0]?.clientY ?? null;
+      const previousTouchClientY = paneLastTouchClientYRef.current;
+      paneLastTouchClientYRef.current = currentTouchClientY;
+      return (
+        currentTouchClientY !== null &&
+        previousTouchClientY !== null &&
+        currentTouchClientY > previousTouchClientY + 0.5
+      );
+    }
+
+    if (event.type === "keydown" && "key" in event) {
+      return (
+        event.key === "PageUp" ||
+        event.key === "ArrowUp" ||
+        event.key === "Home" ||
+        (event.key === " " && event.shiftKey)
+      );
+    }
+
+    return event.type === "mousedown" && event.target === event.currentTarget;
+  }
+
+  function handleMessageStackUserScrollIntent(
+    event:
+      | ReactWheelEvent<HTMLElement>
+      | ReactTouchEvent<HTMLElement>
+      | ReactKeyboardEvent<HTMLElement>
+      | ReactMouseEvent<HTMLElement>,
+  ) {
     cancelPaneProgrammaticBottomFollow();
+    if (isTailFollowEscapeInput(event)) {
+      markTailFollowUserEscape();
+    }
   }
 
   function restoreMessageStackScrollTop(targetTop: number) {
@@ -1868,7 +2005,7 @@ export function SessionPaneView({
       forceSessionScrollToBottomRef.current[activeSession.id];
     if (shouldForceBottomAfterWorkspaceRebuild) {
       delete forceSessionScrollToBottomRef.current[activeSession.id];
-      setShouldStickToBottom(true);
+      setTailFollowIntent(true);
       paneScrollPositions[scrollStateKey] = {
         top: Number.MAX_SAFE_INTEGER,
         shouldStick: true,
@@ -1882,14 +2019,14 @@ export function SessionPaneView({
       }
     } else if (paneScrollPositions[scrollStateKey]) {
       const saved = paneScrollPositions[scrollStateKey];
-      setShouldStickToBottom(saved.shouldStick);
+      setTailFollowIntent(saved.shouldStick);
       if (saved.shouldStick) {
         restoreCleanup = scheduleSettledScrollToBottom("auto", {
           maxAttempts: 60,
           preferVirtualizedBoundary: true,
         });
       } else if (!restoreMessageStackScrollTop(saved.top)) {
-        setShouldStickToBottom(true);
+        setTailFollowIntent(true);
         restoreCleanup = scheduleSettledScrollToBottom("auto", {
           maxAttempts: 60,
           preferVirtualizedBoundary: true,
@@ -1900,7 +2037,7 @@ export function SessionPaneView({
         maxAttempts: 60,
         preferVirtualizedBoundary: true,
       });
-      setShouldStickToBottom(true);
+      setTailFollowIntent(true);
       paneScrollPositions[scrollStateKey] = {
         top: Number.MAX_SAFE_INTEGER,
         shouldStick: true,
@@ -1908,7 +2045,7 @@ export function SessionPaneView({
     } else {
       node.scrollTop = 0;
       notifyMessageStackScrollWrite(node);
-      setShouldStickToBottom(false);
+      setTailFollowIntent(false);
       paneScrollPositions[scrollStateKey] = {
         top: 0,
         shouldStick: false,
@@ -1931,7 +2068,7 @@ export function SessionPaneView({
       return;
     }
 
-    setShouldStickToBottom(false);
+    setTailFollowIntent(false);
     node.scrollIntoView({
       block: "center",
       behavior: "auto",
@@ -2025,12 +2162,12 @@ export function SessionPaneView({
       const saved = paneScrollPositions[scrollStateKey];
       if (saved && !saved.shouldStick) {
         if (!restoreMessageStackScrollTop(saved.top)) {
-          setShouldStickToBottom(true);
+          setTailFollowIntent(true);
           return scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
         }
         return;
       }
-      if (getShouldStickToBottom() || saved?.shouldStick) {
+      if (getTailFollowIntent() || saved?.shouldStick) {
         return scheduleSettledScrollToBottom("auto", {
           maxAttempts: 60,
           preferVirtualizedBoundary: true,
@@ -2049,7 +2186,7 @@ export function SessionPaneView({
     }
 
     if (hasSessionFindQuery) {
-      setShouldStickToBottom(false);
+      setTailFollowIntent(false);
       if (
         pane.viewMode === "session" &&
         visibleLastMessageAuthor === "assistant"
@@ -2060,7 +2197,7 @@ export function SessionPaneView({
     }
 
     const shouldScroll =
-      getShouldStickToBottom() ||
+      getTailFollowIntent() ||
       paneScrollPositions[scrollStateKey]?.shouldStick === true ||
       visibleLastMessageAuthor === "you";
     if (!shouldScroll) {
@@ -2823,6 +2960,12 @@ export function SessionPaneView({
         }
         onScroll={(event) => {
           const node = event.currentTarget;
+          const previousScrollPosition = paneScrollPositions[scrollStateKey];
+          const previousTop = previousScrollPosition?.top;
+          const movedUpFromRecordedPosition =
+            typeof previousTop === "number" &&
+            previousTop < Number.MAX_SAFE_INTEGER / 2 &&
+            node.scrollTop < previousTop - 1;
           const { shouldStick } = syncMessageStackScrollPosition(
             node,
             scrollStateKey,
@@ -2830,7 +2973,7 @@ export function SessionPaneView({
           );
           if (isPaneProgrammaticBottomFollowActive()) {
             const targetTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-            setShouldStickToBottom(true);
+            setTailFollowIntent(true);
             paneScrollPositions[scrollStateKey] = {
               top: targetTop,
               shouldStick: true,
@@ -2841,14 +2984,23 @@ export function SessionPaneView({
             }
             return;
           }
-          setShouldStickToBottom(shouldStick);
           if (shouldStick) {
+            setTailFollowIntent(true);
             setNewResponseIndicator(scrollStateKey, false);
-          } else {
+          } else if (
+            hasTailFollowUserEscape() ||
+            movedUpFromRecordedPosition ||
+            !getTailFollowIntent()
+          ) {
+            setTailFollowIntent(false);
             cancelSettledScrollToBottom();
+          } else {
+            keepPaneScrollPositionPinned(node);
+            setNewResponseIndicator(scrollStateKey, false);
           }
         }}
         onWheel={handleMessageStackUserScrollIntent}
+        onTouchStart={handleMessageStackTouchStart}
         onTouchMove={handleMessageStackUserScrollIntent}
         onKeyDown={handleMessageStackUserScrollIntent}
         // Scrollbar-thumb mousedown is the only path that bypasses

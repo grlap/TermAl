@@ -197,10 +197,17 @@ export function makeWorkspaceLayoutResponse(
 export type AppTestStateResponse = Awaited<ReturnType<typeof api.fetchState>>;
 export type AppTestStateResponseOverrides = Pick<
   AppTestStateResponse,
-  "revision" | "projects" | "orchestrators" | "workspaces" | "sessions"
+  | "revision"
+  | "projects"
+  | "orchestrators"
+  | "workspaces"
+  | "sessions"
 > &
   Partial<
-    Pick<AppTestStateResponse, "codex" | "agentReadiness" | "serverInstanceId"> & {
+    Pick<
+      AppTestStateResponse,
+      "codex" | "agentReadiness" | "serverInstanceId" | "delegationWaits"
+    > & {
       preferences: Partial<AppTestStateResponse["preferences"]>;
     }
   >;
@@ -221,6 +228,7 @@ export function makeStateResponse(overrides: AppTestStateResponseOverrides): App
     orchestrators: overrides.orchestrators,
     workspaces: overrides.workspaces,
     sessions: overrides.sessions,
+    delegationWaits: overrides.delegationWaits ?? [],
   };
 }
 

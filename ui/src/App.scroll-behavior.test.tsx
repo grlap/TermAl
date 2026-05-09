@@ -1426,6 +1426,90 @@ describe("App scroll behaviour", () => {
     });
   });
 
+  it("keeps the live turn tail pinned when transcript growth opens a temporary bottom gap", async () => {
+    await withSuppressedActWarnings(async () => {
+      let scrollHeight = 1000;
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: () => scrollHeight,
+      });
+      const context = await renderAppWithProjectAndSession();
+
+      try {
+        const messageStack = Array.from(
+          document.querySelectorAll(".message-stack"),
+        ).find(
+          (candidate): candidate is HTMLElement =>
+            candidate instanceof HTMLElement &&
+            !candidate.classList.contains("control-panel-stack"),
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 2,
+          projects: [
+            {
+              id: "project-termal",
+              name: "TermAl",
+              rootPath: "/projects/termal",
+            },
+          ],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              status: "active",
+              preview: "Current turn partial.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "Current prompt",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Current turn partial.",
+                },
+              ],
+            }),
+          ],
+        });
+        await settleAsyncUi();
+
+        const liveTail = screen
+          .getByText("Live turn")
+          .closest(".conversation-live-tail");
+        expect(liveTail).not.toBeNull();
+        expect(liveTail).toHaveClass("is-pinned");
+
+        messageStack.scrollTop = 800;
+        await act(async () => {
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+
+        scrollHeight = 1120;
+        await act(async () => {
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+
+        expect(liveTail).toHaveClass("is-pinned");
+      } finally {
+        context.cleanup();
+        restoreScrollGeometry();
+      }
+    });
+  });
+
   it("resolves settled-scroll minimum attempts from the fallback threshold and explicit clamp", () => {
     expect(resolveSettledScrollMinimumAttempts(60)).toBe(8);
     expect(resolveSettledScrollMinimumAttempts(13)).toBe(8);

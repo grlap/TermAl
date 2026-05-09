@@ -183,6 +183,7 @@ function renderSessionPaneView({
     codexState: {},
     projectLookup: new Map(projects.map((project) => [project.id, project])),
     remoteLookup: new Map(remotes.map((remote) => [remote.id, remote])),
+    delegationWaits: [],
     sessionLookup: new Map([[session.id, session]]),
     isActive: true,
     isLoading: false,

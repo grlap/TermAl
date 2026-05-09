@@ -927,6 +927,28 @@ struct DelegationRecord {
     result: Option<DelegationResult>,
 }
 
+/// Determines when a delegation wait resumes its parent session.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum DelegationWaitMode {
+    Any,
+    #[default]
+    All,
+}
+
+/// Durable pending resume request for one parent waiting on child delegations.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationWaitRecord {
+    id: String,
+    parent_session_id: String,
+    delegation_ids: Vec<String>,
+    mode: DelegationWaitMode,
+    created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+}
+
 /// Summary-safe delegation metadata for `/api/state` and broad SSE deltas.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -994,6 +1016,27 @@ struct DelegationResultResponse {
     revision: u64,
     result: DelegationResult,
     #[serde(default)]
+    server_instance_id: String,
+}
+
+/// Request payload for scheduling a parent resume after delegations finish.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateDelegationWaitRequest {
+    delegation_ids: Vec<String>,
+    #[serde(default)]
+    mode: DelegationWaitMode,
+    #[serde(default)]
+    title: Option<String>,
+}
+
+/// Response payload for scheduling a delegation wait.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationWaitResponse {
+    revision: u64,
+    wait: DelegationWaitRecord,
+    queued_resume: bool,
     server_instance_id: String,
 }
 
@@ -1417,6 +1460,8 @@ struct StateResponse {
     sessions: Vec<Session>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     delegations: Vec<DelegationSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    delegation_waits: Vec<DelegationWaitRecord>,
 }
 
 /// Represents one full session response payload.
@@ -1563,6 +1608,61 @@ struct AgentCommand {
 #[serde(rename_all = "camelCase")]
 struct AgentCommandsResponse {
     commands: Vec<AgentCommand>,
+}
+
+/// Indicates why an agent command is being resolved.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum AgentCommandResolveIntent {
+    Send,
+    Delegate,
+}
+
+impl Default for AgentCommandResolveIntent {
+    /// Builds the default value.
+    fn default() -> Self {
+        Self::Send
+    }
+}
+
+/// Request payload for resolving an agent command into a concrete prompt.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolveAgentCommandRequest {
+    #[serde(default)]
+    arguments: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    intent: AgentCommandResolveIntent,
+}
+
+/// Optional delegation defaults derived from a resolved command.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolvedAgentCommandDelegationDefaults {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mode: Option<DelegationMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    write_policy: Option<DelegationWritePolicy>,
+}
+
+/// Response payload for a resolved agent command.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolveAgentCommandResponse {
+    name: String,
+    source: String,
+    kind: AgentCommandKind,
+    visible_prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expanded_prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    delegation: Option<ResolvedAgentCommandDelegationDefaults>,
 }
 
 /// Enumerates agent command kinds.
@@ -1833,6 +1933,15 @@ enum DeltaEvent {
     DelegationCreated {
         revision: u64,
         delegation: DelegationSummary,
+    },
+    DelegationWaitCreated {
+        revision: u64,
+        wait: DelegationWaitRecord,
+    },
+    DelegationWaitConsumed {
+        revision: u64,
+        wait_id: String,
+        parent_session_id: String,
     },
     DelegationUpdated {
         revision: u64,

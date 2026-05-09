@@ -26,6 +26,12 @@ const DELEGATION_RESULT_PACKET_SEARCH_BYTES: usize = 32 * 1024;
 const MAX_RUNNING_DELEGATIONS_PER_PARENT: usize = 4;
 // Keep nesting shallow until delegation ownership/scheduling is explicit.
 const MAX_DELEGATION_DEPTH: usize = 3;
+// Parent resume prompts should only wait on a small fan-in set.
+const MAX_DELEGATION_WAIT_IDS: usize = 10;
+// The synthesized parent fan-in prompt is persisted and sent to a model.
+const MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES: usize = 64 * 1024;
+const DELEGATION_WAIT_RESUME_TRUNCATED_MARKER: &str =
+    "\n\n[TermAl truncated this delegation fan-in prompt. Open the child sessions for full results.]";
 // Shared conflict text for create/cancel races before child dispatch starts.
 const DELEGATION_NO_LONGER_STARTABLE_MESSAGE: &str = "delegation is no longer running";
 #[cfg(test)]
@@ -113,6 +119,24 @@ enum DelegationLifecycleDelta {
         reason: Option<String>,
         parent_card_delta: Option<ParentDelegationCardDelta>,
     },
+}
+
+#[derive(Clone, Debug, Default)]
+struct DelegationWaitRefresh {
+    dispatch_parents: Vec<String>,
+    consumed_waits: Vec<DelegationWaitRecord>,
+}
+
+impl DelegationWaitRefresh {
+    fn did_mutate(&self) -> bool {
+        !self.consumed_waits.is_empty()
+    }
+
+    fn queued_parent(&self, parent_session_id: &str) -> bool {
+        self.dispatch_parents
+            .iter()
+            .any(|candidate| candidate == parent_session_id)
+    }
 }
 
 struct RemovedSessionDelegationReconciliation {
@@ -405,18 +429,7 @@ impl AppState {
             let child_record = inner
                 .session_mut_by_index(child_index)
                 .expect("child session index should be valid");
-            if child_record.session.agent.supports_codex_prompt_settings() {
-                child_record.codex_approval_policy = CodexApprovalPolicy::Never;
-                child_record.codex_sandbox_mode = delegation_codex_sandbox_mode(&write_policy);
-                child_record.session.approval_policy = Some(CodexApprovalPolicy::Never);
-                child_record.session.sandbox_mode = Some(child_record.codex_sandbox_mode);
-            } else if child_record.session.agent.supports_cursor_mode() {
-                child_record.session.cursor_mode = Some(CursorMode::Plan);
-            } else if child_record.session.agent.supports_claude_approval_mode() {
-                child_record.session.claude_approval_mode = Some(ClaudeApprovalMode::Plan);
-            } else if child_record.session.agent.supports_gemini_approval_mode() {
-                child_record.session.gemini_approval_mode = Some(GeminiApprovalMode::Plan);
-            }
+            configure_delegation_child_prompt_settings(child_record, &write_policy);
             child_record.session.parent_delegation_id = Some(delegation_id.clone());
         }
         let child_session = Self::wire_session_from_record(&inner.sessions[child_index]);
@@ -589,6 +602,78 @@ impl AppState {
         })
     }
 
+    fn create_delegation_wait(
+        &self,
+        parent_session_id: &str,
+        request: CreateDelegationWaitRequest,
+    ) -> Result<DelegationWaitResponse, ApiError> {
+        let parent_session_id = normalize_optional_identifier(Some(parent_session_id))
+            .ok_or_else(|| ApiError::bad_request("parent session id is required"))?
+            .to_owned();
+        let delegation_ids = normalize_delegation_wait_ids(request.delegation_ids)?;
+        let title = request
+            .title
+            .as_deref()
+            .and_then(non_empty_trimmed);
+        if title
+            .as_ref()
+            .is_some_and(|value| value.chars().count() > MAX_DELEGATION_TITLE_CHARS)
+        {
+            return Err(ApiError::bad_request(format!(
+                "delegation wait title must be at most {MAX_DELEGATION_TITLE_CHARS} characters"
+            )));
+        }
+        let wait_id = format!("delegation-wait-{}", Uuid::new_v4());
+        let wait = DelegationWaitRecord {
+            id: wait_id.clone(),
+            parent_session_id: parent_session_id.clone(),
+            delegation_ids,
+            mode: request.mode,
+            created_at: stamp_now(),
+            title,
+        };
+
+        let created_revision = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .find_visible_session_index(&parent_session_id)
+                .ok_or_else(ApiError::local_session_missing)?;
+            validate_delegation_wait_targets_locked(&inner, &wait)?;
+            inner.delegation_waits.push(wait.clone());
+            self.commit_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!("failed to persist delegation wait: {err:#}"))
+            })?
+        };
+
+        self.publish_delegation_wait_created(created_revision, wait.clone());
+
+        let (revision, queued_resume, refresh) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let refresh = refresh_delegation_waits_locked(&mut inner);
+            if refresh.did_mutate() {
+                let revision = self.commit_locked(&mut inner).map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to persist delegation wait refresh: {err:#}"
+                    ))
+                })?;
+                (revision, refresh.queued_parent(&parent_session_id), refresh)
+            } else {
+                (created_revision, false, refresh)
+            }
+        };
+        if refresh.did_mutate() {
+            self.publish_delegation_wait_consumed_deltas(revision, &refresh.consumed_waits);
+        }
+        self.dispatch_delegation_wait_resumes(refresh.dispatch_parents.clone());
+
+        Ok(DelegationWaitResponse {
+            revision,
+            wait,
+            queued_resume,
+            server_instance_id: self.server_instance_id.clone(),
+        })
+    }
+
     fn cancel_delegation(
         &self,
         parent_session_id: &str,
@@ -599,7 +684,8 @@ impl AppState {
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
             let lifecycle_delta = refresh_delegation_from_child_locked(&mut inner, index);
-            let revision = if lifecycle_delta.is_some() {
+            let wait_refresh = refresh_delegation_waits_locked(&mut inner);
+            let revision = if lifecycle_delta.is_some() || wait_refresh.did_mutate() {
                 self.commit_locked(&mut inner).map_err(|err| {
                     ApiError::internal(format!(
                         "failed to persist delegation status before cancel: {err:#}"
@@ -619,6 +705,13 @@ impl AppState {
                 if let Some(delta) = lifecycle_delta {
                     self.publish_delegation_lifecycle_delta(revision, delta);
                 }
+                if wait_refresh.did_mutate() {
+                    self.publish_delegation_wait_consumed_deltas(
+                        revision,
+                        &wait_refresh.consumed_waits,
+                    );
+                }
+                self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
                 return Ok(response);
             }
             let child_session_id = delegation.child_session_id.clone();
@@ -626,6 +719,10 @@ impl AppState {
             if let Some(delta) = lifecycle_delta {
                 self.publish_delegation_lifecycle_delta(revision, delta);
             }
+            if wait_refresh.did_mutate() {
+                self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
+            }
+            self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
             child_session_id
         };
 
@@ -657,7 +754,8 @@ impl AppState {
         } else {
             mark_delegation_canceled_locked(&mut inner, index, None)
         };
-        let revision = if lifecycle_delta.is_some() {
+        let wait_refresh = refresh_delegation_waits_locked(&mut inner);
+        let revision = if lifecycle_delta.is_some() || wait_refresh.did_mutate() {
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist delegation cancelation: {err:#}"))
             })?
@@ -669,6 +767,10 @@ impl AppState {
         if let Some(delta) = lifecycle_delta {
             self.publish_delegation_lifecycle_delta(revision, delta);
         }
+        if wait_refresh.did_mutate() {
+            self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
+        }
+        self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
         Ok(DelegationStatusResponse {
             revision,
             delegation,
@@ -677,16 +779,25 @@ impl AppState {
     }
 
     fn refresh_delegation_for_child_session(&self, child_session_id: &str) -> Result<()> {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_delegation_index_by_child_session_id(child_session_id) else {
-            return Ok(());
+        let (revision, lifecycle_delta, wait_refresh) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_delegation_index_by_child_session_id(child_session_id)
+            else {
+                return Ok(());
+            };
+            let Some(lifecycle_delta) = refresh_delegation_from_child_locked(&mut inner, index)
+            else {
+                return Ok(());
+            };
+            let wait_refresh = refresh_delegation_waits_locked(&mut inner);
+            let revision = self.commit_locked(&mut inner)?;
+            (revision, lifecycle_delta, wait_refresh)
         };
-        let Some(lifecycle_delta) = refresh_delegation_from_child_locked(&mut inner, index) else {
-            return Ok(());
-        };
-        let revision = self.commit_locked(&mut inner)?;
-        drop(inner);
         self.publish_delegation_lifecycle_delta(revision, lifecycle_delta);
+        if wait_refresh.did_mutate() {
+            self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
+        }
+        self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
         Ok(())
     }
 
@@ -858,7 +969,7 @@ impl AppState {
         child_session_id: &str,
         detail: &str,
     ) -> Result<(), ApiError> {
-        let (revision, lifecycle_delta, detached_child) = {
+        let (revision, lifecycle_delta, detached_child, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_delegation_index(delegation_id)
@@ -869,10 +980,11 @@ impl AppState {
             };
             let detached_child =
                 detach_delegation_child_runtime_locked(&mut inner, child_session_id, None);
+            let wait_refresh = refresh_delegation_waits_locked(&mut inner);
             let revision = self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist delegation failure: {err:#}"))
             })?;
-            (revision, lifecycle_delta, detached_child)
+            (revision, lifecycle_delta, detached_child, wait_refresh)
         };
 
         if let Some(runtime) = detached_child.runtime {
@@ -886,6 +998,10 @@ impl AppState {
             self.publish_delegation_child_transcript_delta(revision, delta);
         }
         self.publish_delegation_lifecycle_delta(revision, lifecycle_delta);
+        if wait_refresh.did_mutate() {
+            self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
+        }
+        self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
         Ok(())
     }
 
@@ -955,6 +1071,24 @@ impl AppState {
                     self.publish_parent_delegation_card_delta(revision, delta);
                 }
             }
+        }
+    }
+
+    fn publish_delegation_wait_created(&self, revision: u64, wait: DelegationWaitRecord) {
+        self.publish_delta(&DeltaEvent::DelegationWaitCreated { revision, wait });
+    }
+
+    fn publish_delegation_wait_consumed_deltas(
+        &self,
+        revision: u64,
+        waits: &[DelegationWaitRecord],
+    ) {
+        for wait in waits {
+            self.publish_delta(&DeltaEvent::DelegationWaitConsumed {
+                revision,
+                wait_id: wait.id.clone(),
+                parent_session_id: wait.parent_session_id.clone(),
+            });
         }
     }
 
@@ -1079,6 +1213,46 @@ impl AppState {
         Ok(())
     }
 
+    fn dispatch_delegation_wait_resumes(&self, parent_session_ids: Vec<String>) {
+        let mut seen = BTreeSet::new();
+        for parent_session_id in parent_session_ids {
+            if !seen.insert(parent_session_id.clone()) {
+                continue;
+            }
+            match self.dispatch_next_queued_turn(&parent_session_id, false) {
+                Ok(Some(dispatch)) => {
+                    if let Err(err) = deliver_turn_dispatch(self, dispatch) {
+                        eprintln!(
+                            "delegation wait warning> failed to dispatch queued resume for session `{}`: {}",
+                            parent_session_id, err.message
+                        );
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    eprintln!(
+                        "delegation wait warning> failed to inspect queued resume for session `{parent_session_id}`: {err:#}"
+                    );
+                }
+            }
+        }
+    }
+
+    fn reconcile_delegation_waits_after_boot(&self) -> Result<()> {
+        let (revision, wait_refresh) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let wait_refresh = refresh_delegation_waits_locked(&mut inner);
+            if !wait_refresh.did_mutate() {
+                return Ok(());
+            }
+            let revision = self.commit_locked(&mut inner)?;
+            (revision, wait_refresh)
+        };
+        self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
+        self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
+        Ok(())
+    }
+
     fn ensure_delegation_can_start_child_turn(
         &self,
         delegation_id: &str,
@@ -1126,6 +1300,313 @@ Final answer requirements:\n\
         write_policy,
         record.prompt,
     )
+}
+
+fn configure_delegation_child_prompt_settings(
+    child_record: &mut SessionRecord,
+    write_policy: &DelegationWritePolicy,
+) {
+    if child_record.session.agent.supports_codex_prompt_settings() {
+        child_record.codex_approval_policy = CodexApprovalPolicy::Never;
+        child_record.codex_sandbox_mode = delegation_codex_sandbox_mode(write_policy);
+        child_record.session.approval_policy = Some(CodexApprovalPolicy::Never);
+        child_record.session.sandbox_mode = Some(child_record.codex_sandbox_mode);
+    } else if child_record.session.agent.supports_cursor_mode() {
+        child_record.session.cursor_mode = Some(CursorMode::Plan);
+    } else if child_record.session.agent.supports_gemini_approval_mode() {
+        child_record.session.gemini_approval_mode = Some(GeminiApprovalMode::Plan);
+    }
+}
+
+fn normalize_delegation_wait_ids(ids: Vec<String>) -> Result<Vec<String>, ApiError> {
+    let mut normalized = Vec::with_capacity(ids.len());
+    let mut seen = BTreeSet::new();
+    for id in ids {
+        let Some(id) = non_empty_trimmed(&id) else {
+            return Err(ApiError::bad_request(
+                "delegation wait ids cannot be empty",
+            ));
+        };
+        if seen.insert(id.clone()) {
+            normalized.push(id);
+        }
+    }
+    if normalized.is_empty() {
+        return Err(ApiError::bad_request(
+            "delegation wait requires at least one delegation id",
+        ));
+    }
+    if normalized.len() > MAX_DELEGATION_WAIT_IDS {
+        return Err(ApiError::bad_request(format!(
+            "delegation wait accepts at most {MAX_DELEGATION_WAIT_IDS} delegation ids"
+        )));
+    }
+    Ok(normalized)
+}
+
+fn validate_delegation_wait_targets_locked(
+    inner: &StateInner,
+    wait: &DelegationWaitRecord,
+) -> Result<(), ApiError> {
+    for delegation_id in &wait.delegation_ids {
+        let index = inner
+            .find_delegation_index(delegation_id)
+            .ok_or_else(|| ApiError::not_found("delegation not found"))?;
+        let delegation = &inner.delegations[index];
+        if delegation.parent_session_id != wait.parent_session_id {
+            return Err(ApiError::bad_request(format!(
+                "delegation `{delegation_id}` does not belong to parent session `{}`",
+                wait.parent_session_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+// Delegation wait lifecycle:
+// 1. Mutate `inner.delegation_waits` only while the state lock is held.
+// 2. Treat consumed waits as state mutations even when the parent resume cannot
+//    be queued, so callers commit deletions and do not resurrect waits on boot.
+// 3. Drop the lock before dispatching queued parent turns. Dispatch failures are
+//    currently best-effort and logged to stderr; the consumed wait has already
+//    been persisted and announced through `delegationWaitConsumed`.
+fn refresh_delegation_waits_locked(inner: &mut StateInner) -> DelegationWaitRefresh {
+    if inner.delegation_waits.is_empty() {
+        return DelegationWaitRefresh::default();
+    }
+
+    let waits = std::mem::take(&mut inner.delegation_waits);
+    let mut remaining = Vec::new();
+    let mut refresh = DelegationWaitRefresh::default();
+    for wait in waits {
+        let Some(resume_prompt) = delegation_wait_resume_prompt_locked(inner, &wait) else {
+            remaining.push(wait);
+            continue;
+        };
+        if queue_delegation_wait_resume_locked(inner, &wait.parent_session_id, resume_prompt) {
+            refresh.dispatch_parents.push(wait.parent_session_id.clone());
+        }
+        refresh.consumed_waits.push(wait);
+    }
+    inner.delegation_waits = remaining;
+    refresh
+}
+
+fn delegation_wait_resume_prompt_locked(
+    inner: &StateInner,
+    wait: &DelegationWaitRecord,
+) -> Option<String> {
+    let records = wait
+        .delegation_ids
+        .iter()
+        .filter_map(|id| inner.delegations.iter().find(|delegation| delegation.id == *id))
+        .collect::<Vec<_>>();
+    if records.len() != wait.delegation_ids.len() {
+        return Some(format!(
+            "Delegation wait `{}` ended because one or more delegation records disappeared.\n\nRequested delegations:\n{}",
+            wait.id,
+            wait.delegation_ids
+                .iter()
+                .map(|id| format!("- `{id}`"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
+
+    let terminal_records = records
+        .iter()
+        .copied()
+        .filter(|delegation| delegation_is_terminal(delegation.status))
+        .collect::<Vec<_>>();
+    let satisfied = match wait.mode {
+        DelegationWaitMode::Any => !terminal_records.is_empty(),
+        DelegationWaitMode::All => terminal_records.len() == records.len(),
+    };
+    if !satisfied {
+        return None;
+    }
+
+    Some(limit_delegation_wait_resume_prompt(
+        build_delegation_wait_resume_prompt(wait, &records, &terminal_records),
+    ))
+}
+
+fn queue_delegation_wait_resume_locked(
+    inner: &mut StateInner,
+    parent_session_id: &str,
+    prompt: String,
+) -> bool {
+    let Some(parent_index) = inner.find_visible_session_index(parent_session_id) else {
+        return false;
+    };
+    let should_dispatch_now = {
+        let record = &inner.sessions[parent_index];
+        !matches!(
+            record.session.status,
+            SessionStatus::Active | SessionStatus::Approval
+        ) && !record.orchestrator_auto_dispatch_blocked
+            && record.queued_prompts.is_empty()
+            && !record_has_archived_codex_thread(record)
+    };
+    let message_id = inner.next_message_id();
+    let record = inner
+        .session_mut_by_index(parent_index)
+        .expect("parent session index should be valid");
+    queue_orchestrator_prompt_on_record(
+        record,
+        PendingPrompt {
+            attachments: Vec::new(),
+            id: message_id,
+            timestamp: stamp_now(),
+            text: prompt,
+            expanded_text: None,
+        },
+        Vec::new(),
+    );
+    should_dispatch_now
+}
+
+fn build_delegation_wait_resume_prompt(
+    wait: &DelegationWaitRecord,
+    records: &[&DelegationRecord],
+    terminal_records: &[&DelegationRecord],
+) -> String {
+    let title = wait.title.as_deref().unwrap_or("Delegation wait completed");
+    let mode = match wait.mode {
+        DelegationWaitMode::Any => "any",
+        DelegationWaitMode::All => "all",
+    };
+    let overview = records
+        .iter()
+        .map(|delegation| {
+            format!(
+                "- `{}`: {} - {}",
+                delegation.id,
+                delegation_status_label(delegation.status),
+                delegation.title
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let results = terminal_records
+        .iter()
+        .map(|delegation| delegation_wait_result_section(delegation))
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n");
+
+    format!(
+        "{title}\n\nWait id: `{}`\nMode: `{mode}`\nParent session: `{}`\n\nDelegations:\n{}\n\nResults:\n{}",
+        wait.id, wait.parent_session_id, overview, results
+    )
+}
+
+fn limit_delegation_wait_resume_prompt(prompt: String) -> String {
+    truncate_to_byte_limit_with_marker(
+        prompt,
+        MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES,
+        DELEGATION_WAIT_RESUME_TRUNCATED_MARKER,
+    )
+}
+
+fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
+    let result = delegation.result.as_ref();
+    let summary = result
+        .map(|result| result.summary.trim())
+        .filter(|summary| !summary.is_empty())
+        .unwrap_or("No result summary was recorded.");
+    let commands = result
+        .map(|result| {
+            result
+                .commands_run
+                .iter()
+                .map(|command| format!("- `{}`: {}", command.command, command.status))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let changed_files = result
+        .map(|result| {
+            result
+                .changed_files
+                .iter()
+                .map(|path| format!("- `{path}`"))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let findings = result
+        .map(|result| {
+            result
+                .findings
+                .iter()
+                .map(format_delegation_finding)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let notes = result
+        .map(|result| {
+            result
+                .notes
+                .iter()
+                .map(|note| format!("- {note}"))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let commands = if commands.is_empty() {
+        "- None".to_owned()
+    } else {
+        commands.join("\n")
+    };
+    let findings = if findings.is_empty() {
+        "- None".to_owned()
+    } else {
+        findings.join("\n")
+    };
+    let changed_files = if changed_files.is_empty() {
+        "- None".to_owned()
+    } else {
+        changed_files.join("\n")
+    };
+    let notes = if notes.is_empty() {
+        "- None".to_owned()
+    } else {
+        notes.join("\n")
+    };
+
+    format!(
+        "### {} (`{}`)\n\nStatus: {}\nChild session: `{}`\n\nSummary:\n{}\n\nFindings:\n{}\n\nChanged files:\n{}\n\nCommands run:\n{}\n\nNotes:\n{}",
+        delegation.title,
+        delegation.id,
+        delegation_status_label(delegation.status),
+        delegation.child_session_id,
+        summary,
+        findings,
+        changed_files,
+        commands,
+        notes
+    )
+}
+
+fn format_delegation_finding(finding: &DelegationFinding) -> String {
+    let location = match (finding.file.as_deref(), finding.line) {
+        (Some(file), Some(line)) => format!(" `{file}:{line}`"),
+        (Some(file), None) => format!(" `{file}`"),
+        (None, Some(line)) => format!(" line {line}"),
+        (None, None) => String::new(),
+    };
+    format!(
+        "- {}{} - {}",
+        finding.severity, location, finding.message
+    )
+}
+
+fn delegation_status_label(status: DelegationStatus) -> &'static str {
+    match status {
+        DelegationStatus::Queued => "queued",
+        DelegationStatus::Running => "running",
+        DelegationStatus::Completed => "completed",
+        DelegationStatus::Failed => "failed",
+        DelegationStatus::Canceled => "canceled",
+    }
 }
 
 fn delegation_prompt_write_policy(write_policy: &DelegationWritePolicy) -> String {
@@ -1292,8 +1773,10 @@ fn refresh_delegation_from_child_locked(
         }
         DelegationChildOutcome::Completed {
             summary,
+            findings,
             changed_files,
             commands_run,
+            notes,
         } => {
             let completed_at = stamp_now();
             let result = DelegationResult {
@@ -1301,10 +1784,10 @@ fn refresh_delegation_from_child_locked(
                 child_session_id: delegation.child_session_id.clone(),
                 status: DelegationStatus::Completed,
                 summary,
-                findings: Vec::new(),
+                findings,
                 changed_files,
                 commands_run,
-                notes: Vec::new(),
+                notes,
             };
             let record = inner.delegations.get_mut(delegation_index)?;
             record.status = DelegationStatus::Completed;
@@ -1950,8 +2433,10 @@ enum DelegationChildOutcome {
     Running,
     Completed {
         summary: String,
+        findings: Vec<DelegationFinding>,
         changed_files: Vec<String>,
         commands_run: Vec<DelegationCommandResult>,
+        notes: Vec<String>,
     },
     Failed {
         summary: String,
@@ -1963,6 +2448,8 @@ enum DelegationChildOutcome {
 struct ParsedDelegationResult {
     status: DelegationStatus,
     summary: String,
+    findings: Vec<DelegationFinding>,
+    notes: Vec<String>,
 }
 
 fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> DelegationChildOutcome {
@@ -1984,8 +2471,10 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
                 } else {
                     DelegationChildOutcome::Completed {
                         summary: result.summary,
+                        findings: result.findings,
                         changed_files: child_changed_files(&child.session),
                         commands_run: child_commands_run(&child.session),
+                        notes: result.notes,
                     }
                 }
             } else {
@@ -2153,6 +2642,15 @@ fn latest_assistant_delegation_result(session: &Session) -> Option<ParsedDelegat
     })
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DelegationResultSection {
+    Summary,
+    Findings,
+    Notes,
+    FilesInspected,
+    Ignored,
+}
+
 fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> {
     let search_window = delegation_result_search_window(text);
     let mut lines = search_window
@@ -2162,10 +2660,12 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
 
     let mut status = None;
     let mut summary_lines = Vec::new();
-    let mut in_summary = false;
+    let mut finding_lines = Vec::new();
+    let mut note_lines: Vec<String> = Vec::new();
+    let mut section: Option<DelegationResultSection> = None;
     for line in lines {
         let cleaned = line.trim();
-        if !in_summary {
+        if section.is_none() {
             if let Some((label, value)) = cleaned.split_once(':') {
                 if label.trim().eq_ignore_ascii_case("status") {
                     status = match value.trim().to_ascii_lowercase().as_str() {
@@ -2176,17 +2676,23 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
                     continue;
                 }
             }
-        } else if is_delegation_result_section_heading(cleaned) {
-            in_summary = false;
         }
 
-        if cleaned.eq_ignore_ascii_case("Summary:") {
-            in_summary = true;
+        if let Some(next_section) = delegation_result_section_heading(cleaned) {
+            section = Some(next_section);
             continue;
         }
 
-        if in_summary {
-            summary_lines.push(line);
+        match section {
+            Some(DelegationResultSection::Summary) => summary_lines.push(line),
+            Some(DelegationResultSection::Findings) => finding_lines.push(line),
+            Some(DelegationResultSection::Notes) => note_lines.push(line.to_owned()),
+            Some(DelegationResultSection::FilesInspected) => {
+                if let Some(note) = parse_delegation_note_line(line) {
+                    note_lines.push(format!("Inspected {note}"));
+                }
+            }
+            Some(DelegationResultSection::Ignored) | None => {}
         }
     }
 
@@ -2202,17 +2708,94 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
         summary
     };
 
-    Some(ParsedDelegationResult { status, summary })
+    Some(ParsedDelegationResult {
+        status,
+        summary,
+        findings: finding_lines
+            .iter()
+            .filter_map(|line| parse_delegation_finding_line(line))
+            .collect(),
+        notes: note_lines
+            .iter()
+            .filter_map(|line| parse_delegation_note_line(line))
+            .collect(),
+    })
 }
 
-fn is_delegation_result_section_heading(cleaned: &str) -> bool {
+fn delegation_result_section_heading(cleaned: &str) -> Option<DelegationResultSection> {
     let Some(label) = cleaned.strip_suffix(':') else {
-        return false;
+        return None;
     };
-    matches!(
-        label.trim().to_ascii_lowercase().as_str(),
-        "findings" | "commands run" | "files inspected" | "notes"
-    )
+    match label.trim().to_ascii_lowercase().as_str() {
+        "summary" => Some(DelegationResultSection::Summary),
+        "findings" => Some(DelegationResultSection::Findings),
+        "notes" => Some(DelegationResultSection::Notes),
+        "files inspected" => Some(DelegationResultSection::FilesInspected),
+        "commands run" => Some(DelegationResultSection::Ignored),
+        _ => None,
+    }
+}
+
+fn parse_delegation_note_line(line: &str) -> Option<String> {
+    let text = normalize_delegation_result_list_item(line);
+    if text.is_empty() || text.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    Some(text.to_owned())
+}
+
+fn parse_delegation_finding_line(line: &str) -> Option<DelegationFinding> {
+    let text = normalize_delegation_result_list_item(line);
+    if text.is_empty() || text.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    let (head, message) = text
+        .split_once(" - ")
+        .map(|(head, message)| (head.trim(), message.trim()))
+        .unwrap_or(("", text));
+    let (severity, location) = head
+        .split_once(char::is_whitespace)
+        .map(|(severity, location)| (severity.trim(), location.trim()))
+        .unwrap_or((head.trim(), ""));
+    let severity = if severity.is_empty() {
+        "Note"
+    } else {
+        severity
+    };
+    let (file, line) = parse_delegation_finding_location(location);
+    Some(DelegationFinding {
+        severity: severity.to_owned(),
+        file,
+        line,
+        message: message.to_owned(),
+    })
+}
+
+fn parse_delegation_finding_location(location: &str) -> (Option<String>, Option<u32>) {
+    let location = location.trim().trim_matches('`');
+    if location.is_empty() {
+        return (None, None);
+    }
+    if let Some((file, line)) = location.rsplit_once(':') {
+        let file = file.trim().trim_matches('`');
+        if let Ok(line) = line.parse::<u32>() {
+            if !file.is_empty() {
+                return (Some(file.to_owned()), Some(line));
+            }
+        }
+        if !file.is_empty() {
+            return (Some(file.to_owned()), None);
+        }
+    }
+    (Some(location.to_owned()), None)
+}
+
+fn normalize_delegation_result_list_item(line: &str) -> &str {
+    line.trim()
+        .strip_prefix("- ")
+        .or_else(|| line.trim().strip_prefix("* "))
+        .unwrap_or_else(|| line.trim())
+        .trim()
 }
 
 fn delegation_result_search_window(text: &str) -> &str {
@@ -2250,6 +2833,31 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
         end = index + ch.len_utf8();
     }
     value.to_owned()
+}
+
+fn truncate_to_byte_limit_with_marker(
+    mut value: String,
+    max_bytes: usize,
+    marker: &str,
+) -> String {
+    if value.len() <= max_bytes {
+        return value;
+    }
+    if marker.len() >= max_bytes {
+        let mut end = max_bytes;
+        while end > 0 && !marker.is_char_boundary(end) {
+            end -= 1;
+        }
+        return marker[..end].to_owned();
+    }
+
+    let mut end = max_bytes - marker.len();
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value.truncate(end);
+    value.push_str(marker);
+    value
 }
 
 fn child_changed_files(session: &Session) -> Vec<String> {
