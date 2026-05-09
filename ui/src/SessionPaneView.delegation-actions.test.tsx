@@ -3,7 +3,6 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { SessionPaneView } from "./SessionPaneView";
-import { isLocalSessionRemote } from "./remotes";
 import type {
   ParallelAgentsMessage,
   Project,
@@ -307,15 +306,8 @@ describe("SessionPaneView delegation action wiring", () => {
       expectedEnabled: false,
     },
   ])(
-    "matches isLocalSessionRemote for $name",
+    "gates delegation actions for $name",
     ({ session, projects, expectedEnabled }) => {
-      const project =
-        session.projectId != null
-          ? (projects.find((candidate) => candidate.id === session.projectId) ??
-            null)
-          : null;
-      expect(isLocalSessionRemote(session, project)).toBe(expectedEnabled);
-
       renderSessionPaneView({
         session,
         projects,

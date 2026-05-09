@@ -4329,6 +4329,26 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         replay_key(orchestrators_updated_with_session_preview("second preview")),
         "OrchestratorsUpdated replay identity must include session payloads"
     );
+    let orchestrators_updated_with_session_remote_id = |remote_id: &str| {
+        let mut orchestrator = remote_state.orchestrators[0].clone();
+        orchestrator.status = OrchestratorInstanceStatus::Running;
+        let mut session = remote_state.sessions[0].clone();
+        session.remote_id = Some(remote_id.to_owned());
+        DeltaEvent::OrchestratorsUpdated {
+            revision: 8,
+            orchestrators: vec![orchestrator],
+            sessions: vec![session],
+        }
+    };
+    assert_eq!(
+        replay_key(orchestrators_updated_with_session_remote_id(
+            "attacker-remote-a"
+        )),
+        replay_key(orchestrators_updated_with_session_remote_id(
+            "attacker-remote-b"
+        )),
+        "OrchestratorsUpdated replay identity must ignore inbound session remote_id because localization discards it"
+    );
 
     let codex_updated = |title: &str| DeltaEvent::CodexUpdated {
         revision: 9,

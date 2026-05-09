@@ -297,6 +297,85 @@ describe("ConversationOverviewRail", () => {
     }
   });
 
+  it("rebuilds a focused projection through the hard timeout when idle never fires", () => {
+    vi.useFakeTimers();
+    const composer = document.createElement("textarea");
+    composer.dataset.conversationComposerInput = "true";
+    document.body.appendChild(composer);
+    const originalRequestIdleCallback = window.requestIdleCallback;
+    const originalCancelIdleCallback = window.cancelIdleCallback;
+    Object.defineProperty(window, "requestIdleCallback", {
+      configurable: true,
+      value: vi.fn(() => 1),
+    });
+    Object.defineProperty(window, "cancelIdleCallback", {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    try {
+      const messages = textMessages(5);
+      const updatedMessages = messages.map((message, index) =>
+        index === 0 && message.type === "text"
+          ? { ...message, text: "Updated prompt sample" }
+          : message,
+      );
+      act(() => {
+        composer.focus();
+        fireEvent.focusIn(composer);
+      });
+
+      const { rerender } = render(
+        <ConversationOverviewRail
+          messages={messages}
+          layoutSnapshot={layoutSnapshot(messages)}
+          minMessages={4}
+          maxHeightPx={250}
+          onNavigate={() => {}}
+        />,
+      );
+
+      rerender(
+        <ConversationOverviewRail
+          messages={updatedMessages}
+          layoutSnapshot={layoutSnapshot(updatedMessages)}
+          minMessages={4}
+          maxHeightPx={250}
+          onNavigate={() => {}}
+        />,
+      );
+
+      expect(screen.getByLabelText(/User prompt 1: Message 1/)).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(240);
+      });
+
+      expect(
+        screen.getByLabelText(/User prompt 1: Updated prompt sample/),
+      ).toBeInTheDocument();
+    } finally {
+      if (originalRequestIdleCallback) {
+        Object.defineProperty(window, "requestIdleCallback", {
+          configurable: true,
+          value: originalRequestIdleCallback,
+        });
+      } else {
+        delete (window as { requestIdleCallback?: unknown }).requestIdleCallback;
+      }
+      if (originalCancelIdleCallback) {
+        Object.defineProperty(window, "cancelIdleCallback", {
+          configurable: true,
+          value: originalCancelIdleCallback,
+        });
+      } else {
+        delete (window as { cancelIdleCallback?: unknown }).cancelIdleCallback;
+      }
+      document.body.removeChild(composer);
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     "url(https://example.test/marker)",
     "var(--signal-blue)",
@@ -423,12 +502,53 @@ describe("ConversationOverviewRail", () => {
 
     fireEvent.keyDown(rail, { key: "End" });
 
+    expect(rail).toHaveAttribute(
+      "aria-valuenow",
+      rail.getAttribute("aria-valuemax"),
+    );
     expect(onNavigate).toHaveBeenLastCalledWith(
       expect.objectContaining({
         messageId: "command-message-220",
         messageIndex: 219,
       }),
     );
+  });
+
+  it("releases compact keyboard navigation state if the viewport never confirms", () => {
+    vi.useFakeTimers();
+    try {
+      const messages = commandMessages(220);
+      const { container } = render(
+        <ConversationOverviewRail
+          messages={messages}
+          layoutSnapshot={layoutSnapshot(messages)}
+          minMessages={4}
+          maxHeightPx={1024}
+          onNavigate={() => {}}
+        />,
+      );
+      const rail = screen.getByLabelText("Conversation overview");
+      const initialValue = rail.getAttribute("aria-valuenow");
+
+      expect(container.querySelectorAll(".conversation-overview-segment")).toHaveLength(
+        0,
+      );
+
+      fireEvent.keyDown(rail, { key: "End" });
+
+      expect(rail).toHaveAttribute(
+        "aria-valuenow",
+        rail.getAttribute("aria-valuemax"),
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(800);
+      });
+
+      expect(rail).toHaveAttribute("aria-valuenow", initialValue);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("can move the viewport indicator without replacing layout geometry", () => {
@@ -615,6 +735,47 @@ describe("ConversationOverviewRail", () => {
     expect(firstItem).toHaveFocus();
     expect(firstItem).toHaveAttribute("tabIndex", "0");
     expect(lastItem).toHaveAttribute("tabIndex", "-1");
+  });
+
+  it("keeps one overview segment tabbable immediately after the segment list shrinks", () => {
+    const initialMessages = textMessages(5);
+    const { rerender } = render(
+      <ConversationOverviewRail
+        messages={initialMessages}
+        layoutSnapshot={layoutSnapshot(initialMessages)}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={() => {}}
+      />,
+    );
+
+    const firstItem = screen.getByLabelText(/User prompt 1/);
+    fireEvent.keyDown(firstItem, { key: "End" });
+    expect(screen.getByLabelText(/User prompt 5/)).toHaveAttribute(
+      "tabIndex",
+      "0",
+    );
+
+    const shrunkMessages = textMessages(3);
+    rerender(
+      <ConversationOverviewRail
+        messages={shrunkMessages}
+        layoutSnapshot={layoutSnapshot(shrunkMessages)}
+        minMessages={2}
+        maxHeightPx={250}
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText(/User prompt 3/)).toHaveAttribute(
+      "tabIndex",
+      "0",
+    );
+    expect(
+      Array.from(
+        document.querySelectorAll(".conversation-overview-segment"),
+      ).filter((item) => item.getAttribute("tabIndex") === "0"),
+    ).toHaveLength(1);
   });
 
   it("renders and navigates live-turn tail items", () => {

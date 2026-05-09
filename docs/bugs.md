@@ -7,22 +7,453 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## `remember_assistant_forwarding_cursor` unconditionally write-throughs the legacy mirror
+## Active-baseline → settled transition can strand cursor when agent appends in-place to baselined message
 
-**Severity:** Medium - `src/telegram.rs:1668-1697`. Round 78 introduced `assistant_forwarding_cursors: HashMap<SessionId, TelegramAssistantForwardingCursor>` as the authoritative per-session cursor, but `remember_assistant_forwarding_cursor` still unconditionally writes `state.last_forwarded_assistant_message_id` and `_text_chars` from the *passed-in* cursor on every call, regardless of which session is being updated.
+**Severity:** Medium - `src/telegram.rs:1969-2006`. When an active session with `baseline_while_active=true` settles, the new transition baselines onto the latest message and clears the flag. The cursor's `resend_if_grown` is set to `false`, so an in-place text growth on the baselined message is NOT detected.
 
-Two interleaved sessions clobber each other's legacy mirror. Combined with the fallback at `:1653-1666` that returns the legacy mirror for unknown sessions, the fallback path is non-deterministic in the multi-session case — it returns "the most recently mutated session's cursor".
+If the agent's response to the Telegram prompt appends to the existing message id (some agents stream in-place), `start_index = position_of_last + 1` skips that very message. The user's Telegram prompt was never "delivered" as a separate reply — the existing message was just baselined, and the relay shows nothing to the Telegram user.
 
 **Current behavior:**
-- Per-session map holds authoritative cursors.
-- Legacy mirror unconditionally write-through on every call.
-- Two interleaved sessions clobber each other's mirror.
-- Fallback for unknown sessions returns the latest-touched session's cursor.
+- Active-baseline → settled clears `baseline_while_active` and sets `resend_if_grown: false`.
+- In-place text growth on the baselined message is invisible.
+- Telegram user sees no reply when agent appends rather than emitting a new message.
 
 **Proposal:**
-- Stop unconditionally mirroring.
-- Mirror only when the session id matches a designated "primary" session id.
-- Or drop runtime use of the mirror entirely (read-once at startup).
+- When transitioning from active-baseline to settled, also set `resend_if_grown: true` so an in-place text growth is detected and re-forwarded as the Telegram reply.
+- Or document that mid-message append is not a supported producer pattern.
+
+## Footer-send failure permanently loses the close marker with no retry
+
+**Severity:** Medium - `src/telegram.rs:2154-2165`. Footer-send failure is converted to `Ok(sent_visible_content: true)` and logged. The footer is for visual closure. If a transient failure swallows the footer once, it is permanently lost for that turn. The footer's stated purpose ("user has no easy way to tell 'is the agent still typing or done?'") is silently undermined.
+
+**Current behavior:**
+- Footer-send failure → `Ok(sent_visible_content: true)`, log only.
+- No retry on next poll.
+- Permanent loss of close marker for that turn.
+
+**Proposal:**
+- Either persist a "footer pending" flag in the cursor so the next poll can retry.
+- Or accept the loss but emit a heads-up message ("[turn complete; footer delivery failed]") on the success path.
+
+## `telegram_forward_records_partial_progress_when_later_send_fails` no longer asserts the critical invariant
+
+**Severity:** Medium - `src/tests/telegram.rs:411-421`. Previously called `merge_assistant_forward_result(&mut dirty, result)` and asserted `dirty=true`. Now the test only checks `forwarded=true`. It does NOT assert that `sent_visible_content=true` was also returned, nor that the digest-primary suppression logic in `forward_relevant_assistant_messages` would correctly skip the digest primary on this outcome.
+
+**Current behavior:**
+- Test asserts `forwarded=true` only.
+- `sent_visible_content` invariant unverified.
+
+**Proposal:**
+- Use `forward_new_assistant_message_outcome` (not `_if_any`) and assert `outcome.sent_visible_content`.
+
+## Marker focus-restore cancellation test fragile to additional rAF scheduling
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.test.tsx:1578-1586`. The test captures `requestAnimationFrameMock.mock.results[results.length - 1].value` after clicking "Hide markers window". This assumes the focus-restore frame is the LAST rAF scheduled in response to the click.
+
+**Current behavior:**
+- Captures last rAF result as the focus-restore frame.
+- Fragile to unrelated rAF additions.
+
+**Proposal:**
+- Capture `requestAnimationFrameMock.mock.calls.length` BEFORE the click and assert exactly one new call.
+- Or filter `mock.calls` by inspecting the callback function reference.
+
+## Deferred delegation test mutates `params` by-reference rather than using `initialProps`
+
+**Severity:** Medium - `ui/src/SessionPaneView.render-callbacks.test.ts:723`. The deferred delegation test mutates `params.activeSession = makeSessionWithId("session-2")` directly, then calls `hook.rerender()`. This breaks the typical `renderHook` contract — a future refactor that destructures `params` at call time would invalidate the test silently.
+
+**Current behavior:**
+- Test mutates parameter object by reference.
+- Future destructure-then-memoize refactor would silently fail.
+
+**Proposal:**
+- Use `renderHook(({ activeSession }) => useSessionRenderCallbacks({ ...params, activeSession }), { initialProps: { activeSession: firstSession } })` and `rerender({ activeSession: secondSession })`.
+
+## `canApplyDelegationActionResult` re-entry to same session unpinned
+
+**Severity:** Medium - `ui/src/SessionPaneView.render-callbacks.tsx:189-193`. The callback only checks `mountedRef.current && activeSessionIdRef.current === parentSessionId`. If the user switches FROM session A TO session B then BACK to session A before the delegation result settles, `activeSessionIdRef.current === parentSessionId` becomes true again, and the stale result lands.
+
+The new test only covers the unidirectional A→B case.
+
+**Current behavior:**
+- Re-entry to same session re-validates stale result.
+- A→B→A re-entry case uncovered.
+
+**Proposal:**
+- Capture an additional "operation generation" id at submit time and compare it after settlement.
+- Or document that re-entry to the same session is intentionally allowed.
+
+## First-chunk failure can cause permanent retry loops
+
+**Severity:** Low - `src/telegram.rs:2109-2117`. The chunk loop returns `Err(err)` when `sent_visible_content` is false (no chunks were successfully sent). The cursor was NOT updated. On retry, the relay will replay the first chunk. If the first chunk's send always fails (e.g., the chunk is malformed), the user will see permanent retry loops with no progress, no `sent_visible_content`, and no error escalation.
+
+**Current behavior:**
+- First-chunk failure → no cursor update → infinite retry.
+
+**Proposal:**
+- After N failed first-chunk attempts for the same `(message_id, chunk_index)`, advance the cursor anyway and surface a "[chunk N skipped: send failed]" line in chat.
+
+## `assertNeverDelegationStatus` runtime crash for forward-compat scenarios
+
+**Severity:** Low - `ui/src/SessionPaneView.render-callbacks.tsx:78-79, 95-96`. `assertNeverDelegationStatus(status: never): never` throws at runtime. If a remote-served delegation status is added server-side and the client receives it without a corresponding client-side type update, the entire delegation card click handler throws. The user sees `"Unhandled delegation status: <newStatus>"` instead of a friendly message.
+
+**Current behavior:**
+- Compile-time exhaustiveness defense.
+- Runtime crash for forward-compat scenarios.
+
+**Proposal:**
+- Make the helper return a Either-like `null | string` and let the caller fall back to a generic message.
+- Reserve `assertNever` for build-time checks.
+
+## `forward_telegram_text_to_project` does not size-limit prompt text
+
+**Severity:** Note - `src/telegram.rs:1551-1606`. Accepts arbitrary Telegram chat text and forwards it via `termal.send_session_message(session_id, text)` without size limit. A malicious Telegram bot operator can flood the backend with large prompts.
+
+**Current behavior:**
+- No length limit at the relay boundary.
+- Backend enforces limits, returns Err.
+
+**Proposal:**
+- Length-limit `text` to a sane max (e.g., 64K characters) at the relay boundary.
+
+## Telegram tests accumulate temp files in `$TMPDIR`
+
+**Severity:** Note - `src/tests/telegram.rs:148-159`. `telegram_test_config()` writes `state_path` per test but never cleans up. Files accumulate in `$TMPDIR` across test runs.
+
+**Current behavior:**
+- Per-test temp file path generated.
+- No cleanup.
+
+**Proposal:**
+- Use a `Drop` guard or `tempfile::NamedTempFile` so created files are reaped.
+
+## `TelegramPromptClient` trait colocation rationale undocumented
+
+**Severity:** Note - `src/telegram.rs:1172-1186`. The new trait colocates three concerns (session read, digest fetch, prompt send) into one bound. Single consumer (`forward_telegram_text_to_project`). Rationale not documented.
+
+**Current behavior:**
+- Trait colocates session read + digest + prompt send.
+- Single consumer.
+- No doc on the design rationale.
+
+**Proposal:**
+- Add a doc comment block on the trait explaining that this is the test-seam bound for `forward_telegram_text_to_project`.
+
+## `TelegramPromptClient::send_session_message` discards `SessionMessageResponse`
+
+**Severity:** Note - `src/telegram.rs:1182-1185`. The trait method returns `Result<()>`, but the prod impl returns `Result<SessionMessageResponse>`. The trait drops the response. Subsequent reasoning in the test-only flow might want the response.
+
+**Current behavior:**
+- Trait returns `Result<()>`.
+- Prod returns `Result<SessionMessageResponse>`.
+
+**Proposal:**
+- Make the trait return `Result<SessionMessageResponse>` mirroring the impl, or document the design choice.
+
+## `forward_new_assistant_message_outcome` is now ~256 lines with interleaved early-returns
+
+**Severity:** Note - `src/telegram.rs:1916-2007`. The new pre-forward block has 3 separate `Active baseline` early returns and one merge into the main path; future contributors will struggle to trace which baseline shape is preserved across the merge.
+
+**Current behavior:**
+- Single function ~256 lines.
+- Multiple interleaved early-return branches.
+
+**Proposal:**
+- Extract the active-baseline transition into a helper `transition_active_baseline_to_settled` that returns either the new cursor + position or an `OutcomeShortCircuit`.
+
+## `remote_delta_session_created_fingerprint` name implies single-purpose but used for two delta types
+
+**Severity:** Note - `src/remote_routes.rs:711`. Now used in `SessionCreated` at `:537` and `OrchestratorsUpdated` at `:711`. The name lies about scope.
+
+**Current behavior:**
+- Helper name implies single-purpose.
+- Used for two delta types.
+
+**Proposal:**
+- Rename to `remote_delta_session_payload_fingerprint` (drops the `_created` suffix).
+
+## `OrchestratorsUpdated` replay key test doesn't verify localized session strips wire id
+
+**Severity:** Low - `src/tests/remote.rs:4332-4351`. The new test uses `assert_eq!`, which only proves equality of the *fingerprinted* payloads. It does NOT verify that the localized session emitted to local clients clears `remote_id`.
+
+**Current behavior:**
+- Replay-key equality verified.
+- Localized-session-emission contract untested at this layer.
+
+**Proposal:**
+- Add an integration assertion that `localize_remote_session` clears the inbound id BEFORE the replay key normalization helper sees it.
+
+## Approval-with-prior-text full lifecycle not covered
+
+**Severity:** Low - `src/tests/telegram.rs:1064-1167`. `telegram_prompt_behind_initial_approval_session_forwards_later_reply` constructs the lifecycle as Approval(empty)→Active(message-1)→Idle(message-1+message-2). The Approval phase has NO assistant message. In production, an Approval state typically has the in-progress assistant text.
+
+**Current behavior:**
+- Empty Approval → Active → Idle covered.
+- Approval-with-prior-text path uncovered.
+
+**Proposal:**
+- Add a sibling test where the initial Approval has a prior assistant message.
+
+## Unknown-status-first attack vector not covered
+
+**Severity:** Low - `src/tests/telegram.rs:1168-1274`. `telegram_unknown_status_preserves_old_turn_boundary_until_known_reply` only tests Active → Unknown → Idle. The hostile case is `Unknown → Active → Idle` (Unknown FIRST, then a known status).
+
+**Current behavior:**
+- Active → Unknown → Idle covered.
+- Unknown-first prepare path uncovered.
+
+**Proposal:**
+- Add a sibling test where `prepare_*` is called against an Unknown-status session.
+
+## Deferred delegation handler test doesn't cover post-switch rejection path
+
+**Severity:** Low - `ui/src/SessionPaneView.render-callbacks.test.ts:680-740`. The "drops deferred delegation action results" test only inspects the success-after-switch path. It does NOT verify behavior when the deferred promises REJECT after session switch.
+
+**Current behavior:**
+- Post-switch resolve path covered.
+- Post-switch reject path uncovered.
+
+**Proposal:**
+- Add a test where the deferred promises REJECT after session switch.
+- Verify no `onComposerError` call.
+
+## Marker-window override "auto-show after toggle" reset not covered
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:1461-1514`. The new test covers `null → true → null` on session switch. The toggle direction (`true → false → switch session → null`) is not covered.
+
+**Current behavior:**
+- One direction covered.
+- Toggle-then-switch direction uncovered.
+
+**Proposal:**
+- Add an "auto-show after toggle" sibling that exercises true→false→null on switch.
+
+## Footer-send failure violates Telegram-protocol "always closing footer" contract
+
+**Severity:** Low - `src/telegram.rs:2154-2165`. The footer error handling silently logs and returns Ok with `dirty: changed`. The Telegram-protocol contract is silently violated by transient failures.
+
+**Current behavior:**
+- Footer failure → soft fail.
+- Cursor advances despite missing closing marker.
+
+**Proposal:**
+- Document the contract or persist a "footer-pending" flag for retry.
+
+## Chunk-loop early-return retry semantics correct but undocumented
+
+**Severity:** Note - `src/telegram.rs:2109-2117`. The chunk-loop early-return path drops remaining `to_forward` entries (will be re-discovered on the next poll because cursor only advanced to last successfully forwarded). Behavior correct but undocumented.
+
+**Current behavior:**
+- Early return drops remaining `to_forward` entries.
+- Cursor advance preserves retry on next poll.
+
+**Proposal:**
+- Add an inline comment "// Remaining unforwarded entries in to_forward will be re-discovered on the next poll because the cursor only advanced to the last successfully forwarded message."
+
+## Invariants between `dirty` and `sent_visible_content` not encoded in type
+
+**Severity:** Medium - `src/telegram.rs:1655-1664`. The relationship between `dirty` and `sent_visible_content` (sending content always implies dirty) is not encoded in the type. A future change in `forward_new_assistant_message_outcome` that sends Telegram messages without bumping `dirty` (e.g., a probe message) would still trigger the gate but `dirty` would not flag persistence.
+
+**Current behavior:**
+- Two-flag outcome with implicit invariant.
+- Future change could break `!sent_visible_content || dirty` relationship.
+
+**Proposal:**
+- Add `debug_assert!(!outcome.sent_visible_content || outcome.dirty)` after each `Ok(outcome)` branch.
+- Or document the invariant on the struct.
+
+## ConversationOverviewRail `compactNavigationSegmentIndex` 800ms timeout creates flicker race
+
+**Severity:** Low - `ui/src/panels/ConversationOverviewRail.tsx:132-156`. The `setTimeout` cleanup (`CONVERSATION_OVERVIEW_COMPACT_NAVIGATION_STALE_DELAY_MS = 800`) clears `compactNavigationSegmentIndex` after 800ms regardless of in-flight viewport updates. If the parent confirms at 850ms (heavy main-thread work, GC pause, dev-tools paint), the override has already cleared, and `aria-valuenow` flips back to the (stale) viewport value, then the parent confirmation fires `setCompactNavigationSegmentIndex(null)` (a no-op). The user perceives a brief flash to "wrong" `aria-valuenow`.
+
+**Current behavior:**
+- 800ms wall-clock timeout.
+- Heavy main-thread work past 800ms produces flicker.
+
+**Proposal:**
+- Cancel the timeout when `currentSegmentIndex` moves at all.
+- Or extend to 2-3 seconds.
+- Or use rAF-counting instead of wall-clock.
+
+## `focusedSegmentIndex` state can drift past `segments.length` after shrink-then-grow
+
+**Severity:** Low - `ui/src/panels/ConversationOverviewRail.tsx:81`. Round 82 removed the `useEffect` that clamped `focusedSegmentIndex` when `segments.length` changes. The inline `clampedFocusedSegmentIndex` covers all reads, but the underlying state value can drift past the new bound.
+
+If `segments.length` shrinks then grows back to a value `>= focusedSegmentIndex`, the focus jumps to the (stale) `focusedSegmentIndex` rather than tracking the user's current intent.
+
+**Current behavior:**
+- State value can exceed `segments.length`.
+- Inline clamp covers reads.
+- Shrink-then-grow restores stale focus.
+
+**Proposal:**
+- Either restore the effect (acknowledging the redundancy with inline clamps).
+- Or write a `useReducer`/dispatch-based focus model that recomputes bounds in one place.
+
+## `can_forward_settled_assistant_text` and `keeps_telegram_prompt_boundary_open` overlap on Approval
+
+**Severity:** Note - `src/telegram.rs:1289-1297`. Two helper methods both treat `Approval` as their own truthy. The semantics are intentional but no source-level comment documents the deliberate overlap. The forwarding correctness pivots on this overlap and the order of checks at `:1921-1937` vs `:1939`.
+
+**Current behavior:**
+- Both helpers return true for Approval.
+- Order of checks matters but not documented.
+
+**Proposal:**
+- Add a doc comment block above both methods explaining "Approval is intentionally in both — it can be forwarded AND keeps the Telegram prompt boundary open."
+
+## `forward_new_assistant_message_if_any` and `_outcome` differ only by return type
+
+**Severity:** Note - `src/telegram.rs:1903-1900`. Two functions differ only by return type. `if_any` is a thin wrapper that drops `sent_visible_content`. One careless future call site that uses `if_any` instead of `outcome` in `forward_relevant_assistant_messages` could regress the digest-primary starvation fix silently.
+
+**Current behavior:**
+- Two near-duplicate signatures.
+- `if_any` drops the gating signal.
+
+**Proposal:**
+- Either deprecate `if_any` and migrate all callers to `outcome`.
+- Or add `#[doc(hidden)]` / a comment marking `if_any` as test-only.
+
+## `armed_sent_visible_content` purpose not commented
+
+**Severity:** Note - `src/telegram.rs:1639`. The new variable is more precisely named than `armed_made_progress`, but the intent ("did any armed session forward content visible to a Telegram user, in which case the digest primary doesn't need to fire this poll") is not captured in a comment. The previous (incorrect) variable was named identically and yet had the wrong meaning.
+
+**Current behavior:**
+- Renamed for precision.
+- Intent unclear without context.
+
+**Proposal:**
+- Add an inline `// We only skip the digest primary when an armed forward actually sent content...` comment block.
+
+## `cancelScheduledComposerResize` name misleading after round-82 reset addition
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1664-1673`. The function now has dual responsibilities: reset flags AND cancel the rAF. Old name suggests only the latter. Future callers might be surprised that `composerResizeShouldAnimateHeightRef` is also reset to `true` (a side effect that suppresses an in-flight non-animation request).
+
+**Current behavior:**
+- Function name suggests cancel-only.
+- Implementation now also resets flags.
+
+**Proposal:**
+- Rename to `resetAndCancelScheduledComposerResize`.
+- Or split into `resetComposerResizeFlags()` + `cancelScheduledComposerResize()`.
+
+## Composer transition session-switch test only inspects the new textarea
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:8401-8541`. Asserts the textarea's transition stays `"height 150ms ease"` after the session switch. If the regression were "the prior session's transition is restored on the WRONG textarea" (a stale element reference), the test wouldn't catch it because it only inspects the new textarea.
+
+**Current behavior:**
+- Narrow assertion pins one outcome.
+- Doesn't pin where the restore happened.
+
+**Proposal:**
+- Capture the original textarea node reference before rerender.
+- Assert on it after rerender (it's been removed from DOM, but transition state is observable in the captured ref).
+
+## Stale-clear test for compactNavigationSegmentIndex doesn't cover cleanup-on-rerender
+
+**Severity:** Low - `ui/src/panels/ConversationOverviewRail.test.tsx:517-552`. The new fake-timer test for stale-clear (800ms). Does NOT exercise the cleanup-on-rerender. If a regression broke the timeout cleanup (`return () => window.clearTimeout(timeoutId)`), this test would still pass because it doesn't unmount or rerender mid-timer.
+
+**Current behavior:**
+- Wall-clock 800ms covered.
+- Timer cleanup on dependency change not covered.
+
+**Proposal:**
+- Add a sibling test that re-fires `keyDown` (changing `compactNavigationSegmentIndex`) while a prior timer is in flight.
+- Asserts the prior timer was cancelled.
+
+## Round-trip serialization test doesn't go back to JSON
+
+**Severity:** Low - `src/tests/telegram.rs:2058-2075`. The new round-trip test deserializes, then re-asserts in-memory fields. It does NOT round-trip BACK to JSON and compare to the original `value`. A regression that changed serialization but kept deserialization compatible would not be caught.
+
+**Current behavior:**
+- Wire-shape pinning is incomplete.
+- Only the read direction is fully tested.
+
+**Proposal:**
+- Add `let reserialized = serde_json::to_value(&round_tripped).unwrap();` and `assert_eq!(reserialized, value)`.
+
+## Composer transition restore can be lost when a non-shrink resize races the restore frame
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1765`. `resizeComposerInput` cancels a pending transition-restore frame before it knows whether the current resize will consume or replace that restore.
+
+After a send-shrink path schedules the deferred restore, a subsequent non-shrink resize can run before that frame, such as when the user types immediately after sending. In that path `shouldAllowShrink` is false, so the previously saved transition is discarded and the textarea can remain at `transition: none` for later composer resizing.
+
+**Current behavior:**
+- Send-shrink schedules a transition restore.
+- A later resize cancels the pending restore unconditionally.
+- Non-shrink resize paths do not restore or reschedule the saved transition.
+
+**Proposal:**
+- Restore the previous transition before returning from non-shrink resize paths when a pending restore was cancelled.
+- Or avoid cancelling the pending restore until the code knows it will replace or consume it.
+
+## No test pins `styles.css` `column-reverse` visual reordering for `.is-pinned` live tail
+
+**Severity:** Medium - `ui/src/styles.css:4566-4573`. Round-80 added `.is-pinned` modifier overriding `display: grid` with `display: flex; flex-direction: column-reverse`. This visually inverts the order of `liveTurnCard` and queued `pendingPromptCards` only when pinned. The DOM order in `AgentSessionPanel.tsx:1300-1306` keeps `liveTurnCard` first; with `column-reverse` the live-turn card moves to the visual bottom (closer to the composer) and pending prompts stack above it.
+
+`App.scroll-behavior.test.tsx` only checks the `is-pinned` class, not the DOM order. A regression that drops `column-reverse` (or that reverses the DOM order to compensate) cannot be caught by tests.
+
+**Current behavior:**
+- `.is-pinned` flips visual order via `column-reverse`.
+- DOM-vs-visual order disagrees under pinned mode.
+- No test pins the visual/DOM relationship.
+
+**Proposal:**
+- Add a snapshot or computed-style assertion on the order of `.activity-card-live` vs queued prompt cards under `.is-pinned`.
+
+## Two composer cleanup paths look symmetric but only one restores layout
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:2017-2028`. The unmount cleanup `useEffect(() => { return () => {...} }, [])` resets `composerResizeShouldAnimateHeightRef.current = true` and calls `cancelAndRestoreScheduledComposerTransition`. The active-session-change `useLayoutEffect` does the same plus a direct `resizeComposerInput(true)`. Two cleanup paths that look symmetric but only the second restores layout. If the unmount fires without active session being changed first, the ref-reset is essentially a no-op since the component is gone.
+
+Cosmetic — possible to simplify by routing through one cleanup.
+
+**Current behavior:**
+- Two cleanup paths share the cancel/reset logic.
+- Only active-session-change path also calls `resizeComposerInput`.
+- Asymmetry not documented.
+
+**Proposal:**
+- Hoist the cleanup-state reset into a single helper called from both effects.
+
+## `cancelAndRestoreScheduledComposerTransition` race-window guard is subtle and undocumented
+
+**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1683-1727`. `scheduleComposerTransitionRestore` schedules a single rAF that synchronously reads the ref to verify identity. The frame-id identity check `if (!pendingRestore || pendingRestore.frameId !== frameId)` covers the race between scheduling and firing.
+
+`cancelScheduledComposerTransitionRestore` clears the ref to null BEFORE returning; if the textarea's transition is still `"none"` only because the resize did not yet flush, a competing scheduling call can lose the original `previousInlineTransition`. Mostly correct but the race-window guard is undocumented.
+
+**Current behavior:**
+- Frame-id identity check guards the race.
+- Pre-flush competing scheduling can lose the previous transition.
+- No comment block describes the sequencing contract.
+
+**Proposal:**
+- Inline a comment block on `cancelAndRestoreScheduledComposerTransition` describing the race-window guard.
+
+## Send-shrink test brittle to probe sequence refactors
+
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:8362-8365`. The assertion `expect(heightWrites).toContainEqual({value: "40px", transition: "none"})` requires the height of `40px` to be one of the writes — but the implementation does multiple writes during shrink (`1px` probe, then `previousMeasuredHeight`, then `40px`).
+
+The test is brittle to refactors that change the probe sequence (e.g., a future change that combines the probe and final write into one step would still set the final height to 40px, but the intermediate write states could differ).
+
+**Current behavior:**
+- Test asserts on intermediate write state.
+- Future probe-sequence refactor could produce different intermediate writes that still satisfy the contract.
+
+**Proposal:**
+- Either pin the full write sequence with `toEqual([...])`.
+- Or rewrite to assert the contract (final transition restored, no zero-height probe at end of write sequence) rather than the implementation.
+
+## `assistant_forwarding_cursor_for_session` takes `messages` parameter but otherwise pure-read
+
+**Severity:** Note - `src/telegram.rs:1685-1712`. `assistant_forwarding_cursor_for_session` now takes `messages: &[TelegramSessionFetchMessage]` to gate the legacy fallback by "is the legacy id still in this session's messages?" Good defense, but the function is pure-read on `state` and uses-the-messages-but-doesn't-mutate-anything. Readers expect "cursor for session" to be a state-only lookup.
+
+**Current behavior:**
+- Function name suggests state-only lookup.
+- Implementation requires messages to gate the legacy fallback.
+- Asymmetric inputs not reflected in name.
+
+**Proposal:**
+- Rename to `resolve_assistant_forwarding_cursor`.
+- Or split into `cursor_from_state` + `legacy_cursor_if_in_messages` and let the caller compose.
 
 ## `resend_if_grown` fabricated as `true` in legacy-mirror fallback
 
@@ -34,49 +465,6 @@ Two interleaved sessions clobber each other's legacy mirror. Combined with the f
 
 **Proposal:**
 - For the fallback, hard-code `resend_if_grown: false`.
-
-## ConversationOverviewRail `focusedSegmentIndex` clamps only on `segments.length` change
-
-**Severity:** Medium - `ui/src/panels/ConversationOverviewRail.tsx:121-125`. The `useEffect` clamps `focusedSegmentIndex` only on `segments.length` change, but during the render *between* a length shrink and the effect firing, no segment carries `tabIndex={0}` (the focused index points beyond the array).
-
-For one render frame after segments shrink, the rail has no tab stop. If `segments.length` stays the same but the *segments at indices* change (re-keyed), `focusedSegmentIndex` stays stale.
-
-**Current behavior:**
-- Clamp runs in effect, not in render.
-- One-frame staleness window after shrink.
-- Index-only-changed segments don't trigger clamp.
-
-**Proposal:**
-- Compute the clamped index inline (`const clampedIndex = Math.min(focusedSegmentIndex, segments.length - 1)`) and use it for both the tabIndex render and the displayed slider state.
-
-## ConversationOverviewRail compact-mode `aria-valuenow` lags behind keyboard input
-
-**Severity:** Medium - `ui/src/panels/ConversationOverviewRail.tsx:255-322`. In compact mode, the rail has `role="slider"` plus `aria-valuemin/max/now/text`, but the actual *navigation* (Enter/Space/Arrow keys) doesn't update `aria-valuenow` until the parent receives the `onNavigate` event AND re-snapshots its viewport AND that flows back through `viewportProjection.viewportTopPx`.
-
-A screen reader announcing the slider's current position will lag visible focus by one or more renders. Pressing Down doesn't update the announced position immediately.
-
-**Current behavior:**
-- `aria-valuenow` derived from viewport projection.
-- Keyboard input must round-trip through parent state.
-- Multi-render lag in announced position.
-
-**Proposal:**
-- Track an "intended" segment index synchronously when handlers fire, surface it in `aria-valuenow`, and let the viewport-derived value override only when the parent has caught up.
-
-## ConversationOverviewRail "deferred build" test doesn't exercise hard-timeout path
-
-**Severity:** Medium - `ui/src/panels/ConversationOverviewRail.test.tsx:188-285`. The new "bounds focused projection deferral when idle callbacks keep reporting low time" test stubs `requestIdleCallback` to capture callbacks but never verifies the *hard timeout* path (`setTimeout(runOnce, 240)`).
-
-The fix added two safety nets: (a) `requestIdleCallback({ timeout: 240 })` honoring `didTimeout`, and (b) a parallel `setTimeout(runOnce, 240)` that races the idle callback. The test covers (a). A regression that removes (b) (and breaks browsers that ignore the `timeout` option) would still pass.
-
-**Current behavior:**
-- Test exercises `didTimeout: true` branch.
-- Timer-only fallback path uncovered.
-
-**Proposal:**
-- Add a variant where `requestIdleCallback` never invokes the callback at all (timer-only).
-- Advance fake timers by 240ms.
-- Assert the rebuild fires.
 
 ## `assistant_forwarding_cursors` HashMap never reaped on session deletion
 
@@ -102,45 +490,6 @@ The fix added two safety nets: (a) `requestIdleCallback({ timeout: 240 })` honor
 **Proposal:**
 - Export `CONVERSATION_COMPOSER_INPUT_DATASET_KEY` from a shared module and reference it from both call sites.
 
-## SessionPaneView delegation-actions test uses tautological `isLocalSessionRemote` assertion
-
-**Severity:** Note - `ui/src/SessionPaneView.delegation-actions.test.tsx:15-103`. The new test mocks both `AgentSessionPanel` and `AgentSessionPanelFooter`, then asserts a *re-derived* `isLocalSessionRemote(session, project)` matches the props the mocks observe. It doesn't actually assert that `SessionPaneView` produces the correct derivation when the project lookup is missing or when remote ownership is embedded vs. trusted at the session level.
-
-A regression in `SessionPaneView` (e.g., consulting a different lookup or omitting the project parameter) would still pass because the assertion compares the helper's output to the mock-observed flag, both fed from the same `(session, project)` pair.
-
-**Current behavior:**
-- Test mirrors helper output back to mocked prop.
-- Independent regression check missing.
-
-**Proposal:**
-- Drop the `expect(isLocalSessionRemote(...)).toBe(expectedEnabled)` line.
-- Instead assert that, e.g., a session with `remoteId: "ssh-lab"` on a *local* project does NOT enable delegation.
-
-## Marker name 120-char limit comment names only two of three sync sites
-
-**Severity:** Note - `ui/src/panels/conversation-markers.tsx:62-65`. The new comment says "Keep these in sync with `src/session_markers.rs` validation" but doesn't reference the matching constant name (`CONVERSATION_MARKER_NAME_MAX_CHARS`) nor mention the third codepoint-aware fallback site at `app-session-actions.ts`.
-
-**Current behavior:**
-- Comment names two sync sites.
-- Third site (`app-session-actions.ts`) absent.
-
-**Proposal:**
-- Extend the comment to enumerate the three sites.
-- Or expose the limit via wire protocol so all three become derived.
-
-## `focusConversationMarkerContextMenuTrigger` tabindex add-then-remove hack obscures intent
-
-**Severity:** Note - `ui/src/panels/conversation-markers.tsx:911-920`. `focusConversationMarkerContextMenuTrigger` adds `tabindex="-1"`, focuses, then *removes* the attribute. The helper's "add then remove" hack hides the assumption that the focused element is intentionally not a tab stop.
-
-**Current behavior:**
-- Add `tabindex="-1"` → focus → remove.
-- Looks like DOM is unchanged but briefly mutates during a focus cycle.
-- Future contributor reading just the helper sees `trigger.focus()`.
-
-**Proposal:**
-- Either keep `tabindex="-1"` permanently on the trigger via React markup (declarative).
-- Or document the helper as "focus a non-tabbable element via temporary tabindex" with a comment.
-
 ## Codepoint-paste truncation in marker create form has no user feedback
 
 **Severity:** Note - `ui/src/panels/conversation-markers.tsx:644-649`. `updateCreateMarkerName` is called from `onChange` and slices the input. During paste of >120 codepoints the user sees their input truncated to 120 with no indication that more was discarded. The behavior is now codepoint-correct but lost the browser's "input-length-limit" affordance.
@@ -153,41 +502,6 @@ A regression in `SessionPaneView` (e.g., consulting a different lookup or omitti
 - Add a tooltip / live-region count showing `currentLength/120` near the input.
 - Or surface a brief toast when truncation actually happens.
 
-## `TelegramAssistantForwardingPlan` is a single-variant enum
-
-**Severity:** Note - `src/telegram.rs:1721-1727`. The `TelegramAssistantForwardingPlan` enum now has only one variant (`Baseline`); the `Skip` variant was removed because the gating moved into the caller's logic. The `let Plan::Baseline { ... } = plan else { ... };` pattern at `apply_assistant_forwarding_plan` is now an irrefutable destructure.
-
-**Current behavior:**
-- Single-variant enum with a single irrefutable destructure pattern.
-- Structurally pointless.
-
-**Proposal:**
-- Replace the enum with a struct.
-- Or document the future-extensibility intent.
-
-## `assistant_forwarding_cursors` persisted schema undocumented
-
-**Severity:** Note - `src/telegram.rs:392-395`. `assistant_forwarding_cursors` joins the persisted state file with serde camelCase. The on-disk schema now includes `assistantForwardingCursors: { "<session-id>": { messageId, textChars, resendIfGrown? } }`. No documentation of the new schema in `docs/features/`.
-
-**Current behavior:**
-- Persisted-state schema bumped non-trivially.
-- A future migration or external tool reading the file has no spec.
-
-**Proposal:**
-- Add a brief schema note to a Telegram feature brief.
-- Or inline doc comment naming the wire shape.
-
-## `telegram_assistant_forwarding_cursors_are_scoped_per_session` doesn't exercise legacy fallback
-
-**Severity:** Low - `src/tests/telegram.rs:544-587`. The new test puts session-1 in the HashMap with default-empty legacy fields, then forwards for session-2. It doesn't exercise the *fallback* to legacy fields for an unknown session, so the most concerning failure mode is not pinned.
-
-**Current behavior:**
-- Explicit-entry case covered.
-- Implicit-fallback case untested.
-
-**Proposal:**
-- Add a sister test that pre-populates legacy fields with session-1 data, forwards for session-2, and asserts session-2's baseline does not inherit session-1's cursor data.
-
 ## Marker dialog-semantics test bundles 6+ behaviors in one `it()`
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:1024-1121`. The new "uses dialog semantics and local keyboard behavior" test combines six behaviors (dialog role, input focus/select, codepoint truncation, whitespace-disabled submit, button-keydown short-circuit, resize-doesn't-close-during-edit, trim, cancel restores focus, escape restores focus). One test asserting six behaviors fails opaquely.
@@ -199,46 +513,6 @@ A regression in `SessionPaneView` (e.g., consulting a different lookup or omitti
 **Proposal:**
 - Consider splitting once the test grows further.
 - Current 6-in-1 is acceptable but the pattern should not expand.
-
-## Telegram assistant forwarding can arm an active session before its first assistant reply
-
-**Severity:** Medium - `src/telegram.rs:1733`. `prepare_assistant_forwarding_for_telegram_prompt` can baseline an already-active session even when that session has not emitted assistant text yet. With no assistant cursor, `apply_assistant_forwarding_baseline` arms `forward_next_assistant_message_session_id`; when the pre-existing active turn settles, its first assistant reply can be forwarded as if it were the Telegram-originated reply queued behind that turn.
-
-**Current behavior:**
-- Active sessions with no assistant text can be armed for the next assistant reply.
-- The next reply may belong to the pre-existing turn, not the Telegram prompt.
-- Telegram can receive a response for the wrong turn.
-
-**Proposal:**
-- Restore a skip/defer path for active sessions that have no assistant baseline yet.
-- Or track a stronger post-prompt boundary than "next settled assistant message."
-- Add a regression covering active session, no assistant text, Telegram prompt queued, then the pre-existing turn settling.
-
-## `OrchestratorsUpdated` remote replay keys still include untrusted embedded session ownership
-
-**Severity:** Low - `src/remote_routes.rs:709`. The staged replay-key fix normalizes `SessionCreated` by clearing inbound `remoteId` before hashing, but `OrchestratorsUpdated` also carries embedded `Session` values through the same remote-localization boundary. Same-revision duplicates that differ only by untrusted or derived `remoteId` can still miss replay suppression for this delta variant.
-
-**Current behavior:**
-- `SessionCreated` replay identity clears embedded `remote_id` before hashing.
-- `OrchestratorsUpdated` session payloads still hash embedded sessions without the same normalization.
-- Duplicate same-revision remote updates can be treated as distinct when only ignored wire ownership differs.
-
-**Proposal:**
-- Reuse one normalized session fingerprint helper for every replay payload that hashes `Session` values.
-- Include `OrchestratorsUpdated.sessions` in the remote ownership normalization test coverage.
-
-## Telegram assistant forwarding cursors remain session-keyed but the armed gate is global
-
-**Severity:** Low - `src/telegram.rs:1609`. `assistant_forwarding_cursors` is now session-keyed, but `forward_next_assistant_message_session_id` remains one global `Option`. `forward_relevant_assistant_messages` checks the armed session first and returns after that path, so an armed session that is paused on approval or otherwise makes no assistant-message progress can keep the digest primary session from being checked.
-
-**Current behavior:**
-- Forwarded cursor progress is tracked per session.
-- The "next assistant reply" armed state is still a singleton session id.
-- If the singleton armed session makes no progress, forwarding for the current digest primary can be skipped.
-
-**Proposal:**
-- Make armed-next-reply state session-keyed as well.
-- Drain a bounded set of armed sessions before the digest primary, or fall through to the digest primary when the armed session made no progress.
 
 ## Mermaid `getMermaidDiagramFrameStyle` keeps 24px aspect-ratio slack in fit-to-frame mode
 
@@ -1110,28 +1384,6 @@ This is already on the bug-ledger backlog as a P2 split task. Round 71 made the 
 **Proposal:**
 - Construct a marker with a color produced by `DEFAULT_CONVERSATION_MARKER_COLOR` (the contract value) and assert that color round-trips through normalization.
 
-## Marker focus-restore test bundles two distinct focus paths in one `it()`
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:893-985`. The "toggles the floating marker window from the message context menu" test now also asserts focus restoration. The test does both context-menu close → assistantShell focus AND close-button → conversation-page focus in a single `it()`. A regression in only one of the two paths would surface as one failing test, but the bundle is heavy.
-
-**Current behavior:**
-- Two focus-paths bundled.
-- Test name doesn't communicate both behaviors.
-
-**Proposal:**
-- Split into "context-menu close restores focus to trigger" and "close-button restores focus to conversation page" siblings.
-
-## Reset-override test only covers `false → null` direction
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:1032-1103`. "Resets explicit marker-window visibility when switching sessions" pins the round-70 finding's reset effect for the `false` (hidden override) case. The parallel `true` override case (set true via "Show markers window", switch session, observe reset) is not pinned.
-
-**Current behavior:**
-- `false → null` direction tested.
-- `true → null` direction unverified.
-
-**Proposal:**
-- Add a sibling test starting from `markerPanelVisibilityOverride = true` and verify the new session resets back to auto-show heuristic.
-
 ## "keeps the draft when delegation spawn throws" doesn't assert busy state was cleared
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7101-7128`. The `finally` arm clears `setIsDelegationSpawning(false)` only when mounted. The test exercises the throw path but does not assert `screen.queryByRole("button", { name: "Delegating..." })` is gone — only that the textarea retained the draft.
@@ -1272,18 +1524,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 - Keep the composer-scoped naming and add a note that other delegation kinds should add their own builder.
 - Or rename to `createReadOnlyReviewerDelegationRequest` to make the constraint explicit.
 
-## `delegationChildUnavailableStatusLabel` lacks default/assertNever clause
-
-**Severity:** Note - the switch at `ui/src/SessionPaneView.render-callbacks.tsx:81-94` exhaustively maps all current `DelegationStatus` values but has no `default` / `assertNever` clause. A new status added to the union later returns `undefined`, which would surface as the literal string "undefined" inside the user-visible message ("Delegation child session is unavailable (undefined)."). The same shape exists for `cancelDelegationTerminalErrorMessage` (line 65-79).
-
-**Current behavior:**
-- Exhaustive switch returns string for each known status.
-- No default arm.
-- A new status variant silently produces undefined → broken UX.
-
-**Proposal:**
-- Add an `_exhaustive: never = status` arm or a `return assertNever(status)` so future additions are caught at compile time.
-
 ## `enableLocalDelegationActions` is binary all-or-nothing without contract doc
 
 **Severity:** Note - `enableLocalDelegationActions` is passed as a single all-or-nothing boolean at `ui/src/SessionPaneView.render-callbacks.tsx:107,154,400`. The wire/docs/UX could grow to allow Open without Cancel (e.g., "view but don't mutate" remote sessions); the binary flag forecloses that. No comment captures the design intent of "all three are routed together by construction."
@@ -1361,17 +1601,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 **Proposal:**
 - Either pass the composite identity to the handler.
 - Or document the gating contract on `runAgentAction` / the per-action callbacks.
-
-## Only one of five `delegationChildUnavailableStatusLabel` outcomes exercised in tests
-
-**Severity:** Low - `ui/src/SessionPaneView.render-callbacks.test.ts:285-319`. Only `canceled` → "already canceled" is exercised. The other four (`completed`, `failed`, `queued`, `running`) plus the new "still queued" / "still running" non-terminal phrasings are unverified.
-
-**Current behavior:**
-- Only `canceled` outcome tested.
-- Four other status outcomes unverified.
-
-**Proposal:**
-- Use `it.each([...])` over the five `(status, expectedPhrase)` pairs.
 
 ## Mixed-source same-id MessageCard test doesn't pin pending-key composite contract
 
@@ -1456,20 +1685,6 @@ The previous round-64 review entry called out the clobber as future-proofing ris
 **Proposal:**
 - Upgrade to a release-mode guard that warns and resets, or errors before a mismatched source can drive UI routing.
 - Keep the debug assertion only as a supplemental development check.
-
-## `app-utils.test.ts` covers only the `source`-only marker change
-
-**Severity:** Note - the new test at `ui/src/app-utils.test.ts:5-31` verifies that toggling `agent.source` from `"tool"` to `"delegation"` changes the marker. It does not verify the rest of the marker contract (id, status, detail length).
-
-The round-65 change was specifically about including `source`, so a focused test is appropriate. But if the marker function ever drops other fields, those drops won't be caught by this test alone.
-
-**Current behavior:**
-- Source-only change covered.
-- Other field-only changes unverified.
-- Acceptable if sibling coverage exists elsewhere.
-
-**Proposal:**
-- Confirm there is sibling coverage for id/status/detail-only marker changes; add to this file if not.
 
 ## SSE-envelope test only asserts the second `parallelAgentsUpdate` event, skips the first
 
@@ -2915,17 +3130,18 @@ The new design fixes the false-positive Low (verified by `accessToken=` and `csr
 
 ## `AgentSessionPanel.tsx` exceeds 2000-line architecture rubric threshold
 
-**Severity:** Low - file remains over the documented TSX file-size budget after round-51/52 hook extractions.
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1475` and `ui/src/panels/AgentSessionPanel.test.tsx`. The panel remains over the documented TSX file-size budget, and the composer resize/transition behavior is now a local state machine inside `SessionComposer`.
 
-`ui/src/panels/AgentSessionPanel.tsx`. The marker-context-menu hook extraction shrunk this file but it remains over budget. The CLAUDE.md instruction explicitly asks to "Keep new modules small and focused — the project has a few very large files already and we are actively splitting them smaller, not larger." Round 52 added 17 lines to make the `visibleMessageIds` memo explicit but did not trim other surface area.
+This review adds and exercises multiple rAF/transition refs plus cancellation/restore ordering in the same component. The behavior is UI-local, but the ordering contract is subtle enough that future changes are hard to reason about inside the broader panel file.
 
 **Current behavior:**
-- File is 2175 lines after round 52.
-- Architecture rubric §9 sets ~2000-line scrutiny threshold for TSX components.
-- Candidates remain (e.g., `renderMarkedMessageCard` factory, `SessionConversationPage` memo body).
+- `AgentSessionPanel.tsx` is 2605 lines.
+- `AgentSessionPanel.test.tsx` is 8677 lines.
+- Composer auto-resize and transition restoration share state across several refs and rAF callbacks.
 
 **Proposal:**
-- Track for a future split round; candidates are the `renderMarkedMessageCard` callback factory and the `SessionConversationPage` memo body, both of which could become their own modules.
+- When touching this area again, extract textarea sizing/transition behavior into a focused hook such as `useComposerAutoResize`.
+- Keep targeted tests for resize scheduling, transition restoration, and session-switch cleanup with that hook.
 
 ## `scheduleConversationOverviewRailBuild` module-level FIFO queue is shared across all controller instances
 
@@ -2940,38 +3156,6 @@ The new design fixes the false-positive Low (verified by `accessToken=` and `csr
 
 **Proposal:**
 - Defer (no concrete bug today). Consider in a future round whether per-pane queues would simplify reasoning, especially as multi-pane scenarios become more common.
-
-## `forward_telegram_text_to_project` mutates forwarding state before prompt acceptance
-
-**Severity:** Medium - a failed Telegram prompt submission can still mutate assistant-forwarding cursor state for a prompt the backend never accepted.
-
-`src/telegram.rs:854-857`. `arm_assistant_forwarding_for_telegram_prompt` mutates `state.forward_next_assistant_message_session_id` and may re-baseline `last_forwarded_assistant_message_id` / `_text_chars` before `termal.send_session_message(...)?` succeeds. If the local POST rejects or fails, the handler returns `Err(...)` after mutating state. Because the poll loop has already advanced `next_update_id`, the final persist can save forwarding state for a prompt that never reached the backend; if a later call fails after the POST but before the digest refresh, the relay can also resend the same Telegram prompt on the next poll.
-
-**Current behavior:**
-- `arm_*` mutates forwarding state before `send_session_message` succeeds.
-- The prompt-send failure path does not roll that state back.
-- The outer poll loop may persist the mutated forwarding state because `next_update_id` advanced.
-- A later digest-fetch failure after a successful prompt POST can still replay the Telegram prompt on the next poll.
-
-**Proposal:**
-- Compute the pre-prompt cursor without mutating, then apply forwarding-state changes only after `send_session_message` succeeds.
-- Or snapshot and roll back forwarding state on prompt-send failure.
-- Add send-failure and post-send digest-failure regressions.
-
-## Telegram long-message forwarding loses chunk-level progress on failure
-
-**Severity:** Medium - a failure after one chunk of a long assistant message causes the next retry to resend already-delivered chunks.
-
-`src/telegram.rs:1151-1160` sends all chunks for a message before recording `last_forwarded_assistant_message_id` and `last_forwarded_assistant_message_text_chars`. If chunk 2 fails after chunk 1 was sent, the cursor is not advanced to reflect the partial chunk success. The next poll retries the same message from the beginning, duplicating chunk 1 in Telegram.
-
-**Current behavior:**
-- Progress is recorded per assistant message, after all chunks for that message are sent.
-- A mid-message chunk failure loses the already-sent chunk position.
-- Retrying the same long message resends earlier chunks.
-
-**Proposal:**
-- Track chunk-level progress for in-flight long messages, or restructure forwarding so successful chunks can be resumed without replaying already-sent chunks.
-- Add emoji/long-message retry coverage that fails a later chunk and proves the earlier chunk is not duplicated.
 
 ## CSS context-menu pattern duplicated between pane-tab and conversation-marker variants
 
@@ -2988,20 +3172,6 @@ The new design fixes the false-positive Low (verified by `accessToken=` and `csr
 - Promote the shared shell + item rules into a base `.context-menu` set.
 - Let `.pane-tab-context-menu` and `.conversation-marker-context-menu` carry only their unique tweaks (`min-width`, `border-radius`, `border`, separator).
 - Defer if the variations are deliberately divergent — but mark this as a known cluster so the third instance triggers extraction.
-
-## Create-marker dialog survives viewport resize without reclamping
-
-**Severity:** Low - `ui/src/panels/conversation-markers.tsx:615`. The marker action menu used to close on window resize or viewport movement. Create mode now intentionally stays open so mobile soft-keyboard resize does not dismiss the form, but the fixed-position dialog is only clamped when `contextMenu` state changes. A viewport shrink, zoom change, or mobile keyboard resize can leave the dialog partly off-screen with input or buttons unreachable.
-
-**Current behavior:**
-- Create mode ignores resize/viewport-move events.
-- The stored fixed position is not recomputed on that event.
-- The dialog can remain outside the viewport margins after the viewport changes.
-
-**Proposal:**
-- Re-clamp and update the stored `left`/`top` position while staying open in create mode.
-- Or close the create dialog with focus restore on viewport movement.
-- Add a regression test that shrinks the viewport and asserts the create dialog remains within margins.
 
 ## `SessionPaneView.tsx` near-bottom early-out is captured at `isSending` flip, not reactive
 
@@ -3627,7 +3797,7 @@ Many production SQLite helpers in `src/persist.rs` are `#[cfg(not(test))]`, so e
 
 ## `SessionPaneView.tsx` and `app-session-actions.ts` past architecture file-size thresholds
 
-**Severity:** Low - `ui/src/SessionPaneView.tsx` is now 3,160 lines and `ui/src/app-session-actions.ts` is 1,968 lines, both past the architecture rubric §9 thresholds (~2,000 for TSX components, ~1,500 for utility modules). The round-11 extractions of `connection-retry.ts`, `app-live-state-resync-options.ts`, `session-hydration-adoption.ts`, and `SessionPaneView.render-callbacks.tsx`, plus the later `action-state-adoption.ts` split, reduced these files but left them over their respective thresholds.
+**Severity:** Low - `ui/src/SessionPaneView.tsx` is now 3,160 lines and `ui/src/app-session-actions.ts` is 1,968 lines, both past the architecture rubric Â§9 thresholds (~2,000 for TSX components, ~1,500 for utility modules). The round-11 extractions of `connection-retry.ts`, `app-live-state-resync-options.ts`, `session-hydration-adoption.ts`, and `SessionPaneView.render-callbacks.tsx`, plus the later `action-state-adoption.ts` split, reduced these files but left them over their respective thresholds.
 
 The companion `app-live-state.ts` entry already exists; this captures the two related Phase-2 candidates that emerged after the round-11 splits.
 
@@ -3643,7 +3813,7 @@ The companion `app-live-state.ts` entry already exists; this captures the two re
 
 ## `App.live-state.deltas.test.tsx` past 2,000-line review threshold
 
-**Severity:** Low - `ui/src/App.live-state.deltas.test.tsx`. File is now 3,435 lines and 18 `it` blocks after this round's cross-instance regression coverage, well past the architecture rubric §9 ~2,000-line threshold for TSX files. The header already lists three sibling files split out (`reconnect`, `visibility`, `watchdog`), establishing the per-cluster split pattern.
+**Severity:** Low - `ui/src/App.live-state.deltas.test.tsx`. File is now 3,435 lines and 18 `it` blocks after this round's cross-instance regression coverage, well past the architecture rubric Â§9 ~2,000-line threshold for TSX files. The header already lists three sibling files split out (`reconnect`, `visibility`, `watchdog`), establishing the per-cluster split pattern.
 
 The newest tests still cluster around hydration/restart races and cross-instance recovery, which is a coherent split boundary. Pure code move per CLAUDE.md.
 
@@ -3658,7 +3828,7 @@ The newest tests still cluster around hydration/restart races and cross-instance
 
 ## `app-live-state.ts` past 1,500-line review threshold for TypeScript utility modules
 
-**Severity:** Low - `ui/src/app-live-state.ts`. File is now 2,435 lines after this round. The architecture rubric §9 sets a pragmatic ~1,500-line threshold for TypeScript utility modules. The hydration adoption helpers have moved out, but the module still mixes retry scheduling, profiling, JSON peek helpers, and the main state machine.
+**Severity:** Low - `ui/src/app-live-state.ts`. File is now 2,435 lines after this round. The architecture rubric Â§9 sets a pragmatic ~1,500-line threshold for TypeScript utility modules. The hydration adoption helpers have moved out, but the module still mixes retry scheduling, profiling, JSON peek helpers, and the main state machine.
 
 **Current behavior:**
 - Single module mixes hydration matching, retry scheduling, profiling, JSON peek helpers, and the main state machine.
@@ -4054,14 +4224,10 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover Telegram assistant-forwarding active-session no-baseline behavior:
-  add a regression where a Telegram prompt is queued behind an already-active session with no assistant text, then the pre-existing turn settles; assert the old turn is not forwarded as the Telegram reply.
-- [ ] P2: Cover Telegram assistant-forwarding cursor persistence:
-  add a load/persist or serde round-trip test with non-empty `assistantForwardingCursors`, including the intended empty-map serialization behavior.
 - [ ] P2: Cover real composer-to-overview focus detection:
   render the real composer/overview path or assert the real composer emits `data-conversation-composer-input`, so `ConversationOverviewRail` deferral does not depend only on synthetic test fixtures.
-- [ ] P2: Cover `OrchestratorsUpdated` remote replay ownership normalization:
-  send duplicate same-revision orchestrator updates whose embedded sessions differ only by inbound `remoteId`, and assert replay suppression treats them as duplicates after localization.
+- [ ] P2: Cover composer transition restore when a non-shrink resize races the send-shrink restore frame:
+  send a multiline draft, flush the first shrink frame without the restore frame, type immediately to trigger a non-shrink resize, and assert the textarea transition is restored instead of staying `none`.
 - [ ] P2: Cover fit-to-frame Mermaid preview behavior with wide diagrams:
   add a `MarkdownContent` test using `fillMermaidAvailableSpace` with a wide Mermaid `viewBox` inside a constrained parent, and assert the fit-mode iframe `srcdoc` plus frame sizing contract.
 - [ ] P2: Cover editable SourcePanel Mermaid fit-mode iframe wiring:
@@ -4074,10 +4240,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
   cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
-- [ ] P2: Add Telegram assistant-forwarding ownership/order regressions:
-  cover prompt POST failure after forwarding state is prepared, post-send digest failure, and a digest primary-session switch before the armed Telegram reply settles.
-- [ ] P2: Add Telegram long-message chunk retry and UTF-16 chunking coverage:
-  fail a later chunk after an earlier chunk is sent and assert retry does not duplicate it; add emoji/surrogate-pair-heavy text proving chunks respect Telegram's UTF-16 code-unit limit.
 - [ ] P2: Cover Telegram `/sessions` state contract and command dispatch:
   add a serde sample for the `/api/state` projection (`projectId`, `messageCount`) and a command-path test proving `/sessions` calls the state endpoint and sends the rendered list.
 - [ ] P2: Cover Telegram callback action failure handling:
@@ -4214,8 +4376,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   current test covers only "first OK, second rejected". Add cases for (a) third call after >2s passes (cooldown actually expires), (b) entries pruned after 60s `TELEGRAM_TEST_RATE_LIMIT_RETAIN`. Use injected clock or `tokio::time::pause`.
 - [ ] P2: Cover `prune_telegram_config_for_deleted_project` no-op early-return:
   call against a config that doesn't reference the target project; assert no disk write happens (file mtime unchanged or `Ok(())` returned without invoking persistence). The `telegram_configs_equal` early-return is currently uncovered.
-- [ ] P2: Strengthen UTF-16 chunking coverage:
-  current test covers only pure-emoji input. Add (a) mixed BMP + surrogate-pair text where the boundary lands at the limit, (b) text that fits EXACTLY at the limit (no chunking), (c) text where a single character exceeds the limit (impossible at 3500 cap but worth a defensive test).
 - [ ] P2: Strengthen forwarder armed-priority assertion:
   the `telegram_forwarder_drains_armed_session_before_digest_primary` test asserts only `sent_texts == ["Telegram-originated reply", footer]`. This indirectly proves session-2 wasn't sent, but doesn't track which `session_id` values were passed to `get_session`. Track in the fake and assert exclusion explicitly.
 - [ ] P2: Cover `backup_corrupt_telegram_bot_file` cross-fs fallback:
@@ -4258,8 +4418,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add a 100-message session test asserting `fetchSessionTail` is NOT called, and a 101-message session test asserting it IS called.
 - [ ] P2: Replace bundled `..._handles_escaped_and_telegram_specific_contexts` test with per-shape `#[test]`s:
   promote each of the nine assertions (escaped JSON, Bearer `:`, lowercase bearer-colon, Bearer `=`, `Authorization=Bearer`, lowercase bearer-equals, snake-case key, camel-case key, env-var key) to its own `#[test]`. Same for the prior bundled sanitizer tests and the `ambiguous_token_key` behavior flip.
-- [ ] P2: Add deferred delegation handler stale-guard tests:
-  use deferred promises for open/insert/cancel/rejection paths, switching panes and unmounting before settlement, and assert no stale open/insert/error callback fires afterward.
 - [ ] P2: Cover Telegram relay active-project reconciliation:
   start an in-process relay with subscribed projects but no default and assert startup fails or status exposes the effective `activeProjectId`; delete a project used by a running relay and assert the relay is stopped or restarted without the deleted id.
 - [ ] P2: Cover Telegram relay runtime lifecycle seam:
@@ -4268,14 +4426,8 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   simulate disable or config retarget while an old relay is in flight and assert stale-generation polling/action handling cannot continue after status reports the replacement or stopped state.
 - [ ] P2: Add component-level session tab tooltip remote-owner coverage:
   render tab tooltips for projectless, missing-project, missing-remote, and conflicting session/project remote proxy sessions whose summaries carry `remoteId`, complementing formatter-level coverage for session-owner precedence.
-- [ ] P2: Cover SessionPaneView composer delegation click-through:
-  mock `spawnDelegationCommand`, click the composer Delegate action through `SessionPaneView`, and assert the active parent session drives the payload, success clears the draft, command-error handling preserves it, and composer errors surface.
 - [ ] P2: Cover remote-sync embedded remote-owner clearing:
   seed a remote snapshot session with attacker-chosen `remoteId`, localize it, and assert trusted `SessionRecord.remote_id` metadata is preserved while the embedded `record.session.remote_id` is cleared and local wire projections re-emit only trusted ownership.
-- [ ] P2: Cover marker context-menu restore target and create-mode semantics:
-  open a marker menu via right-click and keyboard trigger, close it, and assert focus returns to the actual labelled trigger and Enter/Space can reopen the menu; add an accessibility regression for create mode so form controls are not exposed as invalid menu children.
-- [ ] P2: Cover marker-window focus-restore cancellation:
-  mock `requestAnimationFrame` / `cancelAnimationFrame`, close the floating marker window, switch sessions or unmount before the frame flushes, and assert the scheduled focus restore is canceled.
 - [ ] P2: Pin `event.target === node` mousedown guard with negative case:
   add a sibling test that fires `mouseDown` on a child of `scrollNode` (e.g., a virtualized message slot) and asserts hydration does NOT occur. Round-63's isolated test only fires mouseDown directly on the scrollNode.
 - [ ] P2: Cover MessageCard pending-action across all action types:
@@ -4306,8 +4458,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   for empty 502 body, `extractError` returns `"Request failed with status 502."` — more confusing than the prior `"The TermAl backend is unavailable."`. Either fall through to backend-unavailable copy when `raw` is empty AND `status >= 502`, or have `extractError` return a sentinel that the caller can detect for a fallback.
 - [ ] P2: Capture unhandled-rejection events in the rejected-action MessageCard test:
   the existing test asserts only the visible button-re-enabled side-effect (which `.finally()` alone satisfies). Add `process.on("unhandledRejection", ...)` capture or `vi.spyOn(console, "error")` to pin the `.catch(() => undefined)` round-65 fix.
-- [ ] P2: Add `app-utils.test.ts` coverage for non-source marker fields:
-  confirm sibling coverage exists for id/status/detail-only marker changes; if not, add focused tests so a regression that drops other fields from `messageChangeMarker` is caught.
 - [ ] P2: Assert SSE-envelope source in the `parallelAgentsUpdate` create event:
   parse the first event in `state_events_route_streams_parallel_agents_update_sources` instead of consuming via `let _ = ...`, asserting `agents[0].source` and `agents[1].source`. Or add a sibling test scoped to the create path.
 - [ ] P2: Cover production-path tool/delegation id collision:
@@ -4316,8 +4466,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add a `delegation` → `tool` source-flip case alongside the existing `tool` → `delegation` case, or note the symmetry assumption in the test.
 - [ ] P2: Split `cancelDelegation` `it.each` running/completed/canceled identical-pin into focused tests:
   add a comment explaining the test pin is the current-but-flagged behavior, or split `running` into its own test scoped to the bugs.md follow-up.
-- [ ] P2: Cover all five `delegationChildUnavailableStatusLabel` outcomes:
-  use `it.each([...])` over the five `(status, expectedPhrase)` pairs (canceled/already canceled, completed/already completed, failed/already failed, queued/still queued, running/still running). Round 67 only covers `canceled`.
 - [ ] P2: Pin pending-key composite contract in mixed-source MessageCard tests:
   trigger two sequential actions on the same source/id pair, assert one is rejected as pending. Add a test that flips a tool row to a delegation row across rerenders and asserts no row reuse. Also wrap with `DeferredHeavyContentActivationProvider` per sibling test pattern.
 - [ ] P2: Strengthen "renders remote delegation progress as display-only" test:

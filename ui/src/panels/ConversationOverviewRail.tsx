@@ -32,6 +32,7 @@ export const CONVERSATION_OVERVIEW_MIN_MESSAGES = 80;
 const CONVERSATION_OVERVIEW_COMPACT_SEGMENT_THRESHOLD = 160;
 const CONVERSATION_OVERVIEW_COMPACT_VISUAL_SEGMENT_COUNT = 96;
 const CONVERSATION_OVERVIEW_FOCUSED_PROMPT_FALLBACK_DELAY_MS = 240;
+const CONVERSATION_OVERVIEW_COMPACT_NAVIGATION_STALE_DELAY_MS = 800;
 const EMPTY_CONVERSATION_OVERVIEW_MARKERS: readonly ConversationOverviewMarkerInput[] =
   [];
 const EMPTY_CONVERSATION_OVERVIEW_TAIL_ITEMS: readonly ConversationOverviewTailItemInput[] =
@@ -78,6 +79,8 @@ export function ConversationOverviewRail({
   const dragStartedItemRef = useRef<HTMLElement | null>(null);
   const suppressNextClickRef = useRef(false);
   const [focusedSegmentIndex, setFocusedSegmentIndex] = useState(0);
+  const [compactNavigationSegmentIndex, setCompactNavigationSegmentIndex] =
+    useState<number | null>(null);
   const projection = useConversationOverviewProjection({
     layoutSnapshot,
     markers,
@@ -106,7 +109,15 @@ export function ConversationOverviewRail({
     segments,
     currentViewportItemIndex,
   );
-  const currentSegment = segments[currentSegmentIndex] ?? segments[0] ?? null;
+  const clampedFocusedSegmentIndex = clampOverviewSegmentIndex(
+    focusedSegmentIndex,
+    segments.length,
+  );
+  const compactSegmentIndex = clampOverviewSegmentIndex(
+    compactNavigationSegmentIndex ?? currentSegmentIndex,
+    segments.length,
+  );
+  const compactSegment = segments[compactSegmentIndex] ?? null;
   const compactVisualSegments = useMemo(
     () =>
       shouldCompactSegments
@@ -119,10 +130,30 @@ export function ConversationOverviewRail({
   );
 
   useEffect(() => {
-    setFocusedSegmentIndex((index) =>
-      Math.min(index, Math.max(segments.length - 1, 0)),
-    );
-  }, [segments.length]);
+    if (
+      compactNavigationSegmentIndex !== null &&
+      clampOverviewSegmentIndex(compactNavigationSegmentIndex, segments.length) ===
+        currentSegmentIndex
+    ) {
+      setCompactNavigationSegmentIndex(null);
+    }
+  }, [compactNavigationSegmentIndex, currentSegmentIndex, segments.length]);
+
+  useEffect(() => {
+    if (compactNavigationSegmentIndex === null) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setCompactNavigationSegmentIndex((index) =>
+        index === compactNavigationSegmentIndex ? null : index,
+      );
+    }, CONVERSATION_OVERVIEW_COMPACT_NAVIGATION_STALE_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [compactNavigationSegmentIndex]);
 
   if (messages.length < minMessages || projection.items.length === 0) {
     return null;
@@ -137,6 +168,12 @@ export function ConversationOverviewRail({
     const mapY = rect.height > 0 ? clientY - rect.top : 0;
     const item = findConversationOverviewItemAtY(projection, mapY);
     if (item) {
+      if (shouldCompactSegments) {
+        const itemIndex = projection.items.indexOf(item);
+        setCompactNavigationSegmentIndex(
+          findOverviewSegmentIndexForItemIndex(segments, itemIndex),
+        );
+      }
       onNavigate(item);
     }
   };
@@ -213,6 +250,7 @@ export function ConversationOverviewRail({
   const navigateToSegmentIndex = (index: number) => {
     const segment = segments[index];
     if (segment) {
+      setCompactNavigationSegmentIndex(index);
       navigateToSegment(segment);
     }
   };
@@ -236,16 +274,16 @@ export function ConversationOverviewRail({
   const handleCompactRailKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      navigateToSegmentIndex(currentSegmentIndex);
+      navigateToSegmentIndex(compactSegmentIndex);
       return;
     }
 
     const nextIndex = resolveOverviewSegmentKeyboardIndex(
       event.key,
-      currentSegmentIndex,
+      compactSegmentIndex,
       segments.length,
     );
-    if (nextIndex === null || nextIndex === currentSegmentIndex) {
+    if (nextIndex === null || nextIndex === compactSegmentIndex) {
       return;
     }
     event.preventDefault();
@@ -258,10 +296,10 @@ export function ConversationOverviewRail({
       aria-orientation={shouldCompactSegments ? "vertical" : undefined}
       aria-valuemax={shouldCompactSegments ? segments.length : undefined}
       aria-valuemin={shouldCompactSegments ? 1 : undefined}
-      aria-valuenow={shouldCompactSegments ? currentSegmentIndex + 1 : undefined}
+      aria-valuenow={shouldCompactSegments ? compactSegmentIndex + 1 : undefined}
       aria-valuetext={
-        shouldCompactSegments && currentSegment
-          ? overviewSegmentLabel(currentSegment, projection.items)
+        shouldCompactSegments && compactSegment
+          ? overviewSegmentLabel(compactSegment, projection.items)
           : undefined
       }
       className="conversation-overview-rail"
@@ -316,7 +354,7 @@ export function ConversationOverviewRail({
               height: `${segment.mapHeightPx}px`,
             }}
             onFocus={() => setFocusedSegmentIndex(index)}
-            tabIndex={index === focusedSegmentIndex ? 0 : -1}
+            tabIndex={index === clampedFocusedSegmentIndex ? 0 : -1}
           />
         ))
       )}
@@ -582,6 +620,13 @@ function resolveOverviewSegmentKeyboardIndex(
     default:
       return null;
   }
+}
+
+function clampOverviewSegmentIndex(index: number, segmentCount: number) {
+  if (segmentCount <= 0) {
+    return 0;
+  }
+  return Math.min(Math.max(index, 0), segmentCount - 1);
 }
 
 function findOverviewSegmentIndexForItemIndex(

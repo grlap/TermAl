@@ -399,6 +399,13 @@ describe("AgentSessionPanel conversation caching", () => {
       .closest(".pending-prompt-card");
     expect(liveTail).not.toBeNull();
     expect(queuedPromptCard).not.toBeNull();
+    expect(liveTail).toHaveClass("is-pinned");
+    expect(Array.from((liveTail as HTMLElement).children)[0]).toHaveTextContent(
+      "Live turn",
+    );
+    expect(Array.from((liveTail as HTMLElement).children)[1]).toHaveTextContent(
+      "Queued follow-up",
+    );
     expect(liveTail).toContainElement(queuedPromptCard as HTMLElement);
     expect(scrollTop).toBe(120);
     scrollWrites.length = 0;
@@ -1120,7 +1127,7 @@ describe("AgentSessionPanel conversation caching", () => {
     });
   });
 
-  it("toggles the floating marker window from the message context menu", async () => {
+  it("toggles the floating marker window from the message context menu", () => {
     const activeSession = makeSession("session-1", {
       messages: makeTextMessages(4),
       markers: [
@@ -1173,9 +1180,6 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(
       screen.queryByRole("navigation", { name: "Conversation markers" }),
     ).not.toBeInTheDocument();
-    await waitFor(() => {
-      expect(assistantMeta).toHaveFocus();
-    });
 
     fireEvent.contextMenu(assistantMeta!);
     fireEvent.click(
@@ -1205,9 +1209,136 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(
       screen.queryByRole("navigation", { name: "Conversation markers" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("restores marker action menu focus to the trigger and reopens from keyboard", async () => {
+    const user = userEvent.setup();
+    const { container } = renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-1", {
+        messages: makeTextMessages(2),
+      }),
+      renderMessageCard: (message) => (
+        <MessageCard
+          message={message}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />
+      ),
+    });
+
+    const assistantMeta = Array.from(
+      container.querySelectorAll<HTMLElement>(".message-meta-author-agent"),
+    ).find((meta) => meta.textContent?.includes("Agent"));
+    expect(assistantMeta).toBeTruthy();
+
+    fireEvent.contextMenu(assistantMeta!);
+    fireEvent.keyDown(
+      screen.getByRole("menu", { name: "Conversation marker actions" }),
+      { key: "Escape" },
+    );
+    await waitFor(() => {
+      expect(assistantMeta).toHaveFocus();
+    });
+
+    await user.keyboard("{Enter}");
+    expect(
+      screen.getByRole("menu", { name: "Conversation marker actions" }),
+    ).toBeInTheDocument();
+    fireEvent.keyDown(
+      screen.getByRole("menu", { name: "Conversation marker actions" }),
+      { key: "Escape" },
+    );
+    await waitFor(() => {
+      expect(assistantMeta).toHaveFocus();
+    });
+
+    fireEvent.keyDown(assistantMeta!, { key: " " });
+    expect(
+      screen.getByRole("menu", { name: "Conversation marker actions" }),
+    ).toBeInTheDocument();
+  });
+
+  it("restores focus to the conversation page when closing the marker window", async () => {
+    const { container } = renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-1", {
+        messages: makeTextMessages(2),
+        markers: [
+          makeConversationMarker({
+            id: "marker-1",
+            messageId: "message-2",
+            name: "Review point",
+          }),
+        ],
+      }),
+      renderMessageCard: (message) => (
+        <MessageCard
+          message={message}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />
+      ),
+    });
+
+    const markerWindow = screen.getByRole("navigation", {
+      name: "Conversation markers",
+    });
+
+    fireEvent.click(
+      within(markerWindow).getByRole("button", {
+        name: "Hide markers window",
+      }),
+    );
+
+    expect(
+      screen.queryByRole("navigation", { name: "Conversation markers" }),
+    ).not.toBeInTheDocument();
     await waitFor(() => {
       expect(container.querySelector(".session-conversation-page")).toHaveFocus();
     });
+  });
+
+  it("uses dialog controls instead of menuitem children while creating a marker", async () => {
+    const { container } = renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-1", {
+        messages: makeTextMessages(2),
+      }),
+      renderMessageCard: (message) => (
+        <MessageCard
+          message={message}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+        />
+      ),
+    });
+
+    const assistantMeta = Array.from(
+      container.querySelectorAll<HTMLElement>(".message-meta-author-agent"),
+    ).find((meta) => meta.textContent?.includes("Agent"));
+    expect(assistantMeta).toBeTruthy();
+
+    fireEvent.contextMenu(assistantMeta!);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+
+    const dialog = screen.getByRole("dialog", {
+      name: "Create conversation marker",
+    });
+    expect(within(dialog).queryAllByRole("menuitem")).toHaveLength(0);
+    await waitFor(() => {
+      expect(
+        within(dialog).getByRole("textbox", { name: "Marker label" }),
+      ).toHaveFocus();
+    });
+    expect(
+      within(dialog).getByRole("button", { name: "Create marker" }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Cancel" }),
+    ).toBeInTheDocument();
   });
 
   it("starts with the marker window hidden for empty marker sets and can show it from the context menu", () => {
@@ -1325,6 +1456,152 @@ describe("AgentSessionPanel conversation caching", () => {
         name: "Jump to Decision marker Second marker",
       }),
     ).toBeInTheDocument();
+  });
+
+  it("resets explicit marker-window show override when switching sessions", () => {
+    const renderMessageCard = (message: Message) => (
+      <MessageCard
+        message={message}
+        onApprovalDecision={() => {}}
+        onUserInputSubmit={() => {}}
+        onCodexAppRequestSubmit={() => {}}
+      />
+    );
+    const firstSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+      markers: [],
+    });
+    const secondSession = makeSession("session-2", {
+      messages: makeTextMessages(2),
+      markers: [],
+    });
+
+    const { container, rerender } = render(
+      createAgentSessionPanelHarness({
+        activeSession: firstSession,
+        renderMessageCard,
+      })(),
+    );
+
+    const assistantMeta = Array.from(
+      container.querySelectorAll<HTMLElement>(".message-meta-author-agent"),
+    ).find((meta) => meta.textContent?.includes("Agent"));
+    expect(assistantMeta).toBeTruthy();
+    act(() => {
+      fireEvent.contextMenu(assistantMeta!);
+    });
+    act(() => {
+      fireEvent.click(
+        screen.getByRole("menuitem", { name: "Show markers window" }),
+      );
+    });
+    expect(
+      screen.getByRole("navigation", { name: "Conversation markers" }),
+    ).toBeInTheDocument();
+
+    act(() => {
+      rerender(
+        createAgentSessionPanelHarness({
+          activeSession: secondSession,
+          renderMessageCard,
+        })(),
+      );
+    });
+
+    expect(
+      screen.queryByRole("navigation", { name: "Conversation markers" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("cancels the floating marker window focus restore when switching sessions", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    let nextFrameId = 0;
+    const frameCallbacks = new Map<number, FrameRequestCallback>();
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      const frameId = ++nextFrameId;
+      frameCallbacks.set(frameId, callback);
+      return frameId;
+    });
+    const cancelAnimationFrameMock = vi.fn((frameId: number) => {
+      frameCallbacks.delete(frameId);
+    });
+    const renderMessageCard = (message: Message) => (
+      <MessageCard
+        message={message}
+        onApprovalDecision={() => {}}
+        onUserInputSubmit={() => {}}
+        onCodexAppRequestSubmit={() => {}}
+      />
+    );
+    const firstSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+      markers: [
+        makeConversationMarker({
+          id: "marker-1",
+          messageId: "message-2",
+          name: "First marker",
+        }),
+      ],
+    });
+    const secondSession = makeSession("session-2", {
+      messages: makeTextMessages(2),
+      markers: [],
+    });
+
+    window.requestAnimationFrame =
+      requestAnimationFrameMock as unknown as typeof requestAnimationFrame;
+    window.cancelAnimationFrame =
+      cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame;
+
+    try {
+      const { rerender } = render(
+        createAgentSessionPanelHarness({
+          activeSession: firstSession,
+          renderMessageCard,
+        })(),
+      );
+
+      const markerWindow = screen.getByRole("navigation", {
+        name: "Conversation markers",
+      });
+      requestAnimationFrameMock.mockClear();
+      cancelAnimationFrameMock.mockClear();
+
+      act(() => {
+        fireEvent.click(
+          within(markerWindow).getByRole("button", {
+            name: "Hide markers window",
+          }),
+        );
+      });
+      const latestFrameResult =
+        requestAnimationFrameMock.mock.results[
+          requestAnimationFrameMock.mock.results.length - 1
+        ];
+      const focusRestoreFrameId =
+        latestFrameResult?.value;
+
+      expect(typeof focusRestoreFrameId).toBe("number");
+      expect(frameCallbacks.has(focusRestoreFrameId as number)).toBe(true);
+
+      act(() => {
+        rerender(
+          createAgentSessionPanelHarness({
+            activeSession: secondSession,
+            renderMessageCard,
+          })(),
+        );
+      });
+
+      expect(cancelAnimationFrameMock).toHaveBeenCalledWith(
+        focusRestoreFrameId,
+      );
+      expect(frameCallbacks.has(focusRestoreFrameId as number)).toBe(false);
+    } finally {
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
   });
 
   it("preserves native context menu behavior for selected text, links, and code", () => {
@@ -1850,6 +2127,154 @@ describe("AgentSessionPanel conversation caching", () => {
         configurable: true,
         value: originalInnerHeight,
       });
+      if (originalOffsetWidth) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetWidth",
+          originalOffsetWidth,
+        );
+      }
+      if (originalOffsetHeight) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetHeight",
+          originalOffsetHeight,
+        );
+      }
+    }
+  });
+
+  it("reclamps the marker create dialog from rect dimensions on viewport resize", async () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    const originalGetBoundingClientRectDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "getBoundingClientRect",
+    );
+    const originalGetBoundingClientRect =
+      HTMLElement.prototype.getBoundingClientRect;
+    const originalOffsetWidth = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetWidth",
+    );
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight",
+    );
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+    let targetDialog: HTMLElement | null = null;
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 800,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+      configurable: true,
+      get: () => 999,
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get: () => 999,
+    });
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: function getBoundingClientRectMock(this: HTMLElement) {
+        if (this === targetDialog) {
+          return {
+            bottom: 620,
+            height: 120,
+            left: 500,
+            right: 680,
+            top: 500,
+            width: 180,
+            x: 500,
+            y: 500,
+            toJSON: () => ({}),
+          };
+        }
+        return originalGetBoundingClientRect.call(this);
+      },
+    });
+
+    try {
+      renderSessionPanelWithDefaults({
+        activeSession,
+        renderMessageCard: (message) => (
+          <article className="message-card">
+            <div
+              className="message-meta"
+              data-conversation-marker-menu-trigger={
+                message.author === "assistant" ? true : undefined
+              }
+            >
+              <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+              <span>{message.timestamp}</span>
+            </div>
+            <p>{`${message.id} body`}</p>
+          </article>
+        ),
+      });
+
+      fireEvent.contextMenu(screen.getByText("Agent message-2"), {
+        clientX: 500,
+        clientY: 500,
+      });
+      fireEvent.click(
+        screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+      );
+      expect(
+        screen.getByRole("dialog", { name: "Create conversation marker" }),
+      ).toBeInTheDocument();
+      const matchingDialogs = screen.getAllByRole("dialog", {
+        name: "Create conversation marker",
+      });
+      expect(matchingDialogs).toHaveLength(1);
+      targetDialog = matchingDialogs[0];
+
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: 320,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: 260,
+      });
+      fireEvent.resize(window);
+
+      const dialog = screen.getByRole("dialog", {
+        name: "Create conversation marker",
+      });
+      await waitFor(() => {
+        expect(dialog).toHaveStyle({ left: "132px", top: "132px" });
+      });
+    } finally {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+      if (originalGetBoundingClientRectDescriptor) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "getBoundingClientRect",
+          originalGetBoundingClientRectDescriptor,
+        );
+      } else {
+        delete (
+          HTMLElement.prototype as unknown as {
+            getBoundingClientRect?: typeof HTMLElement.prototype.getBoundingClientRect;
+          }
+        ).getBoundingClientRect;
+      }
       if (originalOffsetWidth) {
         Object.defineProperty(
           HTMLElement.prototype,
@@ -7078,6 +7503,35 @@ function deferredValue<T>() {
   return { promise, resolve, reject };
 }
 
+function recordTextareaHeightWrites(
+  textarea: HTMLTextAreaElement,
+  writes: { value: string; transition: string }[],
+) {
+  const style = textarea.style;
+  const originalHeightDescriptor = Object.getOwnPropertyDescriptor(
+    style,
+    "height",
+  );
+  Object.defineProperty(style, "height", {
+    configurable: true,
+    get() {
+      return style.getPropertyValue("height");
+    },
+    set(value: string) {
+      writes.push({ value, transition: style.transition });
+      style.setProperty("height", value);
+    },
+  });
+
+  return () => {
+    if (originalHeightDescriptor) {
+      Object.defineProperty(style, "height", originalHeightDescriptor);
+    } else {
+      delete (style as { height?: string }).height;
+    }
+  };
+}
+
 describe("getAdjustedVirtualizedScrollTopForHeightChange", () => {
   it("preserves the viewport anchor when a measured message above the viewport changes height", () => {
     expect(
@@ -8014,10 +8468,6 @@ describe("AgentSessionPanelFooter", () => {
       HTMLTextAreaElement.prototype,
       "scrollHeight",
     );
-    const originalHeightDescriptor = Object.getOwnPropertyDescriptor(
-      CSSStyleDeclaration.prototype,
-      "height",
-    );
     let nextFrameId = 0;
     const queuedFrames = new Map<number, FrameRequestCallback>();
     const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
@@ -8039,6 +8489,7 @@ describe("AgentSessionPanelFooter", () => {
       }
     };
     let unmount: ReturnType<typeof render>["unmount"] | null = null;
+    let restoreHeightWrites: (() => void) | null = null;
 
     window.requestAnimationFrame =
       requestAnimationFrameMock as unknown as typeof requestAnimationFrame;
@@ -8049,23 +8500,6 @@ describe("AgentSessionPanelFooter", () => {
       get() {
         const textarea = this as HTMLTextAreaElement;
         return 40 + (textarea.value.split("\n").length - 1) * 28;
-      },
-    });
-    Object.defineProperty(CSSStyleDeclaration.prototype, "height", {
-      configurable: true,
-      get() {
-        if (originalHeightDescriptor?.get) {
-          return originalHeightDescriptor.get.call(this);
-        }
-        return this.getPropertyValue("height");
-      },
-      set(value: string) {
-        heightWrites.push({ value, transition: this.transition });
-        if (originalHeightDescriptor?.set) {
-          originalHeightDescriptor.set.call(this, value);
-        } else {
-          this.setProperty("height", value);
-        }
       },
     });
 
@@ -8081,6 +8515,7 @@ describe("AgentSessionPanelFooter", () => {
       if (!(textarea instanceof HTMLTextAreaElement)) {
         throw new Error("Composer textarea not found");
       }
+      restoreHeightWrites = recordTextareaHeightWrites(textarea, heightWrites);
 
       act(() => {
         fireEvent.change(textarea, {
@@ -8128,19 +8563,7 @@ describe("AgentSessionPanelFooter", () => {
           }
         ).scrollHeight;
       }
-      if (originalHeightDescriptor) {
-        Object.defineProperty(
-          CSSStyleDeclaration.prototype,
-          "height",
-          originalHeightDescriptor,
-        );
-      } else {
-        delete (
-          CSSStyleDeclaration.prototype as unknown as {
-            height?: string;
-          }
-        ).height;
-      }
+      restoreHeightWrites?.();
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
     }
@@ -8175,6 +8598,8 @@ describe("AgentSessionPanelFooter", () => {
     const onSend = vi.fn(() => true);
     let unmount: ReturnType<typeof render>["unmount"] | null = null;
     let sawZeroHeightProbe = false;
+    const heightWrites: { value: string; transition: string }[] = [];
+    let restoreHeightWrites: (() => void) | null = null;
 
     window.requestAnimationFrame =
       requestAnimationFrameMock as unknown as typeof requestAnimationFrame;
@@ -8211,6 +8636,7 @@ describe("AgentSessionPanelFooter", () => {
       if (!(textarea instanceof HTMLTextAreaElement)) {
         throw new Error("Composer textarea not found");
       }
+      restoreHeightWrites = recordTextareaHeightWrites(textarea, heightWrites);
 
       act(() => {
         fireEvent.change(textarea, {
@@ -8220,6 +8646,7 @@ describe("AgentSessionPanelFooter", () => {
       drainAnimationFrames();
       expect(textarea.style.height).toBe("96px");
 
+      heightWrites.length = 0;
       act(() => {
         fireEvent.click(screen.getByRole("button", { name: "Send" }));
       });
@@ -8232,7 +8659,132 @@ describe("AgentSessionPanelFooter", () => {
       expect(textarea).toHaveValue("");
       expect(textarea.style.height).toBe("40px");
       expect(sawZeroHeightProbe).toBe(false);
+      expect(heightWrites).toContainEqual({
+        value: "40px",
+        transition: "none",
+      });
+      expect(heightWrites).not.toContainEqual({
+        value: "40px",
+        transition: "",
+      });
       expect(textarea.style.transition).not.toBe("none");
+    } finally {
+      act(() => {
+        unmount?.();
+      });
+      if (originalScrollHeightDescriptor) {
+        Object.defineProperty(
+          HTMLTextAreaElement.prototype,
+          "scrollHeight",
+          originalScrollHeightDescriptor,
+        );
+      } else {
+        delete (
+          HTMLTextAreaElement.prototype as unknown as {
+            scrollHeight?: number;
+          }
+        ).scrollHeight;
+      }
+      restoreHeightWrites?.();
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
+  it("restores composer transition when switching sessions before send-shrink restore fires", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "scrollHeight",
+    );
+    let nextFrameId = 0;
+    const queuedFrames = new Map<number, FrameRequestCallback>();
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      const id = ++nextFrameId;
+      queuedFrames.set(id, callback);
+      return id;
+    });
+    const cancelAnimationFrameMock = vi.fn((id: number) => {
+      queuedFrames.delete(id);
+    });
+    const drainAnimationFrames = () => {
+      while (queuedFrames.size > 0) {
+        const callbacks = [...queuedFrames.values()];
+        queuedFrames.clear();
+        act(() => {
+          callbacks.forEach((callback) => callback(0));
+        });
+      }
+    };
+    const flushNextAnimationFrameBatch = () => {
+      const callbacks = [...queuedFrames.values()];
+      queuedFrames.clear();
+      act(() => {
+        callbacks.forEach((callback) => callback(0));
+      });
+    };
+    const onSend = vi.fn(() => true);
+    let unmount: ReturnType<typeof render>["unmount"] | null = null;
+
+    window.requestAnimationFrame =
+      requestAnimationFrameMock as unknown as typeof requestAnimationFrame;
+    window.cancelAnimationFrame =
+      cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame;
+    Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        const textarea = this as HTMLTextAreaElement;
+        return 40 + (textarea.value.split("\n").length - 1) * 28;
+      },
+    });
+
+    try {
+      const view = render(
+        renderFooter({
+          onSend,
+          session: makeSession("session-a"),
+        }),
+      );
+      unmount = view.unmount;
+      drainAnimationFrames();
+
+      const textarea = screen.getByLabelText("Message session-a");
+      if (!(textarea instanceof HTMLTextAreaElement)) {
+        throw new Error("Composer textarea not found");
+      }
+
+      act(() => {
+        fireEvent.change(textarea, {
+          target: { value: "line one\nline two\nline three" },
+        });
+      });
+      drainAnimationFrames();
+      textarea.style.transition = "height 150ms ease";
+
+      act(() => {
+        fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      });
+      flushNextAnimationFrameBatch();
+
+      expect(textarea.style.transition).toBe("none");
+      expect(queuedFrames.size).toBeGreaterThan(0);
+
+      act(() => {
+        view.rerender(
+          renderFooter({
+            session: makeSession("session-b"),
+          }),
+        );
+      });
+
+      const nextTextarea = screen.getByLabelText("Message session-b");
+      if (!(nextTextarea instanceof HTMLTextAreaElement)) {
+        throw new Error("Composer textarea not found after session switch");
+      }
+      expect(nextTextarea.style.transition).toBe("height 150ms ease");
+      drainAnimationFrames();
+      expect(nextTextarea.style.transition).toBe("height 150ms ease");
     } finally {
       act(() => {
         unmount?.();
@@ -8625,6 +9177,68 @@ describe("AgentSessionPanelFooter", () => {
 
     expect(onSend).toHaveBeenCalledWith("session-a", "/review-local");
     expect(textarea).toHaveValue("");
+  });
+
+  it("expands a selected skill command on Space instead of running it", () => {
+    const onSend = vi.fn(() => true);
+
+    render(
+      renderFooter({
+        onSend,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+        agentCommands: [
+          {
+            kind: "promptTemplate",
+            name: "imagegen",
+            description: "Use the image generation skill.",
+            content: "Use the image generation skill.",
+            source: "Skill",
+          },
+        ],
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/ima" } });
+    fireEvent.keyDown(textarea, { key: "Space", code: "Space" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue("/imagegen ");
+  });
+
+  it("leaves Space as parameter input after a skill command is expanded", () => {
+    const onSend = vi.fn(() => true);
+
+    render(
+      renderFooter({
+        onSend,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+        agentCommands: [
+          {
+            kind: "promptTemplate",
+            name: "imagegen",
+            description: "Use the image generation skill.",
+            content: "Use the image generation skill.",
+            source: "Skill",
+          },
+        ],
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/imagegen detailed prompt" } });
+
+    expect(fireEvent.keyDown(textarea, { key: "Space", code: "Space" })).toBe(
+      true,
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue("/imagegen detailed prompt");
   });
 
   it("expands an agent command with $ARGUMENTS and sends the substituted prompt", () => {

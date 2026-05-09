@@ -75,6 +75,8 @@ function cancelDelegationTerminalErrorMessage(status: DelegationStatus) {
     case "queued":
     case "running":
       return null;
+    default:
+      return assertNeverDelegationStatus(status);
   }
 }
 
@@ -90,7 +92,13 @@ function delegationChildUnavailableStatusLabel(status: DelegationStatus) {
       return "still queued";
     case "running":
       return "still running";
+    default:
+      return assertNeverDelegationStatus(status);
   }
+}
+
+function assertNeverDelegationStatus(status: never): never {
+  throw new Error(`Unhandled delegation status: ${String(status)}`);
 }
 
 type UseSessionRenderCallbacksParams = {

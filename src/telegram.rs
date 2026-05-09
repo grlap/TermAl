@@ -389,10 +389,21 @@ struct TelegramBotState {
     /// next observed (acceptable cost for self-healing).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_forwarded_assistant_message_text_chars: Option<usize>,
-    /// Session-keyed forwarding cursors. This is the authoritative cursor set;
-    /// the two legacy fields above are kept as a compatibility mirror.
+    /// Session-keyed forwarding cursors. This is the authoritative cursor set.
+    /// The two legacy fields above are read as a compatibility fallback for
+    /// older state files, but new cursor writes stay session-scoped. On disk
+    /// this is `assistantForwardingCursors: { "<session-id>": { messageId,
+    /// textChars, resendIfGrown?, baselineWhileActive? } }`.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     assistant_forwarding_cursors: HashMap<String, TelegramAssistantForwardingCursor>,
+    /// Session ids whose next settled assistant reply should be forwarded even
+    /// when no prior assistant text exists for that session. This ordered list
+    /// is authoritative; the legacy singleton below mirrors the latest touched
+    /// id for older state readers. On disk this is
+    /// `forwardNextAssistantMessageSessionIds: ["<session-id>", ...]`, in the
+    /// same order Telegram prompts armed their sessions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    forward_next_assistant_message_session_ids: Vec<String>,
     /// Session id whose next settled assistant text should be forwarded even
     /// when there was no previous assistant message to baseline against. Set
     /// immediately before accepting a Telegram-originated prompt.
@@ -409,6 +420,16 @@ struct TelegramAssistantForwardingCursor {
     text_chars: Option<usize>,
     #[serde(default, skip_serializing_if = "is_false")]
     resend_if_grown: bool,
+    /// Number of chunks already delivered for `message_id` when a long
+    /// assistant message failed mid-message. `None` means the message is
+    /// complete, not partially delivered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sent_chunks: Option<usize>,
+    /// Holds the boundary for a Telegram prompt queued behind an already
+    /// running or approval-paused local turn. Older binaries ignore this field;
+    /// after a downgrade, one settled old-turn reply can be misattributed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    baseline_while_active: bool,
 }
 
 impl TelegramAssistantForwardingCursor {
@@ -418,12 +439,25 @@ impl TelegramAssistantForwardingCursor {
                 message_id: Some(message_id),
                 text_chars: Some(text_chars),
                 resend_if_grown,
+                sent_chunks: None,
+                baseline_while_active: false,
             })
             .unwrap_or_default()
     }
 
+    fn active_baseline(latest: Option<(String, usize)>) -> Self {
+        Self {
+            baseline_while_active: true,
+            ..Self::from_latest(latest, false)
+        }
+    }
+
     fn is_empty(&self) -> bool {
-        self.message_id.is_none() && self.text_chars.is_none() && !self.resend_if_grown
+        self.message_id.is_none()
+            && self.text_chars.is_none()
+            && !self.resend_if_grown
+            && self.sent_chunks.is_none()
+            && !self.baseline_while_active
     }
 }
 
@@ -1143,6 +1177,22 @@ impl TelegramSessionReader for TermalApiClient {
     }
 }
 
+trait TelegramPromptClient: TelegramSessionReader {
+    fn get_project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse>;
+    fn send_session_message(&self, session_id: &str, text: &str) -> Result<()>;
+}
+
+impl TelegramPromptClient for TermalApiClient {
+    fn get_project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse> {
+        TermalApiClient::get_project_digest(self, project_id)
+    }
+
+    fn send_session_message(&self, session_id: &str, text: &str) -> Result<()> {
+        let _ = TermalApiClient::send_session_message(self, session_id, text)?;
+        Ok(())
+    }
+}
+
 /// Represents Telegram API envelope.
 #[derive(Deserialize)]
 struct TelegramApiEnvelope<T> {
@@ -1262,8 +1312,17 @@ impl Default for TelegramSessionStatus {
 }
 
 impl TelegramSessionStatus {
+    /// `Approval` deliberately belongs to both helper predicates: an approval
+    /// pause is a settled state for normal assistant forwarding, but it can
+    /// still be part of the pre-existing local turn when a Telegram prompt is
+    /// queued behind it. `Unknown` keeps the boundary open until a known status
+    /// arrives, avoiding a premature baseline across future status variants.
     fn can_forward_settled_assistant_text(&self) -> bool {
         matches!(self, Self::Idle | Self::Approval | Self::Error)
+    }
+
+    fn keeps_telegram_prompt_boundary_open(&self) -> bool {
+        matches!(self, Self::Active | Self::Approval | Self::Unknown)
     }
 }
 
@@ -1499,8 +1558,8 @@ fn handle_telegram_callback_query(
 
 /// Handles forward Telegram text to project.
 fn forward_telegram_text_to_project(
-    telegram: &TelegramApiClient,
-    termal: &TermalApiClient,
+    telegram: &impl TelegramMessageSender,
+    termal: &impl TelegramPromptClient,
     config: &TelegramBotConfig,
     state: &mut TelegramBotState,
     chat_id: i64,
@@ -1518,7 +1577,7 @@ fn forward_telegram_text_to_project(
 
     let assistant_forwarding_plan =
         prepare_assistant_forwarding_for_telegram_prompt(termal, session_id)?;
-    let _ = termal.send_session_message(session_id, text)?;
+    termal.send_session_message(session_id, text)?;
     let assistant_forwarding_baseline_changed =
         apply_assistant_forwarding_plan(state, assistant_forwarding_plan);
     let mut dirty = assistant_forwarding_baseline_changed;
@@ -1606,17 +1665,28 @@ fn forward_relevant_assistant_messages(
     primary_session_id: Option<&str>,
 ) -> bool {
     let mut dirty = false;
-    let armed_session_id = state.forward_next_assistant_message_session_id.clone();
+    let mut armed_sent_visible_content = false;
+    let mut checked_session_ids = BTreeSet::new();
+    let armed_session_ids = forward_next_assistant_message_session_ids(state);
 
-    if let Some(session_id) = armed_session_id.as_deref() {
-        merge_assistant_forward_result(
-            &mut dirty,
-            forward_new_assistant_message_if_any(telegram, termal, state, chat_id, session_id),
-        );
-        return dirty;
+    for session_id in armed_session_ids {
+        checked_session_ids.insert(session_id.clone());
+        match forward_new_assistant_message_outcome(telegram, termal, state, chat_id, &session_id)
+        {
+            Ok(outcome) => {
+                dirty |= outcome.dirty;
+                armed_sent_visible_content |= outcome.sent_visible_content;
+            }
+            Err(err) => {
+                dirty = true;
+                log_telegram_error("failed to forward assistant message", &err);
+            }
+        }
     }
 
-    if let Some(session_id) = primary_session_id {
+    if let Some(session_id) = primary_session_id
+        .filter(|id| !armed_sent_visible_content && !checked_session_ids.contains(*id))
+    {
         merge_assistant_forward_result(
             &mut dirty,
             forward_new_assistant_message_if_any(telegram, termal, state, chat_id, session_id),
@@ -1653,16 +1723,55 @@ fn latest_assistant_text_cursor(
 fn assistant_forwarding_cursor_for_session(
     state: &TelegramBotState,
     session_id: &str,
+    messages: &[TelegramSessionFetchMessage],
 ) -> TelegramAssistantForwardingCursor {
+    if let Some(cursor) = state.assistant_forwarding_cursors.get(session_id) {
+        return cursor.clone();
+    }
+
+    if let Some(legacy_id) = state.last_forwarded_assistant_message_id.as_deref() {
+        if messages.iter().any(|message| {
+            matches!(
+                message,
+                TelegramSessionFetchMessage::Text { id, author, .. }
+                    if id == legacy_id && author == "assistant"
+            )
+        }) {
+            return TelegramAssistantForwardingCursor {
+                message_id: state.last_forwarded_assistant_message_id.clone(),
+                text_chars: state.last_forwarded_assistant_message_text_chars,
+                resend_if_grown: state.last_forwarded_assistant_message_id.is_some(),
+                sent_chunks: None,
+                baseline_while_active: false,
+            };
+        }
+    }
+
+    TelegramAssistantForwardingCursor::default()
+}
+
+fn forward_next_assistant_message_session_ids(state: &TelegramBotState) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut session_ids = Vec::new();
+    for session_id in &state.forward_next_assistant_message_session_ids {
+        if seen.insert(session_id.clone()) {
+            session_ids.push(session_id.clone());
+        }
+    }
+    if let Some(session_id) = state.forward_next_assistant_message_session_id.as_ref() {
+        if seen.insert(session_id.clone()) {
+            session_ids.push(session_id.clone());
+        }
+    }
+    session_ids
+}
+
+fn is_forward_next_assistant_message_session(state: &TelegramBotState, session_id: &str) -> bool {
     state
-        .assistant_forwarding_cursors
-        .get(session_id)
-        .cloned()
-        .unwrap_or_else(|| TelegramAssistantForwardingCursor {
-            message_id: state.last_forwarded_assistant_message_id.clone(),
-            text_chars: state.last_forwarded_assistant_message_text_chars,
-            resend_if_grown: state.last_forwarded_assistant_message_id.is_some(),
-        })
+        .forward_next_assistant_message_session_ids
+        .iter()
+        .any(|armed_session_id| armed_session_id == session_id)
+        || state.forward_next_assistant_message_session_id.as_deref() == Some(session_id)
 }
 
 fn remember_assistant_forwarding_cursor(
@@ -1684,15 +1793,6 @@ fn remember_assistant_forwarding_cursor(
         changed = true;
     }
 
-    if state.last_forwarded_assistant_message_id != cursor.message_id {
-        state.last_forwarded_assistant_message_id = cursor.message_id.clone();
-        changed = true;
-    }
-    if state.last_forwarded_assistant_message_text_chars != cursor.text_chars {
-        state.last_forwarded_assistant_message_text_chars = cursor.text_chars;
-        changed = true;
-    }
-
     changed
 }
 
@@ -1700,30 +1800,53 @@ fn clear_forward_next_assistant_message_session_id(
     state: &mut TelegramBotState,
     session_id: &str,
 ) -> bool {
+    let mut changed = state
+        .forward_next_assistant_message_session_ids
+        .iter()
+        .any(|armed_session_id| armed_session_id == session_id);
+    state
+        .forward_next_assistant_message_session_ids
+        .retain(|armed_session_id| armed_session_id != session_id);
     if state.forward_next_assistant_message_session_id.as_deref() == Some(session_id) {
-        state.forward_next_assistant_message_session_id = None;
-        return true;
+        state.forward_next_assistant_message_session_id =
+            state.forward_next_assistant_message_session_ids.first().cloned();
+        changed = true;
     }
-    false
+    changed
 }
 
 fn arm_forward_next_assistant_message_session_id(
     state: &mut TelegramBotState,
     session_id: &str,
 ) -> bool {
-    if state.forward_next_assistant_message_session_id.as_deref() == Some(session_id) {
-        return false;
-    }
+    let inserted = if state
+        .forward_next_assistant_message_session_ids
+        .iter()
+        .any(|armed_session_id| armed_session_id == session_id)
+    {
+        false
+    } else {
+        state
+            .forward_next_assistant_message_session_ids
+            .push(session_id.to_owned());
+        true
+    };
+    let changed = inserted
+        || state.forward_next_assistant_message_session_id.as_deref() != Some(session_id);
     state.forward_next_assistant_message_session_id = Some(session_id.to_owned());
-    true
+    changed
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum TelegramAssistantForwardingPlan {
-    Baseline {
-        session_id: String,
-        latest: Option<(String, usize)>,
-    },
+struct TelegramAssistantForwardingPlan {
+    session_id: String,
+    cursor: TelegramAssistantForwardingCursor,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct TelegramAssistantForwardingOutcome {
+    dirty: bool,
+    sent_visible_content: bool,
 }
 
 fn prepare_assistant_forwarding_for_telegram_prompt(
@@ -1731,9 +1854,19 @@ fn prepare_assistant_forwarding_for_telegram_prompt(
     session_id: &str,
 ) -> Result<TelegramAssistantForwardingPlan> {
     let response = termal.get_session(session_id)?;
-    Ok(TelegramAssistantForwardingPlan::Baseline {
+    let latest = latest_assistant_text_cursor(&response.session.messages);
+    let cursor = if response
+        .session
+        .status
+        .keeps_telegram_prompt_boundary_open()
+    {
+        TelegramAssistantForwardingCursor::active_baseline(latest)
+    } else {
+        TelegramAssistantForwardingCursor::from_latest(latest, false)
+    };
+    Ok(TelegramAssistantForwardingPlan {
         session_id: session_id.to_owned(),
-        latest: latest_assistant_text_cursor(&response.session.messages),
+        cursor,
     })
 }
 
@@ -1741,17 +1874,15 @@ fn apply_assistant_forwarding_plan(
     state: &mut TelegramBotState,
     plan: TelegramAssistantForwardingPlan,
 ) -> bool {
-    let TelegramAssistantForwardingPlan::Baseline { session_id, latest } = plan;
-    apply_assistant_forwarding_baseline(state, &session_id, latest)
+    apply_assistant_forwarding_baseline(state, &plan.session_id, plan.cursor)
 }
 
 fn apply_assistant_forwarding_baseline(
     state: &mut TelegramBotState,
     session_id: &str,
-    latest: Option<(String, usize)>,
+    cursor: TelegramAssistantForwardingCursor,
 ) -> bool {
     let mut changed = false;
-    let cursor = TelegramAssistantForwardingCursor::from_latest(latest, false);
     changed |= remember_assistant_forwarding_cursor(state, session_id, cursor);
     changed |= arm_forward_next_assistant_message_session_id(state, session_id);
 
@@ -1807,27 +1938,53 @@ fn forward_new_assistant_message_if_any(
     chat_id: i64,
     session_id: &str,
 ) -> Result<bool> {
+    Ok(
+        forward_new_assistant_message_outcome(telegram, termal, state, chat_id, session_id)?
+            .dirty,
+    )
+}
+
+fn forward_new_assistant_message_outcome(
+    telegram: &impl TelegramMessageSender,
+    termal: &impl TelegramSessionReader,
+    state: &mut TelegramBotState,
+    chat_id: i64,
+    session_id: &str,
+) -> Result<TelegramAssistantForwardingOutcome> {
     let response = termal.get_session(session_id)?;
-
-    // While the session is `active`, the latest assistant text
-    // message is still being streamed: its `text` field grows as
-    // text-deltas arrive but its `id` stays stable. If we forwarded
-    // a mid-stream snapshot here, the per-id dedupe contract would
-    // mark that truncated snapshot as "already delivered" and the
-    // rest of the reply would silently never reach Telegram. Wait
-    // for the turn to finish (status flips to `idle`/`approval`/
-    // `error`) and forward the settled text on the next sync.
-    if !response.session.status.can_forward_settled_assistant_text() {
-        return Ok(false);
-    }
-
     let messages = &response.session.messages;
 
     let forward_without_existing_baseline =
-        state.forward_next_assistant_message_session_id.as_deref() == Some(session_id);
-    let cursor = assistant_forwarding_cursor_for_session(state, session_id);
+        is_forward_next_assistant_message_session(state, session_id);
+    let mut cursor = assistant_forwarding_cursor_for_session(state, session_id, messages);
 
-    let position_of_last = cursor
+    // While a session is active or approval-paused, assistant text can still
+    // belong to the pre-existing local turn. If this arm was created behind
+    // that turn, keep updating the baseline and do not forward old output as
+    // the Telegram prompt's reply.
+    if forward_without_existing_baseline
+        && cursor.baseline_while_active
+        && response
+            .session
+            .status
+            .keeps_telegram_prompt_boundary_open()
+    {
+        let latest = latest_assistant_text_cursor(messages);
+        return Ok(TelegramAssistantForwardingOutcome {
+            dirty: remember_assistant_forwarding_cursor(
+                state,
+                session_id,
+                TelegramAssistantForwardingCursor::active_baseline(latest),
+            ),
+            sent_visible_content: false,
+        });
+    }
+
+    if !response.session.status.can_forward_settled_assistant_text() {
+        return Ok(TelegramAssistantForwardingOutcome::default());
+    }
+
+    let mut position_of_last = cursor
         .message_id
         .as_deref()
         .and_then(|tracked| {
@@ -1839,6 +1996,47 @@ fn forward_new_assistant_message_if_any(
                 )
             })
         });
+
+    let mut pre_forward_dirty = false;
+    if forward_without_existing_baseline && cursor.baseline_while_active {
+        if let Some(pos) = position_of_last {
+            let text_chars = match &messages[pos] {
+                TelegramSessionFetchMessage::Text { text, .. } => Some(text.chars().count()),
+                _ => None,
+            };
+            let settled_cursor = TelegramAssistantForwardingCursor {
+                baseline_while_active: false,
+                resend_if_grown: false,
+                sent_chunks: None,
+                text_chars,
+                ..cursor.clone()
+            };
+            let dirty = remember_assistant_forwarding_cursor(
+                state,
+                session_id,
+                settled_cursor.clone(),
+            );
+            pre_forward_dirty |= dirty;
+            cursor = settled_cursor;
+            position_of_last = Some(pos);
+            if dirty && pos + 1 == messages.len() {
+                return Ok(TelegramAssistantForwardingOutcome {
+                    dirty,
+                    sent_visible_content: false,
+                });
+            }
+        } else {
+            let latest = latest_assistant_text_cursor(messages);
+            return Ok(TelegramAssistantForwardingOutcome {
+                dirty: remember_assistant_forwarding_cursor(
+                    state,
+                    session_id,
+                    TelegramAssistantForwardingCursor::from_latest(latest, false),
+                ),
+                sent_visible_content: false,
+            });
+        }
+    }
 
     // Detect the "previously forwarded message has grown" case: a
     // forward that started mid-stream stored an id + char count;
@@ -1882,14 +2080,25 @@ fn forward_new_assistant_message_if_any(
             TelegramAssistantForwardingCursor::from_latest(latest, false),
         );
         let cleared = clear_forward_next_assistant_message_session_id(state, session_id);
-        return Ok(changed || cleared);
+        return Ok(TelegramAssistantForwardingOutcome {
+            dirty: changed || cleared,
+            sent_visible_content: false,
+        });
     }
 
-    // If the prior forward was truncated, restart at that
-    // message's index so it gets re-forwarded as part of the
-    // batch. Otherwise start strictly after the last forwarded
+    let partial_message_position = cursor
+        .sent_chunks
+        .filter(|sent_chunks| *sent_chunks > 0)
+        .and_then(|_| position_of_last);
+
+    // If the prior forward stopped mid-message, restart at that same message
+    // and skip only the already-sent chunks below. If the prior forward was
+    // truncated, restart at that message's index so it gets re-forwarded as
+    // part of the batch. Otherwise start strictly after the last forwarded
     // message.
-    let start_index = if let Some(pos) = needs_resend_truncated {
+    let start_index = if let Some(pos) = partial_message_position {
+        pos
+    } else if let Some(pos) = needs_resend_truncated {
         pos
     } else if forward_without_existing_baseline && position_of_last.is_none() {
         0
@@ -1909,7 +2118,12 @@ fn forward_new_assistant_message_if_any(
 
     if to_forward.is_empty() {
         let cleared = if forward_without_existing_baseline {
-            if response.session.status == TelegramSessionStatus::Approval {
+            if response.session.status == TelegramSessionStatus::Approval
+                || cursor.message_id.is_some()
+            {
+                // Once a pre-existing turn has been baselined to a concrete
+                // assistant message, keep the arm so the next settled assistant
+                // reply is forwarded as the Telegram-originated response.
                 false
             } else {
                 clear_forward_next_assistant_message_session_id(state, session_id)
@@ -1917,26 +2131,62 @@ fn forward_new_assistant_message_if_any(
         } else {
             false
         };
-        return Ok(cleared);
+        return Ok(TelegramAssistantForwardingOutcome {
+            dirty: cleared,
+            sent_visible_content: false,
+        });
     }
 
-    let mut sent_visible_content = false;
-    let mut changed = false;
+    let mut sent_visible_content = partial_message_position.is_some();
+    let mut changed = pre_forward_dirty;
     for (id, text) in &to_forward {
         let trimmed = text.trim();
         // Empty messages still bump the baseline so the next sync
         // doesn't keep re-checking them; they just don't produce a
         // Telegram send.
         if !trimmed.is_empty() {
-            for chunk in chunk_telegram_message_text(trimmed) {
-                telegram.send_message(chat_id, &chunk, None)?;
+            let chunks = chunk_telegram_message_text(trimmed);
+            let resume_sent_chunks = if cursor.message_id.as_deref() == Some(id.as_str())
+                && cursor.text_chars == Some(text.chars().count())
+            {
+                cursor.sent_chunks.unwrap_or(0).min(chunks.len())
+            } else {
+                0
+            };
+            for (chunk_index, chunk) in chunks.iter().enumerate().skip(resume_sent_chunks) {
+                if let Err(err) = telegram.send_message(chat_id, chunk, None) {
+                    if sent_visible_content {
+                        log_telegram_error("failed to forward assistant message", &err);
+                        return Ok(TelegramAssistantForwardingOutcome {
+                            dirty: changed,
+                            sent_visible_content: true,
+                        });
+                    }
+                    return Err(err);
+                }
+                sent_visible_content = true;
+                let sent_chunks = chunk_index + 1;
+                if sent_chunks < chunks.len() {
+                    changed |= remember_assistant_forwarding_cursor(
+                        state,
+                        session_id,
+                        TelegramAssistantForwardingCursor {
+                            message_id: Some(id.clone()),
+                            text_chars: Some(text.chars().count()),
+                            resend_if_grown: true,
+                            sent_chunks: Some(sent_chunks),
+                            baseline_while_active: false,
+                        },
+                    );
+                }
             }
-            sent_visible_content = true;
         }
-        // Record progress per-message so a mid-batch send failure
-        // still preserves the messages that DID make it. Capture
-        // the char count alongside the id so a streaming-then-
-        // settled re-send can be detected by length growth.
+        // Record complete progress per-message so a mid-batch send failure
+        // still preserves the messages that DID make it. The chunk loop above
+        // records in-flight progress after each successful non-final chunk, so
+        // retrying a long message resumes without duplicating delivered chunks.
+        // Capture the char count alongside the id so a streaming-then-settled
+        // re-send can be detected by length growth.
         changed |= remember_assistant_forwarding_cursor(
             state,
             session_id,
@@ -1944,6 +2194,8 @@ fn forward_new_assistant_message_if_any(
                 message_id: Some(id.clone()),
                 text_chars: Some(text.chars().count()),
                 resend_if_grown: true,
+                sent_chunks: None,
+                baseline_while_active: false,
             },
         );
         changed |= clear_forward_next_assistant_message_session_id(state, session_id);
@@ -1965,14 +2217,23 @@ fn forward_new_assistant_message_if_any(
     // stopped but not because the work is done. See
     // `telegram_turn_settled_footer`.
     if sent_visible_content {
-        telegram.send_message(
+        if let Err(err) = telegram.send_message(
             chat_id,
             telegram_turn_settled_footer(&response.session.status),
             None,
-        )?;
+        ) {
+            log_telegram_error("failed to forward assistant message footer", &err);
+            return Ok(TelegramAssistantForwardingOutcome {
+                dirty: changed,
+                sent_visible_content: true,
+            });
+        }
     }
 
-    Ok(changed)
+    Ok(TelegramAssistantForwardingOutcome {
+        dirty: changed,
+        sent_visible_content,
+    })
 }
 
 /// Returns the footer line shown after a settled assistant-message
@@ -2099,7 +2360,7 @@ fn send_telegram_project_sessions(
 
 /// Handles send fresh Telegram digest from response.
 fn send_fresh_telegram_digest_from_response(
-    telegram: &TelegramApiClient,
+    telegram: &impl TelegramMessageSender,
     config: &TelegramBotConfig,
     state: &mut TelegramBotState,
     chat_id: i64,

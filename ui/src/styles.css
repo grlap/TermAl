@@ -4567,6 +4567,10 @@ textarea {
   position: sticky;
   bottom: 0;
   z-index: 2;
+  display: flex;
+  /* Keep the live turn visually closest to the composer while preserving DOM order. */
+  flex-direction: column-reverse;
+  align-items: stretch;
 }
 
 .activity-card-live {

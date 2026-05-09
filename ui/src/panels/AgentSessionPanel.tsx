@@ -1301,6 +1301,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
     liveTurnCard || pendingPromptCards.length > 0 ? (
       <div className={`conversation-live-tail${liveTailPinned ? " is-pinned" : ""}`}>
         {liveTurnCard}
+        {/* DOM keeps the live turn before queued prompts for screen readers; pinned CSS places it nearest the composer. */}
         {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
         {pendingPromptCards}
       </div>
@@ -1532,7 +1533,12 @@ const SessionComposer = memo(function SessionComposer({
 }) {
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const composerResizeAnimationFrameRef = useRef<number | null>(null);
+  const composerTransitionRestoreRef = useRef<{
+    frameId: number;
+    previousInlineTransition: string;
+  } | null>(null);
   const composerResizeNeedsMetricRefreshRef = useRef(false);
+  const composerResizeShouldAnimateHeightRef = useRef(true);
   const composerLastMeasuredDraftLengthRef = useRef(0);
   const composerLastAppliedHeightRef = useRef<number | null>(null);
   const composerLastAppliedOverflowYRef = useRef<"auto" | "hidden" | null>(null);
@@ -1656,12 +1662,71 @@ const SessionComposer = memo(function SessionComposer({
   }, []);
 
   function cancelScheduledComposerResize() {
+    composerResizeNeedsMetricRefreshRef.current = false;
+    composerResizeShouldAnimateHeightRef.current = true;
     if (composerResizeAnimationFrameRef.current == null) {
       return;
     }
 
     window.cancelAnimationFrame(composerResizeAnimationFrameRef.current);
     composerResizeAnimationFrameRef.current = null;
+  }
+
+  function restoreComposerInputTransition(
+    textarea: HTMLTextAreaElement,
+    previousInlineTransition: string,
+  ) {
+    if (previousInlineTransition) {
+      textarea.style.transition = previousInlineTransition;
+    } else {
+      textarea.style.removeProperty("transition");
+    }
+  }
+
+  function cancelScheduledComposerTransitionRestore() {
+    const pendingRestore = composerTransitionRestoreRef.current;
+    if (!pendingRestore) {
+      return null;
+    }
+
+    window.cancelAnimationFrame(pendingRestore.frameId);
+    composerTransitionRestoreRef.current = null;
+    return pendingRestore.previousInlineTransition;
+  }
+
+  function cancelAndRestoreScheduledComposerTransition() {
+    const previousInlineTransition = cancelScheduledComposerTransitionRestore();
+    const textarea = composerInputRef.current;
+    if (
+      previousInlineTransition !== null &&
+      textarea &&
+      textarea.style.transition === "none"
+    ) {
+      restoreComposerInputTransition(textarea, previousInlineTransition);
+    }
+  }
+
+  function scheduleComposerTransitionRestore(
+    textarea: HTMLTextAreaElement,
+    previousInlineTransition: string,
+  ) {
+    cancelScheduledComposerTransitionRestore();
+    const frameId = window.requestAnimationFrame(() => {
+      const pendingRestore = composerTransitionRestoreRef.current;
+      if (!pendingRestore || pendingRestore.frameId !== frameId) {
+        return;
+      }
+
+      composerTransitionRestoreRef.current = null;
+      restoreComposerInputTransition(
+        textarea,
+        pendingRestore.previousInlineTransition,
+      );
+    });
+    composerTransitionRestoreRef.current = {
+      frameId,
+      previousInlineTransition,
+    };
   }
 
   function getComposerSizingState(
@@ -1691,12 +1756,14 @@ const SessionComposer = memo(function SessionComposer({
     return composerSizingStateRef.current;
   }
 
-  function resizeComposerInput(forceRefreshMetrics = false) {
+  function resizeComposerInput(forceRefreshMetrics = false, animateHeight = true) {
     const textarea = composerInputRef.current;
     if (!textarea) {
       return;
     }
 
+    const pendingPreviousInlineTransition =
+      cancelScheduledComposerTransitionRestore();
     const sizingState = getComposerSizingState(textarea, forceRefreshMetrics);
     const availablePanelHeight =
       sizingState.panelSlotElement?.clientHeight ??
@@ -1711,7 +1778,11 @@ const SessionComposer = memo(function SessionComposer({
     const shouldAllowShrink =
       forceRefreshMetrics ||
       currentDraftLength < composerLastMeasuredDraftLengthRef.current;
-    const previousInlineTransition = textarea.style.transition;
+    const previousInlineTransition =
+      pendingPreviousInlineTransition !== null &&
+      textarea.style.transition === "none"
+        ? pendingPreviousInlineTransition
+        : textarea.style.transition;
     const previousMeasuredHeight =
       composerLastAppliedHeightRef.current ??
       (parseFloat(textarea.style.height) ||
@@ -1737,10 +1808,10 @@ const SessionComposer = memo(function SessionComposer({
         textarea.style.height = `${previousMeasuredHeight}px`;
         void textarea.offsetHeight;
       }
-      if (previousInlineTransition) {
-        textarea.style.transition = previousInlineTransition;
+      if (animateHeight) {
+        restoreComposerInputTransition(textarea, previousInlineTransition);
       } else {
-        textarea.style.removeProperty("transition");
+        scheduleComposerTransitionRestore(textarea, previousInlineTransition);
       }
       if (!heightChanged) {
         composerLastAppliedHeightRef.current = nextHeight;
@@ -1758,13 +1829,15 @@ const SessionComposer = memo(function SessionComposer({
     composerLastMeasuredDraftLengthRef.current = currentDraftLength;
   }
 
-  function scheduleComposerResize(forceRefreshMetrics = false) {
+  function scheduleComposerResize(forceRefreshMetrics = false, animateHeight = true) {
     if (!activeSessionId) {
       return;
     }
 
     composerResizeNeedsMetricRefreshRef.current =
       composerResizeNeedsMetricRefreshRef.current || forceRefreshMetrics;
+    composerResizeShouldAnimateHeightRef.current =
+      composerResizeShouldAnimateHeightRef.current && animateHeight;
     if (composerResizeAnimationFrameRef.current != null) {
       return;
     }
@@ -1772,22 +1845,27 @@ const SessionComposer = memo(function SessionComposer({
     composerResizeAnimationFrameRef.current = window.requestAnimationFrame(() => {
       composerResizeAnimationFrameRef.current = null;
       const shouldRefreshMetrics = composerResizeNeedsMetricRefreshRef.current;
+      const shouldAnimateHeight = composerResizeShouldAnimateHeightRef.current;
       composerResizeNeedsMetricRefreshRef.current = false;
-      resizeComposerInput(shouldRefreshMetrics);
+      composerResizeShouldAnimateHeightRef.current = true;
+      resizeComposerInput(shouldRefreshMetrics, shouldAnimateHeight);
     });
   }
 
   useLayoutEffect(() => {
     composerSizingStateRef.current = null;
     composerResizeNeedsMetricRefreshRef.current = false;
+    composerResizeShouldAnimateHeightRef.current = true;
     composerLastMeasuredDraftLengthRef.current = 0;
     composerLastAppliedHeightRef.current = null;
     composerLastAppliedOverflowYRef.current = null;
     cancelScheduledComposerResize();
+    cancelAndRestoreScheduledComposerTransition();
     resizeComposerInput(true);
 
     return () => {
       cancelScheduledComposerResize();
+      cancelAndRestoreScheduledComposerTransition();
     };
   }, [activeSessionId]);
 
@@ -1943,10 +2021,12 @@ const SessionComposer = memo(function SessionComposer({
     return () => {
       composerSizingStateRef.current = null;
       composerResizeNeedsMetricRefreshRef.current = false;
+      composerResizeShouldAnimateHeightRef.current = true;
       composerLastMeasuredDraftLengthRef.current = 0;
       composerLastAppliedHeightRef.current = null;
       composerLastAppliedOverflowYRef.current = null;
       cancelScheduledComposerResize();
+      cancelAndRestoreScheduledComposerTransition();
     };
   }, []);
 
@@ -2031,7 +2111,11 @@ const SessionComposer = memo(function SessionComposer({
     });
   }
 
-  function updateLocalDraft(sessionId: string, nextValue: string) {
+  function updateLocalDraft(
+    sessionId: string,
+    nextValue: string,
+    options: { animateHeight?: boolean } = {},
+  ) {
     localDraftsRef.current[sessionId] = nextValue;
     if (sessionId === activeSessionId) {
       if (composerInputRef.current && composerInputRef.current.value !== nextValue) {
@@ -2050,7 +2134,7 @@ const SessionComposer = memo(function SessionComposer({
               }
             : { draft: "", sessionId: null },
       );
-      scheduleComposerResize();
+      scheduleComposerResize(false, options.animateHeight ?? true);
     }
   }
 
@@ -2170,7 +2254,7 @@ const SessionComposer = memo(function SessionComposer({
       }
 
       resetPromptHistory(activeSessionId);
-      updateLocalDraft(activeSessionId, "");
+      updateLocalDraft(activeSessionId, "", { animateHeight: false });
       commitDraft(activeSessionId, "");
       focusComposerInput();
       return;
@@ -2221,7 +2305,7 @@ const SessionComposer = memo(function SessionComposer({
     }
 
     resetPromptHistory(activeSessionId);
-    updateLocalDraft(activeSessionId, "");
+    updateLocalDraft(activeSessionId, "", { animateHeight: false });
     commitDraft(activeSessionId, "");
     focusComposerInput();
   }
@@ -2265,7 +2349,7 @@ const SessionComposer = memo(function SessionComposer({
     }
 
     resetPromptHistory(requestSessionId);
-    updateLocalDraft(requestSessionId, "");
+    updateLocalDraft(requestSessionId, "", { animateHeight: false });
     commitDraft(requestSessionId, "");
     focusComposerInput();
   }
@@ -2298,11 +2382,24 @@ const SessionComposer = memo(function SessionComposer({
         !event.shiftKey
       ) {
         if (activeSlashItem) {
-          event.preventDefault();
           if (activeSlashItem.kind === "choice") {
+            event.preventDefault();
             applySlashPaletteItem(activeSlashItem, true);
-          } else {
+          } else if (activeSlashItem.kind === "command") {
+            event.preventDefault();
             applySlashPaletteItem(activeSlashItem);
+          } else {
+            const parsedDraft = parseAgentCommandDraft(getComposerDraftValue());
+            const matchesSelectedCommand =
+              parsedDraft?.commandName.toLowerCase() ===
+              activeSlashItem.name.toLowerCase();
+            if (!matchesSelectedCommand) {
+              event.preventDefault();
+              resetPromptHistory(activeSessionId);
+              const nextDraft = `/${activeSlashItem.name} `;
+              updateLocalDraft(activeSessionId, nextDraft);
+              focusComposerInput(nextDraft.length);
+            }
           }
         }
         return;

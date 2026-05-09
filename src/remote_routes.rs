@@ -708,7 +708,7 @@ impl AppState {
                     .collect::<Option<Vec<_>>>()?,
                 session_fingerprints: sessions
                     .iter()
-                    .map(Self::remote_delta_payload_fingerprint)
+                    .map(Self::remote_delta_session_created_fingerprint)
                     .collect::<Option<Vec<_>>>()?,
             },
             DeltaEvent::DelegationCreated { .. }

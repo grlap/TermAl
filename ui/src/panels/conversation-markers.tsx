@@ -59,8 +59,9 @@ const NATIVE_MESSAGE_CONTEXT_MENU_SELECTOR = [
 const CONVERSATION_MARKER_CONTEXT_MENU_TRIGGER_SELECTOR =
   "[data-conversation-marker-menu-trigger='true']";
 const CONVERSATION_MARKER_CONTEXT_MENU_VIEWPORT_MARGIN_PX = 8;
-// Keep these in sync with src/session_markers.rs validation so the UI mirrors
-// server-side defaults and codepoint length limits.
+// Keep the default label in sync with app-session-actions.ts, and keep the
+// UI/server codepoint limit in sync with
+// src/session_markers.rs CONVERSATION_MARKER_NAME_MAX_CHARS.
 const DEFAULT_CONVERSATION_MARKER_NAME = "Checkpoint";
 const CONVERSATION_MARKER_NAME_MAX_LENGTH = 120;
 
@@ -614,6 +615,24 @@ export function useConversationMarkerContextMenu({
     };
     const handleViewportMove = () => {
       if (contextMenuRef.current?.mode === "create") {
+        const menu = menuRef.current;
+        if (!menu) {
+          return;
+        }
+        setContextMenu((current) => {
+          if (!current || current.mode !== "create") {
+            return current;
+          }
+          const nextPosition = clampConversationMarkerContextMenuPosition(
+            current.clientX,
+            current.clientY,
+            menu,
+          );
+          return nextPosition.left !== current.left ||
+            nextPosition.top !== current.top
+            ? { ...current, ...nextPosition }
+            : current;
+        });
         return;
       }
       closeContextMenu();
@@ -910,6 +929,9 @@ function handleConversationMarkerContextMenuKeyDown(
 
 function focusConversationMarkerContextMenuTrigger(trigger: HTMLElement) {
   const hadTabIndex = trigger.hasAttribute("tabindex");
+  // Custom renderers may mark a header as a marker trigger without making it
+  // keyboard-focusable. Temporarily opt it into programmatic focus so closing
+  // the menu still restores focus to the exact trigger that opened it.
   if (!hadTabIndex) {
     trigger.tabIndex = -1;
   }
