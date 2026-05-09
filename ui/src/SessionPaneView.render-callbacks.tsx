@@ -62,7 +62,14 @@ export function shouldPreferStreamingAssistantTextRender(
   return message.id === streamingAssistantTextMessageId;
 }
 
-function cancelDelegationTerminalErrorMessage(status: DelegationStatus) {
+function delegationStatusFallbackLabel(status: string) {
+  const trimmed = status.trim();
+  return trimmed ? `unrecognized status "${trimmed}"` : "unrecognized status";
+}
+
+function cancelDelegationTerminalErrorMessage(
+  status: DelegationStatus | string,
+) {
   // Cancel returns the server's latest delegation status. Failed means the
   // cancel was a no-op against an errored delegation; completed/canceled are
   // idempotent terminal no-ops, and queued/running mean the request was
@@ -76,11 +83,15 @@ function cancelDelegationTerminalErrorMessage(status: DelegationStatus) {
     case "running":
       return null;
     default:
-      return assertNeverDelegationStatus(status);
+      return `Delegation cancel returned ${delegationStatusFallbackLabel(
+        status,
+      )}. Refresh the session before retrying.`;
   }
 }
 
-function delegationChildUnavailableStatusLabel(status: DelegationStatus) {
+function delegationChildUnavailableStatusLabel(
+  status: DelegationStatus | string,
+) {
   switch (status) {
     case "completed":
       return "already completed";
@@ -93,12 +104,8 @@ function delegationChildUnavailableStatusLabel(status: DelegationStatus) {
     case "running":
       return "still running";
     default:
-      return assertNeverDelegationStatus(status);
+      return delegationStatusFallbackLabel(status);
   }
-}
-
-function assertNeverDelegationStatus(status: never): never {
-  throw new Error(`Unhandled delegation status: ${String(status)}`);
 }
 
 type UseSessionRenderCallbacksParams = {
@@ -177,6 +184,7 @@ export function useSessionRenderCallbacks({
 }: UseSessionRenderCallbacksParams) {
   const mountedRef = useRef(true);
   const activeSessionIdRef = useRef<string | null>(activeSession?.id ?? null);
+  const activeSessionGenerationRef = useRef(0);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -185,10 +193,15 @@ export function useSessionRenderCallbacks({
   }, []);
   useEffect(() => {
     activeSessionIdRef.current = activeSession?.id ?? null;
+    activeSessionGenerationRef.current += 1;
   }, [activeSession?.id]);
+  // Stable by design: deferred delegation actions must read the latest refs
+  // when they settle, not close over the session that rendered the card.
   const canApplyDelegationActionResult = useCallback(
-    (parentSessionId: string) =>
-      mountedRef.current && activeSessionIdRef.current === parentSessionId,
+    (parentSessionId: string, operationGeneration: number) =>
+      mountedRef.current &&
+      activeSessionIdRef.current === parentSessionId &&
+      activeSessionGenerationRef.current === operationGeneration,
     [],
   );
   const renderSessionCommandCard = useCallback(
@@ -224,13 +237,19 @@ export function useSessionRenderCallbacks({
       if (!parentSessionId) {
         return Promise.resolve();
       }
+      const operationGeneration = activeSessionGenerationRef.current;
       return (async () => {
         try {
           const response = await getDelegationStatusCommand(
             parentSessionId,
             delegationId,
           );
-          if (!canApplyDelegationActionResult(parentSessionId)) {
+          if (
+            !canApplyDelegationActionResult(
+              parentSessionId,
+              operationGeneration,
+            )
+          ) {
             return;
           }
           const childSessionId =
@@ -245,7 +264,12 @@ export function useSessionRenderCallbacks({
           }
           onOpenConversationFromDiff(childSessionId, paneId);
         } catch (error) {
-          if (canApplyDelegationActionResult(parentSessionId)) {
+          if (
+            canApplyDelegationActionResult(
+              parentSessionId,
+              operationGeneration,
+            )
+          ) {
             onComposerError(getErrorMessage(error));
           }
         }
@@ -265,13 +289,19 @@ export function useSessionRenderCallbacks({
       if (!parentSessionId) {
         return Promise.resolve();
       }
+      const operationGeneration = activeSessionGenerationRef.current;
       return (async () => {
         try {
           const result = await getDelegationResultCommand(
             parentSessionId,
             delegationId,
           );
-          if (!canApplyDelegationActionResult(parentSessionId)) {
+          if (
+            !canApplyDelegationActionResult(
+              parentSessionId,
+              operationGeneration,
+            )
+          ) {
             return;
           }
           onInsertReviewIntoPrompt(
@@ -280,7 +310,12 @@ export function useSessionRenderCallbacks({
             formatDelegationResultPrompt(result),
           );
         } catch (error) {
-          if (canApplyDelegationActionResult(parentSessionId)) {
+          if (
+            canApplyDelegationActionResult(
+              parentSessionId,
+              operationGeneration,
+            )
+          ) {
             onComposerError(getErrorMessage(error));
           }
         }
@@ -300,13 +335,19 @@ export function useSessionRenderCallbacks({
       if (!parentSessionId) {
         return Promise.resolve();
       }
+      const operationGeneration = activeSessionGenerationRef.current;
       return (async () => {
         try {
           const response = await cancelDelegationCommand(
             parentSessionId,
             delegationId,
           );
-          if (!canApplyDelegationActionResult(parentSessionId)) {
+          if (
+            !canApplyDelegationActionResult(
+              parentSessionId,
+              operationGeneration,
+            )
+          ) {
             return;
           }
           const terminalErrorMessage = cancelDelegationTerminalErrorMessage(
@@ -318,7 +359,12 @@ export function useSessionRenderCallbacks({
             onComposerError(null);
           }
         } catch (error) {
-          if (canApplyDelegationActionResult(parentSessionId)) {
+          if (
+            canApplyDelegationActionResult(
+              parentSessionId,
+              operationGeneration,
+            )
+          ) {
             onComposerError(getErrorMessage(error));
           }
         }

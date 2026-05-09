@@ -8004,7 +8004,7 @@ describe("AgentSessionPanelFooter", () => {
     expect(textarea).toHaveValue("Keep this if spawn rejects.");
   });
 
-  it("disables delegation while the slash palette is open", () => {
+  it("disables delegation for session-control slash palette choices", () => {
     const onSpawnDelegation = vi.fn(async () => true);
     render(
       renderFooter({
@@ -8018,9 +8018,178 @@ describe("AgentSessionPanelFooter", () => {
     );
 
     const delegateButton = screen.getByRole("button", { name: "Delegate" });
+    expect(
+      screen.getByRole("listbox", { name: "Codex models" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /gpt-5\.4/ })).toBeInTheDocument();
     expect(delegateButton).toBeDisabled();
     fireEvent.click(delegateButton);
     expect(onSpawnDelegation).not.toHaveBeenCalled();
+  });
+
+  it("delegates a selected prompt-template agent command with expanded content", async () => {
+    const onSend = vi.fn(() => true);
+    const onSpawnDelegation = vi.fn(async () => true);
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+        agentCommands: [
+          {
+            kind: "promptTemplate",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "Expanded review command body.",
+            source: ".claude/commands/review-local.md",
+          },
+        ],
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onSend,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+    expect(
+      screen.getByRole("option", { name: /\/review-local/ }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    expect(onSpawnDelegation).toHaveBeenCalledWith(
+      "session-a",
+      "Expanded review command body.",
+      {
+        writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+      },
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("delegates native slash agent commands as slash prompts", async () => {
+    const onSend = vi.fn(() => true);
+    const onSpawnDelegation = vi.fn(async () => true);
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+        agentCommands: [
+          {
+            kind: "nativeSlash",
+            name: "review",
+            description: "Review the current changes.",
+            content: "/review",
+            source: "Claude bundled command",
+          },
+        ],
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onSend,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "/review");
+    expect(onSend).not.toHaveBeenCalled();
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("delegates review-local native slash commands in an isolated worktree", async () => {
+    const onSend = vi.fn(() => true);
+    const onSpawnDelegation = vi.fn(async () => true);
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+        agentCommands: [
+          {
+            kind: "nativeSlash",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "/review-local",
+            source: ".claude/commands/review-local.md",
+          },
+        ],
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onSend,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "/review-local", {
+      writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+    });
+    expect(onSend).not.toHaveBeenCalled();
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("expands argument-taking agent commands before delegation", async () => {
+    const onSpawnDelegation = vi.fn(async () => true);
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+        agentCommands: [
+          {
+            kind: "promptTemplate",
+            name: "fix-bug",
+            description: "Fix a bug.",
+            content: "Fix:\n$ARGUMENTS",
+            source: ".claude/commands/fix-bug.md",
+          },
+        ],
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/fix" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    expect(onSpawnDelegation).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue("/fix-bug ");
+
+    fireEvent.change(textarea, { target: { value: "/fix-bug 42" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "Fix:\n42");
+    await waitFor(() => expect(textarea).toHaveValue(""));
   });
 
   it("does not clear the original draft when a delegation resolves after a session switch", async () => {

@@ -435,7 +435,8 @@ export type CreateDelegationRequest = {
     | {
         kind: "isolatedWorktree";
         ownedPaths: string[];
-        worktreePath: string;
+        /** Backend generates a TermAl-owned worktree path when omitted. */
+        worktreePath?: string;
       };
 };
 

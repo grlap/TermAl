@@ -90,8 +90,9 @@ describe("TelegramPreferencesPanel", () => {
     const tokenInput = await screen.findByLabelText("Bot token");
     fireEvent.click(screen.getByRole("button", { name: "Setup" }));
     expect(
-      screen.getByText(/No separate TermAl process or telegram command should be required/),
+      screen.getByText(/No separate TermAl process or telegram command is required/),
     ).toBeInTheDocument();
+    expect(screen.getByText(/\/projects and \/project <id>/)).toBeInTheDocument();
 
     fireEvent.change(tokenInput, { target: { value: "123456:token" } });
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));

@@ -76,6 +76,7 @@ import type {
   CommandMessage,
   CodexReasoningEffort,
   CursorMode,
+  DelegationWritePolicy,
   DiffMessage,
   GeminiApprovalMode,
   ImageAttachment,
@@ -124,6 +125,87 @@ type SessionSettingsValue =
   | ClaudeApprovalMode
   | CursorMode
   | GeminiApprovalMode;
+
+type AgentCommandSlashPaletteItem = Extract<
+  SlashPaletteItem,
+  { kind: "agent-command" }
+>;
+
+type AgentCommandSubmissionResolution =
+  | { kind: "expand"; nextDraft: string }
+  | {
+      expandedPrompt: string | null;
+      kind: "submit";
+      visiblePrompt: string;
+    };
+
+type SpawnDelegationOptions = {
+  writePolicy?: DelegationWritePolicy;
+};
+
+type SpawnDelegationHandler = (
+  sessionId: string,
+  prompt: string,
+  options?: SpawnDelegationOptions,
+) => Promise<boolean>;
+
+function agentCommandDelegationOptions(
+  item: AgentCommandSlashPaletteItem,
+): SpawnDelegationOptions | undefined {
+  const commandName = item.name.trim().toLowerCase();
+  const commandSource = item.command.source.replace(/\\/g, "/").toLowerCase();
+  if (
+    commandName === "review-local" ||
+    commandSource.endsWith("/.claude/commands/review-local.md")
+  ) {
+    return {
+      writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+    };
+  }
+  return undefined;
+}
+
+function resolveAgentCommandSubmission(
+  item: AgentCommandSlashPaletteItem,
+  draft: string,
+): AgentCommandSubmissionResolution {
+  const agentCommand = item.command;
+  const parsedDraft = parseAgentCommandDraft(draft);
+  const matchesSelectedCommand =
+    parsedDraft?.commandName.toLowerCase() === item.name.toLowerCase();
+  if (item.hasArguments && !matchesSelectedCommand) {
+    return { kind: "expand", nextDraft: `/${item.name} ` };
+  }
+
+  const visiblePrompt = (matchesSelectedCommand
+    ? draft
+    : `/${item.name}`).trim();
+  if (normalizedAgentCommandKind(agentCommand) === "nativeSlash") {
+    return { expandedPrompt: null, kind: "submit", visiblePrompt };
+  }
+
+  return {
+    expandedPrompt: agentCommand.content.split("$ARGUMENTS").join(
+      matchesSelectedCommand ? (parsedDraft?.argumentsText ?? "") : "",
+    ),
+    kind: "submit",
+    visiblePrompt,
+  };
+}
+
+function sendResolvedAgentCommandSubmission(
+  onSend: (
+    sessionId: string,
+    draftText?: string,
+    expandedText?: string | null,
+  ) => boolean,
+  sessionId: string,
+  resolution: Extract<AgentCommandSubmissionResolution, { kind: "submit" }>,
+) {
+  return resolution.expandedPrompt == null
+    ? onSend(sessionId, resolution.visiblePrompt)
+    : onSend(sessionId, resolution.visiblePrompt, resolution.expandedPrompt);
+}
 
 // The transcript virtualizer and overview rail intentionally share the same
 // size threshold. The rail may still defer its first paint, but marker jumps
@@ -636,7 +718,7 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
   onRefreshAgentCommands: (sessionId: string) => void;
   onSend: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
   canSpawnDelegation?: boolean;
-  onSpawnDelegation?: (sessionId: string, prompt: string) => Promise<boolean>;
+  onSpawnDelegation?: SpawnDelegationHandler;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -1522,7 +1604,7 @@ const SessionComposer = memo(function SessionComposer({
   onRefreshAgentCommands: (sessionId: string) => void;
   onSend: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
   canSpawnDelegation?: boolean;
-  onSpawnDelegation?: (sessionId: string, prompt: string) => Promise<boolean>;
+  onSpawnDelegation?: SpawnDelegationHandler;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -1635,6 +1717,8 @@ const SessionComposer = memo(function SessionComposer({
     slashPalette.kind === "none" || slashPalette.items.length === 0
       ? null
       : (slashPalette.items[Math.min(slashActiveIndex, slashPalette.items.length - 1)] ?? null);
+  const canDelegateActiveSlashCommand =
+    slashPalette.kind !== "none" && activeSlashItem?.kind === "agent-command";
   const composerInputDisabled = !session || isStopping;
   const composerSendDisabled =
     !session ||
@@ -1650,9 +1734,7 @@ const SessionComposer = memo(function SessionComposer({
     isStopping ||
     isUpdating ||
     isDelegationSpawning ||
-    // Delegate treats slash text as plain task instructions, so do not let it
-    // bypass the slash palette while the user is choosing a command/model.
-    slashPalette.kind !== "none";
+    (slashPalette.kind !== "none" && !canDelegateActiveSlashCommand);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -2223,31 +2305,22 @@ const SessionComposer = memo(function SessionComposer({
         return;
       }
 
-      const agentCommand = item.command;
-      const parsedDraft = parseAgentCommandDraft(getComposerDraftValue());
-      const matchesSelectedCommand =
-        parsedDraft?.commandName.toLowerCase() === item.name.toLowerCase();
-      if (item.hasArguments && !matchesSelectedCommand) {
+      const resolution = resolveAgentCommandSubmission(
+        item,
+        getComposerDraftValue(),
+      );
+      if (resolution.kind === "expand") {
         resetPromptHistory(activeSessionId);
-        const nextDraft = `/${item.name} `;
-        updateLocalDraft(activeSessionId, nextDraft);
-        focusComposerInput(nextDraft.length);
+        updateLocalDraft(activeSessionId, resolution.nextDraft);
+        focusComposerInput(resolution.nextDraft.length);
         return;
       }
 
-      const visiblePrompt = (matchesSelectedCommand
-        ? getComposerDraftValue()
-        : `/${item.name}`).trim();
-      const accepted =
-        normalizedAgentCommandKind(agentCommand) === "nativeSlash"
-          ? onSend(activeSessionId, visiblePrompt)
-          : onSend(
-              activeSessionId,
-              visiblePrompt,
-              agentCommand.content.split("$ARGUMENTS").join(
-                matchesSelectedCommand ? (parsedDraft?.argumentsText ?? "") : "",
-              ),
-            );
+      const accepted = sendResolvedAgentCommandSubmission(
+        onSend,
+        activeSessionId,
+        resolution,
+      );
       if (!accepted) {
         focusComposerInput();
         return;
@@ -2316,7 +2389,28 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    const prompt = getComposerDraftValue().trim();
+    let prompt: string;
+    let delegationOptions: SpawnDelegationOptions | undefined;
+    if (slashPalette.kind !== "none") {
+      if (activeSlashItem?.kind !== "agent-command") {
+        focusComposerInput(getComposerDraftValue().length);
+        return;
+      }
+      delegationOptions = agentCommandDelegationOptions(activeSlashItem);
+      const resolution = resolveAgentCommandSubmission(
+        activeSlashItem,
+        getComposerDraftValue(),
+      );
+      if (resolution.kind === "expand") {
+        resetPromptHistory(activeSessionId);
+        updateLocalDraft(activeSessionId, resolution.nextDraft);
+        focusComposerInput(resolution.nextDraft.length);
+        return;
+      }
+      prompt = (resolution.expandedPrompt ?? resolution.visiblePrompt).trim();
+    } else {
+      prompt = getComposerDraftValue().trim();
+    }
     if (!prompt) {
       focusComposerInput();
       return;
@@ -2326,7 +2420,9 @@ const SessionComposer = memo(function SessionComposer({
     setIsDelegationSpawning(true);
     let accepted = false;
     try {
-      accepted = await onSpawnDelegation(requestSessionId, prompt);
+      accepted = delegationOptions
+        ? await onSpawnDelegation(requestSessionId, prompt, delegationOptions)
+        : await onSpawnDelegation(requestSessionId, prompt);
     } catch {
       accepted = false;
     } finally {

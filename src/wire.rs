@@ -834,20 +834,25 @@ enum DelegationStatus {
     Canceled,
 }
 
-/// Delegated child write policy. Phase 1 only accepts `ReadOnly`.
+/// Delegated child write policy. Backend support currently accepts
+/// `ReadOnly` and reviewer-safe `IsolatedWorktree`; `SharedWorktree`
+/// remains a future worker policy.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 enum DelegationWritePolicy {
     #[serde(alias = "read_only")]
     ReadOnly,
     #[serde(alias = "shared_worktree")]
-    SharedWorktree {
-        owned_paths: Vec<String>,
-    },
+    SharedWorktree { owned_paths: Vec<String> },
     #[serde(alias = "isolated_worktree")]
     IsolatedWorktree {
         owned_paths: Vec<String>,
-        worktree_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        worktree_path: Option<String>,
     },
 }
 

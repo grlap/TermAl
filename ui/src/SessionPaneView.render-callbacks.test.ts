@@ -86,11 +86,17 @@ function StrictModeWrapper({ children }: { children: ReactNode }) {
   return createElement(StrictMode, null, children);
 }
 
-function renderCallbacks(
-  overrides: Partial<Parameters<typeof useSessionRenderCallbacks>[0]> = {},
-  options: Parameters<typeof renderHook>[1] = {},
-) {
-  const params: Parameters<typeof useSessionRenderCallbacks>[0] = {
+type UseSessionRenderCallbacksParams = Parameters<
+  typeof useSessionRenderCallbacks
+>[0];
+type UseSessionRenderCallbacksResult = ReturnType<
+  typeof useSessionRenderCallbacks
+>;
+
+function makeRenderCallbackParams(
+  overrides: Partial<UseSessionRenderCallbacksParams> = {},
+): UseSessionRenderCallbacksParams {
+  return {
     activeSession: makeSession("idle", []),
     activeSessionSearchMatchItemKey: undefined,
     editorAppearance: "dark",
@@ -116,11 +122,30 @@ function renderCallbacks(
     sessionSettingNotice: null,
     ...overrides,
   };
+}
+
+function renderCallbacks(
+  overrides: Partial<UseSessionRenderCallbacksParams> = {},
+  options: Parameters<typeof renderHook>[1] = {},
+) {
+  const params = makeRenderCallbackParams(overrides);
   const hook = renderHook(() => useSessionRenderCallbacks(params), options);
   return { hook, params };
 }
 
-function renderDelegationCard(params: Parameters<typeof useSessionRenderCallbacks>[0]) {
+function renderCallbacksWithActiveSessionProps(
+  overrides: Partial<UseSessionRenderCallbacksParams> = {},
+) {
+  const params = makeRenderCallbackParams(overrides);
+  const hook = renderHook(
+    ({ activeSession }: { activeSession: Session | null }) =>
+      useSessionRenderCallbacks({ ...params, activeSession }),
+    { initialProps: { activeSession: params.activeSession } },
+  );
+  return { hook, params };
+}
+
+function renderDelegationCard(params: UseSessionRenderCallbacksParams) {
   const hook = renderHook(() => useSessionRenderCallbacks(params));
   const element = hook.result.current.renderSessionMessageCard(
     {
@@ -209,9 +234,9 @@ function makeDelegationResultPacket(): Awaited<
   };
 }
 
-function renderMultiDelegationCard(
-  hook: ReturnType<typeof renderCallbacks>["hook"],
-) {
+function renderMultiDelegationCard(hook: {
+  result: { current: UseSessionRenderCallbacksResult };
+}) {
   const element = hook.result.current.renderSessionMessageCard(
     {
       id: "delegations",
@@ -411,6 +436,26 @@ describe("SessionPaneView render callbacks", () => {
     },
   );
 
+  it("reports unknown unavailable delegation child statuses without throwing", async () => {
+    vi.mocked(getDelegationStatusCommand).mockResolvedValueOnce(
+      makeDelegationStatusResponse({
+        childSessionId: "  ",
+        status: "timing_out" as DelegationStatusCommandResponse["status"],
+      }),
+    );
+    const { params } = renderCallbacks();
+    renderDelegationCard(params);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open session" }));
+
+    await waitFor(() =>
+      expect(params.onComposerError).toHaveBeenCalledWith(
+        'Delegation child session is unavailable (unrecognized status "timing_out").',
+      ),
+    );
+    expect(params.onOpenConversationFromDiff).not.toHaveBeenCalled();
+  });
+
   it("inserts delegation results through the command wrapper", async () => {
     vi.mocked(getDelegationResultCommand).mockResolvedValueOnce({
       delegationId: "delegation-1",
@@ -588,6 +633,24 @@ describe("SessionPaneView render callbacks", () => {
     );
   });
 
+  it("reports unknown cancel response statuses without throwing", async () => {
+    vi.mocked(cancelDelegationCommand).mockResolvedValueOnce(
+      makeDelegationStatusResponse({
+        status: "timing_out" as DelegationStatusCommandResponse["status"],
+      }),
+    );
+    const { params } = renderCallbacks();
+    renderDelegationCard(params);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(params.onComposerError).toHaveBeenCalledWith(
+        'Delegation cancel returned unrecognized status "timing_out". Refresh the session before retrying.',
+      ),
+    );
+  });
+
   it.each(["canceled", "completed", "running"] as const)(
     "clears composer errors for %s cancel responses",
     async (status) => {
@@ -691,7 +754,7 @@ describe("SessionPaneView render callbacks", () => {
     vi.mocked(cancelDelegationCommand).mockReturnValueOnce(
       cancelDeferred.promise,
     );
-    const { params, hook } = renderCallbacks();
+    const { params, hook } = renderCallbacksWithActiveSessionProps();
     renderMultiDelegationCard(hook);
 
     const rows = screen.getAllByRole("listitem");
@@ -720,9 +783,8 @@ describe("SessionPaneView render callbacks", () => {
       "delegation-completed",
     );
 
-    params.activeSession = makeSessionWithId("session-2");
     await act(async () => {
-      hook.rerender();
+      hook.rerender({ activeSession: makeSessionWithId("session-2") });
       await Promise.resolve();
     });
 
@@ -736,6 +798,95 @@ describe("SessionPaneView render callbacks", () => {
 
     expect(params.onOpenConversationFromDiff).not.toHaveBeenCalled();
     expect(params.onInsertReviewIntoPrompt).not.toHaveBeenCalled();
+    expect(params.onComposerError).not.toHaveBeenCalled();
+  });
+
+  it("drops deferred delegation action errors after the active session changes", async () => {
+    const openDeferred = createDeferred<DelegationStatusCommandResponse>();
+    const insertDeferred = createDeferred<
+      Awaited<ReturnType<typeof getDelegationResultCommand>>
+    >();
+    const cancelDeferred = createDeferred<DelegationStatusCommandResponse>();
+    vi.mocked(getDelegationStatusCommand).mockReturnValueOnce(
+      openDeferred.promise,
+    );
+    vi.mocked(getDelegationResultCommand).mockReturnValueOnce(
+      insertDeferred.promise,
+    );
+    vi.mocked(cancelDelegationCommand).mockReturnValueOnce(
+      cancelDeferred.promise,
+    );
+    const { params, hook } = renderCallbacksWithActiveSessionProps();
+    renderMultiDelegationCard(hook);
+
+    const rows = screen.getAllByRole("listitem");
+    await act(async () => {
+      fireEvent.click(
+        within(rows[0]!).getByRole("button", { name: "Open session" }),
+      );
+      fireEvent.click(
+        within(rows[0]!).getByRole("button", { name: "Cancel" }),
+      );
+      fireEvent.click(
+        within(rows[1]!).getByRole("button", { name: "Insert result" }),
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      hook.rerender({ activeSession: makeSessionWithId("session-2") });
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      openDeferred.reject(new Error("late open failure"));
+      insertDeferred.reject(new Error("late insert failure"));
+      cancelDeferred.reject(new Error("late cancel failure"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(params.onOpenConversationFromDiff).not.toHaveBeenCalled();
+    expect(params.onInsertReviewIntoPrompt).not.toHaveBeenCalled();
+    expect(params.onComposerError).not.toHaveBeenCalled();
+  });
+
+  it("drops deferred delegation action results after leaving and returning to the parent session", async () => {
+    const openDeferred = createDeferred<DelegationStatusCommandResponse>();
+    vi.mocked(getDelegationStatusCommand).mockReturnValueOnce(
+      openDeferred.promise,
+    );
+    const { params, hook } = renderCallbacksWithActiveSessionProps();
+    renderMultiDelegationCard(hook);
+
+    await act(async () => {
+      const rows = screen.getAllByRole("listitem");
+      fireEvent.click(
+        within(rows[0]!).getByRole("button", { name: "Open session" }),
+      );
+      await Promise.resolve();
+    });
+    expect(getDelegationStatusCommand).toHaveBeenCalledWith(
+      "session-1",
+      "delegation-1",
+    );
+
+    await act(async () => {
+      hook.rerender({ activeSession: makeSessionWithId("session-2") });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      hook.rerender({ activeSession: makeSessionWithId("session-1") });
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      openDeferred.resolve(makeDelegationStatusResponse());
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(params.onOpenConversationFromDiff).not.toHaveBeenCalled();
     expect(params.onComposerError).not.toHaveBeenCalled();
   });
 

@@ -249,7 +249,7 @@ describe("delegation command surface", () => {
     );
   });
 
-  it("builds the fixed read-only reviewer request for composer delegation", () => {
+  it("builds the default read-only reviewer request for composer delegation", () => {
     const request = createComposerDelegationRequest(
       makeSession({
         agent: "Claude",
@@ -265,6 +265,25 @@ describe("delegation command surface", () => {
       model: "claude-sonnet-4.5",
       mode: "reviewer",
       writePolicy: { kind: "readOnly" },
+    });
+  });
+
+  it("allows composer delegation callers to request isolated worktree review", () => {
+    const request = createComposerDelegationRequest(
+      makeSession({
+        agent: "Codex",
+        model: "gpt-5.5",
+      }),
+      "Run /review-local.",
+      { writePolicy: { kind: "isolatedWorktree", ownedPaths: [] } },
+    );
+
+    expect(request).toMatchObject({
+      prompt: "Run /review-local.",
+      agent: "Codex",
+      model: "gpt-5.5",
+      mode: "reviewer",
+      writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
     });
   });
 

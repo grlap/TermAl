@@ -78,7 +78,9 @@ impl TelegramSessionReader for FakeTelegramSessionReaderById {
 
 struct FakeTelegramPromptClient {
     digests: RefCell<VecDeque<std::result::Result<ProjectDigestResponse, String>>>,
+    digest_project_ids: RefCell<Vec<String>>,
     session_response: TelegramSessionFetchResponse,
+    state_sessions: TelegramStateSessionsResponse,
     send_error: Option<String>,
     sent_prompts: RefCell<Vec<(String, String)>>,
 }
@@ -90,10 +92,20 @@ impl FakeTelegramPromptClient {
     ) -> Self {
         Self {
             digests: RefCell::new(VecDeque::from(digests)),
+            digest_project_ids: RefCell::new(Vec::new()),
             session_response,
+            state_sessions: TelegramStateSessionsResponse {
+                projects: Vec::new(),
+                sessions: Vec::new(),
+            },
             send_error: None,
             sent_prompts: RefCell::new(Vec::new()),
         }
+    }
+
+    fn with_state_sessions(mut self, state_sessions: TelegramStateSessionsResponse) -> Self {
+        self.state_sessions = state_sessions;
+        self
     }
 
     fn with_send_error(mut self, error: &str) -> Self {
@@ -109,7 +121,10 @@ impl TelegramSessionReader for FakeTelegramPromptClient {
 }
 
 impl TelegramPromptClient for FakeTelegramPromptClient {
-    fn get_project_digest(&self, _project_id: &str) -> Result<ProjectDigestResponse> {
+    fn get_project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse> {
+        self.digest_project_ids
+            .borrow_mut()
+            .push(project_id.to_owned());
         match self
             .digests
             .borrow_mut()
@@ -119,6 +134,10 @@ impl TelegramPromptClient for FakeTelegramPromptClient {
             Ok(digest) => Ok(digest),
             Err(error) => bail!("{error}"),
         }
+    }
+
+    fn get_state_sessions(&self) -> Result<TelegramStateSessionsResponse> {
+        Ok(self.state_sessions.clone())
     }
 
     fn send_session_message(&self, session_id: &str, text: &str) -> Result<()> {
@@ -155,6 +174,7 @@ fn telegram_test_config() -> TelegramBotConfig {
         project_id: "project-1".to_owned(),
         public_base_url: None,
         state_path: std::env::temp_dir().join(format!("termal-telegram-{}.json", Uuid::new_v4())),
+        subscribed_project_ids: vec!["project-1".to_owned()],
     }
 }
 
@@ -213,8 +233,19 @@ fn telegram_command_parser_supports_suffixes_and_aliases() {
     let parsed = parse_telegram_command("/status").expect("status should parse");
     assert_eq!(parsed.command, TelegramIncomingCommand::Status);
 
+    let parsed = parse_telegram_command("/projects").expect("projects should parse");
+    assert_eq!(parsed.command, TelegramIncomingCommand::Projects);
+
+    let parsed = parse_telegram_command("/project project-2").expect("project should parse");
+    assert_eq!(parsed.command, TelegramIncomingCommand::Project);
+    assert_eq!(parsed.args, "project-2");
+
     let parsed = parse_telegram_command("/sessions").expect("sessions should parse");
     assert_eq!(parsed.command, TelegramIncomingCommand::Sessions);
+
+    let parsed = parse_telegram_command("/session session-2").expect("session should parse");
+    assert_eq!(parsed.command, TelegramIncomingCommand::Session);
+    assert_eq!(parsed.args, "session-2");
 
     assert!(parse_telegram_command("/commit@termal_bot now please").is_none());
     assert!(
@@ -282,7 +313,6 @@ fn telegram_sessions_renderer_lists_project_sessions_newest_first() {
                 name: "Older".to_owned(),
                 project_id: Some("project-1".to_owned()),
                 status: "idle".to_owned(),
-                preview: "Ready".to_owned(),
                 message_count: 2,
             },
             TelegramStateSession {
@@ -290,7 +320,6 @@ fn telegram_sessions_renderer_lists_project_sessions_newest_first() {
                 name: "Other Project".to_owned(),
                 project_id: Some("project-2".to_owned()),
                 status: "active".to_owned(),
-                preview: "Ignore me".to_owned(),
                 message_count: 1,
             },
             TelegramStateSession {
@@ -298,7 +327,6 @@ fn telegram_sessions_renderer_lists_project_sessions_newest_first() {
                 name: "Current".to_owned(),
                 project_id: Some("project-1".to_owned()),
                 status: "active".to_owned(),
-                preview: "Working on the Telegram sessions list".to_owned(),
                 message_count: 7,
             },
         ],
@@ -308,7 +336,7 @@ fn telegram_sessions_renderer_lists_project_sessions_newest_first() {
 
     assert!(text.starts_with("Sessions for TermAl:\n- Current"));
     assert!(text.contains("id: session-2"));
-    assert!(text.contains("Working on the Telegram sessions list"));
+    assert!(!text.contains("Working on the Telegram sessions list"));
     assert!(text.contains("- Older (idle, 2 messages)"));
     assert!(!text.contains("Other Project"));
 }
@@ -325,6 +353,439 @@ fn telegram_sessions_renderer_handles_empty_project() {
     assert_eq!(
         text,
         "No sessions are attached to project `project-1` yet. Start one in TermAl first."
+    );
+}
+
+#[test]
+fn telegram_sessions_command_chunks_oversized_output() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: (0..12)
+            .map(|index| TelegramStateSession {
+                id: format!("session-{index}"),
+                name: format!("Session {index} {}", "x".repeat(400)),
+                project_id: Some("project-1".to_owned()),
+                status: "idle".to_owned(),
+                message_count: 1,
+            })
+            .collect(),
+    });
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+
+    send_telegram_project_sessions(&telegram, &termal, &config, &mut state, 42)
+        .expect("sessions command should send chunks");
+
+    let sent = telegram.sent_texts.borrow();
+    assert!(sent.len() > 1);
+    assert!(
+        sent.iter()
+            .all(|chunk| chunk.encode_utf16().count() <= TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS)
+    );
+    assert!(!sent.join("\n").contains("must not be rendered"));
+}
+
+#[test]
+fn telegram_projects_renderer_lists_subscribed_projects_and_active_marker() {
+    let mut config = telegram_test_config();
+    config.subscribed_project_ids = vec!["project-1".to_owned(), "project-2".to_owned()];
+    let bot_state = TelegramBotState {
+        selected_project_id: Some("project-2".to_owned()),
+        ..TelegramBotState::default()
+    };
+    let state = TelegramStateSessionsResponse {
+        projects: vec![
+            TelegramStateProject {
+                id: "project-1".to_owned(),
+                name: "TermAl".to_owned(),
+            },
+            TelegramStateProject {
+                id: "project-2".to_owned(),
+                name: "Side Project".to_owned(),
+            },
+        ],
+        sessions: vec![
+            TelegramStateSession {
+                id: "session-1".to_owned(),
+                name: "Main".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: "idle".to_owned(),
+                message_count: 1,
+            },
+            TelegramStateSession {
+                id: "session-2".to_owned(),
+                name: "Other".to_owned(),
+                project_id: Some("project-2".to_owned()),
+                status: "idle".to_owned(),
+                message_count: 1,
+            },
+        ],
+    };
+
+    let text = render_telegram_projects(&config, &bot_state, &state);
+
+    assert!(text.contains("- TermAl (1 session)\n  id: project-1"));
+    assert!(text.contains("* Side Project (1 session)\n  id: project-2"));
+    assert!(text.contains("Send /project <project-id> to switch."));
+}
+
+#[test]
+fn telegram_project_command_switches_active_project_and_clears_session_target() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![
+            TelegramStateProject {
+                id: "project-1".to_owned(),
+                name: "TermAl".to_owned(),
+            },
+            TelegramStateProject {
+                id: "project-2".to_owned(),
+                name: "Side Project".to_owned(),
+            },
+        ],
+        sessions: Vec::new(),
+    });
+    let mut config = telegram_test_config();
+    config.subscribed_project_ids = vec!["project-1".to_owned(), "project-2".to_owned()];
+    let mut state = TelegramBotState {
+        selected_session_id: Some("session-1".to_owned()),
+        last_digest_hash: Some("old-digest".to_owned()),
+        last_digest_message_id: Some(10),
+        ..TelegramBotState::default()
+    };
+
+    let changed = select_telegram_project(&telegram, &termal, &config, &mut state, 42, "project-2")
+        .expect("project selection should succeed");
+
+    assert!(changed);
+    assert_eq!(state.selected_project_id.as_deref(), Some("project-2"));
+    assert_eq!(state.selected_session_id, None);
+    assert_eq!(state.last_digest_hash, None);
+    assert_eq!(state.last_digest_message_id, None);
+    assert!(
+        telegram.sent_texts.borrow()[0].contains("Telegram project target set to Side Project")
+    );
+
+    let changed = select_telegram_project(&telegram, &termal, &config, &mut state, 42, "default")
+        .expect("project reset should succeed");
+
+    assert!(changed);
+    assert_eq!(state.selected_project_id, None);
+}
+
+#[test]
+fn telegram_project_command_rejects_unsubscribed_project() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-2".to_owned(),
+            name: "Side Project".to_owned(),
+        }],
+        sessions: Vec::new(),
+    });
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+
+    let changed = select_telegram_project(&telegram, &termal, &config, &mut state, 42, "project-2")
+        .expect("project selection rejection should not fail");
+
+    assert!(!changed);
+    assert_eq!(state.selected_project_id, None);
+    assert!(telegram.sent_texts.borrow()[0].contains("is not subscribed"));
+}
+
+#[test]
+fn telegram_session_command_selects_project_session_target() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![
+            TelegramStateSession {
+                id: "session-other".to_owned(),
+                name: "Other".to_owned(),
+                project_id: Some("project-2".to_owned()),
+                status: "idle".to_owned(),
+                message_count: 0,
+            },
+            TelegramStateSession {
+                id: "session-2".to_owned(),
+                name: "Target".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: "idle".to_owned(),
+                message_count: 0,
+            },
+        ],
+    });
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+
+    let changed =
+        select_telegram_project_session(&telegram, &termal, &config, &mut state, 42, "session-2")
+            .expect("session selection should succeed");
+
+    assert!(changed);
+    assert_eq!(state.selected_session_id.as_deref(), Some("session-2"));
+    assert!(telegram.sent_texts.borrow()[0].contains("Telegram session target set to Target"));
+    assert!(
+        state
+            .forward_next_assistant_message_session_ids
+            .iter()
+            .any(|session_id| session_id == "session-2")
+    );
+
+    let changed =
+        select_telegram_project_session(&telegram, &termal, &config, &mut state, 42, "clear")
+            .expect("session clear should succeed");
+
+    assert!(changed);
+    assert_eq!(state.selected_session_id, None);
+    assert!(state.forward_next_assistant_message_session_ids.is_empty());
+}
+
+#[test]
+fn telegram_session_command_rejects_sessions_outside_project() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: Vec::new(),
+        sessions: vec![TelegramStateSession {
+            id: "session-other".to_owned(),
+            name: "Other".to_owned(),
+            project_id: Some("project-2".to_owned()),
+            status: "idle".to_owned(),
+            message_count: 0,
+        }],
+    });
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+
+    let changed = select_telegram_project_session(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        42,
+        "session-other",
+    )
+    .expect("session selection rejection should not fail");
+
+    assert!(!changed);
+    assert_eq!(state.selected_session_id, None);
+    assert!(telegram.sent_texts.borrow()[0].contains("I couldn't find session"));
+}
+
+#[test]
+fn telegram_session_command_uses_selected_project() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-2".to_owned(),
+            name: "Side Project".to_owned(),
+        }],
+        sessions: vec![TelegramStateSession {
+            id: "session-2".to_owned(),
+            name: "Selected Project Session".to_owned(),
+            project_id: Some("project-2".to_owned()),
+            status: "idle".to_owned(),
+            message_count: 0,
+        }],
+    });
+    let mut config = telegram_test_config();
+    config.subscribed_project_ids = vec!["project-1".to_owned(), "project-2".to_owned()];
+    let mut state = TelegramBotState {
+        selected_project_id: Some("project-2".to_owned()),
+        ..TelegramBotState::default()
+    };
+
+    let changed =
+        select_telegram_project_session(&telegram, &termal, &config, &mut state, 42, "session-2")
+            .expect("session selection should use selected project");
+
+    assert!(changed);
+    assert_eq!(state.selected_session_id.as_deref(), Some("session-2"));
+}
+
+#[test]
+fn telegram_selected_session_forwards_later_local_termal_reply() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "baseline".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Existing selected session reply".to_owned(),
+                }],
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![TelegramStateSession {
+            id: "session-2".to_owned(),
+            name: "Selected".to_owned(),
+            project_id: Some("project-1".to_owned()),
+            status: "idle".to_owned(),
+            message_count: 1,
+        }],
+    });
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+
+    select_telegram_project_session(&telegram, &termal, &config, &mut state, 42, "session-2")
+        .expect("session selection should baseline selected session");
+
+    assert_eq!(
+        state
+            .assistant_forwarding_cursors
+            .get("session-2")
+            .and_then(|cursor| cursor.message_id.as_deref()),
+        Some("baseline")
+    );
+
+    let forward_telegram = FakeTelegramSender::new(None);
+    let settled_after_local_prompt = FakeTelegramSessionReaderById {
+        responses: HashMap::from([(
+            "session-2".to_owned(),
+            TelegramSessionFetchResponse {
+                session: TelegramSessionFetchSession {
+                    status: TelegramSessionStatus::Idle,
+                    messages: vec![
+                        TelegramSessionFetchMessage::Text {
+                            id: "baseline".to_owned(),
+                            author: "assistant".to_owned(),
+                            text: "Existing selected session reply".to_owned(),
+                        },
+                        TelegramSessionFetchMessage::Text {
+                            id: "reply".to_owned(),
+                            author: "assistant".to_owned(),
+                            text: "Reply to local TermAl prompt".to_owned(),
+                        },
+                    ],
+                },
+            },
+        )]),
+    };
+
+    let changed = forward_relevant_assistant_messages(
+        &forward_telegram,
+        &settled_after_local_prompt,
+        &mut state,
+        42,
+        Some("session-2"),
+    );
+
+    assert!(changed);
+    assert_eq!(
+        forward_telegram.sent_texts.borrow().as_slice(),
+        [
+            "Reply to local TermAl prompt".to_owned(),
+            telegram_turn_settled_footer(&TelegramSessionStatus::Idle).to_owned()
+        ]
+    );
+    assert_eq!(state.forward_next_assistant_message_session_id, None);
+}
+
+#[test]
+fn telegram_selected_session_sync_baselines_persisted_selection_before_local_reply() {
+    let termal = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "baseline".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Existing selected session reply".to_owned(),
+                }],
+            },
+        },
+    };
+    let mut state = TelegramBotState {
+        selected_session_id: Some("session-2".to_owned()),
+        ..TelegramBotState::default()
+    };
+
+    let changed = ensure_selected_session_forwarding_baseline(&termal, &mut state, "session-2")
+        .expect("selected session baseline should succeed");
+
+    assert!(changed);
+    assert_eq!(
+        state
+            .assistant_forwarding_cursors
+            .get("session-2")
+            .and_then(|cursor| cursor.message_id.as_deref()),
+        Some("baseline")
+    );
+    assert!(
+        state
+            .forward_next_assistant_message_session_ids
+            .iter()
+            .any(|session_id| session_id == "session-2")
     );
 }
 
@@ -551,6 +1012,118 @@ fn telegram_prompt_digest_refresh_failure_keeps_single_accepted_prompt_armed() {
         .get("session-1")
         .expect("accepted prompt should arm assistant forwarding");
     assert_eq!(cursor.message_id.as_deref(), Some("baseline"));
+}
+
+#[test]
+fn telegram_prompt_uses_selected_session_before_digest_primary() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(telegram_project_digest(Some("session-1"))),
+            Ok(telegram_project_digest(Some("session-1"))),
+        ],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "baseline".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Existing selected session reply".to_owned(),
+                }],
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: Vec::new(),
+        sessions: vec![TelegramStateSession {
+            id: "session-2".to_owned(),
+            name: "Selected".to_owned(),
+            project_id: Some("project-1".to_owned()),
+            status: "idle".to_owned(),
+            message_count: 1,
+        }],
+    });
+    let config = telegram_test_config();
+    let mut state = TelegramBotState {
+        selected_session_id: Some("session-2".to_owned()),
+        ..TelegramBotState::default()
+    };
+
+    let changed =
+        forward_telegram_text_to_project(&telegram, &termal, &config, &mut state, 42, "from chat")
+            .expect("forwarding should succeed");
+
+    assert!(changed);
+    assert_eq!(
+        termal.sent_prompts.borrow().as_slice(),
+        [("session-2".to_owned(), "from chat".to_owned())]
+    );
+    assert_eq!(state.selected_session_id.as_deref(), Some("session-2"));
+    assert!(
+        state
+            .forward_next_assistant_message_session_ids
+            .iter()
+            .any(|session_id| session_id == "session-2")
+    );
+}
+
+#[test]
+fn telegram_prompt_uses_selected_project_digest_and_session() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(ProjectDigestResponse {
+                project_id: "project-2".to_owned(),
+                headline: "side".to_owned(),
+                done_summary: "Working.".to_owned(),
+                current_status: "Agent is working.".to_owned(),
+                primary_session_id: Some("session-2".to_owned()),
+                proposed_actions: vec![],
+                deep_link: None,
+                source_message_ids: vec![],
+            }),
+            Ok(ProjectDigestResponse {
+                project_id: "project-2".to_owned(),
+                headline: "side".to_owned(),
+                done_summary: "Still working.".to_owned(),
+                current_status: "Agent is working.".to_owned(),
+                primary_session_id: Some("session-2".to_owned()),
+                proposed_actions: vec![],
+                deep_link: None,
+                source_message_ids: vec![],
+            }),
+        ],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "baseline".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Existing selected project reply".to_owned(),
+                }],
+            },
+        },
+    );
+    let mut config = telegram_test_config();
+    config.subscribed_project_ids = vec!["project-1".to_owned(), "project-2".to_owned()];
+    let mut state = TelegramBotState {
+        selected_project_id: Some("project-2".to_owned()),
+        ..TelegramBotState::default()
+    };
+
+    let changed =
+        forward_telegram_text_to_project(&telegram, &termal, &config, &mut state, 42, "from chat")
+            .expect("forwarding should succeed");
+
+    assert!(changed);
+    assert_eq!(
+        termal.digest_project_ids.borrow().as_slice(),
+        ["project-2".to_owned(), "project-2".to_owned()]
+    );
+    assert_eq!(
+        termal.sent_prompts.borrow().as_slice(),
+        [("session-2".to_owned(), "from chat".to_owned())]
+    );
 }
 
 #[test]
@@ -2773,6 +3346,8 @@ fn telegram_assistant_forwarding_cursor_state_uses_documented_wire_shape() {
             },
         )]),
         forward_next_assistant_message_session_ids: vec!["session-1".to_owned()],
+        selected_project_id: Some("project-2".to_owned()),
+        selected_session_id: Some("session-2".to_owned()),
         ..TelegramBotState::default()
     })
     .expect("state should serialize");
@@ -2801,6 +3376,8 @@ fn telegram_assistant_forwarding_cursor_state_uses_documented_wire_shape() {
         value["forwardNextAssistantMessageSessionIds"],
         json!(["session-1"])
     );
+    assert_eq!(value["selectedProjectId"], json!("project-2"));
+    assert_eq!(value["selectedSessionId"], json!("session-2"));
 
     let round_tripped: TelegramBotState =
         serde_json::from_value(value.clone()).expect("state should deserialize");
@@ -2822,6 +3399,14 @@ fn telegram_assistant_forwarding_cursor_state_uses_documented_wire_shape() {
             .iter()
             .any(|session_id| session_id == "session-1")
     );
+    assert_eq!(
+        round_tripped.selected_project_id.as_deref(),
+        Some("project-2")
+    );
+    assert_eq!(
+        round_tripped.selected_session_id.as_deref(),
+        Some("session-2")
+    );
 
     let default_value =
         serde_json::to_value(TelegramBotState::default()).expect("state should serialize");
@@ -2831,10 +3416,12 @@ fn telegram_assistant_forwarding_cursor_state_uses_documented_wire_shape() {
             .get("forwardNextAssistantMessageSessionIds")
             .is_none()
     );
+    assert!(default_value.get("selectedProjectId").is_none());
+    assert!(default_value.get("selectedSessionId").is_none());
 }
 
 #[test]
-fn telegram_ui_file_requires_default_project_for_relay_config() {
+fn telegram_ui_file_uses_single_subscribed_project_for_relay_config() {
     let file = TelegramBotFile {
         config: TelegramUiConfig {
             enabled: true,
@@ -2846,7 +3433,10 @@ fn telegram_ui_file_requires_default_project_for_relay_config() {
         state: TelegramBotState::default(),
     };
 
-    assert!(TelegramBotConfig::from_ui_file("/tmp", &file).is_none());
+    let config = TelegramBotConfig::from_ui_file("/tmp", &file)
+        .expect("single subscribed project should produce relay config");
+    assert_eq!(config.project_id, "project-1");
+    assert_eq!(config.subscribed_project_ids, vec!["project-1"]);
 
     let with_blank_default = TelegramBotFile {
         config: TelegramUiConfig {
@@ -2855,11 +3445,34 @@ fn telegram_ui_file_requires_default_project_for_relay_config() {
         },
         state: TelegramBotState::default(),
     };
-    assert!(TelegramBotConfig::from_ui_file("/tmp", &with_blank_default).is_none());
+    let config = TelegramBotConfig::from_ui_file("/tmp", &with_blank_default)
+        .expect("blank default should fall back to single subscribed project");
+    assert_eq!(config.project_id, "project-1");
+
+    let without_any_project = TelegramBotFile {
+        config: TelegramUiConfig {
+            subscribed_project_ids: Vec::new(),
+            default_project_id: None,
+            ..file.config.clone()
+        },
+        state: TelegramBotState::default(),
+    };
+    assert!(TelegramBotConfig::from_ui_file("/tmp", &without_any_project).is_none());
+
+    let with_multiple_projects = TelegramBotFile {
+        config: TelegramUiConfig {
+            subscribed_project_ids: vec!["project-1".to_owned(), "project-2".to_owned()],
+            default_project_id: None,
+            ..file.config.clone()
+        },
+        state: TelegramBotState::default(),
+    };
+    assert!(TelegramBotConfig::from_ui_file("/tmp", &with_multiple_projects).is_none());
 
     let with_default = TelegramBotFile {
         config: TelegramUiConfig {
             default_project_id: Some(" project-1 ".to_owned()),
+            subscribed_project_ids: vec![" project-2 ".to_owned(), "project-1".to_owned()],
             ..file.config
         },
         state: TelegramBotState {
@@ -2871,6 +3484,10 @@ fn telegram_ui_file_requires_default_project_for_relay_config() {
         .expect("default project should produce relay config");
 
     assert_eq!(config.project_id, "project-1");
+    assert_eq!(
+        config.subscribed_project_ids,
+        vec!["project-2", "project-1"]
+    );
     assert_eq!(config.chat_id, Some(42));
 }
 
@@ -3298,6 +3915,26 @@ fn telegram_settings_validation_autofills_session_project_subscription() {
 }
 
 #[test]
+fn telegram_settings_validation_uses_single_subscribed_project_as_default() {
+    let state = test_app_state();
+    let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
+    let mut config = TelegramUiConfig {
+        subscribed_project_ids: vec![project_id.clone()],
+        ..TelegramUiConfig::default()
+    };
+
+    state
+        .validate_and_normalize_telegram_config(&mut config)
+        .expect("config should validate");
+
+    assert_eq!(
+        config.default_project_id.as_deref(),
+        Some(project_id.as_str())
+    );
+    assert_eq!(config.subscribed_project_ids, vec![project_id]);
+}
+
+#[test]
 fn telegram_settings_validation_rejects_orphan_session_project() {
     let state = test_app_state();
     let session_id = {
@@ -3516,7 +4153,10 @@ fn telegram_config_update_sanitizes_stale_persisted_references_before_validation
 
     assert!(response.enabled);
     assert_eq!(response.subscribed_project_ids, vec![project_id.clone()]);
-    assert_eq!(response.default_project_id, None);
+    assert_eq!(
+        response.default_project_id.as_deref(),
+        Some(project_id.as_str())
+    );
     assert_eq!(response.default_session_id, None);
     assert_eq!(response.linked_chat_id, Some(123));
 
@@ -3524,8 +4164,11 @@ fn telegram_config_update_sanitizes_stale_persisted_references_before_validation
         .expect("settings file should parse");
     assert_eq!(value["config"]["enabled"], json!(true));
     assert_eq!(value["config"]["botToken"], json!("123456:secret"));
-    assert_eq!(value["config"]["subscribedProjectIds"], json!([project_id]));
-    assert!(value["config"].get("defaultProjectId").is_none());
+    assert_eq!(
+        value["config"]["subscribedProjectIds"],
+        json!([project_id.clone()])
+    );
+    assert_eq!(value["config"]["defaultProjectId"], json!(project_id));
     assert!(value["config"].get("defaultSessionId").is_none());
     assert_eq!(value["chatId"], json!(123));
 }

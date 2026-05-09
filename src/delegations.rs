@@ -1,9 +1,9 @@
-// Phase 1 delegation records: durable parent-child metadata plus read-only
-// child sessions. The child remains a normal session; this layer owns parent
-// cards, lifecycle/result metadata, compact `/api/state` summaries, result
-// parsing, read-only guard integration, queue cleanup, and delegation SSE
-// deltas. It does not remote-forward delegation creation or implement writable
-// worker policies yet.
+// Delegation records: durable parent-child metadata plus child-session launch
+// policy. The child remains a normal session; this layer owns parent cards,
+// lifecycle/result metadata, compact `/api/state` summaries, result parsing,
+// read-only guard integration, queue cleanup, isolated worktree preparation,
+// and delegation SSE deltas. It does not remote-forward delegation creation or
+// implement shared-worktree/worker policies yet.
 
 // Keep prompts bounded because they are embedded into child-agent startup input.
 // Keep in sync with `MAX_DELEGATION_PROMPT_BYTES` in
@@ -34,6 +34,11 @@ const TEST_FORCE_DELEGATION_START_FAILURE_PROMPT: &str =
 #[cfg(test)]
 const TEST_CANCEL_DELEGATION_BEFORE_START_PROMPT: &str =
     "TERMAL_TEST_CANCEL_DELEGATION_BEFORE_START";
+
+struct PreparedIsolatedWorktree {
+    child_cwd: String,
+    worktree_root: String,
+}
 
 #[derive(Clone, Debug)]
 enum ParentDelegationCardDelta {
@@ -249,15 +254,22 @@ impl AppState {
                 "worker delegations are not implemented in Phase 1",
             ));
         }
-        let write_policy = request
+        let requested_write_policy = request
             .write_policy
             .unwrap_or(DelegationWritePolicy::ReadOnly);
-        if write_policy != DelegationWritePolicy::ReadOnly {
+        if matches!(
+            requested_write_policy,
+            DelegationWritePolicy::SharedWorktree { .. }
+        ) {
             return Err(ApiError::from_status(
                 StatusCode::NOT_IMPLEMENTED,
-                "only readOnly delegation write policy is implemented in Phase 1",
+                "sharedWorktree delegation write policy is not implemented yet",
             ));
         }
+        let delegation_id = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner.next_delegation_id()
+        };
 
         let (parent_workdir, parent_project_id, parent_agent, parent_is_remote_backed) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -288,7 +300,7 @@ impl AppState {
                 resolve_session_workdir(cwd)
             })
             .transpose()?;
-        let cwd = requested_cwd.unwrap_or(parent_workdir);
+        let source_cwd = requested_cwd.unwrap_or(parent_workdir);
         if let Some(project_id) = parent_project_id.as_deref() {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let project = inner
@@ -300,13 +312,43 @@ impl AppState {
                     "delegations for remote-backed projects are not implemented in Phase 1",
                 ));
             }
-            if !path_contains(&project.root_path, FsPath::new(&cwd)) {
+            if !path_contains(&project.root_path, FsPath::new(&source_cwd)) {
                 return Err(ApiError::bad_request(format!(
-                    "delegation cwd `{cwd}` must stay inside project `{}`",
+                    "delegation cwd `{source_cwd}` must stay inside project `{}`",
                     project.name
                 )));
             }
         }
+
+        let (cwd, child_project_id, write_policy) = match requested_write_policy {
+            DelegationWritePolicy::ReadOnly => (
+                source_cwd.clone(),
+                parent_project_id.clone(),
+                DelegationWritePolicy::ReadOnly,
+            ),
+            DelegationWritePolicy::SharedWorktree { .. } => unreachable!(
+                "sharedWorktree policy should be rejected before workspace preparation"
+            ),
+            DelegationWritePolicy::IsolatedWorktree {
+                owned_paths,
+                worktree_path,
+            } => {
+                let prepared = prepare_isolated_delegation_worktree(
+                    &source_cwd,
+                    worktree_path.as_deref(),
+                    &self.default_workdir,
+                    &delegation_id,
+                )?;
+                (
+                    prepared.child_cwd,
+                    None,
+                    DelegationWritePolicy::IsolatedWorktree {
+                        owned_paths,
+                        worktree_path: Some(prepared.worktree_root),
+                    },
+                )
+            }
+        };
 
         let agent = request.agent.unwrap_or(parent_agent);
         let has_test_runtime_override = {
@@ -347,13 +389,12 @@ impl AppState {
                 "delegation nesting depth is limited to {MAX_DELEGATION_DEPTH}"
             )));
         }
-        let delegation_id = inner.next_delegation_id();
         let now = stamp_now();
         let child_record = inner.create_session(
             agent,
             Some(title.clone()),
             cwd.clone(),
-            parent_project_id.clone(),
+            child_project_id,
             model,
         );
         let child_session_id = child_record.session.id.clone();
@@ -366,9 +407,9 @@ impl AppState {
                 .expect("child session index should be valid");
             if child_record.session.agent.supports_codex_prompt_settings() {
                 child_record.codex_approval_policy = CodexApprovalPolicy::Never;
-                child_record.codex_sandbox_mode = CodexSandboxMode::ReadOnly;
+                child_record.codex_sandbox_mode = delegation_codex_sandbox_mode(&write_policy);
                 child_record.session.approval_policy = Some(CodexApprovalPolicy::Never);
-                child_record.session.sandbox_mode = Some(CodexSandboxMode::ReadOnly);
+                child_record.session.sandbox_mode = Some(child_record.codex_sandbox_mode);
             } else if child_record.session.agent.supports_cursor_mode() {
                 child_record.session.cursor_mode = Some(CursorMode::Plan);
             } else if child_record.session.agent.supports_claude_approval_mode() {
@@ -443,7 +484,7 @@ impl AppState {
             }
         }
 
-        let runtime_prompt = build_read_only_delegation_prompt(&record);
+        let runtime_prompt = build_delegation_prompt(&record);
         if let Err(err) =
             self.start_delegation_child_turn(&record.id, &record.child_session_id, runtime_prompt)
         {
@@ -1058,7 +1099,8 @@ impl AppState {
     }
 }
 
-fn build_read_only_delegation_prompt(record: &DelegationRecord) -> String {
+fn build_delegation_prompt(record: &DelegationRecord) -> String {
+    let write_policy = delegation_prompt_write_policy(&record.write_policy);
     format!(
         "You are a delegated child session for TermAl delegation `{}`.\n\
 \n\
@@ -1066,7 +1108,7 @@ Mode: {:?}\n\
 Parent session: `{}`\n\
 Child session: `{}`\n\
 Working directory: `{}`\n\
-Write policy: read-only. Do not edit, stage, commit, push, or otherwise mutate files.\n\
+{}\n\
 Other sessions may be active in the same workspace. Do not revert unrelated changes.\n\
 \n\
 Task:\n{}\n\
@@ -1081,8 +1123,42 @@ Final answer requirements:\n\
         record.parent_session_id,
         record.child_session_id,
         record.cwd,
+        write_policy,
         record.prompt,
     )
+}
+
+fn delegation_prompt_write_policy(write_policy: &DelegationWritePolicy) -> String {
+    match write_policy {
+        DelegationWritePolicy::ReadOnly => {
+            "Write policy: read-only. Do not edit, stage, commit, push, or otherwise mutate files."
+                .to_owned()
+        }
+        DelegationWritePolicy::IsolatedWorktree {
+            owned_paths,
+            worktree_path,
+        } => {
+            let worktree_path = worktree_path.as_deref().unwrap_or("(pending)");
+            let owned_paths = if owned_paths.is_empty() {
+                "No owned paths were declared.".to_owned()
+            } else {
+                format!("Owned paths: {}.", owned_paths.join(", "))
+            };
+            format!(
+                "Write policy: isolated worktree. You may write only inside the isolated worktree `{worktree_path}`. Do not edit, stage, commit, push, or otherwise mutate the parent workspace. {owned_paths}"
+            )
+        }
+        DelegationWritePolicy::SharedWorktree { owned_paths } => {
+            let owned_paths = if owned_paths.is_empty() {
+                "No owned paths were declared.".to_owned()
+            } else {
+                format!("Owned paths: {}.", owned_paths.join(", "))
+            };
+            format!(
+                "Write policy: shared worktree. Do not write outside declared ownership. {owned_paths}"
+            )
+        }
+    }
 }
 
 fn add_parent_delegation_card_locked(
@@ -1624,6 +1700,250 @@ fn validate_delegation_cwd_input(cwd: &str) -> Result<(), ApiError> {
     }
     let _ = cwd;
     Ok(())
+}
+
+fn delegation_codex_sandbox_mode(write_policy: &DelegationWritePolicy) -> CodexSandboxMode {
+    match write_policy {
+        DelegationWritePolicy::ReadOnly => CodexSandboxMode::ReadOnly,
+        DelegationWritePolicy::IsolatedWorktree { .. } => CodexSandboxMode::WorkspaceWrite,
+        DelegationWritePolicy::SharedWorktree { .. } => CodexSandboxMode::WorkspaceWrite,
+    }
+}
+
+fn prepare_isolated_delegation_worktree(
+    source_cwd: &str,
+    requested_worktree_path: Option<&str>,
+    default_workdir: &str,
+    delegation_id: &str,
+) -> Result<PreparedIsolatedWorktree, ApiError> {
+    if let Some(path) = requested_worktree_path {
+        validate_delegation_cwd_input(path)?;
+    }
+    let source_cwd_path = fs::canonicalize(FsPath::new(source_cwd))
+        .map(|path| normalize_user_facing_path(&path))
+        .map_err(|err| {
+            ApiError::bad_request(format!(
+                "delegation cwd `{source_cwd}` could not be resolved: {err}"
+            ))
+        })?;
+    let source_repo_root = resolve_git_repo_root(&source_cwd_path)?.ok_or_else(|| {
+        ApiError::bad_request("isolatedWorktree delegation requires a git repository")
+    })?;
+    let source_repo_root = fs::canonicalize(&source_repo_root)
+        .map(|path| normalize_user_facing_path(&path))
+        .map_err(|err| {
+            ApiError::internal(format!(
+                "failed to canonicalize git repo root {}: {err}",
+                source_repo_root.display()
+            ))
+        })?;
+    let relative_cwd = source_cwd_path
+        .strip_prefix(&source_repo_root)
+        .map_err(|_| {
+            ApiError::bad_request(format!(
+                "delegation cwd `{}` must stay inside git repository `{}`",
+                source_cwd_path.display(),
+                source_repo_root.display()
+            ))
+        })?
+        .to_path_buf();
+
+    let worktree_root =
+        resolve_isolated_worktree_root(requested_worktree_path, default_workdir, delegation_id)?;
+    let source_repo_root_text = source_repo_root.to_string_lossy();
+    let worktree_root_text = worktree_root.to_string_lossy();
+    if path_contains(source_repo_root_text.as_ref(), &worktree_root)
+        || path_contains(worktree_root_text.as_ref(), &source_repo_root)
+    {
+        return Err(ApiError::bad_request(
+            "isolated worktree path must be outside the source repository",
+        ));
+    }
+
+    ensure_isolated_worktree_target_available(&worktree_root)?;
+    let staged_patch = git_repo_output(
+        &source_repo_root,
+        &["diff", "--cached", "--binary"],
+        "failed to collect staged git diff for isolated worktree",
+    )?;
+    let unstaged_patch = git_repo_output(
+        &source_repo_root,
+        &["diff", "--binary"],
+        "failed to collect unstaged git diff for isolated worktree",
+    )?;
+
+    create_detached_git_worktree(&source_repo_root, &worktree_root)?;
+    if git_patch_has_content(&staged_patch) {
+        run_git_repo_command_with_input(
+            &worktree_root,
+            &["apply", "--index", "--binary"],
+            &staged_patch,
+            "failed to apply staged git diff to isolated worktree",
+        )?;
+    }
+    if git_patch_has_content(&unstaged_patch) {
+        run_git_repo_command_with_input(
+            &worktree_root,
+            &["apply", "--binary"],
+            &unstaged_patch,
+            "failed to apply unstaged git diff to isolated worktree",
+        )?;
+    }
+
+    let child_cwd = normalize_user_facing_path(&worktree_root.join(relative_cwd));
+    Ok(PreparedIsolatedWorktree {
+        child_cwd: child_cwd.to_string_lossy().into_owned(),
+        worktree_root: worktree_root.to_string_lossy().into_owned(),
+    })
+}
+
+fn resolve_isolated_worktree_root(
+    path: Option<&str>,
+    default_workdir: &str,
+    delegation_id: &str,
+) -> Result<PathBuf, ApiError> {
+    let requested_path = match path.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(path) => resolve_requested_path(path)?,
+        None => resolve_termal_data_dir(default_workdir)
+            .join("delegations")
+            .join(delegation_id)
+            .join("worktree"),
+    };
+    canonicalize_path_with_existing_ancestor(&requested_path)
+}
+
+fn ensure_isolated_worktree_target_available(worktree_root: &FsPath) -> Result<(), ApiError> {
+    match fs::metadata(worktree_root) {
+        Ok(metadata) if !metadata.is_dir() => Err(ApiError::bad_request(format!(
+            "isolated worktree path `{}` must be a directory",
+            worktree_root.display()
+        ))),
+        Ok(_) => {
+            let mut entries = fs::read_dir(worktree_root).map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to inspect isolated worktree path {}: {err}",
+                    worktree_root.display()
+                ))
+            })?;
+            if entries.next().is_some() {
+                return Err(ApiError::bad_request(format!(
+                    "isolated worktree path `{}` must be empty or not exist",
+                    worktree_root.display()
+                )));
+            }
+            Ok(())
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(ApiError::internal(format!(
+            "failed to inspect isolated worktree path {}: {err}",
+            worktree_root.display()
+        ))),
+    }
+}
+
+fn create_detached_git_worktree(
+    source_repo_root: &FsPath,
+    worktree_root: &FsPath,
+) -> Result<(), ApiError> {
+    let parent = worktree_root.parent().ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "isolated worktree path `{}` is invalid",
+            worktree_root.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(|err| {
+        ApiError::internal(format!(
+            "failed to create isolated worktree parent {}: {err}",
+            parent.display()
+        ))
+    })?;
+
+    let output = git_command()
+        .arg("-C")
+        .arg(source_repo_root)
+        .args(["worktree", "add", "--detach"])
+        .arg(worktree_root)
+        .arg("HEAD")
+        .output()
+        .map_err(|err| ApiError::internal(format!("failed to create git worktree: {err}")))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let detail = extract_git_command_error(&output);
+    if detail.is_empty() {
+        Err(ApiError::bad_request(
+            "failed to create isolated git worktree",
+        ))
+    } else {
+        Err(ApiError::bad_request(format!(
+            "failed to create isolated git worktree: {detail}"
+        )))
+    }
+}
+
+fn git_repo_output(
+    repo_root: &FsPath,
+    args: &[&str],
+    error_context: &str,
+) -> Result<Vec<u8>, ApiError> {
+    let output = git_command()
+        .arg("-C")
+        .arg(repo_root)
+        .args(args)
+        .output()
+        .map_err(|err| ApiError::internal(format!("{error_context}: {err}")))?;
+    if output.status.success() {
+        return Ok(output.stdout);
+    }
+    let detail = extract_git_command_error(&output);
+    if detail.is_empty() {
+        Err(ApiError::bad_request(error_context))
+    } else {
+        Err(ApiError::bad_request(format!("{error_context}: {detail}")))
+    }
+}
+
+fn run_git_repo_command_with_input(
+    repo_root: &FsPath,
+    args: &[&str],
+    input: &[u8],
+    error_context: &str,
+) -> Result<(), ApiError> {
+    let mut child = git_command()
+        .arg("-C")
+        .arg(repo_root)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| ApiError::internal(format!("{error_context}: {err}")))?;
+    let Some(mut stdin) = child.stdin.take() else {
+        return Err(ApiError::internal(format!(
+            "{error_context}: failed to open git stdin"
+        )));
+    };
+    stdin
+        .write_all(input)
+        .map_err(|err| ApiError::internal(format!("{error_context}: {err}")))?;
+    drop(stdin);
+
+    let output = child
+        .wait_with_output()
+        .map_err(|err| ApiError::internal(format!("{error_context}: {err}")))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let detail = extract_git_command_error(&output);
+    if detail.is_empty() {
+        Err(ApiError::bad_request(error_context))
+    } else {
+        Err(ApiError::bad_request(format!("{error_context}: {detail}")))
+    }
+}
+
+fn git_patch_has_content(patch: &[u8]) -> bool {
+    patch.iter().any(|byte| !byte.is_ascii_whitespace())
 }
 
 enum DelegationChildOutcome {

@@ -174,6 +174,7 @@ import {
   createComposerDelegationRequest,
   resolveComposerDelegationAvailability,
   spawnDelegationCommand,
+  type CreateComposerDelegationOptions,
 } from "./delegation-commands";
 import { isLocalSessionRemote } from "./remotes";
 
@@ -1052,7 +1053,11 @@ export function SessionPaneView({
   );
   const handleSendFromFooter = useStableEvent(onSend);
   const handleSpawnDelegationFromFooter = useStableEvent(
-    async (sessionId: string, prompt: string) => {
+    async (
+      sessionId: string,
+      prompt: string,
+      options?: CreateComposerDelegationOptions,
+    ) => {
       const parentSession = sessionLookup.get(sessionId);
       const parentProject =
         parentSession?.projectId != null
@@ -1069,7 +1074,11 @@ export function SessionPaneView({
 
       const result = await spawnDelegationCommand(
         sessionId,
-        createComposerDelegationRequest(availability.parentSession, prompt),
+        createComposerDelegationRequest(
+          availability.parentSession,
+          prompt,
+          options,
+        ),
       );
       if (result.outcome === "error") {
         // Command wrappers already sanitize validation and transport failures;

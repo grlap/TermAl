@@ -180,6 +180,12 @@ impl AppState {
             }
         }
 
+        if normalized.default_project_id.is_none()
+            && normalized.subscribed_project_ids.len() == 1
+        {
+            normalized.default_project_id = normalized.subscribed_project_ids.first().cloned();
+        }
+
         if let Some(project_id) = normalized.default_project_id.clone() {
             if !known_projects.contains(project_id.as_str()) {
                 return Err(ApiError::bad_request(format!(
@@ -276,6 +282,12 @@ impl AppState {
         config
             .subscribed_project_ids
             .retain(|project_id| known_projects.contains(project_id.as_str()));
+
+        if config.default_project_id.is_none()
+            && config.subscribed_project_ids.len() == 1
+        {
+            config.default_project_id = config.subscribed_project_ids.first().cloned();
+        }
 
         if !config
             .default_project_id

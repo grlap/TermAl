@@ -1166,6 +1166,185 @@ fn delegation_creation_dispatches_child_prompt_through_runtime_channel() {
 }
 
 #[test]
+fn isolated_worktree_delegation_materializes_dirty_state_and_uses_workspace_write() {
+    let (state, input_rx) =
+        test_app_state_with_delegation_codex_runtime("isolated-delegation-runtime");
+    let unique = Uuid::new_v4();
+    let repo_root = std::env::temp_dir().join(format!("termal-isolated-source-{unique}"));
+    let worktree_root = std::env::temp_dir().join(format!("termal-isolated-child-{unique}"));
+    fs::create_dir_all(&repo_root).expect("source repo root should be created");
+    fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+    fs::write(repo_root.join("README.md"), "staged\n").expect("staged content should write");
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    fs::write(repo_root.join("README.md"), "unstaged\n").expect("unstaged content should write");
+
+    let parent_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner.create_session(
+            Agent::Codex,
+            Some("Isolated Parent".to_owned()),
+            repo_root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let session_id = record.session.id.clone();
+        state.commit_locked(&mut inner).unwrap();
+        session_id
+    };
+
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Run build-gated review.".to_owned(),
+                title: Some("Isolated Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                    owned_paths: vec!["README.md".to_owned()],
+                    worktree_path: Some(worktree_root.to_string_lossy().into_owned()),
+                }),
+            },
+        )
+        .expect("isolated worktree delegation should be created");
+
+    match input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("delegation child prompt should be delivered to runtime")
+    {
+        CodexRuntimeCommand::Prompt {
+            session_id,
+            command,
+        } => {
+            assert_eq!(session_id, created.delegation.child_session_id);
+            assert_eq!(command.approval_policy, CodexApprovalPolicy::Never);
+            assert_eq!(command.sandbox_mode, CodexSandboxMode::WorkspaceWrite);
+            assert_eq!(command.cwd, created.delegation.cwd);
+            assert!(command.prompt.contains("Write policy: isolated worktree"));
+            assert!(command.prompt.contains("README.md"));
+        }
+        _ => panic!("isolated delegation should dispatch a Codex prompt command"),
+    }
+
+    assert_eq!(created.child_session.project_id, None);
+    assert_eq!(
+        created.child_session.sandbox_mode,
+        Some(CodexSandboxMode::WorkspaceWrite)
+    );
+    assert_eq!(
+        fs::read_to_string(worktree_root.join("README.md"))
+            .unwrap()
+            .replace("\r\n", "\n"),
+        "unstaged\n"
+    );
+    let staged_diff =
+        run_git_test_command_output(&worktree_root, &["diff", "--cached", "--", "README.md"]);
+    assert!(staged_diff.contains("-base"));
+    assert!(staged_diff.contains("+staged"));
+    let unstaged_diff = run_git_test_command_output(&worktree_root, &["diff", "--", "README.md"]);
+    assert!(unstaged_diff.contains("-staged"));
+    assert!(unstaged_diff.contains("+unstaged"));
+
+    let _ = git_command()
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["worktree", "remove", "--force"])
+        .arg(&worktree_root)
+        .output();
+    let _ = fs::remove_dir_all(&repo_root);
+    let _ = fs::remove_dir_all(&worktree_root);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn isolated_worktree_delegation_generates_termal_owned_path_when_omitted() {
+    let (state, input_rx) =
+        test_app_state_with_delegation_codex_runtime("generated-isolated-delegation-runtime");
+    let unique = Uuid::new_v4();
+    let repo_root = std::env::temp_dir().join(format!("termal-isolated-auto-source-{unique}"));
+    fs::create_dir_all(&repo_root).expect("source repo root should be created");
+    fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+    fs::write(repo_root.join("README.md"), "changed\n").expect("changed file should write");
+
+    let parent_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner.create_session(
+            Agent::Codex,
+            Some("Auto Isolated Parent".to_owned()),
+            repo_root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let session_id = record.session.id.clone();
+        state.commit_locked(&mut inner).unwrap();
+        session_id
+    };
+
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Run generated isolated review.".to_owned(),
+                title: Some("Generated Isolated Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                    owned_paths: Vec::new(),
+                    worktree_path: None,
+                }),
+            },
+        )
+        .expect("isolated worktree delegation should be created");
+    let _ = input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("delegation child prompt should be delivered to runtime");
+
+    let DelegationWritePolicy::IsolatedWorktree { worktree_path, .. } =
+        &created.delegation.write_policy
+    else {
+        panic!("created delegation should preserve isolated write policy");
+    };
+    let worktree_path = worktree_path
+        .as_ref()
+        .expect("generated worktree path should be stored");
+    assert!(worktree_path.contains(&created.delegation.id));
+    assert_eq!(
+        fs::read_to_string(FsPath::new(worktree_path).join("README.md"))
+            .unwrap()
+            .replace("\r\n", "\n"),
+        "changed\n"
+    );
+
+    let _ = git_command()
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["worktree", "remove", "--force"])
+        .arg(worktree_path)
+        .output();
+    let _ = fs::remove_dir_all(&repo_root);
+    let _ = fs::remove_dir_all(
+        FsPath::new(worktree_path)
+            .parent()
+            .unwrap_or_else(|| FsPath::new(worktree_path)),
+    );
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
     let (state, input_rx) =
         test_app_state_with_delegation_codex_runtime("delegation-terminal-dispatch");
@@ -4625,7 +4804,7 @@ fn delegation_write_policy_accepts_legacy_snake_case_discriminators() {
         isolated,
         DelegationWritePolicy::IsolatedWorktree {
             owned_paths: vec!["src".to_owned()],
-            worktree_path: "C:/tmp/delegation-worktree".to_owned(),
+            worktree_path: Some("C:/tmp/delegation-worktree".to_owned()),
         }
     );
 }
@@ -5211,7 +5390,7 @@ async fn delegation_route_rejects_remote_proxy_parent_without_local_project() {
 }
 
 #[tokio::test]
-async fn delegation_route_rejects_worker_and_writable_policy() {
+async fn delegation_route_rejects_worker_and_shared_worktree_policy() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let app = app_router(state.clone());
@@ -5253,7 +5432,7 @@ async fn delegation_route_rejects_worker_and_writable_policy() {
         policy_body["error"]
             .as_str()
             .unwrap()
-            .contains("only readOnly delegation write policy")
+            .contains("sharedWorktree delegation write policy")
     );
 
     let _ = fs::remove_file(state.persistence_path.as_path());

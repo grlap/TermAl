@@ -1563,7 +1563,7 @@ export function TelegramPreferencesPanel({
             className="ghost-button"
             type="button"
             disabled
-            title="The link-code wizard lands in the next Telegram phase."
+            title="Manual chat linking is active; the link-code wizard lands in a later Telegram phase."
           >
             Link chat
           </button>
@@ -1584,10 +1584,10 @@ export function TelegramPreferencesPanel({
               <li>Open @BotFather in Telegram, create a bot with /newbot, and copy the token.</li>
               <li>Paste the token here, test the connection, choose projects, then save.</li>
               <li>Turn on Enable relay. TermAl will run the Telegram relay from the main backend process.</li>
-              <li>Use Link chat to connect this one Telegram conversation to TermAl.</li>
+              <li>Open the bot in Telegram and send /start from the linked chat.</li>
             </ol>
             <p className="session-control-hint">
-              No separate TermAl process or telegram command should be required. Relay startup and link-code binding are the next backend wiring step.
+              No separate TermAl process or telegram command is required. Use /projects and /project &lt;id&gt; in Telegram to switch projects, then /sessions and /session &lt;id&gt; to switch sessions.
             </p>
           </div>
         ) : null}

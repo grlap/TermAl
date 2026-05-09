@@ -69,6 +69,10 @@ const UNSAFE_TRANSPORT_ID_PATTERN = /[/?#\u0000-\u001f\u007f]/u;
 const DELEGATION_COMPOSER_FALLBACK_TITLE = "Delegated review";
 const DELEGATION_COMPOSER_TITLE_ELLIPSIS = "...";
 
+export type CreateComposerDelegationOptions = {
+  writePolicy?: CreateDelegationRequest["writePolicy"];
+};
+
 // These client-side wait limits compose to at most 20 status requests/sec per
 // wait call. They intentionally do not mirror backend delegation fan-out limits;
 // the backend remains authoritative and the MCP wrapper should still add a
@@ -254,16 +258,18 @@ export function delegationTitleFromPrompt(prompt: string) {
 export function createComposerDelegationRequest(
   parentSession: Pick<Session, "agent" | "model">,
   prompt: string,
+  options: CreateComposerDelegationOptions = {},
 ): CreateDelegationRequest {
-  // The composer Delegate action is intentionally the read-only reviewer path.
-  // Worker/write delegation needs explicit ownership controls before exposure.
+  // The composer Delegate action defaults to read-only reviewer mode. Build-
+  // gated agent commands may override this with an isolated worktree policy.
+  // Worker/shared-write delegation still needs explicit ownership controls.
   return {
     title: delegationTitleFromPrompt(prompt),
     prompt,
     agent: parentSession.agent,
     model: parentSession.model,
     mode: "reviewer",
-    writePolicy: { kind: "readOnly" },
+    writePolicy: options.writePolicy ?? { kind: "readOnly" },
   };
 }
 

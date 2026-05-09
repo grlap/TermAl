@@ -250,7 +250,28 @@ Runs an interactive terminal loop — reads prompts from stdin, runs one agent t
 
 ### Telegram relay (experimental)
 
-Run the backend first, then start the Telegram relay in a separate terminal:
+Configure Telegram from Settings -> Telegram:
+
+1. Create a bot with Telegram's `@BotFather` and copy the bot token.
+2. Paste the token, test the connection, choose the subscribed projects, and save.
+3. Enable the relay and restart the backend if it was already running before the save.
+4. Open the bot chat in Telegram and send `/start`.
+
+The backend runs the relay in-process; no second `cargo run -- telegram` process is required for the normal setup. The relay is bound to one Telegram chat and can control multiple subscribed TermAl projects from that chat.
+
+Telegram commands:
+
+- `/status` — show the active project's digest and actions
+- `/projects` — list subscribed projects
+- `/project <id>` — switch the active project for this Telegram chat
+- `/sessions` — list sessions in the active project
+- `/session <id>` — select a session inside the active project
+- `/session clear` — return free text to the active project's current/default session
+- `/approve`, `/reject`, `/continue`, `/fix`, `/commit`, `/iterate`, `/stop`, `/review` — dispatch project digest actions
+
+Free text is forwarded into the selected session, or into the active project's current digest target when no session is selected. Assistant replies from the selected session are tailed back to Telegram after they settle.
+
+Legacy CLI mode still exists for debugging:
 
 ```bash
 TERMAL_TELEGRAM_BOT_TOKEN=... \
@@ -259,14 +280,7 @@ TERMAL_TELEGRAM_CHAT_ID=123456789 \
 cargo run -- telegram
 ```
 
-Environment variables:
-
-- `TERMAL_TELEGRAM_CHAT_ID` — required for new setups unless `~/.termal/telegram-bot.json` already contains a trusted binding; locks the relay to one Telegram chat ID
-- `TERMAL_TELEGRAM_API_BASE_URL` — override the local TermAl backend URL (default `http://127.0.0.1:8787`)
-- `TERMAL_TELEGRAM_PUBLIC_BASE_URL` — public URL used for `Review in TermAl` deep links
-- `TERMAL_TELEGRAM_POLL_TIMEOUT_SECS` — long-poll timeout for Telegram Bot API requests
-
-Fresh relays no longer bind the first chat that sends `/start`. If no trusted binding exists, `/start` replies with setup instructions and no chat ID is persisted.
+Do not run the legacy CLI relay at the same time as the in-process relay for the same bot token; Telegram allows only one `getUpdates` poller per bot and will return API 409 conflicts.
 
 ## Project structure
 

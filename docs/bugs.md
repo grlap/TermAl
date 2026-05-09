@@ -7,9 +7,24 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Read-only delegations cannot run build-gated slash review commands
+
+**Severity:** Medium - delegated agent commands such as `/review-local` can expand and spawn, but the child reviewer session is created with Codex read-only sandboxing. `/review-local` requires `cargo check` as its first build gate, and the delegated child stops immediately because the read-only policy rejects that command.
+
+This prevents the existing unified command workflow from being reused for delegated reviews that need build or type-check commands, even when the review itself should not edit files.
+
+**Current behavior:**
+- Delegating `/review-local` spawns a read-only child with the expanded command prompt.
+- The child stops at Step 1 with `read-only session policy rejected cargo check`.
+- No diff collection or reviewer execution happens.
+
+**Proposal:**
+- Add a reviewer-safe execution mode for build checks, such as controlled writes to temporary build/cache directories or isolated worktree reviewer delegations.
+- Until that exists, surface or block slash commands that require build/test writes from read-only delegation.
+
 ## Active-baseline → settled transition can strand cursor when agent appends in-place to baselined message
 
-**Severity:** Medium - `src/telegram.rs:1969-2006`. When an active session with `baseline_while_active=true` settles, the new transition baselines onto the latest message and clears the flag. The cursor's `resend_if_grown` is set to `false`, so an in-place text growth on the baselined message is NOT detected.
+**Severity:** Medium - `src/telegram.rs:2001-2009`. When an active session with `baseline_while_active=true` settles, the new transition baselines onto the latest message and clears the flag. The cursor's `resend_if_grown` is set to `false`, so an in-place text growth on the baselined message is NOT detected.
 
 If the agent's response to the Telegram prompt appends to the existing message id (some agents stream in-place), `start_index = position_of_last + 1` skips that very message. The user's Telegram prompt was never "delivered" as a separate reply — the existing message was just baselined, and the relay shows nothing to the Telegram user.
 
@@ -24,7 +39,7 @@ If the agent's response to the Telegram prompt appends to the existing message i
 
 ## Footer-send failure permanently loses the close marker with no retry
 
-**Severity:** Medium - `src/telegram.rs:2154-2165`. Footer-send failure is converted to `Ok(sent_visible_content: true)` and logged. The footer is for visual closure. If a transient failure swallows the footer once, it is permanently lost for that turn. The footer's stated purpose ("user has no easy way to tell 'is the agent still typing or done?'") is silently undermined.
+**Severity:** Medium - `src/telegram.rs:2208-2223`. Footer-send failure is converted to `Ok(sent_visible_content: true)` and logged. The footer is for visual closure. If a transient failure swallows the footer once, it is permanently lost for that turn. The footer's stated purpose ("user has no easy way to tell 'is the agent still typing or done?'") is silently undermined.
 
 **Current behavior:**
 - Footer-send failure → `Ok(sent_visible_content: true)`, log only.
@@ -58,34 +73,9 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Capture `requestAnimationFrameMock.mock.calls.length` BEFORE the click and assert exactly one new call.
 - Or filter `mock.calls` by inspecting the callback function reference.
 
-## Deferred delegation test mutates `params` by-reference rather than using `initialProps`
-
-**Severity:** Medium - `ui/src/SessionPaneView.render-callbacks.test.ts:723`. The deferred delegation test mutates `params.activeSession = makeSessionWithId("session-2")` directly, then calls `hook.rerender()`. This breaks the typical `renderHook` contract — a future refactor that destructures `params` at call time would invalidate the test silently.
-
-**Current behavior:**
-- Test mutates parameter object by reference.
-- Future destructure-then-memoize refactor would silently fail.
-
-**Proposal:**
-- Use `renderHook(({ activeSession }) => useSessionRenderCallbacks({ ...params, activeSession }), { initialProps: { activeSession: firstSession } })` and `rerender({ activeSession: secondSession })`.
-
-## `canApplyDelegationActionResult` re-entry to same session unpinned
-
-**Severity:** Medium - `ui/src/SessionPaneView.render-callbacks.tsx:189-193`. The callback only checks `mountedRef.current && activeSessionIdRef.current === parentSessionId`. If the user switches FROM session A TO session B then BACK to session A before the delegation result settles, `activeSessionIdRef.current === parentSessionId` becomes true again, and the stale result lands.
-
-The new test only covers the unidirectional A→B case.
-
-**Current behavior:**
-- Re-entry to same session re-validates stale result.
-- A→B→A re-entry case uncovered.
-
-**Proposal:**
-- Capture an additional "operation generation" id at submit time and compare it after settlement.
-- Or document that re-entry to the same session is intentionally allowed.
-
 ## First-chunk failure can cause permanent retry loops
 
-**Severity:** Low - `src/telegram.rs:2109-2117`. The chunk loop returns `Err(err)` when `sent_visible_content` is false (no chunks were successfully sent). The cursor was NOT updated. On retry, the relay will replay the first chunk. If the first chunk's send always fails (e.g., the chunk is malformed), the user will see permanent retry loops with no progress, no `sent_visible_content`, and no error escalation.
+**Severity:** Low - `src/telegram.rs:2156-2162`. The chunk loop returns `Err(err)` when `sent_visible_content` is false (no chunks were successfully sent). The cursor was NOT updated. On retry, the relay will replay the first chunk. If the first chunk's send always fails (e.g., the chunk is malformed), the user will see permanent retry loops with no progress, no `sent_visible_content`, and no error escalation.
 
 **Current behavior:**
 - First-chunk failure → no cursor update → infinite retry.
@@ -93,28 +83,18 @@ The new test only covers the unidirectional A→B case.
 **Proposal:**
 - After N failed first-chunk attempts for the same `(message_id, chunk_index)`, advance the cursor anyway and surface a "[chunk N skipped: send failed]" line in chat.
 
-## `assertNeverDelegationStatus` runtime crash for forward-compat scenarios
+## Armed Telegram delivery failure can leak digest-primary fallback into the same chat
 
-**Severity:** Low - `ui/src/SessionPaneView.render-callbacks.tsx:78-79, 95-96`. `assertNeverDelegationStatus(status: never): never` throws at runtime. If a remote-served delegation status is added server-side and the client receives it without a corresponding client-side type update, the entire delegation card click handler throws. The user sees `"Unhandled delegation status: <newStatus>"` instead of a friendly message.
-
-**Current behavior:**
-- Compile-time exhaustiveness defense.
-- Runtime crash for forward-compat scenarios.
-
-**Proposal:**
-- Make the helper return a Either-like `null | string` and let the caller fall back to a generic message.
-- Reserve `assertNever` for build-time checks.
-
-## `forward_telegram_text_to_project` does not size-limit prompt text
-
-**Severity:** Note - `src/telegram.rs:1551-1606`. Accepts arbitrary Telegram chat text and forwards it via `termal.send_session_message(session_id, text)` without size limit. A malicious Telegram bot operator can flood the backend with large prompts.
+**Severity:** Low - `src/telegram.rs:1668-1692`. `forward_relevant_assistant_messages` suppresses digest-primary fallback only after an armed forward sends visible content. If the armed session hits a first-chunk delivery error, it logs the failure but leaves `armed_sent_visible_content=false`, so an unrelated `primary_session_id` can still forward in the same poll.
 
 **Current behavior:**
-- No length limit at the relay boundary.
-- Backend enforces limits, returns Err.
+- Armed delivery failure marks the relay state dirty and logs the error.
+- `armed_sent_visible_content` remains false.
+- Digest-primary fallback can still forward another session's assistant text to the Telegram chat.
 
 **Proposal:**
-- Length-limit `text` to a sane max (e.g., 64K characters) at the relay boundary.
+- Track "armed delivery attempted and failed" separately from "armed session only baselined/no visible content".
+- Suppress digest-primary fallback after an armed delivery error.
 
 ## Telegram tests accumulate temp files in `$TMPDIR`
 
@@ -205,18 +185,6 @@ The new test only covers the unidirectional A→B case.
 **Proposal:**
 - Add a sibling test where `prepare_*` is called against an Unknown-status session.
 
-## Deferred delegation handler test doesn't cover post-switch rejection path
-
-**Severity:** Low - `ui/src/SessionPaneView.render-callbacks.test.ts:680-740`. The "drops deferred delegation action results" test only inspects the success-after-switch path. It does NOT verify behavior when the deferred promises REJECT after session switch.
-
-**Current behavior:**
-- Post-switch resolve path covered.
-- Post-switch reject path uncovered.
-
-**Proposal:**
-- Add a test where the deferred promises REJECT after session switch.
-- Verify no `onComposerError` call.
-
 ## Marker-window override "auto-show after toggle" reset not covered
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:1461-1514`. The new test covers `null → true → null` on session switch. The toggle direction (`true → false → switch session → null`) is not covered.
@@ -227,17 +195,6 @@ The new test only covers the unidirectional A→B case.
 
 **Proposal:**
 - Add an "auto-show after toggle" sibling that exercises true→false→null on switch.
-
-## Footer-send failure violates Telegram-protocol "always closing footer" contract
-
-**Severity:** Low - `src/telegram.rs:2154-2165`. The footer error handling silently logs and returns Ok with `dirty: changed`. The Telegram-protocol contract is silently violated by transient failures.
-
-**Current behavior:**
-- Footer failure → soft fail.
-- Cursor advances despite missing closing marker.
-
-**Proposal:**
-- Document the contract or persist a "footer-pending" flag for retry.
 
 ## Chunk-loop early-return retry semantics correct but undocumented
 
@@ -371,6 +328,17 @@ If `segments.length` shrinks then grows back to a value `>= focusedSegmentIndex`
 **Proposal:**
 - Add `let reserialized = serde_json::to_value(&round_tripped).unwrap();` and `assert_eq!(reserialized, value)`.
 
+## Cursor on-disk contract comment omits `sentChunks`
+
+**Severity:** Note - `src/telegram.rs:392-397`. The comment documenting `assistantForwardingCursors` lists `messageId`, `textChars`, `resendIfGrown`, and `baselineWhileActive`, but the serialized cursor now also includes `sentChunks`.
+
+**Current behavior:**
+- The serde shape and tests include `sentChunks`.
+- The nearby on-disk contract comment omits it.
+
+**Proposal:**
+- Update the comment so the documented cursor shape matches the serialized fields.
+
 ## Composer transition restore can be lost when a non-shrink resize races the restore frame
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1765`. `resizeComposerInput` cancels a pending transition-restore frame before it knows whether the current resize will consume or replace that restore.
@@ -386,19 +354,20 @@ After a send-shrink path schedules the deferred restore, a subsequent non-shrink
 - Restore the previous transition before returning from non-shrink resize paths when a pending restore was cancelled.
 - Or avoid cancelling the pending restore until the code knows it will replace or consume it.
 
-## No test pins `styles.css` `column-reverse` visual reordering for `.is-pinned` live tail
+## Pinned live-tail `column-reverse` reverses queued prompt order
 
-**Severity:** Medium - `ui/src/styles.css:4566-4573`. Round-80 added `.is-pinned` modifier overriding `display: grid` with `display: flex; flex-direction: column-reverse`. This visually inverts the order of `liveTurnCard` and queued `pendingPromptCards` only when pinned. The DOM order in `AgentSessionPanel.tsx:1300-1306` keeps `liveTurnCard` first; with `column-reverse` the live-turn card moves to the visual bottom (closer to the composer) and pending prompts stack above it.
+**Severity:** Low - `ui/src/styles.css:4566-4573`. The `.is-pinned` modifier overrides `display: grid` with `display: flex; flex-direction: column-reverse`. This keeps the live-turn card visually closest to the composer, but it also reverses all other children. With live turn + queued prompt A + queued prompt B, the queued prompts render as B before A visually.
 
-`App.scroll-behavior.test.tsx` only checks the `is-pinned` class, not the DOM order. A regression that drops `column-reverse` (or that reverses the DOM order to compensate) cannot be caught by tests.
+Existing coverage only checks one queued prompt and the `is-pinned` class, so the multi-queued-prompt ordering regression is unpinned.
 
 **Current behavior:**
 - `.is-pinned` flips visual order via `column-reverse`.
-- DOM-vs-visual order disagrees under pinned mode.
-- No test pins the visual/DOM relationship.
+- The live card moves closest to the composer.
+- Multiple queued prompts reverse relative to their FIFO order.
 
 **Proposal:**
-- Add a snapshot or computed-style assertion on the order of `.activity-card-live` vs queued prompt cards under `.is-pinned`.
+- Use explicit CSS ordering or a queued-prompt wrapper so only the live card moves closest to the composer.
+- Add a pinned live-tail test with at least two queued prompts.
 
 ## Two composer cleanup paths look symmetric but only one restores layout
 
@@ -666,17 +635,6 @@ A regression that flipped `> 12` to `>= 12` or removed the trailing line would s
 - Add a fixture with 13+ project-scoped sessions.
 - Assert the overflow line is present plus that exactly 12 session entries appear.
 
-## Telegram renderer tests don't exercise empty-preview skip path
-
-**Severity:** Low - `src/tests/telegram.rs:188-245`. `telegram_session_preview_line` returns `None` for empty previews; the renderer skips the preview line. The test fixture has non-empty previews on every session — the empty-preview branch is structurally untested.
-
-**Current behavior:**
-- Every test fixture session has non-empty preview.
-- Empty-preview skip path uncovered.
-
-**Proposal:**
-- Add a fixture session with `preview = ""` and assert the rendered text does not include a preview line for it.
-
 ## Composer height test asserts on `transition: "none"` writes without ordering pin
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7789-7950`. The "keeps multiline composer height steady when deleting text inside a line" test asserts `heightWrites.toContainEqual({ value: "1px", transition: "none" })` and `heightWrites.toContainEqual({ value: "96px", transition: "none" })`. The full ordering is not validated, so a regression that re-orders the writes (e.g., setting `96px` first and then `1px`) would still pass even though the visible behavior would differ.
@@ -764,32 +722,6 @@ A regression that flipped `> 12` to `>= 12` or removed the trailing line would s
 **Proposal:**
 - Add `showWaitingIndicator` to the effect dependency array.
 - Or derive the exemption only from values already included in the dependency list.
-
-## Telegram `/sessions` output is not chunked
-
-**Severity:** Low - `src/telegram.rs:2020-2028`. `send_telegram_project_sessions()` renders up to 12 sessions and sends the result as one Telegram message. Telegram rejects oversized messages, and session/project names plus previews are not bounded tightly enough to guarantee the response stays below Telegram's limit.
-
-**Current behavior:**
-- `/sessions` builds one text response.
-- The response is sent through a single `send_message()` call.
-- If Telegram rejects it for length, the command produces no chat response and only logs the error.
-
-**Proposal:**
-- Reuse `chunk_telegram_message_text()` for `/sessions` output.
-- Or cap rendered names/previews tightly enough to guarantee one response fits.
-
-## Telegram `/sessions` exposes session previews to Telegram
-
-**Severity:** Low - `src/telegram.rs:2238`. The new `/sessions` command includes `session.preview` for up to 12 project sessions. Session previews can contain user/assistant conversation content, local paths, snippets, or secrets.
-
-**Current behavior:**
-- `/sessions` exports preview text, not just metadata.
-- The preview is sent to Telegram without a dedicated data-minimization or redaction pass.
-- This expands the relay from project/status metadata into broader transcript-content disclosure.
-
-**Proposal:**
-- Omit previews by default.
-- Or gate preview output behind an explicit verbose mode and apply stronger redaction before sending.
 
 ## `TelegramStateSession.status` is stringly-typed where parallel projection uses typed enum
 
@@ -965,18 +897,6 @@ The order acknowledges first then reports, which is correct (Telegram's callback
 
 **Proposal:**
 - Replace the two booleans with a `RelayState` enum (`Idle | Spawning | Running`) and centralize the `running()` accessor on it.
-
-## `from_ui_file` trim divergence between `default_project_id` and `subscribed_project_ids`
-
-**Severity:** Note - `src/telegram.rs:181-213`. The function trims `default_project_id` while `subscribed_project_ids` are NOT trimmed at the same site. A subscribed project id that arrives with leading whitespace can fail downstream lookups while the default project id passes the same check after trimming.
-
-**Current behavior:**
-- `default_project_id` is trimmed and empty-filtered.
-- `subscribed_project_ids` entries are not trimmed.
-- Two collections share configuration semantics but diverge on whitespace handling.
-
-**Proposal:**
-- Apply the same trim/empty filter to entries in `subscribed_project_ids` either in `from_ui_file` or upstream in the validate/normalize path.
 
 ## `start_telegram_relay_runtime` `else` branch redundantly clears `spawning` after spawn succeeds
 
@@ -1396,20 +1316,6 @@ A regression that left the button stuck in "Delegating..." after a thrown error 
 
 **Proposal:**
 - Add `expect(screen.queryByRole("button", { name: "Delegating..." })).not.toBeInTheDocument()` or assert "Delegate" is back as the button name.
-
-## "disables delegation while slash palette is open" doesn't pin which palette state
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7130-7147`. The test sets `committedDraft: "/model"` and asserts the Delegate button is disabled, but doesn't assert what `slashPalette.kind` is at that point. If the slash-palette state machine changed and `/model` no longer triggered `kind: "choice"`, the test would still pass for the wrong reason.
-
-`composerDelegateDisabled` has multiple disable reasons (no session, isDelegationSpawning, slash palette open). The test exercises one input that triggers the slash branch in the current implementation but doesn't pin which branch is asserted.
-
-**Current behavior:**
-- Single input string `/model` triggers disabled.
-- Disable reason not pinned.
-
-**Proposal:**
-- Either render with explicit `slashPalette` state via dependency injection.
-- Or assert the specific item-list state of the palette.
 
 ## `delegation-commands.ts` header comment doesn't reflect new composer helpers
 
@@ -2098,21 +2004,6 @@ A user clicking "Insert result" on an `error`-status agent gets the failure summ
 **Proposal:**
 - Confirm with the user via a "do you really want to insert a failed result?" pattern when `result.status !== "completed"`.
 - Or surface a non-blocking notice via `onComposerError`.
-
-## `canApplyDelegationActionResult` empty deps obscure intent
-
-**Severity:** Low - the callback at `ui/src/SessionPaneView.render-callbacks.tsx:146-149` has empty deps `[]` but reads `mountedRef.current` and `activeSessionIdRef.current`. This is intentional and correct (refs are read at call time, never close over values), but the empty deps are easy to misread.
-
-A future maintainer might think the callback should depend on `activeSession?.id` and add it, breaking the stable-reference contract that flows down through the callback chain.
-
-**Current behavior:**
-- Empty deps array.
-- Reads refs at call time — correct but easy to misread.
-- No comment explaining the intent.
-
-**Proposal:**
-- Add `// eslint-disable-next-line react-hooks/exhaustive-deps` with a short comment explaining "intentionally empty: reads refs only".
-- Or convert to a non-`useCallback` function-statement (consumers don't include it in dep arrays).
 
 ## `runAgentAction` not memoized; recreated per render
 
@@ -3266,7 +3157,7 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 
 **Severity:** Medium - any linked chat can still fan out prompt submissions quickly enough to create a burst of local backend and agent work.
 
-`src/telegram.rs:775-787` now rejects Telegram prompts above `MAX_DELEGATION_PROMPT_BYTES = 64 * 1024` before calling `forward_telegram_text_to_project`, but accepted prompts are still not rate-limited per chat. A linked chat can submit many below-limit prompts or action commands in quick succession, each becoming local backend work and possibly an agent turn.
+`src/telegram.rs:1477-1489` now rejects Telegram prompts above `MAX_DELEGATION_PROMPT_BYTES = 64 * 1024` before calling `forward_telegram_text_to_project`, but accepted prompts are still not rate-limited per chat. Command and callback actions dispatch backend work at `src/telegram.rs:1457` and `src/telegram.rs:1532`. A linked chat can submit many below-limit prompts or action commands in quick succession, each becoming local backend work and possibly an agent turn.
 
 **Current behavior:**
 - Oversized Telegram prompts are rejected by UTF-8 byte length.
@@ -4228,6 +4119,18 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   render the real composer/overview path or assert the real composer emits `data-conversation-composer-input`, so `ConversationOverviewRail` deferral does not depend only on synthetic test fixtures.
 - [ ] P2: Cover composer transition restore when a non-shrink resize races the send-shrink restore frame:
   send a multiline draft, flush the first shrink frame without the restore frame, type immediately to trigger a non-shrink resize, and assert the textarea transition is restored instead of staying `none`.
+- [ ] P2: Cover active-baseline same-message growth after Telegram prompt settlement:
+  arm a Telegram prompt behind an active turn, settle with the same assistant message id grown in place, and assert the reply forwards or the unsupported behavior is explicitly pinned.
+- [ ] P2: Cover first-chunk Telegram forward failure:
+  force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
+- [ ] P2: Cover armed-delivery failure suppressing digest-primary fallback:
+  make an armed session fail before sending visible content and assert an unrelated digest primary is not forwarded in the same poll.
+- [ ] P2: Cover OrchestratorsUpdated localized remote ownership:
+  assert emitted localized sessions clear inbound `remote_id` before replay-key normalization/fingerprinting.
+- [ ] P2: Stabilize marker focus-restore cancellation coverage:
+  capture rAF call count before closing the markers window and assert the exact newly scheduled restore frame is canceled.
+- [ ] P2: Cover pinned live-tail queued prompt order:
+  render a pinned live turn with at least two queued prompts and assert the live card is closest to the composer without reversing queued prompt FIFO order.
 - [ ] P2: Cover fit-to-frame Mermaid preview behavior with wide diagrams:
   add a `MarkdownContent` test using `fillMermaidAvailableSpace` with a wide Mermaid `viewBox` inside a constrained parent, and assert the fit-mode iframe `srcdoc` plus frame sizing contract.
 - [ ] P2: Cover editable SourcePanel Mermaid fit-mode iframe wiring:

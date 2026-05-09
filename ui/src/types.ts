@@ -328,7 +328,7 @@ export type DelegationWritePolicy =
   | {
       kind: "isolatedWorktree";
       ownedPaths: string[];
-      worktreePath: string;
+      worktreePath?: string;
     };
 
 export type DelegationFinding = {
