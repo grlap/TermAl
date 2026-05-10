@@ -267,18 +267,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Hook session deletion to remove the corresponding cursor.
 - Or prune entries in the relay's existing cleanup paths whenever it observes a foreign session id absent from current state.
 
-## Codepoint-paste truncation in marker create form has no user feedback
-
-**Severity:** Note - `ui/src/panels/conversation-markers.tsx:644-649`. `updateCreateMarkerName` is called from `onChange` and slices the input. During paste of >120 codepoints the user sees their input truncated to 120 with no indication that more was discarded. The behavior is now codepoint-correct but lost the browser's "input-length-limit" affordance.
-
-**Current behavior:**
-- Paste truncates silently.
-- No visual count or limit indicator.
-
-**Proposal:**
-- Add a tooltip / live-region count showing `currentLength/120` near the input.
-- Or surface a brief toast when truncation actually happens.
-
 ## Marker dialog-semantics test bundles 6+ behaviors in one `it()`
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:1024-1121`. The new "uses dialog semantics and local keyboard behavior" test combines six behaviors (dialog role, input focus/select, codepoint truncation, whitespace-disabled submit, button-keydown short-circuit, resize-doesn't-close-during-edit, trim, cancel restores focus, escape restores focus). One test asserting six behaviors fails opaquely.

@@ -7,6 +7,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -464,6 +465,7 @@ export function useConversationMarkerContextMenu({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const firstMenuItemRef = useRef<HTMLButtonElement | null>(null);
   const createNameInputRef = useRef<HTMLInputElement | null>(null);
+  const createNameLimitId = useId();
   const focusRestoreFrameRef = useRef<number | null>(null);
   const isContextMenuOpen = contextMenu !== null;
   contextMenuRef.current = contextMenu;
@@ -656,6 +658,9 @@ export function useConversationMarkerContextMenu({
     ? markersByMessageId.get(contextMenu.messageId) ?? []
     : [];
   const createMarkerName = contextMenu?.draftName.trim() ?? "";
+  const createMarkerNameLength = contextMenu
+    ? Array.from(contextMenu.draftName).length
+    : 0;
   const updateCreateMarkerName = (name: string) => {
     setContextMenu((current) =>
       current
@@ -727,8 +732,20 @@ export function useConversationMarkerContextMenu({
                   className="conversation-marker-context-menu-input"
                   value={contextMenu.draftName}
                   onChange={(event) => updateCreateMarkerName(event.target.value)}
+                  aria-describedby={createNameLimitId}
                 />
               </label>
+              <span
+                id={createNameLimitId}
+                className="conversation-marker-context-menu-limit"
+                aria-live="polite"
+              >
+                {createMarkerNameLength}/{CONVERSATION_MARKER_NAME_MAX_LENGTH}{" "}
+                characters
+                {createMarkerNameLength === CONVERSATION_MARKER_NAME_MAX_LENGTH
+                  ? " maximum"
+                  : ""}
+              </span>
               <div className="conversation-marker-context-menu-form-actions">
                 <button
                   type="submit"

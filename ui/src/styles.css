@@ -4160,6 +4160,13 @@ textarea {
   outline-offset: 1px;
 }
 
+.conversation-marker-context-menu-limit {
+  justify-self: end;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
 .conversation-marker-context-menu-form-actions {
   display: flex;
   gap: var(--space-xs);

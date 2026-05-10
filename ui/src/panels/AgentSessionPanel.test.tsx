@@ -1571,6 +1571,53 @@ describe("AgentSessionPanel conversation caching", () => {
     });
   });
 
+  it("shows marker label length feedback while creating a marker", async () => {
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      renderMessageCard: (message) => (
+        <article className="message-card">
+          <div
+            className="message-meta"
+            data-conversation-marker-menu-trigger={
+              message.author === "assistant" ? true : undefined
+            }
+          >
+            <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+            <span>{message.timestamp}</span>
+          </div>
+          <p>{`${message.id} body`}</p>
+        </article>
+      ),
+    });
+
+    const trigger = screen
+      .getByText("Agent message-2")
+      .closest("[data-conversation-marker-menu-trigger='true']") as HTMLElement;
+    fireEvent.contextMenu(trigger);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+
+    const dialog = screen.getByRole("dialog", {
+      name: "Create conversation marker",
+    });
+    const markerLabelInput = within(dialog).getByRole("textbox", {
+      name: "Marker label",
+    }) as HTMLInputElement;
+
+    expect(within(dialog).getByText("10/120 characters")).toBeInTheDocument();
+    fireEvent.change(markerLabelInput, { target: { value: "x".repeat(121) } });
+
+    expect(markerLabelInput.value).toHaveLength(120);
+    expect(
+      within(dialog).getByText("120/120 characters maximum"),
+    ).toBeInTheDocument();
+  });
+
   it("toggles the floating marker window from the message context menu", () => {
     const activeSession = makeSession("session-1", {
       messages: makeTextMessages(4),
