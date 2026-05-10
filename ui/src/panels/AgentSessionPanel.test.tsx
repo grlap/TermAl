@@ -9753,6 +9753,17 @@ describe("AgentSessionPanelFooter", () => {
         callbacks.forEach((callback) => callback(0));
       });
     };
+    const flushNewestAnimationFrame = () => {
+      const newestFrameId = Math.max(...queuedFrames.keys());
+      const callback = queuedFrames.get(newestFrameId);
+      if (!callback) {
+        throw new Error("Expected a queued animation frame");
+      }
+      queuedFrames.delete(newestFrameId);
+      act(() => {
+        callback(0);
+      });
+    };
     const onSend = vi.fn(() => true);
     let unmount: ReturnType<typeof render>["unmount"] | null = null;
 
@@ -9804,7 +9815,7 @@ describe("AgentSessionPanelFooter", () => {
           target: { value: "new draft" },
         });
       });
-      flushNextAnimationFrameBatch();
+      flushNewestAnimationFrame();
 
       expect(textarea).toHaveValue("new draft");
       expect(textarea.style.transition).toBe("height 150ms ease");
