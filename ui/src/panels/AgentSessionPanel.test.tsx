@@ -9917,6 +9917,7 @@ describe("AgentSessionPanelFooter", () => {
         );
       });
 
+      expect(textarea.style.transition).toBe("height 150ms ease");
       const nextTextarea = screen.getByLabelText("Message session-b");
       if (!(nextTextarea instanceof HTMLTextAreaElement)) {
         throw new Error("Composer textarea not found after session switch");

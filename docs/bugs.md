@@ -298,18 +298,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Add a sibling test where `prepare_*` is called against an Unknown-status session.
 
-## Composer transition session-switch test only inspects the new textarea
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:8401-8541`. Asserts the textarea's transition stays `"height 150ms ease"` after the session switch. If the regression were "the prior session's transition is restored on the WRONG textarea" (a stale element reference), the test wouldn't catch it because it only inspects the new textarea.
-
-**Current behavior:**
-- Narrow assertion pins one outcome.
-- Doesn't pin where the restore happened.
-
-**Proposal:**
-- Capture the original textarea node reference before rerender.
-- Assert on it after rerender (it's been removed from DOM, but transition state is observable in the captured ref).
-
 ## Send-shrink test brittle to probe sequence refactors
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:8362-8365`. The assertion `expect(heightWrites).toContainEqual({value: "40px", transition: "none"})` requires the height of `40px` to be one of the writes — but the implementation does multiple writes during shrink (`1px` probe, then `previousMeasuredHeight`, then `40px`).
