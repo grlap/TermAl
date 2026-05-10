@@ -74,7 +74,6 @@ fn run_telegram_bot_with_config(
     }
 
     while !telegram_relay_shutdown_requested(&shutdown) {
-        let mut dirty = false;
         let updates = match telegram.get_updates(state.next_update_id, config.poll_timeout_secs) {
             Ok(updates) => updates,
             Err(err) => {
@@ -82,37 +81,16 @@ fn run_telegram_bot_with_config(
                 persist_dirty_telegram_state_after_poll_error(
                     &config.state_path,
                     &state,
-                    dirty,
+                    false,
                 );
                 telegram_relay_sleep(TELEGRAM_ERROR_RETRY_DELAY, &shutdown);
                 continue;
             }
         };
 
-        for update in updates {
-            if telegram_relay_shutdown_requested(&shutdown) {
-                break;
-            }
-            let next_update_id = update.update_id.saturating_add(1);
-            if state.next_update_id != Some(next_update_id) {
-                state.next_update_id = Some(next_update_id);
-                dirty = true;
-            }
-
-            match handle_telegram_update(&telegram, &termal, &config, &mut state, update) {
-                Ok(changed) => dirty |= changed,
-                Err(err) => log_telegram_error("failed to handle update", &err),
-            }
-        }
-
-        if !telegram_relay_shutdown_requested(&shutdown) {
-            if let Some(chat_id) = effective_telegram_chat_id(&config, &state) {
-                match sync_telegram_digest(&telegram, &termal, &config, &mut state, chat_id) {
-                    Ok(changed) => dirty |= changed,
-                    Err(err) => log_telegram_error("failed to sync digest", &err),
-                }
-            }
-        }
+        let dirty = drain_telegram_updates_then_sync_digest(
+            &telegram, &termal, &config, &mut state, updates, &shutdown,
+        );
 
         if dirty {
             persist_telegram_bot_state(&config.state_path, &state)?;
@@ -134,6 +112,43 @@ fn telegram_relay_sleep(duration: Duration, shutdown: &Option<Arc<AtomicBool>>) 
         std::thread::sleep(chunk);
         remaining = remaining.saturating_sub(chunk);
     }
+}
+
+fn drain_telegram_updates_then_sync_digest(
+    telegram: &impl TelegramCallbackResponder,
+    termal: &(impl TelegramPromptClient + TelegramActionClient),
+    config: &TelegramBotConfig,
+    state: &mut TelegramBotState,
+    updates: Vec<TelegramUpdate>,
+    shutdown: &Option<Arc<AtomicBool>>,
+) -> bool {
+    let mut dirty = false;
+    for update in updates {
+        if telegram_relay_shutdown_requested(shutdown) {
+            break;
+        }
+        let next_update_id = update.update_id.saturating_add(1);
+        if state.next_update_id != Some(next_update_id) {
+            state.next_update_id = Some(next_update_id);
+            dirty = true;
+        }
+
+        match handle_telegram_update(telegram, termal, config, state, update) {
+            Ok(changed) => dirty |= changed,
+            Err(err) => log_telegram_error("failed to handle update", &err),
+        }
+    }
+
+    if !telegram_relay_shutdown_requested(shutdown) {
+        if let Some(chat_id) = effective_telegram_chat_id(config, state) {
+            match sync_telegram_digest(telegram, termal, config, state, chat_id) {
+                Ok(changed) => dirty |= changed,
+                Err(err) => log_telegram_error("failed to sync digest", &err),
+            }
+        }
+    }
+
+    dirty
 }
 
 /// Holds Telegram bot configuration.
@@ -1620,8 +1635,8 @@ struct TelegramInlineKeyboardButton {
 
 /// Handles Telegram update.
 fn handle_telegram_update(
-    telegram: &TelegramApiClient,
-    termal: &TermalApiClient,
+    telegram: &impl TelegramCallbackResponder,
+    termal: &(impl TelegramPromptClient + TelegramActionClient),
     config: &TelegramBotConfig,
     state: &mut TelegramBotState,
     update: TelegramUpdate,
@@ -1893,8 +1908,8 @@ fn forward_telegram_text_to_project(
 
 /// Syncs Telegram digest.
 fn sync_telegram_digest(
-    telegram: &TelegramApiClient,
-    termal: &TermalApiClient,
+    telegram: &impl TelegramDigestMessageSender,
+    termal: &impl TelegramPromptClient,
     config: &TelegramBotConfig,
     state: &mut TelegramBotState,
     chat_id: i64,

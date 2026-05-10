@@ -3499,10 +3499,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover Telegram relay update-before-digest ordering:
-  extract a testable relay loop iteration or fake Telegram/TermAl clients, then
-  assert pending updates are processed before digest sync and that one loop
-  iteration emits at most one digest/assistant-forwarding pass.
 - [ ] P2: Cover pending-prompts visibility without a live turn:
   render `SessionConversationPage` with `showWaitingIndicator: false` and a non-empty `pendingPrompts` array, then assert `.conversation-live-tail` is absent and the pending-prompt cards live inside `.conversation-pending-prompts`. Prevents a regression that re-introduces the old `liveTurnCard || pendingPromptCards.length > 0` condition.
 - [ ] P2: Cover `DelegationWaitResponse` JSON serialization:

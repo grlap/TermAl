@@ -107,6 +107,7 @@ impl TelegramSessionReader for FakeTelegramSessionReaderById {
 struct FakeTelegramPromptClient {
     digests: RefCell<VecDeque<std::result::Result<ProjectDigestResponse, String>>>,
     digest_project_ids: RefCell<Vec<String>>,
+    events: RefCell<Vec<String>>,
     session_response: TelegramSessionFetchResponse,
     state_session_reads: Cell<usize>,
     state_sessions: TelegramStateSessionsResponse,
@@ -122,6 +123,7 @@ impl FakeTelegramPromptClient {
         Self {
             digests: RefCell::new(VecDeque::from(digests)),
             digest_project_ids: RefCell::new(Vec::new()),
+            events: RefCell::new(Vec::new()),
             session_response,
             state_session_reads: Cell::new(0),
             state_sessions: TelegramStateSessionsResponse {
@@ -145,13 +147,19 @@ impl FakeTelegramPromptClient {
 }
 
 impl TelegramSessionReader for FakeTelegramPromptClient {
-    fn get_session(&self, _session_id: &str) -> Result<TelegramSessionFetchResponse> {
+    fn get_session(&self, session_id: &str) -> Result<TelegramSessionFetchResponse> {
+        self.events
+            .borrow_mut()
+            .push(format!("session:{session_id}"));
         Ok(self.session_response.clone())
     }
 }
 
 impl TelegramPromptClient for FakeTelegramPromptClient {
     fn get_project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse> {
+        self.events
+            .borrow_mut()
+            .push(format!("digest:{project_id}"));
         self.digest_project_ids
             .borrow_mut()
             .push(project_id.to_owned());
@@ -167,12 +175,14 @@ impl TelegramPromptClient for FakeTelegramPromptClient {
     }
 
     fn get_state_sessions(&self) -> Result<TelegramStateSessionsResponse> {
+        self.events.borrow_mut().push("state-sessions".to_owned());
         self.state_session_reads
             .set(self.state_session_reads.get() + 1);
         Ok(self.state_sessions.clone())
     }
 
     fn send_session_message(&self, session_id: &str, text: &str) -> Result<()> {
+        self.events.borrow_mut().push(format!("send:{session_id}"));
         if let Some(error) = self.send_error.as_deref() {
             bail!("{error}");
         }
@@ -631,6 +641,76 @@ fn telegram_sessions_slash_command_reads_state_and_sends_rendered_list() {
     assert!(sent_texts[0].contains("Sessions for TermAl:"));
     assert!(sent_texts[0].contains("- Current (active, 3 messages)"));
     assert!(sent_texts[0].contains("id: session-1"));
+}
+
+#[test]
+fn telegram_relay_iteration_drains_updates_before_one_digest_sync() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![Ok(telegram_project_digest(Some("session-2")))],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![TelegramStateSession {
+            id: "session-2".to_owned(),
+            name: "Selected".to_owned(),
+            project_id: Some("project-1".to_owned()),
+            status: TelegramSessionStatus::Idle,
+            message_count: 0,
+        }],
+    });
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+    let updates = vec![TelegramUpdate {
+        update_id: 10,
+        callback_query: None,
+        message: Some(TelegramChatMessage {
+            message_id: 7,
+            chat: TelegramChat {
+                id: 42,
+                _kind: "private".to_owned(),
+            },
+            text: Some("/session session-2".to_owned()),
+        }),
+    }];
+
+    let dirty = drain_telegram_updates_then_sync_digest(
+        &telegram, &termal, &config, &mut state, updates, &None,
+    );
+
+    assert!(dirty);
+    assert_eq!(state.next_update_id, Some(11));
+    assert_eq!(state.selected_session_id.as_deref(), Some("session-2"));
+    assert_eq!(
+        termal.digest_project_ids.borrow().as_slice(),
+        ["project-1".to_owned()]
+    );
+    let events = termal.events.borrow();
+    let first_update_event = events
+        .iter()
+        .position(|event| event == "state-sessions")
+        .expect("update handling should read sessions before selecting");
+    let digest_event = events
+        .iter()
+        .position(|event| event == "digest:project-1")
+        .expect("iteration should sync one digest after updates");
+    assert!(first_update_event < digest_event, "{events:?}");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.as_str() == "digest:project-1")
+            .count(),
+        1
+    );
 }
 
 #[test]
