@@ -3499,8 +3499,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover Claude default-model validation:
-  assert app settings reject leading-hyphen and control-character Claude model values, or assert the eventual Claude CLI args use a safe `--model=<value>` form.
 - [ ] P2: Cover Telegram relay update-before-digest ordering:
   extract a testable relay loop iteration or fake Telegram/TermAl clients, then
   assert pending updates are processed before digest sync and that one loop
