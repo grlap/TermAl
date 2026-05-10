@@ -2028,6 +2028,10 @@ const SessionComposer = memo(function SessionComposer({
   }
 
   function cancelAndRestoreScheduledComposerTransition() {
+    // A shrink can suppress height transitions for one frame. If another path
+    // cancels that restore before the frame fires, only restore when the current
+    // textarea is still in that temporary "none" state; otherwise a newer resize
+    // has already established its own transition.
     const previousInlineTransition = cancelScheduledComposerTransitionRestore();
     const textarea = composerInputRef.current;
     if (
@@ -2046,6 +2050,8 @@ const SessionComposer = memo(function SessionComposer({
     cancelScheduledComposerTransitionRestore();
     const frameId = window.requestAnimationFrame(() => {
       const pendingRestore = composerTransitionRestoreRef.current;
+      // A later resize may cancel or replace this restore before the rAF fires.
+      // The frame id pins this callback to the restore that scheduled it.
       if (!pendingRestore || pendingRestore.frameId !== frameId) {
         return;
       }

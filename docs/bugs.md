@@ -324,20 +324,6 @@ Cosmetic — possible to simplify by routing through one cleanup.
 **Proposal:**
 - Hoist the cleanup-state reset into a single helper called from both effects.
 
-## `cancelAndRestoreScheduledComposerTransition` race-window guard is subtle and undocumented
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1683-1727`. `scheduleComposerTransitionRestore` schedules a single rAF that synchronously reads the ref to verify identity. The frame-id identity check `if (!pendingRestore || pendingRestore.frameId !== frameId)` covers the race between scheduling and firing.
-
-`cancelScheduledComposerTransitionRestore` clears the ref to null BEFORE returning; if the textarea's transition is still `"none"` only because the resize did not yet flush, a competing scheduling call can lose the original `previousInlineTransition`. Mostly correct but the race-window guard is undocumented.
-
-**Current behavior:**
-- Frame-id identity check guards the race.
-- Pre-flush competing scheduling can lose the previous transition.
-- No comment block describes the sequencing contract.
-
-**Proposal:**
-- Inline a comment block on `cancelAndRestoreScheduledComposerTransition` describing the race-window guard.
-
 ## Send-shrink test brittle to probe sequence refactors
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:8362-8365`. The assertion `expect(heightWrites).toContainEqual({value: "40px", transition: "none"})` requires the height of `40px` to be one of the writes — but the implementation does multiple writes during shrink (`1px` probe, then `previousMeasuredHeight`, then `40px`).
