@@ -29,22 +29,6 @@ the Implementation Tasks section.
 - Bind validation to the opened handle where platform support allows it, e.g. no-follow open plus handle metadata checks.
 - Or compare pre/post file metadata and treat mismatch as unavailable.
 
-## Project-local command metadata can grant trusted delegation defaults
-
-**Severity:** Medium - `src/api_files.rs:534-571`, `src/api_files.rs:649-666`, and `src/workspace_queries.rs:177-180, 241-357`. The resolver reads frontmatter metadata from prompt-template command files under the active session workdir and applies `metadata.termal.delegation` defaults for delegate intent. That lets project-local `.claude/commands/*.md` files opt into reviewer mode and `isolatedWorktree` write policy before the target TermAl-trusted command/skill boundary is enforced.
-
-Project-controlled metadata should not silently broaden delegation write capability. Without an explicit trust boundary, a repository can make a normal slash-command delegation look like a trusted review workflow.
-
-**Current behavior:**
-- Prompt-template command metadata is loaded from the session workdir.
-- `metadata.termal.delegation.enabled` can produce delegation defaults.
-- `metadata.termal.delegation.writePolicy.kind: isolatedWorktree` is accepted without a separate trusted-source check.
-
-**Proposal:**
-- Add an explicit trusted command/source marker before accepting delegation metadata that affects mode or write policy.
-- Or require confirmation before applying non-read-only defaults from project-local commands.
-- Add negative coverage for project-local metadata attempting to grant `isolatedWorktree`.
-
 ## Pending-prompts queue scrolls away from the pinned live tail
 
 **Severity:** Low - `ui/src/styles.css:4567-4576`, `ui/src/panels/AgentSessionPanel.tsx:1437-1442`. After splitting `pendingPromptCards` into a sibling `<div className="conversation-pending-prompts">` instead of nesting inside `.conversation-live-tail`, the live tail keeps `position: sticky; bottom: 0` while the pending-prompts queue uses `display: grid` with no sticky positioning.
@@ -4396,8 +4380,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   instead of silently mixing old prompt content with freshly re-read metadata.
 - [ ] P2: Cover delegation tests through `update_app_settings` normalization:
   add at least one delegation test that goes through `state.update_app_settings(...)` with a non-canonical model string instead of mutating `inner.preferences.default_codex_model` directly, then creates a delegation and asserts the child uses the canonicalized form.
-- [ ] P2: Cover trusted command metadata boundaries:
-  add resolver tests proving project-local `.claude/commands/*.md` frontmatter cannot grant delegation defaults or `isolatedWorktree`, while an explicitly trusted TermAl-owned command can.
 - [ ] P2: Cover frontend default-model forwarding for all model-picker agents:
   add parameterized tests for Claude, Codex, Cursor, and Gemini covering custom default forwarding, the `default` sentinel omission, and at least one settings-panel Apply/Reset interaction.
 - [ ] P2: Cover Claude default-model validation:

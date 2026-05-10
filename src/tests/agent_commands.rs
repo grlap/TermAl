@@ -86,6 +86,7 @@ $ARGUMENTS
                 source: ".claude/commands/fix-bug.md".to_owned(),
                 argument_hint: None,
                 resolver_frontmatter: None,
+                resolver_frontmatter_trusted: false,
             },
             AgentCommand {
                 kind: AgentCommandKind::PromptTemplate,
@@ -100,6 +101,7 @@ Inspect diffs.
                 source: ".claude/commands/review-local.md".to_owned(),
                 argument_hint: None,
                 resolver_frontmatter: None,
+                resolver_frontmatter_trusted: false,
             },
         ]
     );
@@ -486,6 +488,7 @@ fn extracts_claude_native_agent_commands_from_initialize_response() {
                 source: "Claude bundled command".to_owned(),
                 argument_hint: None,
                 resolver_frontmatter: None,
+                resolver_frontmatter_trusted: false,
             },
             AgentCommand {
                 kind: AgentCommandKind::NativeSlash,
@@ -495,6 +498,7 @@ fn extracts_claude_native_agent_commands_from_initialize_response() {
                 source: "Claude project command".to_owned(),
                 argument_hint: Some("[scope]".to_owned()),
                 resolver_frontmatter: None,
+                resolver_frontmatter_trusted: false,
             },
         ])
     );
@@ -536,6 +540,7 @@ fn extracts_claude_native_agent_commands_filters_empty_names_and_normalizes_user
             source: "Claude user command".to_owned(),
             argument_hint: None,
             resolver_frontmatter: None,
+            resolver_frontmatter_trusted: false,
         }])
     );
 }
@@ -613,6 +618,7 @@ fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
                     source: "Claude bundled command".to_owned(),
                     argument_hint: None,
                     resolver_frontmatter: None,
+                    resolver_frontmatter_trusted: false,
                 },
                 AgentCommand {
                     kind: AgentCommandKind::NativeSlash,
@@ -622,6 +628,7 @@ fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
                     source: "Claude project command".to_owned(),
                     argument_hint: Some("[scope]".to_owned()),
                     resolver_frontmatter: None,
+                    resolver_frontmatter_trusted: false,
                 },
             ],
         )
@@ -690,6 +697,7 @@ fn sync_session_agent_commands_bumps_visible_session_command_revision() {
                 source: "Claude bundled command".to_owned(),
                 argument_hint: None,
                 resolver_frontmatter: None,
+                resolver_frontmatter_trusted: false,
             }],
         )
         .unwrap();
@@ -750,6 +758,7 @@ fn sync_session_agent_commands_filters_runtime_prompt_templates() {
                     source: ".claude/commands/review-local.md".to_owned(),
                     argument_hint: None,
                     resolver_frontmatter: None,
+                    resolver_frontmatter_trusted: false,
                 },
                 AgentCommand {
                     kind: AgentCommandKind::NativeSlash,
@@ -759,6 +768,7 @@ fn sync_session_agent_commands_filters_runtime_prompt_templates() {
                     source: "Claude bundled command".to_owned(),
                     argument_hint: None,
                     resolver_frontmatter: None,
+                    resolver_frontmatter_trusted: false,
                 },
             ],
         )
@@ -975,11 +985,11 @@ fn rejects_oversized_agent_command_arguments_and_note() {
     }
 }
 
-// Pins resolver-owned delegation policy for `/review-local`. React should
-// not hard-code the isolated-worktree special case; the backend returns the
-// default when the command is resolved with delegate intent.
+// Pins project-local command metadata to title generation only. React should
+// not hard-code the isolated-worktree special case, and repository-owned
+// frontmatter must not grant trusted delegation defaults by itself.
 #[test]
-fn resolves_review_local_delegation_defaults() {
+fn project_local_review_local_metadata_does_not_grant_delegation_defaults() {
     let root = std::env::temp_dir().join(format!(
         "termal-agent-command-resolve-review-local-{}",
         Uuid::new_v4()
@@ -1039,36 +1049,22 @@ Review staged and unstaged changes.
 
     assert_eq!(response.visible_prompt, "/review-local");
     assert_eq!(
+        response.title.as_deref(),
+        Some("Review staged and unstaged changes.")
+    );
+    assert_eq!(
         response.expanded_prompt.as_deref(),
         Some("Review staged and unstaged changes.\n")
     );
-    assert_eq!(
-        response.delegation,
-        Some(ResolvedAgentCommandDelegationDefaults {
-            mode: Some(DelegationMode::Reviewer),
-            title: Some("Review staged and unstaged changes.".to_owned()),
-            write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
-                owned_paths: Vec::new(),
-                worktree_path: None,
-            }),
-        })
-    );
+    assert_eq!(response.delegation, None);
 
     fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
 fn rejects_invalid_agent_command_delegation_metadata() {
-    let root = std::env::temp_dir().join(format!(
-        "termal-agent-command-invalid-metadata-{}",
-        Uuid::new_v4()
-    ));
-    let commands_dir = root.join(".claude").join("commands");
-    fs::create_dir_all(&commands_dir).unwrap();
-    fs::write(
-        commands_dir.join("review-local.md"),
-        "---
-name: review-local
+    let error = parse_agent_command_resolver_metadata(
+        "name: review-local
 description: Review staged and unstaged changes.
 metadata:
   termal:
@@ -1076,51 +1072,116 @@ metadata:
       enabled: true
       mode: worker
       writePolicy:
-        kind: sharedWorktree
----
-
-Review staged and unstaged changes.
-",
+        kind: sharedWorktree",
+        true,
     )
-    .unwrap();
-
-    let state = test_app_state();
-    let created = state
-        .create_session(CreateSessionRequest {
-            agent: Some(Agent::Codex),
-            name: Some("Codex Session".to_owned()),
-            workdir: Some(root.to_string_lossy().into_owned()),
-            project_id: None,
-            model: None,
-            approval_policy: None,
-            reasoning_effort: None,
-            sandbox_mode: None,
-            cursor_mode: None,
-            claude_approval_mode: None,
-            claude_effort: None,
-            gemini_approval_mode: None,
-        })
-        .unwrap();
-
-    let error = state
-        .resolve_agent_command(
-            &created.session_id,
-            "review-local",
-            ResolveAgentCommandRequest {
-                arguments: None,
-                note: None,
-                intent: AgentCommandResolveIntent::Delegate,
-            },
-        )
-        .unwrap_err();
+    .unwrap_err();
 
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert_eq!(
         error.message,
         "metadata.termal.delegation.mode `worker` is not supported yet"
     );
+}
 
-    fs::remove_dir_all(root).unwrap();
+#[test]
+fn project_local_invalid_delegation_metadata_does_not_block_resolution() {
+    let cases = [
+        (
+            "unsupported-values",
+            "metadata:
+  termal:
+    delegation:
+      enabled: true
+      mode: worker
+      writePolicy:
+        kind: sharedWorktree",
+        ),
+        (
+            "misquoted-mode",
+            "metadata:
+  termal:
+    delegation:
+      enabled: true
+      mode: 'reviewer' stale'
+      writePolicy:
+        kind: readOnly",
+        ),
+        (
+            "tab-indented-delegation",
+            "metadata:
+  termal:
+    delegation:
+\t  enabled: true",
+        ),
+    ];
+
+    for (case_name, frontmatter) in cases {
+        let root = std::env::temp_dir().join(format!(
+            "termal-agent-command-untrusted-invalid-metadata-{case_name}-{}",
+            Uuid::new_v4()
+        ));
+        let _cleanup = TempDirCleanup::new(root.clone());
+        let commands_dir = root.join(".claude").join("commands");
+        fs::create_dir_all(&commands_dir).unwrap();
+        fs::write(
+            commands_dir.join("review-local.md"),
+            format!(
+                "---
+name: review-local
+description: Frontmatter review title.
+{frontmatter}
+---
+
+Body fallback should not win.
+"
+            ),
+        )
+        .unwrap();
+
+        let state = test_app_state();
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Codex Session".to_owned()),
+                workdir: Some(root.to_string_lossy().into_owned()),
+                project_id: None,
+                model: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        let response = state
+            .resolve_agent_command(
+                &created.session_id,
+                "review-local",
+                ResolveAgentCommandRequest {
+                    arguments: None,
+                    note: None,
+                    intent: AgentCommandResolveIntent::Delegate,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(response.visible_prompt, "/review-local", "{case_name}");
+        assert_eq!(
+            response.title.as_deref(),
+            Some("Frontmatter review title."),
+            "{case_name}"
+        );
+        assert_eq!(
+            response.expanded_prompt.as_deref(),
+            Some("Body fallback should not win.\n"),
+            "{case_name}"
+        );
+        assert_eq!(response.delegation, None, "{case_name}");
+    }
 }
 
 #[test]
@@ -1193,60 +1254,10 @@ fn rejects_partial_agent_command_termal_metadata() {
     ];
 
     for (case_name, frontmatter, expected_message) in cases {
-        let root = std::env::temp_dir().join(format!(
-            "termal-agent-command-partial-metadata-{}-{}",
-            case_name,
-            Uuid::new_v4()
-        ));
-        let commands_dir = root.join(".claude").join("commands");
-        fs::create_dir_all(&commands_dir).unwrap();
-        fs::write(
-            commands_dir.join("review-local.md"),
-            format!(
-                "---
-{frontmatter}
----
-
-Review staged and unstaged changes.
-"
-            ),
-        )
-        .unwrap();
-
-        let state = test_app_state();
-        let created = state
-            .create_session(CreateSessionRequest {
-                agent: Some(Agent::Codex),
-                name: Some("Codex Session".to_owned()),
-                workdir: Some(root.to_string_lossy().into_owned()),
-                project_id: None,
-                model: None,
-                approval_policy: None,
-                reasoning_effort: None,
-                sandbox_mode: None,
-                cursor_mode: None,
-                claude_approval_mode: None,
-                claude_effort: None,
-                gemini_approval_mode: None,
-            })
-            .unwrap();
-
-        let error = state
-            .resolve_agent_command(
-                &created.session_id,
-                "review-local",
-                ResolveAgentCommandRequest {
-                    arguments: None,
-                    note: None,
-                    intent: AgentCommandResolveIntent::Delegate,
-                },
-            )
-            .unwrap_err();
+        let error = parse_agent_command_resolver_metadata(frontmatter, true).unwrap_err();
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST, "{case_name}");
         assert_eq!(error.message, expected_message, "{case_name}");
-
-        fs::remove_dir_all(root).unwrap();
     }
 }
 
@@ -1430,14 +1441,8 @@ Review staged and unstaged changes.
         .unwrap();
 
     assert_eq!(response.visible_prompt, "/review-local");
-    assert_eq!(
-        response.delegation,
-        Some(ResolvedAgentCommandDelegationDefaults {
-            mode: Some(DelegationMode::Reviewer),
-            title: Some("Review local' stale".to_owned()),
-            write_policy: Some(DelegationWritePolicy::ReadOnly),
-        })
-    );
+    assert_eq!(response.title.as_deref(), Some("Review local' stale"));
+    assert_eq!(response.delegation, None);
 }
 
 #[test]
@@ -1495,14 +1500,8 @@ Review $ARGUMENTS.
         .unwrap();
 
     assert_eq!(response.visible_prompt, "/review-local staged changes");
-    assert_eq!(
-        response.delegation,
-        Some(ResolvedAgentCommandDelegationDefaults {
-            mode: Some(DelegationMode::Reviewer),
-            title: Some("Review local staged".to_owned()),
-            write_policy: Some(DelegationWritePolicy::ReadOnly),
-        })
-    );
+    assert_eq!(response.title.as_deref(), Some("Review local staged"));
+    assert_eq!(response.delegation, None);
 }
 
 #[test]
@@ -1535,6 +1534,7 @@ fn native_delegate_resolution_uses_metadata_name_not_source_suffix() {
                 source: ".claude/commands/review-local.md".to_owned(),
                 argument_hint: None,
                 resolver_frontmatter: None,
+                resolver_frontmatter_trusted: false,
             }],
         )
         .unwrap();
@@ -1586,6 +1586,7 @@ fn legacy_cached_prompt_template_delegate_resolution_uses_metadata_name_not_sour
             source: ".claude/commands/review-local.md".to_owned(),
             argument_hint: None,
             resolver_frontmatter: None,
+            resolver_frontmatter_trusted: false,
         }],
     );
 
@@ -1643,6 +1644,7 @@ fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
             source: ".claude/commands/review-local.md".to_owned(),
             argument_hint: None,
             resolver_frontmatter: None,
+            resolver_frontmatter_trusted: false,
         }],
     );
 
@@ -1686,6 +1688,7 @@ fn resolver_metadata_uses_cached_frontmatter_snapshot_without_disk_reread() {
 "
             .to_owned(),
         ),
+        resolver_frontmatter_trusted: true,
     };
 
     let metadata = read_agent_command_resolver_metadata(FsPath::new("C:/does/not/exist"), &command)
@@ -1747,6 +1750,7 @@ fn native_delegate_resolution_does_not_use_prompt_template_metadata_by_name() {
                 source: "claude/native".to_owned(),
                 argument_hint: None,
                 resolver_frontmatter: None,
+                resolver_frontmatter_trusted: false,
             }],
         )
         .unwrap();
@@ -1801,6 +1805,7 @@ fn rejects_note_for_native_slash_command_resolution() {
                 source: "Claude bundled command".to_owned(),
                 argument_hint: Some("[scope]".to_owned()),
                 resolver_frontmatter: None,
+                resolver_frontmatter_trusted: false,
             }],
         )
         .unwrap();

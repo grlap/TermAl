@@ -346,18 +346,18 @@ Required contract:
   `arguments` field, and appends a `## Additional User Note` block when `note`
   is present.
 - The backend returns the resolved delegation prompt plus command-derived
-  defaults such as `mode`, `title`, and `writePolicy`. The policy source is
-  `metadata.termal` frontmatter, not hard-coded command names. The target trust
-  boundary is TermAl-owned command or future `SKILL.md` metadata; the current
-  implementation still accepts project-local `.claude/commands/*.md` metadata
-  that passes the source/name gate, and tightening that is tracked in
-  `docs/bugs.md`.
+  defaults such as `mode`, `title`, and `writePolicy` when trusted command
+  metadata is available. The policy source is trusted `metadata.termal`
+  frontmatter, not hard-coded command names. Project-local
+  `.claude/commands/*.md` frontmatter may influence resolver titles, but cannot
+  grant delegation defaults.
 - `spawn_delegation` receives the already-resolved prompt and the resolver's
   write policy. React components must not special-case command names such as
   `review-local`.
 
-This keeps `/fix-bug`, `/review-local`, and future Claude skills consistent
-whether the user sends them in the parent session or delegates them to a child.
+This keeps `/fix-bug`, future trusted `/review-local` commands, and future
+Claude skills consistent whether the user sends them in the parent session or
+delegates them to a child.
 
 ## Command And Tool Surface
 

@@ -465,6 +465,7 @@ fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, Api
             source: format!(".claude/commands/{}.md", stem),
             argument_hint: command_content.argument_hint,
             resolver_frontmatter: command_content.frontmatter.map(str::to_owned),
+            resolver_frontmatter_trusted: false,
         });
     }
 
@@ -486,8 +487,8 @@ struct MarkdownCommandContent<'a> {
 // Command frontmatter intentionally uses a tiny YAML subset instead of a full
 // YAML parser: top-level `key: value` scalars plus space-indented nested maps.
 // Unsupported non-TermAl YAML features are ignored. Project-local command
-// metadata is accepted today; the target TermAl-owned trust boundary is tracked
-// separately in docs/bugs.md.
+// metadata may drive title generation, but delegation defaults require an
+// explicitly trusted command source.
 fn strip_markdown_frontmatter(content: &str) -> MarkdownCommandContent<'_> {
     let opening_len = if content.starts_with("---\r\n") {
         "---\r\n".len()
@@ -508,7 +509,7 @@ fn strip_markdown_frontmatter(content: &str) -> MarkdownCommandContent<'_> {
         if line_without_newline.trim() == "---" {
             let frontmatter = &content[opening_len..offset];
             if looks_like_markdown_frontmatter(frontmatter) {
-                let fields = markdown_frontmatter_fields(frontmatter).unwrap_or_default();
+                let fields = markdown_command_frontmatter_fields(frontmatter);
                 let body = strip_single_leading_blank_line(&content[offset + line.len()..]);
                 return MarkdownCommandContent {
                     content: body,
@@ -581,7 +582,7 @@ fn read_agent_command_resolver_metadata(
         return Ok(None);
     };
 
-    parse_agent_command_resolver_metadata(frontmatter)
+    parse_agent_command_resolver_metadata(frontmatter, command.resolver_frontmatter_trusted)
 }
 
 // Discriminates real command frontmatter from a Markdown thematic-break block.
@@ -616,14 +617,25 @@ fn looks_like_markdown_frontmatter(frontmatter: &str) -> bool {
 
 fn parse_agent_command_resolver_metadata(
     frontmatter: &str,
+    trust_delegation_metadata: bool,
 ) -> Result<Option<AgentCommandResolverMetadata>, ApiError> {
     if !frontmatter_has_termal_metadata(frontmatter) {
         return Ok(None);
     }
-    let fields = markdown_frontmatter_fields(frontmatter)?;
+    let fields = if trust_delegation_metadata {
+        markdown_frontmatter_fields(frontmatter)?
+    } else {
+        markdown_frontmatter_title_fields(frontmatter)?
+    };
     let has_termal_metadata = fields
         .keys()
         .any(|key| key == "metadata.termal" || key.starts_with("metadata.termal."));
+    if !trust_delegation_metadata && !has_termal_metadata {
+        return Ok(Some(AgentCommandResolverMetadata {
+            title: AgentCommandTitleStrategy::Default,
+            delegation: None,
+        }));
+    }
     if !has_termal_metadata {
         return Ok(None);
     }
@@ -642,7 +654,8 @@ fn parse_agent_command_resolver_metadata(
             "metadata.termal.title must define strategy metadata",
         ));
     }
-    if fields.contains_key("metadata.termal.delegation")
+    if trust_delegation_metadata
+        && fields.contains_key("metadata.termal.delegation")
         && !has_frontmatter_field_children(&fields, "metadata.termal.delegation")
     {
         return Err(ApiError::bad_request(
@@ -676,6 +689,18 @@ fn parse_agent_command_resolver_metadata(
         }
     };
 
+    let delegation = if trust_delegation_metadata {
+        parse_agent_command_delegation_metadata(&fields)?
+    } else {
+        None
+    };
+
+    Ok(Some(AgentCommandResolverMetadata { title, delegation }))
+}
+
+fn parse_agent_command_delegation_metadata(
+    fields: &BTreeMap<String, String>,
+) -> Result<Option<AgentCommandDelegationMetadata>, ApiError> {
     let delegation_mode = fields
         .get("metadata.termal.delegation.mode")
         .map(|value| parse_agent_command_delegation_mode(value.trim().to_owned()))
@@ -684,8 +709,7 @@ fn parse_agent_command_resolver_metadata(
         .get("metadata.termal.delegation.writePolicy.kind")
         .map(|value| parse_agent_command_delegation_write_policy(value.trim().to_owned()))
         .transpose()?;
-    let has_delegation_metadata =
-        delegation_mode.is_some() || delegation_write_policy.is_some();
+    let has_delegation_metadata = delegation_mode.is_some() || delegation_write_policy.is_some();
 
     let delegation = match fields.get("metadata.termal.delegation.enabled") {
         None => None,
@@ -713,7 +737,7 @@ fn parse_agent_command_resolver_metadata(
         ));
     }
 
-    Ok(Some(AgentCommandResolverMetadata { title, delegation }))
+    Ok(delegation)
 }
 
 fn frontmatter_has_termal_metadata(frontmatter: &str) -> bool {
@@ -751,8 +775,7 @@ fn frontmatter_has_termal_metadata(frontmatter: &str) -> bool {
 
 // Flattens the supported TermAl frontmatter subset into dotted keys such as
 // `metadata.termal.delegation.writePolicy.kind`. This intentionally supports
-// only local command-template metadata, not full YAML; project-local metadata
-// is currently accepted until the trusted-source boundary is tightened.
+// only local command-template metadata, not full YAML.
 fn markdown_frontmatter_fields(frontmatter: &str) -> Result<BTreeMap<String, String>, ApiError> {
     let mut fields = BTreeMap::new();
     let mut path: Vec<(usize, String)> = Vec::new();
@@ -811,6 +834,93 @@ fn markdown_frontmatter_fields(frontmatter: &str) -> Result<BTreeMap<String, Str
     Ok(fields)
 }
 
+fn markdown_command_frontmatter_fields(frontmatter: &str) -> BTreeMap<String, String> {
+    let mut fields = BTreeMap::new();
+    for line in frontmatter.lines() {
+        let line = line.trim_end();
+        let trimmed = line.trim_start();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || line.len() != trimmed.len()
+            || line.starts_with('\t')
+        {
+            continue;
+        }
+        let Some((raw_key, raw_value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let key = raw_key.trim();
+        if !matches!(key, "description" | "argument-hint" | "argument_hint") {
+            continue;
+        }
+        let value = raw_value.trim();
+        let field_value =
+            unquote_markdown_frontmatter_string(value, key, false).unwrap_or_else(|_| value.to_owned());
+        fields.insert(key.to_owned(), field_value);
+    }
+    fields
+}
+
+fn markdown_frontmatter_title_fields(
+    frontmatter: &str,
+) -> Result<BTreeMap<String, String>, ApiError> {
+    let mut fields = BTreeMap::new();
+    let mut path: Vec<(usize, String)> = Vec::new();
+    for line in frontmatter.lines() {
+        let line = line.trim_end();
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((raw_key, raw_value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let indent = line.len().saturating_sub(trimmed.len());
+        while path
+            .last()
+            .is_some_and(|(existing_indent, _)| *existing_indent >= indent)
+        {
+            path.pop();
+        }
+
+        let key = raw_key.trim();
+        if key.is_empty() {
+            continue;
+        }
+        let mut field_path = path
+            .iter()
+            .map(|(_, key)| key.as_str())
+            .collect::<Vec<_>>();
+        field_path.push(key);
+        let is_title_path = is_termal_title_frontmatter_components(&field_path);
+        if line[..indent].contains('\t') {
+            if is_title_path {
+                return Err(ApiError::bad_request(
+                    "agent command frontmatter must be space-indented",
+                ));
+            }
+            continue;
+        }
+
+        let value = raw_value.trim();
+        if value.is_empty() {
+            if is_title_path {
+                fields.entry(field_path.join(".")).or_default();
+            }
+            path.push((indent, key.to_owned()));
+            continue;
+        }
+        if !is_title_path {
+            continue;
+        }
+
+        let field_key = field_path.join(".");
+        let field_value = unquote_markdown_frontmatter_string(value, &field_key, true)?;
+        fields.insert(field_key, field_value);
+    }
+    Ok(fields)
+}
+
 fn is_termal_frontmatter_path(path: &[(usize, String)], key: &str) -> bool {
     let mut components = path
         .iter()
@@ -823,6 +933,18 @@ fn is_termal_frontmatter_path(path: &[(usize, String)], key: &str) -> bool {
 fn is_termal_frontmatter_key(key: &str) -> bool {
     let components = key.split('.').collect::<Vec<_>>();
     is_termal_frontmatter_components(&components)
+}
+
+fn is_termal_title_frontmatter_components(components: &[&str]) -> bool {
+    match components {
+        ["metadata.termal.title", ..] => true,
+        ["metadata.termal", "title", ..] => true,
+        ["metadata", "termal", "title", ..] => true,
+        ["metadata", second, ..] if second == &"termal.title" => true,
+        ["metadata", second, ..] if second.starts_with("termal.title.") => true,
+        [first, ..] if first.starts_with("metadata.termal.title.") => true,
+        _ => false,
+    }
 }
 
 fn is_termal_frontmatter_components(components: &[&str]) -> bool {

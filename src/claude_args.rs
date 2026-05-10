@@ -205,6 +205,7 @@ fn claude_agent_commands(message: &Value) -> Option<Vec<AgentCommand>> {
                 source,
                 argument_hint,
                 resolver_frontmatter: None,
+                resolver_frontmatter_trusted: false,
             })
         })
         .collect::<Vec<_>>();

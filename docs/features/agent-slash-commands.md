@@ -15,9 +15,9 @@ commands. Native Claude commands are sent as slash prompts such as `/review`,
 while markdown templates are resolved through `POST
 /api/sessions/{id}/agent-commands/{name}/resolve`. The frontend passes
 `arguments` and optional `note`; the backend applies `$ARGUMENTS`, appends any
-note as a standard user-note block, and returns the resolved prompt and
-delegation defaults. Regular session sends and delegated sends use the same
-resolver.
+note as a standard user-note block, and returns the resolved prompt plus any
+trusted delegation defaults. Regular session sends and delegated sends use the
+same resolver.
 
 See [`slash-commands.md`](slash-commands.md) for the existing session-control implementation.
 
@@ -139,9 +139,10 @@ Response:
 }
 ```
 
-Delegating a prompt-template command with command-owned defaults, such as the
-current `.claude/commands/review-local.md` template, returns `delegation` only
-for `intent: "delegate"`:
+Delegating a prompt-template command with trusted command-owned defaults returns
+`delegation` only for `intent: "delegate"`. This is the trusted-source response
+shape; project-local `.claude/commands/*.md` templates are not trusted today and
+do not return delegation defaults:
 
 ```json
 {
@@ -199,11 +200,12 @@ sending the template to an agent and uses `description:` as the command palette
 description when present.
 
 TermAl parses prompt-template command frontmatter for resolver metadata today.
-The intended long-term trust boundary is TermAl-owned command/skill files; the
-current implementation also accepts project-local `.claude/commands/*.md`
-metadata that passes the source/name gate, and tightening that boundary is
-tracked in `docs/bugs.md`. Future `SKILL.md` support should reuse the same
-`metadata.termal` shape.
+Project-local `.claude/commands/*.md` metadata may drive title generation after
+passing the source/name gate, but delegation defaults that affect mode or write
+policy are ignored. No production command source is marked trusted yet; future
+TermAl-owned command or `SKILL.md` support should reuse the same
+`metadata.termal` shape and set the trusted-source marker only for those
+TermAl-owned files.
 
 Metadata contract:
 
@@ -231,21 +233,23 @@ Title strategies:
 
 Delegation metadata:
 
-- `enabled: true` allows the resolver to return delegation defaults for
-  `intent: "delegate"`.
+- In trusted metadata, `enabled: true` allows the resolver to return delegation
+  defaults for `intent: "delegate"`.
 - `mode` currently accepts `reviewer` or `explorer`; `worker` remains blocked
   until write-enabled worker delegations are implemented.
 - `writePolicy.kind` currently accepts `readOnly` or `isolatedWorktree`.
   `sharedWorktree` remains unsupported for command metadata.
 
-Target trust rules:
+Trust rules:
 
-- Only metadata from TermAl-trusted filesystem command/skill files may grant
-  delegation defaults. Native runtime-advertised commands or untrusted project
-  entries named `review-local` must not inherit TermAl privileges by name.
-- Invalid `metadata.termal` must fail command resolution with a clear validation
-  error. It must not silently broaden permissions or fall back to a more
-  permissive policy.
+- Only metadata from future TermAl-trusted filesystem command/skill files may
+  grant delegation defaults. Native runtime-advertised commands or untrusted
+  project entries named `review-local` must not inherit TermAl privileges by
+  name.
+- Invalid trusted `metadata.termal` must fail command resolution with a clear
+  validation error. It must not silently broaden permissions or fall back to a
+  more permissive policy. Untrusted delegation metadata is ignored rather than
+  applied.
 - Metadata is declarative; command names are not policy. `/review-local` and
   `/fix-bug` are examples, not special cases in Rust code.
 
@@ -444,8 +448,8 @@ Backend:
 Backend resolver:
 - Resolver replaces `$ARGUMENTS` with the request `arguments`.
 - Resolver appends `## Additional User Note` only when `note` is non-empty.
-- Resolver returns delegation defaults for build-gated commands such as
-  `/review-local`.
+- Resolver returns delegation defaults only for commands whose metadata comes
+  from an explicitly trusted TermAl-owned source.
 
 Frontend:
 - Slash palette shows agent commands when available.
@@ -471,8 +475,8 @@ Frontend:
   Enter resolves with `arguments: "3"` and sends the resolved prompt.
 - Passing a note appends an `Additional User Note` block without changing
   `$ARGUMENTS`.
-- Delegating `/review-local` uses the same backend resolver as regular send and
-  receives the resolver-selected delegation write policy.
+- Delegating a trusted command uses the same backend resolver as regular send
+  and receives the resolver-selected delegation write policy.
 - Commands are scoped to the session's workdir (different projects show different commands).
 - Adding a new `.md` file to `.claude/commands/` and clicking refresh shows the new command.
 - The existing session-control commands (`/model`, `/mode`, `/effort`) continue to work

@@ -1623,6 +1623,8 @@ struct AgentCommand {
     argument_hint: Option<String>,
     #[serde(skip)]
     resolver_frontmatter: Option<String>,
+    #[serde(skip)]
+    resolver_frontmatter_trusted: bool,
 }
 
 /// Represents the agent commands response payload.
