@@ -1824,6 +1824,104 @@ fn prompt_template_delegate_resolution_does_not_use_metadata_when_source_path_mi
 }
 
 #[test]
+fn resolver_metadata_and_prompt_content_refresh_together_after_file_edit() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-command-frontmatter-freshness-{}",
+        Uuid::new_v4()
+    ));
+    let _cleanup = TempDirCleanup::new(root.clone());
+    let commands_dir = root.join(".claude").join("commands");
+    fs::create_dir_all(&commands_dir).unwrap();
+    let command_path = commands_dir.join("review-local.md");
+    fs::write(
+        &command_path,
+        "---
+description: First review.
+metadata:
+  termal:
+    title:
+      strategy: prefixFirstArgument
+      prefix: First title
+---
+
+First prompt $ARGUMENTS.
+",
+    )
+    .unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Codex Session".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let listed = state.list_agent_commands(&created.session_id).unwrap();
+    assert_eq!(listed.commands[0].description, "First review.");
+
+    let first = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: Some("scope".to_owned()),
+                note: None,
+                intent: AgentCommandResolveIntent::Send,
+            },
+        )
+        .unwrap();
+    assert_eq!(first.title.as_deref(), Some("First title scope"));
+    assert_eq!(
+        first.expanded_prompt.as_deref(),
+        Some("First prompt scope.\n")
+    );
+
+    fs::write(
+        &command_path,
+        "---
+description: Second review.
+metadata:
+  termal:
+    title:
+      strategy: prefixFirstArgument
+      prefix: Second title
+---
+
+Second prompt $ARGUMENTS.
+",
+    )
+    .unwrap();
+
+    let second = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: Some("scope".to_owned()),
+                note: None,
+                intent: AgentCommandResolveIntent::Send,
+            },
+        )
+        .unwrap();
+    assert_eq!(second.title.as_deref(), Some("Second title scope"));
+    assert_eq!(
+        second.expanded_prompt.as_deref(),
+        Some("Second prompt scope.\n")
+    );
+}
+
+#[test]
 fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
     let root = std::env::temp_dir().join(format!(
         "termal-agent-command-missing-metadata-{}",
