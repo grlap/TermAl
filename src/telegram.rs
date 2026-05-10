@@ -1253,6 +1253,10 @@ impl TermalApiClient {
         )
     }
 
+    /// Reads `/api/state` through a narrow Telegram projection. The relay uses
+    /// the broad state endpoint intentionally so project and session selection
+    /// commands share one consistent snapshot instead of racing separate
+    /// project/session list calls.
     fn get_state_sessions(&self) -> Result<TelegramStateSessionsResponse> {
         self.request_json(Method::GET, "/api/state", None)
     }

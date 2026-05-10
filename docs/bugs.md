@@ -356,19 +356,6 @@ The sanitizer only redacts Telegram tokens. A backend error like `"failed to loa
 **Proposal:**
 - Add a test that asserts the live-tail wrapper appears AND disappears as `showWaitingIndicator`/`pendingPrompts` toggle.
 
-## Telegram `/sessions` couples the relay to full `/api/state`
-
-**Severity:** Note - `src/telegram.rs:1025, 2020-2240`. The relay calls full `/api/state` and reconstructs a Telegram-specific project-session list locally. That couples Telegram command behavior to the broad state snapshot shape instead of a narrow project-scoped session summary contract.
-
-**Current behavior:**
-- `get_state_sessions()` deserializes a subset of `/api/state`.
-- Telegram-specific project/session filtering and rendering happens inside the relay.
-- No source comment documents why this broad state contract is intentional.
-
-**Proposal:**
-- Prefer a narrow project-scoped session summary API/contract.
-- Or add a source comment documenting why the relay intentionally owns this `/api/state` projection and which fields it depends on.
-
 ## `start_telegram_relay_runtime` parallel `spawning`/`running` booleans should be a state enum
 
 **Severity:** Note - `src/telegram.rs:222-302`. Round 74 consolidated the relay state into `TelegramRelayRuntime` with parallel `spawning` and `running` booleans. The snapshot rule `running && !spawning` is implicit. A future contributor adding a new flag (e.g., `stopping`) needs to remember to combine all three correctly in the snapshot.
