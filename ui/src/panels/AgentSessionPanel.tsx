@@ -3009,6 +3009,8 @@ const SessionComposer = memo(function SessionComposer({
   previous.onRefreshSessionModelOptions === next.onRefreshSessionModelOptions &&
   previous.onRefreshAgentCommands === next.onRefreshAgentCommands &&
   previous.onSend === next.onSend &&
+  previous.canSpawnDelegation === next.canSpawnDelegation &&
+  previous.onSpawnDelegation === next.onSpawnDelegation &&
   previous.onSessionSettingsChange === next.onSessionSettingsChange &&
   previous.onStopSession === next.onStopSession &&
   previous.onPaste === next.onPaste

@@ -7,7 +7,11 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useLayoutEffect, type RefObject } from "react";
+import {
+  useLayoutEffect,
+  type ClipboardEvent as ReactClipboardEvent,
+  type RefObject,
+} from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as slashPalette from "./session-slash-palette";
@@ -7508,6 +7512,10 @@ function renderFooter({
   canSpawnDelegation = false,
   onSpawnDelegation,
   onSessionSettingsChange = vi.fn(),
+  onScrollToLatest = vi.fn(),
+  onDraftAttachmentRemove = vi.fn(),
+  onStopSession = vi.fn(),
+  onPaste = vi.fn(),
 }: {
   isPaneActive?: boolean;
   session: Session | null;
@@ -7532,6 +7540,10 @@ function renderFooter({
   canSpawnDelegation?: boolean;
   onSpawnDelegation?: (sessionId: string, prompt: string) => Promise<boolean>;
   onSessionSettingsChange?: (sessionId: string, field: string, value: string) => void;
+  onScrollToLatest?: () => void;
+  onDraftAttachmentRemove?: (sessionId: string, attachmentId: string) => void;
+  onStopSession?: (sessionId: string) => void;
+  onPaste?: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
 }) {
   syncComposerSessionsStore({
     sessions: session ? [session] : [],
@@ -7551,9 +7563,9 @@ function renderFooter({
       isUpdating={isUpdating}
       showNewResponseIndicator={false}
       footerModeLabel="Session"
-      onScrollToLatest={() => {}}
+      onScrollToLatest={onScrollToLatest}
       onDraftCommit={onDraftCommit}
-      onDraftAttachmentRemove={() => {}}
+      onDraftAttachmentRemove={onDraftAttachmentRemove}
       isRefreshingModelOptions={false}
       modelOptionsError={modelOptionsError}
       agentCommands={agentCommands}
@@ -7566,8 +7578,8 @@ function renderFooter({
       canSpawnDelegation={canSpawnDelegation}
       onSpawnDelegation={onSpawnDelegation}
       onSessionSettingsChange={onSessionSettingsChange}
-      onStopSession={() => {}}
-      onPaste={() => {}}
+      onStopSession={onStopSession}
+      onPaste={onPaste}
     />
   );
 }
@@ -8016,6 +8028,88 @@ describe("AgentSessionPanelFooter", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Delegate" })).not.toBeInTheDocument();
+  });
+
+  it("refreshes the delegation action when availability changes", () => {
+    const session = makeSession("session-a");
+    const stableProps = {
+      onDraftAttachmentRemove: vi.fn(),
+      onDraftCommit: vi.fn(),
+      onPaste: vi.fn(),
+      onRefreshAgentCommands: vi.fn(),
+      onRefreshSessionModelOptions: vi.fn(),
+      onScrollToLatest: vi.fn(),
+      onSend: vi.fn(() => true),
+      onSessionSettingsChange: vi.fn(),
+      onStopSession: vi.fn(),
+      onSpawnDelegation: vi.fn(async () => true),
+    };
+    const { rerender } = render(
+      renderFooter({
+        session,
+        canSpawnDelegation: false,
+        ...stableProps,
+      }),
+    );
+
+    expect(screen.queryByRole("button", { name: "Delegate" })).not.toBeInTheDocument();
+
+    rerender(
+      renderFooter({
+        session,
+        canSpawnDelegation: true,
+        ...stableProps,
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "Delegate" })).toBeInTheDocument();
+  });
+
+  it("uses the latest delegation handler after rerender", async () => {
+    const session = makeSession("session-a");
+    const initialSpawn = vi.fn(async () => true);
+    const latestSpawn = vi.fn(async () => true);
+    const stableProps = {
+      canSpawnDelegation: true,
+      onDraftAttachmentRemove: vi.fn(),
+      onDraftCommit: vi.fn(),
+      onPaste: vi.fn(),
+      onRefreshAgentCommands: vi.fn(),
+      onRefreshSessionModelOptions: vi.fn(),
+      onScrollToLatest: vi.fn(),
+      onSend: vi.fn(() => true),
+      onSessionSettingsChange: vi.fn(),
+      onStopSession: vi.fn(),
+    };
+    const { rerender } = render(
+      renderFooter({
+        session,
+        onSpawnDelegation: initialSpawn,
+        ...stableProps,
+      }),
+    );
+    rerender(
+      renderFooter({
+        session,
+        onSpawnDelegation: latestSpawn,
+        ...stableProps,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, {
+      target: { value: "Use the latest delegation handler." },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    expect(initialSpawn).not.toHaveBeenCalled();
+    expect(latestSpawn).toHaveBeenCalledWith(
+      "session-a",
+      "Use the latest delegation handler.",
+    );
   });
 
   it("marks the delegation action busy while the spawn is in flight", async () => {

@@ -93,7 +93,7 @@ fn create_delegation_for_persist_transition(title: &str) -> (AppState, Delegatio
 }
 
 #[test]
-fn claude_delegation_child_keeps_app_default_approval_mode_and_effort() {
+fn claude_read_only_delegation_child_forces_plan_mode_and_preserves_effort() {
     let state = test_app_state();
     let workdir = std::env::temp_dir().to_string_lossy().into_owned();
     let child_session_id = {
@@ -127,9 +127,66 @@ fn claude_delegation_child_keeps_app_default_approval_mode_and_effort() {
         .expect("child session should exist");
     assert_eq!(
         child.session.claude_approval_mode,
-        Some(ClaudeApprovalMode::AutoApprove)
+        Some(ClaudeApprovalMode::Plan)
     );
     assert_eq!(child.session.claude_effort, Some(ClaudeEffortLevel::Max));
+}
+
+#[test]
+fn claude_write_delegation_child_keeps_app_default_approval_mode_and_effort() {
+    let state = test_app_state();
+    let workdir = std::env::temp_dir().to_string_lossy().into_owned();
+    let write_policies = [
+        DelegationWritePolicy::SharedWorktree {
+            owned_paths: vec!["src".to_owned()],
+        },
+        DelegationWritePolicy::IsolatedWorktree {
+            owned_paths: vec!["src".to_owned()],
+            worktree_path: Some(
+                std::env::temp_dir()
+                    .join(format!("termal-claude-write-delegation-{}", Uuid::new_v4()))
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+        },
+    ];
+
+    for write_policy in write_policies {
+        let child_session_id = {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            inner.preferences.default_claude_approval_mode = ClaudeApprovalMode::AutoApprove;
+            inner.preferences.default_claude_effort = ClaudeEffortLevel::Max;
+            let child = inner.create_session(
+                Agent::Claude,
+                Some("Claude Write Delegation Defaults".to_owned()),
+                workdir.clone(),
+                None,
+                None,
+            );
+            let child_session_id = child.session.id.clone();
+            let child_index = inner
+                .find_session_index(&child_session_id)
+                .expect("child session should be indexed");
+            let child_record = inner
+                .session_mut_by_index(child_index)
+                .expect("child session index should be valid");
+
+            configure_delegation_child_prompt_settings(child_record, &write_policy);
+            child_session_id
+        };
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let child = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == child_session_id)
+            .expect("child session should exist");
+        assert_eq!(
+            child.session.claude_approval_mode,
+            Some(ClaudeApprovalMode::AutoApprove)
+        );
+        assert_eq!(child.session.claude_effort, Some(ClaudeEffortLevel::Max));
+    }
 }
 
 #[test]
@@ -344,6 +401,29 @@ fn delegation_wait_rejects_delegation_owned_by_another_parent() {
 fn delegation_wait_resume_prompt_is_capped_with_marker() {
     let oversized = "界".repeat(MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES);
     let prompt = limit_delegation_wait_resume_prompt(oversized);
+
+    assert!(prompt.len() <= MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES);
+    assert!(prompt.ends_with(DELEGATION_WAIT_RESUME_TRUNCATED_MARKER));
+}
+
+#[test]
+fn delegation_wait_missing_record_prompt_uses_resume_prompt_cap() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    // Unit-test the cap directly with an oversized missing id; API validation
+    // rejects ids this large before they can be persisted through normal routes.
+    let wait = DelegationWaitRecord {
+        id: "delegation-wait-missing-record-cap".to_owned(),
+        parent_session_id,
+        delegation_ids: vec!["x".repeat(MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES)],
+        mode: DelegationWaitMode::All,
+        created_at: stamp_now(),
+        title: None,
+    };
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let prompt = delegation_wait_resume_prompt_locked(&inner, &wait)
+        .expect("missing delegation records should resolve the wait");
 
     assert!(prompt.len() <= MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES);
     assert!(prompt.ends_with(DELEGATION_WAIT_RESUME_TRUNCATED_MARKER));

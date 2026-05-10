@@ -58,8 +58,8 @@ anything implied by my default behaviour or by the Claude-Code skills
 - Feature briefs live in `docs/features/*.md`. Cross-link them both
   ways when a new doc references an existing one.
 - `docs/bugs.md` is the active-bug ledger + implementation-task
-  backlog. Finished work moves to the "also fixed in the current
-  tree" preamble; new findings land as new sections.
+  backlog. It intentionally keeps only active issues and open tasks;
+  fixed-history notes do not belong there.
 
 ## Review cadence
 

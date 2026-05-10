@@ -7,51 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Claude read-only delegations inherit auto-approve without enforced read-only semantics
-
-**Severity:** High - `src/delegations.rs:1305-1318`. `configure_delegation_child_prompt_settings` forces Codex into `approvalPolicy: never` plus a sandbox, and forces Cursor/Gemini into plan mode, but Claude children keep the app's default Claude approval mode. The current test pins `AutoApprove` as the delegated Claude default.
-
-If the user default is `auto-approve`, a read-only Claude reviewer delegation can continue through write/tool requests unless another enforcement layer blocks them. That makes `writePolicy: readOnly` mean different things across agents.
-
-**Current behavior:**
-- Read-only Claude children preserve the default Claude approval mode.
-- Cursor and Gemini children are forced to plan mode.
-- The delegation docs do not explain the Claude asymmetry or the alternate enforcement layer.
-
-**Proposal:**
-- Either force Claude read-only delegations into `ClaudeApprovalMode::Plan`.
-- Or document and test the concrete enforcement mechanism that prevents Claude read-only delegations from mutating the workspace while preserving the user's approval setting.
-
-## `SessionComposer` memo comparator omits delegation props
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:2990-3020`. `SessionComposer` receives `canSpawnDelegation` and `onSpawnDelegation`, but its custom `memo` comparator does not compare either prop.
-
-If delegation availability or the spawn handler changes without another compared prop changing, the composer can keep a stale Delegate button state or stale click handler.
-
-**Current behavior:**
-- `canSpawnDelegation` affects whether the Delegate button renders and whether it is disabled.
-- `onSpawnDelegation` is invoked by the Delegate action.
-- Neither prop participates in the memo equality check.
-
-**Proposal:**
-- Add `canSpawnDelegation` and `onSpawnDelegation` to the comparator.
-- Add a rerender test that toggles delegation availability or the handler without changing unrelated props.
-
-## Missing-record delegation wait prompts bypass the fan-in prompt size cap
-
-**Severity:** Medium - `src/delegations.rs:1395-1431`. `delegation_wait_resume_prompt_locked` applies `limit_delegation_wait_resume_prompt` to the normal terminal-result path, but the early-return path for disappeared delegation records returns an uncapped prompt.
-
-The current wait-id cap keeps this small, but future richer missing-record diagnostics or a larger wait cap could bypass the documented 64 KB resume-prompt ceiling.
-
-**Current behavior:**
-- Normal fan-in result prompts are capped.
-- Missing-record prompts are not capped.
-- Tests cover the happy-path cap but not the missing-record branch.
-
-**Proposal:**
-- Route the missing-record prompt through `limit_delegation_wait_resume_prompt`.
-- Add a regression test for the missing-record branch.
-
 ## Delegation wait response metadata has ambiguous `queuedResume` semantics
 
 **Severity:** Medium - `src/delegations.rs:605-666` and `docs/features/agent-delegation-sessions.md`. `create_delegation_wait` can create and immediately consume a wait when all watched delegations are already terminal. The response returns the created wait and the later revision, but `queuedResume` is derived from whether the parent was dispatchable immediately, not whether a resume prompt was queued.
@@ -4558,12 +4513,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover Claude read-only delegation approval semantics:
-  add a Rust test proving read-only Claude delegations either force plan mode or are protected by a concrete alternate write-blocking mechanism when the app default is `auto-approve`.
-- [ ] P2: Cover `SessionComposer` delegation props in memo comparison:
-  rerender with only `canSpawnDelegation` or `onSpawnDelegation` changed and assert the Delegate button/handler updates.
-- [ ] P2: Cover missing-record delegation wait prompt capping:
-  build a wait whose delegation record disappears and assert the generated resume prompt still flows through the 64 KB cap/truncation marker path.
 - [ ] P2: Cover already-terminal delegation waits against busy parents:
   create an already-satisfied wait while the parent is active and assert the response metadata distinguishes prompt-queued from immediate-dispatch behavior.
 - [ ] P2: Cover parent-removal delegation wait reconciliation:
