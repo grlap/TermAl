@@ -505,7 +505,7 @@ impl AppState {
         }
     }
 
-    fn remote_delta_session_created_fingerprint(session: &Session) -> Option<String> {
+    fn remote_delta_session_payload_fingerprint(session: &Session) -> Option<String> {
         let mut normalized = session.clone();
         // `localize_remote_session` discards inbound wire ownership, so replay
         // identity must ignore it too.
@@ -534,7 +534,7 @@ impl AppState {
             } => RemoteDeltaReplayPayload::SessionCreated {
                 session_id: session_id.clone(),
                 message_count: session.message_count,
-                session_fingerprint: Self::remote_delta_session_created_fingerprint(session)?,
+                session_fingerprint: Self::remote_delta_session_payload_fingerprint(session)?,
                 session_mutation_stamp: session.session_mutation_stamp,
             },
             DeltaEvent::MessageCreated {
@@ -708,7 +708,7 @@ impl AppState {
                     .collect::<Option<Vec<_>>>()?,
                 session_fingerprints: sessions
                     .iter()
-                    .map(Self::remote_delta_session_created_fingerprint)
+                    .map(Self::remote_delta_session_payload_fingerprint)
                     .collect::<Option<Vec<_>>>()?,
             },
             DeltaEvent::DelegationCreated { .. }

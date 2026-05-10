@@ -265,17 +265,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Extract the active-baseline transition into a helper `transition_active_baseline_to_settled` that returns either the new cursor + position or an `OutcomeShortCircuit`.
 
-## `remote_delta_session_created_fingerprint` name implies single-purpose but used for two delta types
-
-**Severity:** Note - `src/remote_routes.rs:711`. Now used in `SessionCreated` at `:537` and `OrchestratorsUpdated` at `:711`. The name lies about scope.
-
-**Current behavior:**
-- Helper name implies single-purpose.
-- Used for two delta types.
-
-**Proposal:**
-- Rename to `remote_delta_session_payload_fingerprint` (drops the `_created` suffix).
-
 ## `OrchestratorsUpdated` replay key test doesn't verify localized session strips wire id
 
 **Severity:** Low - `src/tests/remote.rs:4332-4351`. The new test uses `assert_eq!`, which only proves equality of the *fingerprinted* payloads. It does NOT verify that the localized session emitted to local clients clears `remote_id`.
