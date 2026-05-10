@@ -181,13 +181,29 @@ When the async action settles after the effect increments the generation, the re
 
 ## First-chunk failure can cause permanent retry loops
 
-**Severity:** Low - `src/telegram.rs:2156-2162`. The chunk loop returns `Err(err)` when `sent_visible_content` is false (no chunks were successfully sent). The cursor was NOT updated. On retry, the relay will replay the first chunk. If the first chunk's send always fails (e.g., the chunk is malformed), the user will see permanent retry loops with no progress, no `sent_visible_content`, and no error escalation.
+**Severity:** Low - `src/telegram.rs:2452-2466`. The chunk loop records a delivery failure when `sent_visible_content` is false (no chunks were successfully sent), but the cursor is NOT advanced. On retry, the relay will replay the first chunk. If the first chunk's send always fails (e.g., the chunk is malformed), the user will see permanent retry loops with no progress and no bounded escalation.
 
 **Current behavior:**
-- First-chunk failure → no cursor update → infinite retry.
+- First-chunk failure -> no cursor update -> infinite retry.
+- Digest-primary fallback is suppressed for the poll, but the armed session remains stuck on the same failed first chunk.
 
 **Proposal:**
 - After N failed first-chunk attempts for the same `(message_id, chunk_index)`, advance the cursor anyway and surface a "[chunk N skipped: send failed]" line in chat.
+
+## First-settled active-baseline same-message growth lacks a safe turn boundary
+
+**Severity:** Medium - `src/telegram.rs:2294-2327`. When a Telegram prompt is armed behind an active/approval-paused turn, the relay baselines the current assistant message while `baseline_while_active=true`. If the tracked message id has already grown by the first settled poll, the relay cannot distinguish "old turn finished after the last active poll" from "the Telegram reply was appended to the same message id."
+
+Forwarding the grown same message immediately can leak the pre-existing active turn into Telegram and consume the arm. Baseline-only behavior avoids that leak but can miss producers that append the actual Telegram reply to the same assistant message before the first settled poll.
+
+**Current behavior:**
+- First settled poll records the grown same-message length as the baseline and waits for later growth or a later message.
+- Later same-message growth is forwarded because `resend_if_grown` remains armed.
+- Same-message reply text already present on the first settled poll is not forwarded.
+
+**Proposal:**
+- Add a stronger turn-boundary signal from the session/agent layer, then forward only text known to belong to the Telegram-originated prompt.
+- Or document that same-message append before the first settled poll is unsupported for queued Telegram prompts.
 
 ## `forward_new_assistant_message_outcome` is now ~256 lines with interleaved early-returns
 
@@ -3534,6 +3550,8 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   render the real composer/overview path or assert the real composer emits `data-conversation-composer-input`, so `ConversationOverviewRail` deferral does not depend only on synthetic test fixtures.
 - [ ] P2: Cover first-chunk Telegram forward failure:
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
+- [ ] P2: Cover first-settled active-baseline same-message growth policy:
+  pin the current conservative behavior and, if a future turn-boundary signal lands, add the positive forwarding case for same-message reply text already present on first settled poll.
 - [ ] P2: Cover emitted OrchestratorsUpdated localized remote ownership:
   drive remote delta application end-to-end and assert the emitted localized sessions clear inbound `remote_id` before replay-key normalization/fingerprinting.
 - [ ] P2: Cover pinned live-tail queued prompt order:

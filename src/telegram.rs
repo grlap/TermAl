@@ -2297,20 +2297,11 @@ fn forward_new_assistant_message_outcome(
                 TelegramSessionFetchMessage::Text { text, .. } => Some(text.chars().count()),
                 _ => None,
             };
-            let resend_same_message_growth = match (cursor.text_chars, text_chars) {
-                (None, Some(_)) => true,
-                (Some(previous), Some(current)) if current > previous => true,
-                _ => false,
-            };
             let settled_cursor = TelegramAssistantForwardingCursor {
                 baseline_while_active: false,
                 resend_if_grown: true,
                 sent_chunks: None,
-                text_chars: if resend_same_message_growth {
-                    cursor.text_chars
-                } else {
-                    text_chars
-                },
+                text_chars,
                 ..cursor.clone()
             };
             let dirty = remember_assistant_forwarding_cursor(
@@ -2321,7 +2312,7 @@ fn forward_new_assistant_message_outcome(
             pre_forward_dirty |= dirty;
             cursor = settled_cursor;
             position_of_last = Some(pos);
-            if dirty && pos + 1 == messages.len() && !resend_same_message_growth {
+            if dirty && pos + 1 == messages.len() {
                 return Ok(TelegramAssistantForwardingOutcome {
                     dirty,
                     sent_visible_content: false,
