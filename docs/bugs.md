@@ -3499,8 +3499,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover pending-prompts visibility without a live turn:
-  render `SessionConversationPage` with `showWaitingIndicator: false` and a non-empty `pendingPrompts` array, then assert `.conversation-live-tail` is absent and the pending-prompt cards live inside `.conversation-pending-prompts`. Prevents a regression that re-introduces the old `liveTurnCard || pendingPromptCards.length > 0` condition.
 - [ ] P2: Cover `DelegationWaitResponse` JSON serialization:
   round-trip a `DelegationWaitResponse` through `serde_json::to_value` and assert the camelCase keys `resumePromptQueued` and `resumeDispatchRequested` are present for one busy-parent and one idle-parent scenario, and round-trip a `DeltaEvent::DelegationWaitConsumed` to assert `reason` is always emitted with the expected value.
 - [ ] P2: Replace the duplicative malformed-wait persistence test:

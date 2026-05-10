@@ -412,6 +412,38 @@ describe("AgentSessionPanel conversation caching", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("renders pending prompts outside the live tail when no live turn is visible", () => {
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        messages: [],
+        pendingPrompts: [
+          {
+            id: "pending-prompt-a",
+            timestamp: "10:02",
+            text: "Queued follow-up without a live turn",
+          },
+        ],
+      }),
+      showWaitingIndicator: false,
+    });
+
+    const queuedPromptCard = screen
+      .getByText("Queued follow-up without a live turn")
+      .closest(".pending-prompt-card");
+    const pendingPromptQueue = queuedPromptCard?.closest(
+      ".conversation-pending-prompts",
+    );
+
+    expect(queuedPromptCard).not.toBeNull();
+    expect(pendingPromptQueue).not.toBeNull();
+    expect(
+      document.querySelector(".conversation-live-tail"),
+    ).not.toBeInTheDocument();
+    expect(pendingPromptQueue).toContainElement(
+      queuedPromptCard as HTMLElement,
+    );
+  });
+
   it("keeps the live-turn tail calm while assistant output grows above queued prompts", () => {
     const scrollNode = document.createElement("section");
     let scrollTop = 120;
