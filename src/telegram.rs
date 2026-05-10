@@ -1432,6 +1432,11 @@ struct TelegramChat {
     _kind: String,
 }
 
+/// Narrow projection of `/api/state` used by Telegram project/session
+/// selection commands. The relay needs project labels plus session ids,
+/// project bindings, statuses, and message counts; the rest of the app
+/// state response is intentionally ignored by serde. Field names follow
+/// the camelCase wire contract exposed by the HTTP API.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TelegramStateSessionsResponse {
@@ -1441,6 +1446,8 @@ struct TelegramStateSessionsResponse {
     sessions: Vec<TelegramStateSession>,
 }
 
+/// Project entry from the `/api/state` projection used to render Telegram
+/// project labels.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TelegramStateProject {
@@ -1448,6 +1455,8 @@ struct TelegramStateProject {
     name: String,
 }
 
+/// Session entry from the `/api/state` projection used to list and select
+/// Telegram prompt targets within a project.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TelegramStateSession {

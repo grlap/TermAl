@@ -303,18 +303,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - As with `primary_session_id`, lift the per-branch `deep_link` derivation into a helper that takes the action-target session id explicitly.
 
-## `TelegramStateSessionsResponse` lacks documentation tying it to `/api/state`
-
-**Severity:** Note - `src/telegram.rs:1176-1204`. The struct is a narrow projection of `/api/state`, but unlike `TelegramSessionFetchResponse` (which has explicit doc comments at lines 1206-1210, 1239-1249), `TelegramStateSessionsResponse` has none. Future readers cannot tell why this struct exists, what fields it depends on, or whether `/api/state` is the intentional source.
-
-**Current behavior:**
-- No `///` doc on the struct.
-- Sibling `TelegramSessionFetchResponse` has docs.
-- Inconsistent documentation across the relay's wire projections.
-
-**Proposal:**
-- Add a doc comment matching the style of `TelegramSessionFetchResponse`: explain the relay's data needs, document why `/api/state` is used over a narrower endpoint, and pin the camelCase wire contract.
-
 ## `digest.primary_session_id` semantics drift between branches without wire-level documentation
 
 **Severity:** Note - `src/api.rs:308-484`. Round 76 deliberately changed `primary_session_id` in `worktree_dirty` and `idle` branches to be the non-delegation prompt target, while `pending_approval`, `pending_interaction`, `error_session`, and `active_session` branches keep the original "most-relevant session" semantics. The wire contract `ProjectDigestResponse.primary_session_id` is unchanged and undocumented. Consumers cannot tell which definition applies in which branch.
