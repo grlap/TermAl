@@ -60,19 +60,6 @@ Operators and the UI cannot tell that fan-in resume should have happened but did
 - Emit a structured warning event or retain dispatch error metadata.
 - Or document the best-effort policy and recovery expectations.
 
-## Two duplicate composer delegation option types kept in sync manually
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:152-156` and `ui/src/delegation-commands.ts:79-83`. `SpawnDelegationOptions` and `CreateComposerDelegationOptions` describe the same composer-delegation option shape, but they live in separate modules and are kept in sync manually.
-
-Adding another option field requires updating both types.
-
-**Current behavior:**
-- Two parallel option type definitions describe the same flow.
-- Synchronization is manual.
-
-**Proposal:**
-- Lift the shared option type into `delegation-commands.ts` or a nearby shared module and import it where needed.
-
 ## Marker-create highlight color drifts from the just-created marker on messages with prior markers
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1232-1236`. When the user creates a marker and `activeMessageMarker` is null (because the parent has not yet pushed the new marker into `markersByMessageId`), the highlight-color derivation falls back to `messageMarkers[0]?.color`. If the message already has, say, a "Review point" (red) marker and the user creates a "Checkpoint" (blue) marker, the highlight will show red until the next render once the new marker reaches state.

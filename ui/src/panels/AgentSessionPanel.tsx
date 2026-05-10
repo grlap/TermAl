@@ -24,9 +24,9 @@ import {
 } from "./session-slash-palette";
 import {
   resolveAgentCommand,
-  type CreateDelegationRequest,
   type ResolveAgentCommandResponse,
 } from "../api";
+import type { CreateComposerDelegationOptions } from "../delegation-commands";
 import {
   MessageSlot,
   PanelEmptyState,
@@ -80,7 +80,6 @@ import type {
   CommandMessage,
   CodexReasoningEffort,
   CursorMode,
-  DelegationWritePolicy,
   DiffMessage,
   GeminiApprovalMode,
   ImageAttachment,
@@ -144,11 +143,7 @@ type AgentCommandSubmissionResolution =
       noteText?: string;
     };
 
-type SpawnDelegationOptions = {
-  title?: string;
-  mode?: CreateDelegationRequest["mode"];
-  writePolicy?: DelegationWritePolicy;
-};
+type SpawnDelegationOptions = CreateComposerDelegationOptions;
 
 type SpawnDelegationHandler = (
   sessionId: string,
