@@ -254,17 +254,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Extract the active-baseline transition into a helper `transition_active_baseline_to_settled` that returns either the new cursor + position or an `OutcomeShortCircuit`.
 
-## `OrchestratorsUpdated` replay key test doesn't verify localized session strips wire id
-
-**Severity:** Low - `src/tests/remote.rs:4332-4351`. The new test uses `assert_eq!`, which only proves equality of the *fingerprinted* payloads. It does NOT verify that the localized session emitted to local clients clears `remote_id`.
-
-**Current behavior:**
-- Replay-key equality verified.
-- Localized-session-emission contract untested at this layer.
-
-**Proposal:**
-- Add an integration assertion that `localize_remote_session` clears the inbound id BEFORE the replay key normalization helper sees it.
-
 ## Send-shrink test brittle to probe sequence refactors
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:8362-8365`. The assertion `expect(heightWrites).toContainEqual({value: "40px", transition: "none"})` requires the height of `40px` to be one of the writes — but the implementation does multiple writes during shrink (`1px` probe, then `previousMeasuredHeight`, then `40px`).

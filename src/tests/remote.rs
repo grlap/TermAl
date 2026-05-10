@@ -4512,6 +4512,18 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         )),
         "OrchestratorsUpdated replay identity must ignore inbound session remote_id because localization discards it"
     );
+    let mut inbound_session_with_remote_id = remote_state.sessions[0].clone();
+    inbound_session_with_remote_id.remote_id = Some("attacker-remote-a".to_owned());
+    let localized_session = localize_remote_session(
+        remote_id,
+        "local-session-1",
+        Some("local-project-1".to_owned()),
+        &inbound_session_with_remote_id,
+    );
+    assert!(
+        localized_session.remote_id.is_none(),
+        "localized OrchestratorsUpdated sessions must strip untrusted inbound remote_id before local emission"
+    );
 
     let codex_updated = |title: &str| DeltaEvent::CodexUpdated {
         revision: 9,
