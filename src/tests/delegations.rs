@@ -50,6 +50,18 @@ fn assert_read_only_delegation_error(value: &Value, title: &str) {
     assert!(error.contains(&format!("while read-only delegation `{title}` is running")));
 }
 
+fn assert_delegation_wait_response_serializes_queue_flags(
+    response: &DelegationWaitResponse,
+    resume_prompt_queued: bool,
+    resume_dispatch_requested: bool,
+) {
+    let value = serde_json::to_value(response).expect("wait response should serialize");
+    assert_eq!(value["resumePromptQueued"], resume_prompt_queued);
+    assert_eq!(value["resumeDispatchRequested"], resume_dispatch_requested);
+    assert!(value.get("resume_prompt_queued").is_none());
+    assert!(value.get("resume_dispatch_requested").is_none());
+}
+
 fn test_app_state_with_delegation_codex_runtime(
     runtime_id: &str,
 ) -> (AppState, mpsc::Receiver<CodexRuntimeCommand>) {
@@ -361,6 +373,7 @@ fn already_terminal_delegation_wait_reports_queued_prompt_without_dispatch_for_b
         !wait.resume_dispatch_requested,
         "active parents should keep the queued prompt pending"
     );
+    assert_delegation_wait_response_serializes_queue_flags(&wait, true, false);
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     assert!(inner.delegation_waits.is_empty());
@@ -419,6 +432,7 @@ fn already_terminal_delegation_wait_reports_dispatch_for_idle_parent() {
 
     assert!(wait.resume_prompt_queued);
     assert!(wait.resume_dispatch_requested);
+    assert_delegation_wait_response_serializes_queue_flags(&wait, true, true);
 }
 
 #[test]
@@ -789,6 +803,23 @@ fn legacy_delegation_wait_consumed_delta_defaults_reason_to_completed() {
         }
         _ => panic!("expected delegation wait consumed delta"),
     }
+}
+
+#[test]
+fn delegation_wait_consumed_delta_serializes_reason() {
+    let event = DeltaEvent::DelegationWaitConsumed {
+        revision: 42,
+        wait_id: "delegation-wait-serialized".to_owned(),
+        parent_session_id: "session-parent".to_owned(),
+        reason: DelegationWaitConsumedReason::ParentSessionRemoved,
+    };
+
+    let value = serde_json::to_value(&event).expect("wait-consumed delta should serialize");
+
+    assert_eq!(value["type"], "delegationWaitConsumed");
+    assert_eq!(value["waitId"], "delegation-wait-serialized");
+    assert_eq!(value["parentSessionId"], "session-parent");
+    assert_eq!(value["reason"], "parentSessionRemoved");
 }
 
 #[test]
