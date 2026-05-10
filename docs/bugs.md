@@ -220,18 +220,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Use `forward_new_assistant_message_outcome` (not `_if_any`) and assert `outcome.sent_visible_content`.
 
-## Marker focus-restore cancellation test fragile to additional rAF scheduling
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.test.tsx:1578-1586`. The test captures `requestAnimationFrameMock.mock.results[results.length - 1].value` after clicking "Hide markers window". This assumes the focus-restore frame is the LAST rAF scheduled in response to the click.
-
-**Current behavior:**
-- Captures last rAF result as the focus-restore frame.
-- Fragile to unrelated rAF additions.
-
-**Proposal:**
-- Capture `requestAnimationFrameMock.mock.calls.length` BEFORE the click and assert exactly one new call.
-- Or filter `mock.calls` by inspecting the callback function reference.
-
 ## First-chunk failure can cause permanent retry loops
 
 **Severity:** Low - `src/telegram.rs:2156-2162`. The chunk loop returns `Err(err)` when `sent_visible_content` is false (no chunks were successfully sent). The cursor was NOT updated. On retry, the relay will replay the first chunk. If the first chunk's send always fails (e.g., the chunk is malformed), the user will see permanent retry loops with no progress, no `sent_visible_content`, and no error escalation.
@@ -343,17 +331,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 
 **Proposal:**
 - Add a sibling test where `prepare_*` is called against an Unknown-status session.
-
-## Marker-window override "auto-show after toggle" reset not covered
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:1461-1514`. The new test covers `null → true → null` on session switch. The toggle direction (`true → false → switch session → null`) is not covered.
-
-**Current behavior:**
-- One direction covered.
-- Toggle-then-switch direction uncovered.
-
-**Proposal:**
-- Add an "auto-show after toggle" sibling that exercises true→false→null on switch.
 
 ## Chunk-loop early-return retry semantics correct but undocumented
 
@@ -4287,8 +4264,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   make an armed session fail before sending visible content and assert an unrelated digest primary is not forwarded in the same poll.
 - [ ] P2: Cover OrchestratorsUpdated localized remote ownership:
   assert emitted localized sessions clear inbound `remote_id` before replay-key normalization/fingerprinting.
-- [ ] P2: Stabilize marker focus-restore cancellation coverage:
-  capture rAF call count before closing the markers window and assert the exact newly scheduled restore frame is canceled.
 - [ ] P2: Cover pinned live-tail queued prompt order:
   render a pinned live turn with at least two queued prompts and assert the live card is closest to the composer without reversing queued prompt FIFO order.
 - [ ] P2: Cover fit-to-frame Mermaid preview behavior with wide diagrams:

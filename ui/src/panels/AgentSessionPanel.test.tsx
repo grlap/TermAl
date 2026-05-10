@@ -2019,12 +2019,10 @@ describe("AgentSessionPanel conversation caching", () => {
           }),
         );
       });
+      expect(requestAnimationFrameMock).toHaveBeenCalledTimes(1);
       const latestFrameResult =
-        requestAnimationFrameMock.mock.results[
-          requestAnimationFrameMock.mock.results.length - 1
-        ];
-      const focusRestoreFrameId =
-        latestFrameResult?.value;
+        requestAnimationFrameMock.mock.results[0];
+      const focusRestoreFrameId = latestFrameResult?.value;
 
       expect(typeof focusRestoreFrameId).toBe("number");
       expect(frameCallbacks.has(focusRestoreFrameId as number)).toBe(true);
