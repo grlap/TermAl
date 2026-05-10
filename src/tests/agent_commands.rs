@@ -1138,25 +1138,105 @@ Review staged and unstaged changes.
 
 #[test]
 fn rejects_invalid_agent_command_delegation_metadata() {
-    let error = parse_agent_command_resolver_metadata(
-        "name: review-local
-description: Review staged and unstaged changes.
-metadata:
+    let cases = [
+        (
+            "worker-mode",
+            "metadata:
   termal:
     delegation:
       enabled: true
       mode: worker
       writePolicy:
+        kind: readOnly",
+            "metadata.termal.delegation.mode `worker` is not supported yet",
+        ),
+        (
+            "invalid-mode",
+            "metadata:
+  termal:
+    delegation:
+      enabled: true
+      mode: invalid_value
+      writePolicy:
+        kind: readOnly",
+            "unsupported metadata.termal.delegation.mode `invalid_value`",
+        ),
+        (
+            "shared-worktree",
+            "metadata:
+  termal:
+    delegation:
+      enabled: true
+      mode: reviewer
+      writePolicy:
         kind: sharedWorktree",
-        true,
-    )
-    .unwrap_err();
+            "metadata.termal.delegation.writePolicy.kind `sharedWorktree` is not supported yet",
+        ),
+        (
+            "bogus-write-policy",
+            "metadata:
+  termal:
+    delegation:
+      enabled: true
+      mode: reviewer
+      writePolicy:
+        kind: bogus",
+            "unsupported metadata.termal.delegation.writePolicy.kind `bogus`",
+        ),
+        (
+            "invalid-enabled",
+            "metadata:
+  termal:
+    delegation:
+      enabled: sometimes
+      mode: reviewer
+      writePolicy:
+        kind: readOnly",
+            "unsupported metadata.termal.delegation.enabled value `sometimes`",
+        ),
+        (
+            "enabled-without-mode",
+            "metadata:
+  termal:
+    delegation:
+      enabled: true
+      writePolicy:
+        kind: readOnly",
+            "delegation metadata requires metadata.termal.delegation.mode",
+        ),
+        (
+            "enabled-without-write-policy",
+            "metadata:
+  termal:
+    delegation:
+      enabled: true
+      mode: reviewer",
+            "delegation metadata requires metadata.termal.delegation.writePolicy.kind",
+        ),
+        (
+            "prefix-without-strategy",
+            "metadata:
+  termal:
+    title:
+      prefix: Fix bug",
+            "metadata.termal.title.prefix requires metadata.termal.title.strategy prefixFirstArgument",
+        ),
+        (
+            "bogus-title-strategy",
+            "metadata:
+  termal:
+    title:
+      strategy: bogus",
+            "unsupported metadata.termal.title.strategy `bogus`",
+        ),
+    ];
 
-    assert_eq!(error.status, StatusCode::BAD_REQUEST);
-    assert_eq!(
-        error.message,
-        "metadata.termal.delegation.mode `worker` is not supported yet"
-    );
+    for (case_name, frontmatter, expected_message) in cases {
+        let error = parse_agent_command_resolver_metadata(frontmatter, true).unwrap_err();
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST, "{case_name}");
+        assert_eq!(error.message, expected_message, "{case_name}");
+    }
 }
 
 #[test]

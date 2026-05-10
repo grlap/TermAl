@@ -3499,8 +3499,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover `rejects_invalid_agent_command_delegation_metadata` parametrically:
-  parameterize over each error branch in the metadata parser: `mode: invalid_value`, `writePolicy.kind: bogus`, `enabled: not-a-bool`, `enabled: true` without `mode`, `enabled: true` without `writePolicy.kind`, `prefix:` without `strategy: prefixFirstArgument`, `strategy: bogus`.
 - [ ] P2: Cover adversarial `PromptTemplate` source-vs-name mismatch for delegation defaults:
   add `prompt_template_delegate_resolution_does_not_use_metadata_when_source_path_mismatches_name` — a PromptTemplate whose source ends with `/.claude/commands/review-local.md` but whose name is `audit` must not inherit metadata defaults.
 - [ ] P2: Cover frontmatter freshness contract:
