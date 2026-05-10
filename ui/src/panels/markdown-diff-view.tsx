@@ -95,7 +95,7 @@ export function MarkdownDiffView({
   documentPath,
   editBlockedReason,
   gitSectionId,
-  isFullDocumentDeferred = false,
+  isFullDocumentEditDeferred = false,
   isDirty,
   isSaving,
   markdownPreview,
@@ -117,7 +117,7 @@ export function MarkdownDiffView({
   documentPath: string | null;
   editBlockedReason: string | null;
   gitSectionId: GitDiffSection | null;
-  isFullDocumentDeferred?: boolean;
+  isFullDocumentEditDeferred?: boolean;
   isDirty: boolean;
   isSaving: boolean;
   markdownPreview: MarkdownDiffPreviewModel;
@@ -279,12 +279,12 @@ export function MarkdownDiffView({
           {gitSectionLabel ? <span className="chip">{gitSectionLabel}</span> : null}
           <span className="chip">One document</span>
           {canEdit ? <span className="chip">Editable</span> : null}
-          {isFullDocumentDeferred ? <span className="chip">Full document deferred</span> : null}
+          {isFullDocumentEditDeferred ? <span className="chip">Editing deferred</span> : null}
           <span className="chip">{formatMarkdownSideSource(markdownPreview.after.source)}</span>
         </div>
-        {canEdit || isFullDocumentDeferred ? (
+        {canEdit || isFullDocumentEditDeferred ? (
           <div className="source-editor-actions markdown-diff-edit-actions">
-            {isFullDocumentDeferred && onRenderFullDocument ? (
+            {isFullDocumentEditDeferred && onRenderFullDocument ? (
               <button
                 className="ghost-button"
                 type="button"

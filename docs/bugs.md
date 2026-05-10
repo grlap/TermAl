@@ -1161,44 +1161,6 @@ The new "Stopped" UI label is broad. If the user thinks they enabled the relay b
 **Proposal:**
 - Return a `Result<Self, RelayDisabledReason>` and route the reason through to status / preferences UI.
 
-## `isLargeCompleteMarkdownDocument` not memoized — char-by-char walk per render
-
-**Severity:** Low - `ui/src/panels/DiffPanel.tsx:389-399`. `isLargeCompleteMarkdownDocument` is computed every render without `useMemo`. `isLargeMarkdownDocumentContent` is called on both `documentContent.before.content` and `documentContent.after.content`; each call iterates char-by-char until it either passes the line threshold or exhausts the string. For a 119k-char file with 1199 lines, the loop runs 119k times per render on each side.
-
-DiffPanel re-renders on a wide range of state updates. A 240k-char-per-render walk on every state update is wasteful for users on large repos / Markdown docs.
-
-**Current behavior:**
-- Per-render call to `isLargeMarkdownDocumentContent`.
-- Iterates entire content per side until threshold.
-- Wasted work on subsequent renders.
-
-**Proposal:**
-- Wrap with `useMemo(..., [documentContent])` — deps are reference-stable already.
-
-## `markdown-diff-view.tsx` would render dual buttons if `canEdit && isFullDocumentDeferred`
-
-**Severity:** Low - `ui/src/panels/markdown-diff-view.tsx:285-303`. When `canEdit && isFullDocumentDeferred` are both true, the action area would render BOTH the "Edit full document" button AND the (potentially disabled) "Save Markdown" button. In practice `canEdit` is gated on `markdownDisplayPreview.after.completeness === "full"`, which is `"patch"` while deferred, so `canEdit` is false — but this dependency is implicit and a future change to `canEdit`'s gating could expose a confusing dual-button state.
-
-**Current behavior:**
-- Visual contract relies on a chain of memos.
-- Nothing in `MarkdownDiffView` enforces it locally.
-
-**Proposal:**
-- Either branch on `isFullDocumentDeferred` first and pick exactly one action region.
-- Or assert/document that `canEdit && isFullDocumentDeferred` is unreachable.
-
-## `setRenderLargeMarkdownFullDocument` reset semantics undocumented
-
-**Severity:** Note - `ui/src/panels/DiffPanel.tsx:226-227, 607-623`. `setRenderLargeMarkdownFullDocument(false)` is reset only on the `[diffMessageId, filePath]` effect. If `documentContent` updates such that `isLargeCompleteMarkdownDocument` becomes false AND later updates again to a large state, the user's prior "render full document" toggle is preserved. Probably intended behavior but isn't documented and isn't covered by a test.
-
-**Current behavior:**
-- Toggle survives same-tab `documentContent` updates.
-- Resets only on tab/file identity changes.
-- Implicit invariant.
-
-**Proposal:**
-- Add a one-line comment near `renderLargeMarkdownFullDocument` declaration documenting the reset contract.
-
 ## `||` change in `resolveSessionRemoteId` flips behavior for `session.remoteId === ""`
 
 **Severity:** Note - `ui/src/remotes.ts:32`. The contract change from `??` to `||` (closes round-73 ledger entry) is correct per the protocol, but it changes observable behavior for `session.remoteId === ""`. If any backend path or test fixture ever produces an empty string, routing flips from "session declares local" (pre-round-74) to "fall through to project" (round-74).
@@ -1247,17 +1209,6 @@ The protocol contract is unwritten in code — only the comment in `types.ts:290
 
 **Proposal:**
 - Split into per-case tests (`it.each` over `(file_config, expected_outcome)` pairs).
-
-## "Defers full-document rendering for large Markdown diffs" only covers `canEdit: true`
-
-**Severity:** Low - `ui/src/panels/DiffPanel.test.tsx:2473-2533`. Covers only the `canEdit: true` path. Missing: `canEdit: false` path (button label should read "Render full document", not "Edit full document"); reset on `diffMessageId` / `filePath` change; no second click to verify idempotence.
-
-**Current behavior:**
-- `canEdit: true` covered.
-- Read-only path uncovered.
-
-**Proposal:**
-- Add a sibling test for staged Markdown (`canEdit: false`) and a test that asserts the toggle resets when `diffMessageId` changes.
 
 ## "Stopped" preferences test covers only one combination, no negative cases
 
@@ -4483,10 +4434,8 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   create many Mermaid/math rendered regions and assert the preview applies the same document-level caps as a single `MarkdownContent` document.
 - [ ] P2: Add single-target rendered diff navigation coverage:
   assert prev/next scrolls the only Markdown diff change and the only rendered diff region even though the selected index does not change.
-- [ ] P2: Cover large Markdown full-document deferral by character count:
-  add a low-line Markdown document over `LARGE_MARKDOWN_FULL_RENDER_CHAR_LIMIT` and assert the deferred state plus full-render transition. The current test covers only the line-count trigger.
-- [ ] P2: Cover read-only deferred Markdown full-document rendering:
-  render a staged or otherwise read-only large Markdown diff, assert `Render full document` appears, clicking it renders the full document, and save/edit affordances remain absent.
+- [ ] P2: Cover large Markdown editing deferral by character count:
+  add a low-line Markdown document over `LARGE_MARKDOWN_FULL_RENDER_CHAR_LIMIT` and assert the editable-section deferral state plus opt-in transition. The current test covers only the line-count trigger.
 - [ ] P2: Route the new lagged-recovery reconnect test through the textDelta fast-path it documents:
   the new `App.live-state.reconnect.test.tsx` test exercises the revision-gap branch (the `messageCreated` delta omits `sessionMutationStamp` so it falls into the resync fallback). Add `sessionMutationStamp` so the delta routes through the matched-stamp fast-path that the surrounding `handleDeltaEvent` comment is most concerned about, OR rename the test to clarify it covers the revision-gap branch specifically and add a sibling test for the textDelta fast-path.
 - [ ] P2: Split the bad-live-event + workspaceFilesChanged test into isolated arrange-act-assert phases:

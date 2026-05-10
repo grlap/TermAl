@@ -2470,7 +2470,7 @@ describe("DiffPanel", () => {
     expect(screen.getAllByText("Patch preview").length).toBeGreaterThan(0);
   });
 
-  it("defers full-document rendering for large Markdown diffs until requested", async () => {
+  it("renders complete large Markdown diffs while deferring editable full-document sections", async () => {
     const sharedLines = Array.from({ length: 1_205 }, (_, index) => `Shared line ${index + 1}`);
     const beforeContent = [...sharedLines, "Old ending", ""].join("\n");
     const afterContent = [...sharedLines, "New ending", ""].join("\n");
@@ -2517,16 +2517,25 @@ describe("DiffPanel", () => {
     });
 
     expect(screen.getByLabelText("Markdown diff status")).toBeInTheDocument();
-    expect(screen.getAllByText("Patch preview").length).toBeGreaterThan(0);
-    expect(screen.getByText("Full document deferred")).toBeInTheDocument();
+    expect(screen.getAllByText("Full document").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Patch preview")).not.toBeInTheDocument();
+    expect(screen.getByText("Editing deferred")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit full document" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Render full document" })).toBeNull();
+    const renderedMarkdownText =
+      document.querySelector(".markdown-diff-change-scroll")?.textContent ?? "";
+    expect(renderedMarkdownText).toContain("Shared line 1");
+    expect(renderedMarkdownText).toContain("Shared line 1205");
+    expect(renderedMarkdownText).toContain("New ending");
+    expect(
+      screen.queryByText("Preview reconstructed from the patch. Unchanged regions outside shown hunks are omitted."),
+    ).not.toBeInTheDocument();
     expect(document.querySelector("[data-markdown-editable='true']")).toBeNull();
 
     await clickAndSettle(screen.getByRole("button", { name: "Edit full document" }));
 
     expect(screen.getAllByText("Full document").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Full document deferred")).not.toBeInTheDocument();
+    expect(screen.queryByText("Editing deferred")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(document.querySelector("[data-markdown-editable='true']")).not.toBeNull();
     });
