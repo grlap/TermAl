@@ -38,6 +38,10 @@ fn persists_remote_settings() {
 
     let updated = state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: None,
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
             default_codex_reasoning_effort: None,
             default_claude_approval_mode: None,
             default_claude_effort: None,
@@ -81,6 +85,10 @@ fn rejects_remote_settings_with_unsafe_remote_id() {
     let state = test_app_state();
 
     let error = match state.update_app_settings(UpdateAppSettingsRequest {
+        default_codex_model: None,
+        default_claude_model: None,
+        default_cursor_model: None,
+        default_gemini_model: None,
         default_codex_reasoning_effort: None,
         default_claude_approval_mode: None,
         default_claude_effort: None,
@@ -117,6 +125,10 @@ fn rejects_remote_settings_with_invalid_ssh_host() {
     let state = test_app_state();
 
     let error = match state.update_app_settings(UpdateAppSettingsRequest {
+        default_codex_model: None,
+        default_claude_model: None,
+        default_cursor_model: None,
+        default_gemini_model: None,
         default_codex_reasoning_effort: None,
         default_claude_approval_mode: None,
         default_claude_effort: None,
@@ -150,6 +162,10 @@ fn rejects_remote_settings_with_invalid_ssh_user() {
     let state = test_app_state();
 
     let error = match state.update_app_settings(UpdateAppSettingsRequest {
+        default_codex_model: None,
+        default_claude_model: None,
+        default_cursor_model: None,
+        default_gemini_model: None,
         default_codex_reasoning_effort: None,
         default_claude_approval_mode: None,
         default_claude_effort: None,

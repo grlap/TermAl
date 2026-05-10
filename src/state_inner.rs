@@ -133,7 +133,7 @@ impl StateInner {
                 workdir,
                 project_id,
                 remote_id: None,
-                model: model.unwrap_or_else(|| agent.default_model().to_owned()),
+                model: model.unwrap_or_else(|| self.preferences.default_model_for_agent(agent)),
                 model_options: Vec::new(),
                 approval_policy: None,
                 reasoning_effort: None,

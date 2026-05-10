@@ -46,6 +46,10 @@ fn creates_sessions_for_remote_projects_over_ssh() {
 
     state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: None,
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
             default_codex_reasoning_effort: None,
             default_claude_approval_mode: None,
             default_claude_effort: None,

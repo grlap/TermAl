@@ -68,12 +68,20 @@ function createBaseProps(
     newSessionModel: "gpt-5.4",
     newSessionModelOptions: [{ label: "gpt-5.4", value: "gpt-5.4" }],
     onChangeNewSessionModel: vi.fn(),
+    defaultCodexModel: "default",
+    handleDefaultCodexModelChange: vi.fn(),
     defaultCodexReasoningEffort,
     handleDefaultCodexReasoningEffortChange: vi.fn(),
+    defaultClaudeModel: "default",
+    handleDefaultClaudeModelChange: vi.fn(),
     defaultClaudeEffort,
     handleDefaultClaudeEffortChange: vi.fn(),
+    defaultCursorModel: "default",
+    handleDefaultCursorModelChange: vi.fn(),
     defaultCursorMode: CURSOR_MODE_OPTIONS[0].value,
     onChangeDefaultCursorMode: vi.fn(),
+    defaultGeminiModel: "default",
+    handleDefaultGeminiModelChange: vi.fn(),
     defaultGeminiApprovalMode: GEMINI_APPROVAL_OPTIONS[0].value,
     onChangeDefaultGeminiApprovalMode: vi.fn(),
     createSessionProjectId: "",
@@ -175,6 +183,17 @@ function renderCreateProjectDialog(overrides: Partial<ComponentProps<typeof AppD
   return onClose;
 }
 
+function renderSettingsDialog(settingsTab: PreferencesTabId) {
+  render(
+    <AppDialogs
+      {...createBaseProps({
+        isSettingsOpen: true,
+        settingsTab,
+      })}
+    />,
+  );
+}
+
 describe("AppDialogs create-dialog backdrop dismissal", () => {
   let originalPlatform: PropertyDescriptor | undefined;
   let originalUserAgentData: PropertyDescriptor | undefined;
@@ -264,5 +283,33 @@ describe("AppDialogs create-dialog backdrop dismissal", () => {
     fireEvent.mouseDown(getBackdrop("Add project"), { button: 0 });
 
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("AppDialogs settings agent defaults", () => {
+  it("renders the Cursor settings tab", () => {
+    renderSettingsDialog("cursor");
+
+    expect(
+      screen.getByRole("heading", { name: "Cursor startup settings" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Default model")).toHaveAttribute(
+      "id",
+      "default-cursor-model",
+    );
+    expect(screen.getByLabelText("Default Cursor mode")).toBeInTheDocument();
+  });
+
+  it("renders the Gemini settings tab", () => {
+    renderSettingsDialog("gemini");
+
+    expect(
+      screen.getByRole("heading", { name: "Gemini startup settings" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Default model")).toHaveAttribute(
+      "id",
+      "default-gemini-model",
+    );
+    expect(screen.getByLabelText("Default Gemini approvals")).toBeInTheDocument();
   });
 });

@@ -149,6 +149,17 @@ The child is a normal session with:
 
 The child remains independently openable. TermAl should not hide its transcript.
 
+### Retention And Cleanup
+
+Delegation children currently remain ordinary visible sessions after completion,
+failure, or cancellation. That is useful for auditability, but repeated reviewer
+fan-out can accumulate many completed child sessions in the workspace.
+
+Open item: define a retention policy for terminal delegation children. A likely
+direction is to auto-hide or archive completed child sessions after fan-in while
+preserving the delegation result packet, parent card, transcript link, and a
+way for the user to reopen the child session on demand.
+
 ### Result Packet
 
 When a child finishes, TermAl records a compact result packet:
@@ -251,6 +262,13 @@ the prompt dispatches immediately. If the parent is still in a turn, the prompt
 waits behind the current turn and resumes the parent through the existing
 queued-prompt path.
 
+If the parent session is removed before a wait can resume it, TermAl consumes
+the parent's pending waits with `reason: "parentSessionRemoved"` and does not
+queue a resume prompt. This keeps `/api/state` from retaining orphan waits and
+lets SSE clients distinguish normal fan-in completion from parent removal.
+Boot-time reconciliation applies the same cleanup to persisted waits whose
+parent session is already missing.
+
 The resume prompt is deliberately close to orchestration's consolidated
 transition prompt: it includes the wait id, mode, watched delegation statuses,
 and one result section per terminal child. `all` waits produce a full fan-in
@@ -323,7 +341,9 @@ Required contract:
   `arguments` field, and appends a `## Additional User Note` block when `note`
   is present.
 - The backend returns the resolved delegation prompt plus command-derived
-  defaults such as `mode`, `title`, and `writePolicy`.
+  defaults such as `mode`, `title`, and `writePolicy`. The policy source is
+  trusted `metadata.termal` frontmatter on the command or future `SKILL.md`,
+  not hard-coded command names.
 - `spawn_delegation` receives the already-resolved prompt and the resolver's
   write policy. React components must not special-case command names such as
   `review-local`.
@@ -499,6 +519,12 @@ Safety limits for agent-facing tools:
   names stay metadata-sized and are not a prompt-sized side channel
 - explicit delegation model names are capped at 200 characters because they are
   persisted and echoed in summaries as metadata
+- omitted or blank delegation `model` values use the selected agent's app-level
+  default model preference; explicit delegation models still override that
+  preference for the child only
+- composer-created delegations intentionally omit `model` unless the caller
+  explicitly supplies one, so they follow the app-level default instead of a
+  parent session's transient model override
 - every spawn, cancel, timeout, and result-read emits an auditable event
 - child sessions cannot commit or push through TermAl-mediated commands unless
   the human explicitly approves that operation
@@ -521,7 +547,10 @@ parent session state.
 render the parent waiting state. Wait records are removed from the snapshot when
 they are consumed. The synchronous `DelegationWaitResponse` still returns the
 created wait even if it is instantly satisfied and consumed by a follow-up
-revision.
+revision. `queuedResume` is an alias for `resumePromptQueued`: it means TermAl
+queued a parent resume prompt. `resumeDispatchRequested` is separate and only
+means that the parent was idle enough for TermAl to dispatch that queued prompt
+immediately.
 
 Delegation lifecycle changes should be revisioned delta events so normal SSE
 gap detection and `/api/state` repair keep working:
@@ -535,6 +564,7 @@ type DelegationDeltaEvent =
       revision: number;
       waitId: string;
       parentSessionId: string;
+      reason: "completed" | "parentSessionRemoved";
     }
   | {
       type: "delegationUpdated";
@@ -722,6 +752,8 @@ type SpawnReviewerBatchResumeWaitResult =
       outcome: "scheduled";
       wait: DelegationWaitRecord;
       queuedResume: boolean;
+      resumePromptQueued: boolean;
+      resumeDispatchRequested: boolean;
       revision: number;
       serverInstanceId: string;
     }

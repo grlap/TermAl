@@ -422,6 +422,10 @@ export type UseAppLiveStateStateSetters = {
 };
 
 export type UseAppLiveStatePreferenceSetters = {
+  setDefaultCodexModel: Dispatch<SetStateAction<string>>;
+  setDefaultClaudeModel: Dispatch<SetStateAction<string>>;
+  setDefaultCursorModel: Dispatch<SetStateAction<string>>;
+  setDefaultGeminiModel: Dispatch<SetStateAction<string>>;
   setDefaultCodexReasoningEffort: Dispatch<
     SetStateAction<CodexReasoningEffort>
   >;
@@ -595,6 +599,10 @@ export function useAppLiveState(
     setBackendConnectionState,
   } = stateSetters;
   const {
+    setDefaultCodexModel,
+    setDefaultClaudeModel,
+    setDefaultCursorModel,
+    setDefaultGeminiModel,
     setDefaultCodexReasoningEffort,
     setDefaultClaudeApprovalMode,
     setDefaultClaudeEffort,
@@ -1544,6 +1552,10 @@ export function useAppLiveState(
 
   function syncPreferencesFromState(nextState: StateResponse) {
     const preferences = resolveAppPreferences(nextState.preferences);
+    setDefaultCodexModel(preferences.defaultCodexModel);
+    setDefaultClaudeModel(preferences.defaultClaudeModel);
+    setDefaultCursorModel(preferences.defaultCursorModel);
+    setDefaultGeminiModel(preferences.defaultGeminiModel);
     setDefaultCodexReasoningEffort(preferences.defaultCodexReasoningEffort);
     setDefaultClaudeApprovalMode(preferences.defaultClaudeApprovalMode);
     setDefaultClaudeEffort(preferences.defaultClaudeEffort);

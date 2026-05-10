@@ -104,12 +104,16 @@ function makeSessionActionsParams(
     newProjectUsesLocalRemote: true,
     defaults: {
       defaultCodexApprovalPolicy: "never",
+      defaultCodexModel: "default",
       defaultCodexReasoningEffort: "medium",
       defaultCodexSandboxMode: "workspace-write",
       defaultClaudeApprovalMode: "ask",
       defaultClaudeEffort: "default",
+      defaultClaudeModel: "default",
+      defaultCursorModel: "default",
       defaultCursorMode: "agent",
       defaultGeminiApprovalMode: "default",
+      defaultGeminiModel: "default",
     },
     refs: {
       isMountedRef: { current: true },
@@ -172,6 +176,49 @@ function expectRequestErrorDeferredUpdatesOnly(
 describe("useAppSessionActions", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("sends a configured default model when creating a new session", async () => {
+    const createSessionSpy = vi.spyOn(api, "createSession").mockResolvedValue({
+      revision: 6,
+      serverInstanceId: "server-a",
+      session: makeSession("session-new", { model: "gpt-5.5" }),
+    } as Awaited<ReturnType<typeof api.createSession>>);
+    const params = makeSessionActionsParams();
+    params.defaults.defaultCodexModel = "gpt-5.5";
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleNewSession({ agent: "Codex", model: "default" }),
+    ).resolves.toBe(true);
+
+    expect(createSessionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent: "Codex",
+        model: "gpt-5.5",
+      }),
+    );
+  });
+
+  it("omits mixed-case default model sentinel when creating a new session", async () => {
+    const createSessionSpy = vi.spyOn(api, "createSession").mockResolvedValue({
+      revision: 6,
+      serverInstanceId: "server-a",
+      session: makeSession("session-new"),
+    } as Awaited<ReturnType<typeof api.createSession>>);
+    const params = makeSessionActionsParams();
+    params.defaults.defaultCodexModel = " DEFAULT ";
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleNewSession({ agent: "Codex", model: "default" }),
+    ).resolves.toBe(true);
+
+    expect(createSessionSpy).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        model: expect.any(String),
+      }),
+    );
   });
 
   it("clears the acted session hydration mismatch on stale same-instance action success", async () => {

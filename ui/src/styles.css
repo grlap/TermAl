@@ -4567,10 +4567,12 @@ textarea {
   position: sticky;
   bottom: 0;
   z-index: 2;
-  display: flex;
-  /* Keep the live turn visually closest to the composer while preserving DOM order. */
-  flex-direction: column-reverse;
-  align-items: stretch;
+}
+
+.conversation-pending-prompts {
+  display: grid;
+  gap: var(--message-stack-gap);
+  align-content: start;
 }
 
 .activity-card-live {

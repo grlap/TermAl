@@ -219,6 +219,10 @@ export function makeStateResponse(overrides: AppTestStateResponseOverrides): App
     codex: overrides.codex ?? {},
     agentReadiness: overrides.agentReadiness ?? [],
     preferences: {
+      defaultCodexModel: "default",
+      defaultClaudeModel: "default",
+      defaultCursorModel: "default",
+      defaultGeminiModel: "default",
       defaultCodexReasoningEffort: "medium",
       defaultClaudeApprovalMode: "ask",
       defaultClaudeEffort: "default",

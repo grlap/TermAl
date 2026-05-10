@@ -175,6 +175,10 @@ export type RemoteConfig = {
 };
 
 export type AppPreferences = {
+  defaultCodexModel?: string;
+  defaultClaudeModel?: string;
+  defaultCursorModel?: string;
+  defaultGeminiModel?: string;
   defaultCodexReasoningEffort: CodexReasoningEffort;
   defaultClaudeApprovalMode: ClaudeApprovalMode;
   defaultClaudeEffort: ClaudeEffortLevel;
@@ -396,6 +400,10 @@ export type DelegationWaitRecord = {
   createdAt: string;
   title?: string | null;
 };
+
+export type DelegationWaitConsumedReason =
+  | "completed"
+  | "parentSessionRemoved";
 
 export type Message =
   | TextMessage
@@ -804,6 +812,7 @@ export type DelegationWaitConsumedEvent = {
   revision: number;
   waitId: string;
   parentSessionId: string;
+  reason?: DelegationWaitConsumedReason;
 };
 
 export type DelegationUpdatedEvent = {

@@ -58,6 +58,7 @@ import { CREATE_SESSION_WORKSPACE_ID } from "./app-shell-internals";
 import {
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
+  isDefaultModelPreference,
   normalizedCodexReasoningEffort,
   normalizedRequestedSessionModel,
   resolveUnknownSessionModelSendAttempt,
@@ -113,12 +114,16 @@ type UseAppSessionActionsLookups = {
 
 type UseAppSessionActionsDefaults = {
   defaultCodexApprovalPolicy: ApprovalPolicy;
+  defaultCodexModel: string;
   defaultCodexReasoningEffort: CodexReasoningEffort;
   defaultCodexSandboxMode: SandboxMode;
   defaultClaudeApprovalMode: ClaudeApprovalMode;
   defaultClaudeEffort: ClaudeEffortLevel;
+  defaultClaudeModel: string;
+  defaultCursorModel: string;
   defaultCursorMode: CursorMode;
   defaultGeminiApprovalMode: GeminiApprovalMode;
+  defaultGeminiModel: string;
 };
 
 type UseAppSessionActionsRefs = {
@@ -384,12 +389,16 @@ export function useAppSessionActions(
     newProjectUsesLocalRemote,
     defaults: {
       defaultCodexApprovalPolicy,
+      defaultCodexModel,
       defaultCodexReasoningEffort,
       defaultCodexSandboxMode,
       defaultClaudeApprovalMode,
       defaultClaudeEffort,
+      defaultClaudeModel,
+      defaultCursorModel,
       defaultCursorMode,
       defaultGeminiApprovalMode,
+      defaultGeminiModel,
     },
     refs: {
       isMountedRef,
@@ -1270,6 +1279,19 @@ export function useAppSessionActions(
     });
   }
 
+  function configuredDefaultModelForAgent(agent: AgentType) {
+    switch (agent) {
+      case "Claude":
+        return defaultClaudeModel;
+      case "Codex":
+        return defaultCodexModel;
+      case "Cursor":
+        return defaultCursorModel;
+      case "Gemini":
+        return defaultGeminiModel;
+    }
+  }
+
   async function handleNewSession({
     agent,
     model,
@@ -1322,9 +1344,17 @@ export function useAppSessionActions(
         projectSelectionId === CREATE_SESSION_WORKSPACE_ID
           ? null
           : projectSelectionId;
+      const defaultModel = configuredDefaultModelForAgent(agent).trim();
+      // Send a configured default explicitly so an immediately-created session
+      // observes optimistic settings changes before the backend save returns.
+      const requestedModel = usesSessionModelPicker(agent)
+        ? !isDefaultModelPreference(defaultModel)
+          ? defaultModel
+          : undefined
+        : trimmedModel;
       const created = await createSession({
         agent,
-        model: usesSessionModelPicker(agent) ? undefined : trimmedModel,
+        model: requestedModel,
         approvalPolicy:
           agent === "Codex" ? defaultCodexApprovalPolicy : undefined,
         reasoningEffort:

@@ -235,6 +235,8 @@ describe("delegation command surface", () => {
       revision: 42,
       serverInstanceId: "server-a",
       queuedResume: false,
+      resumePromptQueued: false,
+      resumeDispatchRequested: false,
       wait: {
         id: "delegation-wait-1",
         parentSessionId,
@@ -261,6 +263,8 @@ describe("delegation command surface", () => {
     ).resolves.toMatchObject({
       revision: 42,
       queuedResume: false,
+      resumePromptQueued: false,
+      resumeDispatchRequested: false,
       wait: {
         parentSessionId: "parent-1",
         delegationIds: ["delegation-1", "delegation-2"],
@@ -334,10 +338,10 @@ describe("delegation command surface", () => {
       title: "Review the current diff.",
       prompt: "Review the current diff.",
       agent: "Claude",
-      model: "claude-sonnet-4.5",
       mode: "reviewer",
       writePolicy: { kind: "readOnly" },
     });
+    expect(request).not.toHaveProperty("model");
   });
 
   it("allows composer delegation callers to request isolated worktree review", () => {
@@ -353,10 +357,10 @@ describe("delegation command surface", () => {
     expect(request).toMatchObject({
       prompt: "Run /review-local.",
       agent: "Codex",
-      model: "gpt-5.5",
       mode: "reviewer",
       writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
     });
+    expect(request).not.toHaveProperty("model");
   });
 
   it("preserves composer delegation mode overrides from resolved commands", () => {
@@ -843,6 +847,8 @@ describe("delegation command surface", () => {
       revision: 8,
       serverInstanceId: "server-a",
       queuedResume: false,
+      resumePromptQueued: false,
+      resumeDispatchRequested: false,
       wait: {
         id: "delegation-wait-1",
         parentSessionId,
@@ -894,6 +900,8 @@ describe("delegation command surface", () => {
       resumeWait: {
         outcome: "scheduled",
         queuedResume: false,
+        resumePromptQueued: false,
+        resumeDispatchRequested: false,
         revision: 8,
         serverInstanceId: "server-a",
         wait: {

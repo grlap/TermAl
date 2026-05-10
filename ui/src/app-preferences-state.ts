@@ -108,6 +108,10 @@ export function useAppPreferencesState(
     useState<SandboxMode>("workspace-write");
   const [defaultCodexApprovalPolicy, setDefaultCodexApprovalPolicy] =
     useState<ApprovalPolicy>("never");
+  const [defaultCodexModel, setDefaultCodexModel] = useState("default");
+  const [defaultClaudeModel, setDefaultClaudeModel] = useState("default");
+  const [defaultCursorModel, setDefaultCursorModel] = useState("default");
+  const [defaultGeminiModel, setDefaultGeminiModel] = useState("default");
   const [defaultCodexReasoningEffort, setDefaultCodexReasoningEffort] =
     useState<CodexReasoningEffort>(DEFAULT_CODEX_REASONING_EFFORT);
   const [defaultClaudeApprovalMode, setDefaultClaudeApprovalMode] =
@@ -197,6 +201,14 @@ export function useAppPreferencesState(
     setDefaultCodexSandboxMode,
     defaultCodexApprovalPolicy,
     setDefaultCodexApprovalPolicy,
+    defaultCodexModel,
+    setDefaultCodexModel,
+    defaultClaudeModel,
+    setDefaultClaudeModel,
+    defaultCursorModel,
+    setDefaultCursorModel,
+    defaultGeminiModel,
+    setDefaultGeminiModel,
     defaultCodexReasoningEffort,
     setDefaultCodexReasoningEffort,
     defaultClaudeApprovalMode,

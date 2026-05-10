@@ -26,7 +26,9 @@ export type PreferencesTabId =
   | "telegram"
   | "orchestrators"
   | "codex-prompts"
-  | "claude-approvals";
+  | "claude-approvals"
+  | "cursor"
+  | "gemini";
 
 export const PREFERENCES_TABS: ReadonlyArray<{
   id: PreferencesTabId;
@@ -40,4 +42,6 @@ export const PREFERENCES_TABS: ReadonlyArray<{
   { id: "orchestrators", label: "Orchestrators" },
   { id: "codex-prompts", label: "Codex" },
   { id: "claude-approvals", label: "Claude" },
+  { id: "cursor", label: "Cursor" },
+  { id: "gemini", label: "Gemini" },
 ];

@@ -134,7 +134,21 @@ Response:
   "kind": "promptTemplate",
   "visiblePrompt": "/fix-bug 1024",
   "expandedPrompt": "Fix a bug from docs/bugs.md...\n\n1024\n\n## Additional User Note\n\nPlease add integration tests for Connectivity class.",
-  "title": "Fix bug 1024",
+  "title": "Fix bug 1024"
+}
+```
+
+Delegating a command with command-owned defaults, such as `/review-local`,
+returns `delegation` only for `intent: "delegate"`:
+
+```json
+{
+  "name": "review-local",
+  "source": ".claude/commands/review-local.md",
+  "kind": "promptTemplate",
+  "visiblePrompt": "/review-local",
+  "expandedPrompt": "Review staged and unstaged changes...",
+  "title": "Review staged and unstaged changes using multiple specialized reviewers.",
   "delegation": {
     "mode": "reviewer",
     "writePolicy": { "kind": "isolatedWorktree", "ownedPaths": [] }
@@ -165,9 +179,66 @@ Resolution rules:
   `visiblePrompt` such as `/review`. If a native runtime cannot accept appended
   notes, the resolver must either reject `note` with a validation error or
   convert the request to a prompt-template path that TermAl owns.
-- Command metadata may later provide argument arity, title generation,
-  delegation mode, and write policy. Until metadata exists, policies must live
-  in a backend resolver table, not in React components.
+- Backend resolver metadata provides command-specific title generation,
+  delegation mode, and write policy. Add new command behavior through trusted
+  command/skill frontmatter metadata, not React component branches or Rust
+  command-name lookup tables.
+
+### 1b. Command/skill frontmatter metadata
+
+Command templates and future `SKILL.md` files may declare TermAl execution
+metadata under `metadata.termal`. This follows the Claude skill model: YAML
+frontmatter is the always-loaded discovery layer, while the Markdown body remains
+the prompt/instruction payload. TermAl strips recognized frontmatter before
+sending the template to an agent and uses `description:` as the command palette
+description when present.
+
+TermAl parses trusted command frontmatter for resolver metadata today. Future
+`SKILL.md` support should reuse the same `metadata.termal` shape.
+
+Metadata contract:
+
+```yaml
+---
+name: review-local
+description: Review staged and unstaged changes using multiple specialized reviewers.
+metadata:
+  termal:
+    title:
+      strategy: default
+    delegation:
+      enabled: true
+      mode: reviewer
+      writePolicy:
+        kind: isolatedWorktree
+---
+```
+
+Title strategies:
+
+- `default`: use the command description or visible prompt.
+- `prefixFirstArgument`: use `<prefix> <first argument>` when an argument is
+  present, otherwise fall back to `default`.
+
+Delegation metadata:
+
+- `enabled: true` allows the resolver to return delegation defaults for
+  `intent: "delegate"`.
+- `mode` currently accepts `reviewer` or `explorer`; `worker` remains blocked
+  until write-enabled worker delegations are implemented.
+- `writePolicy.kind` currently accepts `readOnly` or `isolatedWorktree`.
+  `sharedWorktree` remains unsupported for command metadata.
+
+Trust rules:
+
+- Only metadata from TermAl-trusted filesystem command/skill files may grant
+  delegation defaults. Native runtime-advertised commands or untrusted project
+  entries named `review-local` must not inherit TermAl privileges by name.
+- Invalid `metadata.termal` must fail command resolution with a clear validation
+  error. It must not silently broaden permissions or fall back to a more
+  permissive policy.
+- Metadata is declarative; command names are not policy. `/review-local` and
+  `/fix-bug` are examples, not special cases in Rust code.
 
 Example user intent:
 

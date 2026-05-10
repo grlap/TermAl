@@ -1,3 +1,13 @@
+---
+name: fix-bug
+description: Fix a bug from docs/bugs.md by number.
+metadata:
+  termal:
+    title:
+      strategy: prefixFirstArgument
+      prefix: Fix bug
+---
+
 Fix a bug from `docs/bugs.md` by number (e.g., `3`).
 
 Arguments: $ARGUMENTS (required bug number). If omitted, ask the user which bug to fix.

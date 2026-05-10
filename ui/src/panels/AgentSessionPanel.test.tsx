@@ -389,10 +389,15 @@ describe("AgentSessionPanel conversation caching", () => {
       author: "you",
       text: "Current prompt",
     };
-    const pendingPrompt = {
-      id: "pending-prompt",
+    const firstPendingPrompt = {
+      id: "pending-prompt-a",
       timestamp: "10:02",
-      text: "Queued follow-up",
+      text: "Queued follow-up A",
+    };
+    const secondPendingPrompt = {
+      id: "pending-prompt-b",
+      timestamp: "10:03",
+      text: "Queued follow-up B",
     };
 
     Object.defineProperty(scrollNode, "clientHeight", {
@@ -421,7 +426,7 @@ describe("AgentSessionPanel conversation caching", () => {
             text: "Partial reply",
           },
         ],
-        pendingPrompts: [pendingPrompt],
+        pendingPrompts: [firstPendingPrompt, secondPendingPrompt],
       }),
       scrollContainerRef: { current: scrollNode },
       showWaitingIndicator: true,
@@ -431,19 +436,43 @@ describe("AgentSessionPanel conversation caching", () => {
     const liveTail = screen
       .getByText("Live turn")
       .closest(".conversation-live-tail");
-    const queuedPromptCard = screen
-      .getByText("Queued follow-up")
+    const firstQueuedPromptCard = screen
+      .getByText("Queued follow-up A")
       .closest(".pending-prompt-card");
+    const secondQueuedPromptCard = screen
+      .getByText("Queued follow-up B")
+      .closest(".pending-prompt-card");
+    const pendingPromptQueue = firstQueuedPromptCard?.closest(
+      ".conversation-pending-prompts",
+    );
     expect(liveTail).not.toBeNull();
-    expect(queuedPromptCard).not.toBeNull();
+    expect(firstQueuedPromptCard).not.toBeNull();
+    expect(secondQueuedPromptCard).not.toBeNull();
+    expect(pendingPromptQueue).not.toBeNull();
     expect(liveTail).toHaveClass("is-pinned");
     expect(Array.from((liveTail as HTMLElement).children)[0]).toHaveTextContent(
       "Live turn",
     );
-    expect(Array.from((liveTail as HTMLElement).children)[1]).toHaveTextContent(
-      "Queued follow-up",
+    expect(
+      Boolean(
+        firstQueuedPromptCard!.compareDocumentPosition(secondQueuedPromptCard!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
+    expect(
+      Boolean(
+        secondQueuedPromptCard!.compareDocumentPosition(liveTail!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
+    expect(liveTail).not.toContainElement(firstQueuedPromptCard as HTMLElement);
+    expect(liveTail).not.toContainElement(secondQueuedPromptCard as HTMLElement);
+    expect(pendingPromptQueue).toContainElement(
+      firstQueuedPromptCard as HTMLElement,
     );
-    expect(liveTail).toContainElement(queuedPromptCard as HTMLElement);
+    expect(pendingPromptQueue).toContainElement(
+      secondQueuedPromptCard as HTMLElement,
+    );
     expect(scrollTop).toBe(120);
     scrollWrites.length = 0;
 
@@ -462,7 +491,7 @@ describe("AgentSessionPanel conversation caching", () => {
                 text: "Partial reply with enough streamed content to grow above the live tail",
               },
             ],
-            pendingPrompts: [pendingPrompt],
+            pendingPrompts: [firstPendingPrompt, secondPendingPrompt],
           }),
         ],
         draftsBySessionId: {},

@@ -290,7 +290,7 @@ export function CodexPromptSettingsCard({
             ? "Loading Codex's live model list for this session. Sandbox, approval, and reasoning changes still apply on the next Codex prompt."
             : canChangeModel
               ? "Model, sandbox, approval, and reasoning changes apply on the next Codex prompt. You can still paste a full Codex model id manually if the live list is behind."
-              : "TermAl asks Codex for its live model list when this session opens. New sessions begin on Codex's default model. You can still paste a full Codex model id manually. Sandbox, approval, and reasoning changes still apply on the next Codex prompt."}
+              : "TermAl asks Codex for its live model list when this session opens. New sessions use the configured app default model; set it to default to let Codex choose. You can still paste a full Codex model id manually. Sandbox, approval, and reasoning changes still apply on the next Codex prompt."}
           {modelCapabilityHint ? ` ${modelCapabilityHint}` : ""}
         </p>
       </div>
@@ -410,7 +410,7 @@ export function ClaudePromptSettingsCard({
             ? "Refreshing Claude's live model list from the session."
             : session.modelOptions?.length
               ? "Claude exposes its live model list during session initialization. Model changes are applied live to the session, and you can still paste a full model id if you need something outside the current list. Ask keeps approval cards, Auto-approve continues through tool requests, Plan keeps Claude in read-only analysis mode, and effort changes restart Claude before the next prompt."
-              : "Start the Claude session once to load its live model list. New Claude sessions use Claude's default model, and you can still paste a full Claude model id manually."}
+              : "Start the Claude session once to load its live model list. New Claude sessions use the configured app default model; set it to default to let Claude choose. You can still paste a full Claude model id manually."}
           {modelCapabilityHint ? ` ${modelCapabilityHint}` : ""}
         </p>
       </div>
@@ -713,7 +713,7 @@ export function CursorPromptSettingsCard({
             ? "Loading Cursor's live model list for this session."
             : canChangeModel
               ? "Model and mode changes apply to the live Cursor session. You can still paste a full model id manually if Cursor's list is behind."
-              : "TermAl asks Cursor for its live model list when this session opens. New sessions begin on Auto, and you can still paste a full model id manually."}{" "}
+              : "TermAl asks Cursor for its live model list when this session opens. New sessions use the configured app default model; set it to default to leave Cursor on Auto. You can still paste a full model id manually."}{" "}
           Agent auto-approves tool requests and can edit, Ask keeps approval cards, and Plan
           denies tool requests.
         </p>
@@ -815,7 +815,7 @@ export function GeminiPromptSettingsCard({
             ? "Loading Gemini's live model list for this session."
             : canChangeModel
               ? "Model changes apply to the live Gemini session. You can still paste a full Gemini model id manually if the live list is behind."
-              : "TermAl asks Gemini for its live model list when this session opens. New sessions begin on Auto, and you can still paste a full Gemini model id manually."}{" "}
+              : "TermAl asks Gemini for its live model list when this session opens. New sessions use the configured app default model; set it to default to leave Gemini on Auto. You can still paste a full Gemini model id manually."}{" "}
           Default prompts for approval, Auto edit approves edit tools, YOLO approves all tools,
           and Plan stays read-only. Approval-mode changes apply on the next Gemini prompt.
         </p>

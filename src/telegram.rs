@@ -11,7 +11,7 @@ action contract instead of exposing a second transport-specific control path.
 */
 
 const TELEGRAM_API_BASE_URL: &str = "https://api.telegram.org";
-const TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS: u64 = 5;
+const TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS: u64 = 1;
 const TELEGRAM_ERROR_RETRY_DELAY: Duration = Duration::from_secs(2);
 const TELEGRAM_GET_UPDATES_LIMIT: i64 = 25;
 const TELEGRAM_RELAY_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -74,16 +74,26 @@ fn run_telegram_bot_with_config(
     }
 
     while !telegram_relay_shutdown_requested(&shutdown) {
+        let mut dirty = false;
+        if let Some(chat_id) = effective_telegram_chat_id(&config, &state) {
+            match sync_telegram_digest(&telegram, &termal, &config, &mut state, chat_id) {
+                Ok(changed) => dirty |= changed,
+                Err(err) => log_telegram_error("failed to sync digest", &err),
+            }
+        }
+
         let updates = match telegram.get_updates(state.next_update_id, config.poll_timeout_secs) {
             Ok(updates) => updates,
             Err(err) => {
+                if dirty {
+                    persist_telegram_bot_state(&config.state_path, &state)?;
+                }
                 log_telegram_error("failed to poll updates", &err);
                 telegram_relay_sleep(TELEGRAM_ERROR_RETRY_DELAY, &shutdown);
                 continue;
             }
         };
 
-        let mut dirty = false;
         for update in updates {
             if telegram_relay_shutdown_requested(&shutdown) {
                 break;

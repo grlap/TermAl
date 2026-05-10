@@ -426,7 +426,7 @@ export type CreateDelegationRequest = {
   cwd?: string;
   /** Defaults to the parent session agent when omitted. */
   agent?: AgentType;
-  /** Defaults to the selected agent's default model when omitted or blank. */
+  /** Defaults to the selected agent's configured app default model when omitted or blank. */
   model?: string;
   /** Defaults to reviewer mode when omitted. */
   mode?: "reviewer" | "explorer" | "worker";
@@ -498,7 +498,10 @@ export type DelegationWaitRecord = {
 export type DelegationWaitResponse = {
   revision: number;
   wait: DelegationWaitRecord;
+  /** Alias for resumePromptQueued. */
   queuedResume: boolean;
+  resumePromptQueued: boolean;
+  resumeDispatchRequested: boolean;
   serverInstanceId: string;
 };
 
@@ -676,6 +679,10 @@ export function deleteWorkspaceLayout(workspaceId: string) {
 }
 
 export function updateAppSettings(payload: {
+  defaultCodexModel?: string;
+  defaultClaudeModel?: string;
+  defaultCursorModel?: string;
+  defaultGeminiModel?: string;
   defaultCodexReasoningEffort?: CodexReasoningEffort;
   defaultClaudeApprovalMode?: ClaudeApprovalMode;
   defaultClaudeEffort?: ClaudeEffortLevel;

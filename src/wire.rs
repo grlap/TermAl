@@ -1036,8 +1036,25 @@ struct CreateDelegationWaitRequest {
 struct DelegationWaitResponse {
     revision: u64,
     wait: DelegationWaitRecord,
+    /// Backwards-compatible alias for `resume_prompt_queued`.
     queued_resume: bool,
+    resume_prompt_queued: bool,
+    resume_dispatch_requested: bool,
     server_instance_id: String,
+}
+
+/// Reason a delegation wait left the pending wait set.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum DelegationWaitConsumedReason {
+    Completed,
+    ParentSessionRemoved,
+}
+
+impl Default for DelegationWaitConsumedReason {
+    fn default() -> Self {
+        Self::Completed
+    }
 }
 
 /// Represents the create project request payload.
@@ -1054,6 +1071,10 @@ struct CreateProjectRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateAppSettingsRequest {
+    default_codex_model: Option<String>,
+    default_claude_model: Option<String>,
+    default_cursor_model: Option<String>,
+    default_gemini_model: Option<String>,
     default_codex_reasoning_effort: Option<CodexReasoningEffort>,
     default_claude_approval_mode: Option<ClaudeApprovalMode>,
     default_claude_effort: Option<ClaudeEffortLevel>,
@@ -1942,6 +1963,8 @@ enum DeltaEvent {
         revision: u64,
         wait_id: String,
         parent_session_id: String,
+        #[serde(default)]
+        reason: DelegationWaitConsumedReason,
     },
     DelegationUpdated {
         revision: u64,

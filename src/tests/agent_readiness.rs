@@ -145,6 +145,10 @@ fn update_app_settings_refreshes_invalidated_agent_readiness_cache() {
 
     let updated = state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: None,
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
             default_codex_reasoning_effort: Some(next_reasoning_effort),
             default_claude_approval_mode: None,
             default_claude_effort: None,
@@ -256,6 +260,10 @@ fn update_app_settings_sse_matches_api_response() {
     };
     let api_response = state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: None,
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
             default_codex_reasoning_effort: Some(next_reasoning_effort),
             default_claude_approval_mode: None,
             default_claude_effort: None,

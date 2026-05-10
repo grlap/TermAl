@@ -81,6 +81,230 @@ Inspect diffs.
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn reads_claude_agent_commands_strip_yaml_frontmatter() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-commands-frontmatter-{}",
+        Uuid::new_v4()
+    ));
+    let commands_dir = root.join(".claude").join("commands");
+
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("review-local.md"),
+        "---
+name: review-local
+description: Review local changes.
+metadata:
+  termal:
+    delegation:
+      enabled: true
+      mode: reviewer
+      writePolicy:
+        kind: isolatedWorktree
+---
+
+Template body starts here.
+
+## Step 1
+Inspect diffs.
+",
+    )
+    .unwrap();
+
+    let commands = read_claude_agent_commands(&root).unwrap();
+
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].description, "Review local changes.");
+    assert_eq!(
+        commands[0].content,
+        "Template body starts here.
+
+## Step 1
+Inspect diffs.
+"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn reads_claude_agent_commands_strip_claude_only_frontmatter() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-commands-claude-frontmatter-{}",
+        Uuid::new_v4()
+    ));
+    let commands_dir = root.join(".claude").join("commands");
+
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("tool-check.md"),
+        "---
+argument-hint: PATH
+allowed-tools: Bash(rg:*), Read
+---
+
+Run a targeted tool check.
+",
+    )
+    .unwrap();
+
+    let commands = read_claude_agent_commands(&root).unwrap();
+
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].description, "Run a targeted tool check.");
+    assert_eq!(commands[0].content, "Run a targeted tool check.\n");
+    assert_eq!(commands[0].argument_hint.as_deref(), Some("PATH"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn reads_claude_agent_commands_strip_model_only_frontmatter() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-commands-model-frontmatter-{}",
+        Uuid::new_v4()
+    ));
+    let commands_dir = root.join(".claude").join("commands");
+
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("model-check.md"),
+        "---
+model: opus
+---
+
+Run with the command model preference.
+",
+    )
+    .unwrap();
+
+    let commands = read_claude_agent_commands(&root).unwrap();
+
+    assert_eq!(commands.len(), 1);
+    assert_eq!(
+        commands[0].description,
+        "Run with the command model preference."
+    );
+    assert_eq!(
+        commands[0].content,
+        "Run with the command model preference.\n"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn reads_claude_agent_commands_strip_tools_and_disable_model_frontmatter() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-commands-tools-frontmatter-{}",
+        Uuid::new_v4()
+    ));
+    let commands_dir = root.join(".claude").join("commands");
+
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("disable-model.md"),
+        "---
+disable-model-invocation: true
+---
+
+Run without model invocation.
+",
+    )
+    .unwrap();
+    fs::write(
+        commands_dir.join("tools-check.md"),
+        "---
+tools:
+  - Bash
+  - Read
+---
+
+Run with declared tools.
+",
+    )
+    .unwrap();
+
+    let commands = read_claude_agent_commands(&root).unwrap();
+
+    assert_eq!(commands.len(), 2);
+    assert_eq!(commands[0].name, "disable-model");
+    assert_eq!(commands[0].description, "Run without model invocation.");
+    assert_eq!(commands[0].content, "Run without model invocation.\n");
+    assert_eq!(commands[1].name, "tools-check");
+    assert_eq!(commands[1].description, "Run with declared tools.");
+    assert_eq!(commands[1].content, "Run with declared tools.\n");
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn reads_claude_agent_commands_preserve_thematic_breaks() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-commands-thematic-break-{}",
+        Uuid::new_v4()
+    ));
+    let commands_dir = root.join(".claude").join("commands");
+
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("divider.md"),
+        "---
+Checklist:
+- Keep this prompt body intact.
+---
+
+Run the check.
+",
+    )
+    .unwrap();
+
+    let commands = read_claude_agent_commands(&root).unwrap();
+
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].description, "Checklist:");
+    assert!(commands[0].content.starts_with("---\nChecklist:\n"));
+    assert!(
+        commands[0]
+            .content
+            .contains("- Keep this prompt body intact.")
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn reads_claude_agent_commands_ignore_nested_frontmatter_description() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-commands-nested-description-{}",
+        Uuid::new_v4()
+    ));
+    let commands_dir = root.join(".claude").join("commands");
+
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("nested.md"),
+        "---
+metadata:
+  termal:
+    description: Nested metadata should not become the command description.
+---
+
+Body description wins.
+",
+    )
+    .unwrap();
+
+    let commands = read_claude_agent_commands(&root).unwrap();
+
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].description, "Body description wins.");
+    assert_eq!(commands[0].content, "Body description wins.\n");
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 // Pins `read_claude_agent_commands` to returning an empty vector (not an
 // error) when the project has no `.claude/commands/` directory at all.
 // Guards against a missing directory becoming a hard failure that blocks
@@ -420,7 +644,22 @@ fn resolves_prompt_template_arguments_and_note() {
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
         commands_dir.join("fix-bug.md"),
-        "Fix the requested bug:\n\n$ARGUMENTS\n\nVerify the fix.\n",
+        "---
+name: fix-bug
+description: Fix the requested bug.
+metadata:
+  termal:
+    title:
+      strategy: prefixFirstArgument
+      prefix: Fix bug
+---
+
+Fix the requested bug:
+
+$ARGUMENTS
+
+Verify the fix.
+",
     )
     .unwrap();
 
@@ -482,7 +721,22 @@ fn resolves_review_local_delegation_defaults() {
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
         commands_dir.join("review-local.md"),
-        "Review staged and unstaged changes.\n",
+        "---
+name: review-local
+description: Review staged and unstaged changes.
+metadata:
+  termal:
+    title:
+      strategy: default
+    delegation:
+      enabled: true
+      mode: reviewer
+      writePolicy:
+        kind: isolatedWorktree
+---
+
+Review staged and unstaged changes.
+",
     )
     .unwrap();
 
@@ -534,6 +788,275 @@ fn resolves_review_local_delegation_defaults() {
     );
 
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn rejects_invalid_agent_command_delegation_metadata() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-command-invalid-metadata-{}",
+        Uuid::new_v4()
+    ));
+    let commands_dir = root.join(".claude").join("commands");
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("review-local.md"),
+        "---
+name: review-local
+description: Review staged and unstaged changes.
+metadata:
+  termal:
+    delegation:
+      enabled: true
+      mode: worker
+      writePolicy:
+        kind: sharedWorktree
+---
+
+Review staged and unstaged changes.
+",
+    )
+    .unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Codex Session".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let error = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: None,
+                note: None,
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap_err();
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "metadata.termal.delegation.mode `worker` is not supported yet"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn native_delegate_resolution_uses_metadata_name_not_source_suffix() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    state
+        .sync_session_agent_commands(
+            &created.session_id,
+            vec![AgentCommand {
+                kind: AgentCommandKind::NativeSlash,
+                name: "audit".to_owned(),
+                description: "Audit the current state.".to_owned(),
+                content: "/audit".to_owned(),
+                source: ".claude/commands/review-local.md".to_owned(),
+                argument_hint: None,
+            }],
+        )
+        .unwrap();
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "audit",
+            ResolveAgentCommandRequest {
+                arguments: Some("staged".to_owned()),
+                note: None,
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(response.visible_prompt, "/audit staged");
+    assert_eq!(response.expanded_prompt, None);
+    assert_eq!(response.delegation, None);
+}
+
+#[test]
+fn prompt_template_delegate_resolution_uses_metadata_name_not_source_suffix() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    state
+        .sync_session_agent_commands(
+            &created.session_id,
+            vec![AgentCommand {
+                kind: AgentCommandKind::PromptTemplate,
+                name: "audit".to_owned(),
+                description: "Audit the current state.".to_owned(),
+                content: "Audit $ARGUMENTS".to_owned(),
+                source: ".claude/commands/review-local.md".to_owned(),
+                argument_hint: None,
+            }],
+        )
+        .unwrap();
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "audit",
+            ResolveAgentCommandRequest {
+                arguments: Some("staged".to_owned()),
+                note: None,
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(response.visible_prompt, "/audit staged");
+    assert_eq!(response.expanded_prompt.as_deref(), Some("Audit staged"));
+    assert_eq!(response.delegation, None);
+}
+
+#[test]
+fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    state
+        .sync_session_agent_commands(
+            &created.session_id,
+            vec![AgentCommand {
+                kind: AgentCommandKind::PromptTemplate,
+                name: "review-local".to_owned(),
+                description: "Cached prompt template.".to_owned(),
+                content: "Cached review $ARGUMENTS".to_owned(),
+                source: ".claude/commands/review-local.md".to_owned(),
+                argument_hint: None,
+            }],
+        )
+        .unwrap();
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: Some("staged".to_owned()),
+                note: None,
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(response.visible_prompt, "/review-local staged");
+    assert_eq!(
+        response.expanded_prompt.as_deref(),
+        Some("Cached review staged")
+    );
+    assert_eq!(response.delegation, None);
+}
+
+#[test]
+fn native_delegate_resolution_does_not_use_prompt_template_metadata_by_name() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    state
+        .sync_session_agent_commands(
+            &created.session_id,
+            vec![AgentCommand {
+                kind: AgentCommandKind::NativeSlash,
+                name: "review-local".to_owned(),
+                description: "Runtime-provided review command.".to_owned(),
+                content: "/review-local".to_owned(),
+                source: "claude/native".to_owned(),
+                argument_hint: None,
+            }],
+        )
+        .unwrap();
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: Some("staged".to_owned()),
+                note: None,
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(response.visible_prompt, "/review-local staged");
+    assert_eq!(response.expanded_prompt, None);
+    assert_eq!(response.delegation, None);
 }
 
 // Pins native slash resolution to rejecting notes until TermAl owns a safe

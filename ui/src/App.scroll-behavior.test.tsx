@@ -1207,7 +1207,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("keeps the live turn anchored when queued prompts append below it", async () => {
+  it("scrolls down when queued prompts append in transcript order above the live turn", async () => {
     await withSuppressedActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -1328,13 +1328,13 @@ describe("App scroll behaviour", () => {
         expect(queuedPromptCard).not.toBeNull();
         expect(
           Boolean(
-            liveTurnCard!.compareDocumentPosition(queuedPromptCard!) &
+            queuedPromptCard!.compareDocumentPosition(liveTurnCard!) &
               Node.DOCUMENT_POSITION_FOLLOWING,
           ),
         ).toBe(true);
-        expect(filterScrollToCallsAt(scrollToMock, 920, "smooth")).toEqual([]);
+        expect(filterScrollToCallsAt(scrollToMock, 920, "smooth").length).toBeGreaterThan(0);
         expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
-        expect(messageStack.scrollTop).toBe(800);
+        expect(messageStack.scrollTop).toBe(920);
       } finally {
         context.cleanup();
         restoreScrollGeometry();

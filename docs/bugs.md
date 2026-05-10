@@ -7,37 +7,235 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Delegation wait response metadata has ambiguous `queuedResume` semantics
+## Telegram relay can send stale digest before draining pending updates
 
-**Severity:** Medium - `src/delegations.rs:605-666` and `docs/features/agent-delegation-sessions.md`. `create_delegation_wait` can create and immediately consume a wait when all watched delegations are already terminal. The response returns the created wait and the later revision, but `queuedResume` is derived from whether the parent was dispatchable immediately, not whether a resume prompt was queued.
+**Severity:** Medium - `src/telegram.rs:77-85`. The relay now runs `sync_telegram_digest` before `getUpdates` every loop. If a user sends `/session`, `/project`, a prompt, or a callback while the loop is between polls, the next iteration can send an old digest or forward the previously selected session's assistant text before applying the already-arrived Telegram update.
 
-For a busy parent, the backend can queue a fan-in prompt while returning `queuedResume: false`. Callers may read that as "no resume was queued" and start polling or retrying unnecessarily.
-
-**Current behavior:**
-- `queue_delegation_wait_resume_locked` queues the parent prompt whenever the parent exists.
-- Its boolean return is `true` only when the parent should dispatch immediately.
-- `DelegationWaitResponse.queuedResume` exposes that boolean under a name that implies queued-prompt creation.
-
-**Proposal:**
-- Rename or document the field as immediate-dispatch state.
-- Or return separate fields for "resume prompt queued" and "resume dispatch requested".
-- Add a test covering an already-terminal wait with a busy parent.
-
-## Delegation waits can silently disappear or orphan when the parent session is removed
-
-**Severity:** Medium - `src/delegations.rs:1373-1392` and `src/session_lifecycle.rs`. Wait refresh consumes satisfied waits even when `queue_delegation_wait_resume_locked` cannot find the parent. Waits that are not yet satisfied can remain pending after the parent session is removed.
-
-This breaks the delegation guarantee that TermAl will reactivate the parent. Observers see a wait disappear with no resume prompt, or keep seeing a wait that can never resume.
+The same change also reduces the default poll timeout to 1 second at `src/telegram.rs:14`, so digest sync is tied to a faster long-poll cadence and can run again after updates are processed at `src/telegram.rs:113-119`.
 
 **Current behavior:**
-- A satisfied wait with a missing parent is removed and emits a consumed delta.
-- An unsatisfied wait can survive parent removal.
-- No structured reason distinguishes "resumed" from "parent missing".
+- Outbound digest/assistant sync runs before draining pending Telegram updates.
+- Default Telegram poll timeout is 1 second.
+- Post-update digest sync also still runs in the same loop.
 
 **Proposal:**
-- Explicitly drop or mark all waits owned by a removed parent during session removal.
-- Publish a reasoned delta or retain audit metadata for parent-missing consumption.
-- Add tests for both satisfied and unsatisfied waits when the parent is removed.
+- Drain/process pending updates before side-effecting digest or assistant forwarding.
+- Or add a nonblocking update drain before pre-sync while preserving post-update sync for low latency.
+- Add a minimum digest-sync interval/backoff and coalesce sends/edits when state changes rapidly.
+
+## Telegram relay near-1Hz cadence multiplies outbound and local API load
+
+**Severity:** Medium - `src/telegram.rs:14, 78-83, 113-120`. Reducing `TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS` from 5 to 1 combined with the new pre-poll `sync_telegram_digest` (in addition to the existing post-update sync) doubles the digest passes per loop iteration. Each iteration now reaches the local TermAl backend roughly three times (digest, `/api/state`, `/api/sessions/{id}` via `forward_relevant_assistant_messages`) and `api.telegram.org` once at near-1Hz.
+
+The combined frequency is around 4-5x more outbound HTTPS requests per minute than before, and a comparable multiplier on the local mutex contention. There is no Telegram 429 / `Retry-After` parsing today; the only backoff is the fixed 2-second `TELEGRAM_ERROR_RETRY_DELAY`, regardless of which error fired.
+
+**Current behavior:**
+- Long-poll timeout floor is 1 second.
+- Both top-of-loop and bottom-of-loop digest syncs run in every iteration when a chat is selected.
+- 429 / `Retry-After` is not parsed; relay backoff is fixed.
+
+**Proposal:**
+- Restore long-poll cadence (~25-50s) and drive digest re-sync from backend SSE deltas instead of the loop tick.
+- Or rate-limit `sync_telegram_digest` to a minimum interval (e.g. 2-5s) and coalesce top-of-loop with bottom-of-loop.
+- Parse Telegram 429 `parameters.retry_after` and back off accordingly.
+- Document the cadence trade-off in `docs/features/telegram-ui-integration.md`.
+
+## Poll-error persist `?` propagation can silently kill the Telegram relay
+
+**Severity:** Medium - `src/telegram.rs:85-95`. The new `if dirty { persist_telegram_bot_state(...)?; }` inside the `get_updates` Err branch propagates persistence errors with `?`, exiting `run_telegram_bot_with_config` before the `log_telegram_error("failed to poll updates", &err)` line runs. A transient disk error during a poll-failure window therefore terminates the relay thread without ever logging the original polling failure that caused this branch to run.
+
+The user is left with the relay marked as crashed (only the persist error visible) and no diagnostic for the upstream cause. Combined with the new ~1Hz cadence and the new top-of-loop digest sync, the chance of at least one transient `persist_telegram_bot_state` failure per session is materially higher.
+
+**Current behavior:**
+- `get_updates` Err branch persists with `?` and exits the relay before logging the polling error.
+- The next iteration's persistence retry never runs because the worker has exited.
+
+**Proposal:**
+- Log the polling error before attempting persist, so the original cause is visible even on persist failure.
+- Or log the persist failure non-fatally and continue, since `next_update_id` has not advanced past unprocessed updates and the next iteration can re-derive the dirty fields.
+
+## Project-local command metadata can grant trusted delegation defaults
+
+**Severity:** Medium - `src/api_files.rs:534-571`, `src/api_files.rs:649-666`, and `src/workspace_queries.rs:177-180, 241-357`. The resolver reads frontmatter metadata from prompt-template command files under the active session workdir and applies `metadata.termal.delegation` defaults for delegate intent. That lets project-local `.claude/commands/*.md` files opt into reviewer mode and `isolatedWorktree` write policy even though the feature doc says only TermAl-trusted command or skill files may grant those defaults.
+
+Project-controlled metadata should not silently broaden delegation write capability. Without an explicit trust boundary, a repository can make a normal slash-command delegation look like a trusted review workflow.
+
+**Current behavior:**
+- Prompt-template command metadata is loaded from the session workdir.
+- `metadata.termal.delegation.enabled` can produce delegation defaults.
+- `metadata.termal.delegation.writePolicy.kind: isolatedWorktree` is accepted without a separate trusted-source check.
+
+**Proposal:**
+- Add an explicit trusted command/source marker before accepting delegation metadata that affects mode or write policy.
+- Or require confirmation before applying non-read-only defaults from project-local commands.
+- Add negative coverage for project-local metadata attempting to grant `isolatedWorktree`.
+
+## Remote session creation bypasses app default model preferences
+
+**Severity:** Medium - `src/remote_create_proxies.rs:117-124` and `src/session_crud.rs:108-253`. Local session creation resolves an omitted model through `inner.preferences.default_model_for_agent(...)`, but remote-backed session creation forwards `request.model` directly in the remote create request. A custom app default therefore applies to local sessions but not remote-proxy sessions created through the same user-facing flow.
+
+The settings copy now says model defaults are used when new sessions and delegations start. That contract becomes dependent on whether the target project is local or remote.
+
+**Current behavior:**
+- Local `create_session` materializes an effective model from app preferences when the request omits one.
+- `create_remote_session_proxy` serializes `"model": request.model` unchanged.
+- Remote-backed sessions with no explicit model fall through to the remote server's default instead of the local app preference.
+
+**Proposal:**
+- Materialize the effective local model before entering remote-proxy creation.
+- Or pass enough preference context to the remote create path to preserve the same default-model contract.
+- Add a remote-create regression test for custom app defaults with no explicit model.
+
+## `consume_delegation_waits_for_removed_parent_locked` is now redundant with the generic refresh
+
+**Severity:** Low - `src/delegations.rs:1407-1431`, `src/session_lifecycle.rs:82-83`. After teaching `refresh_delegation_waits_locked` to also map missing parents to `ParentSessionRemoved`, the explicit pre-call from `kill_session` produces no additional consumes. The unstaged comment swap acknowledges the convergence.
+
+Both passes drain the same waits with the same reason, so the explicit drain costs an extra `mem::take` and `extend()` merge on every session removal without changing observed behavior. Future refactors that change the invariants of one path may silently let the other take over with subtly different delta ordering.
+
+**Current behavior:**
+- `kill_session` calls both `consume_delegation_waits_for_removed_parent_locked` and `refresh_delegation_waits_locked`.
+- The second pass cannot find any of the explicitly drained waits.
+- The convergence is intentional defensive layering; the redundancy is uncommented at non-`kill_session` callers (e.g., remote-proxy removal in `src/remote_session_proxies.rs:189-199`).
+
+**Proposal:**
+- Either delete `consume_delegation_waits_for_removed_parent_locked` and rely solely on `refresh_delegation_waits_locked`.
+- Or add a debug-build assertion that the second pass produces no additional `ParentSessionRemoved` consumes, documenting the redundancy.
+- Note the missing-parent fallback behavior at the non-`kill_session` call sites that depend on it.
+
+## Terminal delegation child sessions accumulate without retention policy
+
+**Severity:** Low - delegation children are normal visible sessions and remain
+in the workspace after completion, failure, or cancellation. A reviewer fan-out
+workflow can therefore leave many terminal child sessions in the session list
+even after the parent has consumed the fan-in result.
+
+The behavior is intentional for auditability, but the product has no retention
+or archive policy yet. Users must manually close completed child sessions.
+
+**Current behavior:**
+- Delegation spawn creates an ordinary child session.
+- Terminal delegation updates preserve the child transcript and session record.
+- Fan-in wait consumption does not hide, archive, or prune terminal children.
+
+**Proposal:**
+- Define a retention policy for terminal delegation children in the delegation
+  feature spec.
+- Prefer auto-hide/archive after fan-in while preserving parent cards, result
+  packets, transcript links, and explicit reopen affordances.
+- Add UI/backend tests for the chosen retention behavior.
+
+## "New response" indicator label is misleading for queued-prompt-only updates
+
+**Severity:** Low - `ui/src/SessionPaneView.tsx:2183-2197`, `ui/src/panels/AgentSessionPanel.tsx:2766`. The new `setNewResponseIndicator(scrollStateKey, true)` branch in `onlyPendingPromptsChanged` fires when a queued user prompt appears below the viewport while tail-following is off. The indicator button still renders the literal text "New response", which suggests new assistant output rather than a newly queued user prompt.
+
+The whole point of the `onlyPendingPromptsChanged` branch is that the assistant produced nothing new. The label steals attention with copy that does not match the trigger.
+
+**Current behavior:**
+- Queued-prompt-only updates while scrolled away set the "New response" indicator.
+- The indicator button label is fixed regardless of trigger.
+
+**Proposal:**
+- Either suppress the indicator for the queued-prompt-only case (revert to the old "always clear" behavior).
+- Or generalize the indicator label based on the trigger (e.g., "Jump to bottom" / "New activity").
+
+## Pending-prompts queue scrolls away from the pinned live tail
+
+**Severity:** Low - `ui/src/styles.css:4567-4576`, `ui/src/panels/AgentSessionPanel.tsx:1437-1442`. After splitting `pendingPromptCards` into a sibling `<div className="conversation-pending-prompts">` instead of nesting inside `.conversation-live-tail`, the live tail keeps `position: sticky; bottom: 0` while the pending-prompts queue uses `display: grid` with no sticky positioning.
+
+When the user scrolls up to read history, the live tail and its waiting indicator stay pinned, but the queued prompts disappear from view. Previously the column-reverse flex inside the live tail kept queued prompts visually adjacent to the live turn. The new layout drops that co-pinning silently.
+
+**Current behavior:**
+- `.conversation-pending-prompts` is a normal grid (no `position: sticky`).
+- `.conversation-live-tail.is-pinned` stays sticky at the bottom.
+- Queued prompts can scroll out of view while the live tail remains visible.
+
+**Proposal:**
+- Confirm whether the loss of co-pinning is intentional and document it next to the JSX/CSS.
+- Or wrap both sections in a single sticky parent / set `position: sticky; bottom: <live-tail-height>` on the queue so it pins above the live tail.
+- Add a code comment explaining the new DOM order vs. visual intent (the previous `column-reverse` had a comment that no longer applies).
+
+## Pre-poll Telegram digest sync can hammer per-chat sendMessage budget during streaming replies
+
+**Severity:** Low - `src/telegram.rs:78-83, 113-120, 1841-1852`. The new top-of-loop `sync_telegram_digest` calls `forward_relevant_assistant_messages`, which can issue Telegram `sendMessage` calls when the assistant text grew or new chunks need delivering. Combined with the existing post-`handle_telegram_update` digest sync, every iteration that processes user input now triggers two digest+forward passes.
+
+For a long streaming assistant reply that re-forwards chunk-by-chunk via `chunk_telegram_message_text`, two passes per second can exceed Telegram's per-chat ~1 msg/s sendMessage budget. There is no per-chat outbound rate limiting to coalesce the bursts, and `sent_chunks` tracking persists partial state, so a stuck large reply keeps hammering Telegram every iteration.
+
+**Current behavior:**
+- Both top-of-loop and bottom-of-loop digest syncs may emit `sendMessage` calls per iteration.
+- No coalescing or per-chat outbound rate limiting between the two passes.
+
+**Proposal:**
+- Gate the top-of-loop sync on a wall-clock minimum interval, or skip it when the bottom-of-loop sync just ran in the prior iteration.
+- Add explicit Telegram 429 handling so chunk-forwarding back-pressures rather than retries on the next ~1Hz tick.
+
+## `queuedResume` permanent alias is API surface debt
+
+**Severity:** Note - `src/wire.rs:1037-1042`, `ui/src/api.ts:498-506`, `ui/src/delegation-commands.ts:173-189`. After fixing the ambiguous `queuedResume` semantics by introducing `resume_prompt_queued` and `resume_dispatch_requested`, the response keeps `queued_resume` as a permanent alias for `resume_prompt_queued`. Per CLAUDE.md and the Development-Phase Compatibility Policy, internal API back-compat is not required.
+
+The duplicate field propagates: the TypeScript wrapper type `SpawnReviewerBatchResumeWaitResult` carries both fields and every test/mock specifies two booleans that always agree. Tomorrow's reader has to ask "do I read `queuedResume` or `resumePromptQueued`?" with no compile-time enforcement that they stay in sync.
+
+**Current behavior:**
+- `DelegationWaitResponse` carries `queuedResume`, `resumePromptQueued`, and `resumeDispatchRequested`.
+- `SpawnReviewerBatchResumeWaitResult` mirrors all three.
+- Doc comment says "Backwards-compatible alias", not "deprecated, will be removed".
+
+**Proposal:**
+- Mark `queued_resume` / `queuedResume` `@deprecated` with a removal target so editors flag legacy usage.
+- Drop `queuedResume` from `SpawnReviewerBatchResumeWaitResult` (the wrapper is locally constructed; no wire requirement to mirror the alias).
+- Update the alias doc comment to either commit to permanence or schedule removal.
+
+## `DelegationWaitResponse` shape is not formally defined in the feature doc
+
+**Severity:** Note - `docs/features/agent-delegation-sessions.md:371, 716-740`. The Data Model section formally defines `DelegationWaitRecord` and `SpawnReviewerBatchResumeWaitResult` but does not include a `type DelegationWaitResponse = {...}` block, even though `resume_after_delegations` is documented as returning that type and the `queuedResume` / `resumePromptQueued` / `resumeDispatchRequested` semantics narrative references the field set.
+
+Wrappers (e.g. the planned MCP wrapper) consuming `resume_after_delegations` directly never see the formal shape from the doc and have to read source.
+
+**Current behavior:**
+- Doc references `DelegationWaitResponse` fields textually only.
+- Only `SpawnReviewerBatchResumeWaitResult` carries a structural type definition.
+
+**Proposal:**
+- Add a `type DelegationWaitResponse = { revision; wait; queuedResume; resumePromptQueued; resumeDispatchRequested; serverInstanceId }` block in the Data Model section.
+- Cross-link the alias narrative to the new definition.
+
+## `isolatedWorktree` request docs conflate generated and persisted `worktreePath`
+
+**Severity:** Note - `docs/features/agent-delegation-sessions.md:610`, `docs/features/agent-slash-commands.md:154`, and `ui/src/api.ts:438`. The delegation-session data model describes `isolatedWorktree.worktreePath` as required, while resolver/default request examples omit it and rely on the backend to generate a TermAl-owned path.
+
+Clients reading the feature doc cannot tell whether omitted `worktreePath` is valid request/default metadata, only valid after backend preparation, or an accidental docs gap.
+
+**Current behavior:**
+- Resolver-provided isolated worktree defaults can omit `worktreePath`.
+- Backend request handling accepts omitted `worktreePath` and generates a path.
+- The persisted/session policy shape documents `worktreePath` as required.
+
+**Proposal:**
+- Split request/default write-policy docs from persisted response write-policy docs.
+- Or mark `worktreePath` optional wherever omission is accepted before backend worktree preparation.
+
+## `DelegationWaitRefresh::extend` silently overwrites duplicate queue-result keys
+
+**Severity:** Low - `src/delegations.rs:138-151`. `BTreeMap::extend` overwrites existing keys. Currently safe because only `refresh_delegation_waits_locked` populates `queue_results_by_wait_id` and `consume_delegation_waits_for_removed_parent_locked` does not, so the `kill_session` two-pass `extend` cannot collide. If a future pass starts populating queue results for already-consumed waits, the silent overwrite would mask the conflict.
+
+**Current behavior:**
+- `extend` uses `BTreeMap::extend`'s default overwrite semantics.
+- The non-collision invariant is unenforced and uncommented.
+
+**Proposal:**
+- Add a `debug_assert!(self.queue_results_by_wait_id.insert(k, v).is_none())` helper that fails on duplicate inserts in debug builds.
+- Or document the invariant near the `extend` definition.
+
+## Telegram relay cadence change lacks contract comment in `src/telegram.rs` header
+
+**Severity:** Note - `src/telegram.rs:1-20`. The file-header `/* ... */` block still describes the old "poll updates → render digest → persist" cadence. The 5s→1s timeout drop and the new pre-poll `sync_telegram_digest` add a dual-sync pattern the header does not mention, and the rationale for needing both pre-poll and post-update syncs lives only in commit history.
+
+**Current behavior:**
+- Header comment describes the previous single-sync, long-poll model.
+- New top-of-loop sync is uncommented at the call site.
+
+**Proposal:**
+- Update the file-header block to describe the dual-sync cadence and the trade-off behind the 1s long-poll floor.
+- Or add a short comment at the top-of-loop call site explaining when the pre-poll sync is needed beyond what the post-update sync handles.
 
 ## Multi-wait parent indicator drops wait titles
 
@@ -67,6 +265,21 @@ Wrappers using the feature brief as the command/error contract will not know thi
 **Proposal:**
 - Add the title-cap message to the documented wait/resume diagnostics.
 
+## `DelegationWaitConsumedEvent.reason` is optional despite required wire contract
+
+**Severity:** Note - `ui/src/types.ts:812-815`. The backend now serializes `reason` on every new `delegationWaitConsumed` delta and the feature doc lists it as required, but the frontend event type marks `reason` optional.
+
+That optionality weakens the current wire contract and can hide handling paths that forget to normalize missing legacy values.
+
+**Current behavior:**
+- Backend `DeltaEvent::DelegationWaitConsumed` serializes `reason`.
+- Feature docs show `reason` as required.
+- Frontend type allows `reason` to be absent.
+
+**Proposal:**
+- Make `reason` required in the frontend type.
+- Or add an explicit SSE normalization/defaulting boundary that maps missing legacy values to `"completed"` and document the optionality there.
+
 ## Delegate path skips active-session check after resolver await
 
 **Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:2515-2548`. The send path captures `requestSessionId` before `await resolveAgentCommand` and bails if `activeSessionIdRef.current` changed after the await. The delegate path resolves first and captures `requestSessionId` afterward.
@@ -94,21 +307,6 @@ On a slow resolver, the user can type more text after pressing Enter; once resol
 **Proposal:**
 - Include `isAgentCommandResolving` in the composer disabled state.
 - Or compare the post-resolve draft to the prepared slash-command snapshot and skip clearing if the user typed more text.
-
-## Backend resolver still hard-codes `review-local` and `fix-bug` by name
-
-**Severity:** Medium - `src/workspace_queries.rs:280-298, 332-341`. The frontend special case moved to the backend, but the backend still uses command-name and source-path conditionals for `review-local`, plus a name special case for `fix-bug`.
-
-Adding another command with delegation defaults or title behavior still requires touching resolver code instead of updating declarative metadata.
-
-**Current behavior:**
-- `is_review_local_agent_command` matches by command name and source path suffix.
-- `resolved_agent_command_title` special-cases `fix-bug` by name.
-- A third command requires another resolver branch.
-
-**Proposal:**
-- Introduce a small command metadata table keyed by command name with write policy, mode, and title-generation hints.
-- Read from that table instead of adding more ad hoc branches.
 
 ## `resumeWaitFailurePacket` redaction safe-list has only one happy-path test
 
@@ -140,7 +338,7 @@ The wire shape becomes silently wrong, and the user has no signal that their int
 
 ## Resolver does not size-cap `arguments` or `note` request fields
 
-**Severity:** Low - `src/workspace_queries.rs:202-244`, `src/wire.rs:1041-1049`. `ResolveAgentCommandRequest` has no size caps on `arguments` or `note`; only the global body limit applies. `arguments` is interpolated by splitting the template on `$ARGUMENTS` and joining with the provided argument string, so a large argument and multiple placeholders can allocate substantially before any downstream prompt-size guard runs.
+**Severity:** Low - `src/workspace_queries.rs:213-229`, `src/wire.rs:1041-1049`. `ResolveAgentCommandRequest` has no size caps on `arguments` or `note`; only the global body limit applies. `arguments` is interpolated by splitting the template on `$ARGUMENTS` and joining with the provided argument string, so a large argument and multiple placeholders can allocate substantially before any downstream prompt-size guard runs.
 
 The resolved prompt may flow into send-message paths or delegation creation after the resolver has already paid the allocation cost.
 
@@ -151,6 +349,37 @@ The resolved prompt may flow into send-message paths or delegation creation afte
 **Proposal:**
 - Cap `arguments` and `note` at resolver entry.
 - Reject oversized input with `400 bad_request`, matching existing delegation prompt behavior.
+
+## Default Claude model preferences accept option-looking strings
+
+**Severity:** Low - `src/session_crud.rs:52-65` and `src/claude_args.rs:56`. App-level default model preferences accept any non-empty string up to 200 characters after trimming. For Claude, that value later flows into CLI argument construction as the value after `--model`.
+
+Model ids that begin with `-` or contain control characters can create downstream CLI ambiguity or failed launches, and the persisted default applies repeatedly to future sessions and delegations.
+
+**Current behavior:**
+- Default model normalization rejects only empty/default sentinel values and overlong values.
+- Claude defaults can be saved as option-looking strings such as `--help`.
+- Future Claude sessions/delegations reuse the persisted value.
+
+**Proposal:**
+- Reject leading-hyphen and control-character model ids for Claude defaults.
+- Or pass Claude model values with a CLI-safe `--model=<value>` form if Claude supports it.
+- Add regression tests for option-looking model inputs.
+
+## Cached prompt-template missing-metadata test depends on ambient `/tmp`
+
+**Severity:** Low - `src/tests/agent_commands.rs:960-1010`. `cached_prompt_template_missing_metadata_file_resolves_without_defaults` creates its session with `workdir: Some("/tmp")` while the cached command source points at `.claude/commands/review-local.md`. If a developer or CI image has `/tmp/.claude/commands/review-local.md`, the resolver can pick up real metadata and fail the test for environmental reasons.
+
+This makes the regression coverage non-hermetic on Unix-like systems and contradicts the test's missing-metadata premise.
+
+**Current behavior:**
+- The test uses `/tmp` as the session workdir.
+- The cached command source is a relative prompt-template path.
+- Ambient files under `/tmp/.claude/commands` can affect resolver output.
+
+**Proposal:**
+- Use a fresh temp directory with no metadata file for the session workdir.
+- Clean it up with best-effort cleanup that does not mask the original assertion failure.
 
 ## `create_delegation_wait` does not check parent eligibility for queued prompts
 
@@ -3555,12 +3784,13 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 
 **Severity:** Medium - any linked chat can still fan out prompt submissions quickly enough to create a burst of local backend and agent work.
 
-`src/telegram.rs:1477-1489` now rejects Telegram prompts above `MAX_DELEGATION_PROMPT_BYTES = 64 * 1024` before calling `forward_telegram_text_to_project`, but accepted prompts are still not rate-limited per chat. Command and callback actions dispatch backend work at `src/telegram.rs:1457` and `src/telegram.rs:1532`. A linked chat can submit many below-limit prompts or action commands in quick succession, each becoming local backend work and possibly an agent turn.
+`src/telegram.rs:1654-1666` now rejects Telegram prompts above `MAX_DELEGATION_PROMPT_BYTES = 64 * 1024` before calling `forward_telegram_text_to_project`, but accepted prompts are still not rate-limited per chat. Command and callback actions dispatch backend work at `src/telegram.rs:1633` and `src/telegram.rs:1710`. A linked chat can submit many below-limit prompts or action commands in quick succession, each becoming local backend work and possibly an agent turn.
 
 **Current behavior:**
 - Oversized Telegram prompts are rejected by UTF-8 byte length.
 - Below-limit prompts and action commands are forwarded unchanged.
 - No per-minute or burst cap exists per linked chat before backend work starts.
+- The default 1-second poll cadence can ingest those bursts quickly.
 
 **Proposal:**
 - Add a per-minute / per-chat prompt and action-command rate cap so a linked chat cannot fan out N HTTP calls per second.
@@ -4513,10 +4743,34 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover already-terminal delegation waits against busy parents:
-  create an already-satisfied wait while the parent is active and assert the response metadata distinguishes prompt-queued from immediate-dispatch behavior.
-- [ ] P2: Cover parent-removal delegation wait reconciliation:
-  remove a parent with both satisfied and unsatisfied waits, then assert waits do not orphan and consumed/drop deltas carry recoverable semantics.
+- [ ] P2: Cover trusted command metadata boundaries:
+  add resolver tests proving project-local `.claude/commands/*.md` frontmatter cannot grant delegation defaults or `isolatedWorktree`, while an explicitly trusted TermAl-owned command can.
+- [ ] P2: Cover remote session default-model propagation:
+  create a remote-backed session with a custom local app default model and no explicit request model, then assert the remote create request receives the effective model or a documented sentinel.
+- [ ] P2: Cover Cursor and Gemini default-model session creation:
+  extend backend session settings coverage so `default_cursor_model` and `default_gemini_model` are applied to new Cursor and Gemini sessions, not only persisted in preferences.
+- [ ] P2: Cover frontend default-model forwarding for all model-picker agents:
+  add parameterized tests for Claude, Codex, Cursor, and Gemini covering custom default forwarding, the `default` sentinel omission, and at least one settings-panel Apply/Reset interaction.
+- [ ] P2: Cover Claude default-model validation:
+  assert app settings reject leading-hyphen and control-character Claude model values, or assert the eventual Claude CLI args use a safe `--model=<value>` form.
+- [ ] P2: Isolate cached prompt-template missing-metadata tests:
+  change `cached_prompt_template_missing_metadata_file_resolves_without_defaults` to use a fresh temp workdir with no command metadata file so `/tmp/.claude/commands` cannot influence the result.
+- [ ] P2: Cover CRLF command frontmatter parsing:
+  add a command fixture using `---\r\n` frontmatter and assert description extraction, body stripping, and argument-hint preservation still work on Windows-style files.
+- [ ] P2: Cover Telegram pre-poll digest sync loop ordering:
+  extract a testable relay loop iteration or fake Telegram/TermAl clients, then assert digest sync does not emit stale output before pending updates are processed and dirty state persists when `getUpdates` fails.
+- [ ] P2: Cover Telegram poll-error persist propagation:
+  force `persist_telegram_bot_state` to fail inside the `get_updates` Err branch with `dirty=true` and assert the relay either logs the original polling error and continues, or fails in a way that surfaces both errors. The current `?` propagation drops the polling error and exits the relay thread.
+- [ ] P2: Cover pending-prompts visibility without a live turn:
+  render `SessionConversationPage` with `showWaitingIndicator: false` and a non-empty `pendingPrompts` array, then assert `.conversation-live-tail` is absent and the pending-prompt cards live inside `.conversation-pending-prompts`. Prevents a regression that re-introduces the old `liveTurnCard || pendingPromptCards.length > 0` condition.
+- [ ] P2: Cover `DelegationWaitResponse` JSON serialization:
+  round-trip a `DelegationWaitResponse` through `serde_json::to_value` and assert the camelCase keys `queuedResume`, `resumePromptQueued`, and `resumeDispatchRequested` are all present for one busy-parent and one idle-parent scenario, and round-trip a `DeltaEvent::DelegationWaitConsumed` to assert `reason` is always emitted with the expected value.
+- [ ] P2: Replace the duplicative malformed-wait persistence test:
+  rewrite `removing_parent_consumes_unsatisfied_wait_even_when_targets_are_not_terminal` so it writes a stale wait whose owner is missing into the persistence file, restarts via `AppState::new_with_paths`, and asserts boot reconciliation drops it. As written, it bypasses validation via `inner.delegation_waits.push` and duplicates a scenario already covered by `removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason`.
+- [ ] P2: Cover true-value delegation wait response booleans through the command layer:
+  add `resumePromptQueued: true` and `resumeDispatchRequested: true` cases for `resume_after_delegations` and reviewer-batch wait propagation so fields cannot be hard-coded false.
+- [ ] P2: Cover scrolled-away pending-prompt indicator branch:
+  start off-bottom, append only pending prompts with unchanged messages, and assert no bottom scroll occurs while the "New response" indicator becomes visible.
 - [ ] P2: Cover multi-wait waiting indicator titles:
   render two pending waits for one parent and assert the UI preserves at least the first wait title plus a count for the remaining waits.
 - [ ] P2: Cover `resumeWaitFailurePacket` redaction parametrically:
@@ -4525,8 +4779,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   avoid asserting the exact `"TermAl restarted before this turn finished"` string from `src/messages.rs`; assert stable wait/delegation identifiers or finish the child with a deterministic result packet before simulated shutdown.
 - [ ] P2: Cover edge cases in delegation finding parsing:
   add focused tests for `- None` filtering, no-separator findings mapping to the current fallback behavior, and multi-word severities such as `Code Style src/foo.rs:42 - msg`.
-- [ ] P2: Cover backend resolver native-slash plus delegate-intent boundary:
-  add a Rust test resolving a non-`review-local` native command with `intent: Delegate` and no note, asserting `response.delegation == None` and `response.expanded_prompt == None`.
 - [ ] P2: Switch resolver Rust temp-dir cleanup away from `unwrap()`:
   replace end-of-test `fs::remove_dir_all(root).unwrap()` cleanup in `src/tests/agent_commands.rs` with `let _ = fs::remove_dir_all(...)` so assertion failures do not leak temp dirs or mask the original failure.
 - [ ] P2: Cover Telegram dirty-state cleanup on informational early returns:

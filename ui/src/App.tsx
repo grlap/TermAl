@@ -391,6 +391,14 @@ export default function App() {
     setDefaultCodexSandboxMode,
     defaultCodexApprovalPolicy,
     setDefaultCodexApprovalPolicy,
+    defaultCodexModel,
+    setDefaultCodexModel,
+    defaultClaudeModel,
+    setDefaultClaudeModel,
+    defaultCursorModel,
+    setDefaultCursorModel,
+    defaultGeminiModel,
+    setDefaultGeminiModel,
     defaultCodexReasoningEffort,
     setDefaultCodexReasoningEffort,
     defaultClaudeApprovalMode,
@@ -820,6 +828,10 @@ export default function App() {
       setBackendConnectionState,
     },
     preferenceSetters: {
+      setDefaultCodexModel,
+      setDefaultClaudeModel,
+      setDefaultCursorModel,
+      setDefaultGeminiModel,
       setDefaultCodexReasoningEffort,
       setDefaultClaudeApprovalMode,
       setDefaultClaudeEffort,
@@ -878,12 +890,16 @@ export default function App() {
     newProjectUsesLocalRemote,
     defaults: {
       defaultCodexApprovalPolicy,
+      defaultCodexModel,
       defaultCodexReasoningEffort,
       defaultCodexSandboxMode,
       defaultClaudeApprovalMode,
       defaultClaudeEffort,
+      defaultClaudeModel,
+      defaultCursorModel,
       defaultCursorMode,
       defaultGeminiApprovalMode,
+      defaultGeminiModel,
     },
     refs: {
       isMountedRef,
@@ -1210,6 +1226,10 @@ export default function App() {
   });
 
   async function persistAppPreferences(payload: {
+    defaultCodexModel?: string;
+    defaultClaudeModel?: string;
+    defaultCursorModel?: string;
+    defaultGeminiModel?: string;
     defaultCodexReasoningEffort?: CodexReasoningEffort;
     defaultClaudeApprovalMode?: ClaudeApprovalMode;
     defaultClaudeEffort?: ClaudeEffortLevel;
@@ -1256,6 +1276,42 @@ export default function App() {
 
     setDefaultCodexReasoningEffort(nextValue);
     void persistAppPreferences({ defaultCodexReasoningEffort: nextValue });
+  }
+
+  function handleDefaultCodexModelChange(nextValue: string) {
+    if (nextValue === defaultCodexModel) {
+      return;
+    }
+
+    setDefaultCodexModel(nextValue);
+    void persistAppPreferences({ defaultCodexModel: nextValue });
+  }
+
+  function handleDefaultClaudeModelChange(nextValue: string) {
+    if (nextValue === defaultClaudeModel) {
+      return;
+    }
+
+    setDefaultClaudeModel(nextValue);
+    void persistAppPreferences({ defaultClaudeModel: nextValue });
+  }
+
+  function handleDefaultCursorModelChange(nextValue: string) {
+    if (nextValue === defaultCursorModel) {
+      return;
+    }
+
+    setDefaultCursorModel(nextValue);
+    void persistAppPreferences({ defaultCursorModel: nextValue });
+  }
+
+  function handleDefaultGeminiModelChange(nextValue: string) {
+    if (nextValue === defaultGeminiModel) {
+      return;
+    }
+
+    setDefaultGeminiModel(nextValue);
+    void persistAppPreferences({ defaultGeminiModel: nextValue });
   }
 
   function handleDefaultClaudeApprovalModeChange(
@@ -2102,13 +2158,21 @@ export default function App() {
           }))
         }
         defaultCodexReasoningEffort={defaultCodexReasoningEffort}
+        defaultCodexModel={defaultCodexModel}
+        handleDefaultCodexModelChange={handleDefaultCodexModelChange}
         handleDefaultCodexReasoningEffortChange={
           handleDefaultCodexReasoningEffortChange
         }
         defaultClaudeEffort={defaultClaudeEffort}
+        defaultClaudeModel={defaultClaudeModel}
+        handleDefaultClaudeModelChange={handleDefaultClaudeModelChange}
         handleDefaultClaudeEffortChange={handleDefaultClaudeEffortChange}
+        defaultCursorModel={defaultCursorModel}
+        handleDefaultCursorModelChange={handleDefaultCursorModelChange}
         defaultCursorMode={defaultCursorMode}
         onChangeDefaultCursorMode={setDefaultCursorMode}
+        defaultGeminiModel={defaultGeminiModel}
+        handleDefaultGeminiModelChange={handleDefaultGeminiModelChange}
         defaultGeminiApprovalMode={defaultGeminiApprovalMode}
         onChangeDefaultGeminiApprovalMode={setDefaultGeminiApprovalMode}
         createSessionProjectId={createSessionProjectId}

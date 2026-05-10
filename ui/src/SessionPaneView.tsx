@@ -2181,7 +2181,18 @@ export function SessionPaneView({
       showWaitingIndicator &&
       previousMessageContentSignature === visibleMessageContentSignature;
     if (onlyPendingPromptsChanged) {
-      setNewResponseIndicator(scrollStateKey, false);
+      if (
+        getTailFollowIntent() ||
+        paneScrollPositions[scrollStateKey]?.shouldStick === true
+      ) {
+        setNewResponseIndicator(scrollStateKey, false);
+        return scheduleSettledScrollToBottom("smooth", {
+          maxAttempts: 24,
+          minAttempts: 4,
+          scrollKind: "bottom_follow",
+        });
+      }
+      setNewResponseIndicator(scrollStateKey, true);
       return;
     }
 

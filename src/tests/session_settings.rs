@@ -111,6 +111,10 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
 
     let updated = state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: Some("gpt-5.5".to_owned()),
+            default_claude_model: Some("claude-sonnet-4-5".to_owned()),
+            default_cursor_model: Some("cursor-premium".to_owned()),
+            default_gemini_model: Some("gemini-2.5-pro".to_owned()),
             default_codex_reasoning_effort: Some(CodexReasoningEffort::High),
             default_claude_approval_mode: Some(ClaudeApprovalMode::AutoApprove),
             default_claude_effort: Some(ClaudeEffortLevel::Max),
@@ -122,6 +126,13 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         updated.preferences.default_codex_reasoning_effort,
         CodexReasoningEffort::High
     );
+    assert_eq!(updated.preferences.default_codex_model, "gpt-5.5");
+    assert_eq!(
+        updated.preferences.default_claude_model,
+        "claude-sonnet-4-5"
+    );
+    assert_eq!(updated.preferences.default_cursor_model, "cursor-premium");
+    assert_eq!(updated.preferences.default_gemini_model, "gemini-2.5-pro");
     assert_eq!(
         updated.preferences.default_claude_approval_mode,
         ClaudeApprovalMode::AutoApprove
@@ -138,6 +149,19 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     assert_eq!(
         reloaded_inner.preferences.default_codex_reasoning_effort,
         CodexReasoningEffort::High
+    );
+    assert_eq!(reloaded_inner.preferences.default_codex_model, "gpt-5.5");
+    assert_eq!(
+        reloaded_inner.preferences.default_claude_model,
+        "claude-sonnet-4-5"
+    );
+    assert_eq!(
+        reloaded_inner.preferences.default_cursor_model,
+        "cursor-premium"
+    );
+    assert_eq!(
+        reloaded_inner.preferences.default_gemini_model,
+        "gemini-2.5-pro"
     );
     assert_eq!(
         reloaded_inner.preferences.default_claude_approval_mode,
@@ -206,6 +230,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         codex_session.reasoning_effort,
         Some(CodexReasoningEffort::High)
     );
+    assert_eq!(codex_session.model, "gpt-5.5");
 
     let claude_created = reloaded_state
         .create_session(CreateSessionRequest {
@@ -229,6 +254,48 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         Some(ClaudeApprovalMode::AutoApprove)
     );
     assert_eq!(claude_session.claude_effort, Some(ClaudeEffortLevel::Max));
+    assert_eq!(claude_session.model, "claude-sonnet-4-5");
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn default_model_preference_canonicalizes_default_sentinel_case() {
+    let state = test_app_state();
+
+    let updated = state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: Some(" DEFAULT ".to_owned()),
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
+            default_codex_reasoning_effort: None,
+            default_claude_approval_mode: None,
+            default_claude_effort: None,
+            remotes: None,
+        })
+        .unwrap();
+
+    assert_eq!(updated.preferences.default_codex_model, "default");
+
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Default Sentinel".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    assert_eq!(created.session.model, Agent::Codex.default_model());
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }

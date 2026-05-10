@@ -175,6 +175,8 @@ export type SpawnReviewerBatchResumeWaitResult =
       outcome: "scheduled";
       wait: DelegationWaitResponse["wait"];
       queuedResume: boolean;
+      resumePromptQueued: boolean;
+      resumeDispatchRequested: boolean;
       revision: number;
       serverInstanceId: string;
       error?: never;
@@ -296,7 +298,7 @@ export function delegationTitleFromPrompt(prompt: string) {
 }
 
 export function createComposerDelegationRequest(
-  parentSession: Pick<Session, "agent" | "model">,
+  parentSession: Pick<Session, "agent">,
   prompt: string,
   options: CreateComposerDelegationOptions = {},
 ): CreateDelegationRequest {
@@ -307,7 +309,6 @@ export function createComposerDelegationRequest(
     title: options.title?.trim() || delegationTitleFromPrompt(prompt),
     prompt,
     agent: parentSession.agent,
-    model: parentSession.model,
     mode: options.mode ?? "reviewer",
     writePolicy: options.writePolicy ?? { kind: "readOnly" },
   };
@@ -530,6 +531,8 @@ async function scheduleReviewerBatchResumeWait(
       outcome: "scheduled",
       wait: response.wait,
       queuedResume: response.queuedResume,
+      resumePromptQueued: response.resumePromptQueued,
+      resumeDispatchRequested: response.resumeDispatchRequested,
       revision: response.revision,
       serverInstanceId: response.serverInstanceId,
     };

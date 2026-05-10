@@ -124,7 +124,8 @@ enum DelegationLifecycleDelta {
 #[derive(Clone, Debug, Default)]
 struct DelegationWaitRefresh {
     dispatch_parents: Vec<String>,
-    consumed_waits: Vec<DelegationWaitRecord>,
+    consumed_waits: Vec<ConsumedDelegationWait>,
+    queue_results_by_wait_id: BTreeMap<String, DelegationWaitQueueResult>,
 }
 
 impl DelegationWaitRefresh {
@@ -132,11 +133,39 @@ impl DelegationWaitRefresh {
         !self.consumed_waits.is_empty()
     }
 
-    fn queued_parent(&self, parent_session_id: &str) -> bool {
-        self.dispatch_parents
-            .iter()
-            .any(|candidate| candidate == parent_session_id)
+    fn queue_result_for_wait(&self, wait_id: &str) -> DelegationWaitQueueResult {
+        self.queue_results_by_wait_id
+            .get(wait_id)
+            .copied()
+            .unwrap_or_default()
     }
+
+    fn consume_wait(
+        &mut self,
+        wait: DelegationWaitRecord,
+        reason: DelegationWaitConsumedReason,
+    ) {
+        self.consumed_waits.push(ConsumedDelegationWait { wait, reason });
+    }
+
+    fn extend(&mut self, other: DelegationWaitRefresh) {
+        self.dispatch_parents.extend(other.dispatch_parents);
+        self.consumed_waits.extend(other.consumed_waits);
+        self.queue_results_by_wait_id
+            .extend(other.queue_results_by_wait_id);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct DelegationWaitQueueResult {
+    prompt_queued: bool,
+    dispatch_requested: bool,
+}
+
+#[derive(Clone, Debug)]
+struct ConsumedDelegationWait {
+    wait: DelegationWaitRecord,
+    reason: DelegationWaitConsumedReason,
 }
 
 struct RemovedSessionDelegationReconciliation {
@@ -647,7 +676,7 @@ impl AppState {
 
         self.publish_delegation_wait_created(created_revision, wait.clone());
 
-        let (revision, queued_resume, refresh) = {
+        let (revision, wait_queue_result, refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let refresh = refresh_delegation_waits_locked(&mut inner);
             if refresh.did_mutate() {
@@ -656,11 +685,17 @@ impl AppState {
                         "failed to persist delegation wait refresh: {err:#}"
                     ))
                 })?;
-                (revision, refresh.queued_parent(&parent_session_id), refresh)
+                (revision, refresh.queue_result_for_wait(&wait_id), refresh)
             } else {
-                (created_revision, false, refresh)
+                (
+                    created_revision,
+                    DelegationWaitQueueResult::default(),
+                    refresh,
+                )
             }
         };
+        let resume_prompt_queued = wait_queue_result.prompt_queued;
+        let resume_dispatch_requested = wait_queue_result.dispatch_requested;
         if refresh.did_mutate() {
             self.publish_delegation_wait_consumed_deltas(revision, &refresh.consumed_waits);
         }
@@ -669,7 +704,9 @@ impl AppState {
         Ok(DelegationWaitResponse {
             revision,
             wait,
-            queued_resume,
+            queued_resume: resume_prompt_queued,
+            resume_prompt_queued,
+            resume_dispatch_requested,
             server_instance_id: self.server_instance_id.clone(),
         })
     }
@@ -1081,13 +1118,14 @@ impl AppState {
     fn publish_delegation_wait_consumed_deltas(
         &self,
         revision: u64,
-        waits: &[DelegationWaitRecord],
+        waits: &[ConsumedDelegationWait],
     ) {
-        for wait in waits {
+        for consumed in waits {
             self.publish_delta(&DeltaEvent::DelegationWaitConsumed {
                 revision,
-                wait_id: wait.id.clone(),
-                parent_session_id: wait.parent_session_id.clone(),
+                wait_id: consumed.wait.id.clone(),
+                parent_session_id: consumed.wait.parent_session_id.clone(),
+                reason: consumed.reason,
             });
         }
     }
@@ -1367,6 +1405,31 @@ fn validate_delegation_wait_targets_locked(
     Ok(())
 }
 
+// Keep `kill_session` explicit about the wait owner being removed. The generic
+// refresh path also maps missing parents to `ParentSessionRemoved`, so both
+// live removal and boot/replay cleanup converge on the same reason.
+fn consume_delegation_waits_for_removed_parent_locked(
+    inner: &mut StateInner,
+    parent_session_id: &str,
+) -> DelegationWaitRefresh {
+    if inner.delegation_waits.is_empty() {
+        return DelegationWaitRefresh::default();
+    }
+
+    let waits = std::mem::take(&mut inner.delegation_waits);
+    let mut remaining = Vec::new();
+    let mut refresh = DelegationWaitRefresh::default();
+    for wait in waits {
+        if wait.parent_session_id == parent_session_id {
+            refresh.consume_wait(wait, DelegationWaitConsumedReason::ParentSessionRemoved);
+        } else {
+            remaining.push(wait);
+        }
+    }
+    inner.delegation_waits = remaining;
+    refresh
+}
+
 // Delegation wait lifecycle:
 // 1. Mutate `inner.delegation_waits` only while the state lock is held.
 // 2. Treat consumed waits as state mutations even when the parent resume cannot
@@ -1383,14 +1446,26 @@ fn refresh_delegation_waits_locked(inner: &mut StateInner) -> DelegationWaitRefr
     let mut remaining = Vec::new();
     let mut refresh = DelegationWaitRefresh::default();
     for wait in waits {
+        if inner
+            .find_visible_session_index(&wait.parent_session_id)
+            .is_none()
+        {
+            refresh.consume_wait(wait, DelegationWaitConsumedReason::ParentSessionRemoved);
+            continue;
+        }
         let Some(resume_prompt) = delegation_wait_resume_prompt_locked(inner, &wait) else {
             remaining.push(wait);
             continue;
         };
-        if queue_delegation_wait_resume_locked(inner, &wait.parent_session_id, resume_prompt) {
+        let queue_result =
+            queue_delegation_wait_resume_locked(inner, &wait.parent_session_id, resume_prompt);
+        if queue_result.dispatch_requested {
             refresh.dispatch_parents.push(wait.parent_session_id.clone());
         }
-        refresh.consumed_waits.push(wait);
+        refresh
+            .queue_results_by_wait_id
+            .insert(wait.id.clone(), queue_result);
+        refresh.consume_wait(wait, DelegationWaitConsumedReason::Completed);
     }
     inner.delegation_waits = remaining;
     refresh
@@ -1439,9 +1514,9 @@ fn queue_delegation_wait_resume_locked(
     inner: &mut StateInner,
     parent_session_id: &str,
     prompt: String,
-) -> bool {
+) -> DelegationWaitQueueResult {
     let Some(parent_index) = inner.find_visible_session_index(parent_session_id) else {
-        return false;
+        return DelegationWaitQueueResult::default();
     };
     let should_dispatch_now = {
         let record = &inner.sessions[parent_index];
@@ -1467,7 +1542,10 @@ fn queue_delegation_wait_resume_locked(
         },
         Vec::new(),
     );
-    should_dispatch_now
+    DelegationWaitQueueResult {
+        prompt_queued: true,
+        dispatch_requested: should_dispatch_now,
+    }
 }
 
 fn build_delegation_wait_resume_prompt(

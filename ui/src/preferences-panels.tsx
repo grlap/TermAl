@@ -14,6 +14,7 @@ import {
   areRemoteConfigsEqual,
   CLAUDE_EFFORT_OPTIONS,
   CODEX_REASONING_EFFORT_OPTIONS,
+  MAX_DEFAULT_MODEL_PREFERENCE_CHARS,
   remoteBadgeLabel,
   type ComboboxOption,
 } from "./session-model-utils";
@@ -54,10 +55,13 @@ import {
   remoteConnectionLabel,
 } from "./remotes";
 import type {
+  AgentType,
   ApprovalPolicy,
   ClaudeApprovalMode,
   ClaudeEffortLevel,
   CodexReasoningEffort,
+  CursorMode,
+  GeminiApprovalMode,
   Project,
   RemoteConfig,
   SandboxMode,
@@ -103,6 +107,87 @@ export const GEMINI_APPROVAL_OPTIONS = [
   { label: "yolo", value: "yolo" },
   { label: "plan", value: "plan" },
 ] as const;
+
+function AgentDefaultModelControl({
+  agent,
+  id,
+  value,
+  onChange,
+}: {
+  agent: AgentType;
+  id: string;
+  value: string;
+  onChange: (nextValue: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  const trimmedDraft = draft.trim();
+  const canApply = trimmedDraft.length > 0 && trimmedDraft !== value;
+
+  function applyDraft() {
+    if (!canApply) {
+      return;
+    }
+
+    onChange(trimmedDraft);
+  }
+
+  return (
+    <div className="session-control-group">
+      <label className="session-control-label" htmlFor={id}>
+        Default model
+      </label>
+      <div className="session-model-custom-row">
+        <input
+          id={id}
+          className="themed-input session-model-custom-input"
+          type="text"
+          value={draft}
+          placeholder="default"
+          maxLength={MAX_DEFAULT_MODEL_PREFERENCE_CHARS}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          onChange={(event) => setDraft(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") {
+              return;
+            }
+
+            event.preventDefault();
+            applyDraft();
+          }}
+        />
+        <button
+          type="button"
+          className="ghost-button session-model-custom-apply"
+          disabled={!canApply}
+          onClick={applyDraft}
+        >
+          Apply
+        </button>
+        <button
+          type="button"
+          className="ghost-button session-model-custom-apply"
+          disabled={value === "default"}
+          onClick={() => {
+            setDraft("default");
+            onChange("default");
+          }}
+        >
+          Reset
+        </button>
+      </div>
+      <p className="session-control-hint">
+        Use <code>default</code> to let {agent} choose its built-in default, or enter an exact model id.
+      </p>
+    </div>
+  );
+}
 
 export function ThemePreferencesPanel({
   activeStyle,
@@ -1609,12 +1694,16 @@ export function TelegramPreferencesPanel({
 export function ClaudeApprovalsPreferencesPanel({
   defaultClaudeApprovalMode,
   defaultClaudeEffort,
+  defaultClaudeModel,
   onSelectEffort,
+  onSelectModel,
   onSelectMode,
 }: {
   defaultClaudeApprovalMode: ClaudeApprovalMode;
   defaultClaudeEffort: ClaudeEffortLevel;
+  defaultClaudeModel: string;
   onSelectEffort: (effort: ClaudeEffortLevel) => void;
+  onSelectModel: (model: string) => void;
   onSelectMode: (mode: ClaudeApprovalMode) => void;
 }) {
   return (
@@ -1623,7 +1712,7 @@ export function ClaudeApprovalsPreferencesPanel({
         <div>
           <p className="session-control-label">New Claude sessions</p>
           <p className="settings-panel-copy">
-            Choose the default Claude mode and effort for sessions created in this window.
+            Choose the default Claude model, mode, and effort for sessions created in this window.
           </p>
         </div>
       </div>
@@ -1632,6 +1721,12 @@ export function ClaudeApprovalsPreferencesPanel({
         <div className="card-label">Session Default</div>
         <h3>Claude startup settings</h3>
         <div className="prompt-settings-grid">
+          <AgentDefaultModelControl
+            agent="Claude"
+            id="default-claude-model"
+            value={defaultClaudeModel}
+            onChange={onSelectModel}
+          />
           <div className="session-control-group">
             <label className="session-control-label" htmlFor="default-claude-approval-mode">
               Default Claude mode
@@ -1658,8 +1753,8 @@ export function ClaudeApprovalsPreferencesPanel({
           </div>
           <p className="session-control-hint">
             Ask keeps approval cards, Auto-approve continues through tool requests, and Plan keeps
-            Claude read-only. The effort setting is used when a new Claude session starts. Existing
-            sessions keep their current mode and effort.
+            Claude read-only. Model settings are used when a new Claude session or delegation
+            starts. Existing sessions keep their current model, mode, and effort.
           </p>
         </div>
       </article>
@@ -1669,16 +1764,20 @@ export function ClaudeApprovalsPreferencesPanel({
 
 export function CodexPromptPreferencesPanel({
   defaultApprovalPolicy,
+  defaultModel,
   defaultReasoningEffort,
   defaultSandboxMode,
   onSelectApprovalPolicy,
+  onSelectModel,
   onSelectReasoningEffort,
   onSelectSandboxMode,
 }: {
   defaultApprovalPolicy: ApprovalPolicy;
+  defaultModel: string;
   defaultReasoningEffort: CodexReasoningEffort;
   defaultSandboxMode: SandboxMode;
   onSelectApprovalPolicy: (policy: ApprovalPolicy) => void;
+  onSelectModel: (model: string) => void;
   onSelectReasoningEffort: (effort: CodexReasoningEffort) => void;
   onSelectSandboxMode: (mode: SandboxMode) => void;
 }) {
@@ -1688,8 +1787,8 @@ export function CodexPromptPreferencesPanel({
         <div>
           <p className="session-control-label">New Codex sessions</p>
           <p className="settings-panel-copy">
-            Choose the default sandbox, approval policy, and reasoning effort for Codex sessions
-            created in this window.
+            Choose the default model, sandbox, approval policy, and reasoning effort for Codex
+            sessions created in this window.
           </p>
         </div>
       </div>
@@ -1698,6 +1797,12 @@ export function CodexPromptPreferencesPanel({
         <div className="card-label">Session Default</div>
         <h3>Codex prompt settings</h3>
         <div className="prompt-settings-grid">
+          <AgentDefaultModelControl
+            agent="Codex"
+            id="default-codex-model"
+            value={defaultModel}
+            onChange={onSelectModel}
+          />
           <div className="session-control-group">
             <label className="session-control-label" htmlFor="default-codex-sandbox-mode">
               Default sandbox
@@ -1735,8 +1840,116 @@ export function CodexPromptPreferencesPanel({
             />
           </div>
           <p className="session-control-hint">
-            This only affects new Codex sessions you create here. Existing sessions keep their
-            current prompt settings.
+            Model settings are used when a new Codex session or delegation starts. Existing
+            sessions keep their current model and prompt settings.
+          </p>
+        </div>
+      </article>
+    </section>
+  );
+}
+
+export function CursorPreferencesPanel({
+  defaultCursorModel,
+  defaultCursorMode,
+  onSelectModel,
+  onSelectMode,
+}: {
+  defaultCursorModel: string;
+  defaultCursorMode: CursorMode;
+  onSelectModel: (model: string) => void;
+  onSelectMode: (mode: CursorMode) => void;
+}) {
+  return (
+    <section className="settings-panel-stack">
+      <div className="settings-panel-intro">
+        <div>
+          <p className="session-control-label">New Cursor sessions</p>
+          <p className="settings-panel-copy">
+            Choose the default Cursor model and mode for sessions created in this window.
+          </p>
+        </div>
+      </div>
+
+      <article className="message-card prompt-settings-card">
+        <div className="card-label">Session Default</div>
+        <h3>Cursor startup settings</h3>
+        <div className="prompt-settings-grid">
+          <AgentDefaultModelControl
+            agent="Cursor"
+            id="default-cursor-model"
+            value={defaultCursorModel}
+            onChange={onSelectModel}
+          />
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor="default-cursor-mode">
+              Default Cursor mode
+            </label>
+            <ThemedCombobox
+              id="default-cursor-mode"
+              className="prompt-settings-select"
+              value={defaultCursorMode}
+              options={CURSOR_MODE_OPTIONS as readonly ComboboxOption[]}
+              onChange={(nextValue) => onSelectMode(nextValue as CursorMode)}
+            />
+          </div>
+          <p className="session-control-hint">
+            Model settings are used when a new Cursor session or delegation starts. Existing
+            sessions keep their current model and mode.
+          </p>
+        </div>
+      </article>
+    </section>
+  );
+}
+
+export function GeminiPreferencesPanel({
+  defaultGeminiApprovalMode,
+  defaultGeminiModel,
+  onSelectApprovalMode,
+  onSelectModel,
+}: {
+  defaultGeminiApprovalMode: GeminiApprovalMode;
+  defaultGeminiModel: string;
+  onSelectApprovalMode: (mode: GeminiApprovalMode) => void;
+  onSelectModel: (model: string) => void;
+}) {
+  return (
+    <section className="settings-panel-stack">
+      <div className="settings-panel-intro">
+        <div>
+          <p className="session-control-label">New Gemini sessions</p>
+          <p className="settings-panel-copy">
+            Choose the default Gemini model and approval mode for sessions created in this window.
+          </p>
+        </div>
+      </div>
+
+      <article className="message-card prompt-settings-card">
+        <div className="card-label">Session Default</div>
+        <h3>Gemini startup settings</h3>
+        <div className="prompt-settings-grid">
+          <AgentDefaultModelControl
+            agent="Gemini"
+            id="default-gemini-model"
+            value={defaultGeminiModel}
+            onChange={onSelectModel}
+          />
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor="default-gemini-approval-mode">
+              Default Gemini approvals
+            </label>
+            <ThemedCombobox
+              id="default-gemini-approval-mode"
+              className="prompt-settings-select"
+              value={defaultGeminiApprovalMode}
+              options={GEMINI_APPROVAL_OPTIONS as readonly ComboboxOption[]}
+              onChange={(nextValue) => onSelectApprovalMode(nextValue as GeminiApprovalMode)}
+            />
+          </div>
+          <p className="session-control-hint">
+            Model settings are used when a new Gemini session or delegation starts. Existing
+            sessions keep their current model and approval mode.
           </p>
         </div>
       </article>

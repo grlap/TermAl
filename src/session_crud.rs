@@ -47,6 +47,24 @@
 // change). Orchestrator instances that reference the project also
 // have their `project_id` cleared for the same reason.
 
+const MAX_DEFAULT_MODEL_CHARS: usize = 200;
+
+fn normalize_default_model_preference(model: String, agent: Agent) -> Result<String, ApiError> {
+    let trimmed = model.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
+        return Ok(default_model_preference());
+    }
+    if trimmed.chars().count() > MAX_DEFAULT_MODEL_CHARS {
+        return Err(ApiError::bad_request(format!(
+            "{} default model must be at most {} characters",
+            agent.name(),
+            MAX_DEFAULT_MODEL_CHARS
+        )));
+    }
+
+    Ok(trimmed.to_owned())
+}
+
 impl AppState {
     /// Creates a new session (local or remote-backed) from a
     /// `CreateSessionRequest`, persists it, and broadcasts the
@@ -192,7 +210,7 @@ impl AppState {
         let mut record = if agent == Agent::Claude {
             let final_model = requested_model
                 .clone()
-                .unwrap_or_else(|| agent.default_model().to_owned());
+                .unwrap_or_else(|| inner.preferences.default_model_for_agent(agent));
             let final_approval_mode = request
                 .claude_approval_mode
                 .unwrap_or(inner.preferences.default_claude_approval_mode);
@@ -351,6 +369,42 @@ impl AppState {
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let mut changed = false;
+
+        if let Some(default_codex_model) = request.default_codex_model {
+            let default_codex_model =
+                normalize_default_model_preference(default_codex_model, Agent::Codex)?;
+            if inner.preferences.default_codex_model != default_codex_model {
+                inner.preferences.default_codex_model = default_codex_model;
+                changed = true;
+            }
+        }
+
+        if let Some(default_claude_model) = request.default_claude_model {
+            let default_claude_model =
+                normalize_default_model_preference(default_claude_model, Agent::Claude)?;
+            if inner.preferences.default_claude_model != default_claude_model {
+                inner.preferences.default_claude_model = default_claude_model;
+                changed = true;
+            }
+        }
+
+        if let Some(default_cursor_model) = request.default_cursor_model {
+            let default_cursor_model =
+                normalize_default_model_preference(default_cursor_model, Agent::Cursor)?;
+            if inner.preferences.default_cursor_model != default_cursor_model {
+                inner.preferences.default_cursor_model = default_cursor_model;
+                changed = true;
+            }
+        }
+
+        if let Some(default_gemini_model) = request.default_gemini_model {
+            let default_gemini_model =
+                normalize_default_model_preference(default_gemini_model, Agent::Gemini)?;
+            if inner.preferences.default_gemini_model != default_gemini_model {
+                inner.preferences.default_gemini_model = default_gemini_model;
+                changed = true;
+            }
+        }
 
         if let Some(default_codex_reasoning_effort) = request.default_codex_reasoning_effort {
             if inner.preferences.default_codex_reasoning_effort != default_codex_reasoning_effort {

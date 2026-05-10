@@ -161,14 +161,23 @@ impl AppState {
             return self.proxy_remote_resolve_agent_command(session_id, command_name, request);
         }
 
+        let session = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_visible_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            inner.sessions[index].session.clone()
+        };
         let command = self
             .list_agent_commands(session_id)?
             .commands
             .into_iter()
             .find(|command| command.name.eq_ignore_ascii_case(command_name))
             .ok_or_else(|| ApiError::not_found("agent command not found"))?;
+        let metadata =
+            read_agent_command_resolver_metadata(FsPath::new(&session.workdir), &command)?;
 
-        resolve_agent_command_payload(command, request)
+        resolve_agent_command_payload(command, request, metadata)
     }
 
     /// Phrase-searches instruction / system-prompt files under the
@@ -199,6 +208,7 @@ impl AppState {
 fn resolve_agent_command_payload(
     command: AgentCommand,
     request: ResolveAgentCommandRequest,
+    metadata: Option<AgentCommandResolverMetadata>,
 ) -> Result<ResolveAgentCommandResponse, ApiError> {
     let arguments = request
         .arguments
@@ -211,7 +221,7 @@ fn resolve_agent_command_payload(
         .map(str::trim)
         .unwrap_or_default();
     let visible_prompt = resolved_agent_command_visible_prompt(&command, arguments);
-    let title = resolved_agent_command_title(&command, arguments, &visible_prompt);
+    let title = resolved_agent_command_title(&command, metadata.as_ref(), arguments, &visible_prompt);
 
     let expanded_prompt = match command.kind {
         AgentCommandKind::PromptTemplate => {
@@ -229,7 +239,7 @@ fn resolve_agent_command_payload(
     };
 
     let delegation = (request.intent == AgentCommandResolveIntent::Delegate)
-        .then(|| resolved_agent_command_delegation_defaults(&command, &title))
+        .then(|| resolved_agent_command_delegation_defaults(metadata.as_ref(), &title))
         .flatten();
 
     Ok(ResolveAgentCommandResponse {
@@ -241,6 +251,21 @@ fn resolve_agent_command_payload(
         title: Some(title),
         delegation,
     })
+}
+
+struct AgentCommandResolverMetadata {
+    title: AgentCommandTitleStrategy,
+    delegation: Option<AgentCommandDelegationMetadata>,
+}
+
+enum AgentCommandTitleStrategy {
+    Default,
+    PrefixFirstArgument { prefix: String },
+}
+
+struct AgentCommandDelegationMetadata {
+    mode: DelegationMode,
+    write_policy: DelegationWritePolicy,
 }
 
 fn resolved_agent_command_visible_prompt(command: &AgentCommand, arguments: &str) -> String {
@@ -279,12 +304,21 @@ fn append_resolved_agent_command_note(mut prompt: String, note: &str) -> String 
 
 fn resolved_agent_command_title(
     command: &AgentCommand,
+    metadata: Option<&AgentCommandResolverMetadata>,
     arguments: &str,
     visible_prompt: &str,
 ) -> String {
-    if command.name.eq_ignore_ascii_case("fix-bug") {
-        if let Some(first_argument) = arguments.split_whitespace().next() {
-            return truncate_resolved_agent_command_title(&format!("Fix bug {first_argument}"));
+    let title_strategy = metadata
+        .map(|metadata| &metadata.title)
+        .unwrap_or(&AgentCommandTitleStrategy::Default);
+    match title_strategy {
+        AgentCommandTitleStrategy::Default => {}
+        AgentCommandTitleStrategy::PrefixFirstArgument { prefix } => {
+            if let Some(first_argument) = arguments.split_whitespace().next() {
+                return truncate_resolved_agent_command_title(&format!(
+                    "{prefix} {first_argument}"
+                ));
+            }
         }
     }
 
@@ -312,30 +346,14 @@ fn truncate_resolved_agent_command_title(value: &str) -> String {
 }
 
 fn resolved_agent_command_delegation_defaults(
-    command: &AgentCommand,
+    metadata: Option<&AgentCommandResolverMetadata>,
     title: &str,
 ) -> Option<ResolvedAgentCommandDelegationDefaults> {
-    if !is_review_local_agent_command(command) {
-        return None;
-    }
+    let delegation = metadata?.delegation.as_ref()?;
 
     Some(ResolvedAgentCommandDelegationDefaults {
-        mode: Some(DelegationMode::Reviewer),
+        mode: Some(delegation.mode),
         title: Some(title.to_owned()),
-        write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
-            owned_paths: Vec::new(),
-            worktree_path: None,
-        }),
+        write_policy: Some(delegation.write_policy.clone()),
     })
-}
-
-fn is_review_local_agent_command(command: &AgentCommand) -> bool {
-    let normalized_name = command.name.trim().to_ascii_lowercase();
-    if normalized_name == "review-local" {
-        return true;
-    }
-
-    let normalized_source = command.source.replace('\\', "/").to_ascii_lowercase();
-    normalized_source.ends_with("/.claude/commands/review-local.md")
-        || normalized_source == ".claude/commands/review-local.md"
 }

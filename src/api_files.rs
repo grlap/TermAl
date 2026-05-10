@@ -427,21 +427,20 @@ fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, Api
             continue;
         }
 
-        let content = fs::read_to_string(&path).map_err(|err| {
+        let raw_content = fs::read_to_string(&path).map_err(|err| {
             ApiError::internal(format!(
                 "failed to read agent command {}: {err}",
                 path.display()
             ))
         })?;
+        let command_content = strip_markdown_frontmatter(&raw_content);
+        let content = command_content.content.to_owned();
         let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
             continue;
         };
-        let description = content
-            .lines()
-            .map(str::trim)
-            .find(|line| !line.is_empty())
-            .unwrap_or("")
-            .to_owned();
+        let description = command_content
+            .description
+            .unwrap_or_else(|| fallback_agent_command_description(&content));
 
         commands.push(AgentCommand {
             kind: AgentCommandKind::PromptTemplate,
@@ -449,7 +448,7 @@ fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, Api
             description,
             content,
             source: format!(".claude/commands/{}.md", stem),
-            argument_hint: None,
+            argument_hint: command_content.argument_hint,
         });
     }
 
@@ -459,4 +458,329 @@ fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, Api
             .cmp(&right.name.to_ascii_lowercase())
     });
     Ok(commands)
+}
+
+struct MarkdownCommandContent<'a> {
+    content: &'a str,
+    description: Option<String>,
+    argument_hint: Option<String>,
+}
+
+fn strip_markdown_frontmatter(content: &str) -> MarkdownCommandContent<'_> {
+    let opening_len = if content.starts_with("---\r\n") {
+        "---\r\n".len()
+    } else if content.starts_with("---\n") {
+        "---\n".len()
+    } else {
+        return MarkdownCommandContent {
+            content,
+            description: None,
+            argument_hint: None,
+        };
+    };
+
+    let mut offset = opening_len;
+    for line in content[opening_len..].split_inclusive('\n') {
+        let line_without_newline = line.trim_end_matches(['\r', '\n']);
+        if line_without_newline.trim() == "---" {
+            let frontmatter = &content[opening_len..offset];
+            if looks_like_markdown_frontmatter(frontmatter) {
+                let fields = markdown_frontmatter_fields(frontmatter);
+                let body = strip_single_leading_blank_line(&content[offset + line.len()..]);
+                return MarkdownCommandContent {
+                    content: body,
+                    description: fields.get("description").cloned(),
+                    argument_hint: fields
+                        .get("argument-hint")
+                        .or_else(|| fields.get("argument_hint"))
+                        .cloned(),
+                };
+            }
+            return MarkdownCommandContent {
+                content,
+                description: None,
+                argument_hint: None,
+            };
+        }
+        offset += line.len();
+    }
+
+    MarkdownCommandContent {
+        content,
+        description: None,
+        argument_hint: None,
+    }
+}
+
+fn fallback_agent_command_description(content: &str) -> String {
+    content
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && *line != "---")
+        .unwrap_or("")
+        .to_owned()
+}
+
+fn strip_single_leading_blank_line(content: &str) -> &str {
+    if let Some(rest) = content.strip_prefix("\r\n") {
+        rest
+    } else if let Some(rest) = content.strip_prefix('\n') {
+        rest
+    } else {
+        content
+    }
+}
+
+fn read_agent_command_resolver_metadata(
+    workdir: &FsPath,
+    command: &AgentCommand,
+) -> Result<Option<AgentCommandResolverMetadata>, ApiError> {
+    if command.kind != AgentCommandKind::PromptTemplate {
+        return Ok(None);
+    }
+
+    let source = command.source.replace('\\', "/");
+    let Some(source_stem) = source
+        .strip_prefix(".claude/commands/")
+        .and_then(|value| value.strip_suffix(".md"))
+    else {
+        return Ok(None);
+    };
+    if source_stem.contains('/') || !source_stem.eq_ignore_ascii_case(command.name.trim()) {
+        return Ok(None);
+    }
+
+    let path = workdir
+        .join(".claude")
+        .join("commands")
+        .join(format!("{source_stem}.md"));
+    let raw_content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(ApiError::internal(format!(
+            "failed to read agent command metadata {}: {err}",
+            path.display()
+            )));
+        }
+    };
+    let Some(frontmatter) = markdown_frontmatter(&raw_content) else {
+        return Ok(None);
+    };
+
+    parse_agent_command_resolver_metadata(frontmatter)
+}
+
+fn looks_like_markdown_frontmatter(frontmatter: &str) -> bool {
+    frontmatter.lines().map(str::trim_end).any(|line| {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            return false;
+        }
+        let Some((key, _)) = line.split_once(':') else {
+            return false;
+        };
+        let key = key.trim();
+        matches!(
+            key,
+            "name"
+                | "description"
+                | "metadata"
+                | "argument-hint"
+                | "argument_hint"
+                | "allowed-tools"
+                | "tools"
+                | "model"
+                | "disable-model-invocation"
+                | "disable_model_invocation"
+        )
+    })
+}
+
+fn markdown_frontmatter(content: &str) -> Option<&str> {
+    let opening_len = if content.starts_with("---\r\n") {
+        "---\r\n".len()
+    } else if content.starts_with("---\n") {
+        "---\n".len()
+    } else {
+        return None;
+    };
+
+    let mut offset = opening_len;
+    for line in content[opening_len..].split_inclusive('\n') {
+        let line_without_newline = line.trim_end_matches(['\r', '\n']);
+        if line_without_newline.trim() == "---" {
+            let frontmatter = &content[opening_len..offset];
+            return looks_like_markdown_frontmatter(frontmatter).then_some(frontmatter);
+        }
+        offset += line.len();
+    }
+
+    None
+}
+
+fn parse_agent_command_resolver_metadata(
+    frontmatter: &str,
+) -> Result<Option<AgentCommandResolverMetadata>, ApiError> {
+    let fields = markdown_frontmatter_fields(frontmatter);
+    if !fields
+        .keys()
+        .any(|key| key.starts_with("metadata.termal."))
+    {
+        return Ok(None);
+    }
+
+    let title = match fields.get("metadata.termal.title.strategy").map(String::as_str) {
+        None | Some("default") => AgentCommandTitleStrategy::Default,
+        Some("prefixFirstArgument") => {
+            let prefix = required_frontmatter_field(
+                &fields,
+                "metadata.termal.title.prefix",
+                "prefixFirstArgument title metadata requires metadata.termal.title.prefix",
+            )?;
+            AgentCommandTitleStrategy::PrefixFirstArgument { prefix }
+        }
+        Some(other) => {
+            return Err(ApiError::bad_request(format!(
+                "unsupported metadata.termal.title.strategy `{other}`"
+            )));
+        }
+    };
+
+    let delegation = match fields.get("metadata.termal.delegation.enabled") {
+        None => None,
+        Some(value) => {
+            if !parse_frontmatter_bool(value, "metadata.termal.delegation.enabled")? {
+                None
+            } else {
+                let mode = parse_agent_command_delegation_mode(required_frontmatter_field(
+                    &fields,
+                    "metadata.termal.delegation.mode",
+                    "delegation metadata requires metadata.termal.delegation.mode",
+                )?)?;
+                let write_policy =
+                    parse_agent_command_delegation_write_policy(required_frontmatter_field(
+                        &fields,
+                        "metadata.termal.delegation.writePolicy.kind",
+                        "delegation metadata requires metadata.termal.delegation.writePolicy.kind",
+                    )?)?;
+                Some(AgentCommandDelegationMetadata { mode, write_policy })
+            }
+        }
+    };
+
+    Ok(Some(AgentCommandResolverMetadata { title, delegation }))
+}
+
+fn markdown_frontmatter_fields(frontmatter: &str) -> BTreeMap<String, String> {
+    let mut fields = BTreeMap::new();
+    let mut path: Vec<(usize, String)> = Vec::new();
+    for line in frontmatter.lines() {
+        let line = line.trim_end();
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((raw_key, raw_value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let indent = line.len().saturating_sub(trimmed.len());
+        if line[..indent].contains('\t') {
+            continue;
+        }
+        while path
+            .last()
+            .is_some_and(|(existing_indent, _)| *existing_indent >= indent)
+        {
+            path.pop();
+        }
+
+        let key = raw_key.trim();
+        if key.is_empty() {
+            continue;
+        }
+
+        let value = raw_value.trim();
+        if value.is_empty() {
+            path.push((indent, key.to_owned()));
+            continue;
+        }
+
+        let mut field_path = path
+            .iter()
+            .map(|(_, key)| key.as_str())
+            .collect::<Vec<_>>();
+        field_path.push(key);
+        fields.insert(
+            field_path.join("."),
+            unquote_markdown_frontmatter_string(value).to_owned(),
+        );
+    }
+    fields
+}
+
+fn required_frontmatter_field(
+    fields: &BTreeMap<String, String>,
+    key: &str,
+    message: &str,
+) -> Result<String, ApiError> {
+    fields
+        .get(key)
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| ApiError::bad_request(message))
+}
+
+fn parse_frontmatter_bool(value: &str, key: &str) -> Result<bool, ApiError> {
+    match value.trim() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        other => Err(ApiError::bad_request(format!(
+            "unsupported {key} value `{other}`"
+        ))),
+    }
+}
+
+fn parse_agent_command_delegation_mode(value: String) -> Result<DelegationMode, ApiError> {
+    match value.as_str() {
+        "reviewer" => Ok(DelegationMode::Reviewer),
+        "explorer" => Ok(DelegationMode::Explorer),
+        "worker" => Err(ApiError::bad_request(
+            "metadata.termal.delegation.mode `worker` is not supported yet",
+        )),
+        other => Err(ApiError::bad_request(format!(
+            "unsupported metadata.termal.delegation.mode `{other}`"
+        ))),
+    }
+}
+
+fn parse_agent_command_delegation_write_policy(
+    value: String,
+) -> Result<DelegationWritePolicy, ApiError> {
+    match value.as_str() {
+        "readOnly" => Ok(DelegationWritePolicy::ReadOnly),
+        "isolatedWorktree" => Ok(DelegationWritePolicy::IsolatedWorktree {
+            owned_paths: Vec::new(),
+            worktree_path: None,
+        }),
+        "sharedWorktree" => Err(ApiError::bad_request(
+            "metadata.termal.delegation.writePolicy.kind `sharedWorktree` is not supported yet",
+        )),
+        other => Err(ApiError::bad_request(format!(
+            "unsupported metadata.termal.delegation.writePolicy.kind `{other}`"
+        ))),
+    }
+}
+
+fn unquote_markdown_frontmatter_string(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2
+        && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
+    {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    }
 }

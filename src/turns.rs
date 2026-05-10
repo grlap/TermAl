@@ -354,6 +354,14 @@ impl RemoteConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AppPreferences {
+    #[serde(default = "default_model_preference")]
+    default_codex_model: String,
+    #[serde(default = "default_model_preference")]
+    default_claude_model: String,
+    #[serde(default = "default_model_preference")]
+    default_cursor_model: String,
+    #[serde(default = "default_model_preference")]
+    default_gemini_model: String,
     #[serde(default = "default_codex_reasoning_effort")]
     default_codex_reasoning_effort: CodexReasoningEffort,
     #[serde(default = "default_claude_approval_mode")]
@@ -368,12 +376,41 @@ impl Default for AppPreferences {
     /// Builds the default value.
     fn default() -> Self {
         Self {
+            default_codex_model: default_model_preference(),
+            default_claude_model: default_model_preference(),
+            default_cursor_model: default_model_preference(),
+            default_gemini_model: default_model_preference(),
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             default_claude_approval_mode: default_claude_approval_mode(),
             default_claude_effort: default_claude_effort(),
             remotes: default_remote_configs(),
         }
     }
+}
+
+impl AppPreferences {
+    /// Resolves the persisted model preference for a newly-created session.
+    fn default_model_for_agent(&self, agent: Agent) -> String {
+        let preference = match agent {
+            Agent::Codex => &self.default_codex_model,
+            Agent::Claude => &self.default_claude_model,
+            Agent::Cursor => &self.default_cursor_model,
+            Agent::Gemini => &self.default_gemini_model,
+        };
+        let trimmed = preference.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
+            // `default` is the persisted app-preference sentinel. Claude's
+            // agent default currently has the same literal value by design.
+            return agent.default_model().to_owned();
+        }
+
+        trimmed.to_owned()
+    }
+}
+
+/// Returns the default model preference marker.
+fn default_model_preference() -> String {
+    "default".to_owned()
 }
 
 /// Returns the default cursor mode.

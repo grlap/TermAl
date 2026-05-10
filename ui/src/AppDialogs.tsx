@@ -24,6 +24,8 @@ import {
   TelegramPreferencesPanel,
   ClaudeApprovalsPreferencesPanel,
   CodexPromptPreferencesPanel,
+  CursorPreferencesPanel,
+  GeminiPreferencesPanel,
   ThemedCombobox,
   CURSOR_MODE_OPTIONS,
   GEMINI_APPROVAL_OPTIONS,
@@ -98,12 +100,20 @@ type AppDialogsProps = {
   newSessionModel: string;
   newSessionModelOptions: readonly ComboboxOption[];
   onChangeNewSessionModel: (nextValue: string) => void;
+  defaultCodexModel: string;
+  handleDefaultCodexModelChange: (nextValue: string) => void;
   defaultCodexReasoningEffort: CodexReasoningEffort;
   handleDefaultCodexReasoningEffortChange: (nextValue: CodexReasoningEffort) => void;
+  defaultClaudeModel: string;
+  handleDefaultClaudeModelChange: (nextValue: string) => void;
   defaultClaudeEffort: ClaudeEffortLevel;
   handleDefaultClaudeEffortChange: (nextValue: ClaudeEffortLevel) => void;
+  defaultCursorModel: string;
+  handleDefaultCursorModelChange: (nextValue: string) => void;
   defaultCursorMode: CursorMode;
   onChangeDefaultCursorMode: (nextValue: CursorMode) => void;
+  defaultGeminiModel: string;
+  handleDefaultGeminiModelChange: (nextValue: string) => void;
   defaultGeminiApprovalMode: GeminiApprovalMode;
   onChangeDefaultGeminiApprovalMode: (nextValue: GeminiApprovalMode) => void;
   createSessionProjectId: string;
@@ -202,12 +212,20 @@ export function AppDialogs({
   newSessionModel,
   newSessionModelOptions,
   onChangeNewSessionModel,
+  defaultCodexModel,
+  handleDefaultCodexModelChange,
   defaultCodexReasoningEffort,
   handleDefaultCodexReasoningEffortChange,
+  defaultClaudeModel,
+  handleDefaultClaudeModelChange,
   defaultClaudeEffort,
   handleDefaultClaudeEffortChange,
+  defaultCursorModel,
+  handleDefaultCursorModelChange,
   defaultCursorMode,
   onChangeDefaultCursorMode,
+  defaultGeminiModel,
+  handleDefaultGeminiModelChange,
   defaultGeminiApprovalMode,
   onChangeDefaultGeminiApprovalMode,
   createSessionProjectId,
@@ -936,20 +954,38 @@ export function AppDialogs({
             ) : settingsTab === "codex-prompts" ? (
               <CodexPromptPreferencesPanel
                 defaultApprovalPolicy={defaultCodexApprovalPolicy}
+                defaultModel={defaultCodexModel}
                 defaultReasoningEffort={defaultCodexReasoningEffort}
                 defaultSandboxMode={defaultCodexSandboxMode}
                 onSelectApprovalPolicy={setDefaultCodexApprovalPolicy}
+                onSelectModel={handleDefaultCodexModelChange}
                 onSelectReasoningEffort={
                   handleDefaultCodexReasoningEffortChange
                 }
                 onSelectSandboxMode={setDefaultCodexSandboxMode}
               />
-            ) : (
+            ) : settingsTab === "claude-approvals" ? (
               <ClaudeApprovalsPreferencesPanel
                 defaultClaudeApprovalMode={defaultClaudeApprovalMode}
                 defaultClaudeEffort={defaultClaudeEffort}
+                defaultClaudeModel={defaultClaudeModel}
                 onSelectEffort={handleDefaultClaudeEffortChange}
+                onSelectModel={handleDefaultClaudeModelChange}
                 onSelectMode={setDefaultClaudeApprovalMode}
+              />
+            ) : settingsTab === "cursor" ? (
+              <CursorPreferencesPanel
+                defaultCursorModel={defaultCursorModel}
+                defaultCursorMode={defaultCursorMode}
+                onSelectModel={handleDefaultCursorModelChange}
+                onSelectMode={onChangeDefaultCursorMode}
+              />
+            ) : (
+              <GeminiPreferencesPanel
+                defaultGeminiApprovalMode={defaultGeminiApprovalMode}
+                defaultGeminiModel={defaultGeminiModel}
+                onSelectApprovalMode={onChangeDefaultGeminiApprovalMode}
+                onSelectModel={handleDefaultGeminiModelChange}
               />
             )}
           </div>

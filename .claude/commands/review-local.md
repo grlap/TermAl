@@ -1,3 +1,17 @@
+---
+name: review-local
+description: Review staged and unstaged changes using multiple specialized reviewers.
+metadata:
+  termal:
+    title:
+      strategy: default
+    delegation:
+      enabled: true
+      mode: reviewer
+      writePolicy:
+        kind: isolatedWorktree
+---
+
 Review staged and unstaged changes using multiple specialized reviewers.
 
 **IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. All other git commands (diff, status, stash, add, etc.) may be executed freely.**

@@ -64,6 +64,8 @@ export const ALL_CODEX_REASONING_EFFORTS = CODEX_REASONING_EFFORT_OPTIONS.map(
 export const DEFAULT_CODEX_REASONING_EFFORT: CodexReasoningEffort = "medium";
 export const DEFAULT_CLAUDE_APPROVAL_MODE: ClaudeApprovalMode = "ask";
 export const DEFAULT_CLAUDE_EFFORT: ClaudeEffortLevel = "default";
+export const DEFAULT_MODEL_PREFERENCE = "default";
+export const MAX_DEFAULT_MODEL_PREFERENCE_CHARS = 200;
 export const FALLBACK_CLAUDE_EFFORTS = ["low", "medium", "high"] as ClaudeEffortLevel[];
 
 export function defaultNewSessionModel(agent: AgentType): string {
@@ -74,16 +76,21 @@ export function usesSessionModelPicker(agent: AgentType): boolean {
   return SESSION_SCOPED_MODEL_AGENTS.has(agent);
 }
 
+export function isDefaultModelPreference(model: string): boolean {
+  const trimmed = model.trim();
+  return trimmed.length === 0 || trimmed.toLowerCase() === DEFAULT_MODEL_PREFERENCE;
+}
+
 export function createSessionModelHint(agent: AgentType): string {
   switch (agent) {
     case "Claude":
-      return "Claude model selection lives on the session itself. TermAl asks Claude for its live model list after the session opens, and you can always enter a full Claude model id manually. New Claude sessions use Claude's default model.";
+      return "Claude model selection lives on the session itself. TermAl asks Claude for its live model list after the session opens, and you can always enter a full Claude model id manually. New Claude sessions use the configured app default model; set it to default to let Claude choose.";
     case "Codex":
-      return "Codex model selection lives on the session itself. TermAl asks Codex for its live model list after the session opens, and you can always enter a full Codex model id manually.";
+      return "Codex model selection lives on the session itself. TermAl asks Codex for its live model list after the session opens, and you can always enter a full Codex model id manually. New Codex sessions use the configured app default model; set it to default to let Codex choose.";
     case "Cursor":
-      return "Cursor model selection lives on the session itself, like Cursor Agent's /model flow. TermAl asks Cursor for its live model list after the session opens, and you can still enter a full model id manually. New Cursor sessions start on Auto.";
+      return "Cursor model selection lives on the session itself, like Cursor Agent's /model flow. TermAl asks Cursor for its live model list after the session opens, and you can still enter a full model id manually. New Cursor sessions use the configured app default model; set it to default to leave Cursor on Auto.";
     case "Gemini":
-      return "Gemini model selection lives on the session itself. TermAl asks Gemini for its live model list after the session opens, and you can still enter a full Gemini model id manually. New Gemini sessions start on Auto.";
+      return "Gemini model selection lives on the session itself. TermAl asks Gemini for its live model list after the session opens, and you can still enter a full Gemini model id manually. New Gemini sessions use the configured app default model; set it to default to leave Gemini on Auto.";
   }
 }
 
@@ -143,6 +150,10 @@ export function currentSessionModelOption(session: Session) {
 
 export function resolveAppPreferences(preferences?: AppPreferences | null) {
   return {
+    defaultCodexModel: preferences?.defaultCodexModel ?? DEFAULT_MODEL_PREFERENCE,
+    defaultClaudeModel: preferences?.defaultClaudeModel ?? DEFAULT_MODEL_PREFERENCE,
+    defaultCursorModel: preferences?.defaultCursorModel ?? DEFAULT_MODEL_PREFERENCE,
+    defaultGeminiModel: preferences?.defaultGeminiModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultCodexReasoningEffort:
       preferences?.defaultCodexReasoningEffort ?? DEFAULT_CODEX_REASONING_EFFORT,
     defaultClaudeApprovalMode:

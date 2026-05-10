@@ -1434,13 +1434,17 @@ const SessionConversationPage = memo(function SessionConversationPage({
       />
     </MessageSlot>
   ));
-  const liveTail =
-    liveTurnCard || pendingPromptCards.length > 0 ? (
-      <div className={`conversation-live-tail${liveTailPinned ? " is-pinned" : ""}`}>
-        {liveTurnCard}
-        {/* DOM keeps the live turn before queued prompts for screen readers; pinned CSS places it nearest the composer. */}
+  const pendingPromptQueue =
+    pendingPromptCards.length > 0 ? (
+      <div className="conversation-pending-prompts">
         {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
         {pendingPromptCards}
+      </div>
+    ) : null;
+  const liveTail =
+    liveTurnCard ? (
+      <div className={`conversation-live-tail${liveTailPinned ? " is-pinned" : ""}`}>
+        {liveTurnCard}
       </div>
     ) : null;
   const markerNavigation = isMarkerPanelVisible ? (
@@ -1458,6 +1462,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       {markerNavigation}
       {conversationMessages}
       {markerContextMenuNode}
+      {pendingPromptQueue}
       {liveTail}
     </>
   );

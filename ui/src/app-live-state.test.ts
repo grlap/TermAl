@@ -314,6 +314,10 @@ function makeLiveStateParams(
       setBackendConnectionState: noopSetter,
     },
     preferenceSetters: {
+      setDefaultCodexModel: noopSetter,
+      setDefaultClaudeModel: noopSetter,
+      setDefaultCursorModel: noopSetter,
+      setDefaultGeminiModel: noopSetter,
       setDefaultCodexReasoningEffort: noopSetter,
       setDefaultClaudeApprovalMode: noopSetter,
       setDefaultClaudeEffort: noopSetter,
