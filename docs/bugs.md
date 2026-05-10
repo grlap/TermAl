@@ -310,17 +310,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Capture the original textarea node reference before rerender.
 - Assert on it after rerender (it's been removed from DOM, but transition state is observable in the captured ref).
 
-## Round-trip serialization test doesn't go back to JSON
-
-**Severity:** Low - `src/tests/telegram.rs:2058-2075`. The new round-trip test deserializes, then re-asserts in-memory fields. It does NOT round-trip BACK to JSON and compare to the original `value`. A regression that changed serialization but kept deserialization compatible would not be caught.
-
-**Current behavior:**
-- Wire-shape pinning is incomplete.
-- Only the read direction is fully tested.
-
-**Proposal:**
-- Add `let reserialized = serde_json::to_value(&round_tripped).unwrap();` and `assert_eq!(reserialized, value)`.
-
 ## Composer transition restore can be lost when a non-shrink resize races the restore frame
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1765`. `resizeComposerInput` cancels a pending transition-restore frame before it knows whether the current resize will consume or replace that restore.

@@ -3407,6 +3407,9 @@ fn telegram_assistant_forwarding_cursor_state_uses_documented_wire_shape() {
         round_tripped.selected_session_id.as_deref(),
         Some("session-2")
     );
+    let reserialized =
+        serde_json::to_value(&round_tripped).expect("round-tripped state should serialize");
+    assert_eq!(reserialized, value);
 
     let default_value =
         serde_json::to_value(TelegramBotState::default()).expect("state should serialize");
