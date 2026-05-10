@@ -1978,7 +1978,7 @@ const SessionComposer = memo(function SessionComposer({
     };
   }, []);
 
-  function cancelScheduledComposerResize() {
+  function resetAndCancelScheduledComposerResize() {
     composerResizeNeedsMetricRefreshRef.current = false;
     composerResizeShouldAnimateHeightRef.current = true;
     if (composerResizeAnimationFrameRef.current == null) {
@@ -2192,12 +2192,12 @@ const SessionComposer = memo(function SessionComposer({
     composerLastMeasuredDraftLengthRef.current = 0;
     composerLastAppliedHeightRef.current = null;
     composerLastAppliedOverflowYRef.current = null;
-    cancelScheduledComposerResize();
+    resetAndCancelScheduledComposerResize();
     cancelAndRestoreScheduledComposerTransition();
     resizeComposerInput(true);
 
     return () => {
-      cancelScheduledComposerResize();
+      resetAndCancelScheduledComposerResize();
       cancelAndRestoreScheduledComposerTransition();
     };
   }, [activeSessionId]);
@@ -2358,7 +2358,7 @@ const SessionComposer = memo(function SessionComposer({
       composerLastMeasuredDraftLengthRef.current = 0;
       composerLastAppliedHeightRef.current = null;
       composerLastAppliedOverflowYRef.current = null;
-      cancelScheduledComposerResize();
+      resetAndCancelScheduledComposerResize();
       cancelAndRestoreScheduledComposerTransition();
     };
   }, []);

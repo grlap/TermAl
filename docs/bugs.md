@@ -326,18 +326,6 @@ If `segments.length` shrinks then grows back to a value `>= focusedSegmentIndex`
 - Either restore the effect (acknowledging the redundancy with inline clamps).
 - Or write a `useReducer`/dispatch-based focus model that recomputes bounds in one place.
 
-## `cancelScheduledComposerResize` name misleading after round-82 reset addition
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1664-1673`. The function now has dual responsibilities: reset flags AND cancel the rAF. Old name suggests only the latter. Future callers might be surprised that `composerResizeShouldAnimateHeightRef` is also reset to `true` (a side effect that suppresses an in-flight non-animation request).
-
-**Current behavior:**
-- Function name suggests cancel-only.
-- Implementation now also resets flags.
-
-**Proposal:**
-- Rename to `resetAndCancelScheduledComposerResize`.
-- Or split into `resetComposerResizeFlags()` + `cancelScheduledComposerResize()`.
-
 ## Composer transition session-switch test only inspects the new textarea
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:8401-8541`. Asserts the textarea's transition stays `"height 150ms ease"` after the session switch. If the regression were "the prior session's transition is restored on the WRONG textarea" (a stale element reference), the test wouldn't catch it because it only inspects the new textarea.
