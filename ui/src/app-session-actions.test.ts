@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { useAppSessionActions } from "./app-session-actions";
 import type { StateResponse } from "./api";
-import type { ConversationMarker, Project, Session } from "./types";
+import type { AgentType, ConversationMarker, Project, Session } from "./types";
 import type { WorkspaceState } from "./workspace";
 
 function makeSession(id: string, overrides: Partial<Session> = {}): Session {
@@ -177,53 +177,95 @@ function expectRequestErrorDeferredUpdatesOnly(
   expect(calls.every(([next]) => typeof next === "function")).toBe(true);
 }
 
+type DefaultModelKey =
+  | "defaultClaudeModel"
+  | "defaultCodexModel"
+  | "defaultCursorModel"
+  | "defaultGeminiModel";
+
+const MODEL_PICKER_AGENT_CASES = [
+  {
+    agent: "Claude",
+    defaultModelKey: "defaultClaudeModel",
+    customModel: "claude-opus-4.5",
+  },
+  {
+    agent: "Codex",
+    defaultModelKey: "defaultCodexModel",
+    customModel: "gpt-5.5",
+  },
+  {
+    agent: "Cursor",
+    defaultModelKey: "defaultCursorModel",
+    customModel: "cursor-max",
+  },
+  {
+    agent: "Gemini",
+    defaultModelKey: "defaultGeminiModel",
+    customModel: "gemini-2.5-pro",
+  },
+] satisfies ReadonlyArray<{
+  agent: AgentType;
+  defaultModelKey: DefaultModelKey;
+  customModel: string;
+}>;
+
 describe("useAppSessionActions", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("sends a configured default model when creating a new session", async () => {
-    const createSessionSpy = vi.spyOn(api, "createSession").mockResolvedValue({
-      revision: 6,
-      serverInstanceId: "server-a",
-      session: makeSession("session-new", { model: "gpt-5.5" }),
-    } as Awaited<ReturnType<typeof api.createSession>>);
-    const params = makeSessionActionsParams();
-    params.defaults.defaultCodexModel = "gpt-5.5";
-    const actions = useAppSessionActions(params);
+  it.each(MODEL_PICKER_AGENT_CASES)(
+    "sends a configured default model when creating a new $agent session",
+    async ({ agent, defaultModelKey, customModel }) => {
+      const createSessionSpy = vi.spyOn(api, "createSession").mockResolvedValue({
+        revision: 6,
+        serverInstanceId: "server-a",
+        session: makeSession("session-new", { agent, model: customModel }),
+      } as Awaited<ReturnType<typeof api.createSession>>);
+      const params = makeSessionActionsParams();
+      params.defaults[defaultModelKey] = customModel;
+      const actions = useAppSessionActions(params);
 
-    await expect(
-      actions.handleNewSession({ agent: "Codex", model: "default" }),
-    ).resolves.toBe(true);
+      await expect(
+        actions.handleNewSession({ agent, model: "default" }),
+      ).resolves.toBe(true);
 
-    expect(createSessionSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agent: "Codex",
-        model: "gpt-5.5",
-      }),
-    );
-  });
+      expect(createSessionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agent,
+          model: customModel,
+        }),
+      );
+    },
+  );
 
-  it("omits mixed-case default model sentinel when creating a new session", async () => {
-    const createSessionSpy = vi.spyOn(api, "createSession").mockResolvedValue({
-      revision: 6,
-      serverInstanceId: "server-a",
-      session: makeSession("session-new"),
-    } as Awaited<ReturnType<typeof api.createSession>>);
-    const params = makeSessionActionsParams();
-    params.defaults.defaultCodexModel = " DEFAULT ";
-    const actions = useAppSessionActions(params);
+  it.each(MODEL_PICKER_AGENT_CASES)(
+    "omits mixed-case default model sentinel when creating a new $agent session",
+    async ({ agent, defaultModelKey }) => {
+      const createSessionSpy = vi.spyOn(api, "createSession").mockResolvedValue({
+        revision: 6,
+        serverInstanceId: "server-a",
+        session: makeSession("session-new", { agent }),
+      } as Awaited<ReturnType<typeof api.createSession>>);
+      const params = makeSessionActionsParams();
+      params.defaults[defaultModelKey] = " DEFAULT ";
+      const actions = useAppSessionActions(params);
 
-    await expect(
-      actions.handleNewSession({ agent: "Codex", model: "default" }),
-    ).resolves.toBe(true);
+      await expect(
+        actions.handleNewSession({ agent, model: "default" }),
+      ).resolves.toBe(true);
 
-    expect(createSessionSpy).toHaveBeenCalledWith(
-      expect.not.objectContaining({
-        model: expect.any(String),
-      }),
-    );
-  });
+      expect(createSessionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ agent }),
+      );
+      expect(createSessionSpy).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          model: expect.any(String),
+        }),
+      );
+    },
+  );
 
   it("clears the acted session hydration mismatch on stale same-instance action success", async () => {
     const state = {
