@@ -139,7 +139,7 @@ export function getMermaidDiagramFrameStyle(
     return {};
   }
 
-  const heightSlack = options.fitToFrame ? 0 : 24;
+  const heightSlack = options.fitToFrame ? 2 : 24;
   const frameHeight = clampMermaidDiagramExtent(
     Math.ceil(dimensions.height) + heightSlack,
     60,
@@ -165,8 +165,9 @@ export function getMermaidDiagramFrameStyle(
     //
     // Default frames include 24px vertical slack for horizontal
     // scrollbar chrome / Mermaid temp-DOM text-measurement drift. Fit
-    // frames do not scroll horizontally, so they keep the raw viewBox
-    // height to avoid a visible blank band below the scaled SVG.
+    // frames do not scroll horizontally, so they keep only a small
+    // 2px vertical pad matching the width pad to avoid hidden-overflow
+    // clipping without restoring the old blank band.
     aspectRatio: `${frameWidth} / ${frameHeight}`,
     height: "auto",
     width: `${frameWidth}px`,

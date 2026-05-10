@@ -3839,10 +3839,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   drive remote delta application end-to-end and assert the emitted localized sessions clear inbound `remote_id` before replay-key normalization/fingerprinting.
 - [ ] P2: Cover pinned live-tail queued prompt order:
   render a pinned live turn with at least two queued prompts and assert the live card is closest to the composer without reversing queued prompt FIFO order.
-- [ ] P2: Cover fit-to-frame Mermaid preview behavior with wide diagrams:
-  add a `MarkdownContent` test using `fillMermaidAvailableSpace` with a wide Mermaid `viewBox` inside a constrained parent, and assert the fit-mode iframe `srcdoc` plus frame sizing contract.
-- [ ] P2: Cover editable SourcePanel Mermaid fit-mode iframe wiring:
-  drive the `preserveMermaidSource` branch through SourcePanel or `MarkdownContent` and assert the Mermaid iframe `srcdoc` contains fit-mode SVG CSS, not just wrapper classes.
 - [ ] P2: Add Telegram settings API/security regressions:
   cover plaintext token-at-rest exposure, corrupt-backup permission hardening, Windows ACL/secret-store fallback behavior, global/concurrent rate limiting that cannot be bypassed by rotating token strings, and bounded rate-limit cache retention.
 - [ ] P2: Cover post-validation Telegram settings sanitization:

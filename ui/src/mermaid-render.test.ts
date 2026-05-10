@@ -47,7 +47,7 @@ describe("mermaid-render", () => {
       width: "302px",
     });
     expect(getMermaidDiagramFrameStyle(svg, { fitToFrame: true })).toMatchObject({
-      aspectRatio: "302 / 80",
+      aspectRatio: "302 / 82",
       height: "auto",
       maxWidth: "100%",
       width: "302px",
