@@ -673,13 +673,19 @@ fn telegram_sessions_command_chunks_oversized_output() {
             .all(|chunk| chunk.encode_utf16().count() <= TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS)
     );
     let reconstructed = sent.join("\n");
+    let lines = reconstructed.lines().collect::<Vec<_>>();
     for index in 0..12 {
         assert!(
-            reconstructed.contains(&format!("Session {index}")),
+            lines.iter().any(|line| {
+                line.starts_with(&format!("- Session {index} "))
+                    && line.ends_with("(idle, 1 message)")
+            }),
             "missing session name {index}"
         );
         assert!(
-            reconstructed.contains(&format!("id: session-{index}")),
+            lines
+                .iter()
+                .any(|line| *line == format!("  id: session-{index}")),
             "missing session id {index}"
         );
     }

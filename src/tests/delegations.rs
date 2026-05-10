@@ -2538,8 +2538,8 @@ fn isolated_worktree_delegation_materializes_dirty_state_and_uses_workspace_writ
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-#[test]
-fn isolated_worktree_delegation_generates_termal_owned_path_when_omitted() {
+#[tokio::test]
+async fn isolated_worktree_delegation_route_generates_termal_owned_path_when_omitted() {
     let (state, input_rx) =
         test_app_state_with_delegation_codex_runtime("generated-isolated-delegation-runtime");
     let unique = Uuid::new_v4();
@@ -2567,23 +2567,29 @@ fn isolated_worktree_delegation_generates_termal_owned_path_when_omitted() {
         session_id
     };
 
-    let created = state
-        .create_read_only_delegation(
-            &parent_session_id,
-            CreateDelegationRequest {
-                prompt: "Run generated isolated review.".to_owned(),
-                title: Some("Generated Isolated Review".to_owned()),
-                cwd: None,
-                agent: Some(Agent::Codex),
-                model: None,
-                mode: Some(DelegationMode::Reviewer),
-                write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
-                    owned_paths: Vec::new(),
-                    worktree_path: None,
-                }),
-            },
-        )
-        .expect("isolated worktree delegation should be created");
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "prompt": "Run generated isolated review.",
+        "title": "Generated Isolated Review",
+        "mode": "reviewer",
+        "writePolicy": {
+            "kind": "isolatedWorktree",
+            "ownedPaths": []
+        }
+    }))
+    .expect("delegation request should serialize");
+    let (status, created): (StatusCode, DelegationResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{parent_session_id}/delegations"))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
     let _ = input_rx
         .recv_timeout(Duration::from_secs(1))
         .expect("delegation child prompt should be delivered to runtime");
