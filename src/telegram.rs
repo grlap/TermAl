@@ -3127,6 +3127,9 @@ fn telegram_help_text(config: &TelegramBotConfig, state: &TelegramBotState) -> S
     .join("\n")
 }
 
+/// Formats a slash-command action failure sent as a normal chat message.
+/// The message is multi-line and includes a `/status` hint because the user
+/// can recover by refreshing the current action list.
 fn telegram_action_error_text(action_id: ProjectActionId, err: &anyhow::Error) -> String {
     format!(
         "Could not run {}.\n{}\nSend /status to see the actions available right now.",
@@ -3135,6 +3138,9 @@ fn telegram_action_error_text(action_id: ProjectActionId, err: &anyhow::Error) -
     )
 }
 
+/// Formats an inline-button callback failure. Keep this one-line because
+/// Telegram displays it near the tapped digest action and the digest already
+/// carries the broader recovery context.
 fn telegram_callback_action_error_text(action_id: ProjectActionId, err: &anyhow::Error) -> String {
     format!(
         "{} failed: {}",
@@ -3143,6 +3149,9 @@ fn telegram_callback_action_error_text(action_id: ProjectActionId, err: &anyhow:
     )
 }
 
+/// Formats a free-text prompt forwarding failure. This is multi-line but has
+/// no `/status` hint because the user's next useful action is usually to edit
+/// and resend the prompt or select a different session.
 fn telegram_prompt_error_text(err: &anyhow::Error) -> String {
     format!(
         "Could not forward that message.\n{}",

@@ -291,19 +291,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Assert on the full `heightWrites` array order, not just `toContainEqual`.
 - Or use `toEqual([...])` with the full expected sequence.
 
-## Three Telegram user-error formatters with three formats but shared truncation helper
-
-**Severity:** Note - `src/telegram.rs:2299-2336`. `telegram_action_error_text` (multi-line with "Send /status" footer), `telegram_callback_action_error_text` (one-line "X failed: Y"), and `telegram_prompt_error_text` (multi-line "Could not forward that message." + detail). Three user-visible string formats mean a UI-level message-style consistency check is missing. A future contributor changing one might forget the others.
-
-**Current behavior:**
-- Three formatters with three formats.
-- Shared truncation helper but divergent prefix/footer styles.
-- No JSDoc-style block declaring contract for each.
-
-**Proposal:**
-- Either consolidate into a single `format_telegram_user_error(action_kind, err)` enum-driven formatter.
-- Or add a JSDoc-style block above each declaring the contract.
-
 ## `SessionPaneView` pending-prompt scroll exemption misses `showWaitingIndicator` dependency
 
 **Severity:** Low - `ui/src/SessionPaneView.tsx:2035`. The scroll effect now checks `showWaitingIndicator` inside the `onlyPendingPromptsChanged` branch, but the effect dependency list does not include `showWaitingIndicator`.
