@@ -279,20 +279,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Consider splitting once the test grows further.
 - Current 6-in-1 is acceptable but the pattern should not expand.
 
-## SourcePanel fit-mode test verifies CSS classes but not iframe srcdoc CSS
-
-**Severity:** Low - `ui/src/panels/SourcePanel.test.tsx:267-304`. The new "lets Mermaid diagrams use the full rendered Markdown preview width" test verifies CSS classes are wired (`markdown-diff-section-fill-mermaid` and `markdown-copy-shell-fill-mermaid`) but does NOT verify the Mermaid iframe srcdoc actually contains fit-mode CSS.
-
-A regression that makes `fillMermaidAvailableSpace` a no-op for the iframe srcdoc would still pass this test.
-
-**Current behavior:**
-- Class assertions cover SourcePanel-side wiring.
-- Iframe srcdoc CSS substring not asserted.
-- Component-level wiring (`MermaidDiagram fillAvailableSpace` → `buildMermaidDiagramFrameSrcDoc({ fitToFrame: true })`) untested at this layer.
-
-**Proposal:**
-- Wait for the iframe to render and assert `(frame as HTMLIFrameElement).srcdoc` contains the fit-mode SVG CSS string `svg{display:block;max-width:100%;height:auto`.
-
 ## `MarkdownContent.test.tsx` fit-mode test only validates srcdoc against a NARROW diagram
 
 **Severity:** Low - `ui/src/MarkdownContent.test.tsx:603-625`. The new test "lets preview callers shrink wide Mermaid frames..." validates fit-mode srcdoc CSS only against a narrow diagram (300×80 viewBox). The "shrinks wide Mermaid frames" claim in the test name is not directly proved — a wide-viewBox test (e.g., 2340×926) plus a constrained-parent wrapper would actually exercise the shrink-without-upscale contract end-to-end.

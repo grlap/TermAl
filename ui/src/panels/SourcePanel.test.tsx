@@ -1,4 +1,5 @@
 import { act, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import mermaid from "mermaid";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +14,16 @@ import type { MarkdownDiffDocumentSegment } from "./markdown-diff-segments";
 
 vi.mock("../clipboard", () => ({
   copyTextToClipboard: vi.fn(),
+}));
+
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn(async (id: string) => ({
+      diagramType: "flowchart",
+      svg: `<svg data-testid="mermaid-svg" id="${id}" viewBox="0 0 300 80"><text>diagram</text></svg>`,
+    })),
+  },
 }));
 
 // Mock Monaco as a textarea. `inlineZones` is surfaced as a data
@@ -67,6 +78,8 @@ vi.mock("../MonacoDiffEditor", () => ({
 }));
 
 const copyTextToClipboardMock = vi.mocked(copyTextToClipboard);
+const mermaidInitializeMock = vi.mocked(mermaid.initialize);
+const mermaidRenderMock = vi.mocked(mermaid.render);
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
@@ -133,6 +146,12 @@ describe("SourcePanel", () => {
   beforeEach(() => {
     copyTextToClipboardMock.mockReset();
     copyTextToClipboardMock.mockResolvedValue(undefined);
+    mermaidInitializeMock.mockClear();
+    mermaidRenderMock.mockClear();
+    mermaidRenderMock.mockResolvedValue({
+      diagramType: "flowchart",
+      svg: '<svg data-testid="mermaid-svg" viewBox="0 0 300 80"><text>diagram</text></svg>',
+    });
   });
 
   it("renders a read-only file label with an inline loading spinner and copy action", async () => {
@@ -301,6 +320,10 @@ describe("SourcePanel", () => {
         ".source-renderer-preview-editable .markdown-copy-shell-fill-mermaid",
       ),
     ).not.toBeNull();
+    const frame = (await screen.findByTestId("mermaid-frame")) as HTMLIFrameElement;
+    expect(frame.srcdoc).toContain(
+      "svg{display:block;max-width:100%;height:auto",
+    );
   });
 
   it("edits Markdown source from rendered Preview and saves the shared buffer", async () => {
