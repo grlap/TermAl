@@ -855,6 +855,9 @@ fn markdown_command_frontmatter_fields(frontmatter: &str) -> BTreeMap<String, St
         }
         let value = raw_value.trim();
         // Ignore unsupported YAML shapes so listing can fall back to body text.
+        if has_frontmatter_quote_boundary(value) && !is_frontmatter_quoted_scalar(value) {
+            continue;
+        }
         if is_yaml_block_scalar_marker(value)
             || (!is_frontmatter_quoted_scalar(value) && value.contains(": "))
         {
@@ -875,23 +878,43 @@ fn is_yaml_block_scalar_marker(value: &str) -> bool {
         return false;
     }
 
-    let mut rest = value[first.len_utf8()..].chars();
-    let Some(next) = rest.next() else {
-        return true;
-    };
-    let remaining = if matches!(next, '-' | '+') {
-        rest.as_str()
-    } else if next.is_ascii_digit() {
-        value[first.len_utf8()..].trim_start_matches(|ch: char| ch.is_ascii_digit())
-    } else {
-        return false;
-    };
-    remaining.chars().all(|ch| ch.is_ascii_digit())
+    let rest = &value[first.len_utf8()..];
+    let mut seen_chomping = false;
+    let mut seen_indent = false;
+    let mut consumed = 0;
+    for (index, ch) in rest.char_indices() {
+        if matches!(ch, '-' | '+') && !seen_chomping {
+            seen_chomping = true;
+            consumed = index + ch.len_utf8();
+            continue;
+        }
+        if ch.is_ascii_digit() && !seen_indent {
+            seen_indent = true;
+            consumed = index + ch.len_utf8();
+            continue;
+        }
+        if ch.is_ascii_digit() && seen_indent {
+            consumed = index + ch.len_utf8();
+            continue;
+        }
+        break;
+    }
+
+    let tail = rest[consumed..].trim_start();
+    tail.is_empty() || tail.starts_with('#')
+}
+
+fn has_frontmatter_quote_boundary(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty() && (matches!(bytes[0], b'"' | b'\'') || matches!(bytes[bytes.len() - 1], b'"' | b'\''))
 }
 
 fn is_frontmatter_quoted_scalar(value: &str) -> bool {
     let bytes = value.as_bytes();
-    bytes.len() >= 2 && matches!(bytes[0], b'"' | b'\'') && bytes[0] == bytes[bytes.len() - 1]
+    if bytes.len() < 2 || !matches!(bytes[0], b'"' | b'\'') || bytes[0] != bytes[bytes.len() - 1] {
+        return false;
+    }
+    !value[1..value.len() - 1].as_bytes().contains(&bytes[0])
 }
 
 fn markdown_frontmatter_title_fields(

@@ -215,6 +215,21 @@ Body starts here.
     assert_eq!(parsed.description, None);
     assert_eq!(parsed.content, "Body starts here.\n");
 
+    for marker in ["|2-", ">2+", "| # comment"] {
+        let frontmatter = format!(
+            "---
+description: {marker}
+  Multi-line descriptions are outside the tiny parser.
+---
+
+Body starts here.
+"
+        );
+        let parsed = strip_markdown_frontmatter(&frontmatter);
+        assert_eq!(parsed.description, None);
+        assert_eq!(parsed.content, "Body starts here.\n");
+    }
+
     let malformed_scalar = "---
 description: value: extra
 ---
@@ -239,6 +254,16 @@ Body.
     );
     assert_eq!(parsed.argument_hint.as_deref(), Some("PATH: reason"));
     assert_eq!(parsed.content, "Body.\n");
+
+    let malformed_quoted_colon_scalar = "---
+description: 'Review: local' stale'
+---
+
+Body fallback.
+";
+    let parsed = strip_markdown_frontmatter(malformed_quoted_colon_scalar);
+    assert_eq!(parsed.description, None);
+    assert_eq!(parsed.content, "Body fallback.\n");
 
     let large_description = "x".repeat(70 * 1024);
     let large_frontmatter = format!(
@@ -1622,7 +1647,10 @@ Review staged and unstaged changes.
         .unwrap();
 
     assert_eq!(response.visible_prompt, "/review-local");
-    assert_eq!(response.title.as_deref(), Some("Review local' stale"));
+    assert_eq!(
+        response.title.as_deref(),
+        Some("Review staged and unstaged changes.")
+    );
     assert_eq!(response.delegation, None);
 }
 
