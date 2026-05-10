@@ -298,18 +298,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Add a sibling test where `prepare_*` is called against an Unknown-status session.
 
-## Invariants between `dirty` and `sent_visible_content` not encoded in type
-
-**Severity:** Medium - `src/telegram.rs:1655-1664`. The relationship between `dirty` and `sent_visible_content` (sending content always implies dirty) is not encoded in the type. A future change in `forward_new_assistant_message_outcome` that sends Telegram messages without bumping `dirty` (e.g., a probe message) would still trigger the gate but `dirty` would not flag persistence.
-
-**Current behavior:**
-- Two-flag outcome with implicit invariant.
-- Future change could break `!sent_visible_content || dirty` relationship.
-
-**Proposal:**
-- Add `debug_assert!(!outcome.sent_visible_content || outcome.dirty)` after each `Ok(outcome)` branch.
-- Or document the invariant on the struct.
-
 ## ConversationOverviewRail `compactNavigationSegmentIndex` 800ms timeout creates flicker race
 
 **Severity:** Low - `ui/src/panels/ConversationOverviewRail.tsx:132-156`. The `setTimeout` cleanup (`CONVERSATION_OVERVIEW_COMPACT_NAVIGATION_STALE_DELAY_MS = 800`) clears `compactNavigationSegmentIndex` after 800ms regardless of in-flight viewport updates. If the parent confirms at 850ms (heavy main-thread work, GC pause, dev-tools paint), the override has already cleared, and `aria-valuenow` flips back to the (stale) viewport value, then the parent confirmation fires `setCompactNavigationSegmentIndex(null)` (a no-op). The user perceives a brief flash to "wrong" `aria-valuenow`.

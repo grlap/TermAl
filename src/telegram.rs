@@ -1928,6 +1928,7 @@ fn forward_relevant_assistant_messages(
         match forward_new_assistant_message_outcome(telegram, termal, state, chat_id, &session_id)
         {
             Ok(outcome) => {
+                outcome.debug_assert_invariants();
                 dirty |= outcome.dirty;
                 armed_sent_visible_content |= outcome.sent_visible_content;
             }
@@ -2103,6 +2104,15 @@ struct TelegramAssistantForwardingOutcome {
     sent_visible_content: bool,
 }
 
+impl TelegramAssistantForwardingOutcome {
+    fn debug_assert_invariants(&self) {
+        debug_assert!(
+            !self.sent_visible_content || self.dirty,
+            "visible Telegram forwarding progress must be persisted"
+        );
+    }
+}
+
 fn prepare_assistant_forwarding_for_telegram_prompt(
     termal: &impl TelegramSessionReader,
     session_id: &str,
@@ -2192,10 +2202,11 @@ fn forward_new_assistant_message_if_any(
     chat_id: i64,
     session_id: &str,
 ) -> Result<bool> {
-    Ok(
-        forward_new_assistant_message_outcome(telegram, termal, state, chat_id, session_id)?
-            .dirty,
-    )
+    let outcome = forward_new_assistant_message_outcome(
+        telegram, termal, state, chat_id, session_id,
+    )?;
+    outcome.debug_assert_invariants();
+    Ok(outcome.dirty)
 }
 
 fn forward_new_assistant_message_outcome(
