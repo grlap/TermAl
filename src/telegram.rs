@@ -2011,7 +2011,7 @@ fn resolve_assistant_forwarding_cursor(
             return TelegramAssistantForwardingCursor {
                 message_id: state.last_forwarded_assistant_message_id.clone(),
                 text_chars: state.last_forwarded_assistant_message_text_chars,
-                resend_if_grown: false,
+                resend_if_grown: state.last_forwarded_assistant_message_text_chars.is_none(),
                 sent_chunks: None,
                 baseline_while_active: false,
             };
@@ -2291,7 +2291,7 @@ fn forward_new_assistant_message_outcome(
             };
             let settled_cursor = TelegramAssistantForwardingCursor {
                 baseline_while_active: false,
-                resend_if_grown: false,
+                resend_if_grown: true,
                 sent_chunks: None,
                 text_chars,
                 ..cursor.clone()

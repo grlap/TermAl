@@ -181,21 +181,6 @@ When the async action settles after the effect increments the generation, the re
 - Update the active-session id/generation ref in `useLayoutEffect` or another pre-interaction path.
 - Add a regression test for an immediate delegation action after session switch.
 
-## Active-baseline → settled transition can strand cursor when agent appends in-place to baselined message
-
-**Severity:** Medium - `src/telegram.rs:2001-2009`. When an active session with `baseline_while_active=true` settles, the new transition baselines onto the latest message and clears the flag. The cursor's `resend_if_grown` is set to `false`, so an in-place text growth on the baselined message is NOT detected.
-
-If the agent's response to the Telegram prompt appends to the existing message id (some agents stream in-place), `start_index = position_of_last + 1` skips that very message. The user's Telegram prompt was never "delivered" as a separate reply — the existing message was just baselined, and the relay shows nothing to the Telegram user.
-
-**Current behavior:**
-- Active-baseline → settled clears `baseline_while_active` and sets `resend_if_grown: false`.
-- In-place text growth on the baselined message is invisible.
-- Telegram user sees no reply when agent appends rather than emitting a new message.
-
-**Proposal:**
-- When transitioning from active-baseline to settled, also set `resend_if_grown: true` so an in-place text growth is detected and re-forwarded as the Telegram reply.
-- Or document that mid-message append is not a supported producer pattern.
-
 ## Footer-send failure permanently loses the close marker with no retry
 
 **Severity:** Medium - `src/telegram.rs:2208-2223`. Footer-send failure is converted to `Ok(sent_visible_content: true)` and logged. The footer is for visual closure. If a transient failure swallows the footer once, it is permanently lost for that turn. The footer's stated purpose ("user has no easy way to tell 'is the agent still typing or done?'") is silently undermined.
@@ -3588,8 +3573,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   reject a resolver request for native-slash notes or backend-unavailable responses and assert the composer surfaces a user-visible sanitized error without clearing the draft.
 - [ ] P2: Cover real composer-to-overview focus detection:
   render the real composer/overview path or assert the real composer emits `data-conversation-composer-input`, so `ConversationOverviewRail` deferral does not depend only on synthetic test fixtures.
-- [ ] P2: Cover active-baseline same-message growth after Telegram prompt settlement:
-  arm a Telegram prompt behind an active turn, settle with the same assistant message id grown in place, and assert the reply forwards or the unsupported behavior is explicitly pinned.
 - [ ] P2: Cover first-chunk Telegram forward failure:
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
 - [ ] P2: Cover armed-delivery failure suppressing digest-primary fallback:

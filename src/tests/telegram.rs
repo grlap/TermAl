@@ -1541,6 +1541,90 @@ fn telegram_active_baseline_advances_across_active_polls_before_reply() {
 }
 
 #[test]
+fn telegram_active_baseline_reforwards_same_message_growth_after_settle() {
+    let termal = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Active,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "message-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Old turn partial".to_owned(),
+                }],
+            },
+        },
+    };
+    let mut state = TelegramBotState::default();
+
+    let plan = prepare_assistant_forwarding_for_telegram_prompt(&termal, "session-1")
+        .expect("prepare should succeed");
+    assert!(apply_assistant_forwarding_plan(&mut state, plan));
+
+    let telegram = FakeTelegramSender::new(None);
+    let settled_old_turn = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "message-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Old turn complete".to_owned(),
+                }],
+            },
+        },
+    };
+
+    let changed = forward_new_assistant_message_if_any(
+        &telegram,
+        &settled_old_turn,
+        &mut state,
+        42,
+        "session-1",
+    )
+    .expect("settled old turn should baseline");
+
+    assert!(changed);
+    assert!(telegram.sent_texts.borrow().is_empty());
+    let cursor = state
+        .assistant_forwarding_cursors
+        .get("session-1")
+        .expect("cursor should stay persisted");
+    assert_eq!(cursor.message_id.as_deref(), Some("message-1"));
+    assert_eq!(cursor.text_chars, Some("Old turn complete".chars().count()));
+    assert!(cursor.resend_if_grown);
+    assert!(!cursor.baseline_while_active);
+
+    let same_message_reply = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "message-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Old turn complete\nTelegram reply".to_owned(),
+                }],
+            },
+        },
+    };
+
+    let changed = forward_new_assistant_message_if_any(
+        &telegram,
+        &same_message_reply,
+        &mut state,
+        42,
+        "session-1",
+    )
+    .expect("same-message reply growth should forward");
+
+    assert!(changed);
+    assert_eq!(
+        telegram.sent_texts.borrow()[0],
+        "Old turn complete\nTelegram reply"
+    );
+    assert_eq!(state.forward_next_assistant_message_session_id, None);
+}
+
+#[test]
 fn telegram_active_baseline_survives_approval_without_text_before_reply() {
     let termal = FakeTelegramSessionReader {
         response: TelegramSessionFetchResponse {
