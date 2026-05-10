@@ -428,18 +428,6 @@ A future server adds a new status variant (`"queued"`, `"timing_out"`) silently 
 **Proposal:**
 - Branch on `max_chars >= 3` to apply the ellipsis suffix and otherwise return at most `max_chars` characters.
 
-## `render_telegram_project_sessions` re-runs filter twice
-
-**Severity:** Note - `src/telegram.rs:2202-2252`. Re-runs `state.sessions.iter().filter(...).count()` after the take-12 to detect "more sessions exist", duplicating the filter logic. Two scans of the same vec when a single capture would suffice.
-
-**Current behavior:**
-- Filter predicate runs twice.
-- Negligible CPU on small N.
-- Future drift risk if filter predicates diverge.
-
-**Proposal:**
-- Compute the filtered count once before the take(12) and reuse it.
-
 ## 3 `style.height` writes per resize cause unnecessary layout thrash
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1726-1729`. `textarea.style.height = previousMeasuredHeight + "px"` reassigns the height immediately after setting it to `Math.max(minHeight, 1)`. The `void textarea.offsetHeight` reflow forces layout twice per resize when only one height is needed.

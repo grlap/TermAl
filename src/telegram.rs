@@ -3065,6 +3065,7 @@ fn render_telegram_project_sessions(
         .iter()
         .filter(|session| session.project_id.as_deref() == Some(project_id))
         .collect::<Vec<_>>();
+    let has_more_sessions = sessions.len() > 12;
     sessions.reverse();
 
     if sessions.is_empty() {
@@ -3087,13 +3088,7 @@ fn render_telegram_project_sessions(
         ));
         lines.push(format!("  id: {}", session.id));
     }
-    if state
-        .sessions
-        .iter()
-        .filter(|session| session.project_id.as_deref() == Some(project_id))
-        .count()
-        > 12
-    {
+    if has_more_sessions {
         lines.push("More sessions exist in TermAl.".to_owned());
     }
     lines.join("\n")
