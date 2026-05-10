@@ -864,11 +864,12 @@ fn telegram_forward_records_partial_progress_when_later_send_fails() {
         ..TelegramBotState::default()
     };
 
-    let forwarded =
-        forward_new_assistant_message_if_any(&telegram, &termal, &mut state, 42, "session-1")
+    let outcome =
+        forward_new_assistant_message_outcome(&telegram, &termal, &mut state, 42, "session-1")
             .expect("partial visible send should be handled");
 
-    assert!(forwarded);
+    assert!(outcome.dirty);
+    assert!(outcome.sent_visible_content);
     assert_eq!(
         telegram.sent_texts.borrow().as_slice(),
         ["First reply".to_owned()]

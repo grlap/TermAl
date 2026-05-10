@@ -209,17 +209,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Either persist a "footer pending" flag in the cursor so the next poll can retry.
 - Or accept the loss but emit a heads-up message ("[turn complete; footer delivery failed]") on the success path.
 
-## `telegram_forward_records_partial_progress_when_later_send_fails` no longer asserts the critical invariant
-
-**Severity:** Medium - `src/tests/telegram.rs:411-421`. Previously called `merge_assistant_forward_result(&mut dirty, result)` and asserted `dirty=true`. Now the test only checks `forwarded=true`. It does NOT assert that `sent_visible_content=true` was also returned, nor that the digest-primary suppression logic in `forward_relevant_assistant_messages` would correctly skip the digest primary on this outcome.
-
-**Current behavior:**
-- Test asserts `forwarded=true` only.
-- `sent_visible_content` invariant unverified.
-
-**Proposal:**
-- Use `forward_new_assistant_message_outcome` (not `_if_any`) and assert `outcome.sent_visible_content`.
-
 ## First-chunk failure can cause permanent retry loops
 
 **Severity:** Low - `src/telegram.rs:2156-2162`. The chunk loop returns `Err(err)` when `sent_visible_content` is false (no chunks were successfully sent). The cursor was NOT updated. On retry, the relay will replay the first chunk. If the first chunk's send always fails (e.g., the chunk is malformed), the user will see permanent retry loops with no progress, no `sent_visible_content`, and no error escalation.
