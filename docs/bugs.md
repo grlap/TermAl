@@ -3961,16 +3961,14 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   reject a resolver request for native-slash notes or backend-unavailable responses and assert the composer surfaces a user-visible sanitized error without clearing the draft.
 - [ ] P2: Cover real composer-to-overview focus detection:
   render the real composer/overview path or assert the real composer emits `data-conversation-composer-input`, so `ConversationOverviewRail` deferral does not depend only on synthetic test fixtures.
-- [ ] P2: Cover composer transition restore when a non-shrink resize races the send-shrink restore frame:
-  send a multiline draft, flush the first shrink frame without the restore frame, type immediately to trigger a non-shrink resize, and assert the textarea transition is restored instead of staying `none`.
 - [ ] P2: Cover active-baseline same-message growth after Telegram prompt settlement:
   arm a Telegram prompt behind an active turn, settle with the same assistant message id grown in place, and assert the reply forwards or the unsupported behavior is explicitly pinned.
 - [ ] P2: Cover first-chunk Telegram forward failure:
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
 - [ ] P2: Cover armed-delivery failure suppressing digest-primary fallback:
   make an armed session fail before sending visible content and assert an unrelated digest primary is not forwarded in the same poll.
-- [ ] P2: Cover OrchestratorsUpdated localized remote ownership:
-  assert emitted localized sessions clear inbound `remote_id` before replay-key normalization/fingerprinting.
+- [ ] P2: Cover emitted OrchestratorsUpdated localized remote ownership:
+  drive remote delta application end-to-end and assert the emitted localized sessions clear inbound `remote_id` before replay-key normalization/fingerprinting.
 - [ ] P2: Cover pinned live-tail queued prompt order:
   render a pinned live turn with at least two queued prompts and assert the live card is closest to the composer without reversing queued prompt FIFO order.
 - [ ] P2: Cover fit-to-frame Mermaid preview behavior with wide diagrams:
