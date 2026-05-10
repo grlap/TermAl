@@ -1609,7 +1609,10 @@ describe("AgentSessionPanel conversation caching", () => {
       name: "Marker label",
     }) as HTMLInputElement;
 
-    expect(within(dialog).getByText("10/120 characters")).toBeInTheDocument();
+    const limitHint = within(dialog).getByText("10/120 characters");
+    expect(limitHint).toBeInTheDocument();
+    expect(limitHint).toHaveAttribute("aria-live", "polite");
+    expect(markerLabelInput).toHaveAttribute("aria-describedby", limitHint.id);
     fireEvent.change(markerLabelInput, { target: { value: "x".repeat(121) } });
 
     expect(markerLabelInput.value).toHaveLength(120);
