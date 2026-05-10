@@ -326,18 +326,6 @@ If `segments.length` shrinks then grows back to a value `>= focusedSegmentIndex`
 - Either restore the effect (acknowledging the redundancy with inline clamps).
 - Or write a `useReducer`/dispatch-based focus model that recomputes bounds in one place.
 
-## `forward_new_assistant_message_if_any` and `_outcome` differ only by return type
-
-**Severity:** Note - `src/telegram.rs:1903-1900`. Two functions differ only by return type. `if_any` is a thin wrapper that drops `sent_visible_content`. One careless future call site that uses `if_any` instead of `outcome` in `forward_relevant_assistant_messages` could regress the digest-primary starvation fix silently.
-
-**Current behavior:**
-- Two near-duplicate signatures.
-- `if_any` drops the gating signal.
-
-**Proposal:**
-- Either deprecate `if_any` and migrate all callers to `outcome`.
-- Or add `#[doc(hidden)]` / a comment marking `if_any` as test-only.
-
 ## `cancelScheduledComposerResize` name misleading after round-82 reset addition
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1664-1673`. The function now has dual responsibilities: reset flags AND cancel the rAF. Old name suggests only the latter. Future callers might be surprised that `composerResizeShouldAnimateHeightRef` is also reset to `true` (a side effect that suppresses an in-flight non-animation request).

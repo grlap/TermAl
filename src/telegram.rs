@@ -2195,6 +2195,10 @@ fn arm_assistant_forwarding_for_telegram_prompt(
 /// thinking blocks are still deliberately excluded from this
 /// forward (Telegram is the wrong format for those); only `Text`
 /// messages from `assistant` are forwarded.
+///
+/// Thin dirty-state wrapper for callers that only need persistence progress.
+/// Use `forward_new_assistant_message_outcome` when visible-content forwarding
+/// affects control flow, such as digest-primary suppression.
 fn forward_new_assistant_message_if_any(
     telegram: &impl TelegramMessageSender,
     termal: &impl TelegramSessionReader,
