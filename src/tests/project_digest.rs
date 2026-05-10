@@ -427,6 +427,66 @@ fn project_digest_prompt_target_skips_errored_parent_sessions() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn project_digest_error_actions_skip_latest_errored_parent_target() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!(
+        "termal-project-error-action-target-skip-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    let project_id = create_test_project(&state, &root, "Error Action Target Skip Project");
+    let healthy_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let errored_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let (runtime, input_rx) = test_codex_runtime_handle("project-error-target-skip");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let healthy_index = inner.find_session_index(&healthy_session_id).unwrap();
+        inner.sessions[healthy_index].runtime = SessionRuntime::Codex(runtime);
+        let errored_index = inner.find_session_index(&errored_session_id).unwrap();
+        inner.sessions[errored_index].session.status = SessionStatus::Error;
+        inner.sessions[errored_index].session.preview =
+            "Latest parent failed before retry.".to_owned();
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    let digest = state.project_digest(&project_id).unwrap();
+
+    assert_eq!(
+        digest.primary_session_id.as_deref(),
+        Some(healthy_session_id.as_str())
+    );
+    assert_eq!(
+        digest.deep_link.as_deref(),
+        Some(format!("/?projectId={project_id}&sessionId={healthy_session_id}").as_str())
+    );
+    assert_eq!(digest.current_status, "Latest parent failed before retry.");
+    assert_eq!(
+        digest
+            .proposed_actions
+            .iter()
+            .map(|action| action.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["fix-it", "review-in-termal"]
+    );
+
+    state.execute_project_action(&project_id, "fix-it").unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::Prompt {
+            session_id,
+            command,
+        } => {
+            assert_eq!(session_id, healthy_session_id);
+            assert_eq!(command.prompt, ProjectActionId::FixIt.prompt().unwrap());
+        }
+        _ => panic!("expected healthy parent prompt dispatch"),
+    }
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 // Pins that dispatching the `approve` action on a project finds the
 // session with the pending Codex approval, forwards an accept response
 // to that runtime on the correct `request_id`, and then returns a
