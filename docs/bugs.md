@@ -3499,8 +3499,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover true-value delegation wait response booleans through the command layer:
-  add `resumePromptQueued: true` and `resumeDispatchRequested: true` cases for `resume_after_delegations` and reviewer-batch wait propagation so fields cannot be hard-coded false.
 - [ ] P2: Decouple `delegation_wait_reconciles_after_restart_recovery` from recovery copy:
   avoid asserting the exact `"TermAl restarted before this turn finished"` string from `src/messages.rs`; assert stable wait/delegation identifiers or finish the child with a deterministic result packet before simulated shutdown.
 - [ ] P2: Cover edge cases in delegation finding parsing:

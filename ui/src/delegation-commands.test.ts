@@ -234,8 +234,8 @@ describe("delegation command surface", () => {
     >(async (parentSessionId, request) => ({
       revision: 42,
       serverInstanceId: "server-a",
-      resumePromptQueued: false,
-      resumeDispatchRequested: false,
+      resumePromptQueued: true,
+      resumeDispatchRequested: true,
       wait: {
         id: "delegation-wait-1",
         parentSessionId,
@@ -261,8 +261,8 @@ describe("delegation command surface", () => {
       ),
     ).resolves.toMatchObject({
       revision: 42,
-      resumePromptQueued: false,
-      resumeDispatchRequested: false,
+      resumePromptQueued: true,
+      resumeDispatchRequested: true,
       wait: {
         parentSessionId: "parent-1",
         delegationIds: ["delegation-1", "delegation-2"],
@@ -845,8 +845,8 @@ describe("delegation command surface", () => {
     >(async (parentSessionId, request) => ({
       revision: 8,
       serverInstanceId: "server-a",
-      resumePromptQueued: false,
-      resumeDispatchRequested: false,
+      resumePromptQueued: true,
+      resumeDispatchRequested: true,
       wait: {
         id: "delegation-wait-1",
         parentSessionId,
@@ -897,8 +897,8 @@ describe("delegation command surface", () => {
       serverInstanceId: "server-a",
       resumeWait: {
         outcome: "scheduled",
-        resumePromptQueued: false,
-        resumeDispatchRequested: false,
+        resumePromptQueued: true,
+        resumeDispatchRequested: true,
         revision: 8,
         serverInstanceId: "server-a",
         wait: {
