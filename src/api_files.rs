@@ -855,7 +855,9 @@ fn markdown_command_frontmatter_fields(frontmatter: &str) -> BTreeMap<String, St
         }
         let value = raw_value.trim();
         // Ignore unsupported YAML shapes so listing can fall back to body text.
-        if matches!(value, "|" | ">") || value.contains(": ") {
+        if is_yaml_block_scalar_marker(value)
+            || (!is_frontmatter_quoted_scalar(value) && value.contains(": "))
+        {
             continue;
         }
         let field_value =
@@ -863,6 +865,33 @@ fn markdown_command_frontmatter_fields(frontmatter: &str) -> BTreeMap<String, St
         fields.insert(key.to_owned(), field_value);
     }
     fields
+}
+
+fn is_yaml_block_scalar_marker(value: &str) -> bool {
+    let Some(first) = value.chars().next() else {
+        return false;
+    };
+    if !matches!(first, '|' | '>') {
+        return false;
+    }
+
+    let mut rest = value[first.len_utf8()..].chars();
+    let Some(next) = rest.next() else {
+        return true;
+    };
+    let remaining = if matches!(next, '-' | '+') {
+        rest.as_str()
+    } else if next.is_ascii_digit() {
+        value[first.len_utf8()..].trim_start_matches(|ch: char| ch.is_ascii_digit())
+    } else {
+        return false;
+    };
+    remaining.chars().all(|ch| ch.is_ascii_digit())
+}
+
+fn is_frontmatter_quoted_scalar(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 2 && matches!(bytes[0], b'"' | b'\'') && bytes[0] == bytes[bytes.len() - 1]
 }
 
 fn markdown_frontmatter_title_fields(

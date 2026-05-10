@@ -6055,6 +6055,45 @@ fn delegation_empty_model_uses_configured_agent_default() {
 }
 
 #[test]
+fn delegation_default_model_uses_update_app_settings_normalized_value() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let updated = state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: Some("  gpt-5.5  ".to_owned()),
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
+            default_codex_reasoning_effort: None,
+            default_claude_approval_mode: None,
+            default_claude_effort: None,
+            remotes: None,
+        })
+        .expect("app settings should update");
+    assert_eq!(updated.preferences.default_codex_model, "gpt-5.5");
+
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Use the normalized configured default model.".to_owned(),
+                title: Some("Normalized Configured Default Model".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: Some("   ".to_owned()),
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+
+    assert_eq!(created.child_session.model, "gpt-5.5");
+    assert_eq!(created.delegation.model.as_deref(), Some("gpt-5.5"));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn delegation_omitted_model_uses_selected_agent_default_not_parent_model() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Claude);

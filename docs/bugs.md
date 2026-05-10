@@ -3499,8 +3499,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover delegation tests through `update_app_settings` normalization:
-  add at least one delegation test that goes through `state.update_app_settings(...)` with a non-canonical model string instead of mutating `inner.preferences.default_codex_model` directly, then creates a delegation and asserts the child uses the canonicalized form.
 - [ ] P2: Cover frontend default-model forwarding for all model-picker agents:
   add parameterized tests for Claude, Codex, Cursor, and Gemini covering custom default forwarding, the `default` sentinel omission, and at least one settings-panel Apply/Reset interaction.
 - [ ] P2: Cover Claude default-model validation:

@@ -204,6 +204,17 @@ Body starts here.
     assert_eq!(parsed.description, None);
     assert_eq!(parsed.content, "Body starts here.\n");
 
+    let chomped_block_description = "---
+description: |-
+  Multi-line descriptions are outside the tiny parser.
+---
+
+Body starts here.
+";
+    let parsed = strip_markdown_frontmatter(chomped_block_description);
+    assert_eq!(parsed.description, None);
+    assert_eq!(parsed.content, "Body starts here.\n");
+
     let malformed_scalar = "---
 description: value: extra
 ---
@@ -212,6 +223,21 @@ Body.
 ";
     let parsed = strip_markdown_frontmatter(malformed_scalar);
     assert_eq!(parsed.description, None);
+    assert_eq!(parsed.content, "Body.\n");
+
+    let quoted_colon_scalar = "---
+description: \"Review: staged changes\"
+argument-hint: 'PATH: reason'
+---
+
+Body.
+";
+    let parsed = strip_markdown_frontmatter(quoted_colon_scalar);
+    assert_eq!(
+        parsed.description.as_deref(),
+        Some("Review: staged changes")
+    );
+    assert_eq!(parsed.argument_hint.as_deref(), Some("PATH: reason"));
     assert_eq!(parsed.content, "Body.\n");
 
     let large_description = "x".repeat(70 * 1024);
