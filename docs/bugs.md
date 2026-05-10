@@ -254,29 +254,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Use a `Drop` guard or `tempfile::NamedTempFile` so created files are reaped.
 
-## `TelegramPromptClient` trait colocation rationale undocumented
-
-**Severity:** Note - `src/telegram.rs:1172-1186`. The new trait colocates three concerns (session read, digest fetch, prompt send) into one bound. Single consumer (`forward_telegram_text_to_project`). Rationale not documented.
-
-**Current behavior:**
-- Trait colocates session read + digest + prompt send.
-- Single consumer.
-- No doc on the design rationale.
-
-**Proposal:**
-- Add a doc comment block on the trait explaining that this is the test-seam bound for `forward_telegram_text_to_project`.
-
-## `TelegramPromptClient::send_session_message` discards `SessionMessageResponse`
-
-**Severity:** Note - `src/telegram.rs:1182-1185`. The trait method returns `Result<()>`, but the prod impl returns `Result<SessionMessageResponse>`. The trait drops the response. Subsequent reasoning in the test-only flow might want the response.
-
-**Current behavior:**
-- Trait returns `Result<()>`.
-- Prod returns `Result<SessionMessageResponse>`.
-
-**Proposal:**
-- Make the trait return `Result<SessionMessageResponse>` mirroring the impl, or document the design choice.
-
 ## `forward_new_assistant_message_outcome` is now ~256 lines with interleaved early-returns
 
 **Severity:** Note - `src/telegram.rs:1916-2007`. The new pre-forward block has 3 separate `Active baseline` early returns and one merge into the main path; future contributors will struggle to trace which baseline shape is preserved across the merge.
@@ -332,17 +309,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Add a sibling test where `prepare_*` is called against an Unknown-status session.
 
-## Chunk-loop early-return retry semantics correct but undocumented
-
-**Severity:** Note - `src/telegram.rs:2109-2117`. The chunk-loop early-return path drops remaining `to_forward` entries (will be re-discovered on the next poll because cursor only advanced to last successfully forwarded). Behavior correct but undocumented.
-
-**Current behavior:**
-- Early return drops remaining `to_forward` entries.
-- Cursor advance preserves retry on next poll.
-
-**Proposal:**
-- Add an inline comment "// Remaining unforwarded entries in to_forward will be re-discovered on the next poll because the cursor only advanced to the last successfully forwarded message."
-
 ## Invariants between `dirty` and `sent_visible_content` not encoded in type
 
 **Severity:** Medium - `src/telegram.rs:1655-1664`. The relationship between `dirty` and `sent_visible_content` (sending content always implies dirty) is not encoded in the type. A future change in `forward_new_assistant_message_outcome` that sends Telegram messages without bumping `dirty` (e.g., a probe message) would still trigger the gate but `dirty` would not flag persistence.
@@ -383,17 +349,6 @@ If `segments.length` shrinks then grows back to a value `>= focusedSegmentIndex`
 - Either restore the effect (acknowledging the redundancy with inline clamps).
 - Or write a `useReducer`/dispatch-based focus model that recomputes bounds in one place.
 
-## `can_forward_settled_assistant_text` and `keeps_telegram_prompt_boundary_open` overlap on Approval
-
-**Severity:** Note - `src/telegram.rs:1289-1297`. Two helper methods both treat `Approval` as their own truthy. The semantics are intentional but no source-level comment documents the deliberate overlap. The forwarding correctness pivots on this overlap and the order of checks at `:1921-1937` vs `:1939`.
-
-**Current behavior:**
-- Both helpers return true for Approval.
-- Order of checks matters but not documented.
-
-**Proposal:**
-- Add a doc comment block above both methods explaining "Approval is intentionally in both — it can be forwarded AND keeps the Telegram prompt boundary open."
-
 ## `forward_new_assistant_message_if_any` and `_outcome` differ only by return type
 
 **Severity:** Note - `src/telegram.rs:1903-1900`. Two functions differ only by return type. `if_any` is a thin wrapper that drops `sent_visible_content`. One careless future call site that uses `if_any` instead of `outcome` in `forward_relevant_assistant_messages` could regress the digest-primary starvation fix silently.
@@ -405,17 +360,6 @@ If `segments.length` shrinks then grows back to a value `>= focusedSegmentIndex`
 **Proposal:**
 - Either deprecate `if_any` and migrate all callers to `outcome`.
 - Or add `#[doc(hidden)]` / a comment marking `if_any` as test-only.
-
-## `armed_sent_visible_content` purpose not commented
-
-**Severity:** Note - `src/telegram.rs:1639`. The new variable is more precisely named than `armed_made_progress`, but the intent ("did any armed session forward content visible to a Telegram user, in which case the digest primary doesn't need to fire this poll") is not captured in a comment. The previous (incorrect) variable was named identically and yet had the wrong meaning.
-
-**Current behavior:**
-- Renamed for precision.
-- Intent unclear without context.
-
-**Proposal:**
-- Add an inline `// We only skip the digest primary when an armed forward actually sent content...` comment block.
 
 ## `cancelScheduledComposerResize` name misleading after round-82 reset addition
 
@@ -463,17 +407,6 @@ If `segments.length` shrinks then grows back to a value `>= focusedSegmentIndex`
 
 **Proposal:**
 - Add `let reserialized = serde_json::to_value(&round_tripped).unwrap();` and `assert_eq!(reserialized, value)`.
-
-## Cursor on-disk contract comment omits `sentChunks`
-
-**Severity:** Note - `src/telegram.rs:392-397`. The comment documenting `assistantForwardingCursors` lists `messageId`, `textChars`, `resendIfGrown`, and `baselineWhileActive`, but the serialized cursor now also includes `sentChunks`.
-
-**Current behavior:**
-- The serde shape and tests include `sentChunks`.
-- The nearby on-disk contract comment omits it.
-
-**Proposal:**
-- Update the comment so the documented cursor shape matches the serialized fields.
 
 ## Composer transition restore can be lost when a non-shrink resize races the restore frame
 

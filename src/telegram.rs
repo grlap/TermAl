@@ -490,7 +490,7 @@ struct TelegramBotState {
     /// The two legacy fields above are read as a compatibility fallback for
     /// older state files, but new cursor writes stay session-scoped. On disk
     /// this is `assistantForwardingCursors: { "<session-id>": { messageId,
-    /// textChars, resendIfGrown?, baselineWhileActive? } }`.
+    /// textChars, resendIfGrown?, sentChunks?, baselineWhileActive? } }`.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     assistant_forwarding_cursors: HashMap<String, TelegramAssistantForwardingCursor>,
     /// Session ids whose next settled assistant reply should be forwarded even
@@ -1343,9 +1343,16 @@ impl TelegramSessionReader for TermalApiClient {
     }
 }
 
+/// Test-seam client for forwarding a Telegram-originated prompt. This one
+/// bound intentionally colocates the state/digest reads used to choose a
+/// target with the prompt-send write, so `forward_telegram_text_to_project`
+/// can be tested without standing up either HTTP client.
 trait TelegramPromptClient: TelegramSessionReader {
     fn get_project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse>;
     fn get_state_sessions(&self) -> Result<TelegramStateSessionsResponse>;
+    /// Only success/failure matters to the relay after sending a prompt; the
+    /// full `SessionMessageResponse` would be ignored because subsequent
+    /// forwarding uses fresh session reads for cursor baselining.
     fn send_session_message(&self, session_id: &str, text: &str) -> Result<()>;
 }
 
@@ -1909,6 +1916,9 @@ fn forward_relevant_assistant_messages(
     primary_session_id: Option<&str>,
 ) -> bool {
     let mut dirty = false;
+    // Suppress digest-primary forwarding only when an armed session already
+    // sent content visible to Telegram in this poll. Baseline-only state
+    // changes should still allow the primary digest session to speak.
     let mut armed_sent_visible_content = false;
     let mut checked_session_ids = BTreeSet::new();
     let armed_session_ids = forward_next_assistant_message_session_ids(state);
@@ -2401,6 +2411,9 @@ fn forward_new_assistant_message_outcome(
                 if let Err(err) = telegram.send_message(chat_id, chunk, None) {
                     if sent_visible_content {
                         log_telegram_error("failed to forward assistant message", &err);
+                        // Remaining entries in `to_forward` are rediscovered on
+                        // the next poll because the cursor advanced only through
+                        // the last successfully forwarded message/chunk.
                         return Ok(TelegramAssistantForwardingOutcome {
                             dirty: changed,
                             sent_visible_content: true,
