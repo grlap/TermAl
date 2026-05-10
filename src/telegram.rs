@@ -1464,7 +1464,7 @@ struct TelegramStateSession {
     name: String,
     #[serde(default)]
     project_id: Option<String>,
-    status: String,
+    status: TelegramSessionStatus,
     #[serde(default)]
     message_count: u32,
 }
@@ -3103,13 +3103,13 @@ fn render_telegram_project_sessions(
     lines.join("\n")
 }
 
-fn telegram_state_session_status_label(status: &str) -> &'static str {
+fn telegram_state_session_status_label(status: &TelegramSessionStatus) -> &'static str {
     match status {
-        "active" => "active",
-        "idle" => "idle",
-        "approval" => "approval",
-        "error" => "error",
-        _ => "unknown",
+        TelegramSessionStatus::Active => "active",
+        TelegramSessionStatus::Idle => "idle",
+        TelegramSessionStatus::Approval => "approval",
+        TelegramSessionStatus::Error => "error",
+        TelegramSessionStatus::Unknown => "unknown",
     }
 }
 

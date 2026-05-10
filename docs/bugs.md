@@ -317,20 +317,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Add `showWaitingIndicator` to the effect dependency array.
 - Or derive the exemption only from values already included in the dependency list.
 
-## `TelegramStateSession.status` is stringly-typed where parallel projection uses typed enum
-
-**Severity:** Note - `src/telegram.rs:1199`. `TelegramStateSession.status: String` is stringly-typed where the parallel `TelegramSessionFetchSession.status` uses a typed `TelegramSessionStatus` enum with `#[serde(other)]`. The wire contract is `"active" | "idle" | "approval" | "error"` (per `wire.rs:712-719`) — closed enum on the server side.
-
-A future server adds a new status variant (`"queued"`, `"timing_out"`) silently slips through as `"unknown"` via `telegram_state_session_status_label`, and there is no compile-time check that the relay handles all wire status values.
-
-**Current behavior:**
-- `TelegramStateSession.status` is `String`.
-- `telegram_state_session_status_label` maps unknown to `"unknown"`.
-- Two parallel projections of the same `Session.status` field have inconsistent typing rigor.
-
-**Proposal:**
-- Replace `String` with a re-used `TelegramSessionStatus` enum that uses `#[serde(other)]` (mirroring `TelegramSessionFetchSession`).
-
 ## `paneMessageContentSignaturesRef` lifetime divergence vs `paneContentSignaturesRef`
 
 **Severity:** Note - `ui/src/SessionPaneView.tsx:672`. `paneMessageContentSignaturesRef` is a per-instance ref while `paneContentSignaturesRef` is hoisted to App.tsx and threaded through. When `SessionPaneView` remounts (e.g., on a layout split), `paneMessageContentSignaturesRef` resets to `{}` while `paneContentSignaturesRef` persists. After remount, `previousMessageContentSignature` will be `undefined` for one render but `previousSignature` will be the prior live value.

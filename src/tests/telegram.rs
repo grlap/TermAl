@@ -321,21 +321,21 @@ fn telegram_sessions_renderer_lists_project_sessions_newest_first() {
                 id: "session-1".to_owned(),
                 name: "Older".to_owned(),
                 project_id: Some("project-1".to_owned()),
-                status: "idle".to_owned(),
+                status: TelegramSessionStatus::Idle,
                 message_count: 2,
             },
             TelegramStateSession {
                 id: "session-other".to_owned(),
                 name: "Other Project".to_owned(),
                 project_id: Some("project-2".to_owned()),
-                status: "active".to_owned(),
+                status: TelegramSessionStatus::Active,
                 message_count: 1,
             },
             TelegramStateSession {
                 id: "session-2".to_owned(),
                 name: "Current".to_owned(),
                 project_id: Some("project-1".to_owned()),
-                status: "active".to_owned(),
+                status: TelegramSessionStatus::Active,
                 message_count: 7,
             },
         ],
@@ -362,7 +362,7 @@ fn telegram_sessions_renderer_reports_project_session_overflow() {
                 id: format!("session-{index}"),
                 name: format!("Session {index}"),
                 project_id: Some("project-1".to_owned()),
-                status: "idle".to_owned(),
+                status: TelegramSessionStatus::Idle,
                 message_count: index,
             })
             .collect(),
@@ -380,6 +380,25 @@ fn telegram_sessions_renderer_reports_project_session_overflow() {
     assert!(text.contains("- Session 12 (idle, 12 messages)"));
     assert!(text.contains("- Session 1 (idle, 1 message)"));
     assert!(!text.contains("- Session 0 (idle, 0 messages)"));
+}
+
+#[test]
+fn telegram_state_sessions_response_decodes_statuses_as_enum() {
+    let state: TelegramStateSessionsResponse = serde_json::from_value(serde_json::json!({
+        "projects": [],
+        "sessions": [
+            { "id": "session-active", "name": "Active", "status": "active" },
+            { "id": "session-future", "name": "Future", "status": "queued" }
+        ]
+    }))
+    .expect("state projection should decode");
+
+    assert_eq!(state.sessions[0].status, TelegramSessionStatus::Active);
+    assert_eq!(state.sessions[1].status, TelegramSessionStatus::Unknown);
+    assert_eq!(
+        telegram_state_session_status_label(&state.sessions[1].status),
+        "unknown"
+    );
 }
 
 #[test]
@@ -419,7 +438,7 @@ fn telegram_sessions_command_chunks_oversized_output() {
                 id: format!("session-{index}"),
                 name: format!("Session {index} {}", "x".repeat(400)),
                 project_id: Some("project-1".to_owned()),
-                status: "idle".to_owned(),
+                status: TelegramSessionStatus::Idle,
                 message_count: 1,
             })
             .collect(),
@@ -463,14 +482,14 @@ fn telegram_projects_renderer_lists_subscribed_projects_and_active_marker() {
                 id: "session-1".to_owned(),
                 name: "Main".to_owned(),
                 project_id: Some("project-1".to_owned()),
-                status: "idle".to_owned(),
+                status: TelegramSessionStatus::Idle,
                 message_count: 1,
             },
             TelegramStateSession {
                 id: "session-2".to_owned(),
                 name: "Other".to_owned(),
                 project_id: Some("project-2".to_owned()),
-                status: "idle".to_owned(),
+                status: TelegramSessionStatus::Idle,
                 message_count: 1,
             },
         ],
@@ -588,14 +607,14 @@ fn telegram_session_command_selects_project_session_target() {
                 id: "session-other".to_owned(),
                 name: "Other".to_owned(),
                 project_id: Some("project-2".to_owned()),
-                status: "idle".to_owned(),
+                status: TelegramSessionStatus::Idle,
                 message_count: 0,
             },
             TelegramStateSession {
                 id: "session-2".to_owned(),
                 name: "Target".to_owned(),
                 project_id: Some("project-1".to_owned()),
-                status: "idle".to_owned(),
+                status: TelegramSessionStatus::Idle,
                 message_count: 0,
             },
         ],
@@ -644,7 +663,7 @@ fn telegram_session_command_rejects_sessions_outside_project() {
             id: "session-other".to_owned(),
             name: "Other".to_owned(),
             project_id: Some("project-2".to_owned()),
-            status: "idle".to_owned(),
+            status: TelegramSessionStatus::Idle,
             message_count: 0,
         }],
     });
@@ -687,7 +706,7 @@ fn telegram_session_command_uses_selected_project() {
             id: "session-2".to_owned(),
             name: "Selected Project Session".to_owned(),
             project_id: Some("project-2".to_owned()),
-            status: "idle".to_owned(),
+            status: TelegramSessionStatus::Idle,
             message_count: 0,
         }],
     });
@@ -731,7 +750,7 @@ fn telegram_selected_session_forwards_later_local_termal_reply() {
             id: "session-2".to_owned(),
             name: "Selected".to_owned(),
             project_id: Some("project-1".to_owned()),
-            status: "idle".to_owned(),
+            status: TelegramSessionStatus::Idle,
             message_count: 1,
         }],
     });
@@ -1081,7 +1100,7 @@ fn telegram_prompt_uses_selected_session_before_digest_primary() {
             id: "session-2".to_owned(),
             name: "Selected".to_owned(),
             project_id: Some("project-1".to_owned()),
-            status: "idle".to_owned(),
+            status: TelegramSessionStatus::Idle,
             message_count: 1,
         }],
     });
