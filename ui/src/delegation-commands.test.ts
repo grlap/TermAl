@@ -336,10 +336,10 @@ describe("delegation command surface", () => {
       title: "Review the current diff.",
       prompt: "Review the current diff.",
       agent: "Claude",
+      model: "claude-sonnet-4.5",
       mode: "reviewer",
       writePolicy: { kind: "readOnly" },
     });
-    expect(request).not.toHaveProperty("model");
   });
 
   it("allows composer delegation callers to request isolated worktree review", () => {
@@ -355,10 +355,10 @@ describe("delegation command surface", () => {
     expect(request).toMatchObject({
       prompt: "Run /review-local.",
       agent: "Codex",
+      model: "gpt-5.5",
       mode: "reviewer",
       writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
     });
-    expect(request).not.toHaveProperty("model");
   });
 
   it("preserves composer delegation mode overrides from resolved commands", () => {
@@ -374,10 +374,10 @@ describe("delegation command surface", () => {
     expect(request).toMatchObject({
       title: "Resolver exploration",
       prompt: "Explore the command resolver.",
+      model: "gpt-5.5",
       mode: "explorer",
       writePolicy: { kind: "readOnly" },
     });
-    expect(request).not.toHaveProperty("model");
   });
 
   it("resolves composer delegation availability before spawning", () => {

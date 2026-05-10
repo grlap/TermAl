@@ -265,6 +265,16 @@ Body fallback.
     assert_eq!(parsed.description, None);
     assert_eq!(parsed.content, "Body fallback.\n");
 
+    let plain_scalar_trailing_quote = "---
+description: Review users'
+---
+
+Body.
+";
+    let parsed = strip_markdown_frontmatter(plain_scalar_trailing_quote);
+    assert_eq!(parsed.description.as_deref(), Some("Review users'"));
+    assert_eq!(parsed.content, "Body.\n");
+
     let large_description = "x".repeat(70 * 1024);
     let large_frontmatter = format!(
         "---

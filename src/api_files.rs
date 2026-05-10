@@ -855,7 +855,7 @@ fn markdown_command_frontmatter_fields(frontmatter: &str) -> BTreeMap<String, St
         }
         let value = raw_value.trim();
         // Ignore unsupported YAML shapes so listing can fall back to body text.
-        if has_frontmatter_quote_boundary(value) && !is_frontmatter_quoted_scalar(value) {
+        if starts_frontmatter_quote(value) && !is_frontmatter_quoted_scalar(value) {
             continue;
         }
         if is_yaml_block_scalar_marker(value)
@@ -904,9 +904,9 @@ fn is_yaml_block_scalar_marker(value: &str) -> bool {
     tail.is_empty() || tail.starts_with('#')
 }
 
-fn has_frontmatter_quote_boundary(value: &str) -> bool {
+fn starts_frontmatter_quote(value: &str) -> bool {
     let bytes = value.as_bytes();
-    !bytes.is_empty() && (matches!(bytes[0], b'"' | b'\'') || matches!(bytes[bytes.len() - 1], b'"' | b'\''))
+    !bytes.is_empty() && matches!(bytes[0], b'"' | b'\'')
 }
 
 fn is_frontmatter_quoted_scalar(value: &str) -> bool {

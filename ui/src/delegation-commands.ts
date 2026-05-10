@@ -79,6 +79,7 @@ const DELEGATION_COMPOSER_TITLE_ELLIPSIS = "...";
 export type CreateComposerDelegationOptions = {
   title?: string;
   mode?: CreateDelegationRequest["mode"];
+  model?: CreateDelegationRequest["model"];
   writePolicy?: CreateDelegationRequest["writePolicy"];
 };
 
@@ -297,7 +298,7 @@ export function delegationTitleFromPrompt(prompt: string) {
 }
 
 export function createComposerDelegationRequest(
-  parentSession: Pick<Session, "agent">,
+  parentSession: Pick<Session, "agent" | "model">,
   prompt: string,
   options: CreateComposerDelegationOptions = {},
 ): CreateDelegationRequest {
@@ -308,6 +309,7 @@ export function createComposerDelegationRequest(
     title: options.title?.trim() || delegationTitleFromPrompt(prompt),
     prompt,
     agent: parentSession.agent,
+    model: options.model ?? parentSession.model,
     mode: options.mode ?? "reviewer",
     writePolicy: options.writePolicy ?? { kind: "readOnly" },
   };
