@@ -1610,6 +1610,9 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const liveTail =
     liveTurnCard ? (
       <div className={`conversation-live-tail${liveTailPinned ? " is-pinned" : ""}`}>
+        {/* Keep queued follow-ups pinned with the live status card; otherwise
+           they scroll away while the active turn remains sticky. */}
+        {pendingPromptQueue}
         {liveTurnCard}
       </div>
     ) : null;
@@ -1628,7 +1631,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       {markerNavigation}
       {conversationMessages}
       {markerContextMenuNode}
-      {pendingPromptQueue}
+      {liveTail ? null : pendingPromptQueue}
       {liveTail}
     </>
   );

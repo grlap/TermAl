@@ -242,6 +242,18 @@ impl AppState {
             }
         }
 
+        if normalized.enabled
+            && normalized
+                .bot_token
+                .as_deref()
+                .is_some_and(|token| !token.trim().is_empty())
+            && normalized.subscribed_project_ids.is_empty()
+        {
+            return Err(ApiError::bad_request(
+                "choose at least one Telegram project before enabling the relay",
+            ));
+        }
+
         *config = normalized;
         Ok(())
     }

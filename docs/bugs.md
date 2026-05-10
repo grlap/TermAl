@@ -29,22 +29,6 @@ the Implementation Tasks section.
 - Bind validation to the opened handle where platform support allows it, e.g. no-follow open plus handle metadata checks.
 - Or compare pre/post file metadata and treat mismatch as unavailable.
 
-## Pending-prompts queue scrolls away from the pinned live tail
-
-**Severity:** Low - `ui/src/styles.css:4567-4576`, `ui/src/panels/AgentSessionPanel.tsx:1437-1442`. After splitting `pendingPromptCards` into a sibling `<div className="conversation-pending-prompts">` instead of nesting inside `.conversation-live-tail`, the live tail keeps `position: sticky; bottom: 0` while the pending-prompts queue uses `display: grid` with no sticky positioning.
-
-When the user scrolls up to read history, the live tail and its waiting indicator stay pinned, but the queued prompts disappear from view. Previously the column-reverse flex inside the live tail kept queued prompts visually adjacent to the live turn. The new layout drops that co-pinning silently.
-
-**Current behavior:**
-- `.conversation-pending-prompts` is a normal grid (no `position: sticky`).
-- `.conversation-live-tail.is-pinned` stays sticky at the bottom.
-- Queued prompts can scroll out of view while the live tail remains visible.
-
-**Proposal:**
-- Confirm whether the loss of co-pinning is intentional and document it next to the JSX/CSS.
-- Or wrap both sections in a single sticky parent / set `position: sticky; bottom: <live-tail-height>` on the queue so it pins above the live tail.
-- Add a code comment explaining the new DOM order vs. visual intent (the previous `column-reverse` had a comment that no longer applies).
-
 ## `dispatch_delegation_wait_resumes` errors are stderr-only without audit ledger
 
 **Severity:** Low - `src/delegations.rs:1131-1154`. Dispatch errors are written to stderr only. A wait that was consumed but failed to dispatch leaves no structured trace in state, deltas, or a retained wait record.
@@ -59,6 +43,38 @@ Operators and the UI cannot tell that fan-in resume should have happened but did
 **Proposal:**
 - Emit a structured warning event or retain dispatch error metadata.
 - Or document the best-effort policy and recovery expectations.
+
+## Waiting-indicator bottom-follow effect can consume inactive rising edges
+
+**Severity:** Medium - `ui/src/SessionPaneView.tsx:2084-2114`. The waiting-indicator rising-edge effect writes `previousShowWaitingIndicatorByKeyRef[scrollStateKey] = showWaitingIndicator` before it checks whether the session tab is active or the pane is in session mode. If the indicator turns on while the pane is inactive, that edge is marked consumed; switching back later sees `wasShowing=true` and skips the bottom-follow adjustment.
+
+The same effect also gates on `paneScrollPositions[scrollStateKey]?.shouldStick` without capturing that value in the dependency list, and it calls `scrollToLatestMessage("auto", true, "bottom_follow")` directly instead of the virtualizer-aware settled-scroll path used by adjacent bottom-follow effects.
+
+**Current behavior:**
+- Inactive panes can update the per-key previous-indicator ref before the active-view guard returns.
+- The current per-key `shouldStick` value influences the effect but is not captured as a dependency.
+- The new path bypasses the helper paths that prefer virtualized transcript boundaries.
+
+**Proposal:**
+- Move the previous-indicator write after the active session/view guards, or store a pending edge that is consumed only when the pane can actually scroll.
+- Derive a narrow `shouldStick` value for the effect or document why the stable `paneScrollPositions` map is intentionally non-reactive.
+- Reuse the virtualizer-aware bottom-follow helper, or add a comment explaining why direct `scrollToLatestMessage` is safe for the waiting-indicator edge.
+
+## Telegram project-target invariant is not enforced on prune paths
+
+**Severity:** Medium - `src/telegram_settings.rs:245-255,261-282` and `ui/src/preferences-panels.tsx:1484-1493`. The save path now rejects an enabled, configured Telegram relay with no subscribed project, and the UI blocks the same shape before POST. Project deletion pruning is a separate write path, though: deleting the last subscribed project removes the target and persists the file without running the new invariant or disabling the relay.
+
+The invariant is also expressed in separate frontend/backend predicates and messages (`canTestToken` + capitalized copy in the UI, normalized `bot_token` + lowercase copy in Rust), so future edits can drift even when the direct save path works.
+
+**Current behavior:**
+- `validate_and_normalize_telegram_config` rejects `enabled + token + []` during settings saves.
+- `prune_telegram_config_for_deleted_project` can persist `enabled + token + []` after deleting the last subscribed project.
+- Frontend and backend gate/copy are duplicated instead of sharing one contract.
+
+**Proposal:**
+- Enforce the same post-prune invariant, either by disabling the relay when its last project target is removed or by routing prune writes through a shared normalization helper.
+- Canonicalize the user-facing validation copy.
+- Add regression coverage for saved-token/no-project updates and delete-last-project pruning.
 
 ## Telegram inline callbacks can dispatch actions to the wrong active project
 
@@ -3499,8 +3515,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover `SessionPaneView` isolated-worktree delegation option pass-through:
-  trigger a delegated `/review-local` command through the component boundary and assert `spawnDelegationCommand` receives `writePolicy: { kind: "isolatedWorktree", ownedPaths: [] }`.
 - [ ] P2: Cover keyboard delegation for selected slash commands:
   add RTL coverage proving keyboard users can delegate an active agent slash command while the palette is open, either through normal tab focus or an explicit delegation shortcut.
 - [ ] P2: Cover visible composer errors for resolver failures:
@@ -3513,12 +3527,12 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   pin the current conservative behavior and, if a future turn-boundary signal lands, add the positive forwarding case for same-message reply text already present on first settled poll.
 - [ ] P2: Cover emitted OrchestratorsUpdated localized remote ownership:
   drive remote delta application end-to-end and assert the emitted localized sessions clear inbound `remote_id` before replay-key normalization/fingerprinting.
-- [ ] P2: Cover pinned live-tail queued prompt order:
-  render a pinned live turn with at least two queued prompts and assert the live card is closest to the composer without reversing queued prompt FIFO order.
 - [ ] P2: Add Telegram settings API/security regressions:
   cover plaintext token-at-rest exposure, corrupt-backup permission hardening, Windows ACL/secret-store fallback behavior, global/concurrent rate limiting that cannot be bypassed by rotating token strings, and bounded rate-limit cache retention.
 - [ ] P2: Cover post-validation Telegram settings sanitization:
   delete a project/session after validation but before the second sanitize path, or extract a deterministic helper seam, and assert the persisted response cannot retain stale references. The current stale-reference test at `src/tests/telegram.rs:1573` seeds invalid state before validation, so removing the post-validation sanitize in `src/telegram_settings.rs:73` would still pass.
+- [ ] P2: Cover Telegram project-target invariant boundaries:
+  pin `enabled + no token + []`, blank-token rejection precedence, saved-token/no-project saves, and deleting the last subscribed project so the UI/backend/prune paths share one enabled-relay target contract.
 - [ ] P2: Add Telegram settings file concurrency regressions:
   simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
@@ -3527,6 +3541,8 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   keep id/index/preview/count/stamp equal while changing message payload and assert a material apply; include same-id pending prompt cleanup coverage.
 - [ ] P2: Add near-bottom prompt-send early-return scroll coverage:
   start near bottom, send with a pending POST, grow `scrollHeight`, and assert no old-target smooth scroll fires before the prompt lands.
+- [ ] P2: Add waiting-indicator bottom-follow negative coverage:
+  cover no duplicate scroll while the live indicator remains visible, far-from-bottom no-op, inactive pane/view not consuming the rising edge, and virtualized-transcript bottom-follow behavior.
 - [ ] P2: Add virtualized bottom re-entry scroll-kind expiry coverage:
   return to bottom, cancel idle compaction, then issue a native scroll without wheel/touch/key prelude and assert stale `lastUserScrollKindRef` classification cannot leak.
 - [ ] P2: Add Telegram startup-message coverage:

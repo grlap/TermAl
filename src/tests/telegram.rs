@@ -5041,6 +5041,24 @@ fn telegram_settings_validation_uses_single_subscribed_project_as_default() {
 }
 
 #[test]
+fn telegram_settings_validation_rejects_enabled_config_without_project_target() {
+    let state = test_app_state();
+    let mut config = TelegramUiConfig {
+        enabled: true,
+        bot_token: Some("123456:secret".to_owned()),
+        ..TelegramUiConfig::default()
+    };
+
+    let err = state
+        .validate_and_normalize_telegram_config(&mut config)
+        .expect_err("enabled configured relay should require a project target");
+
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(err.message.contains("choose at least one Telegram project"));
+    assert!(config.subscribed_project_ids.is_empty());
+}
+
+#[test]
 fn telegram_settings_validation_rejects_orphan_session_project() {
     let state = test_app_state();
     let session_id = {

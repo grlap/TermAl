@@ -502,6 +502,9 @@ describe("AgentSessionPanel conversation caching", () => {
     const liveTail = screen
       .getByText("Live turn")
       .closest(".conversation-live-tail");
+    const liveTurnCard = screen
+      .getByText("Live turn")
+      .closest(".activity-card-live");
     const firstQueuedPromptCard = screen
       .getByText("Queued follow-up A")
       .closest(".pending-prompt-card");
@@ -516,8 +519,13 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(secondQueuedPromptCard).not.toBeNull();
     expect(pendingPromptQueue).not.toBeNull();
     expect(liveTail).toHaveClass("is-pinned");
-    expect(Array.from((liveTail as HTMLElement).children)[0]).toHaveTextContent(
+    expect(liveTurnCard).not.toBeNull();
+    const liveTailChildren = Array.from((liveTail as HTMLElement).children);
+    expect(liveTailChildren[liveTailChildren.length - 1]).toHaveTextContent(
       "Live turn",
+    );
+    expect(pendingPromptQueue?.closest(".conversation-live-tail")).toBe(
+      liveTail,
     );
     expect(
       Boolean(
@@ -527,12 +535,13 @@ describe("AgentSessionPanel conversation caching", () => {
     ).toBe(true);
     expect(
       Boolean(
-        secondQueuedPromptCard!.compareDocumentPosition(liveTail!) &
+        secondQueuedPromptCard!.compareDocumentPosition(liveTurnCard!) &
           Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true);
-    expect(liveTail).not.toContainElement(firstQueuedPromptCard as HTMLElement);
-    expect(liveTail).not.toContainElement(secondQueuedPromptCard as HTMLElement);
+    expect(liveTail).toContainElement(firstQueuedPromptCard as HTMLElement);
+    expect(liveTail).toContainElement(secondQueuedPromptCard as HTMLElement);
+    expect(liveTail).toContainElement(liveTurnCard as HTMLElement);
     expect(pendingPromptQueue).toContainElement(
       firstQueuedPromptCard as HTMLElement,
     );

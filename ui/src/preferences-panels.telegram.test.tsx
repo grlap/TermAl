@@ -151,6 +151,27 @@ describe("TelegramPreferencesPanel", () => {
     expect(await screen.findByText("Stopped")).toBeInTheDocument();
   });
 
+  it("does not save an enabled relay without a subscribed project", async () => {
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      enabled: true,
+      lifecycle: "inProcess",
+      botTokenMasked: "****oken",
+      subscribedProjectIds: [],
+    });
+
+    render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
+
+    await screen.findByText("Saved as ****oken.");
+    fireEvent.click(screen.getByRole("button", { name: "Save Telegram" }));
+
+    expect(
+      await screen.findByText("Choose at least one Telegram project before enabling the relay."),
+    ).toBeInTheDocument();
+    expect(updateTelegramConfigMock).not.toHaveBeenCalled();
+  });
+
   it("keeps handler state updates enabled after React StrictMode remount checks", async () => {
     fetchTelegramStatusMock.mockResolvedValue({
       ...emptyTelegramStatus,

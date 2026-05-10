@@ -41,10 +41,11 @@ impl AppState {
     /// Destructively removes a session: tears down its runtime (kill
     /// child process for Claude/ACP, `turn/interrupt` + detach for shared
     /// Codex), removes the `SessionRecord` from `StateInner`, garbage-collects
-    /// any orphan hidden Claude spares for the same workdir/project,
-    /// suppresses rediscovery of detached Codex threads, and persists the new
-    /// state. No undo. Triggered from the UI trash icon. Proxied to the
-    /// remote backend when `session.remote_target` is set.
+    /// any delegated child sessions it owns transitively, garbage-collects any
+    /// orphan hidden Claude spares for the same workdir/project, suppresses
+    /// rediscovery of detached Codex threads, and persists the new state. No
+    /// undo. Triggered from the UI trash icon. Proxied to the remote backend
+    /// when `session.remote_target` is set.
     fn kill_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_kill_session(session_id);
@@ -55,7 +56,6 @@ impl AppState {
             delegation_runtimes_to_kill,
             revision,
             delegation_lifecycle_deltas,
-            delegation_child_transcript_deltas,
             delegation_wait_refresh,
         ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -78,6 +78,11 @@ impl AppState {
             };
             let delegation_reconciliation =
                 reconcile_delegations_for_removed_session_locked(&mut inner, session_id);
+            // Delegation reconciliation may remove child sessions before the
+            // requested parent is removed, which can shift session indexes.
+            let index = inner
+                .find_visible_session_index(session_id)
+                .expect("session should still exist after delegation reconciliation");
             inner.remove_session_at(index);
 
             let mut hidden_runtimes = Vec::new();
@@ -116,6 +121,51 @@ impl AppState {
                 });
             }
 
+            for thread_id in &delegation_reconciliation.codex_thread_ids_to_ignore {
+                inner.ignore_discovered_codex_thread(Some(thread_id));
+            }
+
+            if !delegation_reconciliation
+                .claude_spare_profiles_to_reap
+                .is_empty()
+            {
+                let visible_profiles = inner
+                    .sessions
+                    .iter()
+                    .filter(|session_record| {
+                        !session_record.hidden
+                            && !session_record.is_remote_proxy()
+                            && session_record.session.agent == Agent::Claude
+                    })
+                    .map(claude_spare_profile)
+                    .collect::<Vec<_>>();
+                inner.retain_sessions(|session_record| {
+                    if !(session_record.hidden
+                        && !session_record.is_remote_proxy()
+                        && session_record.session.agent == Agent::Claude)
+                    {
+                        return true;
+                    }
+
+                    let profile = claude_spare_profile(session_record);
+                    if !delegation_reconciliation
+                        .claude_spare_profiles_to_reap
+                        .contains(&profile)
+                    {
+                        return true;
+                    }
+
+                    let keep = visible_profiles
+                        .contains(&profile);
+                    if !keep {
+                        if let SessionRuntime::Claude(handle) = &session_record.runtime {
+                            hidden_runtimes.push(KillableRuntime::Claude(handle.clone()));
+                        }
+                    }
+                    keep
+                });
+            }
+
             if agent.supports_codex_prompt_settings() {
                 inner.ignore_discovered_codex_thread(external_session_id.as_deref());
             }
@@ -131,7 +181,6 @@ impl AppState {
                 delegation_reconciliation.runtimes_to_kill,
                 revision,
                 delegation_reconciliation.lifecycle_deltas,
-                delegation_reconciliation.child_transcript_deltas,
                 delegation_wait_refresh,
             )
         };
@@ -154,9 +203,6 @@ impl AppState {
             {
                 eprintln!("session cleanup warning> {err:#}");
             }
-        }
-        for delta in delegation_child_transcript_deltas {
-            self.publish_delegation_child_transcript_delta(revision, delta);
         }
         for delta in delegation_lifecycle_deltas {
             self.publish_delegation_lifecycle_delta(revision, delta);

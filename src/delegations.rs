@@ -164,14 +164,30 @@ struct ConsumedDelegationWait {
 
 struct RemovedSessionDelegationReconciliation {
     lifecycle_deltas: Vec<DelegationLifecycleDelta>,
-    child_transcript_deltas: Vec<DelegationChildTranscriptDelta>,
     runtimes_to_kill: Vec<KillableRuntime>,
+    codex_thread_ids_to_ignore: Vec<String>,
+    claude_spare_profiles_to_reap: Vec<ClaudeSpareProfile>,
 }
 
 #[derive(Default)]
 struct DetachedDelegationChildRuntime {
     runtime: Option<KillableRuntime>,
     transcript_deltas: Vec<DelegationChildTranscriptDelta>,
+}
+
+type ClaudeSpareProfile = (
+    String,
+    Option<String>,
+    String,
+    ClaudeApprovalMode,
+    ClaudeEffortLevel,
+);
+
+#[derive(Default)]
+struct RemovedDelegationChildSession {
+    runtime: Option<KillableRuntime>,
+    codex_thread_id_to_ignore: Option<String>,
+    claude_spare_profile_to_reap: Option<ClaudeSpareProfile>,
 }
 
 impl StateInner {
@@ -1911,32 +1927,44 @@ fn reconcile_delegations_for_removed_session_locked(
     inner: &mut StateInner,
     removed_session_id: &str,
 ) -> RemovedSessionDelegationReconciliation {
-    let impacted = inner
-        .delegations
-        .iter()
-        .enumerate()
-        .filter_map(|(index, delegation)| {
-            if delegation_is_terminal(delegation.status) {
-                None
-            } else if delegation.child_session_id == removed_session_id {
-                Some((index, "delegation child session was removed", None, false))
-            } else if delegation.parent_session_id == removed_session_id {
-                Some((
-                    index,
-                    "delegation parent session was removed",
-                    Some(delegation.child_session_id.clone()),
-                    true,
-                ))
-            } else {
-                None
+    let mut child_session_ids_to_remove = Vec::<String>::new();
+    let mut pending_parent_session_ids = vec![removed_session_id.to_owned()];
+    while let Some(parent_session_id) = pending_parent_session_ids.pop() {
+        for delegation in inner.delegations.iter() {
+            if delegation.parent_session_id == parent_session_id
+                && delegation.child_session_id != removed_session_id
+                && !child_session_ids_to_remove
+                    .iter()
+                    .any(|child_session_id| child_session_id == &delegation.child_session_id)
+            {
+                let child_session_id = delegation.child_session_id.clone();
+                pending_parent_session_ids.push(child_session_id.clone());
+                child_session_ids_to_remove.push(child_session_id);
             }
-        })
-        .collect::<Vec<_>>();
+        }
+    }
+
+    let mut impacted = Vec::new();
+    for (index, delegation) in inner.delegations.iter().enumerate() {
+        if delegation_is_terminal(delegation.status) {
+            continue;
+        }
+        if delegation.child_session_id == removed_session_id {
+            impacted.push((index, "delegation child session was removed", false));
+        } else if delegation.parent_session_id == removed_session_id
+            || child_session_ids_to_remove
+                .iter()
+                .any(|child_session_id| child_session_id == &delegation.parent_session_id)
+        {
+            impacted.push((index, "delegation parent session was removed", true));
+        }
+    }
 
     let mut deltas = Vec::new();
-    let mut child_transcript_deltas = Vec::new();
     let mut runtimes_to_kill = Vec::new();
-    for (index, detail, child_session_id_to_unlink, removed_parent_session) in impacted {
+    let mut codex_thread_ids_to_ignore = Vec::new();
+    let mut claude_spare_profiles_to_reap = Vec::new();
+    for (index, detail, removed_parent_session) in impacted {
         if let Some(delta) = mark_delegation_failed_locked(inner, index, detail) {
             deltas.push(if removed_parent_session {
                 strip_parent_card_delta(delta)
@@ -1944,28 +1972,24 @@ fn reconcile_delegations_for_removed_session_locked(
                 delta
             });
         }
-        if let Some(child_session_id) = child_session_id_to_unlink {
-            let detached_child = detach_delegation_child_runtime_locked(
-                inner,
-                &child_session_id,
-                Some("Delegation halted: parent session was removed."),
-            );
-            if let Some(runtime) = detached_child.runtime {
-                runtimes_to_kill.push(runtime);
-            }
-            child_transcript_deltas.extend(detached_child.transcript_deltas);
-            if let Some(child_index) = inner.find_session_index(&child_session_id) {
-                let child = inner
-                    .session_mut_by_index(child_index)
-                    .expect("child session index should be valid");
-                child.session.parent_delegation_id = None;
-            }
+    }
+    for child_session_id in child_session_ids_to_remove {
+        let removed_child = remove_delegation_child_session_locked(inner, &child_session_id);
+        if let Some(runtime) = removed_child.runtime {
+            runtimes_to_kill.push(runtime);
+        }
+        if let Some(thread_id) = removed_child.codex_thread_id_to_ignore {
+            codex_thread_ids_to_ignore.push(thread_id);
+        }
+        if let Some(profile) = removed_child.claude_spare_profile_to_reap {
+            claude_spare_profiles_to_reap.push(profile);
         }
     }
     RemovedSessionDelegationReconciliation {
         lifecycle_deltas: deltas,
-        child_transcript_deltas,
         runtimes_to_kill,
+        codex_thread_ids_to_ignore,
+        claude_spare_profiles_to_reap,
     }
 }
 
@@ -2083,6 +2107,39 @@ fn clear_delegation_child_queue_locked(inner: &mut StateInner, child_session_id:
         .expect("child session index should be valid");
     child.queued_prompts.clear();
     sync_pending_prompts(child);
+}
+
+fn remove_delegation_child_session_locked(
+    inner: &mut StateInner,
+    child_session_id: &str,
+) -> RemovedDelegationChildSession {
+    let Some(child_index) = inner.find_session_index(child_session_id) else {
+        return RemovedDelegationChildSession::default();
+    };
+    let child = inner
+        .sessions
+        .get(child_index)
+        .expect("child session index should be valid");
+    let runtime = match &child.runtime {
+        SessionRuntime::Claude(handle) => Some(KillableRuntime::Claude(handle.clone())),
+        SessionRuntime::Codex(handle) => Some(KillableRuntime::Codex(handle.clone())),
+        SessionRuntime::Acp(handle) => Some(KillableRuntime::Acp(handle.clone())),
+        SessionRuntime::None => None,
+    };
+    let codex_thread_id_to_ignore = child
+        .session
+        .agent
+        .supports_codex_prompt_settings()
+        .then(|| child.external_session_id.clone())
+        .flatten();
+    let claude_spare_profile_to_reap =
+        (child.session.agent == Agent::Claude).then(|| claude_spare_profile(child));
+    inner.remove_session_at(child_index);
+    RemovedDelegationChildSession {
+        runtime,
+        codex_thread_id_to_ignore,
+        claude_spare_profile_to_reap,
+    }
 }
 
 fn detach_delegation_child_runtime_locked(

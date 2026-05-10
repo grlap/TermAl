@@ -117,13 +117,7 @@ fn dedupe_agent_commands(commands: Vec<AgentCommand>) -> Vec<AgentCommand> {
 /// Handles Claude spare profile.
 fn claude_spare_profile(
     record: &SessionRecord,
-) -> (
-    String,
-    Option<String>,
-    String,
-    ClaudeApprovalMode,
-    ClaudeEffortLevel,
-) {
+) -> ClaudeSpareProfile {
     (
         record.session.workdir.clone(),
         record.session.project_id.clone(),

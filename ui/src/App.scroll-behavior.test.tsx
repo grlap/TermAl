@@ -935,6 +935,102 @@ describe("App scroll behaviour", () => {
     });
   });
 
+  it("scrolls before paint to make room when the live turn appears at the bottom", async () => {
+    await withSuppressedActWarnings(async () => {
+      let scrollHeight = 1000;
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: () => scrollHeight,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+      const messages: Session["messages"] = [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Current prompt",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Current response.",
+        },
+      ];
+      const baseState = {
+        revision: 2,
+        projects: [
+          {
+            id: "project-termal",
+            name: "TermAl",
+            rootPath: "/projects/termal",
+          },
+        ],
+        sessions: [
+          makeSession("session-1", {
+            name: "Session 1",
+            projectId: "project-termal",
+            workdir: "/projects/termal",
+            preview: "Current response.",
+            messages,
+          }),
+        ],
+      };
+
+      try {
+        await dispatchStateEvent(latestEventSource(), baseState);
+        await settleAsyncUi();
+
+        const messageStack = Array.from(
+          document.querySelectorAll(".message-stack"),
+        ).find(
+          (candidate): candidate is HTMLElement =>
+            candidate instanceof HTMLElement &&
+            !candidate.classList.contains("control-panel-stack"),
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+
+        messageStack.scrollTop = 800;
+        await act(async () => {
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+        scrollToMock.mockClear();
+
+        scrollHeight = 1120;
+        await dispatchStateEvent(latestEventSource(), {
+          ...baseState,
+          revision: 3,
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              status: "active",
+              preview: "Current response.",
+              messages,
+            }),
+          ],
+        });
+        await settleAsyncUi();
+
+        expect(screen.getByText("Live turn")).toBeInTheDocument();
+        expect(
+          filterScrollToCallsAt(scrollToMock, 920, "auto").length,
+        ).toBeGreaterThan(0);
+        expect(messageStack.scrollTop).toBe(920);
+      } finally {
+        context.cleanup();
+        restoreScrollGeometry();
+      }
+    });
+  });
+
   it("smoothly follows new assistant messages while pinned to the bottom", async () => {
     await withSuppressedActWarnings(async () => {
       let scrollHeight = 1000;

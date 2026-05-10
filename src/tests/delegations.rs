@@ -613,6 +613,13 @@ fn removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason()
             .all(|record| !wait_ids.contains(&record.id)),
         "parent-owned waits should be removed instead of orphaned"
     );
+    assert!(
+        inner
+            .sessions
+            .iter()
+            .all(|record| record.session.id != created.delegation.child_session_id),
+        "parent removal should cascade-delete the running child session"
+    );
     let delegation = inner
         .delegations
         .iter()
@@ -710,6 +717,13 @@ fn removing_delegation_parent_consumes_already_satisfied_wait_with_parent_remove
             .iter()
             .all(|record| record.id != wait.wait.id),
         "already-satisfied parent-owned wait should be removed"
+    );
+    assert!(
+        inner
+            .sessions
+            .iter()
+            .all(|record| record.session.id != created.delegation.child_session_id),
+        "parent removal should cascade-delete terminal child sessions too"
     );
     drop(inner);
 
@@ -4902,19 +4916,220 @@ fn removing_delegation_child_or_parent_terminalizes_records() {
         .find(|delegation| delegation.id == parent_removed.delegation.id)
         .expect("delegation record should remain");
     assert_eq!(delegation.status, DelegationStatus::Failed);
-    let child = inner
-        .sessions
-        .iter()
-        .find(|record| record.session.id == parent_removed.delegation.child_session_id)
-        .expect("child session should remain visible");
-    assert_eq!(child.session.parent_delegation_id, None);
+    assert!(
+        inner
+            .sessions
+            .iter()
+            .all(|record| record.session.id != parent_removed.delegation.child_session_id),
+        "parent removal should cascade-delete its delegated child session"
+    );
     drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 #[test]
-fn removing_delegation_parent_detaches_child_runtime_and_marks_transcript() {
+fn removing_delegation_parent_cascades_to_nested_delegation_children() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let child = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Delegate first-level review.".to_owned(),
+                title: Some("Cascade Child".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("first-level delegation should be created");
+    let child_session_id = child.delegation.child_session_id.clone();
+    let grandchild = state
+        .create_read_only_delegation(
+            &child_session_id,
+            CreateDelegationRequest {
+                prompt: "Delegate nested review.".to_owned(),
+                title: Some("Cascade Grandchild".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("nested delegation should be created");
+    let grandchild_session_id = grandchild.delegation.child_session_id.clone();
+    state
+        .set_external_session_id(&child_session_id, "cascade-child-thread".to_owned())
+        .expect("child Codex thread id should be recorded");
+    state
+        .set_external_session_id(
+            &grandchild_session_id,
+            "cascade-grandchild-thread".to_owned(),
+        )
+        .expect("grandchild Codex thread id should be recorded");
+
+    state
+        .kill_session(&parent_session_id)
+        .expect("parent removal should succeed");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner.sessions.iter().all(|record| {
+            record.session.id != parent_session_id
+                && record.session.id != child_session_id
+                && record.session.id != grandchild_session_id
+        }),
+        "parent removal should delete the full delegated child tree"
+    );
+    let child_delegation = inner
+        .delegations
+        .iter()
+        .find(|delegation| delegation.id == child.delegation.id)
+        .expect("child delegation record should remain");
+    assert_eq!(child_delegation.status, DelegationStatus::Failed);
+    let grandchild_delegation = inner
+        .delegations
+        .iter()
+        .find(|delegation| delegation.id == grandchild.delegation.id)
+        .expect("grandchild delegation record should remain");
+    assert_eq!(grandchild_delegation.status, DelegationStatus::Failed);
+    drop(inner);
+
+    let mut reloaded_inner = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .expect("persisted state should exist");
+    assert!(
+        reloaded_inner
+            .ignored_discovered_codex_thread_ids
+            .contains("cascade-child-thread")
+    );
+    assert!(
+        reloaded_inner
+            .ignored_discovered_codex_thread_ids
+            .contains("cascade-grandchild-thread")
+    );
+    reloaded_inner.import_discovered_codex_threads(
+        "/tmp",
+        vec![
+            DiscoveredCodexThread {
+                approval_policy: Some(CodexApprovalPolicy::Never),
+                archived: false,
+                cwd: "/tmp".to_owned(),
+                id: "cascade-child-thread".to_owned(),
+                model: Some("gpt-5-codex".to_owned()),
+                reasoning_effort: Some(CodexReasoningEffort::Medium),
+                sandbox_mode: Some(CodexSandboxMode::WorkspaceWrite),
+                title: "Cascade child thread".to_owned(),
+            },
+            DiscoveredCodexThread {
+                approval_policy: Some(CodexApprovalPolicy::Never),
+                archived: false,
+                cwd: "/tmp".to_owned(),
+                id: "cascade-grandchild-thread".to_owned(),
+                model: Some("gpt-5-codex".to_owned()),
+                reasoning_effort: Some(CodexReasoningEffort::Medium),
+                sandbox_mode: Some(CodexSandboxMode::WorkspaceWrite),
+                title: "Cascade grandchild thread".to_owned(),
+            },
+        ],
+    );
+    assert!(
+        reloaded_inner.sessions.iter().all(|record| {
+            !matches!(
+                record.external_session_id.as_deref(),
+                Some("cascade-child-thread" | "cascade-grandchild-thread")
+            )
+        }),
+        "cascade-deleted Codex child threads should not be rediscovered"
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn removing_delegation_parent_reaps_hidden_claude_spare_for_child_profile() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Delegate Claude-profile review.".to_owned(),
+                title: Some("Claude Profile Child".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    let child_session_id = created.delegation.child_session_id.clone();
+    let spare_profile = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let child_index = inner
+            .find_session_index(&child_session_id)
+            .expect("child session should exist");
+        let child = inner
+            .session_mut_by_index(child_index)
+            .expect("child session index should be valid");
+        child.session.agent = Agent::Claude;
+        child.session.model = "claude-profile-child".to_owned();
+        child.session.claude_approval_mode = Some(ClaudeApprovalMode::Plan);
+        child.session.claude_effort = Some(ClaudeEffortLevel::High);
+        let profile = claude_spare_profile(child);
+        let spare_id = inner
+            .ensure_hidden_claude_spare(
+                profile.0.clone(),
+                profile.1.clone(),
+                profile.2.clone(),
+                profile.3,
+                profile.4,
+            )
+            .expect("hidden Claude spare should be reserved");
+        assert!(
+            inner.sessions.iter().any(|record| {
+                record.session.id == spare_id
+                    && record.hidden
+                    && record.session.agent == Agent::Claude
+            }),
+            "test setup should create a matching hidden Claude spare"
+        );
+        state.commit_locked(&mut inner).unwrap();
+        profile
+    };
+
+    state
+        .kill_session(&parent_session_id)
+        .expect("parent removal should succeed");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .sessions
+            .iter()
+            .all(|record| record.session.id != child_session_id),
+        "child session should be deleted"
+    );
+    assert!(
+        inner.sessions.iter().all(|record| {
+            !(record.hidden
+                && record.session.agent == Agent::Claude
+                && claude_spare_profile(record) == spare_profile)
+        }),
+        "hidden Claude spare for a cascade-deleted child should be reaped"
+    );
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn removing_delegation_parent_deletes_child_runtime_and_session() {
     let (state, input_rx) =
         test_app_state_with_delegation_codex_runtime("delegation-parent-remove-runtime");
     let parent_session_id = test_session_id(&state, Agent::Codex);
@@ -4959,7 +5174,7 @@ fn removing_delegation_parent_detaches_child_runtime_and_marks_transcript() {
             created.delegation.child_session_id.clone(),
         );
 
-    let pending_message_id = {
+    let _pending_message_id = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let child_index = inner
             .find_session_index(&created.delegation.child_session_id)
@@ -5039,40 +5254,15 @@ fn removing_delegation_parent_detaches_child_runtime_and_marks_transcript() {
         .join()
         .expect("parent removal command thread should join cleanly");
 
-    let mut saw_pending_update = false;
-    let mut saw_halt_marker = false;
+    let mut saw_child_transcript_delta = false;
     while let Ok(payload) = delta_events.try_recv() {
         let delta: DeltaEvent = serde_json::from_str(&payload).expect("delta should deserialize");
         match delta {
-            DeltaEvent::MessageUpdated {
-                session_id,
-                message_id,
-                message:
-                    Message::UserInputRequest {
-                        state: InteractionRequestState::Canceled,
-                        ..
-                    },
-                session_mutation_stamp: Some(_),
-                ..
-            } if session_id == created.delegation.child_session_id
-                && message_id == pending_message_id =>
+            DeltaEvent::MessageUpdated { session_id, .. }
+            | DeltaEvent::MessageCreated { session_id, .. }
+                if session_id == created.delegation.child_session_id =>
             {
-                saw_pending_update = true;
-            }
-            DeltaEvent::MessageCreated {
-                session_id,
-                message:
-                    Message::Text {
-                        text,
-                        author: Author::Assistant,
-                        ..
-                    },
-                session_mutation_stamp: Some(_),
-                ..
-            } if session_id == created.delegation.child_session_id
-                && text == "Delegation halted: parent session was removed." =>
-            {
-                saw_halt_marker = true;
+                saw_child_transcript_delta = true;
             }
             DeltaEvent::ParallelAgentsUpdate { session_id, .. }
                 if session_id == parent_session_id =>
@@ -5085,39 +5275,18 @@ fn removing_delegation_parent_detaches_child_runtime_and_marks_transcript() {
         }
     }
     assert!(
-        saw_pending_update,
-        "detaching a child with pending input should publish MessageUpdated"
-    );
-    assert!(
-        saw_halt_marker,
-        "parent removal should publish an in-band child halt marker"
+        !saw_child_transcript_delta,
+        "deleted child sessions should not receive transcript deltas"
     );
 
     let inner = state.inner.lock().expect("state mutex poisoned");
-    let child = inner
-        .sessions
-        .iter()
-        .find(|record| record.session.id == created.delegation.child_session_id)
-        .expect("child session should remain visible");
-    assert_eq!(child.session.parent_delegation_id, None);
-    assert_eq!(child.session.status, SessionStatus::Error);
-    assert!(matches!(child.runtime, SessionRuntime::None));
-    assert!(child.queued_prompts.is_empty());
-    assert!(child.session.pending_prompts.is_empty());
-    assert!(child.pending_codex_user_inputs.is_empty());
-    assert!(child.deferred_stop_callbacks.is_empty());
-    assert!(child.session.messages.iter().any(|message| matches!(
-        message,
-        Message::Text { text, .. } if text == "Delegation halted: parent session was removed."
-    )));
-    assert!(child.session.messages.iter().any(|message| matches!(
-        message,
-        Message::UserInputRequest {
-            id,
-            state: InteractionRequestState::Canceled,
-            ..
-        } if id == &pending_message_id
-    )));
+    assert!(
+        inner
+            .sessions
+            .iter()
+            .all(|record| record.session.id != created.delegation.child_session_id),
+        "parent removal should delete the child session record"
+    );
     drop(inner);
 
     assert!(

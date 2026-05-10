@@ -6,6 +6,7 @@ import type { CreateDelegationRequest } from "./api";
 import {
   clickAndSettle,
   createActWrappedAnimationFrameMocks,
+  withSuppressedActWarnings,
 } from "./app-test-harness";
 import { SessionPaneView } from "./SessionPaneView";
 import {
@@ -13,6 +14,7 @@ import {
   syncComposerSessionsStore,
 } from "./session-store";
 import type {
+  AgentCommand,
   DelegationSummary,
   Project,
   RemoteConfig,
@@ -24,6 +26,16 @@ import type {
 } from "./delegation-commands";
 
 const spawnDelegationCommandMock = vi.hoisted(() => vi.fn());
+const resolveAgentCommandMock = vi.hoisted(() => vi.fn());
+
+vi.mock("./api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./api")>();
+
+  return {
+    ...actual,
+    resolveAgentCommand: resolveAgentCommandMock,
+  };
+});
 
 vi.mock("./delegation-commands", async (importOriginal) => {
   const actual =
@@ -162,11 +174,13 @@ function errorSpawnResult(message: string): SpawnDelegationCommandResult {
 function renderSessionPaneView({
   session,
   draft,
+  agentCommands = [],
   projects = [makeProject()],
   remotes = [makeRemote()],
 }: {
   session: Session;
   draft: string;
+  agentCommands?: AgentCommand[];
   projects?: Project[];
   remotes?: RemoteConfig[];
 }) {
@@ -193,7 +207,7 @@ function renderSessionPaneView({
     isUpdating: false,
     isRefreshingModelOptions: false,
     modelOptionsError: null,
-    agentCommands: [],
+    agentCommands,
     hasLoadedAgentCommands: true,
     isRefreshingAgentCommands: false,
     agentCommandsError: null,
@@ -276,6 +290,7 @@ describe("SessionPaneView composer delegation click-through", () => {
 
   beforeEach(() => {
     spawnDelegationCommandMock.mockReset();
+    resolveAgentCommandMock.mockReset();
     resetSessionStoreForTesting();
     const {
       cancelAnimationFrameMock,
@@ -331,6 +346,71 @@ describe("SessionPaneView composer delegation click-through", () => {
     });
     expect(onDraftCommit).toHaveBeenCalledWith("session-parent", "");
     expect(onComposerError).toHaveBeenCalledWith(null);
+  });
+
+  it("passes command-owned isolated worktree defaults through to spawn", async () => {
+    const session = makeSession({ id: "session-parent" });
+    const reviewLocalCommand: AgentCommand = {
+      kind: "promptTemplate",
+      name: "review-local",
+      description: "Review staged and unstaged changes.",
+      content: "Review local changes.",
+      source: ".claude/commands/review-local.md",
+    };
+    resolveAgentCommandMock.mockResolvedValue({
+      name: "review-local",
+      source: ".claude/commands/review-local.md",
+      kind: "promptTemplate",
+      visiblePrompt: "/review-local",
+      expandedPrompt: "Review local changes.",
+      title: "Review staged and unstaged changes.",
+      delegation: {
+        mode: "reviewer",
+        title: "Review staged and unstaged changes.",
+        writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+      },
+    });
+    spawnDelegationCommandMock.mockResolvedValue(completedSpawnResult());
+
+    const { onDraftCommit, textarea } = renderSessionPaneView({
+      session,
+      draft: "/rev",
+      agentCommands: [reviewLocalCommand],
+    });
+
+    expect(textarea.value).toBe("/rev");
+    expect(
+      screen.getByRole("option", { name: /\/review-local/ }),
+    ).toBeInTheDocument();
+
+    await withSuppressedActWarnings(async () => {
+      await clickAndSettle(screen.getByRole("button", { name: "Delegate" }));
+
+      await waitFor(() => {
+        expect(resolveAgentCommandMock).toHaveBeenCalledWith(
+          "session-parent",
+          "review-local",
+          {
+            arguments: "",
+            intent: "delegate",
+          },
+        );
+      });
+      await waitFor(() => {
+        expect(spawnDelegationCommandMock).toHaveBeenCalledWith(
+          "session-parent",
+          {
+            title: "Review staged and unstaged changes.",
+            prompt: "Review local changes.",
+            agent: "Codex",
+            model: "gpt-5",
+            mode: "reviewer",
+            writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+          } satisfies CreateDelegationRequest,
+        );
+      });
+      expect(onDraftCommit).toHaveBeenCalledWith("session-parent", "");
+    });
   });
 
   it("preserves the draft and surfaces composer errors when spawning fails", async () => {

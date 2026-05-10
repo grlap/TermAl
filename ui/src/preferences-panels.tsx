@@ -1484,13 +1484,19 @@ export function TelegramPreferencesPanel({
   }
 
   async function handleSave() {
+    const nextProjectIds = draft.defaultProjectId
+      ? Array.from(new Set([...draft.subscribedProjectIds, draft.defaultProjectId]))
+      : draft.subscribedProjectIds;
+    if (draft.enabled && canTestToken && nextProjectIds.length === 0) {
+      setNotice(null);
+      setError("Choose at least one Telegram project before enabling the relay.");
+      return;
+    }
+
     setIsSaving(true);
     setNotice(null);
     setError(null);
     try {
-      const nextProjectIds = draft.defaultProjectId
-        ? Array.from(new Set([...draft.subscribedProjectIds, draft.defaultProjectId]))
-        : draft.subscribedProjectIds;
       const nextStatus = await updateTelegramConfig({
         enabled: draft.enabled,
         botToken: draft.botToken.trim() ? draft.botToken.trim() : undefined,

@@ -1681,6 +1681,7 @@ fn handle_telegram_update(
 }
 
 /// Handles Telegram message.
+#[cfg(test)]
 fn handle_telegram_message(
     telegram: &impl TelegramMessageSender,
     termal: &(impl TelegramPromptClient + TelegramActionClient),
@@ -1889,6 +1890,7 @@ fn handle_telegram_callback_query(
 }
 
 /// Handles forward Telegram text to project.
+#[cfg(test)]
 fn forward_telegram_text_to_project(
     telegram: &impl TelegramMessageSender,
     termal: &impl TelegramPromptClient,

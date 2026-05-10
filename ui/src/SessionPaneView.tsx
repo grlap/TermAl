@@ -708,6 +708,9 @@ export function SessionPaneView({
   const paneRootRef = useRef<HTMLElement | null>(null);
   const settledScrollToBottomCancelRef = useRef<(() => void) | null>(null);
   const paneMessageContentSignaturesRef = useRef<Record<string, string>>({});
+  const previousShowWaitingIndicatorByKeyRef = useRef<
+    Record<string, boolean | undefined>
+  >({});
   const paneProgrammaticBottomFollowRef = useRef<{
     key: string | null;
     until: number;
@@ -2077,6 +2080,38 @@ export function SessionPaneView({
       restoreCleanup?.();
     };
   }, [activeSession?.id, defaultScrollToBottom, scrollStateKey]);
+
+  useLayoutEffect(() => {
+    const previousByKey = previousShowWaitingIndicatorByKeyRef.current;
+    const wasShowing = previousByKey[scrollStateKey] ?? false;
+    previousByKey[scrollStateKey] = showWaitingIndicator;
+
+    if (
+      wasShowing ||
+      !showWaitingIndicator ||
+      !activeSession ||
+      !isSessionTabActive ||
+      pane.viewMode !== "session"
+    ) {
+      return;
+    }
+
+    if (
+      !getTailFollowIntent() &&
+      paneScrollPositions[scrollStateKey]?.shouldStick !== true &&
+      !isMessageStackNearBottom()
+    ) {
+      return;
+    }
+
+    scrollToLatestMessage("auto", true, "bottom_follow");
+  }, [
+    activeSession,
+    isSessionTabActive,
+    pane.viewMode,
+    scrollStateKey,
+    showWaitingIndicator,
+  ]);
 
   useLayoutEffect(() => {
     if (!hasSessionFindQuery || !activeSessionSearchMatch) {

@@ -147,21 +147,23 @@ The child is a normal session with:
 - optional file ownership constraints
 - optional result-format instructions
 
-The child remains independently openable. TermAl should not prune its
-transcript.
+The child remains independently openable from the parent delegation card while
+the parent exists. TermAl omits delegated children from default session lists so
+reviewer fan-out does not clutter the sidebar.
 
 ### Retention And Cleanup
 
-Delegation children are durable ordinary session records for auditability and
-restart recovery, but default session lists omit sessions with
-`parentDelegationId`. Parent delegation cards and result links are the primary
-reopen affordance for child transcripts, so reviewer fan-out does not clutter the
-sidebar while preserving access to the full child session.
+Delegation children are durable ordinary session records while their parent
+exists, which preserves restart recovery and lets users reopen child transcripts
+from the parent card. The parent owns the child tree: deleting a parent session
+cascades deletion to its delegated child sessions and any delegated descendants,
+and tears down their runtimes.
 
-Open item: define a backend archive/prune policy for long-lived installations.
-Any storage-level cleanup must preserve delegation result packets, parent cards,
-transcript links, and an explicit way to reopen or export the child session on
-demand.
+The delegation record and result summary remain in backend state for lifecycle
+bookkeeping after parent deletion. Child transcripts and full result retrieval
+through parent-scoped routes end with the owning parent. Open item: define a
+later archive/export policy if long-lived installations need child transcripts
+or full result packets after the owning parent is deleted.
 
 ### Result Packet
 
