@@ -14,6 +14,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 
 struct FakeTelegramSender {
+    answered_callbacks: RefCell<Vec<(String, String)>>,
+    edited_messages: RefCell<Vec<(i64, i64, String)>>,
     fail_on_attempt: Option<usize>,
     send_attempts: Cell<usize>,
     sent_texts: RefCell<Vec<String>>,
@@ -22,6 +24,8 @@ struct FakeTelegramSender {
 impl FakeTelegramSender {
     fn new(fail_on_attempt: Option<usize>) -> Self {
         Self {
+            answered_callbacks: RefCell::new(Vec::new()),
+            edited_messages: RefCell::new(Vec::new()),
             fail_on_attempt,
             send_attempts: Cell::new(0),
             sent_texts: RefCell::new(Vec::new()),
@@ -50,6 +54,30 @@ impl TelegramMessageSender for FakeTelegramSender {
             },
             text: Some(text.to_owned()),
         })
+    }
+}
+
+impl TelegramDigestMessageSender for FakeTelegramSender {
+    fn edit_message(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        text: &str,
+        _reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+    ) -> Result<i64> {
+        self.edited_messages
+            .borrow_mut()
+            .push((chat_id, message_id, text.to_owned()));
+        Ok(message_id)
+    }
+}
+
+impl TelegramCallbackResponder for FakeTelegramSender {
+    fn answer_callback_query(&self, callback_query_id: &str, text: &str) -> Result<()> {
+        self.answered_callbacks
+            .borrow_mut()
+            .push((callback_query_id.to_owned(), text.to_owned()));
+        Ok(())
     }
 }
 
@@ -148,6 +176,36 @@ impl TelegramPromptClient for FakeTelegramPromptClient {
             .borrow_mut()
             .push((session_id.to_owned(), text.to_owned()));
         Ok(())
+    }
+}
+
+struct FakeTelegramActionClient {
+    dispatches: RefCell<Vec<(String, String)>>,
+    result: std::result::Result<ProjectDigestResponse, String>,
+}
+
+impl FakeTelegramActionClient {
+    fn failed(error: &str) -> Self {
+        Self {
+            dispatches: RefCell::new(Vec::new()),
+            result: Err(error.to_owned()),
+        }
+    }
+}
+
+impl TelegramActionClient for FakeTelegramActionClient {
+    fn dispatch_project_action(
+        &self,
+        project_id: &str,
+        action_id: &str,
+    ) -> Result<ProjectDigestResponse> {
+        self.dispatches
+            .borrow_mut()
+            .push((project_id.to_owned(), action_id.to_owned()));
+        match &self.result {
+            Ok(digest) => Ok(digest.clone()),
+            Err(error) => bail!("{error}"),
+        }
     }
 }
 
@@ -311,6 +369,63 @@ fn telegram_action_error_text_sanitizes_detail_and_points_to_status() {
     assert!(text.contains("Send /status"));
     assert!(text.contains("<redacted>"));
     assert!(!text.contains(&token));
+}
+
+#[test]
+fn telegram_callback_action_failure_answers_and_sends_error_without_digest_refresh() {
+    let telegram = FakeTelegramSender::new(None);
+    let token = telegram_redaction_token();
+    let termal =
+        FakeTelegramActionClient::failed(&format!("action is unavailable; bot token={token}"));
+    let config = telegram_test_config();
+    let mut state = TelegramBotState {
+        last_digest_hash: Some("previous-digest".to_owned()),
+        last_digest_message_id: Some(99),
+        ..TelegramBotState::default()
+    };
+
+    let changed = handle_telegram_callback_query(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        TelegramCallbackQuery {
+            id: "callback-1".to_owned(),
+            data: Some("ask-agent-to-commit".to_owned()),
+            message: Some(TelegramChatMessage {
+                message_id: 123,
+                chat: TelegramChat {
+                    id: 42,
+                    _kind: "private".to_owned(),
+                },
+                text: Some("Project digest".to_owned()),
+            }),
+        },
+    )
+    .expect("callback failure should be reported to the user");
+
+    assert!(!changed);
+    assert_eq!(
+        termal.dispatches.borrow().as_slice(),
+        &[("project-1".to_owned(), "ask-agent-to-commit".to_owned())]
+    );
+    assert_eq!(telegram.answered_callbacks.borrow().len(), 1);
+    let (_, callback_text) = &telegram.answered_callbacks.borrow()[0];
+    assert!(callback_text.contains("Ask Agent to Commit failed"));
+    assert!(callback_text.contains("action is unavailable"));
+    assert!(callback_text.contains("<redacted>"));
+    assert!(!callback_text.contains(&token));
+
+    let sent_texts = telegram.sent_texts.borrow();
+    assert_eq!(sent_texts.len(), 1);
+    assert!(sent_texts[0].contains("Could not run Ask Agent to Commit."));
+    assert!(sent_texts[0].contains("action is unavailable"));
+    assert!(sent_texts[0].contains("Send /status"));
+    assert!(sent_texts[0].contains("<redacted>"));
+    assert!(!sent_texts[0].contains(&token));
+    assert!(telegram.edited_messages.borrow().is_empty());
+    assert_eq!(state.last_digest_hash.as_deref(), Some("previous-digest"));
+    assert_eq!(state.last_digest_message_id, Some(99));
 }
 
 #[test]

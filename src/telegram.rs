@@ -1224,6 +1224,38 @@ impl TelegramMessageSender for TelegramApiClient {
     }
 }
 
+trait TelegramDigestMessageSender: TelegramMessageSender {
+    fn edit_message(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        text: &str,
+        reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+    ) -> Result<i64>;
+}
+
+impl TelegramDigestMessageSender for TelegramApiClient {
+    fn edit_message(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        text: &str,
+        reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+    ) -> Result<i64> {
+        TelegramApiClient::edit_message(self, chat_id, message_id, text, reply_markup)
+    }
+}
+
+trait TelegramCallbackResponder: TelegramDigestMessageSender {
+    fn answer_callback_query(&self, callback_query_id: &str, text: &str) -> Result<()>;
+}
+
+impl TelegramCallbackResponder for TelegramApiClient {
+    fn answer_callback_query(&self, callback_query_id: &str, text: &str) -> Result<()> {
+        TelegramApiClient::answer_callback_query(self, callback_query_id, text)
+    }
+}
+
 /// Represents TermAl API client.
 struct TermalApiClient {
     api_base_url: String,
@@ -1372,6 +1404,24 @@ impl TelegramPromptClient for TermalApiClient {
     fn send_session_message(&self, session_id: &str, text: &str) -> Result<()> {
         let _ = TermalApiClient::send_session_message(self, session_id, text)?;
         Ok(())
+    }
+}
+
+trait TelegramActionClient {
+    fn dispatch_project_action(
+        &self,
+        project_id: &str,
+        action_id: &str,
+    ) -> Result<ProjectDigestResponse>;
+}
+
+impl TelegramActionClient for TermalApiClient {
+    fn dispatch_project_action(
+        &self,
+        project_id: &str,
+        action_id: &str,
+    ) -> Result<ProjectDigestResponse> {
+        TermalApiClient::dispatch_project_action(self, project_id, action_id)
     }
 }
 
@@ -1708,8 +1758,8 @@ fn handle_telegram_message(
 
 /// Handles Telegram callback query.
 fn handle_telegram_callback_query(
-    telegram: &TelegramApiClient,
-    termal: &TermalApiClient,
+    telegram: &impl TelegramCallbackResponder,
+    termal: &impl TelegramActionClient,
     config: &TelegramBotConfig,
     state: &mut TelegramBotState,
     callback_query: TelegramCallbackQuery,
@@ -2890,7 +2940,7 @@ fn send_fresh_telegram_digest_from_response(
 
 /// Handles send or edit Telegram digest from response.
 fn send_or_edit_telegram_digest_from_response(
-    telegram: &TelegramApiClient,
+    telegram: &impl TelegramDigestMessageSender,
     config: &TelegramBotConfig,
     state: &mut TelegramBotState,
     chat_id: i64,
@@ -2909,7 +2959,7 @@ fn send_or_edit_telegram_digest_from_response(
 
 /// Handles edit or send Telegram digest.
 fn edit_or_send_telegram_digest(
-    telegram: &TelegramApiClient,
+    telegram: &impl TelegramDigestMessageSender,
     config: &TelegramBotConfig,
     chat_id: i64,
     message_id: Option<i64>,
