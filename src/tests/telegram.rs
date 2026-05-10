@@ -476,7 +476,7 @@ fn truncate_telegram_user_error_detail_respects_tiny_limits() {
 }
 
 #[test]
-fn telegram_sessions_renderer_lists_project_sessions_newest_first() {
+fn telegram_sessions_renderer_lists_active_project_sessions_first() {
     let state = TelegramStateSessionsResponse {
         projects: vec![TelegramStateProject {
             id: "project-1".to_owned(),
@@ -504,6 +504,13 @@ fn telegram_sessions_renderer_lists_project_sessions_newest_first() {
                 status: TelegramSessionStatus::Active,
                 message_count: 7,
             },
+            TelegramStateSession {
+                id: "session-3".to_owned(),
+                name: "Newer Idle".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Idle,
+                message_count: 3,
+            },
         ],
     };
 
@@ -512,6 +519,13 @@ fn telegram_sessions_renderer_lists_project_sessions_newest_first() {
     assert!(text.starts_with("Sessions for TermAl:\n- Current"));
     assert!(text.contains("id: session-2"));
     assert!(!text.contains("Working on the Telegram sessions list"));
+    assert!(
+        text.find("- Current")
+            .expect("active session should render")
+            < text
+                .find("- Newer Idle")
+                .expect("newer idle session should render")
+    );
     assert!(text.contains("- Older (idle, 2 messages)"));
     assert!(!text.contains("Other Project"));
 }
@@ -710,6 +724,64 @@ fn telegram_relay_iteration_drains_updates_before_one_digest_sync() {
             .filter(|event| event.as_str() == "digest:project-1")
             .count(),
         1
+    );
+}
+
+#[test]
+fn telegram_relay_iteration_skips_post_update_sync_after_prompt_refresh() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(telegram_project_digest(Some("session-1"))),
+            Ok(telegram_project_digest(Some("session-1"))),
+        ],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "baseline".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Existing reply".to_owned(),
+                }],
+            },
+        },
+    );
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+    let updates = vec![TelegramUpdate {
+        update_id: 20,
+        callback_query: None,
+        message: Some(TelegramChatMessage {
+            message_id: 8,
+            chat: TelegramChat {
+                id: 42,
+                _kind: "private".to_owned(),
+            },
+            text: Some("from chat".to_owned()),
+        }),
+    }];
+
+    let dirty = drain_telegram_updates_then_sync_digest(
+        &telegram, &termal, &config, &mut state, updates, &None,
+    );
+
+    assert!(dirty);
+    assert_eq!(state.next_update_id, Some(21));
+    assert_eq!(
+        termal.sent_prompts.borrow().as_slice(),
+        [("session-1".to_owned(), "from chat".to_owned())]
+    );
+    assert_eq!(
+        termal.digest_project_ids.borrow().as_slice(),
+        ["project-1".to_owned(), "project-1".to_owned()]
+    );
+    let events = termal.events.borrow();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.as_str() == "digest:project-1")
+            .count(),
+        2
     );
 }
 

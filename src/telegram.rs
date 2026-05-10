@@ -123,6 +123,7 @@ fn drain_telegram_updates_then_sync_digest(
     shutdown: &Option<Arc<AtomicBool>>,
 ) -> bool {
     let mut dirty = false;
+    let mut digest_synced_during_updates = false;
     for update in updates {
         if telegram_relay_shutdown_requested(shutdown) {
             break;
@@ -134,12 +135,15 @@ fn drain_telegram_updates_then_sync_digest(
         }
 
         match handle_telegram_update(telegram, termal, config, state, update) {
-            Ok(changed) => dirty |= changed,
+            Ok(outcome) => {
+                dirty |= outcome.dirty;
+                digest_synced_during_updates |= outcome.digest_synced;
+            }
             Err(err) => log_telegram_error("failed to handle update", &err),
         }
     }
 
-    if !telegram_relay_shutdown_requested(shutdown) {
+    if !digest_synced_during_updates && !telegram_relay_shutdown_requested(shutdown) {
         if let Some(chat_id) = effective_telegram_chat_id(config, state) {
             match sync_telegram_digest(telegram, termal, config, state, chat_id) {
                 Ok(changed) => dirty |= changed,
@@ -1634,20 +1638,49 @@ struct TelegramInlineKeyboardButton {
 }
 
 /// Handles Telegram update.
+#[derive(Clone, Copy, Debug, Default)]
+struct TelegramUpdateHandlingOutcome {
+    dirty: bool,
+    digest_synced: bool,
+}
+
+impl TelegramUpdateHandlingOutcome {
+    fn unsynced(dirty: bool) -> Self {
+        Self {
+            dirty,
+            digest_synced: false,
+        }
+    }
+
+    fn synced(dirty: bool) -> Self {
+        Self {
+            dirty,
+            digest_synced: true,
+        }
+    }
+}
+
 fn handle_telegram_update(
     telegram: &impl TelegramCallbackResponder,
     termal: &(impl TelegramPromptClient + TelegramActionClient),
     config: &TelegramBotConfig,
     state: &mut TelegramBotState,
     update: TelegramUpdate,
-) -> Result<bool> {
+) -> Result<TelegramUpdateHandlingOutcome> {
     if let Some(callback_query) = update.callback_query {
-        return handle_telegram_callback_query(telegram, termal, config, state, callback_query);
+        return handle_telegram_callback_query(telegram, termal, config, state, callback_query)
+            .map(|dirty| {
+                if dirty {
+                    TelegramUpdateHandlingOutcome::synced(dirty)
+                } else {
+                    TelegramUpdateHandlingOutcome::default()
+                }
+            });
     }
     if let Some(message) = update.message {
-        return handle_telegram_message(telegram, termal, config, state, message);
+        return handle_telegram_message_for_relay(telegram, termal, config, state, message);
     }
-    Ok(false)
+    Ok(TelegramUpdateHandlingOutcome::default())
 }
 
 /// Handles Telegram message.
@@ -1658,14 +1691,27 @@ fn handle_telegram_message(
     state: &mut TelegramBotState,
     message: TelegramChatMessage,
 ) -> Result<bool> {
+    Ok(
+        handle_telegram_message_for_relay(telegram, termal, config, state, message)?
+            .dirty,
+    )
+}
+
+fn handle_telegram_message_for_relay(
+    telegram: &impl TelegramMessageSender,
+    termal: &(impl TelegramPromptClient + TelegramActionClient),
+    config: &TelegramBotConfig,
+    state: &mut TelegramBotState,
+    message: TelegramChatMessage,
+) -> Result<TelegramUpdateHandlingOutcome> {
     let Some(text) = message.text.as_deref().map(str::trim).filter(|text| !text.is_empty()) else {
-        return Ok(false);
+        return Ok(TelegramUpdateHandlingOutcome::default());
     };
     let chat_id = message.chat.id;
 
     if effective_telegram_chat_id(config, state).is_none() {
         if telegram_command_mentions_other_bot(text, config.bot_username.as_deref()) {
-            return Ok(false);
+            return Ok(TelegramUpdateHandlingOutcome::default());
         }
         if matches!(
             parse_telegram_command_for_bot(text, config.bot_username.as_deref())
@@ -1680,32 +1726,34 @@ fn handle_telegram_message(
                 None,
             )?;
         }
-        return Ok(false);
+        return Ok(TelegramUpdateHandlingOutcome::default());
     }
 
     if effective_telegram_chat_id(config, state) != Some(chat_id) {
-        return Ok(false);
+        return Ok(TelegramUpdateHandlingOutcome::default());
     }
 
     if text.starts_with('/') {
         if telegram_command_mentions_other_bot(text, config.bot_username.as_deref()) {
-            return Ok(false);
+            return Ok(TelegramUpdateHandlingOutcome::default());
         }
         let Some(command) = parse_telegram_command_for_bot(text, config.bot_username.as_deref()) else {
             telegram.send_message(chat_id, &telegram_help_text(config, state), None)?;
-            return Ok(false);
+            return Ok(TelegramUpdateHandlingOutcome::default());
         };
 
         return match command.command {
             TelegramIncomingCommand::Start | TelegramIncomingCommand::Help => {
                 telegram.send_message(chat_id, &telegram_help_text(config, state), None)?;
-                Ok(false)
+                Ok(TelegramUpdateHandlingOutcome::default())
             }
             TelegramIncomingCommand::Status => {
                 send_fresh_telegram_digest(telegram, termal, config, state, chat_id)
+                    .map(TelegramUpdateHandlingOutcome::synced)
             }
             TelegramIncomingCommand::Projects => {
                 send_telegram_projects(telegram, termal, config, state, chat_id)
+                    .map(TelegramUpdateHandlingOutcome::unsynced)
             }
             TelegramIncomingCommand::Project => select_telegram_project(
                 telegram,
@@ -1714,9 +1762,11 @@ fn handle_telegram_message(
                 state,
                 chat_id,
                 command.args,
-            ),
+            )
+            .map(TelegramUpdateHandlingOutcome::unsynced),
             TelegramIncomingCommand::Sessions => {
                 send_telegram_project_sessions(telegram, termal, config, state, chat_id)
+                    .map(TelegramUpdateHandlingOutcome::unsynced)
             }
             TelegramIncomingCommand::Session => select_telegram_project_session(
                 telegram,
@@ -1725,7 +1775,8 @@ fn handle_telegram_message(
                 state,
                 chat_id,
                 command.args,
-            ),
+            )
+            .map(TelegramUpdateHandlingOutcome::unsynced),
             TelegramIncomingCommand::Action(action_id) => {
                 let (project_id, mut dirty) = resolve_telegram_active_project_id(config, state);
                 match termal.dispatch_project_action(&project_id, action_id.as_str()) {
@@ -1733,7 +1784,7 @@ fn handle_telegram_message(
                         dirty |= send_fresh_telegram_digest_from_response(
                             telegram, config, state, chat_id, &digest,
                         )?;
-                        Ok(dirty)
+                        Ok(TelegramUpdateHandlingOutcome::synced(dirty))
                     }
                     Err(err) => {
                         log_telegram_error("failed to dispatch Telegram action", &err);
@@ -1742,7 +1793,7 @@ fn handle_telegram_message(
                             &telegram_action_error_text(action_id, &err),
                             None,
                         )?;
-                        Ok(dirty)
+                        Ok(TelegramUpdateHandlingOutcome::unsynced(dirty))
                     }
                 }
             }
@@ -1758,15 +1809,15 @@ fn handle_telegram_message(
             ),
             None,
         )?;
-        return Ok(false);
+        return Ok(TelegramUpdateHandlingOutcome::default());
     }
 
     match forward_telegram_text_to_project(telegram, termal, config, state, chat_id, text) {
-        Ok(changed) => Ok(changed),
+        Ok(changed) => Ok(TelegramUpdateHandlingOutcome::synced(changed)),
         Err(err) => {
             log_telegram_error("failed to forward Telegram prompt", &err);
             telegram.send_message(chat_id, &telegram_prompt_error_text(&err), None)?;
-            Ok(false)
+            Ok(TelegramUpdateHandlingOutcome::default())
         }
     }
 }
@@ -3167,6 +3218,7 @@ fn render_telegram_project_sessions(
         .collect::<Vec<_>>();
     let has_more_sessions = sessions.len() > 12;
     sessions.reverse();
+    sessions.sort_by_key(|session| !matches!(session.status, TelegramSessionStatus::Active));
 
     if sessions.is_empty() {
         return format!(
