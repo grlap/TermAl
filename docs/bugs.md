@@ -204,19 +204,6 @@ When the async action settles after the effect increments the generation, the re
 **Proposal:**
 - After N failed first-chunk attempts for the same `(message_id, chunk_index)`, advance the cursor anyway and surface a "[chunk N skipped: send failed]" line in chat.
 
-## Armed Telegram delivery failure can leak digest-primary fallback into the same chat
-
-**Severity:** Low - `src/telegram.rs:1668-1692`. `forward_relevant_assistant_messages` suppresses digest-primary fallback only after an armed forward sends visible content. If the armed session hits a first-chunk delivery error, it logs the failure but leaves `armed_sent_visible_content=false`, so an unrelated `primary_session_id` can still forward in the same poll.
-
-**Current behavior:**
-- Armed delivery failure marks the relay state dirty and logs the error.
-- `armed_sent_visible_content` remains false.
-- Digest-primary fallback can still forward another session's assistant text to the Telegram chat.
-
-**Proposal:**
-- Track "armed delivery attempted and failed" separately from "armed session only baselined/no visible content".
-- Suppress digest-primary fallback after an armed delivery error.
-
 ## Telegram tests accumulate temp files in `$TMPDIR`
 
 **Severity:** Note - `src/tests/telegram.rs:148-159`. `telegram_test_config()` writes `state_path` per test but never cleans up. Files accumulate in `$TMPDIR` across test runs.
@@ -3575,8 +3562,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   render the real composer/overview path or assert the real composer emits `data-conversation-composer-input`, so `ConversationOverviewRail` deferral does not depend only on synthetic test fixtures.
 - [ ] P2: Cover first-chunk Telegram forward failure:
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
-- [ ] P2: Cover armed-delivery failure suppressing digest-primary fallback:
-  make an armed session fail before sending visible content and assert an unrelated digest primary is not forwarded in the same poll.
 - [ ] P2: Cover emitted OrchestratorsUpdated localized remote ownership:
   drive remote delta application end-to-end and assert the emitted localized sessions clear inbound `remote_id` before replay-key normalization/fingerprinting.
 - [ ] P2: Cover pinned live-tail queued prompt order:

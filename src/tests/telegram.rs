@@ -2596,6 +2596,82 @@ fn telegram_forwarder_suppresses_digest_primary_after_visible_armed_footer_send_
 }
 
 #[test]
+fn telegram_forwarder_suppresses_digest_primary_after_armed_first_chunk_send_error() {
+    let telegram = FakeTelegramSender::new(Some(1));
+    let termal = FakeTelegramSessionReaderById {
+        responses: HashMap::from([
+            (
+                "session-1".to_owned(),
+                TelegramSessionFetchResponse {
+                    session: TelegramSessionFetchSession {
+                        status: TelegramSessionStatus::Idle,
+                        messages: vec![TelegramSessionFetchMessage::Text {
+                            id: "message-1".to_owned(),
+                            author: "assistant".to_owned(),
+                            text: "Armed reply".to_owned(),
+                        }],
+                    },
+                },
+            ),
+            (
+                "session-2".to_owned(),
+                TelegramSessionFetchResponse {
+                    session: TelegramSessionFetchSession {
+                        status: TelegramSessionStatus::Idle,
+                        messages: vec![
+                            TelegramSessionFetchMessage::Text {
+                                id: "baseline".to_owned(),
+                                author: "assistant".to_owned(),
+                                text: "Baseline".to_owned(),
+                            },
+                            TelegramSessionFetchMessage::Text {
+                                id: "message-2".to_owned(),
+                                author: "assistant".to_owned(),
+                                text: "Digest primary reply".to_owned(),
+                            },
+                        ],
+                    },
+                },
+            ),
+        ]),
+    };
+    let mut state = TelegramBotState {
+        forward_next_assistant_message_session_ids: vec!["session-1".to_owned()],
+        forward_next_assistant_message_session_id: Some("session-1".to_owned()),
+        assistant_forwarding_cursors: HashMap::from([(
+            "session-2".to_owned(),
+            TelegramAssistantForwardingCursor {
+                message_id: Some("baseline".to_owned()),
+                text_chars: Some("Baseline".chars().count()),
+                resend_if_grown: false,
+                sent_chunks: None,
+                baseline_while_active: false,
+            },
+        )]),
+        ..TelegramBotState::default()
+    };
+
+    let changed =
+        forward_relevant_assistant_messages(&telegram, &termal, &mut state, 42, Some("session-2"));
+
+    assert!(changed);
+    assert!(telegram.sent_texts.borrow().is_empty());
+    assert_eq!(telegram.send_attempts.get(), 1);
+    assert!(
+        state
+            .assistant_forwarding_cursors
+            .get("session-2")
+            .is_some_and(|cursor| cursor.message_id.as_deref() == Some("baseline"))
+    );
+    assert!(
+        state
+            .forward_next_assistant_message_session_ids
+            .iter()
+            .any(|session_id| session_id == "session-1")
+    );
+}
+
+#[test]
 fn telegram_forwarder_resumes_long_armed_reply_after_content_chunk_failure() {
     let long_reply = format!(
         "{}{}",

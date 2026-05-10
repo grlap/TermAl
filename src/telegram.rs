@@ -1932,10 +1932,11 @@ fn forward_relevant_assistant_messages(
     primary_session_id: Option<&str>,
 ) -> bool {
     let mut dirty = false;
-    // Suppress digest-primary forwarding only when an armed session already
-    // sent content visible to Telegram in this poll. Baseline-only state
-    // changes should still allow the primary digest session to speak.
-    let mut armed_sent_visible_content = false;
+    // Suppress digest-primary forwarding when an armed session either sent
+    // visible content or hit a Telegram delivery failure in this poll.
+    // Baseline-only state changes should still allow the primary digest
+    // session to speak.
+    let mut suppress_digest_primary = false;
     let mut checked_session_ids = BTreeSet::new();
     let armed_session_ids = forward_next_assistant_message_session_ids(state);
 
@@ -1946,7 +1947,8 @@ fn forward_relevant_assistant_messages(
             Ok(outcome) => {
                 outcome.debug_assert_invariants();
                 dirty |= outcome.dirty;
-                armed_sent_visible_content |= outcome.sent_visible_content;
+                suppress_digest_primary |=
+                    outcome.sent_visible_content || outcome.delivery_failed;
             }
             Err(err) => {
                 dirty = true;
@@ -1956,7 +1958,7 @@ fn forward_relevant_assistant_messages(
     }
 
     if let Some(session_id) = primary_session_id
-        .filter(|id| !armed_sent_visible_content && !checked_session_ids.contains(*id))
+        .filter(|id| !suppress_digest_primary && !checked_session_ids.contains(*id))
     {
         merge_assistant_forward_result(
             &mut dirty,
@@ -2118,6 +2120,7 @@ struct TelegramAssistantForwardingPlan {
 struct TelegramAssistantForwardingOutcome {
     dirty: bool,
     sent_visible_content: bool,
+    delivery_failed: bool,
 }
 
 impl TelegramAssistantForwardingOutcome {
@@ -2125,6 +2128,10 @@ impl TelegramAssistantForwardingOutcome {
         debug_assert!(
             !self.sent_visible_content || self.dirty,
             "visible Telegram forwarding progress must be persisted"
+        );
+        debug_assert!(
+            !self.delivery_failed || self.dirty,
+            "Telegram delivery failures must force state persistence"
         );
     }
 }
@@ -2262,6 +2269,7 @@ fn forward_new_assistant_message_outcome(
                 TelegramAssistantForwardingCursor::active_baseline(latest),
             ),
             sent_visible_content: false,
+            delivery_failed: false,
         });
     }
 
@@ -2308,6 +2316,7 @@ fn forward_new_assistant_message_outcome(
                 return Ok(TelegramAssistantForwardingOutcome {
                     dirty,
                     sent_visible_content: false,
+                    delivery_failed: false,
                 });
             }
         } else {
@@ -2319,6 +2328,7 @@ fn forward_new_assistant_message_outcome(
                     TelegramAssistantForwardingCursor::from_latest(latest, false),
                 ),
                 sent_visible_content: false,
+                delivery_failed: false,
             });
         }
     }
@@ -2368,6 +2378,7 @@ fn forward_new_assistant_message_outcome(
         return Ok(TelegramAssistantForwardingOutcome {
             dirty: changed || cleared,
             sent_visible_content: false,
+            delivery_failed: false,
         });
     }
 
@@ -2419,6 +2430,7 @@ fn forward_new_assistant_message_outcome(
         return Ok(TelegramAssistantForwardingOutcome {
             dirty: cleared,
             sent_visible_content: false,
+            delivery_failed: false,
         });
     }
 
@@ -2440,17 +2452,22 @@ fn forward_new_assistant_message_outcome(
             };
             for (chunk_index, chunk) in chunks.iter().enumerate().skip(resume_sent_chunks) {
                 if let Err(err) = telegram.send_message(chat_id, chunk, None) {
+                    log_telegram_error("failed to forward assistant message", &err);
                     if sent_visible_content {
-                        log_telegram_error("failed to forward assistant message", &err);
                         // Remaining entries in `to_forward` are rediscovered on
                         // the next poll because the cursor advanced only through
                         // the last successfully forwarded message/chunk.
                         return Ok(TelegramAssistantForwardingOutcome {
-                            dirty: changed,
+                            dirty: true,
                             sent_visible_content: true,
+                            delivery_failed: true,
                         });
                     }
-                    return Err(err);
+                    return Ok(TelegramAssistantForwardingOutcome {
+                        dirty: true,
+                        sent_visible_content: false,
+                        delivery_failed: true,
+                    });
                 }
                 sent_visible_content = true;
                 let sent_chunks = chunk_index + 1;
@@ -2512,8 +2529,9 @@ fn forward_new_assistant_message_outcome(
         ) {
             log_telegram_error("failed to forward assistant message footer", &err);
             return Ok(TelegramAssistantForwardingOutcome {
-                dirty: changed,
+                dirty: true,
                 sent_visible_content: true,
+                delivery_failed: true,
             });
         }
     }
@@ -2521,6 +2539,7 @@ fn forward_new_assistant_message_outcome(
     Ok(TelegramAssistantForwardingOutcome {
         dirty: changed,
         sent_visible_content,
+        delivery_failed: false,
     })
 }
 
