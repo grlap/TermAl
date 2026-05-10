@@ -329,18 +329,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Hoist `paneMessageContentSignaturesRef` to App.tsx and pass it through alongside `paneContentSignaturesRef`.
 - Or document why the divergence is intentional with a header comment.
 
-## `latest_project_prompt_target_session` selects without health check
-
-**Severity:** Note - `src/api.rs:525-530`. `latest_project_prompt_target_session` selects the latest non-delegation session regardless of `status`, so a parent session in `Error` will be chosen as the prompt target while a healthy delegation child sits idle. Callers downstream of `dispatch_project_action` will retry against an errored session.
-
-**Current behavior:**
-- Picks structurally rather than by health.
-- Errored parent overrides healthy non-parent.
-
-**Proposal:**
-- Document the structural-vs-functional design trade-off in the function `///` doc.
-- Or additionally filter on `status != Error`.
-
 ## 3 `style.height` writes per resize cause unnecessary layout thrash
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1726-1729`. `textarea.style.height = previousMeasuredHeight + "px"` reassigns the height immediately after setting it to `Math.max(minHeight, 1)`. The `void textarea.offsetHeight` reflow forces layout twice per resize when only one height is needed.

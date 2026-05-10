@@ -396,6 +396,37 @@ fn project_digest_routes_error_fix_it_to_non_delegation_session() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn project_digest_prompt_target_skips_errored_parent_sessions() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!(
+        "termal-project-error-target-skip-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    let project_id = create_test_project(&state, &root, "Error Target Skip Project");
+    let healthy_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let errored_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let errored_index = inner.find_session_index(&errored_session_id).unwrap();
+        inner.sessions[errored_index].session.status = SessionStatus::Error;
+        state.commit_locked(&mut inner).unwrap();
+    }
+    let sessions = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner.sessions.clone()
+    };
+
+    let target = latest_project_prompt_target_session(&sessions)
+        .expect("healthy parent session should remain targetable");
+
+    assert_eq!(target.session.id.as_str(), healthy_session_id.as_str());
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 // Pins that dispatching the `approve` action on a project finds the
 // session with the pending Codex approval, forwards an accept response
 // to that runtime on the correct `request_id`, and then returns a

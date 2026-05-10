@@ -531,7 +531,10 @@ fn latest_project_prompt_target_session(sessions: &[SessionRecord]) -> Option<&S
     sessions
         .iter()
         .rev()
-        .find(|record| record.session.parent_delegation_id.is_none())
+        .find(|record| {
+            record.session.parent_delegation_id.is_none()
+                && record.session.status != SessionStatus::Error
+        })
 }
 
 /// Runs blocking API.
