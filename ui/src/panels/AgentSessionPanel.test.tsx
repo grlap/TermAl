@@ -9613,18 +9613,16 @@ describe("AgentSessionPanelFooter", () => {
       drainAnimationFrames();
 
       expect(textarea.style.height).toBe("96px");
-      expect(heightWrites).toContainEqual({
-        value: "1px",
-        transition: "none",
-      });
-      expect(heightWrites).toContainEqual({
-        value: "96px",
-        transition: "none",
-      });
-      expect(heightWrites).not.toContainEqual({
-        value: "96px",
-        transition: "",
-      });
+      expect(heightWrites).toEqual([
+        {
+          value: "1px",
+          transition: "none",
+        },
+        {
+          value: "96px",
+          transition: "none",
+        },
+      ]);
     } finally {
       act(() => {
         unmount?.();

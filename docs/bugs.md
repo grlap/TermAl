@@ -279,18 +279,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Consider splitting once the test grows further.
 - Current 6-in-1 is acceptable but the pattern should not expand.
 
-## Composer height test asserts on `transition: "none"` writes without ordering pin
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7789-7950`. The "keeps multiline composer height steady when deleting text inside a line" test asserts `heightWrites.toContainEqual({ value: "1px", transition: "none" })` and `heightWrites.toContainEqual({ value: "96px", transition: "none" })`. The full ordering is not validated, so a regression that re-orders the writes (e.g., setting `96px` first and then `1px`) would still pass even though the visible behavior would differ.
-
-**Current behavior:**
-- `toContainEqual` matches in any order.
-- A regression that flipped write order would pass.
-
-**Proposal:**
-- Assert on the full `heightWrites` array order, not just `toContainEqual`.
-- Or use `toEqual([...])` with the full expected sequence.
-
 ## `SessionPaneView` pending-prompt scroll exemption misses `showWaitingIndicator` dependency
 
 **Severity:** Low - `ui/src/SessionPaneView.tsx:2035`. The scroll effect now checks `showWaitingIndicator` inside the `onlyPendingPromptsChanged` branch, but the effect dependency list does not include `showWaitingIndicator`.
