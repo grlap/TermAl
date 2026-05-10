@@ -3152,6 +3152,10 @@ fn truncate_telegram_user_error_detail(detail: &str, max_chars: usize) -> String
         return trimmed.to_owned();
     }
 
+    if max_chars < 3 {
+        return trimmed.chars().take(max_chars).collect();
+    }
+
     let mut truncated = trimmed.chars().take(max_chars.saturating_sub(3)).collect::<String>();
     truncated.push_str("...");
     truncated

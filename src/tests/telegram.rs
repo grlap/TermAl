@@ -301,6 +301,15 @@ fn telegram_prompt_error_text_sanitizes_and_truncates_detail() {
 }
 
 #[test]
+fn truncate_telegram_user_error_detail_respects_tiny_limits() {
+    assert_eq!(truncate_telegram_user_error_detail("abcdef", 0), "");
+    assert_eq!(truncate_telegram_user_error_detail("abcdef", 1), "a");
+    assert_eq!(truncate_telegram_user_error_detail("abcdef", 2), "ab");
+    assert_eq!(truncate_telegram_user_error_detail("abcdef", 3), "...");
+    assert_eq!(truncate_telegram_user_error_detail("abcdef", 4), "a...");
+}
+
+#[test]
 fn telegram_sessions_renderer_lists_project_sessions_newest_first() {
     let state = TelegramStateSessionsResponse {
         projects: vec![TelegramStateProject {

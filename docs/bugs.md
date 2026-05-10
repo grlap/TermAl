@@ -417,17 +417,6 @@ A future server adds a new status variant (`"queued"`, `"timing_out"`) silently 
 - Document the structural-vs-functional design trade-off in the function `///` doc.
 - Or additionally filter on `status != Error`.
 
-## `truncate_telegram_text_chars` produces output longer than `max_chars` when `max_chars < 3`
-
-**Severity:** Low - `src/telegram.rs:2275-2285`. For `max_chars = 2`, the function returns `".."` + `"."` = `"..."` (3 chars) instead of `<= 2` chars. Current call sites use 96/180/240, so no immediate impact, but the helper's contract is broken on small inputs.
-
-**Current behavior:**
-- Ellipsis suffix unconditionally appended after truncation.
-- For `max_chars < 3`, output exceeds the limit.
-
-**Proposal:**
-- Branch on `max_chars >= 3` to apply the ellipsis suffix and otherwise return at most `max_chars` characters.
-
 ## 3 `style.height` writes per resize cause unnecessary layout thrash
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1726-1729`. `textarea.style.height = previousMeasuredHeight + "px"` reassigns the height immediately after setting it to `Math.max(minHeight, 1)`. The `void textarea.offsetHeight` reflow forces layout twice per resize when only one height is needed.
