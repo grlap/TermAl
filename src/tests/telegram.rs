@@ -108,6 +108,7 @@ struct FakeTelegramPromptClient {
     digests: RefCell<VecDeque<std::result::Result<ProjectDigestResponse, String>>>,
     digest_project_ids: RefCell<Vec<String>>,
     session_response: TelegramSessionFetchResponse,
+    state_session_reads: Cell<usize>,
     state_sessions: TelegramStateSessionsResponse,
     send_error: Option<String>,
     sent_prompts: RefCell<Vec<(String, String)>>,
@@ -122,6 +123,7 @@ impl FakeTelegramPromptClient {
             digests: RefCell::new(VecDeque::from(digests)),
             digest_project_ids: RefCell::new(Vec::new()),
             session_response,
+            state_session_reads: Cell::new(0),
             state_sessions: TelegramStateSessionsResponse {
                 projects: Vec::new(),
                 sessions: Vec::new(),
@@ -165,6 +167,8 @@ impl TelegramPromptClient for FakeTelegramPromptClient {
     }
 
     fn get_state_sessions(&self) -> Result<TelegramStateSessionsResponse> {
+        self.state_session_reads
+            .set(self.state_session_reads.get() + 1);
         Ok(self.state_sessions.clone())
     }
 
@@ -176,6 +180,16 @@ impl TelegramPromptClient for FakeTelegramPromptClient {
             .borrow_mut()
             .push((session_id.to_owned(), text.to_owned()));
         Ok(())
+    }
+}
+
+impl TelegramActionClient for FakeTelegramPromptClient {
+    fn dispatch_project_action(
+        &self,
+        _project_id: &str,
+        _action_id: &str,
+    ) -> Result<ProjectDigestResponse> {
+        bail!("unexpected fake action dispatch")
     }
 }
 
@@ -529,13 +543,21 @@ fn telegram_state_sessions_response_decodes_statuses_as_enum() {
     let state: TelegramStateSessionsResponse = serde_json::from_value(serde_json::json!({
         "projects": [],
         "sessions": [
-            { "id": "session-active", "name": "Active", "status": "active" },
+            {
+                "id": "session-active",
+                "name": "Active",
+                "projectId": "project-1",
+                "status": "active",
+                "messageCount": 7
+            },
             { "id": "session-future", "name": "Future", "status": "queued" }
         ]
     }))
     .expect("state projection should decode");
 
     assert_eq!(state.sessions[0].status, TelegramSessionStatus::Active);
+    assert_eq!(state.sessions[0].project_id.as_deref(), Some("project-1"));
+    assert_eq!(state.sessions[0].message_count, 7);
     assert_eq!(state.sessions[1].status, TelegramSessionStatus::Unknown);
     assert_eq!(
         telegram_state_session_status_label(&state.sessions[1].status),
@@ -556,6 +578,59 @@ fn telegram_sessions_renderer_handles_empty_project() {
         text,
         "No sessions are attached to project `project-1` yet. Start one in TermAl first."
     );
+}
+
+#[test]
+fn telegram_sessions_slash_command_reads_state_and_sends_rendered_list() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![TelegramStateSession {
+            id: "session-1".to_owned(),
+            name: "Current".to_owned(),
+            project_id: Some("project-1".to_owned()),
+            status: TelegramSessionStatus::Active,
+            message_count: 3,
+        }],
+    });
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+
+    let changed = handle_telegram_message(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        TelegramChatMessage {
+            message_id: 7,
+            chat: TelegramChat {
+                id: 42,
+                _kind: "private".to_owned(),
+            },
+            text: Some("/sessions".to_owned()),
+        },
+    )
+    .expect("sessions command should route through state projection");
+
+    assert!(!changed);
+    assert_eq!(termal.state_session_reads.get(), 1);
+    let sent_texts = telegram.sent_texts.borrow();
+    assert_eq!(sent_texts.len(), 1);
+    assert!(sent_texts[0].contains("Sessions for TermAl:"));
+    assert!(sent_texts[0].contains("- Current (active, 3 messages)"));
+    assert!(sent_texts[0].contains("id: session-1"));
 }
 
 #[test]

@@ -1637,8 +1637,8 @@ fn handle_telegram_update(
 
 /// Handles Telegram message.
 fn handle_telegram_message(
-    telegram: &TelegramApiClient,
-    termal: &TermalApiClient,
+    telegram: &impl TelegramMessageSender,
+    termal: &(impl TelegramPromptClient + TelegramActionClient),
     config: &TelegramBotConfig,
     state: &mut TelegramBotState,
     message: TelegramChatMessage,

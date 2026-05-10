@@ -3564,8 +3564,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
   cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
-- [ ] P2: Cover Telegram `/sessions` state contract and command dispatch:
-  add a serde sample for the `/api/state` projection (`projectId`, `messageCount`) and a command-path test proving `/sessions` calls the state endpoint and sends the rendered list.
 - [ ] P2: Add `messageCreatedDeltaIsNoOp` semantic-change negatives:
   keep id/index/preview/count/stamp equal while changing message payload and assert a material apply; include same-id pending prompt cleanup coverage.
 - [ ] P2: Add near-bottom prompt-send early-return scroll coverage:
