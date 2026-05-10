@@ -2777,6 +2777,29 @@ fn telegram_assistant_forwarding_legacy_cursor_does_not_leak_to_other_session() 
 }
 
 #[test]
+fn telegram_assistant_forwarding_legacy_cursor_does_not_request_resend() {
+    let state = TelegramBotState {
+        last_forwarded_assistant_message_id: Some("legacy-message".to_owned()),
+        last_forwarded_assistant_message_text_chars: Some("Legacy text".chars().count()),
+        ..TelegramBotState::default()
+    };
+
+    let cursor = resolve_assistant_forwarding_cursor(
+        &state,
+        "session-1",
+        &[TelegramSessionFetchMessage::Text {
+            id: "legacy-message".to_owned(),
+            author: "assistant".to_owned(),
+            text: "Legacy text has grown".to_owned(),
+        }],
+    );
+
+    assert_eq!(cursor.message_id.as_deref(), Some("legacy-message"));
+    assert_eq!(cursor.text_chars, Some("Legacy text".chars().count()));
+    assert!(!cursor.resend_if_grown);
+}
+
+#[test]
 fn telegram_session_cursor_updates_do_not_clobber_legacy_mirror() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramSessionReader {

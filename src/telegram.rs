@@ -1995,7 +1995,7 @@ fn resolve_assistant_forwarding_cursor(
             return TelegramAssistantForwardingCursor {
                 message_id: state.last_forwarded_assistant_message_id.clone(),
                 text_chars: state.last_forwarded_assistant_message_text_chars,
-                resend_if_grown: state.last_forwarded_assistant_message_id.is_some(),
+                resend_if_grown: false,
                 sent_chunks: None,
                 baseline_while_active: false,
             };

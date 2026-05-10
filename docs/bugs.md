@@ -254,17 +254,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Extract the active-baseline transition into a helper `transition_active_baseline_to_settled` that returns either the new cursor + position or an `OutcomeShortCircuit`.
 
-## `resend_if_grown` fabricated as `true` in legacy-mirror fallback
-
-**Severity:** Low - `src/telegram.rs:1660-1665`. In the per-session cursor fallback, `resend_if_grown: state.last_forwarded_assistant_message_id.is_some()` derives a per-session resend flag from a global mirror that may belong to an unrelated session. Setting it to `true` for a session that has no real cursor means a spurious id collision could trigger a complete re-forward of the wrong message.
-
-**Current behavior:**
-- Fallback synthesizes `resend_if_grown: true` from a global signal.
-- Per-session intent silently mis-applied.
-
-**Proposal:**
-- For the fallback, hard-code `resend_if_grown: false`.
-
 ## `assistant_forwarding_cursors` HashMap never reaped on session deletion
 
 **Severity:** Low - `src/telegram.rs:392-395`. The new HashMap has no eviction/cleanup tied to session deletion; entries accumulate indefinitely in `~/.termal/telegram-bot.json`. A long-lived install accumulates cursor entries for every Telegram-touched session ever, including deleted ones.
