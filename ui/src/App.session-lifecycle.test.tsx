@@ -2354,7 +2354,12 @@ describe("App session lifecycle", () => {
           eventSource.dispatchNamedEvent("state", {
             revision: 1,
             preferences: {
+              defaultCodexModel: "default",
+              defaultClaudeModel: "default",
+              defaultCursorModel: "default",
+              defaultGeminiModel: "default",
               defaultCodexReasoningEffort: "medium",
+              defaultClaudeApprovalMode: "ask",
               defaultClaudeEffort: "default",
               remotes,
             },
@@ -2406,7 +2411,12 @@ describe("App session lifecycle", () => {
           eventSource.dispatchNamedEvent("state", {
             revision: 2,
             preferences: {
+              defaultCodexModel: "default",
+              defaultClaudeModel: "default",
+              defaultCursorModel: "default",
+              defaultGeminiModel: "default",
               defaultCodexReasoningEffort: "medium",
+              defaultClaudeApprovalMode: "ask",
               defaultClaudeEffort: "default",
               remotes,
             },
@@ -2497,7 +2507,12 @@ describe("App session lifecycle", () => {
           eventSource.dispatchNamedEvent("state", {
             revision: 1,
             preferences: {
+              defaultCodexModel: "default",
+              defaultClaudeModel: "default",
+              defaultCursorModel: "default",
+              defaultGeminiModel: "default",
               defaultCodexReasoningEffort: "medium",
+              defaultClaudeApprovalMode: "ask",
               defaultClaudeEffort: "default",
               remotes,
             },

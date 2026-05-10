@@ -174,7 +174,6 @@ export type SpawnReviewerBatchResumeWaitResult =
   | {
       outcome: "scheduled";
       wait: DelegationWaitResponse["wait"];
-      queuedResume: boolean;
       resumePromptQueued: boolean;
       resumeDispatchRequested: boolean;
       revision: number;
@@ -530,7 +529,6 @@ async function scheduleReviewerBatchResumeWait(
     return {
       outcome: "scheduled",
       wait: response.wait,
-      queuedResume: response.queuedResume,
       resumePromptQueued: response.resumePromptQueued,
       resumeDispatchRequested: response.resumeDispatchRequested,
       revision: response.revision,

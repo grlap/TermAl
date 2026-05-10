@@ -232,7 +232,6 @@ fn delegation_wait_all_queues_consolidated_parent_resume_after_children_finish()
             },
         )
         .expect("wait should be scheduled");
-    assert!(!wait.queued_resume);
     assert!(!wait.resume_prompt_queued);
     assert!(!wait.resume_dispatch_requested);
     let snapshot = state.snapshot();
@@ -355,10 +354,9 @@ fn already_terminal_delegation_wait_reports_queued_prompt_without_dispatch_for_b
         .expect("already-terminal delegation wait should be accepted");
 
     assert!(
-        wait.queued_resume,
-        "queuedResume should mean the parent resume prompt was queued"
+        wait.resume_prompt_queued,
+        "resumePromptQueued should mean the parent resume prompt was queued"
     );
-    assert!(wait.resume_prompt_queued);
     assert!(
         !wait.resume_dispatch_requested,
         "active parents should keep the queued prompt pending"
@@ -419,7 +417,6 @@ fn already_terminal_delegation_wait_reports_dispatch_for_idle_parent() {
         )
         .expect("already-terminal delegation wait should be accepted");
 
-    assert!(wait.queued_resume);
     assert!(wait.resume_prompt_queued);
     assert!(wait.resume_dispatch_requested);
 }
@@ -496,7 +493,6 @@ fn create_delegation_wait_reports_queue_result_for_returned_wait_only() {
         )
         .expect("returned wait should be accepted");
 
-    assert!(wait.queued_resume);
     assert!(wait.resume_prompt_queued);
     assert!(
         !wait.resume_dispatch_requested,
@@ -533,7 +529,7 @@ fn removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason()
         )
         .expect("wait should be scheduled");
     assert!(
-        !wait.queued_resume,
+        !wait.resume_prompt_queued,
         "running child should leave the wait pending"
     );
     let second_wait = state
@@ -547,7 +543,7 @@ fn removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason()
         )
         .expect("second wait should be scheduled");
     assert!(
-        !second_wait.queued_resume,
+        !second_wait.resume_prompt_queued,
         "running child should leave the second wait pending"
     );
     let wait_ids = BTreeSet::from([wait.wait.id.clone(), second_wait.wait.id.clone()]);

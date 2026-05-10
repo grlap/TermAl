@@ -342,8 +342,11 @@ Required contract:
   is present.
 - The backend returns the resolved delegation prompt plus command-derived
   defaults such as `mode`, `title`, and `writePolicy`. The policy source is
-  trusted `metadata.termal` frontmatter on the command or future `SKILL.md`,
-  not hard-coded command names.
+  `metadata.termal` frontmatter, not hard-coded command names. The target trust
+  boundary is TermAl-owned command or future `SKILL.md` metadata; the current
+  implementation still accepts project-local `.claude/commands/*.md` metadata
+  that passes the source/name gate, and tightening that is tracked in
+  `docs/bugs.md`.
 - `spawn_delegation` receives the already-resolved prompt and the resolver's
   write policy. React components must not special-case command names such as
   `review-local`.
@@ -468,6 +471,13 @@ wrapper diagnostics:
 - `pollIntervalMs must be at least <MIN_DELEGATION_WAIT_INTERVAL_MS>ms`
 - `timeoutMs must be no greater than <MAX_DELEGATION_WAIT_TIMEOUT_MS>ms`
 
+Backend-scheduled resume wait failures may surface these sanitized backend
+messages through `DelegationResumeWaitFailurePacket`:
+
+- `delegation wait accepts at most <MAX_DELEGATION_WAIT_IDS> delegation ids`
+- `delegation wait title must be at most <MAX_DELEGATION_TITLE_CHARS> characters`
+- `delegation <id> does not belong to parent session <parentSessionId>`
+
 Use the exported constants from `ui/src/delegation-commands.ts` as the numeric
 source of truth. Angle-bracket placeholders above interpolate these values in
 runtime strings:
@@ -519,6 +529,9 @@ Safety limits for agent-facing tools:
   names stay metadata-sized and are not a prompt-sized side channel
 - explicit delegation model names are capped at 200 characters because they are
   persisted and echoed in summaries as metadata
+- app-level default model preferences are also capped at 200 characters, and a
+  blank value or `default` resets the preference to the selected agent's built-in
+  default behavior
 - omitted or blank delegation `model` values use the selected agent's app-level
   default model preference; explicit delegation models still override that
   preference for the child only
@@ -547,10 +560,9 @@ parent session state.
 render the parent waiting state. Wait records are removed from the snapshot when
 they are consumed. The synchronous `DelegationWaitResponse` still returns the
 created wait even if it is instantly satisfied and consumed by a follow-up
-revision. `queuedResume` is an alias for `resumePromptQueued`: it means TermAl
-queued a parent resume prompt. `resumeDispatchRequested` is separate and only
-means that the parent was idle enough for TermAl to dispatch that queued prompt
-immediately.
+revision. `resumePromptQueued` means TermAl queued a parent resume prompt.
+`resumeDispatchRequested` is separate and only means that the parent was idle
+enough for TermAl to dispatch that queued prompt immediately.
 
 Delegation lifecycle changes should be revisioned delta events so normal SSE
 gap detection and `/api/state` repair keep working:
@@ -611,6 +623,17 @@ type DelegationWritePolicy =
   | { kind: "readOnly" }
   | { kind: "sharedWorktree"; ownedPaths: string[] }
   | { kind: "isolatedWorktree"; ownedPaths: string[]; worktreePath: string };
+
+type DelegationWritePolicyRequest =
+  | { kind: "readOnly" }
+  | { kind: "sharedWorktree"; ownedPaths: string[] }
+  | {
+      kind: "isolatedWorktree";
+      ownedPaths: string[];
+      // Optional in requests/defaults; the backend generates a TermAl-owned
+      // worktree path before persisting the delegation record.
+      worktreePath?: string;
+    };
 
 type DelegationRecord = {
   id: string;
@@ -716,7 +739,7 @@ type CreateDelegationRequest = {
   agent?: AgentType;
   model?: string;
   mode?: DelegationMode;
-  writePolicy?: DelegationWritePolicy;
+  writePolicy?: DelegationWritePolicyRequest;
 };
 
 type SpawnReviewerBatchItem = Omit<CreateDelegationRequest, "mode" | "writePolicy">;
@@ -747,11 +770,18 @@ type StateResponse = {
   delegationWaits?: DelegationWaitRecord[];
 };
 
+type DelegationWaitResponse = {
+  revision: number;
+  wait: DelegationWaitRecord;
+  resumePromptQueued: boolean;
+  resumeDispatchRequested: boolean;
+  serverInstanceId: string;
+};
+
 type SpawnReviewerBatchResumeWaitResult =
   | {
       outcome: "scheduled";
       wait: DelegationWaitRecord;
-      queuedResume: boolean;
       resumePromptQueued: boolean;
       resumeDispatchRequested: boolean;
       revision: number;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ApiRequestError } from "./api";
 import {
+  resumeWaitFailurePacket,
   spawnDelegationFailurePacket,
   spawnDelegationValidationFailurePacket,
 } from "./delegation-error-packets";
@@ -14,7 +15,118 @@ function spawnFailureMessage(error: unknown) {
   }).message;
 }
 
+function resumeWaitFailureMessage(error: unknown) {
+  return resumeWaitFailurePacket(error, {
+    parentSessionId: PARENT_SESSION_ID,
+  }).message;
+}
+
 describe("delegation error packets", () => {
+  it.each([
+    ["backend unavailable", "The TermAl backend is unavailable."],
+    ["session missing", "session not found"],
+    ["delegation missing", "delegation not found"],
+    ["empty ids", "delegation wait ids cannot be empty"],
+    [
+      "requires id",
+      "delegation wait requires at least one delegation id",
+    ],
+  ])("passes through safe resume-wait message: %s", (_caseName, message) => {
+    expect(
+      resumeWaitFailureMessage(
+        new ApiRequestError("request-failed", message, { status: 400 }),
+      ),
+    ).toBe(message);
+  });
+
+  it.each([
+    ["request status", "Request failed with status 500."],
+    [
+      "id cap",
+      "delegation wait accepts at most 10 delegation ids",
+    ],
+    [
+      "title cap",
+      "delegation wait title must be at most 200 characters",
+    ],
+    [
+      "wrong parent",
+      "delegation `delegation-1` does not belong to parent session `session-a`",
+    ],
+  ])("passes through safe resume-wait pattern: %s", (_caseName, message) => {
+    expect(
+      resumeWaitFailureMessage(
+        new ApiRequestError("request-failed", message, { status: 400 }),
+      ),
+    ).toBe(message);
+  });
+
+  it.each([
+    [
+      "status extra detail",
+      "Request failed with status 500 at C:/secret.log.",
+    ],
+    [
+      "id cap path",
+      "delegation wait accepts at most 10 delegation ids from C:/secret.log",
+    ],
+    [
+      "title cap missing number",
+      "delegation wait title must be at most many characters",
+    ],
+    [
+      "wrong parent extra",
+      "delegation `delegation-1` does not belong to parent session `session-a` because token=secret",
+    ],
+  ])("redacts unsafe resume-wait near-miss: %s", (_caseName, message) => {
+    expect(
+      resumeWaitFailureMessage(
+        new ApiRequestError("request-failed", message, { status: 500 }),
+      ),
+    ).toBe("Delegation resume wait scheduling failed.");
+  });
+
+  it("passes through backend-unavailable resume-wait route diagnostics for the requested parent session", () => {
+    const message =
+      "The running backend does not expose /api/sessions/parent-1/delegation-waits (HTTP 404). Restart TermAl so the latest API routes are loaded.";
+
+    expect(
+      resumeWaitFailureMessage(
+        new ApiRequestError("backend-unavailable", message, {
+          status: 404,
+          restartRequired: true,
+        }),
+      ),
+    ).toBe(message);
+  });
+
+  it("redacts backend-unavailable resume-wait route diagnostics for other parent sessions", () => {
+    const message =
+      "The running backend does not expose /api/sessions/token=secret/delegation-waits (HTTP 404). Restart TermAl so the latest API routes are loaded.";
+
+    expect(
+      resumeWaitFailureMessage(
+        new ApiRequestError("backend-unavailable", message, {
+          status: 404,
+          restartRequired: true,
+        }),
+      ),
+    ).toBe("Delegation resume wait scheduling failed.");
+  });
+
+  it("redacts non-Error resume-wait failures", () => {
+    expect(resumeWaitFailurePacket("token=secret", {
+      parentSessionId: PARENT_SESSION_ID,
+    })).toMatchObject({
+      kind: "resume-wait-failed",
+      name: "Error",
+      message: "Delegation resume wait scheduling failed.",
+      apiErrorKind: null,
+      status: null,
+      restartRequired: null,
+    });
+  });
+
   it.each([
     ["backend unavailable", "The TermAl backend is unavailable."],
     ["parent session id", "parent session id is required"],

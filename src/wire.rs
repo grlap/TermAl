@@ -1036,8 +1036,6 @@ struct CreateDelegationWaitRequest {
 struct DelegationWaitResponse {
     revision: u64,
     wait: DelegationWaitRecord,
-    /// Backwards-compatible alias for `resume_prompt_queued`.
-    queued_resume: bool,
     resume_prompt_queued: bool,
     resume_dispatch_requested: bool,
     server_instance_id: String,

@@ -156,7 +156,10 @@ type SpawnDelegationHandler = (
   options?: SpawnDelegationOptions,
 ) => Promise<boolean>;
 
-function splitAgentCommandResolverTail(argumentsText: string): {
+const AGENT_COMMAND_NOTE_SEPARATOR_PATTERN = /(^|\s)--(?=\s|$)/u;
+
+/** @internal Exported for focused parser regression tests. */
+export function splitAgentCommandResolverTail(argumentsText: string): {
   argumentsText: string;
   noteText?: string;
 } {
@@ -164,20 +167,16 @@ function splitAgentCommandResolverTail(argumentsText: string): {
   if (!trimmed) {
     return { argumentsText: "" };
   }
-  if (trimmed.startsWith("-- ")) {
-    const noteText = trimmed.slice(3).trim();
-    return noteText ? { argumentsText: "", noteText } : { argumentsText: "" };
-  }
 
-  const separator = " -- ";
-  const separatorIndex = trimmed.indexOf(separator);
-  if (separatorIndex < 0) {
+  const separatorMatch = AGENT_COMMAND_NOTE_SEPARATOR_PATTERN.exec(trimmed);
+  if (!separatorMatch) {
     return { argumentsText: trimmed };
   }
 
-  const noteText = trimmed.slice(separatorIndex + separator.length).trim();
+  const separatorStart = separatorMatch.index + (separatorMatch[1]?.length ?? 0);
+  const noteText = trimmed.slice(separatorStart + 2).trim();
   return {
-    argumentsText: trimmed.slice(0, separatorIndex).trim(),
+    argumentsText: trimmed.slice(0, separatorMatch.index).trim(),
     ...(noteText ? { noteText } : {}),
   };
 }
@@ -1784,7 +1783,8 @@ const SessionComposer = memo(function SessionComposer({
       : (slashPalette.items[Math.min(slashActiveIndex, slashPalette.items.length - 1)] ?? null);
   const canDelegateActiveSlashCommand =
     slashPalette.kind !== "none" && activeSlashItem?.kind === "agent-command";
-  const composerInputDisabled = !session || isStopping;
+  const composerInputDisabled =
+    !session || isStopping || isAgentCommandResolving || isDelegationSpawning;
   const composerSendDisabled =
     !session ||
     isSending ||
@@ -2424,7 +2424,9 @@ const SessionComposer = memo(function SessionComposer({
           },
         );
       } catch {
-        focusComposerInput();
+        if (isMountedRef.current && activeSessionIdRef.current === requestSessionId) {
+          focusComposerInput();
+        }
         return;
       } finally {
         finishAgentCommandResolution();
@@ -2512,6 +2514,7 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
+    const requestSessionId = activeSessionId;
     let prompt: string;
     let delegationOptions: SpawnDelegationOptions | undefined;
     if (slashPalette.kind !== "none") {
@@ -2535,16 +2538,25 @@ const SessionComposer = memo(function SessionComposer({
         return;
       }
       try {
-        resolved = await resolveAgentCommand(activeSessionId, resolution.commandName, {
-          arguments: resolution.argumentsText,
-          ...(resolution.noteText ? { note: resolution.noteText } : {}),
-          intent: "delegate",
-        });
+        resolved = await resolveAgentCommand(
+          requestSessionId,
+          resolution.commandName,
+          {
+            arguments: resolution.argumentsText,
+            ...(resolution.noteText ? { note: resolution.noteText } : {}),
+            intent: "delegate",
+          },
+        );
       } catch {
-        focusComposerInput();
+        if (isMountedRef.current && activeSessionIdRef.current === requestSessionId) {
+          focusComposerInput();
+        }
         return;
       } finally {
         finishAgentCommandResolution();
+      }
+      if (!isMountedRef.current || activeSessionIdRef.current !== requestSessionId) {
+        return;
       }
       prompt = (resolved.expandedPrompt ?? resolved.visiblePrompt).trim();
       delegationOptions = spawnDelegationOptionsFromResolvedCommand(resolved);
@@ -2556,7 +2568,6 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    const requestSessionId = activeSessionId;
     setIsDelegationSpawning(true);
     let accepted = false;
     try {
@@ -2576,6 +2587,9 @@ const SessionComposer = memo(function SessionComposer({
     }
 
     if (!accepted) {
+      if (activeSessionIdRef.current !== requestSessionId) {
+        return;
+      }
       focusComposerInput();
       return;
     }

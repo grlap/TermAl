@@ -19,6 +19,7 @@ import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
   includeUndeferredMessageTail,
+  splitAgentCommandResolverTail,
 } from "./AgentSessionPanel";
 import { buildConversationOverviewTailItems } from "./conversation-overview-controller";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
@@ -225,6 +226,39 @@ function lastJsonRequestBody(fetchMock: ReturnType<typeof stubResolvedAgentComma
   const init = lastCall?.[1] as RequestInit | undefined;
   return JSON.parse(String(init?.body ?? "{}")) as unknown;
 }
+
+describe("splitAgentCommandResolverTail", () => {
+  it.each([
+    [
+      "space-delimited",
+      "3 -- Please add tests.",
+      { argumentsText: "3", noteText: "Please add tests." },
+    ],
+    [
+      "newline-delimited",
+      "3\n--\nPlease add tests.",
+      { argumentsText: "3", noteText: "Please add tests." },
+    ],
+    [
+      "tab-delimited",
+      "3\t--\tPlease add tests.",
+      { argumentsText: "3", noteText: "Please add tests." },
+    ],
+    [
+      "note-only",
+      "-- Please add tests.",
+      { argumentsText: "", noteText: "Please add tests." },
+    ],
+    ["empty trailing note", "3 --", { argumentsText: "3" }],
+    [
+      "attached dash is an argument",
+      "3 --flag",
+      { argumentsText: "3 --flag" },
+    ],
+  ])("splits %s separators", (_caseName, input, expected) => {
+    expect(splitAgentCommandResolverTail(input)).toEqual(expected);
+  });
+});
 
 describe("AgentSessionPanel conversation caching", () => {
   it("renders current same-id message updates at the active transcript tail", () => {
@@ -8435,6 +8469,7 @@ describe("AgentSessionPanelFooter", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(onSpawnDelegation).not.toHaveBeenCalled();
     expect(delegateButton).toBeDisabled();
+    expect(textarea).toBeDisabled();
 
     await act(async () => {
       pendingResolve.resolve(
@@ -8466,6 +8501,147 @@ describe("AgentSessionPanelFooter", () => {
       }),
     );
     expect(onSpawnDelegation).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("drops resolved delegated agent commands after a session switch", async () => {
+    const onSend = vi.fn(() => true);
+    const onSpawnDelegation = vi.fn(async () => true);
+    const onDraftCommit = vi.fn();
+    const pendingResolve = deferredValue<Response>();
+    const fetchMock = vi.fn(() => pendingResolve.promise);
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+        agentCommands: [
+          {
+            kind: "nativeSlash",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "/review-local",
+            source: "Claude project command",
+          },
+        ],
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onSend,
+        onDraftCommit,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onSpawnDelegation).not.toHaveBeenCalled();
+
+    await act(async () => {
+      rerender(
+        renderFooter({
+          session: makeSession("session-b"),
+          canSpawnDelegation: true,
+          onSpawnDelegation,
+          onSend,
+          onDraftCommit,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      pendingResolve.resolve(
+        new Response(
+          JSON.stringify({
+            name: "review-local",
+            source: "Claude project command",
+            kind: "nativeSlash",
+            visiblePrompt: "/review-local",
+            title: "Review staged and unstaged changes.",
+            delegation: {
+              mode: "reviewer",
+              title: "Review staged and unstaged changes.",
+              writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      await pendingResolve.promise;
+      await Promise.resolve();
+    });
+
+    expect(onSpawnDelegation).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onDraftCommit).toHaveBeenCalledWith("session-a", "/rev");
+    expect(
+      onDraftCommit.mock.calls.filter(([sessionId]) => sessionId === "session-b"),
+    ).toEqual([]);
+  });
+
+  it("does not focus the composer when delegated command resolution rejects after a session switch", async () => {
+    const onSend = vi.fn(() => true);
+    const onSpawnDelegation = vi.fn(async () => true);
+    const pendingResolve = deferredValue<Response>();
+    const fetchMock = vi.fn(() => pendingResolve.promise);
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+        agentCommands: [
+          {
+            kind: "nativeSlash",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "/review-local",
+            source: "Claude project command",
+          },
+        ],
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onSend,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      rerender(
+        renderFooter({
+          session: makeSession("session-b"),
+          canSpawnDelegation: true,
+          onSpawnDelegation,
+          onSend,
+        }),
+      );
+      await Promise.resolve();
+    });
+    const sessionBTextarea = screen.getByLabelText("Message session-b");
+    const focusSpy = vi.spyOn(sessionBTextarea, "focus");
+
+    await act(async () => {
+      pendingResolve.reject(new Error("resolver unavailable"));
+      await pendingResolve.promise.catch(() => undefined);
+      await Promise.resolve();
+    });
+
+    expect(focusSpy).not.toHaveBeenCalled();
+    expect(onSpawnDelegation).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -9808,6 +9984,59 @@ describe("AgentSessionPanelFooter", () => {
       expect(onSend).toHaveBeenCalledWith("session-a", "/review-local"),
     );
     expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not focus the composer when send command resolution rejects after a session switch", async () => {
+    const onSend = vi.fn(() => true);
+    const pendingResolve = deferredValue<Response>();
+    const fetchMock = vi.fn(() => pendingResolve.promise);
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(
+      renderFooter({
+        onSend,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+        agentCommands: [
+          {
+            kind: "nativeSlash",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "/review-local",
+            source: "Claude project command",
+          },
+        ],
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      rerender(
+        renderFooter({
+          onSend,
+          session: makeSession("session-b"),
+        }),
+      );
+      await Promise.resolve();
+    });
+    const sessionBTextarea = screen.getByLabelText("Message session-b");
+    const focusSpy = vi.spyOn(sessionBTextarea, "focus");
+
+    await act(async () => {
+      pendingResolve.reject(new Error("resolver unavailable"));
+      await pendingResolve.promise.catch(() => undefined);
+      await Promise.resolve();
+    });
+
+    expect(focusSpy).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("expands a selected skill command on Space instead of running it", () => {

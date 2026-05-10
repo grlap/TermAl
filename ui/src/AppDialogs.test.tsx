@@ -184,14 +184,17 @@ function renderCreateProjectDialog(overrides: Partial<ComponentProps<typeof AppD
 }
 
 function renderSettingsDialog(settingsTab: PreferencesTabId) {
+  const onClose = vi.fn();
   render(
     <AppDialogs
       {...createBaseProps({
         isSettingsOpen: true,
+        closeSettingsDialog: onClose,
         settingsTab,
       })}
     />,
   );
+  return onClose;
 }
 
 describe("AppDialogs create-dialog backdrop dismissal", () => {
@@ -298,6 +301,7 @@ describe("AppDialogs settings agent defaults", () => {
       "default-cursor-model",
     );
     expect(screen.getByLabelText("Default Cursor mode")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Default Gemini approvals")).toBeNull();
   });
 
   it("renders the Gemini settings tab", () => {
@@ -311,5 +315,6 @@ describe("AppDialogs settings agent defaults", () => {
       "default-gemini-model",
     );
     expect(screen.getByLabelText("Default Gemini approvals")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Default Cursor mode")).toBeNull();
   });
 });

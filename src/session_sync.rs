@@ -84,7 +84,12 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        let next_commands = dedupe_agent_commands(agent_commands);
+        let next_commands = dedupe_agent_commands(
+            agent_commands
+                .into_iter()
+                .filter(|command| command.kind == AgentCommandKind::NativeSlash)
+                .collect(),
+        );
         // Read-only check first: if the commands haven't changed,
         // return without bumping the mutation stamp. Using
         // `session_mut_by_index` up-front would mark this session

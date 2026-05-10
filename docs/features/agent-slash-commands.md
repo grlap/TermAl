@@ -60,9 +60,10 @@ useful as the design record for that work.
 - The backend command-discovery endpoint merges two sources for Claude sessions:
   live native-command metadata from the initialized runtime and filesystem
   templates from `.claude/commands`.
-- Claude Code's command-template format remains simple: the filename (minus `.md`)
-  is the command name, the first line is the description, and the full content is
-  the prompt template.
+- Claude Code command templates use the filename (minus `.md`) as the command
+  name. When YAML frontmatter is present, `description:` and `argument-hint:`
+  populate command metadata and TermAl strips the frontmatter before sending the
+  prompt body; otherwise the first non-empty body line becomes the description.
 - Command execution calls the backend resolver. React only decides whether a
   selected command first needs to expand in the composer for argument input.
 
@@ -138,8 +139,9 @@ Response:
 }
 ```
 
-Delegating a command with command-owned defaults, such as `/review-local`,
-returns `delegation` only for `intent: "delegate"`:
+Delegating a prompt-template command with command-owned defaults, such as the
+current `.claude/commands/review-local.md` template, returns `delegation` only
+for `intent: "delegate"`:
 
 ```json
 {
@@ -150,6 +152,7 @@ returns `delegation` only for `intent: "delegate"`:
   "expandedPrompt": "Review staged and unstaged changes...",
   "title": "Review staged and unstaged changes using multiple specialized reviewers.",
   "delegation": {
+    "title": "Review staged and unstaged changes using multiple specialized reviewers.",
     "mode": "reviewer",
     "writePolicy": { "kind": "isolatedWorktree", "ownedPaths": [] }
   }
@@ -161,6 +164,8 @@ Resolution rules:
 - The frontend sends `arguments` and optional `note` as separate fields. The
   backend should not infer command-specific structure from a single free-form
   string unless command metadata declares that structure.
+- `arguments` and `note` are trimmed and each capped at 65,536 bytes before
+  template interpolation or note appending.
 - `$ARGUMENTS` in prompt templates is replaced with `arguments` exactly after
   trimming only outer whitespace.
 - `note` is never substituted into the template. If present after trimming outer
@@ -193,8 +198,12 @@ the prompt/instruction payload. TermAl strips recognized frontmatter before
 sending the template to an agent and uses `description:` as the command palette
 description when present.
 
-TermAl parses trusted command frontmatter for resolver metadata today. Future
-`SKILL.md` support should reuse the same `metadata.termal` shape.
+TermAl parses prompt-template command frontmatter for resolver metadata today.
+The intended long-term trust boundary is TermAl-owned command/skill files; the
+current implementation also accepts project-local `.claude/commands/*.md`
+metadata that passes the source/name gate, and tightening that boundary is
+tracked in `docs/bugs.md`. Future `SKILL.md` support should reuse the same
+`metadata.termal` shape.
 
 Metadata contract:
 
@@ -229,7 +238,7 @@ Delegation metadata:
 - `writePolicy.kind` currently accepts `readOnly` or `isolatedWorktree`.
   `sharedWorktree` remains unsupported for command metadata.
 
-Trust rules:
+Target trust rules:
 
 - Only metadata from TermAl-trusted filesystem command/skill files may grant
   delegation defaults. Native runtime-advertised commands or untrusted project

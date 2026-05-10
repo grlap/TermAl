@@ -148,12 +148,6 @@ impl DelegationWaitRefresh {
         self.consumed_waits.push(ConsumedDelegationWait { wait, reason });
     }
 
-    fn extend(&mut self, other: DelegationWaitRefresh) {
-        self.dispatch_parents.extend(other.dispatch_parents);
-        self.consumed_waits.extend(other.consumed_waits);
-        self.queue_results_by_wait_id
-            .extend(other.queue_results_by_wait_id);
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -704,7 +698,6 @@ impl AppState {
         Ok(DelegationWaitResponse {
             revision,
             wait,
-            queued_resume: resume_prompt_queued,
             resume_prompt_queued,
             resume_dispatch_requested,
             server_instance_id: self.server_instance_id.clone(),
@@ -1403,31 +1396,6 @@ fn validate_delegation_wait_targets_locked(
         }
     }
     Ok(())
-}
-
-// Keep `kill_session` explicit about the wait owner being removed. The generic
-// refresh path also maps missing parents to `ParentSessionRemoved`, so both
-// live removal and boot/replay cleanup converge on the same reason.
-fn consume_delegation_waits_for_removed_parent_locked(
-    inner: &mut StateInner,
-    parent_session_id: &str,
-) -> DelegationWaitRefresh {
-    if inner.delegation_waits.is_empty() {
-        return DelegationWaitRefresh::default();
-    }
-
-    let waits = std::mem::take(&mut inner.delegation_waits);
-    let mut remaining = Vec::new();
-    let mut refresh = DelegationWaitRefresh::default();
-    for wait in waits {
-        if wait.parent_session_id == parent_session_id {
-            refresh.consume_wait(wait, DelegationWaitConsumedReason::ParentSessionRemoved);
-        } else {
-            remaining.push(wait);
-        }
-    }
-    inner.delegation_waits = remaining;
-    refresh
 }
 
 // Delegation wait lifecycle:

@@ -374,7 +374,8 @@ async fn resolve_agent_command(
     State(state): State<AppState>,
     payload: std::result::Result<Json<ResolveAgentCommandRequest>, JsonRejection>,
 ) -> Result<Json<ResolveAgentCommandResponse>, ApiError> {
-    let Json(request) = payload.map_err(|rejection| api_json_rejection("request", rejection))?;
+    let Json(request) =
+        payload.map_err(|rejection| api_json_rejection("agent command resolve request", rejection))?;
     let response =
         run_blocking_api(move || state.resolve_agent_command(&session_id, &command_name, request))
             .await?;
@@ -390,6 +391,8 @@ async fn search_instructions(
         run_blocking_api(move || state.search_instructions(&query.session_id, &query.q)).await?;
     Ok(Json(response))
 }
+
+const MAX_AGENT_COMMAND_FILE_BYTES: usize = 1024 * 1024;
 
 /// Reads Claude agent commands.
 fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, ApiError> {
@@ -414,17 +417,29 @@ fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, Api
             ))
         })?;
         let path = entry.path();
+        let file_type = entry.file_type().map_err(|err| {
+            ApiError::internal(format!(
+                "failed to stat agent command {}: {err}",
+                path.display()
+            ))
+        })?;
+        if file_type.is_symlink() || !file_type.is_file() {
+            continue;
+        }
+        if path.extension().and_then(|value| value.to_str()) != Some("md") {
+            continue;
+        }
         let metadata = entry.metadata().map_err(|err| {
             ApiError::internal(format!(
                 "failed to stat agent command {}: {err}",
                 path.display()
             ))
         })?;
-        if !metadata.is_file() {
-            continue;
-        }
-        if path.extension().and_then(|value| value.to_str()) != Some("md") {
-            continue;
+        if metadata.len() > MAX_AGENT_COMMAND_FILE_BYTES as u64 {
+            return Err(ApiError::bad_request(format!(
+                "agent command {} must be at most {MAX_AGENT_COMMAND_FILE_BYTES} bytes",
+                path.display()
+            )));
         }
 
         let raw_content = fs::read_to_string(&path).map_err(|err| {
@@ -466,6 +481,11 @@ struct MarkdownCommandContent<'a> {
     argument_hint: Option<String>,
 }
 
+// Command frontmatter intentionally uses a tiny YAML subset instead of a full
+// YAML parser: top-level `key: value` scalars plus space-indented nested maps.
+// Unsupported non-TermAl YAML features are ignored. Project-local command
+// metadata is accepted today; the target TermAl-owned trust boundary is tracked
+// separately in docs/bugs.md.
 fn strip_markdown_frontmatter(content: &str) -> MarkdownCommandContent<'_> {
     let opening_len = if content.starts_with("---\r\n") {
         "---\r\n".len()
@@ -485,14 +505,15 @@ fn strip_markdown_frontmatter(content: &str) -> MarkdownCommandContent<'_> {
         if line_without_newline.trim() == "---" {
             let frontmatter = &content[opening_len..offset];
             if looks_like_markdown_frontmatter(frontmatter) {
-                let fields = markdown_frontmatter_fields(frontmatter);
+                let fields = markdown_frontmatter_fields(frontmatter).unwrap_or_default();
                 let body = strip_single_leading_blank_line(&content[offset + line.len()..]);
                 return MarkdownCommandContent {
                     content: body,
-                    description: fields.get("description").cloned(),
+                    description: non_empty_frontmatter_field(&fields, "description"),
                     argument_hint: fields
                         .get("argument-hint")
                         .or_else(|| fields.get("argument_hint"))
+                        .filter(|value| !value.trim().is_empty())
                         .cloned(),
                 };
             }
@@ -554,15 +575,11 @@ fn read_agent_command_resolver_metadata(
         .join(".claude")
         .join("commands")
         .join(format!("{source_stem}.md"));
-    let raw_content = match fs::read_to_string(&path) {
-        Ok(content) => content,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => {
-            return Err(ApiError::internal(format!(
-            "failed to read agent command metadata {}: {err}",
-            path.display()
-            )));
-        }
+    let Some(_) = agent_command_regular_file_metadata(&path)? else {
+        return Ok(None);
+    };
+    let Some(raw_content) = read_agent_command_frontmatter_document(&path)? else {
+        return Ok(None);
     };
     let Some(frontmatter) = markdown_frontmatter(&raw_content) else {
         return Ok(None);
@@ -571,6 +588,79 @@ fn read_agent_command_resolver_metadata(
     parse_agent_command_resolver_metadata(frontmatter)
 }
 
+fn agent_command_regular_file_metadata(path: &FsPath) -> Result<Option<fs::Metadata>, ApiError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(ApiError::internal(format!(
+                "failed to stat agent command metadata {}: {err}",
+                path.display()
+            )));
+        }
+    };
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() || !metadata.is_file() {
+        return Ok(None);
+    }
+
+    Ok(Some(metadata))
+}
+
+const MAX_AGENT_COMMAND_FRONTMATTER_BYTES: usize = MAX_AGENT_COMMAND_FILE_BYTES;
+
+fn read_agent_command_frontmatter_document(path: &FsPath) -> Result<Option<String>, ApiError> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(ApiError::internal(format!(
+                "failed to read agent command metadata {}: {err}",
+                path.display()
+            )));
+        }
+    };
+    let mut reader = BufReader::new(file);
+    let mut content = String::new();
+    let mut line = String::new();
+    let bytes_read = reader.read_line(&mut line).map_err(|err| {
+        ApiError::internal(format!(
+            "failed to read agent command metadata {}: {err}",
+            path.display()
+        ))
+    })?;
+    if bytes_read == 0 || (line != "---\n" && line != "---\r\n") {
+        return Ok(None);
+    }
+    content.push_str(&line);
+
+    loop {
+        line.clear();
+        let bytes_read = reader.read_line(&mut line).map_err(|err| {
+            ApiError::internal(format!(
+                "failed to read agent command metadata {}: {err}",
+                path.display()
+            ))
+        })?;
+        if bytes_read == 0 {
+            return Ok(None);
+        }
+        if content.len() + line.len() > MAX_AGENT_COMMAND_FRONTMATTER_BYTES {
+            return Err(ApiError::bad_request(format!(
+                "agent command frontmatter must be at most {MAX_AGENT_COMMAND_FRONTMATTER_BYTES} bytes"
+            )));
+        }
+        let closes_frontmatter = line.trim_end_matches(['\r', '\n']).trim() == "---";
+        content.push_str(&line);
+        if closes_frontmatter {
+            return Ok(Some(content));
+        }
+    }
+}
+
+// Discriminates real command frontmatter from a Markdown thematic-break block.
+// Add new top-level Claude/TermAl command keys here when they are introduced;
+// otherwise files using only that key will keep the `---` block in the prompt.
 fn looks_like_markdown_frontmatter(frontmatter: &str) -> bool {
     frontmatter.lines().map(str::trim_end).any(|line| {
         if line.starts_with(' ') || line.starts_with('\t') {
@@ -580,7 +670,9 @@ fn looks_like_markdown_frontmatter(frontmatter: &str) -> bool {
             return false;
         };
         let key = key.trim();
-        matches!(
+        key == "metadata.termal"
+            || key.starts_with("metadata.termal.")
+            || matches!(
             key,
             "name"
                 | "description"
@@ -592,7 +684,7 @@ fn looks_like_markdown_frontmatter(frontmatter: &str) -> bool {
                 | "model"
                 | "disable-model-invocation"
                 | "disable_model_invocation"
-        )
+            )
     })
 }
 
@@ -621,16 +713,49 @@ fn markdown_frontmatter(content: &str) -> Option<&str> {
 fn parse_agent_command_resolver_metadata(
     frontmatter: &str,
 ) -> Result<Option<AgentCommandResolverMetadata>, ApiError> {
-    let fields = markdown_frontmatter_fields(frontmatter);
+    if !frontmatter_has_termal_metadata(frontmatter) {
+        return Ok(None);
+    }
+    let fields = markdown_frontmatter_fields(frontmatter)?;
+    let has_termal_metadata = fields
+        .keys()
+        .any(|key| key == "metadata.termal" || key.starts_with("metadata.termal."));
+    if !has_termal_metadata {
+        return Ok(None);
+    }
     if !fields
         .keys()
         .any(|key| key.starts_with("metadata.termal."))
     {
-        return Ok(None);
+        return Err(ApiError::bad_request(
+            "metadata.termal must define title or delegation metadata",
+        ));
+    }
+    if fields.contains_key("metadata.termal.title")
+        && !has_frontmatter_field_children(&fields, "metadata.termal.title")
+    {
+        return Err(ApiError::bad_request(
+            "metadata.termal.title must define strategy metadata",
+        ));
+    }
+    if fields.contains_key("metadata.termal.delegation")
+        && !has_frontmatter_field_children(&fields, "metadata.termal.delegation")
+    {
+        return Err(ApiError::bad_request(
+            "metadata.termal.delegation must define enabled metadata",
+        ));
     }
 
+    let title_prefix = fields.get("metadata.termal.title.prefix");
     let title = match fields.get("metadata.termal.title.strategy").map(String::as_str) {
-        None | Some("default") => AgentCommandTitleStrategy::Default,
+        None | Some("default") => {
+            if title_prefix.is_some() {
+                return Err(ApiError::bad_request(
+                    "metadata.termal.title.prefix requires metadata.termal.title.strategy prefixFirstArgument",
+                ));
+            }
+            AgentCommandTitleStrategy::Default
+        }
         Some("prefixFirstArgument") => {
             let prefix = required_frontmatter_field(
                 &fields,
@@ -641,10 +766,22 @@ fn parse_agent_command_resolver_metadata(
         }
         Some(other) => {
             return Err(ApiError::bad_request(format!(
-                "unsupported metadata.termal.title.strategy `{other}`"
+                "unsupported metadata.termal.title.strategy `{}`",
+                frontmatter_error_value(other)
             )));
         }
     };
+
+    let delegation_mode = fields
+        .get("metadata.termal.delegation.mode")
+        .map(|value| parse_agent_command_delegation_mode(value.trim().to_owned()))
+        .transpose()?;
+    let delegation_write_policy = fields
+        .get("metadata.termal.delegation.writePolicy.kind")
+        .map(|value| parse_agent_command_delegation_write_policy(value.trim().to_owned()))
+        .transpose()?;
+    let has_delegation_metadata =
+        delegation_mode.is_some() || delegation_write_policy.is_some();
 
     let delegation = match fields.get("metadata.termal.delegation.enabled") {
         None => None,
@@ -652,26 +789,67 @@ fn parse_agent_command_resolver_metadata(
             if !parse_frontmatter_bool(value, "metadata.termal.delegation.enabled")? {
                 None
             } else {
-                let mode = parse_agent_command_delegation_mode(required_frontmatter_field(
-                    &fields,
-                    "metadata.termal.delegation.mode",
-                    "delegation metadata requires metadata.termal.delegation.mode",
-                )?)?;
-                let write_policy =
-                    parse_agent_command_delegation_write_policy(required_frontmatter_field(
-                        &fields,
-                        "metadata.termal.delegation.writePolicy.kind",
+                let mode = delegation_mode.ok_or_else(|| {
+                    ApiError::bad_request(
+                        "delegation metadata requires metadata.termal.delegation.mode",
+                    )
+                })?;
+                let write_policy = delegation_write_policy.ok_or_else(|| {
+                    ApiError::bad_request(
                         "delegation metadata requires metadata.termal.delegation.writePolicy.kind",
-                    )?)?;
+                    )
+                })?;
                 Some(AgentCommandDelegationMetadata { mode, write_policy })
             }
         }
     };
+    if fields.get("metadata.termal.delegation.enabled").is_none() && has_delegation_metadata {
+        return Err(ApiError::bad_request(
+            "delegation metadata requires metadata.termal.delegation.enabled",
+        ));
+    }
 
     Ok(Some(AgentCommandResolverMetadata { title, delegation }))
 }
 
-fn markdown_frontmatter_fields(frontmatter: &str) -> BTreeMap<String, String> {
+fn frontmatter_has_termal_metadata(frontmatter: &str) -> bool {
+    let mut metadata_indent = None;
+    for line in frontmatter.lines() {
+        let line = line.trim_end();
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((raw_key, _)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let indent = line.len().saturating_sub(trimmed.len());
+        let key = raw_key.trim();
+        if key == "metadata.termal" || key.starts_with("metadata.termal.") {
+            return true;
+        }
+        if metadata_indent.is_some_and(|existing_indent| indent <= existing_indent) {
+            metadata_indent = None;
+        }
+        if key == "metadata" {
+            metadata_indent = Some(indent);
+            continue;
+        }
+        if metadata_indent.is_some_and(|existing_indent| indent > existing_indent)
+            && (key == "termal" || key.starts_with("termal."))
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+// Flattens the supported TermAl frontmatter subset into dotted keys such as
+// `metadata.termal.delegation.writePolicy.kind`. This intentionally supports
+// only local command-template metadata, not full YAML; project-local metadata
+// is currently accepted until the trusted-source boundary is tightened.
+fn markdown_frontmatter_fields(frontmatter: &str) -> Result<BTreeMap<String, String>, ApiError> {
     let mut fields = BTreeMap::new();
     let mut path: Vec<(usize, String)> = Vec::new();
     for line in frontmatter.lines() {
@@ -684,9 +862,6 @@ fn markdown_frontmatter_fields(frontmatter: &str) -> BTreeMap<String, String> {
             continue;
         };
         let indent = line.len().saturating_sub(trimmed.len());
-        if line[..indent].contains('\t') {
-            continue;
-        }
         while path
             .last()
             .is_some_and(|(existing_indent, _)| *existing_indent >= indent)
@@ -698,9 +873,23 @@ fn markdown_frontmatter_fields(frontmatter: &str) -> BTreeMap<String, String> {
         if key.is_empty() {
             continue;
         }
+        if line[..indent].contains('\t') {
+            if is_termal_frontmatter_path(&path, key) {
+                return Err(ApiError::bad_request(
+                    "agent command frontmatter must be space-indented",
+                ));
+            }
+            continue;
+        }
 
         let value = raw_value.trim();
         if value.is_empty() {
+            let mut field_path = path
+                .iter()
+                .map(|(_, key)| key.as_str())
+                .collect::<Vec<_>>();
+            field_path.push(key);
+            fields.entry(field_path.join(".")).or_default();
             path.push((indent, key.to_owned()));
             continue;
         }
@@ -710,12 +899,36 @@ fn markdown_frontmatter_fields(frontmatter: &str) -> BTreeMap<String, String> {
             .map(|(_, key)| key.as_str())
             .collect::<Vec<_>>();
         field_path.push(key);
-        fields.insert(
-            field_path.join("."),
-            unquote_markdown_frontmatter_string(value).to_owned(),
-        );
+        let field_key = field_path.join(".");
+        let field_value =
+            unquote_markdown_frontmatter_string(value, &field_key, is_termal_frontmatter_key(&field_key))?;
+        fields.insert(field_key, field_value);
     }
-    fields
+    Ok(fields)
+}
+
+fn is_termal_frontmatter_path(path: &[(usize, String)], key: &str) -> bool {
+    let mut components = path
+        .iter()
+        .map(|(_, key)| key.as_str())
+        .collect::<Vec<_>>();
+    components.push(key);
+    is_termal_frontmatter_components(&components)
+}
+
+fn is_termal_frontmatter_key(key: &str) -> bool {
+    let components = key.split('.').collect::<Vec<_>>();
+    is_termal_frontmatter_components(&components)
+}
+
+fn is_termal_frontmatter_components(components: &[&str]) -> bool {
+    match components {
+        ["metadata.termal", ..] => true,
+        ["metadata", "termal", ..] => true,
+        ["metadata", second, ..] if second.starts_with("termal.") => true,
+        [first, ..] if first.starts_with("metadata.termal.") => true,
+        _ => false,
+    }
 }
 
 fn required_frontmatter_field(
@@ -732,12 +945,27 @@ fn required_frontmatter_field(
         .ok_or_else(|| ApiError::bad_request(message))
 }
 
+fn non_empty_frontmatter_field(fields: &BTreeMap<String, String>, key: &str) -> Option<String> {
+    fields
+        .get(key)
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn has_frontmatter_field_children(fields: &BTreeMap<String, String>, key: &str) -> bool {
+    let child_prefix = format!("{key}.");
+    fields.keys().any(|candidate| candidate.starts_with(&child_prefix))
+}
+
 fn parse_frontmatter_bool(value: &str, key: &str) -> Result<bool, ApiError> {
     match value.trim() {
         "true" => Ok(true),
         "false" => Ok(false),
         other => Err(ApiError::bad_request(format!(
-            "unsupported {key} value `{other}`"
+            "unsupported {key} value `{}`",
+            frontmatter_error_value(other)
         ))),
     }
 }
@@ -750,7 +978,8 @@ fn parse_agent_command_delegation_mode(value: String) -> Result<DelegationMode, 
             "metadata.termal.delegation.mode `worker` is not supported yet",
         )),
         other => Err(ApiError::bad_request(format!(
-            "unsupported metadata.termal.delegation.mode `{other}`"
+            "unsupported metadata.termal.delegation.mode `{}`",
+            frontmatter_error_value(other)
         ))),
     }
 }
@@ -768,19 +997,59 @@ fn parse_agent_command_delegation_write_policy(
             "metadata.termal.delegation.writePolicy.kind `sharedWorktree` is not supported yet",
         )),
         other => Err(ApiError::bad_request(format!(
-            "unsupported metadata.termal.delegation.writePolicy.kind `{other}`"
+            "unsupported metadata.termal.delegation.writePolicy.kind `{}`",
+            frontmatter_error_value(other)
         ))),
     }
 }
 
-fn unquote_markdown_frontmatter_string(value: &str) -> &str {
+fn unquote_markdown_frontmatter_string(
+    value: &str,
+    key: &str,
+    strict: bool,
+) -> Result<String, ApiError> {
     let bytes = value.as_bytes();
-    if bytes.len() >= 2
-        && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
-            || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
-    {
-        &value[1..value.len() - 1]
+    if bytes.is_empty() {
+        return Ok(String::new());
+    }
+
+    let first = bytes[0];
+    let last = bytes[bytes.len() - 1];
+    let starts_quoted = first == b'"' || first == b'\'';
+    let ends_quoted = last == b'"' || last == b'\'';
+    if !starts_quoted && !ends_quoted {
+        return Ok(value.to_owned());
+    }
+    if !strict {
+        return Ok(if bytes.len() >= 2 && first == last {
+            value[1..value.len() - 1].to_owned()
+        } else {
+            value.to_owned()
+        });
+    }
+    if bytes.len() < 2 || first != last {
+        return Err(ApiError::bad_request(format!(
+            "invalid quoted frontmatter value for {key}"
+        )));
+    }
+
+    let inner = &value[1..value.len() - 1];
+    if inner.as_bytes().contains(&first) {
+        return Err(ApiError::bad_request(format!(
+            "invalid quoted frontmatter value for {key}"
+        )));
+    }
+
+    Ok(inner.to_owned())
+}
+
+fn frontmatter_error_value(value: &str) -> String {
+    const MAX_ERROR_VALUE_CHARS: usize = 64;
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(MAX_ERROR_VALUE_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}...")
     } else {
-        value
+        truncated
     }
 }

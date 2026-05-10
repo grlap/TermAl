@@ -103,6 +103,7 @@ import {
   isLocalRemoteId,
   LOCAL_REMOTE_ID,
 } from "./remotes";
+import { assertNever } from "./exhaustive";
 
 type UseAppSessionActionsLookups = {
   sessionLookup: Map<string, Session>;
@@ -1279,7 +1280,7 @@ export function useAppSessionActions(
     });
   }
 
-  function configuredDefaultModelForAgent(agent: AgentType) {
+  function configuredDefaultModelForAgent(agent: AgentType): string {
     switch (agent) {
       case "Claude":
         return defaultClaudeModel;
@@ -1289,7 +1290,27 @@ export function useAppSessionActions(
         return defaultCursorModel;
       case "Gemini":
         return defaultGeminiModel;
+      default:
+        return assertNever(agent, "Unhandled default model agent");
     }
+  }
+
+  function requestedModelForNewSession(
+    agent: AgentType,
+    dialogModel: string,
+  ): string | undefined {
+    if (!usesSessionModelPicker(agent)) {
+      return dialogModel.trim() || undefined;
+    }
+
+    const defaultModel = configuredDefaultModelForAgent(agent).trim();
+    if (isDefaultModelPreference(defaultModel)) {
+      return undefined;
+    }
+
+    // Send a configured default explicitly so an immediately-created session
+    // observes optimistic settings changes before the backend save returns.
+    return defaultModel;
   }
 
   async function handleNewSession({
@@ -1344,14 +1365,7 @@ export function useAppSessionActions(
         projectSelectionId === CREATE_SESSION_WORKSPACE_ID
           ? null
           : projectSelectionId;
-      const defaultModel = configuredDefaultModelForAgent(agent).trim();
-      // Send a configured default explicitly so an immediately-created session
-      // observes optimistic settings changes before the backend save returns.
-      const requestedModel = usesSessionModelPicker(agent)
-        ? !isDefaultModelPreference(defaultModel)
-          ? defaultModel
-          : undefined
-        : trimmedModel;
+      const requestedModel = requestedModelForNewSession(agent, model);
       const created = await createSession({
         agent,
         model: requestedModel,

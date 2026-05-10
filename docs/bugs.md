@@ -7,56 +7,44 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Telegram relay can send stale digest before draining pending updates
+## Resolver re-reads command frontmatter from disk on every resolve
 
-**Severity:** Medium - `src/telegram.rs:77-85`. The relay now runs `sync_telegram_digest` before `getUpdates` every loop. If a user sends `/session`, `/project`, a prompt, or a callback while the loop is between polls, the next iteration can send an old digest or forward the previously selected session's assistant text before applying the already-arrived Telegram update.
-
-The same change also reduces the default poll timeout to 1 second at `src/telegram.rs:14`, so digest sync is tied to a faster long-poll cadence and can run again after updates are processed at `src/telegram.rs:113-119`.
+**Severity:** Low - `src/api_files.rs:557`, `src/workspace_queries.rs:177-178`. `read_agent_command_resolver_metadata` opens the command file and scans its frontmatter even though `read_claude_agent_commands` already loaded the same command for the cached `command` payload. This keeps resolve-time metadata outside the listing snapshot and creates a TOCTOU window where description/content (from listing) and metadata (from resolve) can disagree if the file is edited between the two reads.
 
 **Current behavior:**
-- Outbound digest/assistant sync runs before draining pending Telegram updates.
-- Default Telegram poll timeout is 1 second.
-- Post-update digest sync also still runs in the same loop.
+- Listing reads the file, strips recognized frontmatter, and returns `command.content`.
+- Resolve re-reads the same file's frontmatter from disk to extract `metadata.termal`.
+- No shared frontmatter or metadata cache exists between the two paths.
 
 **Proposal:**
-- Drain/process pending updates before side-effecting digest or assistant forwarding.
-- Or add a nonblocking update drain before pre-sync while preserving post-update sync for low latency.
-- Add a minimum digest-sync interval/backoff and coalesce sends/edits when state changes rapidly.
+- Extend `MarkdownCommandContent` (or `AgentCommand`) to retain the parsed `metadata.termal.*` fields from the listing pass.
+- Have `read_agent_command_resolver_metadata` consume the cached snapshot rather than re-reading.
 
-## Telegram relay near-1Hz cadence multiplies outbound and local API load
+## `AppPreferences` `PartialEq` now allocates string compares
 
-**Severity:** Medium - `src/telegram.rs:14, 78-83, 113-120`. Reducing `TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS` from 5 to 1 combined with the new pre-poll `sync_telegram_digest` (in addition to the existing post-update sync) doubles the digest passes per loop iteration. Each iteration now reaches the local TermAl backend roughly three times (digest, `/api/state`, `/api/sessions/{id}` via `forward_relevant_assistant_messages`) and `api.telegram.org` once at near-1Hz.
-
-The combined frequency is around 4-5x more outbound HTTPS requests per minute than before, and a comparable multiplier on the local mutex contention. There is no Telegram 429 / `Retry-After` parsing today; the only backoff is the fixed 2-second `TELEGRAM_ERROR_RETRY_DELAY`, regardless of which error fired.
+**Severity:** Note - `src/turns.rs:354-361`. Adding 4 owned `String` fields means every `AppPreferences` comparison now performs four byte-by-byte string compares instead of trivial enum/discriminant compares. The struct is compared in update flows to detect "no-op update" and rebroadcast suppression. Negligible at human cadence but the cost characteristic flips from O(1) to O(N strings).
 
 **Current behavior:**
-- Long-poll timeout floor is 1 second.
-- Both top-of-loop and bottom-of-loop digest syncs run in every iteration when a chat is selected.
-- 429 / `Retry-After` is not parsed; relay backoff is fixed.
+- `PartialEq` derived; comparison cost grew with the new fields.
 
 **Proposal:**
-- Restore long-poll cadence (~25-50s) and drive digest re-sync from backend SSE deltas instead of the loop tick.
-- Or rate-limit `sync_telegram_digest` to a minimum interval (e.g. 2-5s) and coalesce top-of-loop with bottom-of-loop.
-- Parse Telegram 429 `parameters.retry_after` and back off accordingly.
-- Document the cadence trade-off in `docs/features/telegram-ui-integration.md`.
+- None needed; flag if `AppPreferences` ever ends up in a tight loop comparison.
 
-## Poll-error persist `?` propagation can silently kill the Telegram relay
+## Command-file regular-file gate is check-then-open
 
-**Severity:** Medium - `src/telegram.rs:85-95`. The new `if dirty { persist_telegram_bot_state(...)?; }` inside the `get_updates` Err branch propagates persistence errors with `?`, exiting `run_telegram_bot_with_config` before the `log_telegram_error("failed to poll updates", &err)` line runs. A transient disk error during a poll-failure window therefore terminates the relay thread without ever logging the original polling failure that caused this branch to run.
-
-The user is left with the relay marked as crashed (only the persist error visible) and no diagnostic for the upstream cause. Combined with the new ~1Hz cadence and the new top-of-loop digest sync, the chance of at least one transient `persist_telegram_bot_state` failure per session is materially higher.
+**Severity:** Note - `src/api_files.rs:418, 562, 597`. Command discovery and resolver metadata now reject stable symlinks and non-regular files before opening, but the check is still separate from the subsequent file open. A command file swapped between the check and open can still be followed/read.
 
 **Current behavior:**
-- `get_updates` Err branch persists with `?` and exits the relay before logging the polling error.
-- The next iteration's persistence retry never runs because the worker has exited.
+- Stable symlinks and non-files under `.claude/commands/` are skipped.
+- There is still a small TOCTOU window between file-type validation and opening.
 
 **Proposal:**
-- Log the polling error before attempting persist, so the original cause is visible even on persist failure.
-- Or log the persist failure non-fatally and continue, since `next_update_id` has not advanced past unprocessed updates and the next iteration can re-derive the dirty fields.
+- Bind validation to the opened handle where platform support allows it, e.g. no-follow open plus handle metadata checks.
+- Or compare pre/post file metadata and treat mismatch as unavailable.
 
 ## Project-local command metadata can grant trusted delegation defaults
 
-**Severity:** Medium - `src/api_files.rs:534-571`, `src/api_files.rs:649-666`, and `src/workspace_queries.rs:177-180, 241-357`. The resolver reads frontmatter metadata from prompt-template command files under the active session workdir and applies `metadata.termal.delegation` defaults for delegate intent. That lets project-local `.claude/commands/*.md` files opt into reviewer mode and `isolatedWorktree` write policy even though the feature doc says only TermAl-trusted command or skill files may grant those defaults.
+**Severity:** Medium - `src/api_files.rs:534-571`, `src/api_files.rs:649-666`, and `src/workspace_queries.rs:177-180, 241-357`. The resolver reads frontmatter metadata from prompt-template command files under the active session workdir and applies `metadata.termal.delegation` defaults for delegate intent. That lets project-local `.claude/commands/*.md` files opt into reviewer mode and `isolatedWorktree` write policy before the target TermAl-trusted command/skill boundary is enforced.
 
 Project-controlled metadata should not silently broaden delegation write capability. Without an explicit trust boundary, a repository can make a normal slash-command delegation look like a trusted review workflow.
 
@@ -69,38 +57,6 @@ Project-controlled metadata should not silently broaden delegation write capabil
 - Add an explicit trusted command/source marker before accepting delegation metadata that affects mode or write policy.
 - Or require confirmation before applying non-read-only defaults from project-local commands.
 - Add negative coverage for project-local metadata attempting to grant `isolatedWorktree`.
-
-## Remote session creation bypasses app default model preferences
-
-**Severity:** Medium - `src/remote_create_proxies.rs:117-124` and `src/session_crud.rs:108-253`. Local session creation resolves an omitted model through `inner.preferences.default_model_for_agent(...)`, but remote-backed session creation forwards `request.model` directly in the remote create request. A custom app default therefore applies to local sessions but not remote-proxy sessions created through the same user-facing flow.
-
-The settings copy now says model defaults are used when new sessions and delegations start. That contract becomes dependent on whether the target project is local or remote.
-
-**Current behavior:**
-- Local `create_session` materializes an effective model from app preferences when the request omits one.
-- `create_remote_session_proxy` serializes `"model": request.model` unchanged.
-- Remote-backed sessions with no explicit model fall through to the remote server's default instead of the local app preference.
-
-**Proposal:**
-- Materialize the effective local model before entering remote-proxy creation.
-- Or pass enough preference context to the remote create path to preserve the same default-model contract.
-- Add a remote-create regression test for custom app defaults with no explicit model.
-
-## `consume_delegation_waits_for_removed_parent_locked` is now redundant with the generic refresh
-
-**Severity:** Low - `src/delegations.rs:1407-1431`, `src/session_lifecycle.rs:82-83`. After teaching `refresh_delegation_waits_locked` to also map missing parents to `ParentSessionRemoved`, the explicit pre-call from `kill_session` produces no additional consumes. The unstaged comment swap acknowledges the convergence.
-
-Both passes drain the same waits with the same reason, so the explicit drain costs an extra `mem::take` and `extend()` merge on every session removal without changing observed behavior. Future refactors that change the invariants of one path may silently let the other take over with subtly different delta ordering.
-
-**Current behavior:**
-- `kill_session` calls both `consume_delegation_waits_for_removed_parent_locked` and `refresh_delegation_waits_locked`.
-- The second pass cannot find any of the explicitly drained waits.
-- The convergence is intentional defensive layering; the redundancy is uncommented at non-`kill_session` callers (e.g., remote-proxy removal in `src/remote_session_proxies.rs:189-199`).
-
-**Proposal:**
-- Either delete `consume_delegation_waits_for_removed_parent_locked` and rely solely on `refresh_delegation_waits_locked`.
-- Or add a debug-build assertion that the second pass produces no additional `ParentSessionRemoved` consumes, documenting the redundancy.
-- Note the missing-parent fallback behavior at the non-`kill_session` call sites that depend on it.
 
 ## Terminal delegation child sessions accumulate without retention policy
 
@@ -154,89 +110,6 @@ When the user scrolls up to read history, the live tail and its waiting indicato
 - Or wrap both sections in a single sticky parent / set `position: sticky; bottom: <live-tail-height>` on the queue so it pins above the live tail.
 - Add a code comment explaining the new DOM order vs. visual intent (the previous `column-reverse` had a comment that no longer applies).
 
-## Pre-poll Telegram digest sync can hammer per-chat sendMessage budget during streaming replies
-
-**Severity:** Low - `src/telegram.rs:78-83, 113-120, 1841-1852`. The new top-of-loop `sync_telegram_digest` calls `forward_relevant_assistant_messages`, which can issue Telegram `sendMessage` calls when the assistant text grew or new chunks need delivering. Combined with the existing post-`handle_telegram_update` digest sync, every iteration that processes user input now triggers two digest+forward passes.
-
-For a long streaming assistant reply that re-forwards chunk-by-chunk via `chunk_telegram_message_text`, two passes per second can exceed Telegram's per-chat ~1 msg/s sendMessage budget. There is no per-chat outbound rate limiting to coalesce the bursts, and `sent_chunks` tracking persists partial state, so a stuck large reply keeps hammering Telegram every iteration.
-
-**Current behavior:**
-- Both top-of-loop and bottom-of-loop digest syncs may emit `sendMessage` calls per iteration.
-- No coalescing or per-chat outbound rate limiting between the two passes.
-
-**Proposal:**
-- Gate the top-of-loop sync on a wall-clock minimum interval, or skip it when the bottom-of-loop sync just ran in the prior iteration.
-- Add explicit Telegram 429 handling so chunk-forwarding back-pressures rather than retries on the next ~1Hz tick.
-
-## `queuedResume` permanent alias is API surface debt
-
-**Severity:** Note - `src/wire.rs:1037-1042`, `ui/src/api.ts:498-506`, `ui/src/delegation-commands.ts:173-189`. After fixing the ambiguous `queuedResume` semantics by introducing `resume_prompt_queued` and `resume_dispatch_requested`, the response keeps `queued_resume` as a permanent alias for `resume_prompt_queued`. Per CLAUDE.md and the Development-Phase Compatibility Policy, internal API back-compat is not required.
-
-The duplicate field propagates: the TypeScript wrapper type `SpawnReviewerBatchResumeWaitResult` carries both fields and every test/mock specifies two booleans that always agree. Tomorrow's reader has to ask "do I read `queuedResume` or `resumePromptQueued`?" with no compile-time enforcement that they stay in sync.
-
-**Current behavior:**
-- `DelegationWaitResponse` carries `queuedResume`, `resumePromptQueued`, and `resumeDispatchRequested`.
-- `SpawnReviewerBatchResumeWaitResult` mirrors all three.
-- Doc comment says "Backwards-compatible alias", not "deprecated, will be removed".
-
-**Proposal:**
-- Mark `queued_resume` / `queuedResume` `@deprecated` with a removal target so editors flag legacy usage.
-- Drop `queuedResume` from `SpawnReviewerBatchResumeWaitResult` (the wrapper is locally constructed; no wire requirement to mirror the alias).
-- Update the alias doc comment to either commit to permanence or schedule removal.
-
-## `DelegationWaitResponse` shape is not formally defined in the feature doc
-
-**Severity:** Note - `docs/features/agent-delegation-sessions.md:371, 716-740`. The Data Model section formally defines `DelegationWaitRecord` and `SpawnReviewerBatchResumeWaitResult` but does not include a `type DelegationWaitResponse = {...}` block, even though `resume_after_delegations` is documented as returning that type and the `queuedResume` / `resumePromptQueued` / `resumeDispatchRequested` semantics narrative references the field set.
-
-Wrappers (e.g. the planned MCP wrapper) consuming `resume_after_delegations` directly never see the formal shape from the doc and have to read source.
-
-**Current behavior:**
-- Doc references `DelegationWaitResponse` fields textually only.
-- Only `SpawnReviewerBatchResumeWaitResult` carries a structural type definition.
-
-**Proposal:**
-- Add a `type DelegationWaitResponse = { revision; wait; queuedResume; resumePromptQueued; resumeDispatchRequested; serverInstanceId }` block in the Data Model section.
-- Cross-link the alias narrative to the new definition.
-
-## `isolatedWorktree` request docs conflate generated and persisted `worktreePath`
-
-**Severity:** Note - `docs/features/agent-delegation-sessions.md:610`, `docs/features/agent-slash-commands.md:154`, and `ui/src/api.ts:438`. The delegation-session data model describes `isolatedWorktree.worktreePath` as required, while resolver/default request examples omit it and rely on the backend to generate a TermAl-owned path.
-
-Clients reading the feature doc cannot tell whether omitted `worktreePath` is valid request/default metadata, only valid after backend preparation, or an accidental docs gap.
-
-**Current behavior:**
-- Resolver-provided isolated worktree defaults can omit `worktreePath`.
-- Backend request handling accepts omitted `worktreePath` and generates a path.
-- The persisted/session policy shape documents `worktreePath` as required.
-
-**Proposal:**
-- Split request/default write-policy docs from persisted response write-policy docs.
-- Or mark `worktreePath` optional wherever omission is accepted before backend worktree preparation.
-
-## `DelegationWaitRefresh::extend` silently overwrites duplicate queue-result keys
-
-**Severity:** Low - `src/delegations.rs:138-151`. `BTreeMap::extend` overwrites existing keys. Currently safe because only `refresh_delegation_waits_locked` populates `queue_results_by_wait_id` and `consume_delegation_waits_for_removed_parent_locked` does not, so the `kill_session` two-pass `extend` cannot collide. If a future pass starts populating queue results for already-consumed waits, the silent overwrite would mask the conflict.
-
-**Current behavior:**
-- `extend` uses `BTreeMap::extend`'s default overwrite semantics.
-- The non-collision invariant is unenforced and uncommented.
-
-**Proposal:**
-- Add a `debug_assert!(self.queue_results_by_wait_id.insert(k, v).is_none())` helper that fails on duplicate inserts in debug builds.
-- Or document the invariant near the `extend` definition.
-
-## Telegram relay cadence change lacks contract comment in `src/telegram.rs` header
-
-**Severity:** Note - `src/telegram.rs:1-20`. The file-header `/* ... */` block still describes the old "poll updates → render digest → persist" cadence. The 5s→1s timeout drop and the new pre-poll `sync_telegram_digest` add a dual-sync pattern the header does not mention, and the rationale for needing both pre-poll and post-update syncs lives only in commit history.
-
-**Current behavior:**
-- Header comment describes the previous single-sync, long-poll model.
-- New top-of-loop sync is uncommented at the call site.
-
-**Proposal:**
-- Update the file-header block to describe the dual-sync cadence and the trade-off behind the 1s long-poll floor.
-- Or add a short comment at the top-of-loop call site explaining when the pre-poll sync is needed beyond what the post-update sync handles.
-
 ## Multi-wait parent indicator drops wait titles
 
 **Severity:** Low - `ui/src/SessionPaneView.tsx`. `delegationWaitIndicatorPrompt` includes the wait title for a single pending wait, but the multi-wait branch collapses to a generic "Waiting on N delegation waits covering X delegated sessions" message.
@@ -250,105 +123,6 @@ When multiple waits are pending, the title is the clearest way to distinguish in
 **Proposal:**
 - Include the first wait title plus a "+N more" suffix in the multi-wait message.
 - Add an RTL test with two pending waits.
-
-## Delegation wait title-cap error is missing from the feature doc diagnostics list
-
-**Severity:** Note - `docs/features/agent-delegation-sessions.md` and `src/delegations.rs:619-625`. The backend rejects oversized delegation-wait titles with `delegation wait title must be at most N characters`, and the frontend redaction layer treats that message as safe, but the feature brief's diagnostics list omits it.
-
-Wrappers using the feature brief as the command/error contract will not know this wire-level error is expected.
-
-**Current behavior:**
-- Backend emits the title-cap error.
-- Frontend safe-list handles it.
-- Feature doc diagnostics list does not mention it.
-
-**Proposal:**
-- Add the title-cap message to the documented wait/resume diagnostics.
-
-## `DelegationWaitConsumedEvent.reason` is optional despite required wire contract
-
-**Severity:** Note - `ui/src/types.ts:812-815`. The backend now serializes `reason` on every new `delegationWaitConsumed` delta and the feature doc lists it as required, but the frontend event type marks `reason` optional.
-
-That optionality weakens the current wire contract and can hide handling paths that forget to normalize missing legacy values.
-
-**Current behavior:**
-- Backend `DeltaEvent::DelegationWaitConsumed` serializes `reason`.
-- Feature docs show `reason` as required.
-- Frontend type allows `reason` to be absent.
-
-**Proposal:**
-- Make `reason` required in the frontend type.
-- Or add an explicit SSE normalization/defaulting boundary that maps missing legacy values to `"completed"` and document the optionality there.
-
-## Delegate path skips active-session check after resolver await
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:2515-2548`. The send path captures `requestSessionId` before `await resolveAgentCommand` and bails if `activeSessionIdRef.current` changed after the await. The delegate path resolves first and captures `requestSessionId` afterward.
-
-If the user switches sessions during the resolver round-trip, the delegation can land on the new session with a prompt resolved against the previous session's command list and workdir.
-
-**Current behavior:**
-- Delegate path resolves the command, then captures the active session id.
-- Cross-session delegation is possible during slow resolver calls.
-
-**Proposal:**
-- Capture `const requestSessionId = activeSessionId` before awaiting `resolveAgentCommand`.
-- Bail immediately after the await if the mounted state or active session changed, mirroring the send path.
-
-## Composer textarea stays editable during resolver round-trip
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:1781-1790, 2438-2456`. `composerInputDisabled` is `!session || isStopping` and does not include `isAgentCommandResolving`, so the textarea remains editable while the resolver promise is in flight. After resolution, the post-send block clears the draft unconditionally.
-
-On a slow resolver, the user can type more text after pressing Enter; once resolution completes, that new text is silently discarded.
-
-**Current behavior:**
-- Textarea is editable during agent-command resolver round-trip.
-- Post-send draft clear unconditionally wipes the composer.
-
-**Proposal:**
-- Include `isAgentCommandResolving` in the composer disabled state.
-- Or compare the post-resolve draft to the prepared slash-command snapshot and skip clearing if the user typed more text.
-
-## `resumeWaitFailurePacket` redaction safe-list has only one happy-path test
-
-**Severity:** Medium - `ui/src/delegation-error-packets.ts:206`, `ui/src/delegation-commands.test.ts:891`. The new `resumeWaitFailurePacket` path has multiple safe literal messages and regex patterns, but only one backend-unavailable happy path is covered.
-
-By contrast, spawn-delegation failure redaction has parametric coverage. A regression that drops a safe entry, broadens a match, or stops redacting generic inputs could leak backend error text without a failing test.
-
-**Current behavior:**
-- Only one `ApiRequestError` path exercises the new packet helper.
-- Safe literals, safe regexes, generic fallback redaction, and non-`Error` throws are not covered.
-
-**Proposal:**
-- Add parametric coverage mirroring the spawn-failure redaction tests.
-- Cover every safe literal/pattern, unsafe inputs collapsing to the generic message, and the non-`Error` branch.
-
-## `splitAgentCommandResolverTail` only recognizes a literal ` -- ` separator
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:159-183`. Only the literal substring `" -- "` splits arguments from notes. Newline-prefixed `--`, tabbed `--`, or trailing-only `--` without a following space are silently absorbed into `argumentsText`.
-
-The wire shape becomes silently wrong, and the user has no signal that their intended note was treated as `$ARGUMENTS`.
-
-**Current behavior:**
-- Multi-line, tabbed, or no-space separators are absorbed into arguments.
-- Trimmed `"-- "` collapses to an argument-only `"--"`.
-
-**Proposal:**
-- Document the exact single-line, space-bounded separator contract.
-- Or expand the matcher to accept whitespace-delimited `--` forms and surface ambiguous input explicitly.
-
-## Resolver does not size-cap `arguments` or `note` request fields
-
-**Severity:** Low - `src/workspace_queries.rs:213-229`, `src/wire.rs:1041-1049`. `ResolveAgentCommandRequest` has no size caps on `arguments` or `note`; only the global body limit applies. `arguments` is interpolated by splitting the template on `$ARGUMENTS` and joining with the provided argument string, so a large argument and multiple placeholders can allocate substantially before any downstream prompt-size guard runs.
-
-The resolved prompt may flow into send-message paths or delegation creation after the resolver has already paid the allocation cost.
-
-**Current behavior:**
-- Resolver accepts arguments and notes up to the global body limit.
-- Oversized resolved prompts are rejected, if at all, only downstream.
-
-**Proposal:**
-- Cap `arguments` and `note` at resolver entry.
-- Reject oversized input with `400 bad_request`, matching existing delegation prompt behavior.
 
 ## Default Claude model preferences accept option-looking strings
 
@@ -365,21 +139,6 @@ Model ids that begin with `-` or contain control characters can create downstrea
 - Reject leading-hyphen and control-character model ids for Claude defaults.
 - Or pass Claude model values with a CLI-safe `--model=<value>` form if Claude supports it.
 - Add regression tests for option-looking model inputs.
-
-## Cached prompt-template missing-metadata test depends on ambient `/tmp`
-
-**Severity:** Low - `src/tests/agent_commands.rs:960-1010`. `cached_prompt_template_missing_metadata_file_resolves_without_defaults` creates its session with `workdir: Some("/tmp")` while the cached command source points at `.claude/commands/review-local.md`. If a developer or CI image has `/tmp/.claude/commands/review-local.md`, the resolver can pick up real metadata and fail the test for environmental reasons.
-
-This makes the regression coverage non-hermetic on Unix-like systems and contradicts the test's missing-metadata premise.
-
-**Current behavior:**
-- The test uses `/tmp` as the session workdir.
-- The cached command source is a relative prompt-template path.
-- Ambient files under `/tmp/.claude/commands` can affect resolver output.
-
-**Proposal:**
-- Use a fresh temp directory with no metadata file for the session workdir.
-- Clean it up with best-effort cleanup that does not mask the original assertion failure.
 
 ## `create_delegation_wait` does not check parent eligibility for queued prompts
 
@@ -410,17 +169,6 @@ Operators and the UI cannot tell that fan-in resume should have happened but did
 **Proposal:**
 - Emit a structured warning event or retain dispatch error metadata.
 - Or document the best-effort policy and recovery expectations.
-
-## `api_json_rejection` label is bare `"request"` for the resolver endpoint
-
-**Severity:** Low - `src/api_files.rs:377`. Peer endpoints pass descriptive labels such as `"delegation request"` or `"delegation wait request"` to `api_json_rejection`. The resolver endpoint passes the bare label `"request"`, yielding a less useful user-facing JSON error.
-
-**Current behavior:**
-- Resolver malformed-JSON errors say `invalid request JSON`.
-- Peer endpoints include endpoint-specific labels.
-
-**Proposal:**
-- Use a label such as `"agent command resolve request"` for the resolver endpoint.
 
 ## Two duplicate composer delegation option types kept in sync manually
 
@@ -596,7 +344,7 @@ Keyboard users can select and send the slash command, but cannot move focus to t
 If the backend rejects a native slash command with an additional note, or the backend is unavailable, the user sees no validation or retry explanation. The draft remains, but there is no visible reason why pressing Enter or Delegate did nothing.
 
 **Current behavior:**
-- Resolver `catch` blocks call `focusComposerInput()` and return.
+- Resolver `catch` blocks refocus the composer only when the original session is still active.
 - No error message is surfaced through the existing composer/session error channel.
 - Native slash note rejection and backend-unavailable failures look like no-ops.
 
@@ -604,20 +352,6 @@ If the backend rejects a native slash command with an additional note, or the ba
 - Thread an `onComposerError` callback or local inline error state into `AgentSessionPanelFooter` / `SessionComposer`.
 - Surface sanitized resolver failures the same way delegation spawn failures are surfaced.
 - Add tests for native-slash note rejection and backend-unavailable resolver failure.
-
-## Delegation architecture docs still describe isolated worktrees as unsupported
-
-**Severity:** Low - `docs/architecture.md:34` and `docs/architecture.md:205`. The backend now accepts `writePolicy.kind = "isolatedWorktree"`, but the architecture docs still describe writable delegation policies as returning `501`.
-
-The current-tree API contract is therefore inconsistent for clients and reviewers using the architecture docs as the source of truth.
-
-**Current behavior:**
-- `isolatedWorktree` is accepted by the API.
-- `sharedWorktree` remains unsupported.
-- The architecture docs still describe writable policies broadly as unsupported.
-
-**Proposal:**
-- Update `docs/architecture.md` to document `readOnly`, `isolatedWorktree`, optional/generated `worktreePath`, and the remaining unsupported `sharedWorktree` policy.
 
 ## Telegram selection cleanup can be lost on informational early returns
 
@@ -4743,28 +4477,35 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
+- [ ] P2: Cover frontmatter parser edge cases directly:
+  add a `strip_markdown_frontmatter` unit-test module covering opening `---` without a closing terminator (returns original content), `description: |` multi-line value, malformed `key: value: extra` lines, very large frontmatter, and trailing whitespace on the closing `---`.
+- [ ] P2: Cover `rejects_invalid_agent_command_delegation_metadata` parametrically:
+  parameterize over each error branch in the metadata parser: `mode: invalid_value`, `writePolicy.kind: bogus`, `enabled: not-a-bool`, `enabled: true` without `mode`, `enabled: true` without `writePolicy.kind`, `prefix:` without `strategy: prefixFirstArgument`, `strategy: bogus`.
+- [ ] P2: Cover adversarial `PromptTemplate` source-vs-name mismatch for delegation defaults:
+  add `prompt_template_delegate_resolution_does_not_use_metadata_when_source_path_mismatches_name` — a PromptTemplate whose source ends with `/.claude/commands/review-local.md` but whose name is `audit` must not inherit metadata defaults.
+- [ ] P2: Cover frontmatter freshness contract:
+  once resolver metadata is cached from the command-listing pass, add a Rust test
+  that lists/resolves a command, edits the on-disk frontmatter, resolves again,
+  and asserts the second resolve follows the documented snapshot/cache contract
+  instead of silently mixing old prompt content with freshly re-read metadata.
+- [ ] P2: Cover delegation tests through `update_app_settings` normalization:
+  add at least one delegation test that goes through `state.update_app_settings(...)` with a non-canonical model string instead of mutating `inner.preferences.default_codex_model` directly, then creates a delegation and asserts the child uses the canonicalized form.
 - [ ] P2: Cover trusted command metadata boundaries:
   add resolver tests proving project-local `.claude/commands/*.md` frontmatter cannot grant delegation defaults or `isolatedWorktree`, while an explicitly trusted TermAl-owned command can.
-- [ ] P2: Cover remote session default-model propagation:
-  create a remote-backed session with a custom local app default model and no explicit request model, then assert the remote create request receives the effective model or a documented sentinel.
-- [ ] P2: Cover Cursor and Gemini default-model session creation:
-  extend backend session settings coverage so `default_cursor_model` and `default_gemini_model` are applied to new Cursor and Gemini sessions, not only persisted in preferences.
 - [ ] P2: Cover frontend default-model forwarding for all model-picker agents:
   add parameterized tests for Claude, Codex, Cursor, and Gemini covering custom default forwarding, the `default` sentinel omission, and at least one settings-panel Apply/Reset interaction.
 - [ ] P2: Cover Claude default-model validation:
   assert app settings reject leading-hyphen and control-character Claude model values, or assert the eventual Claude CLI args use a safe `--model=<value>` form.
-- [ ] P2: Isolate cached prompt-template missing-metadata tests:
-  change `cached_prompt_template_missing_metadata_file_resolves_without_defaults` to use a fresh temp workdir with no command metadata file so `/tmp/.claude/commands` cannot influence the result.
 - [ ] P2: Cover CRLF command frontmatter parsing:
   add a command fixture using `---\r\n` frontmatter and assert description extraction, body stripping, and argument-hint preservation still work on Windows-style files.
-- [ ] P2: Cover Telegram pre-poll digest sync loop ordering:
-  extract a testable relay loop iteration or fake Telegram/TermAl clients, then assert digest sync does not emit stale output before pending updates are processed and dirty state persists when `getUpdates` fails.
-- [ ] P2: Cover Telegram poll-error persist propagation:
-  force `persist_telegram_bot_state` to fail inside the `get_updates` Err branch with `dirty=true` and assert the relay either logs the original polling error and continues, or fails in a way that surfaces both errors. The current `?` propagation drops the polling error and exits the relay thread.
+- [ ] P2: Cover Telegram relay update-before-digest ordering:
+  extract a testable relay loop iteration or fake Telegram/TermAl clients, then
+  assert pending updates are processed before digest sync and that one loop
+  iteration emits at most one digest/assistant-forwarding pass.
 - [ ] P2: Cover pending-prompts visibility without a live turn:
   render `SessionConversationPage` with `showWaitingIndicator: false` and a non-empty `pendingPrompts` array, then assert `.conversation-live-tail` is absent and the pending-prompt cards live inside `.conversation-pending-prompts`. Prevents a regression that re-introduces the old `liveTurnCard || pendingPromptCards.length > 0` condition.
 - [ ] P2: Cover `DelegationWaitResponse` JSON serialization:
-  round-trip a `DelegationWaitResponse` through `serde_json::to_value` and assert the camelCase keys `queuedResume`, `resumePromptQueued`, and `resumeDispatchRequested` are all present for one busy-parent and one idle-parent scenario, and round-trip a `DeltaEvent::DelegationWaitConsumed` to assert `reason` is always emitted with the expected value.
+  round-trip a `DelegationWaitResponse` through `serde_json::to_value` and assert the camelCase keys `resumePromptQueued` and `resumeDispatchRequested` are present for one busy-parent and one idle-parent scenario, and round-trip a `DeltaEvent::DelegationWaitConsumed` to assert `reason` is always emitted with the expected value.
 - [ ] P2: Replace the duplicative malformed-wait persistence test:
   rewrite `removing_parent_consumes_unsatisfied_wait_even_when_targets_are_not_terminal` so it writes a stale wait whose owner is missing into the persistence file, restarts via `AppState::new_with_paths`, and asserts boot reconciliation drops it. As written, it bypasses validation via `inner.delegation_waits.push` and duplicates a scenario already covered by `removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason`.
 - [ ] P2: Cover true-value delegation wait response booleans through the command layer:
@@ -4773,8 +4514,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   start off-bottom, append only pending prompts with unchanged messages, and assert no bottom scroll occurs while the "New response" indicator becomes visible.
 - [ ] P2: Cover multi-wait waiting indicator titles:
   render two pending waits for one parent and assert the UI preserves at least the first wait title plus a count for the remaining waits.
-- [ ] P2: Cover `resumeWaitFailurePacket` redaction parametrically:
-  add an `it.each(...)` block to `ui/src/delegation-error-packets.test.ts` mirroring `spawnDelegationFailurePacket` coverage. Pin each safe literal and regex, cover unsafe inputs collapsing to the generic message, and cover the non-`Error` throw branch.
 - [ ] P2: Decouple `delegation_wait_reconciles_after_restart_recovery` from recovery copy:
   avoid asserting the exact `"TermAl restarted before this turn finished"` string from `src/messages.rs`; assert stable wait/delegation identifiers or finish the child with a deterministic result packet before simulated shutdown.
 - [ ] P2: Cover edge cases in delegation finding parsing:

@@ -35,6 +35,10 @@ function makeStateResponse(
     },
     agentReadiness: [],
     preferences: {
+      defaultCodexModel: "default",
+      defaultClaudeModel: "default",
+      defaultCursorModel: "default",
+      defaultGeminiModel: "default",
       defaultCodexReasoningEffort: "medium",
       defaultClaudeApprovalMode: "ask",
       defaultClaudeEffort: "default",

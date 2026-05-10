@@ -234,7 +234,6 @@ describe("delegation command surface", () => {
     >(async (parentSessionId, request) => ({
       revision: 42,
       serverInstanceId: "server-a",
-      queuedResume: false,
       resumePromptQueued: false,
       resumeDispatchRequested: false,
       wait: {
@@ -262,7 +261,6 @@ describe("delegation command surface", () => {
       ),
     ).resolves.toMatchObject({
       revision: 42,
-      queuedResume: false,
       resumePromptQueued: false,
       resumeDispatchRequested: false,
       wait: {
@@ -379,6 +377,7 @@ describe("delegation command surface", () => {
       mode: "explorer",
       writePolicy: { kind: "readOnly" },
     });
+    expect(request).not.toHaveProperty("model");
   });
 
   it("resolves composer delegation availability before spawning", () => {
@@ -846,7 +845,6 @@ describe("delegation command surface", () => {
     >(async (parentSessionId, request) => ({
       revision: 8,
       serverInstanceId: "server-a",
-      queuedResume: false,
       resumePromptQueued: false,
       resumeDispatchRequested: false,
       wait: {
@@ -899,7 +897,6 @@ describe("delegation command surface", () => {
       serverInstanceId: "server-a",
       resumeWait: {
         outcome: "scheduled",
-        queuedResume: false,
         resumePromptQueued: false,
         resumeDispatchRequested: false,
         revision: 8,

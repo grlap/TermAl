@@ -4,14 +4,14 @@ Telegram Bot API <-> telegram.rs <-> local TermAl project digest/actions
 Poll updates
   -> link chat / parse command / forward free text
   -> GET project digest or POST project action
-  -> render digest + inline keyboard
+  -> render digest + inline keyboard after updates have been drained
   -> persist chat binding and digest cursor
 This adapter runs as a separate CLI mode. It reuses the same backend project
 action contract instead of exposing a second transport-specific control path.
 */
 
 const TELEGRAM_API_BASE_URL: &str = "https://api.telegram.org";
-const TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS: u64 = 1;
+const TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS: u64 = 5;
 const TELEGRAM_ERROR_RETRY_DELAY: Duration = Duration::from_secs(2);
 const TELEGRAM_GET_UPDATES_LIMIT: i64 = 25;
 const TELEGRAM_RELAY_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -75,20 +75,15 @@ fn run_telegram_bot_with_config(
 
     while !telegram_relay_shutdown_requested(&shutdown) {
         let mut dirty = false;
-        if let Some(chat_id) = effective_telegram_chat_id(&config, &state) {
-            match sync_telegram_digest(&telegram, &termal, &config, &mut state, chat_id) {
-                Ok(changed) => dirty |= changed,
-                Err(err) => log_telegram_error("failed to sync digest", &err),
-            }
-        }
-
         let updates = match telegram.get_updates(state.next_update_id, config.poll_timeout_secs) {
             Ok(updates) => updates,
             Err(err) => {
-                if dirty {
-                    persist_telegram_bot_state(&config.state_path, &state)?;
-                }
                 log_telegram_error("failed to poll updates", &err);
+                persist_dirty_telegram_state_after_poll_error(
+                    &config.state_path,
+                    &state,
+                    dirty,
+                );
                 telegram_relay_sleep(TELEGRAM_ERROR_RETRY_DELAY, &shutdown);
                 continue;
             }
@@ -606,6 +601,24 @@ fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result
         serde_json::to_vec_pretty(&file).context("failed to serialize telegram bot state")?;
     write_telegram_bot_file(path, &encoded)
         .with_context(|| format!("failed to write `{}`", path.display()))
+}
+
+fn persist_dirty_telegram_state_after_poll_error(
+    path: &FsPath,
+    state: &TelegramBotState,
+    dirty: bool,
+) -> bool {
+    if !dirty {
+        return true;
+    }
+
+    match persist_telegram_bot_state(path, state) {
+        Ok(()) => true,
+        Err(err) => {
+            log_telegram_error("failed to persist Telegram state after poll error", &err);
+            false
+        }
+    }
 }
 
 fn backup_corrupt_telegram_bot_file(path: &FsPath, err: impl std::fmt::Display) -> Result<()> {

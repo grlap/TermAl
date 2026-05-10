@@ -79,8 +79,6 @@ impl AppState {
             let delegation_reconciliation =
                 reconcile_delegations_for_removed_session_locked(&mut inner, session_id);
             inner.remove_session_at(index);
-            let mut delegation_wait_refresh =
-                consume_delegation_waits_for_removed_parent_locked(&mut inner, session_id);
 
             let mut hidden_runtimes = Vec::new();
             if agent == Agent::Claude {
@@ -122,7 +120,7 @@ impl AppState {
                 inner.ignore_discovered_codex_thread(external_session_id.as_deref());
             }
             inner.normalize_orchestrator_instances();
-            delegation_wait_refresh.extend(refresh_delegation_waits_locked(&mut inner));
+            let delegation_wait_refresh = refresh_delegation_waits_locked(&mut inner);
 
             let revision = self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))

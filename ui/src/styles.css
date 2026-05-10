@@ -3771,7 +3771,8 @@ textarea {
   min-width: 0;
 }
 
-.session-model-custom-apply {
+.session-model-custom-apply,
+.session-model-custom-reset {
   min-width: 4.8rem;
 }
 

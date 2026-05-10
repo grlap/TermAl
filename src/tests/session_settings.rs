@@ -102,7 +102,7 @@ fn import_discovered_codex_threads_prunes_stale_ignored_thread_ids() {
 
 // pins that update_app_settings writes the global preferences to disk
 // and that a freshly loaded AppState inherits those defaults when
-// creating new Codex and Claude sessions. guards against app-settings
+// creating new Codex, Claude, Cursor, and Gemini sessions. guards against app-settings
 // persistence regressions and newly created sessions ignoring the
 // configured global defaults.
 #[test]
@@ -256,12 +256,61 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     assert_eq!(claude_session.claude_effort, Some(ClaudeEffortLevel::Max));
     assert_eq!(claude_session.model, "claude-sonnet-4-5");
 
+    let cursor_created = reloaded_state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Cursor),
+            name: Some("Persisted Cursor".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    assert_eq!(cursor_created.session.model, "cursor-premium");
+
+    let gemini_created = reloaded_state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Gemini),
+            name: Some("Persisted Gemini".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    assert_eq!(gemini_created.session.model, "gemini-2.5-pro");
+
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 #[test]
 fn default_model_preference_canonicalizes_default_sentinel_case() {
     let state = test_app_state();
+
+    state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: Some("gpt-5.5".to_owned()),
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
+            default_codex_reasoning_effort: None,
+            default_claude_approval_mode: None,
+            default_claude_effort: None,
+            remotes: None,
+        })
+        .unwrap();
 
     let updated = state
         .update_app_settings(UpdateAppSettingsRequest {
@@ -277,6 +326,10 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
         .unwrap();
 
     assert_eq!(updated.preferences.default_codex_model, "default");
+    let reloaded_inner = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .expect("persisted state should exist");
+    assert_eq!(reloaded_inner.preferences.default_codex_model, "default");
 
     let created = state
         .create_session(CreateSessionRequest {
@@ -298,6 +351,137 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
     assert_eq!(created.session.model, Agent::Codex.default_model());
 
     let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn default_model_preference_validation_covers_agents_and_boundaries() {
+    for agent in [Agent::Codex, Agent::Claude, Agent::Cursor, Agent::Gemini] {
+        let state = test_app_state();
+        let boundary_model = "m".repeat(MAX_DEFAULT_MODEL_CHARS);
+        let updated = state
+            .update_app_settings(update_app_settings_request_for_agent_model(
+                agent,
+                boundary_model.clone(),
+            ))
+            .unwrap();
+        assert_eq!(
+            default_model_preference_for_agent(&updated.preferences, agent),
+            boundary_model
+        );
+
+        let unicode_model = "é".repeat(MAX_DEFAULT_MODEL_CHARS);
+        let updated = state
+            .update_app_settings(update_app_settings_request_for_agent_model(
+                agent,
+                unicode_model.clone(),
+            ))
+            .unwrap();
+        assert_eq!(
+            default_model_preference_for_agent(&updated.preferences, agent),
+            unicode_model
+        );
+
+        let error = match state.update_app_settings(update_app_settings_request_for_agent_model(
+            agent,
+            "x".repeat(MAX_DEFAULT_MODEL_CHARS + 1),
+        )) {
+            Ok(_) => panic!("oversized {agent:?} default model should be rejected"),
+            Err(error) => error,
+        };
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error.message,
+            format!(
+                "{} default model must be at most {} characters",
+                agent.name(),
+                MAX_DEFAULT_MODEL_CHARS
+            )
+        );
+
+        let blank = state
+            .update_app_settings(update_app_settings_request_for_agent_model(
+                agent,
+                "   ".to_owned(),
+            ))
+            .unwrap();
+        assert_eq!(
+            default_model_preference_for_agent(&blank.preferences, agent),
+            "default"
+        );
+
+        let _ = fs::remove_file(state.persistence_path.as_path());
+    }
+}
+
+fn update_app_settings_request_for_agent_model(
+    agent: Agent,
+    model: String,
+) -> UpdateAppSettingsRequest {
+    UpdateAppSettingsRequest {
+        default_codex_model: (agent == Agent::Codex).then(|| model.clone()),
+        default_claude_model: (agent == Agent::Claude).then(|| model.clone()),
+        default_cursor_model: (agent == Agent::Cursor).then(|| model.clone()),
+        default_gemini_model: (agent == Agent::Gemini).then_some(model),
+        default_codex_reasoning_effort: None,
+        default_claude_approval_mode: None,
+        default_claude_effort: None,
+        remotes: None,
+    }
+}
+
+fn default_model_preference_for_agent(preferences: &AppPreferences, agent: Agent) -> &str {
+    match agent {
+        Agent::Codex => &preferences.default_codex_model,
+        Agent::Claude => &preferences.default_claude_model,
+        Agent::Cursor => &preferences.default_cursor_model,
+        Agent::Gemini => &preferences.default_gemini_model,
+    }
+}
+
+#[test]
+fn oversized_persisted_default_model_falls_back_to_agent_default() {
+    for agent in [Agent::Codex, Agent::Claude, Agent::Cursor, Agent::Gemini] {
+        let state = test_app_state();
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            match agent {
+                Agent::Codex => {
+                    inner.preferences.default_codex_model = "x".repeat(MAX_DEFAULT_MODEL_CHARS + 1);
+                }
+                Agent::Claude => {
+                    inner.preferences.default_claude_model =
+                        "x".repeat(MAX_DEFAULT_MODEL_CHARS + 1);
+                }
+                Agent::Cursor => {
+                    inner.preferences.default_cursor_model =
+                        "x".repeat(MAX_DEFAULT_MODEL_CHARS + 1);
+                }
+                Agent::Gemini => {
+                    inner.preferences.default_gemini_model =
+                        "x".repeat(MAX_DEFAULT_MODEL_CHARS + 1);
+                }
+            }
+            state.commit_locked(&mut inner).unwrap();
+        }
+
+        let reloaded_inner = load_state(state.persistence_path.as_path())
+            .unwrap()
+            .expect("persisted state should exist");
+        assert_eq!(
+            default_model_preference_for_agent(&reloaded_inner.preferences, agent)
+                .chars()
+                .count(),
+            MAX_DEFAULT_MODEL_CHARS + 1,
+            "{agent:?}"
+        );
+        assert_eq!(
+            reloaded_inner.preferences.default_model_for_agent(agent),
+            agent.default_model(),
+            "{agent:?}"
+        );
+
+        let _ = fs::remove_file(state.persistence_path.as_path());
+    }
 }
 
 // pins that a CreateSessionRequest carrying explicit Codex model,

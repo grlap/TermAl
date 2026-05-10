@@ -14,6 +14,8 @@ import {
   areRemoteConfigsEqual,
   CLAUDE_EFFORT_OPTIONS,
   CODEX_REASONING_EFFORT_OPTIONS,
+  DEFAULT_MODEL_PREFERENCE,
+  isDefaultModelPreference,
   MAX_DEFAULT_MODEL_PREFERENCE_CHARS,
   remoteBadgeLabel,
   type ComboboxOption,
@@ -108,6 +110,27 @@ export const GEMINI_APPROVAL_OPTIONS = [
   { label: "plan", value: "plan" },
 ] as const;
 
+function normalizeDefaultModelPreferenceDraft(value: string) {
+  return isDefaultModelPreference(value)
+    ? DEFAULT_MODEL_PREFERENCE
+    : value.trim();
+}
+
+function displayDefaultModelPreference(value: string) {
+  return isDefaultModelPreference(value)
+    ? DEFAULT_MODEL_PREFERENCE
+    : value;
+}
+
+function clampDefaultModelPreferenceDraft(value: string) {
+  const characters = Array.from(value);
+  if (characters.length <= MAX_DEFAULT_MODEL_PREFERENCE_CHARS) {
+    return value;
+  }
+
+  return characters.slice(0, MAX_DEFAULT_MODEL_PREFERENCE_CHARS).join("");
+}
+
 function AgentDefaultModelControl({
   agent,
   id,
@@ -119,21 +142,56 @@ function AgentDefaultModelControl({
   value: string;
   onChange: (nextValue: string) => void;
 }) {
-  const [draft, setDraft] = useState(value);
+  const [draft, setDraft] = useState(displayDefaultModelPreference(value));
+  const [isDirty, setIsDirty] = useState(false);
+  const [pendingAppliedValue, setPendingAppliedValue] = useState<string | null>(null);
 
   useEffect(() => {
-    setDraft(value);
-  }, [value]);
+    setIsDirty(false);
+    setPendingAppliedValue(null);
+    setDraft(displayDefaultModelPreference(value));
+    // Reset only when switching controls; value echoes are handled below without clobbering dirty drafts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
-  const trimmedDraft = draft.trim();
-  const canApply = trimmedDraft.length > 0 && trimmedDraft !== value;
+  const normalizedDraft = normalizeDefaultModelPreferenceDraft(draft);
+  const normalizedValue = normalizeDefaultModelPreferenceDraft(value);
+  const canApply = normalizedDraft !== normalizedValue;
+  const hintId = `${id}-hint`;
+
+  useEffect(() => {
+    if (pendingAppliedValue !== null) {
+      if (normalizedValue === pendingAppliedValue) {
+        setDraft(displayDefaultModelPreference(value));
+        setIsDirty(false);
+        setPendingAppliedValue(null);
+      }
+      return;
+    }
+
+    if (!isDirty) {
+      setDraft(displayDefaultModelPreference(value));
+    }
+  }, [isDirty, normalizedValue, pendingAppliedValue, value]);
+
+  function updateDraft(nextDraft: string) {
+    const clampedDraft = clampDefaultModelPreferenceDraft(nextDraft);
+    setDraft(clampedDraft);
+    setIsDirty(
+      normalizeDefaultModelPreferenceDraft(clampedDraft) !== normalizedValue,
+    );
+    setPendingAppliedValue(null);
+  }
 
   function applyDraft() {
     if (!canApply) {
       return;
     }
 
-    onChange(trimmedDraft);
+    setDraft(normalizedDraft);
+    setIsDirty(true);
+    setPendingAppliedValue(normalizedDraft);
+    onChange(normalizedDraft);
   }
 
   return (
@@ -148,13 +206,17 @@ function AgentDefaultModelControl({
           type="text"
           value={draft}
           placeholder="default"
-          maxLength={MAX_DEFAULT_MODEL_PREFERENCE_CHARS}
+          aria-describedby={hintId}
+          aria-label={`${agent} default model`}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
-          onChange={(event) => setDraft(event.currentTarget.value)}
+          onChange={(event) => updateDraft(event.currentTarget.value)}
           onKeyDown={(event) => {
             if (event.key !== "Enter") {
+              return;
+            }
+            if (!canApply) {
               return;
             }
 
@@ -165,6 +227,8 @@ function AgentDefaultModelControl({
         <button
           type="button"
           className="ghost-button session-model-custom-apply"
+          aria-describedby={hintId}
+          aria-label={`Apply ${agent} default model`}
           disabled={!canApply}
           onClick={applyDraft}
         >
@@ -172,18 +236,22 @@ function AgentDefaultModelControl({
         </button>
         <button
           type="button"
-          className="ghost-button session-model-custom-apply"
-          disabled={value === "default"}
+          className="ghost-button session-model-custom-reset"
+          aria-describedby={hintId}
+          aria-label={`Reset ${agent} default model`}
+          disabled={isDefaultModelPreference(value)}
           onClick={() => {
-            setDraft("default");
-            onChange("default");
+            setDraft(DEFAULT_MODEL_PREFERENCE);
+            setIsDirty(true);
+            setPendingAppliedValue(DEFAULT_MODEL_PREFERENCE);
+            onChange(DEFAULT_MODEL_PREFERENCE);
           }}
         >
           Reset
         </button>
       </div>
-      <p className="session-control-hint">
-        Use <code>default</code> to let {agent} choose its built-in default, or enter an exact model id.
+      <p id={hintId} className="session-control-hint">
+        Use <code>default</code> or leave blank to let {agent} choose its built-in default, or enter an exact model id.
       </p>
     </div>
   );

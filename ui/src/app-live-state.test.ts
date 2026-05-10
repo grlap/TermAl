@@ -208,6 +208,10 @@ function makeStateResponse(session: Session, revision = 2): StateResponse {
     codex: {},
     agentReadiness: [],
     preferences: {
+      defaultCodexModel: "default",
+      defaultClaudeModel: "default",
+      defaultCursorModel: "default",
+      defaultGeminiModel: "default",
       defaultCodexReasoningEffort: "medium",
       defaultClaudeApprovalMode: "ask",
       defaultClaudeEffort: "default",

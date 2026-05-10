@@ -3702,6 +3702,153 @@ fn local_replay_test_remote() -> RemoteConfig {
     }
 }
 
+// Pins remote-backed session creation to materializing the same app-level
+// default model as local session creation before forwarding the create request.
+// Guards against remote sessions silently falling back to the remote host's
+// built-in default when the local UI request omits `model`.
+#[test]
+fn remote_session_create_forwards_configured_default_model() {
+    let captured_body = Arc::new(Mutex::new(None::<Value>));
+    let captured_body_for_server = captured_body.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let remote_session = Session {
+        id: "remote-session-default-model".to_owned(),
+        name: "Remote Default Model".to_owned(),
+        emoji: Agent::Codex.avatar().to_owned(),
+        agent: Agent::Codex,
+        workdir: "/remote/repo".to_owned(),
+        project_id: Some("remote-project-default-model".to_owned()),
+        remote_id: None,
+        model: "gpt-5.5".to_owned(),
+        model_options: Vec::new(),
+        approval_policy: Some(default_codex_approval_policy()),
+        reasoning_effort: Some(default_codex_reasoning_effort()),
+        sandbox_mode: Some(default_codex_sandbox_mode()),
+        cursor_mode: None,
+        claude_effort: None,
+        claude_approval_mode: None,
+        gemini_approval_mode: None,
+        external_session_id: None,
+        agent_commands_revision: 0,
+        codex_thread_state: None,
+        status: SessionStatus::Idle,
+        preview: "Remote Default Model ready.".to_owned(),
+        messages: Vec::new(),
+        messages_loaded: true,
+        message_count: 0,
+        markers: Vec::new(),
+        pending_prompts: Vec::new(),
+        session_mutation_stamp: None,
+        parent_delegation_id: None,
+    };
+    let remote_response = serde_json::to_string(&CreateSessionResponse {
+        session_id: remote_session.id.clone(),
+        session: remote_session,
+        revision: 7,
+        server_instance_id: "remote-server".to_owned(),
+    })
+    .expect("remote create response should encode");
+    let server = std::thread::spawn(move || {
+        loop {
+            let mut stream = accept_test_connection(&listener, "remote session create listener");
+            let request = read_test_http_request(&mut stream);
+            if request.request_line.starts_with("GET /api/health ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    r#"{"ok":true}"#,
+                );
+                continue;
+            }
+
+            if request.request_line.starts_with("POST /api/sessions ") {
+                *captured_body_for_server
+                    .lock()
+                    .expect("captured body mutex poisoned") =
+                    Some(serde_json::from_str(&request.body).expect("create body should decode"));
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    &remote_response,
+                );
+                break;
+            }
+
+            panic!("unexpected request: {}", request.request_line);
+        }
+    });
+
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-default-model".to_owned(),
+        name: "SSH Default Model".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: Some("gpt-5.5".to_owned()),
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
+            default_codex_reasoning_effort: None,
+            default_claude_approval_mode: None,
+            default_claude_effort: None,
+            remotes: Some(vec![RemoteConfig::local(), remote.clone()]),
+        })
+        .unwrap();
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Default Model",
+        "remote-project-default-model",
+    );
+    insert_test_remote_connection(&state, &remote, port);
+
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Remote Default Model".to_owned()),
+            workdir: None,
+            project_id: Some(local_project_id.clone()),
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    assert_eq!(created.session.model, "gpt-5.5");
+    assert_eq!(
+        created.session.project_id.as_deref(),
+        Some(local_project_id.as_str())
+    );
+    let body = captured_body
+        .lock()
+        .expect("captured body mutex poisoned")
+        .clone()
+        .expect("remote create request should be captured");
+    assert_eq!(body["model"], Value::String("gpt-5.5".to_owned()));
+    assert_eq!(
+        body["projectId"],
+        Value::String("remote-project-default-model".to_owned())
+    );
+
+    join_test_server(server);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 #[test]
 fn remote_delegation_delta_advances_revision_without_local_record() {
     let state = test_app_state();

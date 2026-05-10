@@ -13,6 +13,30 @@
 
 use super::*;
 
+struct TempDirCleanup {
+    path: PathBuf,
+}
+
+impl TempDirCleanup {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl Drop for TempDirCleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn cache_agent_commands_for_test(state: &AppState, session_id: &str, commands: Vec<AgentCommand>) {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(session_id)
+        .expect("session should exist");
+    inner.sessions[index].agent_commands = commands;
+}
+
 // Pins `read_claude_agent_commands` to the top level of `.claude/commands/`,
 // `*.md` only, first non-empty line as description, sorted by name.
 // Guards against recursing into subdirectories, picking up non-markdown
@@ -82,6 +106,47 @@ Inspect diffs.
 }
 
 #[test]
+fn read_claude_agent_commands_rejects_oversized_command_file() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-commands-oversized-{}",
+        Uuid::new_v4()
+    ));
+    let _cleanup = TempDirCleanup::new(root.clone());
+    let commands_dir = root.join(".claude").join("commands");
+
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("huge.md"),
+        "x".repeat(MAX_AGENT_COMMAND_FILE_BYTES as usize + 1),
+    )
+    .unwrap();
+
+    let error = read_claude_agent_commands(&root).unwrap_err();
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(
+        error.message.contains("must be at most 1048576 bytes"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn read_agent_command_frontmatter_document_missing_file_returns_none() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-command-missing-frontmatter-{}",
+        Uuid::new_v4()
+    ));
+    let _cleanup = TempDirCleanup::new(root.clone());
+    let missing_path = root.join(".claude").join("commands").join("missing.md");
+
+    assert_eq!(
+        read_agent_command_frontmatter_document(&missing_path).unwrap(),
+        None
+    );
+}
+
+#[test]
 fn reads_claude_agent_commands_strip_yaml_frontmatter() {
     let root = std::env::temp_dir().join(format!(
         "termal-agent-commands-frontmatter-{}",
@@ -124,6 +189,36 @@ Inspect diffs.
 Inspect diffs.
 "
     );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn reads_claude_agent_commands_fallback_description_for_blank_frontmatter_description() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-commands-blank-description-{}",
+        Uuid::new_v4()
+    ));
+    let commands_dir = root.join(".claude").join("commands");
+
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("tool-check.md"),
+        "---
+description:
+argument-hint:
+---
+
+Run a targeted tool check.
+",
+    )
+    .unwrap();
+
+    let commands = read_claude_agent_commands(&root).unwrap();
+
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].description, "Run a targeted tool check.");
+    assert_eq!(commands[0].argument_hint, None);
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -619,6 +714,87 @@ fn sync_session_agent_commands_bumps_visible_session_command_revision() {
     );
 }
 
+// Pins the runtime sync boundary to accepting only native slash commands.
+// Prompt templates are trusted only when read from the session workdir's
+// `.claude/commands/*.md` files; runtime-advertised template entries must not
+// be cached where they could impersonate trusted filesystem templates.
+#[test]
+fn sync_session_agent_commands_filters_runtime_prompt_templates() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-command-runtime-filter-{}",
+        Uuid::new_v4()
+    ));
+    let _cleanup = TempDirCleanup::new(root.clone());
+    fs::create_dir_all(&root).unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    state
+        .sync_session_agent_commands(
+            &created.session_id,
+            vec![
+                AgentCommand {
+                    kind: AgentCommandKind::PromptTemplate,
+                    name: "review-local".to_owned(),
+                    description: "Runtime-provided prompt template.".to_owned(),
+                    content: "Runtime review $ARGUMENTS".to_owned(),
+                    source: ".claude/commands/review-local.md".to_owned(),
+                    argument_hint: None,
+                },
+                AgentCommand {
+                    kind: AgentCommandKind::NativeSlash,
+                    name: "review".to_owned(),
+                    description: "Review the current changes.".to_owned(),
+                    content: "/review".to_owned(),
+                    source: "Claude bundled command".to_owned(),
+                    argument_hint: None,
+                },
+            ],
+        )
+        .unwrap();
+
+    let response = state.list_agent_commands(&created.session_id).unwrap();
+    assert_eq!(
+        response
+            .commands
+            .iter()
+            .map(|command| (command.name.as_str(), command.kind))
+            .collect::<Vec<_>>(),
+        vec![("review", AgentCommandKind::NativeSlash)]
+    );
+
+    let error = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: Some("staged".to_owned()),
+                note: None,
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap_err();
+
+    assert_eq!(error.status, StatusCode::NOT_FOUND);
+    assert_eq!(error.message, "agent command not found");
+}
+
 // Pins `AppState::list_agent_commands` to returning a 404 `ApiError` with
 // the message "session not found" when the session id is unknown.
 // Guards the HTTP status contract that `GET /api/sessions/:id/commands`
@@ -630,6 +806,36 @@ fn returns_not_found_for_missing_agent_command_session() {
 
     assert_eq!(error.status, StatusCode::NOT_FOUND);
     assert_eq!(error.message, "session not found");
+}
+
+#[tokio::test]
+async fn agent_command_resolve_route_json_rejection_uses_endpoint_label() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let app = app_router(state.clone());
+
+    let (status, response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/sessions/{session_id}/agent-commands/review-local/resolve"
+            ))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"arguments":"unterminated"#))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        response["error"]
+            .as_str()
+            .expect("error response should include a message")
+            .contains("invalid agent command resolve request JSON")
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 // Pins backend-owned prompt-template resolution to replacing `$ARGUMENTS`
@@ -706,6 +912,72 @@ Verify the fix.
     assert_eq!(response.delegation, None);
 
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn rejects_oversized_agent_command_arguments_and_note() {
+    let cases = [
+        (
+            "arguments",
+            Some("x".repeat(MAX_AGENT_COMMAND_ARGUMENTS_BYTES + 1)),
+            None,
+            "agent command arguments must be at most 65536 bytes",
+        ),
+        (
+            "note",
+            Some("bug 1024".to_owned()),
+            Some("x".repeat(MAX_AGENT_COMMAND_NOTE_BYTES + 1)),
+            "agent command note must be at most 65536 bytes",
+        ),
+    ];
+
+    for (case_name, arguments, note, expected_message) in cases {
+        let root = std::env::temp_dir().join(format!(
+            "termal-agent-command-oversized-{case_name}-{}",
+            Uuid::new_v4()
+        ));
+        let _cleanup = TempDirCleanup::new(root.clone());
+        let commands_dir = root.join(".claude").join("commands");
+        fs::create_dir_all(&commands_dir).unwrap();
+        fs::write(
+            commands_dir.join("fix-bug.md"),
+            "Fix the requested bug:\n\n$ARGUMENTS\n",
+        )
+        .unwrap();
+
+        let state = test_app_state();
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Codex Session".to_owned()),
+                workdir: Some(root.to_string_lossy().into_owned()),
+                project_id: None,
+                model: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        let error = state
+            .resolve_agent_command(
+                &created.session_id,
+                "fix-bug",
+                ResolveAgentCommandRequest {
+                    arguments,
+                    note,
+                    intent: AgentCommandResolveIntent::Send,
+                },
+            )
+            .unwrap_err();
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST, "{case_name}");
+        assert_eq!(error.message, expected_message, "{case_name}");
+    }
 }
 
 // Pins resolver-owned delegation policy for `/review-local`. React should
@@ -857,6 +1129,388 @@ Review staged and unstaged changes.
 }
 
 #[test]
+fn rejects_partial_agent_command_termal_metadata() {
+    let cases = [
+        (
+            "title-prefix-without-strategy",
+            "metadata:
+  termal:
+    title:
+      prefix: Fix bug",
+            "metadata.termal.title.prefix requires metadata.termal.title.strategy prefixFirstArgument",
+        ),
+        (
+            "disabled-delegation-invalid-mode",
+            "metadata:
+  termal:
+    delegation:
+      enabled: false
+      mode: bogus",
+            "unsupported metadata.termal.delegation.mode `bogus`",
+        ),
+        (
+            "empty-termal-block",
+            "metadata:
+  termal:",
+            "metadata.termal must define title or delegation metadata",
+        ),
+        (
+            "empty-title-block",
+            "metadata:
+  termal:
+    title:",
+            "metadata.termal.title must define strategy metadata",
+        ),
+        (
+            "empty-delegation-block",
+            "metadata:
+  termal:
+    delegation:",
+            "metadata.termal.delegation must define enabled metadata",
+        ),
+        (
+            "delegation-without-enabled",
+            "metadata:
+  termal:
+    delegation:
+      mode: reviewer",
+            "delegation metadata requires metadata.termal.delegation.enabled",
+        ),
+        (
+            "tab-indented-termal-metadata",
+            "metadata:
+\ttermal:
+\t  delegation:
+\t    enabled: true",
+            "agent command frontmatter must be space-indented",
+        ),
+        (
+            "misquoted-delegation-mode",
+            "metadata:
+  termal:
+    delegation:
+      enabled: true
+      mode: 'reviewer' stale'
+      writePolicy:
+        kind: readOnly",
+            "invalid quoted frontmatter value for metadata.termal.delegation.mode",
+        ),
+    ];
+
+    for (case_name, frontmatter, expected_message) in cases {
+        let root = std::env::temp_dir().join(format!(
+            "termal-agent-command-partial-metadata-{}-{}",
+            case_name,
+            Uuid::new_v4()
+        ));
+        let commands_dir = root.join(".claude").join("commands");
+        fs::create_dir_all(&commands_dir).unwrap();
+        fs::write(
+            commands_dir.join("review-local.md"),
+            format!(
+                "---
+{frontmatter}
+---
+
+Review staged and unstaged changes.
+"
+            ),
+        )
+        .unwrap();
+
+        let state = test_app_state();
+        let created = state
+            .create_session(CreateSessionRequest {
+                agent: Some(Agent::Codex),
+                name: Some("Codex Session".to_owned()),
+                workdir: Some(root.to_string_lossy().into_owned()),
+                project_id: None,
+                model: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+            })
+            .unwrap();
+
+        let error = state
+            .resolve_agent_command(
+                &created.session_id,
+                "review-local",
+                ResolveAgentCommandRequest {
+                    arguments: None,
+                    note: None,
+                    intent: AgentCommandResolveIntent::Delegate,
+                },
+            )
+            .unwrap_err();
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST, "{case_name}");
+        assert_eq!(error.message, expected_message, "{case_name}");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn resolves_claude_only_tab_indented_frontmatter_without_termal_metadata() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-command-claude-tab-frontmatter-{}",
+        Uuid::new_v4()
+    ));
+    let _cleanup = TempDirCleanup::new(root.clone());
+    let commands_dir = root.join(".claude").join("commands");
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("tool-check.md"),
+        "---
+description: Tool check
+tools:
+\t- Bash
+---
+
+Run tool check for $ARGUMENTS.
+",
+    )
+    .unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "tool-check",
+            ResolveAgentCommandRequest {
+                arguments: Some("repo".to_owned()),
+                note: None,
+                intent: AgentCommandResolveIntent::Send,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(response.visible_prompt, "/tool-check repo");
+    assert_eq!(
+        response.expanded_prompt.as_deref(),
+        Some("Run tool check for repo.\n")
+    );
+    assert_eq!(response.delegation, None);
+}
+
+#[test]
+fn resolves_claude_only_large_frontmatter_without_termal_metadata() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-command-large-claude-frontmatter-{}",
+        Uuid::new_v4()
+    ));
+    let _cleanup = TempDirCleanup::new(root.clone());
+    let commands_dir = root.join(".claude").join("commands");
+    fs::create_dir_all(&commands_dir).unwrap();
+    let large_tools_value = "x".repeat(70 * 1024);
+    fs::write(
+        commands_dir.join("tool-check.md"),
+        format!(
+            "---
+tools: {large_tools_value}
+---
+
+Run tool check for $ARGUMENTS.
+"
+        ),
+    )
+    .unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "tool-check",
+            ResolveAgentCommandRequest {
+                arguments: Some("repo".to_owned()),
+                note: None,
+                intent: AgentCommandResolveIntent::Send,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        response.expanded_prompt.as_deref(),
+        Some("Run tool check for repo.\n")
+    );
+    assert_eq!(response.delegation, None);
+}
+
+#[test]
+fn resolves_termal_metadata_while_ignoring_unrelated_frontmatter_errors() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-command-mixed-frontmatter-{}",
+        Uuid::new_v4()
+    ));
+    let _cleanup = TempDirCleanup::new(root.clone());
+    let commands_dir = root.join(".claude").join("commands");
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("review-local.md"),
+        "---
+description: 'Review local' stale'
+tools:
+\tfoo: bar
+metadata:
+  termal:
+    delegation:
+      enabled: true
+      mode: reviewer
+      writePolicy:
+        kind: readOnly
+---
+
+Review staged and unstaged changes.
+",
+    )
+    .unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: None,
+                note: None,
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(response.visible_prompt, "/review-local");
+    assert_eq!(
+        response.delegation,
+        Some(ResolvedAgentCommandDelegationDefaults {
+            mode: Some(DelegationMode::Reviewer),
+            title: Some("Review local' stale".to_owned()),
+            write_policy: Some(DelegationWritePolicy::ReadOnly),
+        })
+    );
+}
+
+#[test]
+fn resolves_dotted_termal_metadata_frontmatter() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-command-dotted-frontmatter-{}",
+        Uuid::new_v4()
+    ));
+    let _cleanup = TempDirCleanup::new(root.clone());
+    let commands_dir = root.join(".claude").join("commands");
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("review-local.md"),
+        "---
+metadata.termal.title.strategy: prefixFirstArgument
+metadata.termal.title.prefix: Review local
+metadata.termal.delegation.enabled: true
+metadata.termal.delegation.mode: reviewer
+metadata.termal.delegation.writePolicy.kind: readOnly
+---
+
+Review $ARGUMENTS.
+",
+    )
+    .unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: Some("staged changes".to_owned()),
+                note: None,
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(response.visible_prompt, "/review-local staged changes");
+    assert_eq!(
+        response.delegation,
+        Some(ResolvedAgentCommandDelegationDefaults {
+            mode: Some(DelegationMode::Reviewer),
+            title: Some("Review local staged".to_owned()),
+            write_policy: Some(DelegationWritePolicy::ReadOnly),
+        })
+    );
+}
+
+#[test]
 fn native_delegate_resolution_uses_metadata_name_not_source_suffix() {
     let state = test_app_state();
     let created = state
@@ -907,7 +1561,7 @@ fn native_delegate_resolution_uses_metadata_name_not_source_suffix() {
 }
 
 #[test]
-fn prompt_template_delegate_resolution_uses_metadata_name_not_source_suffix() {
+fn legacy_cached_prompt_template_delegate_resolution_uses_metadata_name_not_source_suffix() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
@@ -925,19 +1579,18 @@ fn prompt_template_delegate_resolution_uses_metadata_name_not_source_suffix() {
             gemini_approval_mode: None,
         })
         .unwrap();
-    state
-        .sync_session_agent_commands(
-            &created.session_id,
-            vec![AgentCommand {
-                kind: AgentCommandKind::PromptTemplate,
-                name: "audit".to_owned(),
-                description: "Audit the current state.".to_owned(),
-                content: "Audit $ARGUMENTS".to_owned(),
-                source: ".claude/commands/review-local.md".to_owned(),
-                argument_hint: None,
-            }],
-        )
-        .unwrap();
+    cache_agent_commands_for_test(
+        &state,
+        &created.session_id,
+        vec![AgentCommand {
+            kind: AgentCommandKind::PromptTemplate,
+            name: "audit".to_owned(),
+            description: "Audit the current state.".to_owned(),
+            content: "Audit $ARGUMENTS".to_owned(),
+            source: ".claude/commands/review-local.md".to_owned(),
+            argument_hint: None,
+        }],
+    );
 
     let response = state
         .resolve_agent_command(
@@ -958,12 +1611,19 @@ fn prompt_template_delegate_resolution_uses_metadata_name_not_source_suffix() {
 
 #[test]
 fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-command-missing-metadata-{}",
+        Uuid::new_v4()
+    ));
+    let _cleanup = TempDirCleanup::new(root.clone());
+    fs::create_dir_all(&root).unwrap();
+
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
-            workdir: Some("/tmp".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
             project_id: None,
             model: None,
             approval_policy: None,
@@ -975,19 +1635,18 @@ fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
             gemini_approval_mode: None,
         })
         .unwrap();
-    state
-        .sync_session_agent_commands(
-            &created.session_id,
-            vec![AgentCommand {
-                kind: AgentCommandKind::PromptTemplate,
-                name: "review-local".to_owned(),
-                description: "Cached prompt template.".to_owned(),
-                content: "Cached review $ARGUMENTS".to_owned(),
-                source: ".claude/commands/review-local.md".to_owned(),
-                argument_hint: None,
-            }],
-        )
-        .unwrap();
+    cache_agent_commands_for_test(
+        &state,
+        &created.session_id,
+        vec![AgentCommand {
+            kind: AgentCommandKind::PromptTemplate,
+            name: "review-local".to_owned(),
+            description: "Cached prompt template.".to_owned(),
+            content: "Cached review $ARGUMENTS".to_owned(),
+            source: ".claude/commands/review-local.md".to_owned(),
+            argument_hint: None,
+        }],
+    );
 
     let response = state
         .resolve_agent_command(

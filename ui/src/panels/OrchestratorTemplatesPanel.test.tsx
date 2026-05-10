@@ -82,6 +82,10 @@ function makeStateResponse(
     codex: overrides.codex ?? {},
     agentReadiness: overrides.agentReadiness ?? [],
     preferences: overrides.preferences ?? {
+      defaultCodexModel: "default",
+      defaultClaudeModel: "default",
+      defaultCursorModel: "default",
+      defaultGeminiModel: "default",
       defaultCodexReasoningEffort: "medium",
       defaultClaudeApprovalMode: "ask",
       defaultClaudeEffort: "default",

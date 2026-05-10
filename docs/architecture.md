@@ -32,13 +32,15 @@ server stores preferences, manages remote connections, and routes project work
 to local or remote TermAl servers over SSH-managed tunnels.
 
 **Delegation status:** Phase 1 supports local read-only child delegation
-sessions only. Worker mode, writable worktree policies, and remote-backed
-delegation requests are well-formed but unimplemented and return `501 Not
-Implemented` so clients can treat them as feature-gated rather than malformed
-input. While a read-only delegation is running, local TermAl-mediated writes are
-blocked for the delegated project/workdir scope from any session, not just from
-the child session, so parent/sibling `sessionId` routing cannot bypass the
-read-only policy.
+sessions and local `isolatedWorktree` child delegation sessions. Worker mode,
+`sharedWorktree`, and remote-backed delegation requests are well-formed but
+unimplemented and return `501 Not Implemented` so clients can treat them as
+feature-gated rather than malformed input. While a read-only delegation is
+running, local TermAl-mediated writes are blocked for the delegated
+project/workdir scope from any session, not just from the child session, so
+parent/sibling `sessionId` routing cannot bypass the read-only policy.
+`isolatedWorktree` requests may omit `worktreePath`; the backend generates a
+TermAl-owned path before persisting the delegation record.
 
 ---
 
@@ -202,7 +204,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | PATCH | `/api/sessions/{id}/markers/{marker_id}` | Patch marker kind/name/body/color/message anchors. Nullable `body` and `endMessageId` clear those fields. Publishes `ConversationMarkerUpdated`. |
 | DELETE | `/api/sessions/{id}/markers/{marker_id}` | Delete one conversation marker and publish `ConversationMarkerDeleted`. |
 | POST | `/api/sessions/{id}/messages` | Send message |
-| POST | `/api/sessions/{id}/delegations` | Create a Phase 1 read-only child delegation session. Returns `201` with `DelegationResponse`; unsupported worker/writable/remote-backed variants return `501`, active-limit conflicts return `409`, handler-level prompt/scope validation returns `400`, and JSON schema/deserialization failures return `422`. |
+| POST | `/api/sessions/{id}/delegations` | Create a Phase 1 local child delegation session with `readOnly` or `isolatedWorktree` write policy. Returns `201` with `DelegationResponse`; unsupported worker/`sharedWorktree`/remote-backed variants return `501`, active-limit conflicts return `409`, handler-level prompt/scope validation returns `400`, and JSON schema/deserialization failures return `422`. |
 | POST | `/api/sessions/{id}/queued-prompts/{prompt_id}/cancel` | Cancel queued prompt |
 | POST | `/api/sessions/{id}/stop` | Stop active turn |
 | POST | `/api/sessions/{id}/kill` | Kill and remove session |

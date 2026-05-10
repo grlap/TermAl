@@ -3804,6 +3804,29 @@ fn telegram_state_persist_backs_up_malformed_existing_file() {
 }
 
 #[test]
+fn telegram_poll_error_dirty_persist_failure_is_nonfatal() {
+    let path = std::env::temp_dir().join(format!(
+        "termal-telegram-poll-error-state-dir-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir(&path).expect("fixture directory should create");
+    let state = TelegramBotState {
+        chat_id: Some(456),
+        next_update_id: Some(99),
+        ..TelegramBotState::default()
+    };
+
+    assert!(!persist_dirty_telegram_state_after_poll_error(
+        &path, &state, true
+    ));
+    assert!(persist_dirty_telegram_state_after_poll_error(
+        &path, &state, false
+    ));
+
+    fs::remove_dir(&path).ok();
+}
+
+#[test]
 fn telegram_state_load_defaults_missing_file() {
     let path = std::env::temp_dir().join(format!(
         "termal-telegram-missing-state-{}.json",

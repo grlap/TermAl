@@ -498,8 +498,6 @@ export type DelegationWaitRecord = {
 export type DelegationWaitResponse = {
   revision: number;
   wait: DelegationWaitRecord;
-  /** Alias for resumePromptQueued. */
-  queuedResume: boolean;
   resumePromptQueued: boolean;
   resumeDispatchRequested: boolean;
   serverInstanceId: string;

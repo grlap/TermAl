@@ -157,6 +157,7 @@ impl AppState {
     ) -> Result<ResolveAgentCommandResponse, ApiError> {
         let command_name = normalize_optional_identifier(Some(command_name))
             .ok_or_else(|| ApiError::bad_request("agent command name is required"))?;
+        validate_resolve_agent_command_request(&request)?;
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_resolve_agent_command(session_id, command_name, request);
         }
@@ -251,6 +252,38 @@ fn resolve_agent_command_payload(
         title: Some(title),
         delegation,
     })
+}
+
+const MAX_AGENT_COMMAND_ARGUMENTS_BYTES: usize = 64 * 1024;
+const MAX_AGENT_COMMAND_NOTE_BYTES: usize = 64 * 1024;
+
+fn validate_resolve_agent_command_request(
+    request: &ResolveAgentCommandRequest,
+) -> Result<(), ApiError> {
+    validate_agent_command_text_field(
+        request.arguments.as_deref(),
+        "arguments",
+        MAX_AGENT_COMMAND_ARGUMENTS_BYTES,
+    )?;
+    validate_agent_command_text_field(
+        request.note.as_deref(),
+        "note",
+        MAX_AGENT_COMMAND_NOTE_BYTES,
+    )
+}
+
+fn validate_agent_command_text_field(
+    value: Option<&str>,
+    field_name: &str,
+    max_bytes: usize,
+) -> Result<(), ApiError> {
+    let trimmed = value.map(str::trim).unwrap_or_default();
+    if trimmed.len() > max_bytes {
+        return Err(ApiError::bad_request(format!(
+            "agent command {field_name} must be at most {max_bytes} bytes"
+        )));
+    }
+    Ok(())
 }
 
 struct AgentCommandResolverMetadata {

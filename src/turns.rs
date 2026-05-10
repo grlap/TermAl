@@ -391,6 +391,7 @@ impl Default for AppPreferences {
 impl AppPreferences {
     /// Resolves the persisted model preference for a newly-created session.
     fn default_model_for_agent(&self, agent: Agent) -> String {
+        debug_assert_eq!(Agent::Claude.default_model(), default_model_preference());
         let preference = match agent {
             Agent::Codex => &self.default_codex_model,
             Agent::Claude => &self.default_claude_model,
@@ -401,6 +402,9 @@ impl AppPreferences {
         if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
             // `default` is the persisted app-preference sentinel. Claude's
             // agent default currently has the same literal value by design.
+            return agent.default_model().to_owned();
+        }
+        if trimmed.chars().count() > MAX_DEFAULT_MODEL_CHARS {
             return agent.default_model().to_owned();
         }
 
