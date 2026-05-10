@@ -786,6 +786,127 @@ fn telegram_relay_iteration_skips_post_update_sync_after_prompt_refresh() {
 }
 
 #[test]
+fn telegram_relay_iteration_runs_final_sync_after_status_digest() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(telegram_project_digest(Some("session-1"))),
+            Ok(telegram_project_digest(Some("session-1"))),
+        ],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    );
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+    let updates = vec![TelegramUpdate {
+        update_id: 30,
+        callback_query: None,
+        message: Some(TelegramChatMessage {
+            message_id: 9,
+            chat: TelegramChat {
+                id: 42,
+                _kind: "private".to_owned(),
+            },
+            text: Some("/status".to_owned()),
+        }),
+    }];
+
+    let dirty = drain_telegram_updates_then_sync_digest(
+        &telegram, &termal, &config, &mut state, updates, &None,
+    );
+
+    assert!(dirty);
+    assert_eq!(state.next_update_id, Some(31));
+    assert_eq!(
+        termal.digest_project_ids.borrow().as_slice(),
+        ["project-1".to_owned(), "project-1".to_owned()]
+    );
+    assert_eq!(
+        termal
+            .events
+            .borrow()
+            .iter()
+            .filter(|event| event.as_str() == "digest:project-1")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn telegram_relay_iteration_resyncs_after_later_unsynced_update() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(telegram_project_digest(Some("session-1"))),
+            Ok(telegram_project_digest(Some("session-2"))),
+        ],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![TelegramStateSession {
+            id: "session-2".to_owned(),
+            name: "Selected".to_owned(),
+            project_id: Some("project-1".to_owned()),
+            status: TelegramSessionStatus::Idle,
+            message_count: 0,
+        }],
+    });
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+    let updates = vec![
+        TelegramUpdate {
+            update_id: 40,
+            callback_query: None,
+            message: Some(TelegramChatMessage {
+                message_id: 10,
+                chat: TelegramChat {
+                    id: 42,
+                    _kind: "private".to_owned(),
+                },
+                text: Some("/status".to_owned()),
+            }),
+        },
+        TelegramUpdate {
+            update_id: 41,
+            callback_query: None,
+            message: Some(TelegramChatMessage {
+                message_id: 11,
+                chat: TelegramChat {
+                    id: 42,
+                    _kind: "private".to_owned(),
+                },
+                text: Some("/session session-2".to_owned()),
+            }),
+        },
+    ];
+
+    let dirty = drain_telegram_updates_then_sync_digest(
+        &telegram, &termal, &config, &mut state, updates, &None,
+    );
+
+    assert!(dirty);
+    assert_eq!(state.next_update_id, Some(42));
+    assert_eq!(state.selected_session_id.as_deref(), Some("session-2"));
+    assert_eq!(
+        termal.digest_project_ids.borrow().as_slice(),
+        ["project-1".to_owned(), "project-1".to_owned()]
+    );
+}
+
+#[test]
 fn telegram_sessions_command_chunks_oversized_output() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramPromptClient::new(

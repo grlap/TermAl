@@ -123,7 +123,7 @@ fn drain_telegram_updates_then_sync_digest(
     shutdown: &Option<Arc<AtomicBool>>,
 ) -> bool {
     let mut dirty = false;
-    let mut digest_synced_during_updates = false;
+    let mut final_sync_satisfied = false;
     for update in updates {
         if telegram_relay_shutdown_requested(shutdown) {
             break;
@@ -137,13 +137,13 @@ fn drain_telegram_updates_then_sync_digest(
         match handle_telegram_update(telegram, termal, config, state, update) {
             Ok(outcome) => {
                 dirty |= outcome.dirty;
-                digest_synced_during_updates |= outcome.digest_synced;
+                final_sync_satisfied = outcome.final_sync_satisfied;
             }
             Err(err) => log_telegram_error("failed to handle update", &err),
         }
     }
 
-    if !digest_synced_during_updates && !telegram_relay_shutdown_requested(shutdown) {
+    if !final_sync_satisfied && !telegram_relay_shutdown_requested(shutdown) {
         if let Some(chat_id) = effective_telegram_chat_id(config, state) {
             match sync_telegram_digest(telegram, termal, config, state, chat_id) {
                 Ok(changed) => dirty |= changed,
@@ -1641,23 +1641,23 @@ struct TelegramInlineKeyboardButton {
 #[derive(Clone, Copy, Debug, Default)]
 struct TelegramUpdateHandlingOutcome {
     dirty: bool,
-    digest_synced: bool,
+    final_sync_satisfied: bool,
 }
 
 impl TelegramUpdateHandlingOutcome {
     fn unsynced(dirty: bool) -> Self {
         Self {
             dirty,
-            digest_synced: false,
+            final_sync_satisfied: false,
         }
     }
 
-    fn synced(dirty: bool) -> Self {
-        Self {
-            dirty,
-            digest_synced: true,
-        }
-    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct TelegramPromptForwardOutcome {
+    dirty: bool,
+    final_sync_satisfied: bool,
 }
 
 fn handle_telegram_update(
@@ -1669,13 +1669,7 @@ fn handle_telegram_update(
 ) -> Result<TelegramUpdateHandlingOutcome> {
     if let Some(callback_query) = update.callback_query {
         return handle_telegram_callback_query(telegram, termal, config, state, callback_query)
-            .map(|dirty| {
-                if dirty {
-                    TelegramUpdateHandlingOutcome::synced(dirty)
-                } else {
-                    TelegramUpdateHandlingOutcome::default()
-                }
-            });
+            .map(TelegramUpdateHandlingOutcome::unsynced);
     }
     if let Some(message) = update.message {
         return handle_telegram_message_for_relay(telegram, termal, config, state, message);
@@ -1749,7 +1743,7 @@ fn handle_telegram_message_for_relay(
             }
             TelegramIncomingCommand::Status => {
                 send_fresh_telegram_digest(telegram, termal, config, state, chat_id)
-                    .map(TelegramUpdateHandlingOutcome::synced)
+                    .map(TelegramUpdateHandlingOutcome::unsynced)
             }
             TelegramIncomingCommand::Projects => {
                 send_telegram_projects(telegram, termal, config, state, chat_id)
@@ -1784,7 +1778,7 @@ fn handle_telegram_message_for_relay(
                         dirty |= send_fresh_telegram_digest_from_response(
                             telegram, config, state, chat_id, &digest,
                         )?;
-                        Ok(TelegramUpdateHandlingOutcome::synced(dirty))
+                        Ok(TelegramUpdateHandlingOutcome::unsynced(dirty))
                     }
                     Err(err) => {
                         log_telegram_error("failed to dispatch Telegram action", &err);
@@ -1812,8 +1806,12 @@ fn handle_telegram_message_for_relay(
         return Ok(TelegramUpdateHandlingOutcome::default());
     }
 
-    match forward_telegram_text_to_project(telegram, termal, config, state, chat_id, text) {
-        Ok(changed) => Ok(TelegramUpdateHandlingOutcome::synced(changed)),
+    match forward_telegram_text_to_project_for_relay(telegram, termal, config, state, chat_id, text)
+    {
+        Ok(outcome) => Ok(TelegramUpdateHandlingOutcome {
+            dirty: outcome.dirty,
+            final_sync_satisfied: outcome.final_sync_satisfied,
+        }),
         Err(err) => {
             log_telegram_error("failed to forward Telegram prompt", &err);
             telegram.send_message(chat_id, &telegram_prompt_error_text(&err), None)?;
@@ -1896,6 +1894,20 @@ fn forward_telegram_text_to_project(
     chat_id: i64,
     text: &str,
 ) -> Result<bool> {
+    Ok(
+        forward_telegram_text_to_project_for_relay(telegram, termal, config, state, chat_id, text)?
+            .dirty,
+    )
+}
+
+fn forward_telegram_text_to_project_for_relay(
+    telegram: &impl TelegramMessageSender,
+    termal: &impl TelegramPromptClient,
+    config: &TelegramBotConfig,
+    state: &mut TelegramBotState,
+    chat_id: i64,
+    text: &str,
+) -> Result<TelegramPromptForwardOutcome> {
     let (project_id, mut dirty) = resolve_telegram_active_project_id(config, state);
     let digest = termal.get_project_digest(&project_id)?;
     let (selected_session_id, selected_session_dirty) =
@@ -1916,7 +1928,10 @@ fn forward_telegram_text_to_project(
             "No active project session is available yet. Start one in TermAl first.",
             None,
         )?;
-        return Ok(dirty);
+        return Ok(TelegramPromptForwardOutcome {
+            dirty,
+            final_sync_satisfied: false,
+        });
     };
 
     let assistant_forwarding_plan =
@@ -1929,14 +1944,20 @@ fn forward_telegram_text_to_project(
         Ok(digest) => digest,
         Err(err) => {
             log_telegram_error("failed to refresh digest after Telegram prompt", &err);
-            return Ok(dirty);
+            return Ok(TelegramPromptForwardOutcome {
+                dirty,
+                final_sync_satisfied: false,
+            });
         }
     };
     match send_fresh_telegram_digest_from_response(telegram, config, state, chat_id, &next_digest) {
         Ok(changed) => dirty |= changed,
         Err(err) => {
             log_telegram_error("failed to send digest after Telegram prompt", &err);
-            return Ok(dirty);
+            return Ok(TelegramPromptForwardOutcome {
+                dirty,
+                final_sync_satisfied: false,
+            });
         }
     }
     // The agent's reply usually hasn't landed by the time this
@@ -1954,7 +1975,10 @@ fn forward_telegram_text_to_project(
         chat_id,
         Some(session_id),
     );
-    Ok(dirty)
+    Ok(TelegramPromptForwardOutcome {
+        dirty,
+        final_sync_satisfied: true,
+    })
 }
 
 /// Syncs Telegram digest.
