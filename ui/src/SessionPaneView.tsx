@@ -477,7 +477,7 @@ export function SessionPaneView({
     sessionId: string,
     messageId: string,
     options?: CreateConversationMarkerOptions,
-  ) => void;
+  ) => boolean | void | Promise<boolean | void>;
   onDeleteConversationMarker: (
     sessionId: string,
     markerId: string,

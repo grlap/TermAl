@@ -105,10 +105,23 @@ type PromptHistoryState = {
   draft: string;
 };
 
+type PendingCreatedConversationMarker = {
+  localId: number;
+  messageId: string;
+  name: string | null;
+  existingMarkerIds: ReadonlySet<string>;
+  resolvedMarkerId?: string;
+};
+
 const EMPTY_PENDING_PROMPTS: readonly PendingPrompt[] = [];
 const EMPTY_CONVERSATION_MARKERS: readonly ConversationMarker[] = [];
 const NOOP_CREATE_CONVERSATION_MARKER = () => {};
 const NOOP_DELETE_CONVERSATION_MARKER = () => {};
+
+type CreateConversationMarkerHandlerResult =
+  | boolean
+  | void
+  | Promise<boolean | void>;
 
 type SessionSettingsField =
   | "model"
@@ -211,6 +224,26 @@ function sendResolvedAgentCommandSubmission(
   return resolution.expandedPrompt == null
     ? onSend(sessionId, resolution.visiblePrompt)
     : onSend(sessionId, resolution.visiblePrompt, resolution.expandedPrompt);
+}
+
+function findNewPendingCreatedConversationMarker(
+  markers: readonly ConversationMarker[],
+  pendingMarker: PendingCreatedConversationMarker,
+  usedMarkerIds: ReadonlySet<string>,
+) {
+  for (const marker of markers) {
+    if (
+      pendingMarker.existingMarkerIds.has(marker.id) ||
+      usedMarkerIds.has(marker.id)
+    ) {
+      continue;
+    }
+    if (pendingMarker.name && marker.name.trim() !== pendingMarker.name) {
+      continue;
+    }
+    return marker;
+  }
+  return null;
 }
 
 function spawnDelegationOptionsFromResolvedCommand(
@@ -613,7 +646,7 @@ export function AgentSessionPanel({
     sessionId: string,
     messageId: string,
     options?: CreateConversationMarkerOptions,
-  ) => void;
+  ) => CreateConversationMarkerHandlerResult;
   onDeleteConversationMarker?: (sessionId: string, markerId: string) => void;
   onSessionSettingsChange: (
       sessionId: string,
@@ -843,7 +876,7 @@ const SessionBody = memo(function SessionBody({
     sessionId: string,
     messageId: string,
     options?: CreateConversationMarkerOptions,
-  ) => void;
+  ) => CreateConversationMarkerHandlerResult;
   onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
   onSessionSettingsChange: (
     sessionId: string,
@@ -1047,7 +1080,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
     sessionId: string,
     messageId: string,
     options?: CreateConversationMarkerOptions,
-  ) => void;
+  ) => CreateConversationMarkerHandlerResult;
   onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
   conversationSearchQuery: string;
   conversationSearchMatchedItemKeys: ReadonlySet<string>;
@@ -1115,10 +1148,20 @@ const SessionConversationPage = memo(function SessionConversationPage({
     () => sortConversationMarkersForNavigation(visibleMarkers, visibleMessages),
     [visibleMarkers, visibleMessages],
   );
+  // activeMarkerId selects a persisted marker in the rail; activeMarkerMessageId
+  // drives the message-shell highlight immediately, including the create flow
+  // before the backend emits the new marker. pendingCreatedMarkers tie that
+  // immediate highlight to markers that appear after create so color follows the
+  // newest create instead of an older marker on the same message.
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
   const [activeMarkerMessageId, setActiveMarkerMessageId] = useState<
     string | null
   >(null);
+  const [pendingCreatedMarkers, setPendingCreatedMarkers] = useState<
+    PendingCreatedConversationMarker[]
+  >([]);
+  const pendingCreatedMarkersRef = useRef<PendingCreatedConversationMarker[]>([]);
+  const pendingCreatedMarkerSequenceRef = useRef(0);
   const [markerPanelVisibilityOverride, setMarkerPanelVisibilityOverride] =
     useState<boolean | null>(null);
   const conversationPageRef = useRef<HTMLDivElement | null>(null);
@@ -1127,19 +1170,85 @@ const SessionConversationPage = memo(function SessionConversationPage({
   // message-header context menu.
   const isMarkerPanelVisible =
     markerPanelVisibilityOverride ?? sortedMarkers.length > 0;
+  const setPendingConversationMarkerCreates = useCallback(
+    (nextPendingMarkers: PendingCreatedConversationMarker[]) => {
+      pendingCreatedMarkersRef.current = nextPendingMarkers;
+      setPendingCreatedMarkers(nextPendingMarkers);
+    },
+    [],
+  );
+  const clearPendingConversationMarkerCreate = useCallback(
+    (localId: number) => {
+      const currentPendingMarkers = pendingCreatedMarkersRef.current;
+      const failedMarker = currentPendingMarkers.find(
+        (marker) => marker.localId === localId,
+      );
+      if (!failedMarker) {
+        return;
+      }
+      const nextPendingMarkers = currentPendingMarkers.filter(
+        (marker) => marker.localId !== localId,
+      );
+      setPendingConversationMarkerCreates(nextPendingMarkers);
+      if (
+        currentPendingMarkers[currentPendingMarkers.length - 1]?.localId ===
+        localId
+      ) {
+        setActiveMarkerMessageId(
+          nextPendingMarkers[nextPendingMarkers.length - 1]?.messageId ?? null,
+        );
+      }
+    },
+    [setPendingConversationMarkerCreates],
+  );
   const handleCreateConversationMarker = useCallback(
     (
       targetSessionId: string,
       messageId: string,
       options?: CreateConversationMarkerOptions,
     ) => {
+      let localPendingMarkerId: number | null = null;
       if (targetSessionId === session.id) {
+        const messageMarkers = markersByMessageId.get(messageId) ?? [];
+        pendingCreatedMarkerSequenceRef.current += 1;
+        localPendingMarkerId = pendingCreatedMarkerSequenceRef.current;
         setActiveMarkerId(null);
         setActiveMarkerMessageId(messageId);
+        setPendingConversationMarkerCreates([
+          ...pendingCreatedMarkersRef.current,
+          {
+            localId: localPendingMarkerId,
+            messageId,
+            name: options?.name?.trim() || null,
+            existingMarkerIds: new Set(
+              messageMarkers.map((marker) => marker.id),
+            ),
+          },
+        ]);
       }
-      onCreateConversationMarker(targetSessionId, messageId, options);
+      const createResult = onCreateConversationMarker(
+        targetSessionId,
+        messageId,
+        options,
+      );
+      if (localPendingMarkerId !== null) {
+        void Promise.resolve(createResult).then(
+          (accepted) => {
+            if (accepted === false) {
+              clearPendingConversationMarkerCreate(localPendingMarkerId);
+            }
+          },
+          () => clearPendingConversationMarkerCreate(localPendingMarkerId),
+        );
+      }
     },
-    [onCreateConversationMarker, session.id],
+    [
+      clearPendingConversationMarkerCreate,
+      markersByMessageId,
+      onCreateConversationMarker,
+      session.id,
+      setPendingConversationMarkerCreates,
+    ],
   );
   const {
     contextMenuNode: markerContextMenuNode,
@@ -1172,14 +1281,62 @@ const SessionConversationPage = memo(function SessionConversationPage({
     ) {
       setActiveMarkerId(null);
       setActiveMarkerMessageId(null);
+      setPendingConversationMarkerCreates([]);
     }
-  }, [activeMarkerId, visibleMarkers]);
+  }, [activeMarkerId, setPendingConversationMarkerCreates, visibleMarkers]);
+
+  useEffect(() => {
+    if (pendingCreatedMarkers.length === 0 || activeMarkerId) {
+      return;
+    }
+    const usedMarkerIds = new Set<string>();
+    let changed = false;
+    const nextPendingMarkers = pendingCreatedMarkers.map((pendingMarker) => {
+      if (pendingMarker.resolvedMarkerId) {
+        usedMarkerIds.add(pendingMarker.resolvedMarkerId);
+        return pendingMarker;
+      }
+      const messageMarkers =
+        markersByMessageId.get(pendingMarker.messageId) ?? [];
+      const createdMarker = findNewPendingCreatedConversationMarker(
+        messageMarkers,
+        pendingMarker,
+        usedMarkerIds,
+      );
+      if (!createdMarker) {
+        return pendingMarker;
+      }
+      usedMarkerIds.add(createdMarker.id);
+      changed = true;
+      return {
+        ...pendingMarker,
+        resolvedMarkerId: createdMarker.id,
+      };
+    });
+    const latestPendingMarker =
+      nextPendingMarkers[nextPendingMarkers.length - 1] ?? null;
+    if (latestPendingMarker?.resolvedMarkerId) {
+      setActiveMarkerId(latestPendingMarker.resolvedMarkerId);
+      setActiveMarkerMessageId(latestPendingMarker.messageId);
+      setPendingConversationMarkerCreates([]);
+      return;
+    }
+    if (changed) {
+      setPendingConversationMarkerCreates(nextPendingMarkers);
+    }
+  }, [
+    activeMarkerId,
+    markersByMessageId,
+    pendingCreatedMarkers,
+    setPendingConversationMarkerCreates,
+  ]);
 
   useEffect(() => {
     setActiveMarkerId(null);
     setActiveMarkerMessageId(null);
+    setPendingConversationMarkerCreates([]);
     setMarkerPanelVisibilityOverride(null);
-  }, [session.id]);
+  }, [session.id, setPendingConversationMarkerCreates]);
 
   const cancelMarkerPanelFocusRestore = useCallback(() => {
     if (markerPanelFocusRestoreFrameRef.current !== null) {
@@ -1205,9 +1362,10 @@ const SessionConversationPage = memo(function SessionConversationPage({
     (marker: ConversationMarker) => {
       setActiveMarkerId(marker.id);
       setActiveMarkerMessageId(marker.messageId);
+      setPendingConversationMarkerCreates([]);
       jumpToConversationMarker(marker);
     },
-    [jumpToConversationMarker],
+    [jumpToConversationMarker, setPendingConversationMarkerCreates],
   );
 
   const navigateMarkerByOffset = useCallback(
@@ -1251,14 +1409,23 @@ const SessionConversationPage = memo(function SessionConversationPage({
         return null;
       }
       const messageMarkers = markersByMessageId.get(message.id) ?? [];
+      const latestPendingCreatedMarker =
+        pendingCreatedMarkers[pendingCreatedMarkers.length - 1] ?? null;
+      const pendingActiveMessageMarker =
+        !activeMarkerId &&
+        latestPendingCreatedMarker?.messageId === message.id &&
+        latestPendingCreatedMarker.resolvedMarkerId
+          ? messageMarkers.find(
+              (marker) =>
+                marker.id === latestPendingCreatedMarker.resolvedMarkerId,
+            ) ?? null
+          : null;
       const activeMessageMarker = activeMarkerId
         ? messageMarkers.find((marker) => marker.id === activeMarkerId) ?? null
-        : null;
+        : pendingActiveMessageMarker;
       const isActiveMarkerMessage =
         activeMessageMarker !== null || activeMarkerMessageId === message.id;
-      const activeMarkerColor =
-        activeMessageMarker?.color ??
-        (activeMarkerMessageId === message.id ? messageMarkers[0]?.color : null);
+      const activeMarkerColor = activeMessageMarker?.color ?? null;
       const markerShellStyle = isActiveMarkerMessage
         ? ({
             "--conversation-active-marker-color":
@@ -1355,6 +1522,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       activeMarkerMessageId,
       markersByMessageId,
       openMarkerContextMenu,
+      pendingCreatedMarkers,
       renderMessageCard,
     ],
   );

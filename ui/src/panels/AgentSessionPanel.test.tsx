@@ -1128,7 +1128,7 @@ describe("AgentSessionPanel conversation caching", () => {
     );
   });
 
-  it("highlights the source message immediately after creating a marker", async () => {
+  it("highlights the source message immediately after creating a marker", () => {
     const onCreateConversationMarker = vi.fn();
     const activeSession = makeSession("session-1", {
       messages: makeTextMessages(2),
@@ -1169,8 +1169,306 @@ describe("AgentSessionPanel conversation caching", () => {
       "message-2",
       { name: "Checkpoint" },
     );
+    expect(messageShell).toHaveClass("is-active-marker");
+  });
+
+  it("uses the newly created marker color when the message already has markers", async () => {
+    const onCreateConversationMarker = vi.fn();
+    const existingMarker = makeConversationMarker({
+      id: "marker-existing",
+      messageId: "message-2",
+      name: "Review point",
+      color: "#ef4444",
+    });
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+      markers: [existingMarker],
+    });
+    const renderPanel = createAgentSessionPanelHarness({
+      activeSession,
+      onCreateConversationMarker,
+      renderMessageCard: (message) => (
+        <article className="message-card">
+          <div
+            className="message-meta"
+            data-conversation-marker-menu-trigger={
+              message.author === "assistant" ? true : undefined
+            }
+          >
+            <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+            <span>{message.timestamp}</span>
+          </div>
+          <p>{`${message.id} body`}</p>
+        </article>
+      ),
+    });
+    const { rerender } = render(renderPanel());
+    const messageShell = () =>
+      screen
+        .getByText("message-2 body")
+        .closest(".conversation-message-marker-shell");
+
+    fireEvent.contextMenu(screen.getByText("Agent message-2"));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create marker" }));
+
+    expect(messageShell()).toHaveClass("is-active-marker");
+    expect(messageShell()).not.toHaveStyle({
+      "--conversation-active-marker-color":
+        normalizeConversationMarkerColor(existingMarker.color),
+    });
+
+    const createdMarker = makeConversationMarker({
+      id: "marker-created",
+      messageId: "message-2",
+      name: "Checkpoint",
+      color: "#2563eb",
+    });
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [
+          makeSession("session-1", {
+            ...activeSession,
+            markers: [existingMarker, createdMarker],
+          }),
+        ],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+    rerender(renderPanel());
+
     await waitFor(() => {
-      expect(messageShell).toHaveClass("is-active-marker");
+      expect(messageShell()).toHaveStyle({
+        "--conversation-active-marker-color": normalizeConversationMarkerColor(
+          createdMarker.color,
+        ),
+      });
+    });
+  });
+
+  it("keeps the latest overlapping marker create active when labels match", async () => {
+    const onCreateConversationMarker = vi.fn();
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+    const renderPanel = createAgentSessionPanelHarness({
+      activeSession,
+      onCreateConversationMarker,
+      renderMessageCard: (message) => (
+        <article className="message-card">
+          <div
+            className="message-meta"
+            data-conversation-marker-menu-trigger={
+              message.author === "assistant" ? true : undefined
+            }
+          >
+            <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+            <span>{message.timestamp}</span>
+          </div>
+          <p>{`${message.id} body`}</p>
+        </article>
+      ),
+    });
+    const { rerender } = render(renderPanel());
+    const messageShell = () =>
+      screen
+        .getByText("message-2 body")
+        .closest(".conversation-message-marker-shell");
+
+    fireEvent.contextMenu(screen.getByText("Agent message-2"));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create marker" }));
+    fireEvent.contextMenu(screen.getByText("Agent message-2"));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create marker" }));
+
+    const firstCreatedMarker = makeConversationMarker({
+      id: "marker-created-first",
+      messageId: "message-2",
+      name: "Checkpoint",
+      color: "#ef4444",
+    });
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [
+          makeSession("session-1", {
+            ...activeSession,
+            markers: [firstCreatedMarker],
+          }),
+        ],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+    rerender(renderPanel());
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", {
+          name: "Jump to Decision marker Checkpoint",
+        }),
+      ).not.toHaveClass("is-active");
+    });
+    expect(messageShell()).not.toHaveStyle({
+      "--conversation-active-marker-color": normalizeConversationMarkerColor(
+        firstCreatedMarker.color,
+      ),
+    });
+
+    const secondCreatedMarker = makeConversationMarker({
+      id: "marker-created-second",
+      messageId: "message-2",
+      name: "Checkpoint",
+      color: "#2563eb",
+      createdAt: "2026-05-01 10:00:01",
+      updatedAt: "2026-05-01 10:00:01",
+    });
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [
+          makeSession("session-1", {
+            ...activeSession,
+            markers: [firstCreatedMarker, secondCreatedMarker],
+          }),
+        ],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+    rerender(renderPanel());
+
+    await waitFor(() => {
+      expect(messageShell()).toHaveStyle({
+        "--conversation-active-marker-color": normalizeConversationMarkerColor(
+          secondCreatedMarker.color,
+        ),
+      });
+    });
+  });
+
+  it("clears a create-driven marker highlight when the marker is deleted", async () => {
+    const onCreateConversationMarker = vi.fn();
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+    const renderPanel = createAgentSessionPanelHarness({
+      activeSession,
+      onCreateConversationMarker,
+      renderMessageCard: (message) => (
+        <article className="message-card">
+          <div
+            className="message-meta"
+            data-conversation-marker-menu-trigger={
+              message.author === "assistant" ? true : undefined
+            }
+          >
+            <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+            <span>{message.timestamp}</span>
+          </div>
+          <p>{`${message.id} body`}</p>
+        </article>
+      ),
+    });
+    const { rerender } = render(renderPanel());
+    const messageShell = () =>
+      screen
+        .getByText("message-2 body")
+        .closest(".conversation-message-marker-shell");
+
+    fireEvent.contextMenu(screen.getByText("Agent message-2"));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create marker" }));
+
+    expect(messageShell()).toHaveClass("is-active-marker");
+
+    const createdMarker = makeConversationMarker({
+      id: "marker-created",
+      messageId: "message-2",
+      name: "Checkpoint",
+    });
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [
+          makeSession("session-1", {
+            ...activeSession,
+            markers: [createdMarker],
+          }),
+        ],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+    rerender(renderPanel());
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", {
+          name: "Jump to Decision marker Checkpoint",
+        }),
+      ).toHaveClass("is-active");
+    });
+
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [makeSession("session-1", activeSession)],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+    rerender(renderPanel());
+
+    await waitFor(() => {
+      expect(messageShell()).not.toHaveClass("is-active-marker");
+    });
+  });
+
+  it("clears a create-driven marker highlight when marker creation fails", async () => {
+    const onCreateConversationMarker = vi.fn(async () => false);
+    const activeSession = makeSession("session-1", {
+      messages: makeTextMessages(2),
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      onCreateConversationMarker,
+      renderMessageCard: (message) => (
+        <article className="message-card">
+          <div
+            className="message-meta"
+            data-conversation-marker-menu-trigger={
+              message.author === "assistant" ? true : undefined
+            }
+          >
+            <span>{`${message.author === "assistant" ? "Agent" : "You"} ${message.id}`}</span>
+            <span>{message.timestamp}</span>
+          </div>
+          <p>{`${message.id} body`}</p>
+        </article>
+      ),
+    });
+
+    const messageShell = screen
+      .getByText("message-2 body")
+      .closest(".conversation-message-marker-shell");
+
+    fireEvent.contextMenu(screen.getByText("Agent message-2"));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create marker" }));
+
+    expect(messageShell).toHaveClass("is-active-marker");
+    await waitFor(() => {
+      expect(messageShell).not.toHaveClass("is-active-marker");
     });
   });
 
