@@ -164,17 +164,44 @@ fn telegram_project_digest(primary_session_id: Option<&str>) -> ProjectDigestRes
     }
 }
 
-fn telegram_test_config() -> TelegramBotConfig {
-    TelegramBotConfig {
-        api_base_url: "http://127.0.0.1:8765".to_owned(),
-        bot_username: Some("termal_bot".to_owned()),
-        bot_token: "123456:TESTTOKEN".to_owned(),
-        chat_id: Some(42),
-        poll_timeout_secs: 1,
-        project_id: "project-1".to_owned(),
-        public_base_url: None,
-        state_path: std::env::temp_dir().join(format!("termal-telegram-{}.json", Uuid::new_v4())),
-        subscribed_project_ids: vec!["project-1".to_owned()],
+struct TelegramTestConfig {
+    config: TelegramBotConfig,
+}
+
+impl std::ops::Deref for TelegramTestConfig {
+    type Target = TelegramBotConfig;
+
+    fn deref(&self) -> &Self::Target {
+        &self.config
+    }
+}
+
+impl std::ops::DerefMut for TelegramTestConfig {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.config
+    }
+}
+
+impl Drop for TelegramTestConfig {
+    fn drop(&mut self) {
+        fs::remove_file(&self.config.state_path).ok();
+    }
+}
+
+fn telegram_test_config() -> TelegramTestConfig {
+    TelegramTestConfig {
+        config: TelegramBotConfig {
+            api_base_url: "http://127.0.0.1:8765".to_owned(),
+            bot_username: Some("termal_bot".to_owned()),
+            bot_token: "123456:TESTTOKEN".to_owned(),
+            chat_id: Some(42),
+            poll_timeout_secs: 1,
+            project_id: "project-1".to_owned(),
+            public_base_url: None,
+            state_path: std::env::temp_dir()
+                .join(format!("termal-telegram-{}.json", Uuid::new_v4())),
+            subscribed_project_ids: vec!["project-1".to_owned()],
+        },
     }
 }
 

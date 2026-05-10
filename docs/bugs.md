@@ -204,17 +204,6 @@ When the async action settles after the effect increments the generation, the re
 **Proposal:**
 - After N failed first-chunk attempts for the same `(message_id, chunk_index)`, advance the cursor anyway and surface a "[chunk N skipped: send failed]" line in chat.
 
-## Telegram tests accumulate temp files in `$TMPDIR`
-
-**Severity:** Note - `src/tests/telegram.rs:148-159`. `telegram_test_config()` writes `state_path` per test but never cleans up. Files accumulate in `$TMPDIR` across test runs.
-
-**Current behavior:**
-- Per-test temp file path generated.
-- No cleanup.
-
-**Proposal:**
-- Use a `Drop` guard or `tempfile::NamedTempFile` so created files are reaped.
-
 ## `forward_new_assistant_message_outcome` is now ~256 lines with interleaved early-returns
 
 **Severity:** Note - `src/telegram.rs:1916-2007`. The new pre-forward block has 3 separate `Active baseline` early returns and one merge into the main path; future contributors will struggle to trace which baseline shape is preserved across the merge.
