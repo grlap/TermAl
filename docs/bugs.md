@@ -3499,8 +3499,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover frontmatter parser edge cases directly:
-  add a `strip_markdown_frontmatter` unit-test module covering opening `---` without a closing terminator (returns original content), `description: |` multi-line value, malformed `key: value: extra` lines, very large frontmatter, and trailing whitespace on the closing `---`.
 - [ ] P2: Cover `rejects_invalid_agent_command_delegation_metadata` parametrically:
   parameterize over each error branch in the metadata parser: `mode: invalid_value`, `writePolicy.kind: bogus`, `enabled: not-a-bool`, `enabled: true` without `mode`, `enabled: true` without `writePolicy.kind`, `prefix:` without `strategy: prefixFirstArgument`, `strategy: bogus`.
 - [ ] P2: Cover adversarial `PromptTemplate` source-vs-name mismatch for delegation defaults:

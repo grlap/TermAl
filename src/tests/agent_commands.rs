@@ -183,6 +183,68 @@ Inspect diffs.
 }
 
 #[test]
+fn strip_markdown_frontmatter_handles_edge_cases() {
+    let unterminated = "---\ndescription: Missing close\nBody stays intact.\n";
+    let parsed = strip_markdown_frontmatter(unterminated);
+    assert_eq!(parsed.content, unterminated);
+    assert_eq!(parsed.frontmatter, None);
+    assert_eq!(parsed.description, None);
+    assert_eq!(parsed.argument_hint, None);
+
+    let block_description = "---
+description: |
+  Multi-line descriptions are outside the tiny parser.
+---
+
+Body starts here.
+";
+    let parsed = strip_markdown_frontmatter(block_description);
+    assert_eq!(
+        parsed.frontmatter,
+        Some("description: |\n  Multi-line descriptions are outside the tiny parser.\n")
+    );
+    assert_eq!(parsed.description.as_deref(), Some("|"));
+    assert_eq!(parsed.content, "Body starts here.\n");
+
+    let malformed_scalar = "---
+description: value: extra
+---
+
+Body.
+";
+    let parsed = strip_markdown_frontmatter(malformed_scalar);
+    assert_eq!(parsed.description.as_deref(), Some("value: extra"));
+    assert_eq!(parsed.content, "Body.\n");
+
+    let large_description = "x".repeat(70 * 1024);
+    let large_frontmatter = format!(
+        "---
+description: {large_description}
+---
+
+Large body.
+"
+    );
+    let parsed = strip_markdown_frontmatter(&large_frontmatter);
+    assert_eq!(
+        parsed.description.as_deref(),
+        Some(large_description.as_str())
+    );
+    assert_eq!(parsed.content, "Large body.\n");
+
+    let trailing_space_close = concat!(
+        "---\n",
+        "description: Trailing close\n",
+        "---",
+        "   \n",
+        "\nBody.\n"
+    );
+    let parsed = strip_markdown_frontmatter(trailing_space_close);
+    assert_eq!(parsed.description.as_deref(), Some("Trailing close"));
+    assert_eq!(parsed.content, "Body.\n");
+}
+
+#[test]
 fn reads_claude_agent_commands_fallback_description_for_blank_frontmatter_description() {
     let root = std::env::temp_dir().join(format!(
         "termal-agent-commands-blank-description-{}",
