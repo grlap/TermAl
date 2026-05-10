@@ -32,7 +32,7 @@ export const CONVERSATION_OVERVIEW_MIN_MESSAGES = 80;
 const CONVERSATION_OVERVIEW_COMPACT_SEGMENT_THRESHOLD = 160;
 const CONVERSATION_OVERVIEW_COMPACT_VISUAL_SEGMENT_COUNT = 96;
 const CONVERSATION_OVERVIEW_FOCUSED_PROMPT_FALLBACK_DELAY_MS = 240;
-const CONVERSATION_OVERVIEW_COMPACT_NAVIGATION_STALE_DELAY_MS = 800;
+const CONVERSATION_OVERVIEW_COMPACT_NAVIGATION_STALE_DELAY_MS = 2_000;
 const EMPTY_CONVERSATION_OVERVIEW_MARKERS: readonly ConversationOverviewMarkerInput[] =
   [];
 const EMPTY_CONVERSATION_OVERVIEW_TAIL_ITEMS: readonly ConversationOverviewTailItemInput[] =
@@ -140,6 +140,12 @@ export function ConversationOverviewRail({
   }, [compactNavigationSegmentIndex, currentSegmentIndex, segments.length]);
 
   useEffect(() => {
+    setFocusedSegmentIndex((index) =>
+      clampOverviewSegmentIndex(index, segments.length),
+    );
+  }, [segments.length]);
+
+  useEffect(() => {
     if (compactNavigationSegmentIndex === null) {
       return;
     }
@@ -153,7 +159,7 @@ export function ConversationOverviewRail({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [compactNavigationSegmentIndex]);
+  }, [compactNavigationSegmentIndex, currentSegmentIndex]);
 
   if (messages.length < minMessages || projection.items.length === 0) {
     return null;

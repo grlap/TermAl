@@ -298,34 +298,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Add a sibling test where `prepare_*` is called against an Unknown-status session.
 
-## ConversationOverviewRail `compactNavigationSegmentIndex` 800ms timeout creates flicker race
-
-**Severity:** Low - `ui/src/panels/ConversationOverviewRail.tsx:132-156`. The `setTimeout` cleanup (`CONVERSATION_OVERVIEW_COMPACT_NAVIGATION_STALE_DELAY_MS = 800`) clears `compactNavigationSegmentIndex` after 800ms regardless of in-flight viewport updates. If the parent confirms at 850ms (heavy main-thread work, GC pause, dev-tools paint), the override has already cleared, and `aria-valuenow` flips back to the (stale) viewport value, then the parent confirmation fires `setCompactNavigationSegmentIndex(null)` (a no-op). The user perceives a brief flash to "wrong" `aria-valuenow`.
-
-**Current behavior:**
-- 800ms wall-clock timeout.
-- Heavy main-thread work past 800ms produces flicker.
-
-**Proposal:**
-- Cancel the timeout when `currentSegmentIndex` moves at all.
-- Or extend to 2-3 seconds.
-- Or use rAF-counting instead of wall-clock.
-
-## `focusedSegmentIndex` state can drift past `segments.length` after shrink-then-grow
-
-**Severity:** Low - `ui/src/panels/ConversationOverviewRail.tsx:81`. Round 82 removed the `useEffect` that clamped `focusedSegmentIndex` when `segments.length` changes. The inline `clampedFocusedSegmentIndex` covers all reads, but the underlying state value can drift past the new bound.
-
-If `segments.length` shrinks then grows back to a value `>= focusedSegmentIndex`, the focus jumps to the (stale) `focusedSegmentIndex` rather than tracking the user's current intent.
-
-**Current behavior:**
-- State value can exceed `segments.length`.
-- Inline clamp covers reads.
-- Shrink-then-grow restores stale focus.
-
-**Proposal:**
-- Either restore the effect (acknowledging the redundancy with inline clamps).
-- Or write a `useReducer`/dispatch-based focus model that recomputes bounds in one place.
-
 ## Composer transition session-switch test only inspects the new textarea
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:8401-8541`. Asserts the textarea's transition stays `"height 150ms ease"` after the session switch. If the regression were "the prior session's transition is restored on the WRONG textarea" (a stale element reference), the test wouldn't catch it because it only inspects the new textarea.
@@ -337,18 +309,6 @@ If `segments.length` shrinks then grows back to a value `>= focusedSegmentIndex`
 **Proposal:**
 - Capture the original textarea node reference before rerender.
 - Assert on it after rerender (it's been removed from DOM, but transition state is observable in the captured ref).
-
-## Stale-clear test for compactNavigationSegmentIndex doesn't cover cleanup-on-rerender
-
-**Severity:** Low - `ui/src/panels/ConversationOverviewRail.test.tsx:517-552`. The new fake-timer test for stale-clear (800ms). Does NOT exercise the cleanup-on-rerender. If a regression broke the timeout cleanup (`return () => window.clearTimeout(timeoutId)`), this test would still pass because it doesn't unmount or rerender mid-timer.
-
-**Current behavior:**
-- Wall-clock 800ms covered.
-- Timer cleanup on dependency change not covered.
-
-**Proposal:**
-- Add a sibling test that re-fires `keyDown` (changing `compactNavigationSegmentIndex`) while a prior timer is in flight.
-- Asserts the prior timer was cancelled.
 
 ## Round-trip serialization test doesn't go back to JSON
 

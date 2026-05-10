@@ -545,7 +545,72 @@ describe("ConversationOverviewRail", () => {
         vi.advanceTimersByTime(800);
       });
 
+      expect(rail).toHaveAttribute(
+        "aria-valuenow",
+        rail.getAttribute("aria-valuemax"),
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(1_200);
+      });
+
       expect(rail).toHaveAttribute("aria-valuenow", initialValue);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears stale compact navigation timers when keyboard navigation changes", () => {
+    vi.useFakeTimers();
+    try {
+      const messages = commandMessages(220);
+      render(
+        <ConversationOverviewRail
+          messages={messages}
+          layoutSnapshot={layoutSnapshot(messages)}
+          minMessages={4}
+          maxHeightPx={1024}
+          onNavigate={() => {}}
+        />,
+      );
+      const rail = screen.getByLabelText("Conversation overview");
+
+      fireEvent.keyDown(rail, { key: "End" });
+      expect(rail).toHaveAttribute(
+        "aria-valuenow",
+        rail.getAttribute("aria-valuemax"),
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      fireEvent.keyDown(rail, { key: "Home" });
+      expect(rail).toHaveAttribute("aria-valuenow", "1");
+
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      fireEvent.keyDown(rail, { key: "End" });
+      expect(rail).toHaveAttribute(
+        "aria-valuenow",
+        rail.getAttribute("aria-valuemax"),
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(rail).toHaveAttribute(
+        "aria-valuenow",
+        rail.getAttribute("aria-valuemax"),
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(1_500);
+      });
+      expect(rail).not.toHaveAttribute(
+        "aria-valuenow",
+        rail.getAttribute("aria-valuemax") ?? "",
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -776,6 +841,60 @@ describe("ConversationOverviewRail", () => {
         document.querySelectorAll(".conversation-overview-segment"),
       ).filter((item) => item.getAttribute("tabIndex") === "0"),
     ).toHaveLength(1);
+  });
+
+  it("does not restore stale focus when segments shrink then grow", () => {
+    const expandedMessages = textMessages(5);
+    const collapsedMessages = assistantTextMessages(5);
+    const { rerender } = render(
+      <ConversationOverviewRail
+        messages={expandedMessages}
+        layoutSnapshot={layoutSnapshot(expandedMessages)}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={() => {}}
+      />,
+    );
+
+    const firstItem = screen.getByLabelText(/User prompt 1/);
+    fireEvent.keyDown(firstItem, { key: "End" });
+    expect(screen.getByLabelText(/User prompt 5/)).toHaveAttribute(
+      "tabIndex",
+      "0",
+    );
+
+    rerender(
+      <ConversationOverviewRail
+        messages={collapsedMessages}
+        layoutSnapshot={layoutSnapshot(collapsedMessages)}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={() => {}}
+      />,
+    );
+    expect(screen.getByLabelText(/Assistant responses 1-5/)).toHaveAttribute(
+      "tabIndex",
+      "0",
+    );
+
+    rerender(
+      <ConversationOverviewRail
+        messages={expandedMessages}
+        layoutSnapshot={layoutSnapshot(expandedMessages)}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText(/User prompt 1/)).toHaveAttribute(
+      "tabIndex",
+      "0",
+    );
+    expect(screen.getByLabelText(/User prompt 5/)).toHaveAttribute(
+      "tabIndex",
+      "-1",
+    );
   });
 
   it("renders and navigates live-turn tail items", () => {
