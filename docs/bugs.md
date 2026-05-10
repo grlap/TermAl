@@ -310,21 +310,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Capture the original textarea node reference before rerender.
 - Assert on it after rerender (it's been removed from DOM, but transition state is observable in the captured ref).
 
-## Pinned live-tail `column-reverse` reverses queued prompt order
-
-**Severity:** Low - `ui/src/styles.css:4566-4573`. The `.is-pinned` modifier overrides `display: grid` with `display: flex; flex-direction: column-reverse`. This keeps the live-turn card visually closest to the composer, but it also reverses all other children. With live turn + queued prompt A + queued prompt B, the queued prompts render as B before A visually.
-
-Existing coverage only checks one queued prompt and the `is-pinned` class, so the multi-queued-prompt ordering regression is unpinned.
-
-**Current behavior:**
-- `.is-pinned` flips visual order via `column-reverse`.
-- The live card moves closest to the composer.
-- Multiple queued prompts reverse relative to their FIFO order.
-
-**Proposal:**
-- Use explicit CSS ordering or a queued-prompt wrapper so only the live card moves closest to the composer.
-- Add a pinned live-tail test with at least two queued prompts.
-
 ## Two composer cleanup paths look symmetric but only one restores layout
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:2017-2028`. The unmount cleanup `useEffect(() => { return () => {...} }, [])` resets `composerResizeShouldAnimateHeightRef.current = true` and calls `cancelAndRestoreScheduledComposerTransition`. The active-session-change `useLayoutEffect` does the same plus a direct `resizeComposerInput(true)`. Two cleanup paths that look symmetric but only the second restores layout. If the unmount fires without active session being changed first, the ref-reset is essentially a no-op since the component is gone.
