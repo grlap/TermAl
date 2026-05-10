@@ -356,18 +356,6 @@ The sanitizer only redacts Telegram tokens. A backend error like `"failed to loa
 **Proposal:**
 - Add a test that asserts the live-tail wrapper appears AND disappears as `showWaitingIndicator`/`pendingPrompts` toggle.
 
-## `mermaid-demo.md` accidental edits: title typo and undefined node
-
-**Severity:** Note - `docs/mermaid-demo.md:1, 9`. Title was changed from `# Mermaid Demo` to `# Mermaid Demoa` (typo) and the diagram edge `Edit --> Stop` was changed to `Edit --> Stop2` (an undefined node). Both edits look like accidental input rather than deliberate. The mermaid diagram now references an undefined node `Stop2` which Mermaid renders as a degenerate empty rectangle.
-
-**Current behavior:**
-- Title contains typo.
-- Edge references undefined node.
-
-**Proposal:**
-- Revert if accidental.
-- Or if intentional (e.g., testing fault-tolerance), add a comment in the file explaining the test scenario.
-
 ## `dispatch_project_action` error handling asymmetric between message and callback paths
 
 **Severity:** Note - `src/telegram.rs:1442-1457`. `dispatch_project_action` failure in callback-query handler calls `answer_callback_query` THEN `send_message`. If `send_message` returns Err, it bubbles via `?` and the function returns Err — but `answer_callback_query` already fired (with `let _ =`).
