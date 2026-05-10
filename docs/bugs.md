@@ -254,20 +254,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Extract the active-baseline transition into a helper `transition_active_baseline_to_settled` that returns either the new cursor + position or an `OutcomeShortCircuit`.
 
-## Send-shrink test brittle to probe sequence refactors
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:8362-8365`. The assertion `expect(heightWrites).toContainEqual({value: "40px", transition: "none"})` requires the height of `40px` to be one of the writes — but the implementation does multiple writes during shrink (`1px` probe, then `previousMeasuredHeight`, then `40px`).
-
-The test is brittle to refactors that change the probe sequence (e.g., a future change that combines the probe and final write into one step would still set the final height to 40px, but the intermediate write states could differ).
-
-**Current behavior:**
-- Test asserts on intermediate write state.
-- Future probe-sequence refactor could produce different intermediate writes that still satisfy the contract.
-
-**Proposal:**
-- Either pin the full write sequence with `toEqual([...])`.
-- Or rewrite to assert the contract (final transition restored, no zero-height probe at end of write sequence) rather than the implementation.
-
 ## `assistant_forwarding_cursor_for_session` takes `messages` parameter but otherwise pure-read
 
 **Severity:** Note - `src/telegram.rs:1685-1712`. `assistant_forwarding_cursor_for_session` now takes `messages: &[TelegramSessionFetchMessage]` to gate the legacy fallback by "is the legacy id still in this session's messages?" Good defense, but the function is pure-read on `state` and uses-the-messages-but-doesn't-mutate-anything. Readers expect "cursor for session" to be a state-only lookup.

@@ -9627,8 +9627,6 @@ describe("AgentSessionPanelFooter", () => {
     const onSend = vi.fn(() => true);
     let unmount: ReturnType<typeof render>["unmount"] | null = null;
     let sawZeroHeightProbe = false;
-    const heightWrites: { value: string; transition: string }[] = [];
-    let restoreHeightWrites: (() => void) | null = null;
 
     window.requestAnimationFrame =
       requestAnimationFrameMock as unknown as typeof requestAnimationFrame;
@@ -9665,7 +9663,6 @@ describe("AgentSessionPanelFooter", () => {
       if (!(textarea instanceof HTMLTextAreaElement)) {
         throw new Error("Composer textarea not found");
       }
-      restoreHeightWrites = recordTextareaHeightWrites(textarea, heightWrites);
 
       act(() => {
         fireEvent.change(textarea, {
@@ -9675,7 +9672,6 @@ describe("AgentSessionPanelFooter", () => {
       drainAnimationFrames();
       expect(textarea.style.height).toBe("96px");
 
-      heightWrites.length = 0;
       act(() => {
         fireEvent.click(screen.getByRole("button", { name: "Send" }));
       });
@@ -9688,14 +9684,6 @@ describe("AgentSessionPanelFooter", () => {
       expect(textarea).toHaveValue("");
       expect(textarea.style.height).toBe("40px");
       expect(sawZeroHeightProbe).toBe(false);
-      expect(heightWrites).toContainEqual({
-        value: "40px",
-        transition: "none",
-      });
-      expect(heightWrites).not.toContainEqual({
-        value: "40px",
-        transition: "",
-      });
       expect(textarea.style.transition).not.toBe("none");
     } finally {
       act(() => {
@@ -9714,7 +9702,6 @@ describe("AgentSessionPanelFooter", () => {
           }
         ).scrollHeight;
       }
-      restoreHeightWrites?.();
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
     }
