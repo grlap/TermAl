@@ -3499,8 +3499,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Replace the duplicative malformed-wait persistence test:
-  rewrite `removing_parent_consumes_unsatisfied_wait_even_when_targets_are_not_terminal` so it writes a stale wait whose owner is missing into the persistence file, restarts via `AppState::new_with_paths`, and asserts boot reconciliation drops it. As written, it bypasses validation via `inner.delegation_waits.push` and duplicates a scenario already covered by `removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason`.
 - [ ] P2: Cover true-value delegation wait response booleans through the command layer:
   add `resumePromptQueued: true` and `resumeDispatchRequested: true` cases for `resume_after_delegations` and reviewer-batch wait propagation so fields cannot be hard-coded false.
 - [ ] P2: Decouple `delegation_wait_reconciles_after_restart_recovery` from recovery copy:

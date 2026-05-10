@@ -246,6 +246,7 @@ fn delegation_wait_all_queues_consolidated_parent_resume_after_children_finish()
         .expect("wait should be scheduled");
     assert!(!wait.resume_prompt_queued);
     assert!(!wait.resume_dispatch_requested);
+    assert_delegation_wait_response_serializes_queue_flags(&wait, false, false);
     let snapshot = state.snapshot();
     assert_eq!(snapshot.delegation_waits.len(), 1);
     assert_eq!(snapshot.delegation_waits[0].id, wait.wait.id);
@@ -393,7 +394,8 @@ fn already_terminal_delegation_wait_reports_queued_prompt_without_dispatch_for_b
 
 #[test]
 fn already_terminal_delegation_wait_reports_dispatch_for_idle_parent() {
-    let state = test_app_state();
+    let (state, input_rx) =
+        test_app_state_with_delegation_codex_runtime("already-terminal-idle-parent-dispatch");
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_read_only_delegation(
@@ -409,6 +411,9 @@ fn already_terminal_delegation_wait_reports_dispatch_for_idle_parent() {
             },
         )
         .expect("delegation should be created");
+    input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("initial delegation prompt should dispatch");
 
     finish_delegation_child_with_assistant_text(
         &state,
@@ -433,6 +438,38 @@ fn already_terminal_delegation_wait_reports_dispatch_for_idle_parent() {
     assert!(wait.resume_prompt_queued);
     assert!(wait.resume_dispatch_requested);
     assert_delegation_wait_response_serializes_queue_flags(&wait, true, true);
+
+    match input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("parent resume prompt should dispatch immediately")
+    {
+        CodexRuntimeCommand::Prompt {
+            session_id,
+            command,
+        } => {
+            assert_eq!(session_id, parent_session_id);
+            assert!(command.prompt.contains("Already terminal idle fan-in"));
+            assert!(command.prompt.contains(&created.delegation.id));
+            assert!(
+                command
+                    .prompt
+                    .contains("Review finished before the idle-parent wait was scheduled.")
+            );
+        }
+        _ => panic!("delegation wait should dispatch a parent resume prompt"),
+    }
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(inner.delegation_waits.is_empty());
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_session_id)
+        .expect("parent should exist");
+    assert!(
+        parent.queued_prompts.is_empty(),
+        "dispatched idle-parent resume should pop the queued prompt"
+    );
 }
 
 #[test]
@@ -701,83 +738,79 @@ fn removing_delegation_parent_consumes_already_satisfied_wait_with_parent_remove
 }
 
 #[test]
-fn removing_parent_consumes_unsatisfied_wait_even_when_targets_are_not_terminal() {
-    let state = test_app_state();
-    let removed_parent_session_id = test_session_id(&state, Agent::Codex);
-    let other_parent_session_id = test_session_id(&state, Agent::Codex);
-    let other_delegation = state
-        .create_read_only_delegation(
-            &other_parent_session_id,
-            CreateDelegationRequest {
-                prompt: "Keep running while another parent is removed.".to_owned(),
-                title: Some("Still Running Review".to_owned()),
-                cwd: None,
-                agent: Some(Agent::Codex),
-                model: None,
-                mode: Some(DelegationMode::Reviewer),
-                write_policy: Some(DelegationWritePolicy::ReadOnly),
-            },
-        )
-        .expect("delegation should be created");
+fn boot_reconciliation_drops_unsatisfied_wait_with_missing_parent_and_running_target() {
+    let (project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let wait_id = "delegation-wait-removed-parent-unsatisfied".to_owned();
+    let delegation_id;
     {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        // Simulate a stale persisted wait whose owner is removed while its
-        // target is still running; the public API validates this on creation.
-        inner.delegation_waits.push(DelegationWaitRecord {
-            id: wait_id.clone(),
-            parent_session_id: removed_parent_session_id.clone(),
-            delegation_ids: vec![other_delegation.delegation.id.clone()],
-            mode: DelegationWaitMode::All,
-            created_at: stamp_now(),
-            title: Some("Unsatisfied removed-parent fan-in".to_owned()),
-        });
+        let state = AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+        )
+        .expect("state should boot");
+        install_delegation_codex_runtime(&state, "delegation-wait-missing-parent-target");
+        let other_parent_session_id = test_session_id(&state, Agent::Codex);
+        let other_delegation = state
+            .create_read_only_delegation(
+                &other_parent_session_id,
+                CreateDelegationRequest {
+                    prompt: "Keep running while a stale wait owner is missing.".to_owned(),
+                    title: Some("Still Running Review".to_owned()),
+                    cwd: None,
+                    agent: Some(Agent::Codex),
+                    model: None,
+                    mode: Some(DelegationMode::Reviewer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                },
+            )
+            .expect("delegation should be created");
+        delegation_id = other_delegation.delegation.id.clone();
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            inner.delegation_waits.push(DelegationWaitRecord {
+                id: wait_id.clone(),
+                parent_session_id: "session-missing-parent".to_owned(),
+                delegation_ids: vec![delegation_id.clone()],
+                mode: DelegationWaitMode::All,
+                created_at: stamp_now(),
+                title: Some("Unsatisfied removed-parent fan-in".to_owned()),
+            });
+            state.commit_locked(&mut inner).unwrap();
+        }
+        state.shutdown_persist_blocking();
     }
 
-    let mut delta_events = state.subscribe_delta_events();
-    while delta_events.try_recv().is_ok() {}
-    state
-        .kill_session(&removed_parent_session_id)
-        .expect("parent removal should succeed");
+    let restarted = AppState::new_with_paths(
+        project_root.to_string_lossy().into_owned(),
+        persistence_path.clone(),
+        templates_path.clone(),
+    )
+    .expect("state should reload");
 
-    let inner = state.inner.lock().expect("state mutex poisoned");
+    let inner = restarted.inner.lock().expect("state mutex poisoned");
     assert!(
         inner
             .delegation_waits
             .iter()
             .all(|record| record.id != wait_id),
-        "unsatisfied wait owned by a removed parent should not survive"
+        "boot reconciliation should drop stale waits with missing parents even when targets are still running"
     );
     let delegation = inner
         .delegations
         .iter()
-        .find(|delegation| delegation.id == other_delegation.delegation.id)
-        .expect("unrelated delegation should remain");
-    assert_eq!(delegation.status, DelegationStatus::Running);
+        .find(|delegation| delegation.id == delegation_id)
+        .expect("target delegation should remain after stale wait cleanup");
+    assert_eq!(delegation.status, DelegationStatus::Failed);
     drop(inner);
+    restarted.shutdown_persist_blocking();
 
-    let mut saw_parent_removed_consumption = false;
-    while let Ok(payload) = delta_events.try_recv() {
-        let event: DeltaEvent =
-            serde_json::from_str(&payload).expect("delta event should deserialize");
-        if let DeltaEvent::DelegationWaitConsumed {
-            wait_id: consumed_wait_id,
-            parent_session_id,
-            reason,
-            ..
-        } = event
-        {
-            if consumed_wait_id == wait_id {
-                assert_eq!(parent_session_id, removed_parent_session_id);
-                assert_eq!(reason, DelegationWaitConsumedReason::ParentSessionRemoved);
-                saw_parent_removed_consumption = true;
-            }
-        }
-    }
-    assert!(
-        saw_parent_removed_consumption,
-        "unsatisfied removed-parent wait should publish a reasoned consumed delta"
-    );
+    let state_root = persistence_path
+        .parent()
+        .expect("persistence path should have a parent")
+        .to_path_buf();
+    let _ = fs::remove_dir_all(project_root);
+    let _ = fs::remove_dir_all(state_root);
 }
 
 #[test]
@@ -807,19 +840,45 @@ fn legacy_delegation_wait_consumed_delta_defaults_reason_to_completed() {
 
 #[test]
 fn delegation_wait_consumed_delta_serializes_reason() {
-    let event = DeltaEvent::DelegationWaitConsumed {
-        revision: 42,
-        wait_id: "delegation-wait-serialized".to_owned(),
-        parent_session_id: "session-parent".to_owned(),
-        reason: DelegationWaitConsumedReason::ParentSessionRemoved,
-    };
+    for (reason, expected_reason) in [
+        (DelegationWaitConsumedReason::Completed, "completed"),
+        (
+            DelegationWaitConsumedReason::ParentSessionRemoved,
+            "parentSessionRemoved",
+        ),
+    ] {
+        let event = DeltaEvent::DelegationWaitConsumed {
+            revision: 42,
+            wait_id: "delegation-wait-serialized".to_owned(),
+            parent_session_id: "session-parent".to_owned(),
+            reason,
+        };
 
-    let value = serde_json::to_value(&event).expect("wait-consumed delta should serialize");
+        let value = serde_json::to_value(&event).expect("wait-consumed delta should serialize");
 
-    assert_eq!(value["type"], "delegationWaitConsumed");
-    assert_eq!(value["waitId"], "delegation-wait-serialized");
-    assert_eq!(value["parentSessionId"], "session-parent");
-    assert_eq!(value["reason"], "parentSessionRemoved");
+        assert_eq!(value["type"], "delegationWaitConsumed");
+        assert_eq!(value["revision"], 42);
+        assert_eq!(value["waitId"], "delegation-wait-serialized");
+        assert_eq!(value["parentSessionId"], "session-parent");
+        assert_eq!(value["reason"], expected_reason);
+
+        let decoded: DeltaEvent =
+            serde_json::from_value(value).expect("serialized delta should round-trip");
+        match decoded {
+            DeltaEvent::DelegationWaitConsumed {
+                revision,
+                wait_id,
+                parent_session_id,
+                reason: decoded_reason,
+            } => {
+                assert_eq!(revision, 42);
+                assert_eq!(wait_id, "delegation-wait-serialized");
+                assert_eq!(parent_session_id, "session-parent");
+                assert_eq!(decoded_reason, reason);
+            }
+            _ => panic!("expected wait-consumed delta"),
+        }
+    }
 }
 
 #[test]
