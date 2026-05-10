@@ -3499,8 +3499,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover adversarial `PromptTemplate` source-vs-name mismatch for delegation defaults:
-  add `prompt_template_delegate_resolution_does_not_use_metadata_when_source_path_mismatches_name` — a PromptTemplate whose source ends with `/.claude/commands/review-local.md` but whose name is `audit` must not inherit metadata defaults.
 - [ ] P2: Cover frontmatter freshness contract:
   once resolver metadata is cached from the command-listing pass, add a Rust test
   that lists/resolves a command, edits the on-disk frontmatter, resolves again,

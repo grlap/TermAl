@@ -1763,6 +1763,67 @@ fn legacy_cached_prompt_template_delegate_resolution_uses_metadata_name_not_sour
 }
 
 #[test]
+fn prompt_template_delegate_resolution_does_not_use_metadata_when_source_path_mismatches_name() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    cache_agent_commands_for_test(
+        &state,
+        &created.session_id,
+        vec![AgentCommand {
+            kind: AgentCommandKind::PromptTemplate,
+            name: "audit".to_owned(),
+            description: "Audit the current state.".to_owned(),
+            content: "Audit $ARGUMENTS".to_owned(),
+            source: ".claude/commands/review-local.md".to_owned(),
+            argument_hint: None,
+            resolver_frontmatter: Some(
+                "metadata:
+  termal:
+    delegation:
+      enabled: true
+      mode: reviewer
+      writePolicy:
+        kind: isolatedWorktree
+"
+                .to_owned(),
+            ),
+            resolver_frontmatter_trusted: true,
+        }],
+    );
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "audit",
+            ResolveAgentCommandRequest {
+                arguments: Some("staged".to_owned()),
+                note: None,
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(response.visible_prompt, "/audit staged");
+    assert_eq!(response.expanded_prompt.as_deref(), Some("Audit staged"));
+    assert_eq!(response.delegation, None);
+}
+
+#[test]
 fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
     let root = std::env::temp_dir().join(format!(
         "termal-agent-command-missing-metadata-{}",
