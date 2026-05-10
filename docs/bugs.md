@@ -3538,8 +3538,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   replace end-of-test `fs::remove_dir_all(root).unwrap()` cleanup in `src/tests/agent_commands.rs` with `let _ = fs::remove_dir_all(...)` so assertion failures do not leak temp dirs or mask the original failure.
 - [ ] P2: Cover `SessionPaneView` isolated-worktree delegation option pass-through:
   trigger a delegated `/review-local` command through the component boundary and assert `spawnDelegationCommand` receives `writePolicy: { kind: "isolatedWorktree", ownedPaths: [] }`.
-- [ ] P2: Cover omitted `isolatedWorktree.worktreePath` JSON:
-  add a serde or route-level test using `{ "kind": "isolatedWorktree", "ownedPaths": [] }` and assert the backend accepts the omitted path and generates a TermAl-owned worktree path.
 - [ ] P2: Cover keyboard delegation for selected slash commands:
   add RTL coverage proving keyboard users can delegate an active agent slash command while the palette is open, either through normal tab focus or an explicit delegation shortcut.
 - [ ] P2: Cover visible composer errors for resolver failures:

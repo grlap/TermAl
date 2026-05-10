@@ -6168,6 +6168,19 @@ fn delegation_write_policy_accepts_legacy_snake_case_discriminators() {
             worktree_path: Some("C:/tmp/delegation-worktree".to_owned()),
         }
     );
+
+    let isolated_without_path: DelegationWritePolicy = serde_json::from_value(json!({
+        "kind": "isolatedWorktree",
+        "ownedPaths": []
+    }))
+    .expect("isolatedWorktree should accept omitted worktreePath");
+    assert_eq!(
+        isolated_without_path,
+        DelegationWritePolicy::IsolatedWorktree {
+            owned_paths: Vec::new(),
+            worktree_path: None,
+        }
+    );
 }
 
 #[test]
