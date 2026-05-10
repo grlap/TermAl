@@ -3534,8 +3534,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   avoid asserting the exact `"TermAl restarted before this turn finished"` string from `src/messages.rs`; assert stable wait/delegation identifiers or finish the child with a deterministic result packet before simulated shutdown.
 - [ ] P2: Cover edge cases in delegation finding parsing:
   add focused tests for `- None` filtering, no-separator findings mapping to the current fallback behavior, and multi-word severities such as `Code Style src/foo.rs:42 - msg`.
-- [ ] P2: Switch resolver Rust temp-dir cleanup away from `unwrap()`:
-  replace end-of-test `fs::remove_dir_all(root).unwrap()` cleanup in `src/tests/agent_commands.rs` with `let _ = fs::remove_dir_all(...)` so assertion failures do not leak temp dirs or mask the original failure.
 - [ ] P2: Cover `SessionPaneView` isolated-worktree delegation option pass-through:
   trigger a delegated `/review-local` command through the component boundary and assert `spawnDelegationCommand` receives `writePolicy: { kind: "isolatedWorktree", ownedPaths: [] }`.
 - [ ] P2: Cover keyboard delegation for selected slash commands:

@@ -106,7 +106,7 @@ Inspect diffs.
         ]
     );
 
-    fs::remove_dir_all(root).unwrap();
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -179,7 +179,7 @@ Inspect diffs.
 "
     );
 
-    fs::remove_dir_all(root).unwrap();
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -209,7 +209,7 @@ Run a targeted tool check.
     assert_eq!(commands[0].description, "Run a targeted tool check.");
     assert_eq!(commands[0].argument_hint, None);
 
-    fs::remove_dir_all(root).unwrap();
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -240,7 +240,7 @@ Run a targeted tool check.
     assert_eq!(commands[0].content, "Run a targeted tool check.\n");
     assert_eq!(commands[0].argument_hint.as_deref(), Some("PATH"));
 
-    fs::remove_dir_all(root).unwrap();
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -275,7 +275,7 @@ Run with the command model preference.
         "Run with the command model preference.\n"
     );
 
-    fs::remove_dir_all(root).unwrap();
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -320,7 +320,7 @@ Run with declared tools.
     assert_eq!(commands[1].description, "Run with declared tools.");
     assert_eq!(commands[1].content, "Run with declared tools.\n");
 
-    fs::remove_dir_all(root).unwrap();
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -355,7 +355,7 @@ Run the check.
             .contains("- Keep this prompt body intact.")
     );
 
-    fs::remove_dir_all(root).unwrap();
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -386,7 +386,7 @@ Body description wins.
     assert_eq!(commands[0].description, "Body description wins.");
     assert_eq!(commands[0].content, "Body description wins.\n");
 
-    fs::remove_dir_all(root).unwrap();
+    let _ = fs::remove_dir_all(root);
 }
 
 // Pins `read_claude_agent_commands` to returning an empty vector (not an
@@ -402,7 +402,7 @@ fn returns_empty_agent_commands_when_commands_directory_is_missing() {
     let commands = read_claude_agent_commands(&root).unwrap();
     assert!(commands.is_empty());
 
-    fs::remove_dir_all(root).unwrap();
+    let _ = fs::remove_dir_all(root);
 }
 
 // Pins `AppState::list_agent_commands` to still returning
@@ -447,7 +447,7 @@ Use the active agent's tools.
     assert_eq!(response.commands[0].description, "Review local changes.");
     assert_eq!(response.commands[0].kind, AgentCommandKind::PromptTemplate);
 
-    fs::remove_dir_all(root).unwrap();
+    let _ = fs::remove_dir_all(root);
 }
 
 // Pins `claude_agent_commands` to parsing the `response.response.commands`
@@ -916,7 +916,7 @@ Verify the fix.
     );
     assert_eq!(response.delegation, None);
 
-    fs::remove_dir_all(root).unwrap();
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -1058,7 +1058,7 @@ Review staged and unstaged changes.
     );
     assert_eq!(response.delegation, None);
 
-    fs::remove_dir_all(root).unwrap();
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
