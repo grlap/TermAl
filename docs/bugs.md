@@ -276,17 +276,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Add a sibling test where the initial Approval has a prior assistant message.
 
-## Unknown-status-first attack vector not covered
-
-**Severity:** Low - `src/tests/telegram.rs:1168-1274`. `telegram_unknown_status_preserves_old_turn_boundary_until_known_reply` only tests Active → Unknown → Idle. The hostile case is `Unknown → Active → Idle` (Unknown FIRST, then a known status).
-
-**Current behavior:**
-- Active → Unknown → Idle covered.
-- Unknown-first prepare path uncovered.
-
-**Proposal:**
-- Add a sibling test where `prepare_*` is called against an Unknown-status session.
-
 ## Send-shrink test brittle to probe sequence refactors
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:8362-8365`. The assertion `expect(heightWrites).toContainEqual({value: "40px", transition: "none"})` requires the height of `40px` to be one of the writes — but the implementation does multiple writes during shrink (`1px` probe, then `previousMeasuredHeight`, then `40px`).
