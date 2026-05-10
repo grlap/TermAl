@@ -624,6 +624,39 @@ describe("MarkdownContent Mermaid diagrams", () => {
     expect(container.querySelector(".markdown-copy-shell-fill-mermaid")).not.toBeNull();
   });
 
+  it("uses fit-mode Mermaid CSS for wide diagrams in constrained preview panes", async () => {
+    mermaidRenderMock.mockResolvedValueOnce({
+      diagramType: "er",
+      svg: '<svg data-testid="mermaid-svg" viewBox="0 0 2340.4453125 926.6875"><text>wide er</text></svg>',
+    });
+
+    render(
+      <div data-testid="narrow-mermaid-parent" style={{ width: "400px" }}>
+        <MarkdownContent
+          fillMermaidAvailableSpace
+          markdown={[
+            "```mermaid",
+            "erDiagram",
+            "  USERS {",
+            "    uuid id",
+            "  }",
+            "```",
+          ].join("\n")}
+        />
+      </div>,
+    );
+
+    const frame = await screen.findByTestId("mermaid-frame");
+    expect(screen.getByTestId("narrow-mermaid-parent")).toHaveStyle({ width: "400px" });
+    expect(frame.style.width).toBe("2343px");
+    expect(frame.style.maxWidth).toBe("100%");
+    expect(frame.style.height).toBe("auto");
+    expect(frame.style.aspectRatio).toBe("2343 / 927");
+    expect((frame as HTMLIFrameElement).srcdoc).toContain(
+      "svg{display:block;max-width:100%;height:auto",
+    );
+  });
+
   it("scales wide Mermaid iframe height when max-width constrains the frame", async () => {
     mermaidRenderMock.mockResolvedValueOnce({
       diagramType: "er",

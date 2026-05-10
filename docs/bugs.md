@@ -279,21 +279,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Consider splitting once the test grows further.
 - Current 6-in-1 is acceptable but the pattern should not expand.
 
-## `MarkdownContent.test.tsx` fit-mode test only validates srcdoc against a NARROW diagram
-
-**Severity:** Low - `ui/src/MarkdownContent.test.tsx:603-625`. The new test "lets preview callers shrink wide Mermaid frames..." validates fit-mode srcdoc CSS only against a narrow diagram (300×80 viewBox). The "shrinks wide Mermaid frames" claim in the test name is not directly proved — a wide-viewBox test (e.g., 2340×926) plus a constrained-parent wrapper would actually exercise the shrink-without-upscale contract end-to-end.
-
-The companion test for default mode at line 627 uses a 2340-wide diagram; fit mode does not have an equivalent wide test.
-
-**Current behavior:**
-- Test uses 300×80 viewBox.
-- Wide-diagram shrink contract not exercised.
-- Test name promises behavior beyond what it asserts.
-
-**Proposal:**
-- Add a second fit-mode test using a wide viewBox like `viewBox="0 0 2340 926"` inside a constrained parent (e.g., `style={{ width: "400px" }}`).
-- Assert the iframe shrinks while srcdoc contains the fit-mode SVG CSS.
-
 ## `buildMermaidDiagramFrameSrcDoc` has no unit test for the new fit-mode option
 
 **Severity:** Low - `ui/src/mermaid-render.test.ts`. The new `buildMermaidDiagramFrameSrcDoc(svg, options)` API has no direct unit test (only integration coverage via `MarkdownContent.test.tsx`). The existing `mermaid-render.test.ts` covers `isMermaidErrorVisualizationSvg` and `renderTermalMermaidDiagram` but not the srcdoc builder.
