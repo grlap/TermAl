@@ -9720,6 +9720,116 @@ describe("AgentSessionPanelFooter", () => {
     }
   });
 
+  it("restores composer transition when typing before send-shrink restore fires", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "scrollHeight",
+    );
+    let nextFrameId = 0;
+    const queuedFrames = new Map<number, FrameRequestCallback>();
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      const id = ++nextFrameId;
+      queuedFrames.set(id, callback);
+      return id;
+    });
+    const cancelAnimationFrameMock = vi.fn((id: number) => {
+      queuedFrames.delete(id);
+    });
+    const drainAnimationFrames = () => {
+      while (queuedFrames.size > 0) {
+        const callbacks = [...queuedFrames.values()];
+        queuedFrames.clear();
+        act(() => {
+          callbacks.forEach((callback) => callback(0));
+        });
+      }
+    };
+    const flushNextAnimationFrameBatch = () => {
+      const callbacks = [...queuedFrames.values()];
+      queuedFrames.clear();
+      act(() => {
+        callbacks.forEach((callback) => callback(0));
+      });
+    };
+    const onSend = vi.fn(() => true);
+    let unmount: ReturnType<typeof render>["unmount"] | null = null;
+
+    window.requestAnimationFrame =
+      requestAnimationFrameMock as unknown as typeof requestAnimationFrame;
+    window.cancelAnimationFrame =
+      cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame;
+    Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        const textarea = this as HTMLTextAreaElement;
+        return 40 + (textarea.value.split("\n").length - 1) * 28;
+      },
+    });
+
+    try {
+      ({ unmount } = render(
+        renderFooter({
+          onSend,
+          session: makeSession("session-a"),
+        }),
+      ));
+      drainAnimationFrames();
+
+      const textarea = screen.getByLabelText("Message session-a");
+      if (!(textarea instanceof HTMLTextAreaElement)) {
+        throw new Error("Composer textarea not found");
+      }
+
+      act(() => {
+        fireEvent.change(textarea, {
+          target: { value: "line one\nline two\nline three" },
+        });
+      });
+      drainAnimationFrames();
+      textarea.style.transition = "height 150ms ease";
+
+      act(() => {
+        fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      });
+      flushNextAnimationFrameBatch();
+
+      expect(textarea).toHaveValue("");
+      expect(textarea.style.transition).toBe("none");
+      expect(queuedFrames.size).toBeGreaterThan(0);
+
+      act(() => {
+        fireEvent.change(textarea, {
+          target: { value: "new draft" },
+        });
+      });
+      flushNextAnimationFrameBatch();
+
+      expect(textarea).toHaveValue("new draft");
+      expect(textarea.style.transition).toBe("height 150ms ease");
+    } finally {
+      act(() => {
+        unmount?.();
+      });
+      if (originalScrollHeightDescriptor) {
+        Object.defineProperty(
+          HTMLTextAreaElement.prototype,
+          "scrollHeight",
+          originalScrollHeightDescriptor,
+        );
+      } else {
+        delete (
+          HTMLTextAreaElement.prototype as unknown as {
+            scrollHeight?: number;
+          }
+        ).scrollHeight;
+      }
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
   it("restores composer transition when switching sessions before send-shrink restore fires", () => {
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;

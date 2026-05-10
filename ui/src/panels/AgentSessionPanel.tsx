@@ -2116,6 +2116,13 @@ const SessionComposer = memo(function SessionComposer({
       textarea.style.transition === "none"
         ? pendingPreviousInlineTransition
         : textarea.style.transition;
+    if (
+      !shouldAllowShrink &&
+      pendingPreviousInlineTransition !== null &&
+      textarea.style.transition === "none"
+    ) {
+      restoreComposerInputTransition(textarea, pendingPreviousInlineTransition);
+    }
     const previousMeasuredHeight =
       composerLastAppliedHeightRef.current ??
       (parseFloat(textarea.style.height) ||

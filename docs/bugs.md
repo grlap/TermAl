@@ -310,21 +310,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Capture the original textarea node reference before rerender.
 - Assert on it after rerender (it's been removed from DOM, but transition state is observable in the captured ref).
 
-## Composer transition restore can be lost when a non-shrink resize races the restore frame
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1765`. `resizeComposerInput` cancels a pending transition-restore frame before it knows whether the current resize will consume or replace that restore.
-
-After a send-shrink path schedules the deferred restore, a subsequent non-shrink resize can run before that frame, such as when the user types immediately after sending. In that path `shouldAllowShrink` is false, so the previously saved transition is discarded and the textarea can remain at `transition: none` for later composer resizing.
-
-**Current behavior:**
-- Send-shrink schedules a transition restore.
-- A later resize cancels the pending restore unconditionally.
-- Non-shrink resize paths do not restore or reschedule the saved transition.
-
-**Proposal:**
-- Restore the previous transition before returning from non-shrink resize paths when a pending restore was cancelled.
-- Or avoid cancelling the pending restore until the code knows it will replace or consume it.
-
 ## Pinned live-tail `column-reverse` reverses queued prompt order
 
 **Severity:** Low - `ui/src/styles.css:4566-4573`. The `.is-pinned` modifier overrides `display: grid` with `display: flex; flex-direction: column-reverse`. This keeps the live-turn card visually closest to the composer, but it also reverses all other children. With live turn + queued prompt A + queued prompt B, the queued prompts render as B before A visually.
