@@ -77,6 +77,17 @@ export type MermaidConfigInput = NonNullable<
   Parameters<MermaidModule["initialize"]>[0]
 >;
 
+/**
+ * Build the sandboxed iframe document for a rendered Mermaid SVG.
+ *
+ * Default mode keeps `overflow-x: auto` and an inline-block body so wide
+ * diagrams preserve their intrinsic width and can scroll inside the frame.
+ * Fit mode is used by source-preview surfaces: the iframe hides scrollbars,
+ * uses a block body, and lets the SVG shrink with `max-width: 100%` without
+ * upscaling smaller diagrams. `getMermaidDiagramFrameStyle` receives the
+ * same fit option so default frames keep scrollbar slack while fit frames
+ * keep only a small clipping pad.
+ */
 export function buildMermaidDiagramFrameSrcDoc(
   svg: string,
   options: { fitToFrame?: boolean } = {},

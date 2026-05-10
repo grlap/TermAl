@@ -157,6 +157,29 @@ mode was dropped — feedback was that mode toggles were friction
   the user types to grow the fence body (zone's `afterLineNumber`
   shifts from 3 to 4 as a line is added).
 
+### Fit-to-frame Mermaid previews shipped
+
+Source-preview surfaces enable `fillMermaidAvailableSpace` so rendered
+Markdown can use the full preview column and Mermaid diagrams can fit the
+available width. Default conversation/history Markdown keeps the older
+scrollable Mermaid frame: wide diagrams preserve their intrinsic iframe width
+and can scroll horizontally inside the iframe. Source previews instead pass
+`fitToFrame: true` into the Mermaid iframe srcdoc and frame-style helper.
+
+Fit mode changes two things deliberately:
+
+- The iframe srcdoc uses hidden overflow, a block body, and
+  `svg { max-width: 100%; height: auto; }`, so wide diagrams shrink to the
+  pane instead of requiring horizontal iframe scrolling.
+- The outer iframe aspect ratio drops the default 24px scrollbar slack and
+  keeps only a 2px vertical pad matching the existing width pad. That avoids
+  the old blank band under fitted diagrams while still guarding against
+  hidden-overflow clipping from rounding and SVG measurement drift.
+
+This mode is preview-wide rather than Mermaid-only: enabling it also applies
+`markdown-copy-shell-fill-mermaid`, widening the Markdown copy shell around
+the diagram so the iframe can actually consume the preview pane width.
+
 ## Problem
 
 TermAl already uses Monaco as the source editor. That is the right editing

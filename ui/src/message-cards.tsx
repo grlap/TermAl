@@ -3637,6 +3637,14 @@ export function MarkdownContent({
 }: {
   appearance?: MonacoAppearance;
   documentPath?: string | null;
+  /**
+   * Source-preview layout mode. When true, the Markdown shell is allowed
+   * to use the full preview width and Mermaid iframes switch to fit mode:
+   * wide diagrams shrink to the pane without a horizontal scrollbar while
+   * narrow diagrams keep their natural SVG size. This is intentionally a
+   * preview-wide layout affordance, not just a Mermaid flag, because the
+   * surrounding Markdown copy area must widen with the iframe.
+   */
   fillMermaidAvailableSpace?: boolean;
   /**
    * When `true`, an in-flight trailing block (unclosed fenced code
