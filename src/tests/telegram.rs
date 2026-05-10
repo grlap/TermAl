@@ -673,6 +673,38 @@ fn telegram_session_command_selects_project_session_target() {
 }
 
 #[test]
+fn telegram_session_command_no_args_persists_stale_project_cleanup() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    );
+    let config = telegram_test_config();
+    let mut state = TelegramBotState {
+        selected_project_id: Some("stale-project".to_owned()),
+        selected_session_id: Some("session-1".to_owned()),
+        last_digest_hash: Some("old-digest".to_owned()),
+        last_digest_message_id: Some(10),
+        ..TelegramBotState::default()
+    };
+
+    let changed = select_telegram_project_session(&telegram, &termal, &config, &mut state, 42, "")
+        .expect("session status should succeed");
+
+    assert!(changed);
+    assert_eq!(state.selected_project_id, None);
+    assert_eq!(state.selected_session_id, None);
+    assert_eq!(state.last_digest_hash, None);
+    assert_eq!(state.last_digest_message_id, None);
+    assert!(telegram.sent_texts.borrow()[0].contains("No Telegram session target is selected"));
+}
+
+#[test]
 fn telegram_session_command_rejects_sessions_outside_project() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramPromptClient::new(
@@ -3135,6 +3167,39 @@ fn telegram_armed_session_keeps_approval_pause_until_reply_arrives() {
     assert!(forwarded);
     assert_eq!(telegram.sent_texts.borrow()[0], "Approved reply");
     assert_eq!(state.forward_next_assistant_message_session_id, None);
+}
+
+#[test]
+fn telegram_prompt_without_active_session_persists_stale_project_cleanup() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![Ok(telegram_project_digest(None))],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    );
+    let config = telegram_test_config();
+    let mut state = TelegramBotState {
+        selected_project_id: Some("stale-project".to_owned()),
+        selected_session_id: Some("session-1".to_owned()),
+        last_digest_hash: Some("old-digest".to_owned()),
+        last_digest_message_id: Some(10),
+        ..TelegramBotState::default()
+    };
+
+    let changed =
+        forward_telegram_text_to_project(&telegram, &termal, &config, &mut state, 42, "from chat")
+            .expect("prompt forwarding should report missing active session");
+
+    assert!(changed);
+    assert_eq!(state.selected_project_id, None);
+    assert_eq!(state.selected_session_id, None);
+    assert_eq!(state.last_digest_hash, None);
+    assert_eq!(state.last_digest_message_id, None);
+    assert!(telegram.sent_texts.borrow()[0].contains("No active project session"));
 }
 
 #[test]

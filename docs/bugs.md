@@ -151,21 +151,6 @@ If the backend rejects a native slash command with an additional note, or the ba
 - Surface sanitized resolver failures the same way delegation spawn failures are surfaced.
 - Add tests for native-slash note rejection and backend-unavailable resolver failure.
 
-## Telegram selection cleanup can be lost on informational early returns
-
-**Severity:** Low - `src/telegram.rs:1757` and `src/telegram.rs:2716`. Some command paths call `resolve_telegram_active_project_id`, which can normalize stale selected project/session state and mark the bot state dirty, then return `Ok(false)` after sending informational text.
-
-Those cleanup mutations are not persisted when the function returns `false`, so stale Telegram selection state can survive a command that already detected and cleared it in memory.
-
-**Current behavior:**
-- Telegram free-text forwarding with no active session can return `Ok(false)` after active-project cleanup.
-- `/session` with no arguments can return `Ok(false)` after active-project cleanup.
-- Dirty cleanup state is lost unless another path persists later.
-
-**Proposal:**
-- Return the accumulated `dirty` value from informational early-return paths.
-- Audit other early returns immediately after Telegram state-normalization helpers.
-
 ## Delegation action generation guard can drop the first action after a session switch
 
 **Severity:** Low - `ui/src/SessionPaneView.render-callbacks.tsx:194`. `activeSessionGenerationRef` is advanced in a passive `useEffect`, so a delegation action started immediately after mount or session switch can capture the pre-effect generation.
@@ -3535,8 +3520,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add focused tests for `- None` filtering, no-separator findings mapping to the current fallback behavior, and multi-word severities such as `Code Style src/foo.rs:42 - msg`.
 - [ ] P2: Switch resolver Rust temp-dir cleanup away from `unwrap()`:
   replace end-of-test `fs::remove_dir_all(root).unwrap()` cleanup in `src/tests/agent_commands.rs` with `let _ = fs::remove_dir_all(...)` so assertion failures do not leak temp dirs or mask the original failure.
-- [ ] P2: Cover Telegram dirty-state cleanup on informational early returns:
-  seed stale selected project/session state, drive the no-active-session free-text path and `/session` with no arguments, and assert cleared selection state is persisted instead of returning `Ok(false)`.
 - [ ] P2: Cover `SessionPaneView` isolated-worktree delegation option pass-through:
   trigger a delegated `/review-local` command through the component boundary and assert `spawnDelegationCommand` receives `writePolicy: { kind: "isolatedWorktree", ownedPaths: [] }`.
 - [ ] P2: Cover omitted `isolatedWorktree.worktreePath` JSON:

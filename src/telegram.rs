@@ -1800,7 +1800,7 @@ fn forward_telegram_text_to_project(
             "No active project session is available yet. Start one in TermAl first.",
             None,
         )?;
-        return Ok(false);
+        return Ok(dirty);
     };
 
     let assistant_forwarding_plan =
@@ -2808,7 +2808,7 @@ fn select_telegram_project_session(
             None => "No Telegram session target is selected. Send /session <session-id> to switch, or /sessions to list ids.".to_owned(),
         };
         telegram.send_message(chat_id, &text, None)?;
-        return Ok(false);
+        return Ok(dirty);
     };
     if parts.next().is_some() {
         telegram.send_message(
