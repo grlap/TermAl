@@ -265,17 +265,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Add an integration assertion that `localize_remote_session` clears the inbound id BEFORE the replay key normalization helper sees it.
 
-## Approval-with-prior-text full lifecycle not covered
-
-**Severity:** Low - `src/tests/telegram.rs:1064-1167`. `telegram_prompt_behind_initial_approval_session_forwards_later_reply` constructs the lifecycle as Approval(empty)→Active(message-1)→Idle(message-1+message-2). The Approval phase has NO assistant message. In production, an Approval state typically has the in-progress assistant text.
-
-**Current behavior:**
-- Empty Approval → Active → Idle covered.
-- Approval-with-prior-text path uncovered.
-
-**Proposal:**
-- Add a sibling test where the initial Approval has a prior assistant message.
-
 ## Send-shrink test brittle to probe sequence refactors
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:8362-8365`. The assertion `expect(heightWrites).toContainEqual({value: "40px", transition: "none"})` requires the height of `40px` to be one of the writes — but the implementation does multiple writes during shrink (`1px` probe, then `previousMeasuredHeight`, then `40px`).

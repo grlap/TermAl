@@ -1680,6 +1680,10 @@ fn telegram_prompt_behind_initial_approval_session_forwards_later_reply() {
 
     assert!(changed);
     assert!(telegram.sent_texts.borrow().is_empty());
+    assert_eq!(
+        state.forward_next_assistant_message_session_id.as_deref(),
+        Some("session-1")
+    );
 
     let settled_with_reply = FakeTelegramSessionReader {
         response: TelegramSessionFetchResponse {
@@ -1714,6 +1718,98 @@ fn telegram_prompt_behind_initial_approval_session_forwards_later_reply() {
     assert_eq!(
         telegram.sent_texts.borrow()[0],
         "Telegram reply after queued approval"
+    );
+    assert_eq!(state.forward_next_assistant_message_session_id, None);
+}
+
+#[test]
+fn telegram_prompt_behind_initial_approval_with_prior_text_forwards_later_reply() {
+    let termal = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Approval,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "message-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Old approved turn waiting".to_owned(),
+                }],
+            },
+        },
+    };
+    let mut state = TelegramBotState::default();
+
+    let plan = prepare_assistant_forwarding_for_telegram_prompt(&termal, "session-1")
+        .expect("prepare should succeed");
+    assert!(apply_assistant_forwarding_plan(&mut state, plan));
+    let cursor = state
+        .assistant_forwarding_cursors
+        .get("session-1")
+        .expect("approval prepare should persist cursor");
+    assert_eq!(cursor.message_id.as_deref(), Some("message-1"));
+    assert!(cursor.baseline_while_active);
+
+    let telegram = FakeTelegramSender::new(None);
+    let resumed_old_turn = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Active,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "message-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Old approved turn resumed".to_owned(),
+                }],
+            },
+        },
+    };
+
+    let _changed = forward_new_assistant_message_if_any(
+        &telegram,
+        &resumed_old_turn,
+        &mut state,
+        42,
+        "session-1",
+    )
+    .expect("resumed old turn should baseline");
+
+    assert!(telegram.sent_texts.borrow().is_empty());
+    assert_eq!(
+        state.forward_next_assistant_message_session_id.as_deref(),
+        Some("session-1")
+    );
+
+    let settled_with_reply = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![
+                    TelegramSessionFetchMessage::Text {
+                        id: "message-1".to_owned(),
+                        author: "assistant".to_owned(),
+                        text: "Old approved turn complete".to_owned(),
+                    },
+                    TelegramSessionFetchMessage::Text {
+                        id: "message-2".to_owned(),
+                        author: "assistant".to_owned(),
+                        text: "Telegram reply after prior approval".to_owned(),
+                    },
+                ],
+            },
+        },
+    };
+
+    let changed = forward_new_assistant_message_if_any(
+        &telegram,
+        &settled_with_reply,
+        &mut state,
+        42,
+        "session-1",
+    )
+    .expect("telegram reply should forward");
+
+    assert!(changed);
+    assert_eq!(
+        telegram.sent_texts.borrow()[0],
+        "Telegram reply after prior approval"
     );
     assert_eq!(state.forward_next_assistant_message_session_id, None);
 }
