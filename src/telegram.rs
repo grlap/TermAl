@@ -139,7 +139,10 @@ fn drain_telegram_updates_then_sync_digest(
                 dirty |= outcome.dirty;
                 final_sync_satisfied = outcome.final_sync_satisfied;
             }
-            Err(err) => log_telegram_error("failed to handle update", &err),
+            Err(err) => {
+                final_sync_satisfied = false;
+                log_telegram_error("failed to handle update", &err);
+            }
         }
     }
 

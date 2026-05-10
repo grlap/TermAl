@@ -907,6 +907,86 @@ fn telegram_relay_iteration_resyncs_after_later_unsynced_update() {
 }
 
 #[test]
+fn telegram_relay_iteration_resyncs_after_later_update_error() {
+    let telegram = FakeTelegramSender::new(Some(2));
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(telegram_project_digest(Some("session-1"))),
+            Ok(telegram_project_digest(Some("session-1"))),
+            Ok(telegram_project_digest(Some("session-2"))),
+        ],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![TelegramStateSession {
+            id: "session-2".to_owned(),
+            name: "Selected".to_owned(),
+            project_id: Some("project-1".to_owned()),
+            status: TelegramSessionStatus::Idle,
+            message_count: 0,
+        }],
+    });
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+    let updates = vec![
+        TelegramUpdate {
+            update_id: 50,
+            callback_query: None,
+            message: Some(TelegramChatMessage {
+                message_id: 12,
+                chat: TelegramChat {
+                    id: 42,
+                    _kind: "private".to_owned(),
+                },
+                text: Some("from chat".to_owned()),
+            }),
+        },
+        TelegramUpdate {
+            update_id: 51,
+            callback_query: None,
+            message: Some(TelegramChatMessage {
+                message_id: 13,
+                chat: TelegramChat {
+                    id: 42,
+                    _kind: "private".to_owned(),
+                },
+                text: Some("/session session-2".to_owned()),
+            }),
+        },
+    ];
+
+    let dirty = drain_telegram_updates_then_sync_digest(
+        &telegram, &termal, &config, &mut state, updates, &None,
+    );
+
+    assert!(dirty);
+    assert_eq!(state.next_update_id, Some(52));
+    assert_eq!(state.selected_session_id.as_deref(), Some("session-2"));
+    assert_eq!(
+        termal.digest_project_ids.borrow().as_slice(),
+        [
+            "project-1".to_owned(),
+            "project-1".to_owned(),
+            "project-1".to_owned()
+        ]
+    );
+    assert_eq!(
+        telegram.sent_texts.borrow().len(),
+        1,
+        "the /session acknowledgement should fail but final sync should still run"
+    );
+}
+
+#[test]
 fn telegram_sessions_command_chunks_oversized_output() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramPromptClient::new(

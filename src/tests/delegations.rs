@@ -768,6 +768,21 @@ fn boot_reconciliation_drops_unsatisfied_wait_with_missing_parent_and_running_ta
         delegation_id = other_delegation.delegation.id.clone();
         {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let delegation_index = inner
+                .find_delegation_index(&delegation_id)
+                .expect("delegation should exist");
+            let child_session_id = inner.delegations[delegation_index].child_session_id.clone();
+            inner.delegations[delegation_index].parent_session_id =
+                "session-missing-parent".to_owned();
+            let child_index = inner
+                .find_session_index(&child_session_id)
+                .expect("child session should exist");
+            let child = inner
+                .session_mut_by_index(child_index)
+                .expect("child session index should be valid");
+            child.remote_id = Some("remote-recovery-skip".to_owned());
+            child.remote_session_id = Some("remote-running-child".to_owned());
+            child.session.status = SessionStatus::Active;
             inner.delegation_waits.push(DelegationWaitRecord {
                 id: wait_id.clone(),
                 parent_session_id: "session-missing-parent".to_owned(),
@@ -801,7 +816,7 @@ fn boot_reconciliation_drops_unsatisfied_wait_with_missing_parent_and_running_ta
         .iter()
         .find(|delegation| delegation.id == delegation_id)
         .expect("target delegation should remain after stale wait cleanup");
-    assert_eq!(delegation.status, DelegationStatus::Failed);
+    assert_eq!(delegation.status, DelegationStatus::Running);
     drop(inner);
     restarted.shutdown_persist_blocking();
 
