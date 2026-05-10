@@ -1989,6 +1989,15 @@ const SessionComposer = memo(function SessionComposer({
     composerResizeAnimationFrameRef.current = null;
   }
 
+  function resetComposerSizingState() {
+    composerSizingStateRef.current = null;
+    composerResizeNeedsMetricRefreshRef.current = false;
+    composerResizeShouldAnimateHeightRef.current = true;
+    composerLastMeasuredDraftLengthRef.current = 0;
+    composerLastAppliedHeightRef.current = null;
+    composerLastAppliedOverflowYRef.current = null;
+  }
+
   function beginAgentCommandResolution() {
     if (isAgentCommandResolvingRef.current) {
       return false;
@@ -2199,12 +2208,7 @@ const SessionComposer = memo(function SessionComposer({
   }
 
   useLayoutEffect(() => {
-    composerSizingStateRef.current = null;
-    composerResizeNeedsMetricRefreshRef.current = false;
-    composerResizeShouldAnimateHeightRef.current = true;
-    composerLastMeasuredDraftLengthRef.current = 0;
-    composerLastAppliedHeightRef.current = null;
-    composerLastAppliedOverflowYRef.current = null;
+    resetComposerSizingState();
     resetAndCancelScheduledComposerResize();
     cancelAndRestoreScheduledComposerTransition();
     resizeComposerInput(true);
@@ -2365,12 +2369,7 @@ const SessionComposer = memo(function SessionComposer({
 
   useEffect(() => {
     return () => {
-      composerSizingStateRef.current = null;
-      composerResizeNeedsMetricRefreshRef.current = false;
-      composerResizeShouldAnimateHeightRef.current = true;
-      composerLastMeasuredDraftLengthRef.current = 0;
-      composerLastAppliedHeightRef.current = null;
-      composerLastAppliedOverflowYRef.current = null;
+      resetComposerSizingState();
       resetAndCancelScheduledComposerResize();
       cancelAndRestoreScheduledComposerTransition();
     };

@@ -310,20 +310,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Capture the original textarea node reference before rerender.
 - Assert on it after rerender (it's been removed from DOM, but transition state is observable in the captured ref).
 
-## Two composer cleanup paths look symmetric but only one restores layout
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:2017-2028`. The unmount cleanup `useEffect(() => { return () => {...} }, [])` resets `composerResizeShouldAnimateHeightRef.current = true` and calls `cancelAndRestoreScheduledComposerTransition`. The active-session-change `useLayoutEffect` does the same plus a direct `resizeComposerInput(true)`. Two cleanup paths that look symmetric but only the second restores layout. If the unmount fires without active session being changed first, the ref-reset is essentially a no-op since the component is gone.
-
-Cosmetic — possible to simplify by routing through one cleanup.
-
-**Current behavior:**
-- Two cleanup paths share the cancel/reset logic.
-- Only active-session-change path also calls `resizeComposerInput`.
-- Asymmetry not documented.
-
-**Proposal:**
-- Hoist the cleanup-state reset into a single helper called from both effects.
-
 ## Send-shrink test brittle to probe sequence refactors
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:8362-8365`. The assertion `expect(heightWrites).toContainEqual({value: "40px", transition: "none"})` requires the height of `40px` to be one of the writes — but the implementation does multiple writes during shrink (`1px` probe, then `previousMeasuredHeight`, then `40px`).
