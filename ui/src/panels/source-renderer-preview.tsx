@@ -65,10 +65,11 @@ export function composeInlineRegionFence(region: SourceRenderableRegion): string
 
 // Preview pane for source files that have at least one renderable
 // region (Phase 3 of `docs/features/source-renderers.md`). For
-// Markdown files, delegates to read-only `MarkdownDocumentView`. The
-// editable SourcePanel Markdown Preview/Split path bypasses this
-// helper and reuses `EditableRenderedMarkdownSection`. For
-// non-Markdown files the detected regions are composed into a
+// Markdown files can delegate to read-only `MarkdownDocumentView` for
+// direct callers of this helper. SourcePanel's editable Markdown
+// Preview/Split path intentionally bypasses this helper and reuses
+// `EditableRenderedMarkdownSection`. For non-Markdown files the detected
+// regions are composed into a
 // synthetic Markdown fragment that
 // `MarkdownContent` already knows how to render — reuses the
 // Mermaid / KaTeX paths already wired in Phase 1 without a second

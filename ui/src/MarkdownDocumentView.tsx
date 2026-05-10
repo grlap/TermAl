@@ -1,3 +1,20 @@
+// Read-only Markdown document chrome used by renderer-preview surfaces
+// that need full-document/patch labels around MarkdownContent.
+//
+// What this file owns:
+//   - `MarkdownDocumentView` — a small wrapper that renders title /
+//     completeness chips, the patch-context note, the empty-document
+//     state, and the scroll container around `MarkdownContent`.
+//   - `MarkdownDocumentCompleteness` — the local full-vs-patch label
+//     contract used by callers that display rendered Markdown outside
+//     editable SourcePanel sections.
+//
+// What this file does NOT own:
+//   - Markdown parsing/rendering, Mermaid iframe sizing, link targets,
+//     or line-number rendering. Those remain in `message-cards.tsx`.
+//   - Editable rendered-Markdown commit plumbing. SourcePanel's
+//     editable preview uses `EditableRenderedMarkdownSection` instead.
+
 import { MarkdownContent, type MarkdownFileLinkTarget } from "./message-cards";
 import type { MonacoAppearance } from "./monaco";
 

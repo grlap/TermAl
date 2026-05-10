@@ -279,21 +279,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Consider splitting once the test grows further.
 - Current 6-in-1 is acceptable but the pattern should not expand.
 
-## `MarkdownDocumentView` is dead-reachable through the `RendererPreviewPane` `isMarkdownSource` branch
-
-**Severity:** Note - `ui/src/MarkdownDocumentView.tsx`. SourcePanel only routes `RendererPreviewPane` when `!(isMarkdownSource && renderedMarkdownSegment)`. `renderedMarkdownSegment` is always non-null when `isMarkdownSource && fileState.status === "ready"`. `RendererPreviewPane` itself bails on `fileState.status !== "ready"`. So the inner `if (isMarkdownSource) return <MarkdownDocumentView .../>` branch in `RendererPreviewPane` cannot fire from this caller.
-
-Threading `fillMermaidAvailableSpace` through dead code does not cost anything but obscures the actual call graph. Round 77 expanded the dead surface area by adding a new prop.
-
-**Current behavior:**
-- Dead branch threads a new prop.
-- No test exercises the path.
-- Live caller graph unclear.
-
-**Proposal:**
-- Either delete the dead branch in `RendererPreviewPane` (and inline `MarkdownDocumentView` into its only live caller, if any).
-- Or explicitly document that the branch exists for future non-SourcePanel callers and add a test that exercises the path.
-
 ## `fillMermaidAvailableSpace` widens the whole Markdown shell without documenting that contract
 
 **Severity:** Note - `ui/src/message-cards.tsx:3624-3662, 4356` and `ui/src/panels/markdown-diff-change-section.tsx:188-228`. The new `fillMermaidAvailableSpace` prop is undocumented while `isStreaming` (just below it) has a detailed multi-paragraph comment explaining contract and consumers. The name is Mermaid-specific, but enabling it adds `markdown-copy-shell-fill-mermaid`, and the CSS widens the whole markdown shell/copy area rather than only Mermaid blocks.
@@ -335,20 +320,6 @@ This counts against the "preserve public behaviour exactly during refactors" gui
 **Proposal:**
 - Either revert the `iframeStyle` block to its original ternary.
 - Or, if the block is preferred, lift the same style to other helpers in the file for consistency.
-
-## `MarkdownDocumentView.tsx` lacks header comment despite Round 77 expanding its surface
-
-**Severity:** Note - `ui/src/MarkdownDocumentView.tsx:1-2`. CLAUDE.md says modules should have header comments explaining what they own / don't own / split provenance. `MarkdownDocumentView.tsx` is not new but Round 77 expanded its contract by threading `fillMermaidAvailableSpace` from non-Markdown / Markdown source preview through this component.
-
-Sibling files like `panels/source-renderer-preview.tsx` and `panels/markdown-diff-change-section.tsx` have detailed header comments.
-
-**Current behavior:**
-- File has no header comment.
-- Round 77 expanded its public-prop surface.
-- Documentation inconsistent with siblings.
-
-**Proposal:**
-- Add a brief header comment describing the read-only Markdown document chrome (header + scroll body) and pin the relationship to the editable preview path used by SourcePanel.
 
 ## `fillMermaidAvailableSpace` feature has no `docs/features/*.md` entry
 
