@@ -244,6 +244,32 @@ Run a targeted tool check.
 }
 
 #[test]
+fn reads_claude_agent_commands_strip_crlf_frontmatter() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-commands-crlf-frontmatter-{}",
+        Uuid::new_v4()
+    ));
+    let commands_dir = root.join(".claude").join("commands");
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(
+        commands_dir.join("crlf-check.md"),
+        "---\r\ndescription: CRLF command\r\nargument-hint: PATH\r\n---\r\n\r\nRun CRLF check for $ARGUMENTS.\r\n",
+    )
+    .unwrap();
+
+    let commands = read_claude_agent_commands(&root).unwrap();
+
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].name, "crlf-check");
+    assert_eq!(commands[0].description, "CRLF command");
+    assert_eq!(commands[0].argument_hint.as_deref(), Some("PATH"));
+    assert_eq!(commands[0].content, "Run CRLF check for $ARGUMENTS.\r\n");
+    assert!(!commands[0].content.contains("---"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn reads_claude_agent_commands_strip_model_only_frontmatter() {
     let root = std::env::temp_dir().join(format!(
         "termal-agent-commands-model-frontmatter-{}",

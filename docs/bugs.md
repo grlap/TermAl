@@ -3516,8 +3516,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add parameterized tests for Claude, Codex, Cursor, and Gemini covering custom default forwarding, the `default` sentinel omission, and at least one settings-panel Apply/Reset interaction.
 - [ ] P2: Cover Claude default-model validation:
   assert app settings reject leading-hyphen and control-character Claude model values, or assert the eventual Claude CLI args use a safe `--model=<value>` form.
-- [ ] P2: Cover CRLF command frontmatter parsing:
-  add a command fixture using `---\r\n` frontmatter and assert description extraction, body stripping, and argument-hint preservation still work on Windows-style files.
 - [ ] P2: Cover Telegram relay update-before-digest ordering:
   extract a testable relay loop iteration or fake Telegram/TermAl clients, then
   assert pending updates are processed before digest sync and that one loop
