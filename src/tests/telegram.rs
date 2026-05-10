@@ -1175,7 +1175,7 @@ fn telegram_assistant_forwarding_plan_baselines_preexisting_active_turn_without_
         state.forward_next_assistant_message_session_id.as_deref(),
         Some("session-1")
     );
-    let cursor = assistant_forwarding_cursor_for_session(&state, "session-1", &[]);
+    let cursor = resolve_assistant_forwarding_cursor(&state, "session-1", &[]);
     assert_eq!(cursor.message_id.as_deref(), Some("message-1"));
     assert_eq!(
         cursor.text_chars,
@@ -2721,12 +2721,12 @@ fn telegram_assistant_forwarding_cursors_are_scoped_per_session() {
 
     assert!(changed);
     assert!(telegram.sent_texts.borrow().is_empty());
-    let session_one_cursor = assistant_forwarding_cursor_for_session(&state, "session-1", &[]);
+    let session_one_cursor = resolve_assistant_forwarding_cursor(&state, "session-1", &[]);
     assert_eq!(
         session_one_cursor.message_id.as_deref(),
         Some("session-1-baseline")
     );
-    let session_two_cursor = assistant_forwarding_cursor_for_session(
+    let session_two_cursor = resolve_assistant_forwarding_cursor(
         &state,
         "session-2",
         &[TelegramSessionFetchMessage::Text {

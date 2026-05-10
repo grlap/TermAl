@@ -1975,7 +1975,7 @@ fn latest_assistant_text_cursor(
     })
 }
 
-fn assistant_forwarding_cursor_for_session(
+fn resolve_assistant_forwarding_cursor(
     state: &TelegramBotState,
     session_id: &str,
     messages: &[TelegramSessionFetchMessage],
@@ -2225,7 +2225,7 @@ fn forward_new_assistant_message_outcome(
 
     let forward_without_existing_baseline =
         is_forward_next_assistant_message_session(state, session_id);
-    let mut cursor = assistant_forwarding_cursor_for_session(state, session_id, messages);
+    let mut cursor = resolve_assistant_forwarding_cursor(state, session_id, messages);
 
     // While a session is active or approval-paused, assistant text can still
     // belong to the pre-existing local turn. If this arm was created behind

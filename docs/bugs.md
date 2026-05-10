@@ -254,19 +254,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Extract the active-baseline transition into a helper `transition_active_baseline_to_settled` that returns either the new cursor + position or an `OutcomeShortCircuit`.
 
-## `assistant_forwarding_cursor_for_session` takes `messages` parameter but otherwise pure-read
-
-**Severity:** Note - `src/telegram.rs:1685-1712`. `assistant_forwarding_cursor_for_session` now takes `messages: &[TelegramSessionFetchMessage]` to gate the legacy fallback by "is the legacy id still in this session's messages?" Good defense, but the function is pure-read on `state` and uses-the-messages-but-doesn't-mutate-anything. Readers expect "cursor for session" to be a state-only lookup.
-
-**Current behavior:**
-- Function name suggests state-only lookup.
-- Implementation requires messages to gate the legacy fallback.
-- Asymmetric inputs not reflected in name.
-
-**Proposal:**
-- Rename to `resolve_assistant_forwarding_cursor`.
-- Or split into `cursor_from_state` + `legacy_cursor_if_in_messages` and let the caller compose.
-
 ## `resend_if_grown` fabricated as `true` in legacy-mirror fallback
 
 **Severity:** Low - `src/telegram.rs:1660-1665`. In the per-session cursor fallback, `resend_if_grown: state.last_forwarded_assistant_message_id.is_some()` derives a per-session resend flag from a global mirror that may belong to an unrelated session. Setting it to `true` for a session that has no real cursor means a spurious id collision could trigger a complete re-forward of the wrong message.
