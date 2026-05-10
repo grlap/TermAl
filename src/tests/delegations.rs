@@ -886,6 +886,147 @@ fn delegation_wait_rejects_delegation_owned_by_another_parent() {
 }
 
 #[test]
+fn delegation_wait_rejects_archived_codex_parent() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review wait parent eligibility.".to_owned(),
+                title: Some("Parent Eligibility".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let parent_index = inner
+            .find_session_index(&parent_session_id)
+            .expect("parent should exist");
+        inner.sessions[parent_index].session.codex_thread_state = Some(CodexThreadState::Archived);
+    }
+
+    let err = match state.create_delegation_wait(
+        &parent_session_id,
+        CreateDelegationWaitRequest {
+            delegation_ids: vec![created.delegation.id.clone()],
+            mode: DelegationWaitMode::All,
+            title: None,
+        },
+    ) {
+        Ok(_) => panic!("archived parent should reject delegation waits"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::CONFLICT);
+    assert_eq!(
+        err.message,
+        "delegation wait parent session is archived; unarchive it before scheduling a wait"
+    );
+}
+
+#[test]
+fn delegation_wait_consumes_without_queueing_when_parent_becomes_archived() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review wait parent archive race.".to_owned(),
+                title: Some("Parent Archive Race".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    let wait = state
+        .create_delegation_wait(
+            &parent_session_id,
+            CreateDelegationWaitRequest {
+                delegation_ids: vec![created.delegation.id.clone()],
+                mode: DelegationWaitMode::All,
+                title: Some("Archived parent fan-in".to_owned()),
+            },
+        )
+        .expect("wait should be scheduled");
+
+    let mut delta_events = state.subscribe_delta_events();
+    while delta_events.try_recv().is_ok() {}
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let parent_index = inner
+            .find_session_index(&parent_session_id)
+            .expect("parent should exist");
+        inner.sessions[parent_index].session.codex_thread_state = Some(CodexThreadState::Archived);
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &created.delegation.child_session_id,
+        "## Result\n\nStatus: completed\n\nSummary:\nParent archived before fan-in finished.",
+    );
+    state
+        .refresh_delegation_for_child_session(&created.delegation.child_session_id)
+        .expect("child completion should consume the wait");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .delegation_waits
+            .iter()
+            .all(|record| record.id != wait.wait.id),
+        "wait should be consumed instead of left pending"
+    );
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_session_id)
+        .expect("parent should exist");
+    assert!(
+        parent.queued_prompts.is_empty(),
+        "archived parents should not receive stranded resume prompts"
+    );
+    drop(inner);
+
+    let mut saw_parent_unavailable_consumption = false;
+    while let Ok(payload) = delta_events.try_recv() {
+        let event: DeltaEvent =
+            serde_json::from_str(&payload).expect("delta event should deserialize");
+        if let DeltaEvent::DelegationWaitConsumed {
+            wait_id,
+            parent_session_id: consumed_parent_session_id,
+            reason,
+            ..
+        } = event
+        {
+            if wait_id == wait.wait.id {
+                assert_eq!(consumed_parent_session_id, parent_session_id);
+                assert_eq!(
+                    reason,
+                    DelegationWaitConsumedReason::ParentSessionUnavailable
+                );
+                saw_parent_unavailable_consumption = true;
+            }
+        }
+    }
+    assert!(
+        saw_parent_unavailable_consumption,
+        "archived-parent wait should publish a reasoned consumed delta"
+    );
+}
+
+#[test]
 fn delegation_wait_resume_prompt_is_capped_with_marker() {
     let oversized = "界".repeat(MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES);
     let prompt = limit_delegation_wait_resume_prompt(oversized);

@@ -62,6 +62,7 @@ import {
 } from "./session-find";
 import {
   countSessionsByFilter,
+  filterSessionListVisibleSessions,
   filterSessionsByListFilter,
   type SessionListFilter,
 } from "./session-list-filter";
@@ -159,9 +160,12 @@ export function buildControlSurfaceSessionListState(
   sessionListFilter: SessionListFilter,
   sessionListSearchQuery: string,
 ) {
+  const sessionListVisibleSessions = filterSessionListVisibleSessions(sessions);
   const projectScopedSessions = selectedProject
-    ? sessions.filter((session) => session.projectId === selectedProject.id)
-    : sessions;
+    ? sessionListVisibleSessions.filter(
+        (session) => session.projectId === selectedProject.id,
+      )
+    : sessionListVisibleSessions;
   const mutableProjectScopedSessions = [...projectScopedSessions];
   const sessionFilterCounts = countSessionsByFilter(
     mutableProjectScopedSessions,

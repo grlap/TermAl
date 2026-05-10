@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { countSessionsByFilter, filterSessionsByListFilter } from "./session-list-filter";
+import {
+  countSessionsByFilter,
+  filterSessionListVisibleSessions,
+  filterSessionsByListFilter,
+} from "./session-list-filter";
 import type { Session } from "./types";
 
-function createSession(id: string, status: Session["status"]): Session {
+function createSession(
+  id: string,
+  status: Session["status"],
+  overrides: Partial<Session> = {},
+): Session {
   return {
     id,
     name: `Session ${id}`,
@@ -14,6 +22,7 @@ function createSession(id: string, status: Session["status"]): Session {
     status,
     preview: "Preview",
     messages: [],
+    ...overrides,
   };
 }
 
@@ -50,5 +59,18 @@ describe("session list filters", () => {
     expect(
       filterSessionsByListFilter(sessions, "completed").map((session) => session.id),
     ).toEqual(["idle"]);
+  });
+
+  it("omits delegated child sessions from default session lists", () => {
+    const visibleSessions = filterSessionListVisibleSessions([
+      createSession("parent", "idle"),
+      createSession("child", "idle", { parentDelegationId: "delegation-1" }),
+      createSession("empty-parent-id", "idle", { parentDelegationId: "" }),
+    ]);
+
+    expect(visibleSessions.map((session) => session.id)).toEqual([
+      "parent",
+      "empty-parent-id",
+    ]);
   });
 });

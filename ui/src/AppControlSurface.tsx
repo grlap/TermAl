@@ -54,7 +54,10 @@ import type {
   Session,
   WorkspaceFilesChangedEvent,
 } from "./types";
-import type { SessionListFilter } from "./session-list-filter";
+import {
+  filterSessionListVisibleSessions,
+  type SessionListFilter,
+} from "./session-list-filter";
 import type { SessionListSearchResult } from "./session-find";
 import type {
   OrchestratorRuntimeAction,
@@ -271,6 +274,8 @@ export function AppControlSurface({
     });
     const isStandaloneSessionList =
       fixedSection === "sessions" && standaloneControlSurfaceTabId !== null;
+    const sessionListVisibleSessionCount =
+      filterSessionListVisibleSessions(sessions).length;
     const standaloneSessionListState = isStandaloneSessionList
       ? buildControlSurfaceSessionListState(
           sessions,
@@ -933,7 +938,7 @@ export function AppControlSurface({
               projects={projects}
               remoteLookup={remoteLookup}
               selectedProjectId={controlSurfaceSelectedProjectId}
-              sessionCount={sessions.length}
+              sessionCount={sessionListVisibleSessionCount}
               onProjectScopeChange={handleControlSurfaceProjectScopeChange}
               onRemoveProject={(project) =>
                 void handleProjectMenuRemoveProject(project)

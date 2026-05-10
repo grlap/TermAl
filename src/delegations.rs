@@ -658,9 +658,7 @@ impl AppState {
 
         let created_revision = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            inner
-                .find_visible_session_index(&parent_session_id)
-                .ok_or_else(ApiError::local_session_missing)?;
+            validate_delegation_wait_parent_locked(&inner, &parent_session_id)?;
             validate_delegation_wait_targets_locked(&inner, &wait)?;
             inner.delegation_waits.push(wait.clone());
             self.commit_locked(&mut inner).map_err(|err| {
@@ -1398,6 +1396,40 @@ fn validate_delegation_wait_targets_locked(
     Ok(())
 }
 
+fn validate_delegation_wait_parent_locked(
+    inner: &StateInner,
+    parent_session_id: &str,
+) -> Result<(), ApiError> {
+    match delegation_wait_parent_eligibility_locked(inner, parent_session_id) {
+        DelegationWaitParentEligibility::Eligible => Ok(()),
+        DelegationWaitParentEligibility::Missing => Err(ApiError::local_session_missing()),
+        DelegationWaitParentEligibility::Unavailable => Err(ApiError::conflict(
+            "delegation wait parent session is archived; unarchive it before scheduling a wait",
+        )),
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DelegationWaitParentEligibility {
+    Eligible,
+    Missing,
+    Unavailable,
+}
+
+fn delegation_wait_parent_eligibility_locked(
+    inner: &StateInner,
+    parent_session_id: &str,
+) -> DelegationWaitParentEligibility {
+    let Some(index) = inner.find_visible_session_index(parent_session_id) else {
+        return DelegationWaitParentEligibility::Missing;
+    };
+    let parent = &inner.sessions[index];
+    if record_has_archived_codex_thread(parent) {
+        return DelegationWaitParentEligibility::Unavailable;
+    }
+    DelegationWaitParentEligibility::Eligible
+}
+
 // Delegation wait lifecycle:
 // 1. Mutate `inner.delegation_waits` only while the state lock is held.
 // 2. Treat consumed waits as state mutations even when the parent resume cannot
@@ -1414,12 +1446,16 @@ fn refresh_delegation_waits_locked(inner: &mut StateInner) -> DelegationWaitRefr
     let mut remaining = Vec::new();
     let mut refresh = DelegationWaitRefresh::default();
     for wait in waits {
-        if inner
-            .find_visible_session_index(&wait.parent_session_id)
-            .is_none()
-        {
-            refresh.consume_wait(wait, DelegationWaitConsumedReason::ParentSessionRemoved);
-            continue;
+        match delegation_wait_parent_eligibility_locked(inner, &wait.parent_session_id) {
+            DelegationWaitParentEligibility::Eligible => {}
+            DelegationWaitParentEligibility::Missing => {
+                refresh.consume_wait(wait, DelegationWaitConsumedReason::ParentSessionRemoved);
+                continue;
+            }
+            DelegationWaitParentEligibility::Unavailable => {
+                refresh.consume_wait(wait, DelegationWaitConsumedReason::ParentSessionUnavailable);
+                continue;
+            }
         }
         let Some(resume_prompt) = delegation_wait_resume_prompt_locked(inner, &wait) else {
             remaining.push(wait);

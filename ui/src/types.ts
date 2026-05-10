@@ -403,6 +403,7 @@ export type DelegationWaitRecord = {
 
 export type DelegationWaitConsumedReason =
   | "completed"
+  | "parentSessionUnavailable"
   | "parentSessionRemoved";
 
 export type Message =

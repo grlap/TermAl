@@ -1046,6 +1046,7 @@ struct DelegationWaitResponse {
 #[serde(rename_all = "camelCase")]
 enum DelegationWaitConsumedReason {
     Completed,
+    ParentSessionUnavailable,
     ParentSessionRemoved,
 }
 
@@ -1620,6 +1621,8 @@ struct AgentCommand {
     source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     argument_hint: Option<String>,
+    #[serde(skip)]
+    resolver_frontmatter: Option<String>,
 }
 
 /// Represents the agent commands response payload.

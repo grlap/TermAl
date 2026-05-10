@@ -702,6 +702,7 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
   isSessionBusy,
   isUpdating,
   showNewResponseIndicator,
+  newResponseIndicatorLabel,
   footerModeLabel,
   onScrollToLatest,
   onDraftCommit,
@@ -731,6 +732,7 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
   isSessionBusy: boolean;
   isUpdating: boolean;
   showNewResponseIndicator: boolean;
+  newResponseIndicatorLabel: string;
   footerModeLabel: string;
   onScrollToLatest: () => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
@@ -766,6 +768,7 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
         isSessionBusy={isSessionBusy}
         isUpdating={isUpdating}
         showNewResponseIndicator={showNewResponseIndicator}
+        newResponseIndicatorLabel={newResponseIndicatorLabel}
         onScrollToLatest={onScrollToLatest}
         onDraftCommit={onDraftCommit}
         onDraftAttachmentRemove={onDraftAttachmentRemove}
@@ -1632,6 +1635,7 @@ const SessionComposer = memo(function SessionComposer({
   isRefreshingAgentCommands,
   agentCommandsError,
   showNewResponseIndicator,
+  newResponseIndicatorLabel,
   onScrollToLatest,
   onDraftCommit,
   onDraftAttachmentRemove,
@@ -1659,6 +1663,7 @@ const SessionComposer = memo(function SessionComposer({
   isRefreshingAgentCommands: boolean;
   agentCommandsError: string | null;
   showNewResponseIndicator: boolean;
+  newResponseIndicatorLabel: string;
   onScrollToLatest: () => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
@@ -2777,7 +2782,7 @@ const SessionComposer = memo(function SessionComposer({
     <footer className="composer">
       {showNewResponseIndicator ? (
         <button className="new-response-indicator" type="button" onClick={onScrollToLatest}>
-          New response
+          {newResponseIndicatorLabel}
         </button>
       ) : null}
       {draftAttachments.length > 0 ? (
@@ -3022,6 +3027,7 @@ const SessionComposer = memo(function SessionComposer({
   previous.isRefreshingAgentCommands === next.isRefreshingAgentCommands &&
   previous.agentCommandsError === next.agentCommandsError &&
   previous.showNewResponseIndicator === next.showNewResponseIndicator &&
+  previous.newResponseIndicatorLabel === next.newResponseIndicatorLabel &&
   previous.onScrollToLatest === next.onScrollToLatest &&
   previous.onDraftCommit === next.onDraftCommit &&
   previous.onDraftAttachmentRemove === next.onDraftAttachmentRemove &&

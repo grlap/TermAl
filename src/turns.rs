@@ -407,6 +407,9 @@ impl AppPreferences {
         if trimmed.chars().count() > MAX_DEFAULT_MODEL_CHARS {
             return agent.default_model().to_owned();
         }
+        if agent == Agent::Claude && validate_claude_default_model_preference(trimmed).is_err() {
+            return agent.default_model().to_owned();
+        }
 
         trimmed.to_owned()
     }

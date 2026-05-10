@@ -184,7 +184,11 @@ import { isLocalSessionRemote } from "./remotes";
 
 const SESSION_PAGE_JUMP_VIEWPORT_FACTOR = 0.45;
 
-function delegationWaitIndicatorPrompt(waits: readonly DelegationWaitRecord[]) {
+type NewResponseIndicatorKind = "activity" | "response";
+
+export function delegationWaitIndicatorPrompt(
+  waits: readonly DelegationWaitRecord[],
+) {
   if (waits.length === 0) {
     return null;
   }
@@ -202,7 +206,13 @@ function delegationWaitIndicatorPrompt(waits: readonly DelegationWaitRecord[]) {
       ? `Waiting for ${mode} of ${childLabel}: ${title}`
       : `Waiting for ${mode} of ${childLabel}`;
   }
-  return `Waiting on ${waits.length} delegation waits covering ${childLabel}`;
+  const firstTitle = waits
+    .map((wait) => wait.title?.trim() ?? "")
+    .find((candidate) => candidate.length > 0);
+  const titleSuffix = firstTitle
+    ? `: ${firstTitle} (+${waits.length - 1} more)`
+    : "";
+  return `Waiting on ${waits.length} delegation waits covering ${childLabel}${titleSuffix}`;
 }
 
 export function SessionPaneView({
@@ -717,7 +727,7 @@ export function SessionPaneView({
     Record<string, true | undefined>
   >({});
   const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
-    Record<string, true | undefined>
+    Record<string, NewResponseIndicatorKind | undefined>
   >({});
   const [liveTailPinnedByKey, setLiveTailPinnedByKey] = useState<
     Record<string, boolean | undefined>
@@ -1003,9 +1013,11 @@ export function SessionPaneView({
     (messageId: string) => connectionRetryDisplayStateByMessageId.get(messageId),
     [connectionRetryDisplayStateByMessageId],
   );
-  const showNewResponseIndicator = Boolean(
-    newResponseIndicatorByKey[scrollStateKey],
-  );
+  const newResponseIndicatorKind =
+    newResponseIndicatorByKey[scrollStateKey] ?? null;
+  const showNewResponseIndicator = newResponseIndicatorKind !== null;
+  const newResponseIndicatorLabel =
+    newResponseIndicatorKind === "activity" ? "New activity" : "New response";
   const paneScrollPositions =
     paneScrollPositionsRef.current[pane.id] ??
     (paneScrollPositionsRef.current[pane.id] = {});
@@ -1246,17 +1258,26 @@ export function SessionPaneView({
     setSourceEditorDirty(isDirty);
   }, []);
 
-  function setNewResponseIndicator(key: string, visible: boolean) {
+  function setNewResponseIndicator(
+    key: string,
+    visible: boolean,
+    kind: NewResponseIndicatorKind = "response",
+  ) {
     startTransition(() => {
       setNewResponseIndicatorByKey((current) => {
-        const isVisible = Boolean(current[key]);
-        if (isVisible === visible) {
+        const currentKind = current[key];
+        if (
+          (!visible && currentKind === undefined) ||
+          (visible &&
+            (currentKind === kind ||
+              (currentKind === "response" && kind === "activity")))
+        ) {
           return current;
         }
 
         const nextState = { ...current };
         if (visible) {
-          nextState[key] = true;
+          nextState[key] = kind;
         } else {
           delete nextState[key];
         }
@@ -2192,7 +2213,7 @@ export function SessionPaneView({
           scrollKind: "bottom_follow",
         });
       }
-      setNewResponseIndicator(scrollStateKey, true);
+      setNewResponseIndicator(scrollStateKey, true, "activity");
       return;
     }
 
@@ -3514,6 +3535,7 @@ export function SessionPaneView({
           isSessionBusy={isSessionBusy}
           isUpdating={isUpdating}
           showNewResponseIndicator={showNewResponseIndicator}
+          newResponseIndicatorLabel={newResponseIndicatorLabel}
           footerModeLabel={labelForPaneViewMode(pane.lastSessionViewMode)}
           onScrollToLatest={handleScrollToLatestFromFooter}
           onDraftCommit={handleDraftCommitFromFooter}

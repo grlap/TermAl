@@ -464,6 +464,7 @@ fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, Api
             content,
             source: format!(".claude/commands/{}.md", stem),
             argument_hint: command_content.argument_hint,
+            resolver_frontmatter: command_content.frontmatter.map(str::to_owned),
         });
     }
 
@@ -477,6 +478,7 @@ fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, Api
 
 struct MarkdownCommandContent<'a> {
     content: &'a str,
+    frontmatter: Option<&'a str>,
     description: Option<String>,
     argument_hint: Option<String>,
 }
@@ -494,6 +496,7 @@ fn strip_markdown_frontmatter(content: &str) -> MarkdownCommandContent<'_> {
     } else {
         return MarkdownCommandContent {
             content,
+            frontmatter: None,
             description: None,
             argument_hint: None,
         };
@@ -509,6 +512,7 @@ fn strip_markdown_frontmatter(content: &str) -> MarkdownCommandContent<'_> {
                 let body = strip_single_leading_blank_line(&content[offset + line.len()..]);
                 return MarkdownCommandContent {
                     content: body,
+                    frontmatter: Some(frontmatter),
                     description: non_empty_frontmatter_field(&fields, "description"),
                     argument_hint: fields
                         .get("argument-hint")
@@ -519,6 +523,7 @@ fn strip_markdown_frontmatter(content: &str) -> MarkdownCommandContent<'_> {
             }
             return MarkdownCommandContent {
                 content,
+                frontmatter: None,
                 description: None,
                 argument_hint: None,
             };
@@ -528,6 +533,7 @@ fn strip_markdown_frontmatter(content: &str) -> MarkdownCommandContent<'_> {
 
     MarkdownCommandContent {
         content,
+        frontmatter: None,
         description: None,
         argument_hint: None,
     }
@@ -553,7 +559,7 @@ fn strip_single_leading_blank_line(content: &str) -> &str {
 }
 
 fn read_agent_command_resolver_metadata(
-    workdir: &FsPath,
+    _workdir: &FsPath,
     command: &AgentCommand,
 ) -> Result<Option<AgentCommandResolverMetadata>, ApiError> {
     if command.kind != AgentCommandKind::PromptTemplate {
@@ -571,91 +577,11 @@ fn read_agent_command_resolver_metadata(
         return Ok(None);
     }
 
-    let path = workdir
-        .join(".claude")
-        .join("commands")
-        .join(format!("{source_stem}.md"));
-    let Some(_) = agent_command_regular_file_metadata(&path)? else {
-        return Ok(None);
-    };
-    let Some(raw_content) = read_agent_command_frontmatter_document(&path)? else {
-        return Ok(None);
-    };
-    let Some(frontmatter) = markdown_frontmatter(&raw_content) else {
+    let Some(frontmatter) = command.resolver_frontmatter.as_deref() else {
         return Ok(None);
     };
 
     parse_agent_command_resolver_metadata(frontmatter)
-}
-
-fn agent_command_regular_file_metadata(path: &FsPath) -> Result<Option<fs::Metadata>, ApiError> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => {
-            return Err(ApiError::internal(format!(
-                "failed to stat agent command metadata {}: {err}",
-                path.display()
-            )));
-        }
-    };
-    let file_type = metadata.file_type();
-    if file_type.is_symlink() || !metadata.is_file() {
-        return Ok(None);
-    }
-
-    Ok(Some(metadata))
-}
-
-const MAX_AGENT_COMMAND_FRONTMATTER_BYTES: usize = MAX_AGENT_COMMAND_FILE_BYTES;
-
-fn read_agent_command_frontmatter_document(path: &FsPath) -> Result<Option<String>, ApiError> {
-    let file = match fs::File::open(path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => {
-            return Err(ApiError::internal(format!(
-                "failed to read agent command metadata {}: {err}",
-                path.display()
-            )));
-        }
-    };
-    let mut reader = BufReader::new(file);
-    let mut content = String::new();
-    let mut line = String::new();
-    let bytes_read = reader.read_line(&mut line).map_err(|err| {
-        ApiError::internal(format!(
-            "failed to read agent command metadata {}: {err}",
-            path.display()
-        ))
-    })?;
-    if bytes_read == 0 || (line != "---\n" && line != "---\r\n") {
-        return Ok(None);
-    }
-    content.push_str(&line);
-
-    loop {
-        line.clear();
-        let bytes_read = reader.read_line(&mut line).map_err(|err| {
-            ApiError::internal(format!(
-                "failed to read agent command metadata {}: {err}",
-                path.display()
-            ))
-        })?;
-        if bytes_read == 0 {
-            return Ok(None);
-        }
-        if content.len() + line.len() > MAX_AGENT_COMMAND_FRONTMATTER_BYTES {
-            return Err(ApiError::bad_request(format!(
-                "agent command frontmatter must be at most {MAX_AGENT_COMMAND_FRONTMATTER_BYTES} bytes"
-            )));
-        }
-        let closes_frontmatter = line.trim_end_matches(['\r', '\n']).trim() == "---";
-        content.push_str(&line);
-        if closes_frontmatter {
-            return Ok(Some(content));
-        }
-    }
 }
 
 // Discriminates real command frontmatter from a Markdown thematic-break block.
@@ -686,28 +612,6 @@ fn looks_like_markdown_frontmatter(frontmatter: &str) -> bool {
                 | "disable_model_invocation"
             )
     })
-}
-
-fn markdown_frontmatter(content: &str) -> Option<&str> {
-    let opening_len = if content.starts_with("---\r\n") {
-        "---\r\n".len()
-    } else if content.starts_with("---\n") {
-        "---\n".len()
-    } else {
-        return None;
-    };
-
-    let mut offset = opening_len;
-    for line in content[opening_len..].split_inclusive('\n') {
-        let line_without_newline = line.trim_end_matches(['\r', '\n']);
-        if line_without_newline.trim() == "---" {
-            let frontmatter = &content[opening_len..offset];
-            return looks_like_markdown_frontmatter(frontmatter).then_some(frontmatter);
-        }
-        offset += line.len();
-    }
-
-    None
 }
 
 fn parse_agent_command_resolver_metadata(

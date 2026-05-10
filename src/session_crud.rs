@@ -61,8 +61,25 @@ fn normalize_default_model_preference(model: String, agent: Agent) -> Result<Str
             MAX_DEFAULT_MODEL_CHARS
         )));
     }
+    if agent == Agent::Claude {
+        validate_claude_default_model_preference(trimmed)?;
+    }
 
     Ok(trimmed.to_owned())
+}
+
+fn validate_claude_default_model_preference(model: &str) -> Result<(), ApiError> {
+    if model.starts_with('-') {
+        return Err(ApiError::bad_request(
+            "Claude default model must not start with `-`",
+        ));
+    }
+    if model.chars().any(char::is_control) {
+        return Err(ApiError::bad_request(
+            "Claude default model must not contain control characters",
+        ));
+    }
+    Ok(())
 }
 
 fn set_agent_default_model_if_present<F>(

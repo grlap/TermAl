@@ -7,19 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Resolver re-reads command frontmatter from disk on every resolve
-
-**Severity:** Low - `src/api_files.rs:557`, `src/workspace_queries.rs:177-178`. `read_agent_command_resolver_metadata` opens the command file and scans its frontmatter even though `read_claude_agent_commands` already loaded the same command for the cached `command` payload. This keeps resolve-time metadata outside the listing snapshot and creates a TOCTOU window where description/content (from listing) and metadata (from resolve) can disagree if the file is edited between the two reads.
-
-**Current behavior:**
-- Listing reads the file, strips recognized frontmatter, and returns `command.content`.
-- Resolve re-reads the same file's frontmatter from disk to extract `metadata.termal`.
-- No shared frontmatter or metadata cache exists between the two paths.
-
-**Proposal:**
-- Extend `MarkdownCommandContent` (or `AgentCommand`) to retain the parsed `metadata.termal.*` fields from the listing pass.
-- Have `read_agent_command_resolver_metadata` consume the cached snapshot rather than re-reading.
-
 ## `AppPreferences` `PartialEq` now allocates string compares
 
 **Severity:** Note - `src/turns.rs:354-361`. Adding 4 owned `String` fields means every `AppPreferences` comparison now performs four byte-by-byte string compares instead of trivial enum/discriminant compares. The struct is compared in update flows to detect "no-op update" and rebroadcast suppression. Negligible at human cadence but the cost characteristic flips from O(1) to O(N strings).
@@ -58,42 +45,6 @@ Project-controlled metadata should not silently broaden delegation write capabil
 - Or require confirmation before applying non-read-only defaults from project-local commands.
 - Add negative coverage for project-local metadata attempting to grant `isolatedWorktree`.
 
-## Terminal delegation child sessions accumulate without retention policy
-
-**Severity:** Low - delegation children are normal visible sessions and remain
-in the workspace after completion, failure, or cancellation. A reviewer fan-out
-workflow can therefore leave many terminal child sessions in the session list
-even after the parent has consumed the fan-in result.
-
-The behavior is intentional for auditability, but the product has no retention
-or archive policy yet. Users must manually close completed child sessions.
-
-**Current behavior:**
-- Delegation spawn creates an ordinary child session.
-- Terminal delegation updates preserve the child transcript and session record.
-- Fan-in wait consumption does not hide, archive, or prune terminal children.
-
-**Proposal:**
-- Define a retention policy for terminal delegation children in the delegation
-  feature spec.
-- Prefer auto-hide/archive after fan-in while preserving parent cards, result
-  packets, transcript links, and explicit reopen affordances.
-- Add UI/backend tests for the chosen retention behavior.
-
-## "New response" indicator label is misleading for queued-prompt-only updates
-
-**Severity:** Low - `ui/src/SessionPaneView.tsx:2183-2197`, `ui/src/panels/AgentSessionPanel.tsx:2766`. The new `setNewResponseIndicator(scrollStateKey, true)` branch in `onlyPendingPromptsChanged` fires when a queued user prompt appears below the viewport while tail-following is off. The indicator button still renders the literal text "New response", which suggests new assistant output rather than a newly queued user prompt.
-
-The whole point of the `onlyPendingPromptsChanged` branch is that the assistant produced nothing new. The label steals attention with copy that does not match the trigger.
-
-**Current behavior:**
-- Queued-prompt-only updates while scrolled away set the "New response" indicator.
-- The indicator button label is fixed regardless of trigger.
-
-**Proposal:**
-- Either suppress the indicator for the queued-prompt-only case (revert to the old "always clear" behavior).
-- Or generalize the indicator label based on the trigger (e.g., "Jump to bottom" / "New activity").
-
 ## Pending-prompts queue scrolls away from the pinned live tail
 
 **Severity:** Low - `ui/src/styles.css:4567-4576`, `ui/src/panels/AgentSessionPanel.tsx:1437-1442`. After splitting `pendingPromptCards` into a sibling `<div className="conversation-pending-prompts">` instead of nesting inside `.conversation-live-tail`, the live tail keeps `position: sticky; bottom: 0` while the pending-prompts queue uses `display: grid` with no sticky positioning.
@@ -109,51 +60,6 @@ When the user scrolls up to read history, the live tail and its waiting indicato
 - Confirm whether the loss of co-pinning is intentional and document it next to the JSX/CSS.
 - Or wrap both sections in a single sticky parent / set `position: sticky; bottom: <live-tail-height>` on the queue so it pins above the live tail.
 - Add a code comment explaining the new DOM order vs. visual intent (the previous `column-reverse` had a comment that no longer applies).
-
-## Multi-wait parent indicator drops wait titles
-
-**Severity:** Low - `ui/src/SessionPaneView.tsx`. `delegationWaitIndicatorPrompt` includes the wait title for a single pending wait, but the multi-wait branch collapses to a generic "Waiting on N delegation waits covering X delegated sessions" message.
-
-When multiple waits are pending, the title is the clearest way to distinguish intent such as "review fan-in" versus "backend release gate".
-
-**Current behavior:**
-- Single wait: title can appear in the waiting indicator.
-- Multiple waits: all titles are omitted.
-
-**Proposal:**
-- Include the first wait title plus a "+N more" suffix in the multi-wait message.
-- Add an RTL test with two pending waits.
-
-## Default Claude model preferences accept option-looking strings
-
-**Severity:** Low - `src/session_crud.rs:52-65` and `src/claude_args.rs:56`. App-level default model preferences accept any non-empty string up to 200 characters after trimming. For Claude, that value later flows into CLI argument construction as the value after `--model`.
-
-Model ids that begin with `-` or contain control characters can create downstream CLI ambiguity or failed launches, and the persisted default applies repeatedly to future sessions and delegations.
-
-**Current behavior:**
-- Default model normalization rejects only empty/default sentinel values and overlong values.
-- Claude defaults can be saved as option-looking strings such as `--help`.
-- Future Claude sessions/delegations reuse the persisted value.
-
-**Proposal:**
-- Reject leading-hyphen and control-character model ids for Claude defaults.
-- Or pass Claude model values with a CLI-safe `--model=<value>` form if Claude supports it.
-- Add regression tests for option-looking model inputs.
-
-## `create_delegation_wait` does not check parent eligibility for queued prompts
-
-**Severity:** Low - `src/delegations.rs:583-626`. The function validates that the parent is visible but does not explicitly validate that the parent can accept queued prompts. Later, `queue_delegation_wait_resume_locked` can silently no-op if the parent cannot be found or cannot be dispatched.
-
-This is easy to miss as more session kinds are added, especially hidden Claude spares, archived sessions, or proxy-mirrored sessions.
-
-**Current behavior:**
-- Only `find_visible_session_index` is called.
-- Parent queued-prompt eligibility is not checked directly.
-- Failures can surface later as silent no-ops.
-
-**Proposal:**
-- Add an explicit parent eligibility check for queued-prompt scheduling.
-- Or document why visibility is sufficient.
 
 ## `dispatch_delegation_wait_resumes` errors are stderr-only without audit ledger
 
@@ -4510,10 +4416,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   rewrite `removing_parent_consumes_unsatisfied_wait_even_when_targets_are_not_terminal` so it writes a stale wait whose owner is missing into the persistence file, restarts via `AppState::new_with_paths`, and asserts boot reconciliation drops it. As written, it bypasses validation via `inner.delegation_waits.push` and duplicates a scenario already covered by `removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason`.
 - [ ] P2: Cover true-value delegation wait response booleans through the command layer:
   add `resumePromptQueued: true` and `resumeDispatchRequested: true` cases for `resume_after_delegations` and reviewer-batch wait propagation so fields cannot be hard-coded false.
-- [ ] P2: Cover scrolled-away pending-prompt indicator branch:
-  start off-bottom, append only pending prompts with unchanged messages, and assert no bottom scroll occurs while the "New response" indicator becomes visible.
-- [ ] P2: Cover multi-wait waiting indicator titles:
-  render two pending waits for one parent and assert the UI preserves at least the first wait title plus a count for the remaining waits.
 - [ ] P2: Decouple `delegation_wait_reconciles_after_restart_recovery` from recovery copy:
   avoid asserting the exact `"TermAl restarted before this turn finished"` string from `src/messages.rs`; assert stable wait/delegation identifiers or finish the child with a deterministic result packet before simulated shutdown.
 - [ ] P2: Cover edge cases in delegation finding parsing:

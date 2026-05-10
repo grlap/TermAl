@@ -11,6 +11,7 @@ import { fetchGitStatus } from "./api";
 import type { StandaloneControlSurfaceViewState } from "./app-shell-internals";
 import {
   countSessionsByFilter,
+  filterSessionListVisibleSessions,
   filterSessionsByListFilter,
   type SessionListFilter,
 } from "./session-list-filter";
@@ -325,15 +326,20 @@ export function useAppControlPanelState({
     : (agentReadinessByAgent.get(newSessionAgent) ?? null);
   const createSessionBlocked = createSessionAgentReadiness?.blocking ?? false;
 
+  const sessionListVisibleSessions = useMemo(
+    () => filterSessionListVisibleSessions(sessions),
+    [sessions],
+  );
+
   const projectScopedSessions = useMemo(() => {
     if (!selectedProject) {
-      return sessions;
+      return sessionListVisibleSessions;
     }
 
-    return sessions.filter(
+    return sessionListVisibleSessions.filter(
       (session) => session.projectId === selectedProject.id,
     );
-  }, [selectedProject, sessions]);
+  }, [selectedProject, sessionListVisibleSessions]);
   const dockedControlPanelPane =
     workspace.panes.find((pane) =>
       pane.tabs.some((tab) => tab.kind === "controlPanel"),
@@ -386,7 +392,9 @@ export function useAppControlPanelState({
       ) ??
         projectScopedSessions[0] ??
         null)
-    : (dockedControlPanelSessionCandidates[0] ?? sessions[0] ?? null);
+    : (dockedControlPanelSessionCandidates[0] ??
+      sessionListVisibleSessions[0] ??
+      null);
   const derivedControlPanelWorkspaceRoot = resolveControlPanelWorkspaceRoot(
     selectedProject,
     controlPanelContextSession?.workdir ?? null,
@@ -547,14 +555,14 @@ export function useAppControlPanelState({
   }, [hasSessionListSearch, sessionListSearchResults, statusFilteredSessions]);
   const projectSessionCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const session of sessions) {
+    for (const session of sessionListVisibleSessions) {
       if (!session.projectId) {
         continue;
       }
       counts.set(session.projectId, (counts.get(session.projectId) ?? 0) + 1);
     }
     return counts;
-  }, [sessions]);
+  }, [sessionListVisibleSessions]);
 
   return {
     remoteLookup,

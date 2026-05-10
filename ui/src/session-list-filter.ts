@@ -4,6 +4,16 @@ export type SessionListFilter = "all" | "working" | "asking" | "completed";
 
 export type SessionListFilterCounts = Record<SessionListFilter, number>;
 
+export function isSessionVisibleInSessionList(session: Session): boolean {
+  return !session.parentDelegationId;
+}
+
+export function filterSessionListVisibleSessions(
+  sessions: readonly Session[],
+): Session[] {
+  return sessions.filter(isSessionVisibleInSessionList);
+}
+
 export function matchesSessionListFilter(session: Session, filter: SessionListFilter) {
   switch (filter) {
     case "working":

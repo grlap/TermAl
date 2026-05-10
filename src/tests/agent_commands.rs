@@ -85,6 +85,7 @@ $ARGUMENTS
                 .to_owned(),
                 source: ".claude/commands/fix-bug.md".to_owned(),
                 argument_hint: None,
+                resolver_frontmatter: None,
             },
             AgentCommand {
                 kind: AgentCommandKind::PromptTemplate,
@@ -98,6 +99,7 @@ Inspect diffs.
                 .to_owned(),
                 source: ".claude/commands/review-local.md".to_owned(),
                 argument_hint: None,
+                resolver_frontmatter: None,
             },
         ]
     );
@@ -128,21 +130,6 @@ fn read_claude_agent_commands_rejects_oversized_command_file() {
         error.message.contains("must be at most 1048576 bytes"),
         "{}",
         error.message
-    );
-}
-
-#[test]
-fn read_agent_command_frontmatter_document_missing_file_returns_none() {
-    let root = std::env::temp_dir().join(format!(
-        "termal-agent-command-missing-frontmatter-{}",
-        Uuid::new_v4()
-    ));
-    let _cleanup = TempDirCleanup::new(root.clone());
-    let missing_path = root.join(".claude").join("commands").join("missing.md");
-
-    assert_eq!(
-        read_agent_command_frontmatter_document(&missing_path).unwrap(),
-        None
     );
 }
 
@@ -498,6 +485,7 @@ fn extracts_claude_native_agent_commands_from_initialize_response() {
                 content: "/review".to_owned(),
                 source: "Claude bundled command".to_owned(),
                 argument_hint: None,
+                resolver_frontmatter: None,
             },
             AgentCommand {
                 kind: AgentCommandKind::NativeSlash,
@@ -506,6 +494,7 @@ fn extracts_claude_native_agent_commands_from_initialize_response() {
                 content: "/review-local".to_owned(),
                 source: "Claude project command".to_owned(),
                 argument_hint: Some("[scope]".to_owned()),
+                resolver_frontmatter: None,
             },
         ])
     );
@@ -546,6 +535,7 @@ fn extracts_claude_native_agent_commands_filters_empty_names_and_normalizes_user
             content: "/release-notes".to_owned(),
             source: "Claude user command".to_owned(),
             argument_hint: None,
+            resolver_frontmatter: None,
         }])
     );
 }
@@ -622,6 +612,7 @@ fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
                     content: "/review".to_owned(),
                     source: "Claude bundled command".to_owned(),
                     argument_hint: None,
+                    resolver_frontmatter: None,
                 },
                 AgentCommand {
                     kind: AgentCommandKind::NativeSlash,
@@ -630,6 +621,7 @@ fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
                     content: "/review-local".to_owned(),
                     source: "Claude project command".to_owned(),
                     argument_hint: Some("[scope]".to_owned()),
+                    resolver_frontmatter: None,
                 },
             ],
         )
@@ -697,6 +689,7 @@ fn sync_session_agent_commands_bumps_visible_session_command_revision() {
                 content: "/review".to_owned(),
                 source: "Claude bundled command".to_owned(),
                 argument_hint: None,
+                resolver_frontmatter: None,
             }],
         )
         .unwrap();
@@ -756,6 +749,7 @@ fn sync_session_agent_commands_filters_runtime_prompt_templates() {
                     content: "Runtime review $ARGUMENTS".to_owned(),
                     source: ".claude/commands/review-local.md".to_owned(),
                     argument_hint: None,
+                    resolver_frontmatter: None,
                 },
                 AgentCommand {
                     kind: AgentCommandKind::NativeSlash,
@@ -764,6 +758,7 @@ fn sync_session_agent_commands_filters_runtime_prompt_templates() {
                     content: "/review".to_owned(),
                     source: "Claude bundled command".to_owned(),
                     argument_hint: None,
+                    resolver_frontmatter: None,
                 },
             ],
         )
@@ -1539,6 +1534,7 @@ fn native_delegate_resolution_uses_metadata_name_not_source_suffix() {
                 content: "/audit".to_owned(),
                 source: ".claude/commands/review-local.md".to_owned(),
                 argument_hint: None,
+                resolver_frontmatter: None,
             }],
         )
         .unwrap();
@@ -1589,6 +1585,7 @@ fn legacy_cached_prompt_template_delegate_resolution_uses_metadata_name_not_sour
             content: "Audit $ARGUMENTS".to_owned(),
             source: ".claude/commands/review-local.md".to_owned(),
             argument_hint: None,
+            resolver_frontmatter: None,
         }],
     );
 
@@ -1645,6 +1642,7 @@ fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
             content: "Cached review $ARGUMENTS".to_owned(),
             source: ".claude/commands/review-local.md".to_owned(),
             argument_hint: None,
+            resolver_frontmatter: None,
         }],
     );
 
@@ -1666,6 +1664,57 @@ fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
         Some("Cached review staged")
     );
     assert_eq!(response.delegation, None);
+}
+
+#[test]
+fn resolver_metadata_uses_cached_frontmatter_snapshot_without_disk_reread() {
+    let command = AgentCommand {
+        kind: AgentCommandKind::PromptTemplate,
+        name: "review-local".to_owned(),
+        description: "Review cached frontmatter.".to_owned(),
+        content: "Review $ARGUMENTS".to_owned(),
+        source: ".claude/commands/review-local.md".to_owned(),
+        argument_hint: None,
+        resolver_frontmatter: Some(
+            "metadata:
+  termal:
+    delegation:
+      enabled: true
+      mode: reviewer
+      writePolicy:
+        kind: isolatedWorktree
+"
+            .to_owned(),
+        ),
+    };
+
+    let metadata = read_agent_command_resolver_metadata(FsPath::new("C:/does/not/exist"), &command)
+        .unwrap()
+        .expect("cached frontmatter should produce resolver metadata");
+
+    let response = resolve_agent_command_payload(
+        command,
+        ResolveAgentCommandRequest {
+            arguments: Some("staged".to_owned()),
+            note: None,
+            intent: AgentCommandResolveIntent::Delegate,
+        },
+        Some(metadata),
+    )
+    .unwrap();
+
+    assert_eq!(response.visible_prompt, "/review-local staged");
+    assert_eq!(
+        response.delegation,
+        Some(ResolvedAgentCommandDelegationDefaults {
+            mode: Some(DelegationMode::Reviewer),
+            title: Some("Review cached frontmatter.".to_owned()),
+            write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                owned_paths: Vec::new(),
+                worktree_path: None,
+            }),
+        })
+    );
 }
 
 #[test]
@@ -1697,6 +1746,7 @@ fn native_delegate_resolution_does_not_use_prompt_template_metadata_by_name() {
                 content: "/review-local".to_owned(),
                 source: "claude/native".to_owned(),
                 argument_hint: None,
+                resolver_frontmatter: None,
             }],
         )
         .unwrap();
@@ -1750,6 +1800,7 @@ fn rejects_note_for_native_slash_command_resolution() {
                 content: "/review".to_owned(),
                 source: "Claude bundled command".to_owned(),
                 argument_hint: Some("[scope]".to_owned()),
+                resolver_frontmatter: None,
             }],
         )
         .unwrap();

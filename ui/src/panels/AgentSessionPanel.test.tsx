@@ -7625,6 +7625,7 @@ function renderFooter({
       isSessionBusy={false}
       isUpdating={isUpdating}
       showNewResponseIndicator={false}
+      newResponseIndicatorLabel="New response"
       footerModeLabel="Session"
       onScrollToLatest={onScrollToLatest}
       onDraftCommit={onDraftCommit}

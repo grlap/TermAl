@@ -413,6 +413,33 @@ fn default_model_preference_validation_covers_agents_and_boundaries() {
     }
 }
 
+#[test]
+fn claude_default_model_preference_rejects_cli_option_like_values() {
+    for (model, expected_message) in [
+        (
+            "--help".to_owned(),
+            "Claude default model must not start with `-`",
+        ),
+        (
+            "claude\nsonnet".to_owned(),
+            "Claude default model must not contain control characters",
+        ),
+    ] {
+        let state = test_app_state();
+        let error = match state.update_app_settings(update_app_settings_request_for_agent_model(
+            Agent::Claude,
+            model,
+        )) {
+            Ok(_) => panic!("unsafe Claude default model should be rejected"),
+            Err(error) => error,
+        };
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.message, expected_message);
+
+        let _ = fs::remove_file(state.persistence_path.as_path());
+    }
+}
+
 fn update_app_settings_request_for_agent_model(
     agent: Agent,
     model: String,
@@ -478,6 +505,31 @@ fn oversized_persisted_default_model_falls_back_to_agent_default() {
             reloaded_inner.preferences.default_model_for_agent(agent),
             agent.default_model(),
             "{agent:?}"
+        );
+
+        let _ = fs::remove_file(state.persistence_path.as_path());
+    }
+}
+
+#[test]
+fn unsafe_persisted_claude_default_model_falls_back_to_agent_default() {
+    for model in ["--help", "claude\nsonnet"] {
+        let state = test_app_state();
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            inner.preferences.default_claude_model = model.to_owned();
+            state.commit_locked(&mut inner).unwrap();
+        }
+
+        let reloaded_inner = load_state(state.persistence_path.as_path())
+            .unwrap()
+            .expect("persisted state should exist");
+        assert_eq!(reloaded_inner.preferences.default_claude_model, model);
+        assert_eq!(
+            reloaded_inner
+                .preferences
+                .default_model_for_agent(Agent::Claude),
+            Agent::Claude.default_model()
         );
 
         let _ = fs::remove_file(state.persistence_path.as_path());

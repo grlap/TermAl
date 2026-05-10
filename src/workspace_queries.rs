@@ -286,16 +286,19 @@ fn validate_agent_command_text_field(
     Ok(())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct AgentCommandResolverMetadata {
     title: AgentCommandTitleStrategy,
     delegation: Option<AgentCommandDelegationMetadata>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum AgentCommandTitleStrategy {
     Default,
     PrefixFirstArgument { prefix: String },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct AgentCommandDelegationMetadata {
     mode: DelegationMode,
     write_policy: DelegationWritePolicy,

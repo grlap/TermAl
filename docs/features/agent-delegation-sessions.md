@@ -29,7 +29,7 @@ small patches with explicit file ownership.
 ## Goals
 
 - Let a parent session spawn one or more child sessions for bounded subtasks.
-- Make child work visible and auditable in the UI.
+- Make child work visible and auditable from the parent delegation UI.
 - Let agents and humans query status, schedule backend-owned waits, cancel work,
   and retrieve a compact result.
 - Keep child sessions as normal TermAl sessions so existing transcript,
@@ -88,9 +88,9 @@ parallel work a durable application feature:
 - **Enforced isolation**: read-only mode, isolated worktrees, ownership scopes,
   parent settings, and project context are enforced by TermAl rather than only
   by prompt discipline.
-- **Human visibility and control**: delegated work remains visible in the UI so
-  the user can inspect child sessions, follow progress, cancel work, or act on a
-  result before the parent continues.
+- **Human visibility and control**: delegated work remains visible from the
+  parent delegation card so the user can inspect child sessions, follow
+  progress, cancel work, or act on a result before the parent continues.
 
 ## Terminology
 
@@ -147,18 +147,21 @@ The child is a normal session with:
 - optional file ownership constraints
 - optional result-format instructions
 
-The child remains independently openable. TermAl should not hide its transcript.
+The child remains independently openable. TermAl should not prune its
+transcript.
 
 ### Retention And Cleanup
 
-Delegation children currently remain ordinary visible sessions after completion,
-failure, or cancellation. That is useful for auditability, but repeated reviewer
-fan-out can accumulate many completed child sessions in the workspace.
+Delegation children are durable ordinary session records for auditability and
+restart recovery, but default session lists omit sessions with
+`parentDelegationId`. Parent delegation cards and result links are the primary
+reopen affordance for child transcripts, so reviewer fan-out does not clutter the
+sidebar while preserving access to the full child session.
 
-Open item: define a retention policy for terminal delegation children. A likely
-direction is to auto-hide or archive completed child sessions after fan-in while
-preserving the delegation result packet, parent card, transcript link, and a
-way for the user to reopen the child session on demand.
+Open item: define a backend archive/prune policy for long-lived installations.
+Any storage-level cleanup must preserve delegation result packets, parent cards,
+transcript links, and an explicit way to reopen or export the child session on
+demand.
 
 ### Result Packet
 
@@ -262,10 +265,12 @@ the prompt dispatches immediately. If the parent is still in a turn, the prompt
 waits behind the current turn and resumes the parent through the existing
 queued-prompt path.
 
-If the parent session is removed before a wait can resume it, TermAl consumes
-the parent's pending waits with `reason: "parentSessionRemoved"` and does not
-queue a resume prompt. This keeps `/api/state` from retaining orphan waits and
-lets SSE clients distinguish normal fan-in completion from parent removal.
+If the parent session is removed or becomes unavailable before a wait can
+resume it, TermAl consumes the parent's pending waits with
+`reason: "parentSessionRemoved"` or `reason: "parentSessionUnavailable"` and
+does not queue a resume prompt. This keeps `/api/state` from retaining orphan
+waits and lets SSE clients distinguish normal fan-in completion from parent
+loss.
 Boot-time reconciliation applies the same cleanup to persisted waits whose
 parent session is already missing.
 
@@ -576,7 +581,7 @@ type DelegationDeltaEvent =
       revision: number;
       waitId: string;
       parentSessionId: string;
-      reason: "completed" | "parentSessionRemoved";
+      reason: "completed" | "parentSessionUnavailable" | "parentSessionRemoved";
     }
   | {
       type: "delegationUpdated";

@@ -204,6 +204,7 @@ fn claude_agent_commands(message: &Value) -> Option<Vec<AgentCommand>> {
                 content: format!("/{name}"),
                 source,
                 argument_hint,
+                resolver_frontmatter: None,
             })
         })
         .collect::<Vec<_>>();
