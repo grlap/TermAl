@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  getMermaidDiagramFrameStyle,
   isMermaidErrorVisualizationSvg,
   renderTermalMermaidDiagram,
   type MermaidModule,
@@ -33,6 +34,23 @@ describe("mermaid-render", () => {
     expect(isMermaidErrorVisualizationSvg('<svg><g class="error-icon"></g></svg>')).toBe(
       false,
     );
+  });
+
+  it("keeps Mermaid frame scrollbar slack out of fit-to-frame mode", () => {
+    const svg = '<svg viewBox="0 0 300 80"><text>ok</text></svg>';
+
+    expect(getMermaidDiagramFrameStyle(svg)).toMatchObject({
+      aspectRatio: "302 / 104",
+      height: "auto",
+      maxWidth: "100%",
+      width: "302px",
+    });
+    expect(getMermaidDiagramFrameStyle(svg, { fitToFrame: true })).toMatchObject({
+      aspectRatio: "302 / 80",
+      height: "auto",
+      maxWidth: "100%",
+      width: "302px",
+    });
   });
 
   it("cleans Mermaid temporary DOM nodes when an error SVG is rethrown", async () => {

@@ -279,21 +279,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Consider splitting once the test grows further.
 - Current 6-in-1 is acceptable but the pattern should not expand.
 
-## Mermaid `getMermaidDiagramFrameStyle` keeps 24px aspect-ratio slack in fit-to-frame mode
-
-**Severity:** Low - `ui/src/mermaid-render.ts:133-169`. The frame's `aspect-ratio: 302/104` was tuned to absorb a 16-20px horizontal scrollbar plus a few pixels of font-metrics drift in the default mode where the iframe is allowed to scroll horizontally. In the new fit mode (`fitToFrame: true`), the SVG has `max-width: 100%; height: auto` and there is no horizontal scrollbar — the slack manifests as 24px of empty iframe area at the bottom that bleeds the parent background through.
-
-For a viewBox 300×80 in fit mode, the SVG's natural rendered height would be about 80, but the iframe is 104, leaving ~24px of unused vertical space. Real diagrams in a narrow source pane can show a noticeable gap below the diagram.
-
-**Current behavior:**
-- `getMermaidDiagramFrameStyle` is mode-agnostic.
-- 24px slack carried into fit mode where there's no scrollbar.
-- Visible gap below diagram in narrow source preview.
-
-**Proposal:**
-- Pass `{ fitToFrame }` through to `getMermaidDiagramFrameStyle` and drop the +24 slack when in fit mode (use `aspectRatio: ${frameWidth} / ${Math.ceil(dimensions.height) + 2}`).
-- Or document the residual slack as an intentional buffer for foreignObject font drift in fit mode.
-
 ## SourcePanel fit-mode test verifies CSS classes but not iframe srcdoc CSS
 
 **Severity:** Low - `ui/src/panels/SourcePanel.test.tsx:267-304`. The new "lets Mermaid diagrams use the full rendered Markdown preview width" test verifies CSS classes are wired (`markdown-diff-section-fill-mermaid` and `markdown-copy-shell-fill-mermaid`) but does NOT verify the Mermaid iframe srcdoc actually contains fit-mode CSS.

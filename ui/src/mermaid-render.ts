@@ -130,14 +130,18 @@ export function buildMermaidDiagramFrameSrcDoc(
 export const MERMAID_DIAGRAM_FRAME_MAX_WIDTH = 4096;
 export const MERMAID_DIAGRAM_FRAME_MAX_HEIGHT = 4096;
 
-export function getMermaidDiagramFrameStyle(svg: string): CSSProperties {
+export function getMermaidDiagramFrameStyle(
+  svg: string,
+  options: { fitToFrame?: boolean } = {},
+): CSSProperties {
   const dimensions = readMermaidSvgDimensions(svg);
   if (!dimensions) {
     return {};
   }
 
+  const heightSlack = options.fitToFrame ? 0 : 24;
   const frameHeight = clampMermaidDiagramExtent(
-    Math.ceil(dimensions.height) + 24,
+    Math.ceil(dimensions.height) + heightSlack,
     60,
     MERMAID_DIAGRAM_FRAME_MAX_HEIGHT,
   );
@@ -159,8 +163,10 @@ export function getMermaidDiagramFrameStyle(svg: string): CSSProperties {
     // vertical overflow hidden. That keeps wide diagrams tight instead
     // of restoring the old fixed-height blank-frame behavior.
     //
-    // `frameHeight` still includes the historical 24px vertical slack
-    // for scrollbar chrome / Mermaid temp-DOM text-measurement drift.
+    // Default frames include 24px vertical slack for horizontal
+    // scrollbar chrome / Mermaid temp-DOM text-measurement drift. Fit
+    // frames do not scroll horizontally, so they keep the raw viewBox
+    // height to avoid a visible blank band below the scaled SVG.
     aspectRatio: `${frameWidth} / ${frameHeight}`,
     height: "auto",
     width: `${frameWidth}px`,

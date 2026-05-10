@@ -1251,9 +1251,11 @@ function MermaidDiagram({
       if (readySvg === null) {
         return undefined;
       }
-      return getMermaidDiagramFrameStyle(readySvg);
+      return getMermaidDiagramFrameStyle(readySvg, {
+        fitToFrame: fillAvailableSpace,
+      });
     },
-    [readySvg],
+    [fillAvailableSpace, readySvg],
   );
 
   if (renderState.status === "error") {
