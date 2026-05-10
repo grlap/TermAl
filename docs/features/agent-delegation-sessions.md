@@ -923,10 +923,8 @@ be explicit about which guarantees are enforced and which are advisory.
 ### Enforcement Model
 
 `readOnly`:
-- TermAl launches the child with the strictest available agent permission mode.
-- Claude read-only children are forced to Plan mode even when the user's
-  default Claude mode is auto-approve; write-enabled Claude delegations keep
-  the configured default mode.
+- TermAl keeps the child's configured agent permission mode. This lets reviewer
+  delegations run normal inspection commands when the user's default allows it.
 - TermAl-mediated write/file/edit commands are disabled for the child.
 - While the read-only delegation is running, TermAl also blocks local
   TermAl-mediated writes from parent or sibling sessions that target the same
