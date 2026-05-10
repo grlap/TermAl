@@ -4161,6 +4161,70 @@ fn delegation_result_packet_drops_trailing_colon_from_invalid_finding_line() {
 }
 
 #[test]
+fn delegation_result_packet_filters_none_findings() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\nStatus: completed\n\nSummary:\nReady.\n\nFindings:\n- None",
+    )
+    .expect("packet with explicit no-findings marker should parse");
+
+    assert!(parsed.findings.is_empty());
+}
+
+#[test]
+fn delegation_result_packet_no_separator_finding_uses_note_fallback() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\nStatus: completed\n\nSummary:\nReady.\n\nFindings:\n- Missing separator but still useful.",
+    )
+    .expect("packet with fallback finding should parse");
+
+    assert_eq!(
+        parsed.findings,
+        vec![DelegationFinding {
+            severity: "Note".to_owned(),
+            file: None,
+            line: None,
+            message: "Missing separator but still useful.".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn delegation_result_packet_parses_multi_word_finding_severity() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\nStatus: completed\n\nSummary:\nReady.\n\nFindings:\n- Code Style src/foo.rs:42 - Use repo formatting.",
+    )
+    .expect("packet with multi-word finding severity should parse");
+
+    assert_eq!(
+        parsed.findings,
+        vec![DelegationFinding {
+            severity: "Code Style".to_owned(),
+            file: Some("src/foo.rs".to_owned()),
+            line: Some(42),
+            message: "Use repo formatting.".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn delegation_result_packet_parses_multi_word_severity_with_backticked_location() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\nStatus: completed\n\nSummary:\nReady.\n\nFindings:\n- Code Style `src/foo.rs:42` - Use repo formatting.",
+    )
+    .expect("packet with backticked multi-word finding location should parse");
+
+    assert_eq!(
+        parsed.findings,
+        vec![DelegationFinding {
+            severity: "Code Style".to_owned(),
+            file: Some("src/foo.rs".to_owned()),
+            line: Some(42),
+            message: "Use repo formatting.".to_owned(),
+        }]
+    );
+}
+
+#[test]
 fn delegation_public_result_summary_is_capped() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);

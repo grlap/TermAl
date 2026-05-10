@@ -2839,10 +2839,7 @@ fn parse_delegation_finding_line(line: &str) -> Option<DelegationFinding> {
         .split_once(" - ")
         .map(|(head, message)| (head.trim(), message.trim()))
         .unwrap_or(("", text));
-    let (severity, location) = head
-        .split_once(char::is_whitespace)
-        .map(|(severity, location)| (severity.trim(), location.trim()))
-        .unwrap_or((head.trim(), ""));
+    let (severity, location) = parse_delegation_finding_head(head);
     let severity = if severity.is_empty() {
         "Note"
     } else {
@@ -2855,6 +2852,33 @@ fn parse_delegation_finding_line(line: &str) -> Option<DelegationFinding> {
         line,
         message: message.to_owned(),
     })
+}
+
+fn parse_delegation_finding_head(head: &str) -> (&str, &str) {
+    let head = head.trim();
+    if let Some((severity, location)) = head.rsplit_once(char::is_whitespace) {
+        if !severity.trim().is_empty()
+            && looks_like_delegation_finding_location(location)
+        {
+            return (severity.trim(), location.trim());
+        }
+    }
+    head.split_once(char::is_whitespace)
+        .map(|(severity, location)| (severity.trim(), location.trim()))
+        .unwrap_or((head, ""))
+}
+
+fn looks_like_delegation_finding_location(location: &str) -> bool {
+    let location = location.trim().trim_matches('`');
+    if location.is_empty() {
+        return false;
+    }
+    if location.contains('/') || location.contains('\\') {
+        return true;
+    }
+    location
+        .rsplit_once(':')
+        .is_some_and(|(file, line)| !file.trim().is_empty() && line.parse::<u32>().is_ok())
 }
 
 fn parse_delegation_finding_location(location: &str) -> (Option<String>, Option<u32>) {
