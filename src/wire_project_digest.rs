@@ -25,10 +25,16 @@ struct ProjectDigestResponse {
     headline: String,
     done_summary: String,
     current_status: String,
+    /// Session id used by digest actions and deep links. For live approval,
+    /// interaction, and active states this points at the session that produced
+    /// the digest status. For error, dirty-worktree, and idle states it points
+    /// at the latest non-delegation prompt target so follow-up actions continue
+    /// in the parent session even when the summary came from another session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     primary_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     proposed_actions: Vec<ProjectDigestAction>,
+    /// Project URL, optionally focused on `primarySessionId` when one exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     deep_link: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

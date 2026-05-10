@@ -309,7 +309,7 @@ impl AppState {
             None
         };
         let prompt_target_session = latest_project_prompt_target_session(&inputs.sessions);
-        let primary_session = pending_approval
+        let summary_session = pending_approval
             .as_ref()
             .map(|(record, _)| *record)
             .or_else(|| pending_interaction.as_ref().map(|(record, _)| *record))
@@ -323,25 +323,25 @@ impl AppState {
                     .find(|record| !record.session.messages.is_empty())
             })
             .or_else(|| inputs.sessions.last());
-        let primary_session_id = primary_session.map(|record| record.session.id.clone());
+        let summary_session_id = summary_session.map(|record| record.session.id.clone());
         let prompt_target_session_id =
             prompt_target_session.map(|record| record.session.id.clone());
-        let deep_link = Some(build_project_deep_link(
+        let summary_deep_link = Some(build_project_deep_link(
             &inputs.project.id,
-            primary_session_id.as_deref(),
+            summary_session_id.as_deref(),
         ));
         let worktree_dirty = git_status.as_ref().is_some_and(|status| !status.is_clean);
 
         if let Some((record, message_id)) = pending_approval {
             let (done_summary, mut source_message_ids) =
-                select_project_done_summary(primary_session, git_status.as_ref(), false);
+                select_project_done_summary(summary_session, git_status.as_ref(), false);
             if !source_message_ids.contains(&message_id) {
                 source_message_ids.insert(0, message_id.clone());
             }
             return Ok(ProjectDigestSummary {
                 headline: inputs.project.name,
                 project_id: inputs.project.id,
-                primary_session_id,
+                primary_session_id: summary_session_id,
                 done_summary: normalize_project_text(
                     &done_summary,
                     "Work paused while waiting for approval.",
@@ -352,7 +352,7 @@ impl AppState {
                     ProjectActionId::Reject,
                     ProjectActionId::ReviewInTermal,
                 ],
-                deep_link,
+                deep_link: summary_deep_link,
                 pending_approval_target: Some(ProjectApprovalTarget {
                     session_id: record.session.id.clone(),
                     message_id,
@@ -363,18 +363,18 @@ impl AppState {
 
         if let Some((record, message_id)) = pending_interaction {
             let (done_summary, mut source_message_ids) =
-                select_project_done_summary(primary_session, git_status.as_ref(), false);
+                select_project_done_summary(summary_session, git_status.as_ref(), false);
             if !source_message_ids.contains(&message_id) {
                 source_message_ids.insert(0, message_id);
             }
             let mut proposed_actions = vec![ProjectActionId::ReviewInTermal];
-            if primary_session_id.is_some() {
+            if summary_session_id.is_some() {
                 proposed_actions.push(ProjectActionId::Stop);
             }
             return Ok(ProjectDigestSummary {
                 headline: inputs.project.name,
                 project_id: inputs.project.id,
-                primary_session_id,
+                primary_session_id: summary_session_id,
                 done_summary: normalize_project_text(
                     &done_summary,
                     "Work is waiting on a response in TermAl.",
@@ -384,7 +384,7 @@ impl AppState {
                     "Waiting on input in TermAl.",
                 ),
                 proposed_actions,
-                deep_link,
+                deep_link: summary_deep_link,
                 pending_approval_target: None,
                 source_message_ids,
             });
@@ -392,27 +392,27 @@ impl AppState {
 
         if let Some(record) = error_session {
             let (done_summary, source_message_ids) =
-                select_project_done_summary(primary_session, git_status.as_ref(), false);
+                select_project_done_summary(summary_session, git_status.as_ref(), false);
             let mut proposed_actions = vec![ProjectActionId::ReviewInTermal];
-            let primary_session_id = prompt_target_session_id.clone();
-            let deep_link = Some(build_project_deep_link(
+            let action_target_session_id = prompt_target_session_id.clone();
+            let action_target_deep_link = Some(build_project_deep_link(
                 &inputs.project.id,
-                primary_session_id.as_deref(),
+                action_target_session_id.as_deref(),
             ));
-            if primary_session_id.is_some() {
+            if action_target_session_id.is_some() {
                 proposed_actions.insert(0, ProjectActionId::FixIt);
             }
             return Ok(ProjectDigestSummary {
                 headline: inputs.project.name,
                 project_id: inputs.project.id,
-                primary_session_id,
+                primary_session_id: action_target_session_id,
                 done_summary: normalize_project_text(
                     &done_summary,
                     "The last turn ended in an error.",
                 ),
                 current_status: normalize_project_text(&record.session.preview, "Needs attention."),
                 proposed_actions,
-                deep_link,
+                deep_link: action_target_deep_link,
                 pending_approval_target: None,
                 source_message_ids,
             });
@@ -420,15 +420,15 @@ impl AppState {
 
         if let Some(record) = active_session {
             let (done_summary, source_message_ids) =
-                select_project_done_summary(primary_session, git_status.as_ref(), false);
+                select_project_done_summary(summary_session, git_status.as_ref(), false);
             return Ok(ProjectDigestSummary {
                 headline: inputs.project.name,
                 project_id: inputs.project.id,
-                primary_session_id,
+                primary_session_id: summary_session_id,
                 done_summary: normalize_project_text(&done_summary, "The agent is still working."),
                 current_status: active_project_status_text(record),
                 proposed_actions: vec![ProjectActionId::Stop, ProjectActionId::ReviewInTermal],
-                deep_link,
+                deep_link: summary_deep_link,
                 pending_approval_target: None,
                 source_message_ids,
             });
@@ -436,41 +436,41 @@ impl AppState {
 
         if worktree_dirty {
             let (done_summary, source_message_ids) =
-                select_project_done_summary(primary_session, git_status.as_ref(), true);
+                select_project_done_summary(summary_session, git_status.as_ref(), true);
             let mut proposed_actions = vec![ProjectActionId::ReviewInTermal];
             if prompt_target_session_id.is_some() {
                 proposed_actions.push(ProjectActionId::AskAgentToCommit);
                 proposed_actions.push(ProjectActionId::KeepIterating);
             }
-            let primary_session_id = prompt_target_session_id.clone();
-            let deep_link = Some(build_project_deep_link(
+            let action_target_session_id = prompt_target_session_id.clone();
+            let action_target_deep_link = Some(build_project_deep_link(
                 &inputs.project.id,
-                primary_session_id.as_deref(),
+                action_target_session_id.as_deref(),
             ));
             return Ok(ProjectDigestSummary {
                 headline: inputs.project.name,
                 project_id: inputs.project.id,
-                primary_session_id,
+                primary_session_id: action_target_session_id,
                 done_summary: normalize_project_text(
                     &done_summary,
                     "The working tree has changes ready for review.",
                 ),
                 current_status: "Changes are ready for review.".to_owned(),
                 proposed_actions,
-                deep_link,
+                deep_link: action_target_deep_link,
                 pending_approval_target: None,
                 source_message_ids,
             });
         }
 
         let (done_summary, source_message_ids) =
-            select_project_done_summary(primary_session, git_status.as_ref(), false);
-        let primary_session_id = prompt_target_session_id;
-        let deep_link = Some(build_project_deep_link(
+            select_project_done_summary(summary_session, git_status.as_ref(), false);
+        let action_target_session_id = prompt_target_session_id;
+        let action_target_deep_link = Some(build_project_deep_link(
             &inputs.project.id,
-            primary_session_id.as_deref(),
+            action_target_session_id.as_deref(),
         ));
-        let proposed_actions = if primary_session_id.is_some() {
+        let proposed_actions = if action_target_session_id.is_some() {
             vec![ProjectActionId::Continue, ProjectActionId::ReviewInTermal]
         } else {
             vec![ProjectActionId::ReviewInTermal]
@@ -478,11 +478,11 @@ impl AppState {
         Ok(ProjectDigestSummary {
             headline: inputs.project.name,
             project_id: inputs.project.id,
-            primary_session_id,
+            primary_session_id: action_target_session_id,
             done_summary: normalize_project_text(&done_summary, "No agent work has started yet."),
             current_status: "Idle and unblocked.".to_owned(),
             proposed_actions,
-            deep_link,
+            deep_link: action_target_deep_link,
             pending_approval_target: None,
             source_message_ids,
         })

@@ -291,31 +291,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Assert on the full `heightWrites` array order, not just `toContainEqual`.
 - Or use `toEqual([...])` with the full expected sequence.
 
-## `digest.deep_link` derivation now branch-local in two places (same triple-shadow as `primary_session_id`)
-
-**Severity:** Note - `src/api.rs:308-484`. Round 76 added two new `let deep_link = Some(build_project_deep_link(...))` rebindings inside the `worktree_dirty` and idle branches. The outer `deep_link` (line 329-332) is now used only by the four upper branches. Same triple-shadow problem as `primary_session_id`. Wire-contract callers cannot tell from `deep_link` alone which target it points at.
-
-**Current behavior:**
-- Three layers of `deep_link` semantics in one function.
-- Shadows in dirty/idle branches.
-- Wire contract docs don't distinguish.
-
-**Proposal:**
-- As with `primary_session_id`, lift the per-branch `deep_link` derivation into a helper that takes the action-target session id explicitly.
-
-## `digest.primary_session_id` semantics drift between branches without wire-level documentation
-
-**Severity:** Note - `src/api.rs:308-484`. Round 76 deliberately changed `primary_session_id` in `worktree_dirty` and `idle` branches to be the non-delegation prompt target, while `pending_approval`, `pending_interaction`, `error_session`, and `active_session` branches keep the original "most-relevant session" semantics. The wire contract `ProjectDigestResponse.primary_session_id` is unchanged and undocumented. Consumers cannot tell which definition applies in which branch.
-
-**Current behavior:**
-- Per-branch divergent semantics.
-- Wire contract unchanged.
-- Consumers cannot disambiguate.
-
-**Proposal:**
-- Document the per-branch contract on `ProjectDigestResponse.primary_session_id` in `wire_project_digest.rs`.
-- Or split the wire field into `summary_session_id` (always source of `done_summary`) and `action_target_session_id` (always dispatch target).
-
 ## Three Telegram user-error formatters with three formats but shared truncation helper
 
 **Severity:** Note - `src/telegram.rs:2299-2336`. `telegram_action_error_text` (multi-line with "Send /status" footer), `telegram_callback_action_error_text` (one-line "X failed: Y"), and `telegram_prompt_error_text` (multi-line "Could not forward that message." + detail). Three user-visible string formats mean a UI-level message-style consistency check is missing. A future contributor changing one might forget the others.
@@ -328,19 +303,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 **Proposal:**
 - Either consolidate into a single `format_telegram_user_error(action_kind, err)` enum-driven formatter.
 - Or add a JSDoc-style block above each declaring the contract.
-
-## Project digest `primary_session_id` mixes summary source and action target semantics
-
-**Severity:** Low - `src/api.rs:397-476`. The error, dirty, and clean idle digest branches can compute summary text/status from one session while replacing `primary_session_id` and `deep_link` with the non-delegation prompt target. Consumers cannot tell whether `primary_session_id` names the session that produced the digest summary/status or the session that should receive follow-up actions.
-
-**Current behavior:**
-- `primary_session_id` is used as the action target by `execute_project_action()`.
-- The same field is also serialized to clients as the digest's primary/deep-link session.
-- Error, dirty, and idle branches can derive summary/status context from a delegation child while returning the parent/non-delegation session id.
-
-**Proposal:**
-- Split the internal digest model into explicit `summary_session_id` and `action_target_session_id` fields.
-- Document which field drives links, summaries, and prompt-producing actions.
 
 ## `SessionPaneView` pending-prompt scroll exemption misses `showWaitingIndicator` dependency
 
@@ -368,18 +330,6 @@ A future server adds a new status variant (`"queued"`, `"timing_out"`) silently 
 
 **Proposal:**
 - Replace `String` with a re-used `TelegramSessionStatus` enum that uses `#[serde(other)]` (mirroring `TelegramSessionFetchSession`).
-
-## Duplicate `let primary_session_id` rebindings in `src/api.rs` digest branches
-
-**Severity:** Note - `src/api.rs:432-470`. Duplicate `let primary_session_id = ...` and `let deep_link = ...` rebindings inside both `worktree_dirty` and idle branches shadow the outer bindings. The function now has three different layers of `primary_session_id` semantics: the original "most-recent-by-activity-rank", the rebinding to `prompt_target_session_id`, and the proposed-actions test `prompt_target_session_id.is_some()` already done before rebinding.
-
-**Current behavior:**
-- Three layers of `primary_session_id` semantics in one function.
-- Future readers will struggle to keep these straight.
-
-**Proposal:**
-- Lift the prompt-target-vs-primary distinction into a single named variable at the top of the function.
-- Or extract the dirty/idle branches into helpers that take both sessions explicitly.
 
 ## `paneMessageContentSignaturesRef` lifetime divergence vs `paneContentSignaturesRef`
 
