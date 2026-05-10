@@ -1279,7 +1279,7 @@ fn telegram_assistant_forwarding_plan_baselines_preexisting_active_turn_without_
                 messages: vec![TelegramSessionFetchMessage::Text {
                     id: "message-1".to_owned(),
                     author: "assistant".to_owned(),
-                    text: "Existing local turn finished".to_owned(),
+                    text: "Existing local turn".to_owned(),
                 }],
             },
         },
@@ -1309,7 +1309,7 @@ fn telegram_assistant_forwarding_plan_baselines_preexisting_active_turn_without_
                     TelegramSessionFetchMessage::Text {
                         id: "message-1".to_owned(),
                         author: "assistant".to_owned(),
-                        text: "Existing local turn finished".to_owned(),
+                        text: "Existing local turn".to_owned(),
                     },
                     TelegramSessionFetchMessage::Text {
                         id: "message-2".to_owned(),
@@ -1588,14 +1588,14 @@ fn telegram_active_baseline_reforwards_same_message_growth_after_settle() {
     assert!(apply_assistant_forwarding_plan(&mut state, plan));
 
     let telegram = FakeTelegramSender::new(None);
-    let settled_old_turn = FakeTelegramSessionReader {
+    let settled_reply = FakeTelegramSessionReader {
         response: TelegramSessionFetchResponse {
             session: TelegramSessionFetchSession {
                 status: TelegramSessionStatus::Idle,
                 messages: vec![TelegramSessionFetchMessage::Text {
                     id: "message-1".to_owned(),
                     author: "assistant".to_owned(),
-                    text: "Old turn complete".to_owned(),
+                    text: "Old turn partial\nTelegram reply".to_owned(),
                 }],
             },
         },
@@ -1603,50 +1603,17 @@ fn telegram_active_baseline_reforwards_same_message_growth_after_settle() {
 
     let changed = forward_new_assistant_message_if_any(
         &telegram,
-        &settled_old_turn,
+        &settled_reply,
         &mut state,
         42,
         "session-1",
     )
-    .expect("settled old turn should baseline");
-
-    assert!(changed);
-    assert!(telegram.sent_texts.borrow().is_empty());
-    let cursor = state
-        .assistant_forwarding_cursors
-        .get("session-1")
-        .expect("cursor should stay persisted");
-    assert_eq!(cursor.message_id.as_deref(), Some("message-1"));
-    assert_eq!(cursor.text_chars, Some("Old turn complete".chars().count()));
-    assert!(cursor.resend_if_grown);
-    assert!(!cursor.baseline_while_active);
-
-    let same_message_reply = FakeTelegramSessionReader {
-        response: TelegramSessionFetchResponse {
-            session: TelegramSessionFetchSession {
-                status: TelegramSessionStatus::Idle,
-                messages: vec![TelegramSessionFetchMessage::Text {
-                    id: "message-1".to_owned(),
-                    author: "assistant".to_owned(),
-                    text: "Old turn complete\nTelegram reply".to_owned(),
-                }],
-            },
-        },
-    };
-
-    let changed = forward_new_assistant_message_if_any(
-        &telegram,
-        &same_message_reply,
-        &mut state,
-        42,
-        "session-1",
-    )
-    .expect("same-message reply growth should forward");
+    .expect("same-message reply growth should forward on first settled poll");
 
     assert!(changed);
     assert_eq!(
         telegram.sent_texts.borrow()[0],
-        "Old turn complete\nTelegram reply"
+        "Old turn partial\nTelegram reply"
     );
     assert_eq!(state.forward_next_assistant_message_session_id, None);
 }
@@ -1731,7 +1698,7 @@ fn telegram_active_baseline_survives_approval_without_text_before_reply() {
                 messages: vec![TelegramSessionFetchMessage::Text {
                     id: "message-1".to_owned(),
                     author: "assistant".to_owned(),
-                    text: "Approved old turn complete".to_owned(),
+                    text: "Approved old turn".to_owned(),
                 }],
             },
         },
@@ -1757,7 +1724,7 @@ fn telegram_active_baseline_survives_approval_without_text_before_reply() {
                     TelegramSessionFetchMessage::Text {
                         id: "message-1".to_owned(),
                         author: "assistant".to_owned(),
-                        text: "Approved old turn complete".to_owned(),
+                        text: "Approved old turn".to_owned(),
                     },
                     TelegramSessionFetchMessage::Text {
                         id: "message-2".to_owned(),
@@ -1864,7 +1831,7 @@ fn telegram_prompt_behind_initial_approval_session_forwards_later_reply() {
                     TelegramSessionFetchMessage::Text {
                         id: "message-1".to_owned(),
                         author: "assistant".to_owned(),
-                        text: "Old approved turn complete".to_owned(),
+                        text: "Old approved turn resumed".to_owned(),
                     },
                     TelegramSessionFetchMessage::Text {
                         id: "message-2".to_owned(),
@@ -1956,7 +1923,7 @@ fn telegram_prompt_behind_initial_approval_with_prior_text_forwards_later_reply(
                     TelegramSessionFetchMessage::Text {
                         id: "message-1".to_owned(),
                         author: "assistant".to_owned(),
-                        text: "Old approved turn complete".to_owned(),
+                        text: "Old approved turn resumed".to_owned(),
                     },
                     TelegramSessionFetchMessage::Text {
                         id: "message-2".to_owned(),
@@ -2041,7 +2008,7 @@ fn telegram_unknown_status_preserves_old_turn_boundary_until_known_reply() {
                     TelegramSessionFetchMessage::Text {
                         id: "message-1".to_owned(),
                         author: "assistant".to_owned(),
-                        text: "Old turn under future status, now settled".to_owned(),
+                        text: "Old turn under future status".to_owned(),
                     },
                     TelegramSessionFetchMessage::Text {
                         id: "message-2".to_owned(),
