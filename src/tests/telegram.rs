@@ -672,7 +672,17 @@ fn telegram_sessions_command_chunks_oversized_output() {
         sent.iter()
             .all(|chunk| chunk.encode_utf16().count() <= TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS)
     );
-    assert!(!sent.join("\n").contains("must not be rendered"));
+    let reconstructed = sent.join("\n");
+    for index in 0..12 {
+        assert!(
+            reconstructed.contains(&format!("Session {index}")),
+            "missing session name {index}"
+        );
+        assert!(
+            reconstructed.contains(&format!("id: session-{index}")),
+            "missing session id {index}"
+        );
+    }
 }
 
 #[test]
