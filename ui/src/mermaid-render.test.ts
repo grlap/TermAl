@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildMermaidDiagramFrameSrcDoc,
   getMermaidDiagramFrameStyle,
   isMermaidErrorVisualizationSvg,
   renderTermalMermaidDiagram,
@@ -51,6 +52,27 @@ describe("mermaid-render", () => {
       maxWidth: "100%",
       width: "302px",
     });
+  });
+
+  it("builds distinct Mermaid iframe CSS for default and fit-to-frame modes", () => {
+    const svg = '<svg viewBox="0 0 300 80"><text>ok</text></svg>';
+
+    expect(buildMermaidDiagramFrameSrcDoc(svg)).toContain(
+      "html{overflow-x:auto;overflow-y:hidden;}",
+    );
+    expect(buildMermaidDiagramFrameSrcDoc(svg)).toContain(
+      "body{display:inline-block;min-width:100%;font-size:0;line-height:0;}",
+    );
+    expect(buildMermaidDiagramFrameSrcDoc(svg)).toContain(
+      "svg{display:block;max-width:none;height:auto",
+    );
+
+    const fitSrcDoc = buildMermaidDiagramFrameSrcDoc(svg, { fitToFrame: true });
+    expect(fitSrcDoc).toContain("html{overflow:hidden;}");
+    expect(fitSrcDoc).toContain(
+      "body{display:block;width:100%;min-width:0;font-size:0;line-height:0;}",
+    );
+    expect(fitSrcDoc).toContain("svg{display:block;max-width:100%;height:auto");
   });
 
   it("cleans Mermaid temporary DOM nodes when an error SVG is rethrown", async () => {

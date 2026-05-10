@@ -279,18 +279,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Consider splitting once the test grows further.
 - Current 6-in-1 is acceptable but the pattern should not expand.
 
-## `buildMermaidDiagramFrameSrcDoc` has no unit test for the new fit-mode option
-
-**Severity:** Low - `ui/src/mermaid-render.test.ts`. The new `buildMermaidDiagramFrameSrcDoc(svg, options)` API has no direct unit test (only integration coverage via `MarkdownContent.test.tsx`). The existing `mermaid-render.test.ts` covers `isMermaidErrorVisualizationSvg` and `renderTermalMermaidDiagram` but not the srcdoc builder.
-
-**Current behavior:**
-- Builder exercised only via integration test.
-- Unit-level CSS-string assertion absent.
-- A regression in builder isolation would not surface until rendering.
-
-**Proposal:**
-- Add a `describe("buildMermaidDiagramFrameSrcDoc")` block with one test per mode asserting on the returned string's CSS substrings (overflow rules, body display, svg max-width).
-
 ## `MarkdownDocumentView` is dead-reachable through the `RendererPreviewPane` `isMarkdownSource` branch
 
 **Severity:** Note - `ui/src/MarkdownDocumentView.tsx`. SourcePanel only routes `RendererPreviewPane` when `!(isMarkdownSource && renderedMarkdownSegment)`. `renderedMarkdownSegment` is always non-null when `isMarkdownSource && fileState.status === "ready"`. `RendererPreviewPane` itself bails on `fileState.status !== "ready"`. So the inner `if (isMarkdownSource) return <MarkdownDocumentView .../>` branch in `RendererPreviewPane` cannot fire from this caller.
