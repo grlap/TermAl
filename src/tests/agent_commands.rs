@@ -44,6 +44,7 @@ fn cache_agent_commands_for_test(state: &AppState, session_id: &str, commands: V
 #[test]
 fn reads_claude_agent_commands_from_markdown_files() {
     let root = std::env::temp_dir().join(format!("termal-agent-commands-{}", Uuid::new_v4()));
+    let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
 
     fs::create_dir_all(commands_dir.join("nested")).unwrap();
@@ -105,8 +106,6 @@ Inspect diffs.
             },
         ]
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -141,6 +140,7 @@ fn reads_claude_agent_commands_strip_yaml_frontmatter() {
         "termal-agent-commands-frontmatter-{}",
         Uuid::new_v4()
     ));
+    let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
 
     fs::create_dir_all(&commands_dir).unwrap();
@@ -178,8 +178,6 @@ Inspect diffs.
 Inspect diffs.
 "
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -203,7 +201,7 @@ Body starts here.
         parsed.frontmatter,
         Some("description: |\n  Multi-line descriptions are outside the tiny parser.\n")
     );
-    assert_eq!(parsed.description.as_deref(), Some("|"));
+    assert_eq!(parsed.description, None);
     assert_eq!(parsed.content, "Body starts here.\n");
 
     let malformed_scalar = "---
@@ -213,7 +211,7 @@ description: value: extra
 Body.
 ";
     let parsed = strip_markdown_frontmatter(malformed_scalar);
-    assert_eq!(parsed.description.as_deref(), Some("value: extra"));
+    assert_eq!(parsed.description, None);
     assert_eq!(parsed.content, "Body.\n");
 
     let large_description = "x".repeat(70 * 1024);
@@ -250,6 +248,7 @@ fn reads_claude_agent_commands_fallback_description_for_blank_frontmatter_descri
         "termal-agent-commands-blank-description-{}",
         Uuid::new_v4()
     ));
+    let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
 
     fs::create_dir_all(&commands_dir).unwrap();
@@ -270,8 +269,6 @@ Run a targeted tool check.
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].description, "Run a targeted tool check.");
     assert_eq!(commands[0].argument_hint, None);
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -280,6 +277,7 @@ fn reads_claude_agent_commands_strip_claude_only_frontmatter() {
         "termal-agent-commands-claude-frontmatter-{}",
         Uuid::new_v4()
     ));
+    let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
 
     fs::create_dir_all(&commands_dir).unwrap();
@@ -301,8 +299,6 @@ Run a targeted tool check.
     assert_eq!(commands[0].description, "Run a targeted tool check.");
     assert_eq!(commands[0].content, "Run a targeted tool check.\n");
     assert_eq!(commands[0].argument_hint.as_deref(), Some("PATH"));
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -311,6 +307,7 @@ fn reads_claude_agent_commands_strip_crlf_frontmatter() {
         "termal-agent-commands-crlf-frontmatter-{}",
         Uuid::new_v4()
     ));
+    let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
@@ -327,8 +324,6 @@ fn reads_claude_agent_commands_strip_crlf_frontmatter() {
     assert_eq!(commands[0].argument_hint.as_deref(), Some("PATH"));
     assert_eq!(commands[0].content, "Run CRLF check for $ARGUMENTS.\r\n");
     assert!(!commands[0].content.contains("---"));
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -337,6 +332,7 @@ fn reads_claude_agent_commands_strip_model_only_frontmatter() {
         "termal-agent-commands-model-frontmatter-{}",
         Uuid::new_v4()
     ));
+    let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
 
     fs::create_dir_all(&commands_dir).unwrap();
@@ -362,8 +358,6 @@ Run with the command model preference.
         commands[0].content,
         "Run with the command model preference.\n"
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -372,6 +366,7 @@ fn reads_claude_agent_commands_strip_tools_and_disable_model_frontmatter() {
         "termal-agent-commands-tools-frontmatter-{}",
         Uuid::new_v4()
     ));
+    let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
 
     fs::create_dir_all(&commands_dir).unwrap();
@@ -407,8 +402,6 @@ Run with declared tools.
     assert_eq!(commands[1].name, "tools-check");
     assert_eq!(commands[1].description, "Run with declared tools.");
     assert_eq!(commands[1].content, "Run with declared tools.\n");
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -417,6 +410,7 @@ fn reads_claude_agent_commands_preserve_thematic_breaks() {
         "termal-agent-commands-thematic-break-{}",
         Uuid::new_v4()
     ));
+    let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
 
     fs::create_dir_all(&commands_dir).unwrap();
@@ -442,8 +436,6 @@ Run the check.
             .content
             .contains("- Keep this prompt body intact.")
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -452,6 +444,7 @@ fn reads_claude_agent_commands_ignore_nested_frontmatter_description() {
         "termal-agent-commands-nested-description-{}",
         Uuid::new_v4()
     ));
+    let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
 
     fs::create_dir_all(&commands_dir).unwrap();
@@ -473,8 +466,6 @@ Body description wins.
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].description, "Body description wins.");
     assert_eq!(commands[0].content, "Body description wins.\n");
-
-    let _ = fs::remove_dir_all(root);
 }
 
 // Pins `read_claude_agent_commands` to returning an empty vector (not an
@@ -485,12 +476,11 @@ Body description wins.
 fn returns_empty_agent_commands_when_commands_directory_is_missing() {
     let root =
         std::env::temp_dir().join(format!("termal-agent-commands-missing-{}", Uuid::new_v4()));
+    let _cleanup = TempDirCleanup::new(root.clone());
     fs::create_dir_all(&root).unwrap();
 
     let commands = read_claude_agent_commands(&root).unwrap();
     assert!(commands.is_empty());
-
-    let _ = fs::remove_dir_all(root);
 }
 
 // Pins `AppState::list_agent_commands` to still returning
@@ -500,6 +490,7 @@ fn returns_empty_agent_commands_when_commands_directory_is_missing() {
 #[test]
 fn returns_agent_commands_for_non_claude_sessions() {
     let root = std::env::temp_dir().join(format!("termal-agent-commands-codex-{}", Uuid::new_v4()));
+    let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
@@ -534,8 +525,6 @@ Use the active agent's tools.
     assert_eq!(response.commands[0].name, "review-local");
     assert_eq!(response.commands[0].description, "Review local changes.");
     assert_eq!(response.commands[0].kind, AgentCommandKind::PromptTemplate);
-
-    let _ = fs::remove_dir_all(root);
 }
 
 // Pins `claude_agent_commands` to parsing the `response.response.commands`
@@ -939,6 +928,7 @@ async fn agent_command_resolve_route_json_rejection_uses_endpoint_label() {
 fn resolves_prompt_template_arguments_and_note() {
     let root =
         std::env::temp_dir().join(format!("termal-agent-command-resolve-{}", Uuid::new_v4()));
+    let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
@@ -1003,8 +993,6 @@ Verify the fix.
         )
     );
     assert_eq!(response.delegation, None);
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -1082,6 +1070,7 @@ fn project_local_review_local_metadata_does_not_grant_delegation_defaults() {
         "termal-agent-command-resolve-review-local-{}",
         Uuid::new_v4()
     ));
+    let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
@@ -1145,8 +1134,6 @@ Review staged and unstaged changes.
         Some("Review staged and unstaged changes.\n")
     );
     assert_eq!(response.delegation, None);
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

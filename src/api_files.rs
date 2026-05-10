@@ -854,6 +854,10 @@ fn markdown_command_frontmatter_fields(frontmatter: &str) -> BTreeMap<String, St
             continue;
         }
         let value = raw_value.trim();
+        // Ignore unsupported YAML shapes so listing can fall back to body text.
+        if matches!(value, "|" | ">") || value.contains(": ") {
+            continue;
+        }
         let field_value =
             unquote_markdown_frontmatter_string(value, key, false).unwrap_or_else(|_| value.to_owned());
         fields.insert(key.to_owned(), field_value);
