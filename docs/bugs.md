@@ -279,20 +279,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Consider splitting once the test grows further.
 - Current 6-in-1 is acceptable but the pattern should not expand.
 
-## Telegram renderer tests don't exercise `> 12 sessions` overflow message
-
-**Severity:** Low - `src/tests/telegram.rs:188-245`. `render_telegram_project_sessions` appends "More sessions exist in TermAl." when more than 12 project-scoped sessions are present. The test fixture uses 2 project-1 sessions; the overflow branch is structurally untested.
-
-A regression that flipped `> 12` to `>= 12` or removed the trailing line would silently pass.
-
-**Current behavior:**
-- Test fixture has 2 sessions per project.
-- >12 sessions case uncovered.
-
-**Proposal:**
-- Add a fixture with 13+ project-scoped sessions.
-- Assert the overflow line is present plus that exactly 12 session entries appear.
-
 ## Composer height test asserts on `transition: "none"` writes without ordering pin
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7789-7950`. The "keeps multiline composer height steady when deleting text inside a line" test asserts `heightWrites.toContainEqual({ value: "1px", transition: "none" })` and `heightWrites.toContainEqual({ value: "96px", transition: "none" })`. The full ordering is not validated, so a regression that re-orders the writes (e.g., setting `96px` first and then `1px`) would still pass even though the visible behavior would differ.

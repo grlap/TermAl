@@ -342,6 +342,38 @@ fn telegram_sessions_renderer_lists_project_sessions_newest_first() {
 }
 
 #[test]
+fn telegram_sessions_renderer_reports_project_session_overflow() {
+    let state = TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: (0..13)
+            .map(|index| TelegramStateSession {
+                id: format!("session-{index}"),
+                name: format!("Session {index}"),
+                project_id: Some("project-1".to_owned()),
+                status: "idle".to_owned(),
+                message_count: index,
+            })
+            .collect(),
+    };
+
+    let text = render_telegram_project_sessions("project-1", &state);
+
+    assert!(text.contains("More sessions exist in TermAl."));
+    assert_eq!(
+        text.lines()
+            .filter(|line| line.starts_with("- Session "))
+            .count(),
+        12
+    );
+    assert!(text.contains("- Session 12 (idle, 12 messages)"));
+    assert!(text.contains("- Session 1 (idle, 1 message)"));
+    assert!(!text.contains("- Session 0 (idle, 0 messages)"));
+}
+
+#[test]
 fn telegram_sessions_renderer_handles_empty_project() {
     let state = TelegramStateSessionsResponse {
         projects: Vec::new(),
