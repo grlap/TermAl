@@ -15,6 +15,7 @@ import {
   type RefObject,
 } from "react";
 import { ExpandedPromptPanel } from "../ExpandedPromptPanel";
+import { CONVERSATION_COMPOSER_INPUT_DATA_ATTRIBUTES } from "./conversation-composer-focus";
 import {
   buildSlashPaletteState,
   parseAgentCommandDraft,
@@ -2993,7 +2994,7 @@ const SessionComposer = memo(function SessionComposer({
           id={`prompt-${paneId}`}
           ref={composerInputRef}
           className="composer-input"
-          data-conversation-composer-input="true"
+          {...CONVERSATION_COMPOSER_INPUT_DATA_ATTRIBUTES}
           aria-label={session ? `Message ${session.name}` : "Message session"}
           defaultValue={initialComposerDraft}
           onChange={(event) => handleComposerChange(event.target.value)}

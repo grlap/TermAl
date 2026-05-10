@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ConversationOverviewRail } from "./ConversationOverviewRail";
+import { CONVERSATION_COMPOSER_INPUT_DATASET_KEY } from "./conversation-composer-focus";
 import type { VirtualizedConversationLayoutSnapshot } from "./VirtualizedConversationMessageList";
 import { DEFAULT_CONVERSATION_MARKER_COLOR } from "../conversation-marker-colors";
 import type { Message } from "../types";
@@ -122,7 +123,7 @@ describe("ConversationOverviewRail", () => {
   it("keeps the previous projection while the composer prompt is focused", () => {
     vi.useFakeTimers();
     const composer = document.createElement("textarea");
-    composer.dataset.conversationComposerInput = "true";
+    composer.dataset[CONVERSATION_COMPOSER_INPUT_DATASET_KEY] = "true";
     document.body.appendChild(composer);
 
     try {
@@ -189,7 +190,7 @@ describe("ConversationOverviewRail", () => {
 
   it("bounds focused projection deferral when idle callbacks keep reporting low time", () => {
     const composer = document.createElement("textarea");
-    composer.dataset.conversationComposerInput = "true";
+    composer.dataset[CONVERSATION_COMPOSER_INPUT_DATASET_KEY] = "true";
     document.body.appendChild(composer);
     const originalRequestIdleCallback = window.requestIdleCallback;
     const originalCancelIdleCallback = window.cancelIdleCallback;
@@ -300,7 +301,7 @@ describe("ConversationOverviewRail", () => {
   it("rebuilds a focused projection through the hard timeout when idle never fires", () => {
     vi.useFakeTimers();
     const composer = document.createElement("textarea");
-    composer.dataset.conversationComposerInput = "true";
+    composer.dataset[CONVERSATION_COMPOSER_INPUT_DATASET_KEY] = "true";
     document.body.appendChild(composer);
     const originalRequestIdleCallback = window.requestIdleCallback;
     const originalCancelIdleCallback = window.cancelIdleCallback;

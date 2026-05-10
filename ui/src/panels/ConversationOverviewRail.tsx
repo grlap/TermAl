@@ -21,6 +21,7 @@ import {
   type ConversationOverviewSegment,
   type ConversationOverviewTailItemInput,
 } from "./conversation-overview-map";
+import { CONVERSATION_COMPOSER_INPUT_DATASET_KEY } from "./conversation-composer-focus";
 import type {
   VirtualizedConversationLayoutSnapshot,
   VirtualizedConversationViewportSnapshot,
@@ -526,7 +527,7 @@ function isComposerPromptFocused() {
   const activeElement = document.activeElement;
   return (
     activeElement instanceof HTMLTextAreaElement &&
-    activeElement.dataset.conversationComposerInput === "true"
+    activeElement.dataset[CONVERSATION_COMPOSER_INPUT_DATASET_KEY] === "true"
   );
 }
 

@@ -267,17 +267,6 @@ If the agent's response to the Telegram prompt appends to the existing message i
 - Hook session deletion to remove the corresponding cursor.
 - Or prune entries in the relay's existing cleanup paths whenever it observes a foreign session id absent from current state.
 
-## `isComposerPromptFocused` data-attribute coupling identical in shape to old CSS-class coupling
-
-**Severity:** Low - `ui/src/panels/ConversationOverviewRail.tsx:481-487`. The round-77 finding is closed by switching to a data attribute (`dataset.conversationComposerInput`). The new coupling is identical in shape (string-on-string), just on a different attribute. A rename of `data-conversation-composer-input` would silently break focus-aware deferral.
-
-**Current behavior:**
-- Data attribute coupling between two unrelated components.
-- No exported constant.
-
-**Proposal:**
-- Export `CONVERSATION_COMPOSER_INPUT_DATASET_KEY` from a shared module and reference it from both call sites.
-
 ## Codepoint-paste truncation in marker create form has no user feedback
 
 **Severity:** Note - `ui/src/panels/conversation-markers.tsx:644-649`. `updateCreateMarkerName` is called from `onChange` and slices the input. During paste of >120 codepoints the user sees their input truncated to 120 with no indication that more was discarded. The behavior is now codepoint-correct but lost the browser's "input-length-limit" affordance.
