@@ -1315,7 +1315,7 @@ fn delegation_wait_reconciles_after_restart_recovery() {
         resume_prompt
             .pending_prompt
             .text
-            .contains("TermAl restarted before this turn finished")
+            .contains("failed - Restart Recovery Review")
     );
     drop(inner);
     restarted.shutdown_persist_blocking();
