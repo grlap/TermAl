@@ -356,19 +356,6 @@ The sanitizer only redacts Telegram tokens. A backend error like `"failed to loa
 **Proposal:**
 - Add a test that asserts the live-tail wrapper appears AND disappears as `showWaitingIndicator`/`pendingPrompts` toggle.
 
-## `dispatch_project_action` error handling asymmetric between message and callback paths
-
-**Severity:** Note - `src/telegram.rs:1442-1457`. `dispatch_project_action` failure in callback-query handler calls `answer_callback_query` THEN `send_message`. If `send_message` returns Err, it bubbles via `?` and the function returns Err — but `answer_callback_query` already fired (with `let _ =`).
-
-The order acknowledges first then reports, which is correct (Telegram's callback_query MUST be answered within ~30s). But if `send_message` errors, the caller's surrounding loop logs the error AND has no way to know the user already saw the toast.
-
-**Current behavior:**
-- Acknowledge-then-report order.
-- send_message error bubbles even though toast already fired.
-
-**Proposal:**
-- Document the "answer toast first, then explanatory message" intent inline.
-
 ## Telegram `/sessions` couples the relay to full `/api/state`
 
 **Severity:** Note - `src/telegram.rs:1025, 2020-2240`. The relay calls full `/api/state` and reconstructs a Telegram-specific project-session list locally. That couples Telegram command behavior to the broad state snapshot shape instead of a narrow project-scoped session summary contract.

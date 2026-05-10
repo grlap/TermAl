@@ -1740,6 +1740,9 @@ fn handle_telegram_callback_query(
         Ok(digest) => digest,
         Err(err) => {
             log_telegram_error("failed to dispatch Telegram callback action", &err);
+            // Telegram requires callback queries to be answered promptly. Send
+            // the toast first, then try the longer chat explanation; if the
+            // chat send fails, the caller should still log that delivery error.
             let _ = telegram.answer_callback_query(
                 &callback_query.id,
                 &telegram_callback_action_error_text(action_id, &err),
