@@ -1029,6 +1029,7 @@ export function SessionPaneView({
     paneContentSignaturesRef.current[pane.id] ??
     (paneContentSignaturesRef.current[pane.id] = {});
   const savedScrollPosition = paneScrollPositions[scrollStateKey];
+  const waitingIndicatorShouldStick = savedScrollPosition?.shouldStick === true;
 
   function getTailFollowIntent() {
     return paneShouldStickToBottomRef.current[pane.id] ?? true;
@@ -2088,33 +2089,49 @@ export function SessionPaneView({
   useLayoutEffect(() => {
     const previousByKey = previousShowWaitingIndicatorByKeyRef.current;
     const wasShowing = previousByKey[scrollStateKey] ?? false;
-    previousByKey[scrollStateKey] = showWaitingIndicator;
+
+    if (!showWaitingIndicator) {
+      previousByKey[scrollStateKey] = false;
+      return;
+    }
 
     if (
-      wasShowing ||
-      !showWaitingIndicator ||
       !activeSession ||
+      !isActive ||
       !isSessionTabActive ||
       pane.viewMode !== "session"
     ) {
       return;
     }
 
+    if (wasShowing) {
+      return;
+    }
+
+    previousByKey[scrollStateKey] = true;
+
     if (
       !getTailFollowIntent() &&
-      paneScrollPositions[scrollStateKey]?.shouldStick !== true &&
+      !waitingIndicatorShouldStick &&
       !isMessageStackNearBottom()
     ) {
       return;
     }
 
-    scrollToLatestMessage("auto", true, "bottom_follow");
+    return scheduleSettledScrollToBottom("auto", {
+      maxAttempts: 24,
+      minAttempts: 4,
+      preferVirtualizedBoundary: true,
+      scrollKind: "bottom_follow",
+    });
   }, [
     activeSession,
+    isActive,
     isSessionTabActive,
     pane.viewMode,
     scrollStateKey,
     showWaitingIndicator,
+    waitingIndicatorShouldStick,
   ]);
 
   useLayoutEffect(() => {
@@ -2305,6 +2322,7 @@ export function SessionPaneView({
     isSessionTabActive,
     pane.viewMode,
     scrollStateKey,
+    showWaitingIndicator,
     visibleContentSignature,
     visibleLastMessageAuthor,
     visibleMessageContentSignature,

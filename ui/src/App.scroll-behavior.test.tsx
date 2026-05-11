@@ -1031,6 +1031,206 @@ describe("App scroll behaviour", () => {
     });
   });
 
+  it("does not consume the live-turn bottom-follow edge while its pane is inactive", async () => {
+    await withSuppressedActWarnings(async () => {
+      let scrollHeight = 1000;
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: () => scrollHeight,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const messages: Session["messages"] = [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Current prompt",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Current response.",
+        },
+      ];
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse(
+            makeStateResponse({
+              revision: 1,
+              projects: [
+                {
+                  id: "project-termal",
+                  name: "TermAl",
+                  rootPath: "/projects/termal",
+                },
+              ],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Session 1",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                  preview: "Current response.",
+                  messages,
+                }),
+              ],
+            }),
+          );
+        }
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+
+      const layoutStorageKey = `${WORKSPACE_LAYOUT_STORAGE_KEY}:test-waiting-indicator-inactive-edge`;
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=test-waiting-indicator-inactive-edge",
+      );
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        layoutStorageKey,
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: {
+              id: "split-root",
+              type: "split",
+              direction: "row",
+              ratio: 0.35,
+              first: {
+                type: "pane",
+                paneId: "pane-control",
+              },
+              second: {
+                type: "pane",
+                paneId: "pane-session",
+              },
+            },
+            panes: [
+              {
+                id: "pane-control",
+                tabs: [
+                  {
+                    id: "tab-control",
+                    kind: "controlPanel",
+                    originSessionId: null,
+                  },
+                ],
+                activeTabId: "tab-control",
+                activeSessionId: null,
+                viewMode: "controlPanel",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-session",
+                tabs: [
+                  {
+                    id: "tab-session",
+                    kind: "session",
+                    sessionId: "session-1",
+                  },
+                ],
+                activeTabId: "tab-session",
+                activeSessionId: "session-1",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+            ],
+            activePaneId: "pane-control",
+          },
+        }),
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+        act(() => {
+          latestEventSource().dispatchError();
+        });
+        await settleAsyncUi();
+
+        const messageStack = Array.from(
+          document.querySelectorAll(".message-stack"),
+        ).find(
+          (candidate): candidate is HTMLElement =>
+            candidate instanceof HTMLElement &&
+            !candidate.classList.contains("control-panel-stack"),
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Session message stack not found");
+        }
+        const sessionPane = messageStack.closest(".workspace-pane");
+        if (!(sessionPane instanceof HTMLElement)) {
+          throw new Error("Session pane not found");
+        }
+        expect(sessionPane).not.toHaveClass("active");
+
+        messageStack.scrollTop = 800;
+        await act(async () => {
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+        scrollToMock.mockClear();
+
+        scrollHeight = 1120;
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 2,
+          projects: [
+            {
+              id: "project-termal",
+              name: "TermAl",
+              rootPath: "/projects/termal",
+            },
+          ],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              status: "active",
+              preview: "Current response.",
+              messages,
+            }),
+          ],
+        });
+        await settleAsyncUi();
+
+        expect(screen.getByText("Live turn")).toBeInTheDocument();
+        expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
+
+        await act(async () => {
+          fireEvent.mouseDown(sessionPane);
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        expect(sessionPane).toHaveClass("active");
+        expect(
+          filterScrollToCallsAt(scrollToMock, 920, "auto").length,
+        ).toBeGreaterThan(0);
+        expect(messageStack.scrollTop).toBe(920);
+      } finally {
+        restoreScrollGeometry();
+      }
+    });
+  });
+
   it("smoothly follows new assistant messages while pinned to the bottom", async () => {
     await withSuppressedActWarnings(async () => {
       let scrollHeight = 1000;

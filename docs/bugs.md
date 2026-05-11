@@ -44,22 +44,6 @@ Operators and the UI cannot tell that fan-in resume should have happened but did
 - Emit a structured warning event or retain dispatch error metadata.
 - Or document the best-effort policy and recovery expectations.
 
-## Waiting-indicator bottom-follow effect can consume inactive rising edges
-
-**Severity:** Medium - `ui/src/SessionPaneView.tsx:2084-2114`. The waiting-indicator rising-edge effect writes `previousShowWaitingIndicatorByKeyRef[scrollStateKey] = showWaitingIndicator` before it checks whether the session tab is active or the pane is in session mode. If the indicator turns on while the pane is inactive, that edge is marked consumed; switching back later sees `wasShowing=true` and skips the bottom-follow adjustment.
-
-The same effect also gates on `paneScrollPositions[scrollStateKey]?.shouldStick` without capturing that value in the dependency list, and it calls `scrollToLatestMessage("auto", true, "bottom_follow")` directly instead of the virtualizer-aware settled-scroll path used by adjacent bottom-follow effects.
-
-**Current behavior:**
-- Inactive panes can update the per-key previous-indicator ref before the active-view guard returns.
-- The current per-key `shouldStick` value influences the effect but is not captured as a dependency.
-- The new path bypasses the helper paths that prefer virtualized transcript boundaries.
-
-**Proposal:**
-- Move the previous-indicator write after the active session/view guards, or store a pending edge that is consumed only when the pane can actually scroll.
-- Derive a narrow `shouldStick` value for the effect or document why the stable `paneScrollPositions` map is intentionally non-reactive.
-- Reuse the virtualizer-aware bottom-follow helper, or add a comment explaining why direct `scrollToLatestMessage` is safe for the waiting-indicator edge.
-
 ## Isolated delegation worktree creation is not transactional
 
 **Severity:** Medium - `src/delegations.rs:336` and `src/delegations.rs:1775`. The API creates a detached git worktree before later fallible validation and before patch application is known to succeed.
@@ -194,19 +178,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 **Proposal:**
 - Consider splitting once the test grows further.
 - Current 6-in-1 is acceptable but the pattern should not expand.
-
-## `SessionPaneView` pending-prompt scroll exemption misses `showWaitingIndicator` dependency
-
-**Severity:** Low - `ui/src/SessionPaneView.tsx:2035`. The scroll effect now checks `showWaitingIndicator` inside the `onlyPendingPromptsChanged` branch, but the effect dependency list does not include `showWaitingIndicator`.
-
-**Current behavior:**
-- `showWaitingIndicator` can change through sending/busy state.
-- The scroll effect can keep using a stale closure for the pending-prompt scroll exemption.
-- Pending-prompt scroll behavior can be out of sync with the current render.
-
-**Proposal:**
-- Add `showWaitingIndicator` to the effect dependency array.
-- Or derive the exemption only from values already included in the dependency list.
 
 ## `paneMessageContentSignaturesRef` lifetime divergence vs `paneContentSignaturesRef`
 
