@@ -583,22 +583,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 **Proposal:**
 - Attach a `Retry-After: 2` header, or add a stable `retryAfterSeconds` field to the error contract.
 
-## `get_session_tail` skips remote-proxy hydration that `get_session` performs
-
-**Severity:** High - the new tail-first path silently degrades for remote-proxy sessions, returning an empty tail instead of triggering upstream hydration.
-
-`src/state_accessors.rs:386-401`. `get_session` (lines 341-374) detects an unloaded remote-proxy session (`record.remote_id.is_some() && record.remote_session_id.is_some() && !record.session.messages_loaded`) and synchronously calls `hydrate_remote_session_target` to fetch from the upstream remote. `get_session_tail` does not perform this check — it returns whatever messages the local cache happens to hold (typically zero for an unhydrated remote proxy), with `messages_loaded=false`. For a 200-message remote-proxy session never opened locally, the tail-first path returns an empty tail. The frontend then proceeds to the full fetch, which DOES trigger upstream hydration. So the user sees: empty pane → full transcript pop, with a wasted round-trip in between. The architecture doc claim at `docs/architecture.md:217-229` ("For unloaded remote-proxy sessions, the same route synchronously calls the owning remote's…") becomes false specifically when `?tail=N` is appended.
-
-**Current behavior:**
-- `get_session_tail` reads `record.session.messages` directly, no remote-proxy hydration branch.
-- For remote proxies with empty local cache, response carries `messages: []`, `messages_loaded: false`.
-- Frontend's `shouldStartTailFirstHydration` triggers based on `messageCount >= 101` — a remote proxy whose summary advertises a large `messageCount` is exactly the case routed here.
-- Empty tail falls through to "stale" (because `responseSession.messages.length > 0` guard), only working by accident, then full fetch triggers hydration.
-
-**Proposal:**
-- Either (a) route `get_session_tail` through the same remote-proxy hydration branch that `get_session` uses (preferred — single source of truth), or (b) reject `?tail=N` on unloaded remote-proxy sessions with a typed error so the frontend skips tail-first hydration for them, or (c) document explicitly that `?tail=N` is local-only and have `shouldStartTailFirstHydration` skip remote-proxy sessions.
-- Add Rust test asserting tail-fetch against an unhydrated remote-proxy session triggers upstream hydration (or returns the typed gating error).
-
 ## `messageUpdated`/`textDelta`/`textReplace` for missing-prefix message IDs silently degrade to `appliedNeedsResync` after partial adoption
 
 **Severity:** High - the partial-tail post-condition (`messagesLoaded: false`, `messages.length: N`, `messageCount: M > N`) creates a real gap window where deltas targeting messages in the unloaded prefix are silently dropped on the floor as metadata-only.
@@ -2134,8 +2118,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `AgentSessionPanel.test.tsx:1493-1525` asserts only that the rail is absent immediately and present after 1.5s of advanced timers. A regression that made the rail render *immediately* (defeating the deferral) would still pass the post-advance assertion. Add an intermediate `act(() => vi.advanceTimersByTime(100))` checkpoint asserting the rail is *still* absent. Or assert directly on a transcript-hydration symptom (count of mounted message slots is small at t=0 and large at t=1500ms).
 - [ ] P2: Add `get_session_tail` boundary and error coverage:
   `src/tests/http_routes.rs:138` covers only happy path (`tail=3` on 5 messages). Add cases for (a) `tail=0` on a populated session asserting `messages: [], messages_loaded: false`, (b) `tail >= len(messages)` where `start_index == 0` asserting `messages_loaded` propagates from the source, (c) `tail > SESSION_TAIL_HYDRATION_MAX_MESSAGES = 500` asserting the silent cap (and ideally fail-loud after the cap-disclosure fix lands), (d) missing session id 404, (e) hidden session, (f) `?tail=abc` malformed value, (g) tail-then-full id-overlap proving the wire-level guarantee.
-- [ ] P2: Add `get_session_tail` remote-proxy hydration coverage:
-  pair with the High-severity bug entry. Once remote-proxy routing is fixed (or explicitly gated), add a Rust integration test that calls `?tail=N` against an unhydrated remote-proxy session and asserts either upstream hydration triggers or the typed gating error fires. Today an empty tail with `messages_loaded: false` is the silent-degrade behavior.
 - [ ] P2: Cover the four uncovered `tailAdoptOutcome` branches in `app-live-state.test.ts`:
   the new "adopts a large-session tail" test exercises only `partial`. Add one focused case per remaining outcome: (a) `adopted` (tail returns full transcript when backend has fewer than 100 messages with `messages_loaded: true` — short-circuits the full fetch), (b) `restartResync` (different `serverInstanceId`), (c) `stateResync` (revision gap), (d) `stale` (lower revision). Each branch has distinct side effects (`hydratedSessionIdsRef.add`, `hydrationRestartResyncPendingRef.current = true`, `requestActionRecoveryResyncRef`, fall through to full fetch).
 - [ ] P2: Cover the tail-fetch mismatch path in `app-live-state.test.ts`:

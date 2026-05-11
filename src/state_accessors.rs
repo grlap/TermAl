@@ -455,6 +455,22 @@ impl AppState {
         session_id: &str,
         message_limit: usize,
     ) -> Result<SessionResponse, ApiError> {
+        let should_hydrate_remote_proxy = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_visible_session_index(session_id)
+                .ok_or_else(ApiError::local_session_missing)?;
+            let record = &inner.sessions[index];
+            record.remote_id.is_some()
+                && record.remote_session_id.is_some()
+                && !record.session.messages_loaded
+        };
+        if should_hydrate_remote_proxy {
+            // Reuse the full-session remote repair path, then project the
+            // now-localized transcript into the requested tail window below.
+            let _ = self.get_session(session_id)?;
+        }
+
         let inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_visible_session_index(session_id)

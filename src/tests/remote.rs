@@ -2745,6 +2745,131 @@ fn get_session_hydrates_unloaded_remote_proxy_from_remote_owner() {
 }
 
 #[test]
+fn get_session_tail_hydrates_unloaded_remote_proxy_before_slicing() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut full_remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    full_remote_session.messages = vec![
+        remote_text_message("remote-message-1", "Remote line 1."),
+        remote_text_message("remote-message-2", "Remote line 2."),
+        remote_text_message("remote-message-3", "Remote line 3."),
+    ];
+    full_remote_session.messages_loaded = true;
+    full_remote_session.message_count = 3;
+    let mut remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        3,
+        OrchestratorInstanceStatus::Running,
+    );
+    let mut remote_state_session = full_remote_session.clone();
+    make_remote_session_summary_only(&mut remote_state_session, 3);
+    remote_state.orchestrators.clear();
+    remote_state.sessions = vec![remote_state_session];
+
+    let mut summary_session = full_remote_session.clone();
+    make_remote_session_summary_only(&mut summary_session, 3);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: summary_session.id.clone(),
+                session: summary_session,
+            },
+        )
+        .expect("remote summary session create delta should apply");
+
+    let local_session_id = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .expect("remote proxy session should exist");
+        let record = &inner.sessions[index];
+        assert!(!record.session.messages_loaded);
+        assert!(record.session.messages.is_empty());
+        assert_eq!(record.session.message_count, 3);
+        record.session.id.clone()
+    };
+
+    let (port, requests, server) = spawn_remote_session_and_state_response_server(
+        SessionResponse {
+            revision: 3,
+            session: full_remote_session,
+            server_instance_id: "remote-instance".to_owned(),
+        },
+        Some(remote_state),
+    );
+    insert_test_remote_connection(&state, &remote, port);
+
+    let response = state
+        .get_session_tail(&local_session_id, 2)
+        .expect("remote proxy tail should hydrate from owner before slicing");
+    assert_eq!(response.session.id, local_session_id);
+    assert_eq!(
+        response.session.project_id.as_deref(),
+        Some(local_project_id.as_str())
+    );
+    assert!(!response.session.messages_loaded);
+    assert_eq!(response.session.message_count, 3);
+    assert_eq!(response.session.messages.len(), 2);
+    assert!(matches!(
+        &response.session.messages[0],
+        Message::Text { text, .. } if text == "Remote line 2."
+    ));
+    assert!(matches!(
+        &response.session.messages[1],
+        Message::Text { text, .. } if text == "Remote line 3."
+    ));
+
+    let stored = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .expect("remote proxy session should still exist");
+        inner.sessions[index].session.clone()
+    };
+    assert!(stored.messages_loaded);
+    assert_eq!(stored.messages.len(), 3);
+
+    let request_lines = requests.lock().expect("requests mutex poisoned").clone();
+    assert!(
+        request_lines
+            .iter()
+            .any(|line| line.starts_with("GET /api/sessions/remote-session-1 ")),
+        "expected targeted remote session fetch, saw {request_lines:?}"
+    );
+    join_test_server(server);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn get_session_falls_back_to_unloaded_summary_when_remote_owner_returns_summary() {
     let state = test_app_state();
     let remote = RemoteConfig {
