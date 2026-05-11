@@ -127,6 +127,13 @@ before checking default-project membership, so orphaned defaults can report
 `unknown ... project/session` wording instead of an older membership-specific
 message.
 
+`POST /api/telegram/config` returns the sanitized current settings after the
+patch is applied, not an echo of request fields. Omitted or `null` patch fields
+leave the matching setting unchanged, but stale persisted project/session
+references can still be scrubbed from the response when they no longer exist.
+Clients should replace local Telegram settings state with the response instead
+of diffing request fields against response fields.
+
 ## Legacy CLI Mode
 
 `cargo run -- telegram` still works for debugging and reads:

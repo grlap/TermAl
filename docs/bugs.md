@@ -600,21 +600,6 @@ Acceptable today; flagging for future re-use when N grows.
 - If parallel-agent counts grow, memoize `runAgentAction` with `useCallback` and stable deps.
 - Or extract `ParallelAgentRow` per existing tracked entry.
 
-## `update_telegram_config` pre-sanitize means response can drop fields the client never touched
-
-**Severity:** Low - the new sanitize-before-patch step now silently scrubs stale persisted state on any unrelated config update (e.g., toggling `enabled`). The wire response then reflects the sanitized state, which differs from what the client posted.
-
-`src/telegram_settings.rs:51`. A client that only patches `enabled: true` will receive a response missing `defaultProjectId` / `defaultSessionId` it never asked to clear. Clients with optimistic UI that diff request to response will diff incorrectly. There is no `metadata.cleared` field or response indicator that sanitization happened.
-
-**Current behavior:**
-- `enabled: true` patch may return a response missing fields the client never touched.
-- No client-visible signal that sanitization occurred.
-- Optimistic UIs cannot diff request vs response.
-
-**Proposal:**
-- Document the contract: "the response always reflects sanitized current-state and may drop fields the client never touched".
-- Or add a `cleared` array (or similar) to the response so clients can know what changed.
-
 ## `ParallelAgentsCard` per-row inline arrow handlers regenerate identity per render
 
 **Severity:** Low - `ui/src/message-cards.tsx:2158-2194` constructs three inline arrow functions per agent row (`() => onOpenAgentSession(agent.id)`, etc.) that regenerate identity on every render. `MessageCard` is `memo`-wrapped, but parent message identity is what stabilizes the card; agent-status updates re-render the whole list anyway.
