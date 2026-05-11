@@ -968,19 +968,6 @@ The remote hydration guard removes its `(remote_id, session_id)` key on drop. `c
 - Or avoid clearing live in-flight markers during remote continuity reset; let the owning guard retire its own marker.
 - Add cleanup tests covering overlapping guards and per-remote cleanup.
 
-## Lagged force-adopt marker clearing on EventSource reconnect lacks coverage
-
-**Severity:** Low - the frontend now clears an armed lagged recovery marker on EventSource error/reconnect, but no test pins that boundary.
-
-The new baseline guard covers same-stream stale recovery after a newer delta, but a separate hazard is an old `lagged` marker surviving across a closed EventSource into a new stream. The implementation clears the marker on reconnect/error cleanup, yet no regression proves a stale lower/same-instance state on the new stream cannot be force-adopted.
-
-**Current behavior:**
-- `clearForceAdoptNextStateEvent` runs during EventSource error/reconnect cleanup.
-- Existing lagged tests do not cross an EventSource boundary.
-
-**Proposal:**
-- Add a reconnect test that dispatches `lagged`, triggers `error`, opens a new EventSource, and sends a lower/same-instance state that must not be force-adopted.
-
 ## Remote hydration dedupe coverage bypasses the production burst path
 
 **Severity:** Low - the current duplicate-hydration test manually seeds the in-flight map instead of driving real bursty remote deltas.
@@ -1723,8 +1710,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   drive the live-state hook or app through text-repair hydration after an unrelated newer live revision and assert the active transcript renders the repaired assistant text without scroll, focus, or another prompt.
 - [ ] P2: Add AgentSessionPanel deferred-tail component regressions:
   cover switching from a non-empty deferred transcript to an empty current session, and same-id updated assistant text through the rendered component path (`useDeferredValue`, pending-prompt filtering, and the virtualized list), not only the exported helper.
-- [ ] P2: Add lagged-marker EventSource reconnect-boundary regression:
-  dispatch `lagged`, trigger EventSource error/reconnect, then send a lower/same-instance state on the new stream and assert the old marker cannot force-adopt it.
 - [ ] P2: Add remote hydration dedupe production-path coverage:
   drive bursty same-session remote deltas through the production hydration path, assert only one remote session fetch is issued, and assert the in-flight guard is cleared after successful hydration.
 - [ ] P2: Add failed manual retry reconnect-rearm regression:

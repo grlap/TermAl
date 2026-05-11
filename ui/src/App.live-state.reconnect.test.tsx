@@ -2990,6 +2990,148 @@ describe("App live state — reconnect", () => {
     }
   });
 
+  it("clears an armed Lagged-recovery marker across EventSource recreation", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    vi.useFakeTimers();
+    const currentSession = makeSession("session-1", {
+      name: "Codex Session",
+      status: "active",
+      preview: "Current live body.",
+      messageCount: 1,
+      messagesLoaded: true,
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Current live body.",
+        },
+      ],
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return jsonResponse(
+          makeStateResponse({
+            revision: 2,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [currentSession],
+            serverInstanceId: "same-instance",
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    EventSourceMock.instances = [];
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const scrollIntoViewSpy = stubScrollIntoView();
+
+    try {
+      await renderApp();
+
+      const initialEventSource = latestEventSource();
+      await dispatchOpenedStateEvent(
+        initialEventSource,
+        makeStateResponse({
+          revision: 2,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [currentSession],
+          serverInstanceId: "same-instance",
+        }),
+      );
+
+      await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+      const sessionRowButton =
+        within(sessionList).getByText("Codex Session").closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+      await clickAndSettle(sessionRowButton);
+      expect(
+        screen.getAllByText("Current live body.").length,
+      ).toBeGreaterThan(0);
+
+      act(() => {
+        initialEventSource.dispatchNamedEvent("lagged", "1");
+        initialEventSource.readyState = 2;
+        initialEventSource.dispatchError();
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      await settleAsyncUi();
+
+      expect(EventSourceMock.instances.length).toBeGreaterThanOrEqual(2);
+      const recoveredEventSource =
+        EventSourceMock.instances[EventSourceMock.instances.length - 1];
+      expect(recoveredEventSource).not.toBe(initialEventSource);
+
+      act(() => {
+        recoveredEventSource.dispatchNamedEvent("state", {
+          ...makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Codex Session",
+                status: "idle",
+                preview: "Stale lagged reconnect body.",
+                messageCount: 1,
+                messagesLoaded: true,
+                messages: [
+                  {
+                    id: "message-stale",
+                    type: "text",
+                    timestamp: "09:59",
+                    author: "assistant",
+                    text: "Stale lagged reconnect body.",
+                  },
+                ],
+              }),
+            ],
+            serverInstanceId: "same-instance",
+          }),
+        });
+      });
+      await settleAsyncUi();
+
+      expect(screen.queryByText("Stale lagged reconnect body.")).toBeNull();
+      expect(
+        screen.getAllByText("Current live body.").length,
+      ).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+      scrollIntoViewSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("ignores a stale Lagged-recovery state snapshot after a newer live delta already advanced the stream", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
