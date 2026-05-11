@@ -359,18 +359,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Add a sibling test that drives both the Claude task path and the delegation creation path with overlapping ids.
 - Or document the assumption that uuid id spaces don't collide deterministically.
 
-## `cancelDelegation` `it.each` test pins running/completed/canceled as identical
-
-**Severity:** Note - `ui/src/SessionPaneView.render-callbacks.test.ts:493-527` `it.each(["canceled", "completed", "running"])` lumps three statuses behind a single assertion. The user-visible UX for `running` (cancel acknowledged, child still running) deserves a different message than `completed` or `canceled`, but the test pins them as identical no-error outcomes — locking in the bugs.md-flagged inconsistency.
-
-**Current behavior:**
-- Three statuses asserted identically.
-- The test will need updating when running gets its own UX.
-
-**Proposal:**
-- Add a comment explaining the test pin is the current-but-flagged behavior.
-- Or split `running` into its own test scoped to the bugs.md follow-up.
-
 ## Bundled telegram redaction tests keep growing despite the explicit anti-pattern flag
 
 **Severity:** Low - the bug-ledger entry "Round-64 added another bundled telegram redaction test" already calls out the bundled-test anti-pattern. Round 65 added two more cases to `..._respects_context_and_thresholds` (`telegram_adjacent_token_key`, `bot_adjacent_token_key`) and three more to `..._handles_escaped_and_telegram_specific_contexts` (`bearer_equals`, `authorization_equals`, `lower_bearer_equals`).
@@ -3013,8 +3001,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   for empty 502 body, `extractError` returns `"Request failed with status 502."` — more confusing than the prior `"The TermAl backend is unavailable."`. Either fall through to backend-unavailable copy when `raw` is empty AND `status >= 502`, or have `extractError` return a sentinel that the caller can detect for a fallback.
 - [ ] P2: Cover production-path tool/delegation id collision:
   add a Rust test that drives both the Claude task path and the delegation creation path with overlapping ids (or document the assumption that uuid id spaces don't collide deterministically). The current test manually inserts the collision.
-- [ ] P2: Split `cancelDelegation` `it.each` running/completed/canceled identical-pin into focused tests:
-  add a comment explaining the test pin is the current-but-flagged behavior, or split `running` into its own test scoped to the bugs.md follow-up.
 - [ ] P2: Clean up AgentSessionPanel `act(...)` warnings:
   targeted AgentSessionPanel Vitest still emits React `act(...)` warnings around async rerenders/events; identify the warned updates and wrap or await them so timing-sensitive failures are not hidden by noisy test output.
 - [ ] P2: Strengthen unmount race-condition delegation test:

@@ -651,31 +651,12 @@ describe("SessionPaneView render callbacks", () => {
     );
   });
 
-  it.each(["canceled", "completed", "running"] as const)(
-    "clears composer errors for %s cancel responses",
+  it.each(["canceled", "completed"] as const)(
+    "clears composer errors for terminal %s cancel responses",
     async (status) => {
-      vi.mocked(cancelDelegationCommand).mockResolvedValueOnce({
-        delegationId: "delegation-1",
-        childSessionId: "child-1",
-        status,
-        delegation: {
-          id: "delegation-1",
-          parentSessionId: "session-1",
-          childSessionId: "child-1",
-          mode: "reviewer",
-          status,
-          title: "Review",
-          agent: "Codex",
-          model: null,
-          writePolicy: { kind: "readOnly" },
-          createdAt: "now",
-          startedAt: "now",
-          completedAt: "now",
-          result: null,
-        },
-        revision: 2,
-        serverInstanceId: "server-1",
-      });
+      vi.mocked(cancelDelegationCommand).mockResolvedValueOnce(
+        makeDelegationStatusResponse({ status }),
+      );
       const { params } = renderCallbacks();
       renderDelegationCard(params);
 
@@ -686,6 +667,23 @@ describe("SessionPaneView render callbacks", () => {
       );
     },
   );
+
+  it("clears composer errors for currently running cancel responses", async () => {
+    // Current server contract: a running response means cancel was accepted or
+    // is still being reflected by follow-up SSE updates, so no inline error is
+    // shown. If UX later distinguishes this state, update this focused test.
+    vi.mocked(cancelDelegationCommand).mockResolvedValueOnce(
+      makeDelegationStatusResponse({ status: "running" }),
+    );
+    const { params } = renderCallbacks();
+    renderDelegationCard(params);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(params.onComposerError).toHaveBeenCalledWith(null),
+    );
+  });
 
   it("does not call delegation commands without an active session", async () => {
     const { hook } = renderCallbacks({ activeSession: null });
