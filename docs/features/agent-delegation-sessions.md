@@ -267,6 +267,12 @@ the prompt dispatches immediately. If the parent is still in a turn, the prompt
 waits behind the current turn and resumes the parent through the existing
 queued-prompt path.
 
+This means a caller must choose between synchronous polling and backend resume
+waits. After scheduling a backend resume wait, the parent turn should end; a
+shell or HTTP polling loop in that same turn keeps the queued resume prompt
+behind the active turn and can make the fan-in look stuck even though TermAl has
+already queued the result.
+
 If the parent session is removed or becomes unavailable before a wait can
 resume it, TermAl consumes the parent's pending waits with
 `reason: "parentSessionRemoved"` or `reason: "parentSessionUnavailable"` and
@@ -424,8 +430,10 @@ record. When the selected `any` or `all` condition is satisfied, the backend
 queues a synthesized resume prompt to the parent through the normal
 queued-prompt dispatcher. The default mode is `all`. Callers should treat a
 successful scheduled wait as a yield point: do not poll in the same parent turn
-unless the user explicitly asks for synchronous status. TermAl will re-activate
-the parent when the wait completes.
+unless the user explicitly asks for synchronous status. If the caller needs
+same-turn results, use `wait_delegations` instead of
+`resume_after_delegations`. TermAl will re-activate the parent when the wait
+completes after the current turn has yielded.
 
 Spawn commands return client-side validation failures as `outcome: "error"`
 with `error.kind === "validation-failed"`. Wait commands are different:
@@ -560,8 +568,10 @@ POST /api/sessions/{parentSessionId}/delegation-waits
 ```
 
 The `delegation-waits` endpoint schedules backend-owned parent resume prompts.
-The polling `wait_delegations` helper remains client-side and does not mutate
-parent session state.
+The polling `wait_delegations` helper remains client-side and does not create
+backend wait records. Its status/result reads may still refresh a completed
+child delegation, persist the terminal delegation record, and consume any
+already-satisfied backend wait watching that delegation.
 
 `GET /api/state` includes pending `delegationWaits` so reloads and other tabs can
 render the parent waiting state. Wait records are removed from the snapshot when

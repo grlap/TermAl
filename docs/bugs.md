@@ -105,37 +105,6 @@ Large tracked binary changes can make the delegation endpoint allocate large pat
 - Enforce a cumulative patch byte limit before creating or applying an isolated worktree.
 - Return a clear 4xx error when dirty state is too large to materialize safely.
 
-## Slash-command delegation is mouse-only while the palette is open
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:2467`. The Delegate button is now enabled for selected agent slash commands, but the textarea still intercepts `Tab` and `Enter` while the slash palette is open.
-
-Keyboard users can select and send the slash command, but cannot move focus to the now-enabled Delegate button with `Tab`; `Enter` sends instead of delegates. The new slash-command delegation flow is therefore effectively mouse-only.
-
-**Current behavior:**
-- `Tab` is prevented and routed to `handleComposerSend` whenever the slash palette is open.
-- `Enter` also sends the selected slash command.
-- No keyboard gesture delegates the selected slash command.
-
-**Proposal:**
-- Allow normal tab navigation when the selected slash item can be delegated.
-- Or add an explicit keyboard command for delegating the active slash command and cover it with RTL tests.
-
-## Agent command resolver failures are invisible in the composer
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:2388` and `ui/src/panels/AgentSessionPanel.tsx:2491`. Resolver errors are caught and handled only by refocusing the composer.
-
-If the backend rejects a native slash command with an additional note, or the backend is unavailable, the user sees no validation or retry explanation. The draft remains, but there is no visible reason why pressing Enter or Delegate did nothing.
-
-**Current behavior:**
-- Resolver `catch` blocks refocus the composer only when the original session is still active.
-- No error message is surfaced through the existing composer/session error channel.
-- Native slash note rejection and backend-unavailable failures look like no-ops.
-
-**Proposal:**
-- Thread an `onComposerError` callback or local inline error state into `AgentSessionPanelFooter` / `SessionComposer`.
-- Surface sanitized resolver failures the same way delegation spawn failures are surfaced.
-- Add tests for native-slash note rejection and backend-unavailable resolver failure.
-
 ## Delegation action generation guard can drop the first action after a session switch
 
 **Severity:** Low - `ui/src/SessionPaneView.render-callbacks.tsx:194`. `activeSessionGenerationRef` is advanced in a passive `useEffect`, so a delegation action started immediately after mount or session switch can capture the pre-effect generation.
@@ -3470,10 +3439,8 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover keyboard delegation for selected slash commands:
-  add RTL coverage proving keyboard users can delegate an active agent slash command while the palette is open, either through normal tab focus or an explicit delegation shortcut.
-- [ ] P2: Cover visible composer errors for resolver failures:
-  reject a resolver request for native-slash notes or backend-unavailable responses and assert the composer surfaces a user-visible sanitized error without clearing the draft.
+- [ ] P2: Cover delegation status/result polling edge contracts:
+  add tests for `any`-mode sibling freshness, no-op status/result GET revision stability, missing-child reconciliation through polling, and the result-GET `409` path still publishing any observed refresh side effects.
 - [ ] P2: Cover real composer-to-overview focus detection:
   render the real composer/overview path or assert the real composer emits `data-conversation-composer-input`, so `ConversationOverviewRail` deferral does not depend only on synthetic test fixtures.
 - [ ] P2: Cover first-chunk Telegram forward failure:

@@ -1,5 +1,6 @@
 import {
   act,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -7949,6 +7950,9 @@ function renderFooter({
   isPaneActive = true,
   session,
   committedDraft = "",
+  isSending = false,
+  isStopping = false,
+  isSessionBusy = false,
   isUpdating = false,
   onDraftCommit = vi.fn(),
   modelOptionsError = null,
@@ -7970,6 +7974,9 @@ function renderFooter({
   isPaneActive?: boolean;
   session: Session | null;
   committedDraft?: string;
+  isSending?: boolean;
+  isStopping?: boolean;
+  isSessionBusy?: boolean;
   isUpdating?: boolean;
   onDraftCommit?: (sessionId: string, nextValue: string) => void;
   modelOptionsError?: string | null;
@@ -8007,9 +8014,9 @@ function renderFooter({
       isPaneActive={isPaneActive}
       activeSessionId={session?.id ?? null}
       formatByteSize={formatFooterByteSize}
-      isSending={false}
-      isStopping={false}
-      isSessionBusy={false}
+      isSending={isSending}
+      isStopping={isStopping}
+      isSessionBusy={isSessionBusy}
       isUpdating={isUpdating}
       showNewResponseIndicator={false}
       newResponseIndicatorLabel="New response"
@@ -8714,6 +8721,525 @@ describe("AgentSessionPanelFooter", () => {
     });
     expect(onSend).not.toHaveBeenCalled();
     await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("lets keyboard users tab to Delegate for active agent slash commands", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(() => true);
+    const onSpawnDelegation = vi.fn(async () => true);
+    stubResolvedAgentCommand({
+      name: "review-local",
+      source: ".claude/commands/review-local.md",
+      kind: "promptTemplate",
+      visiblePrompt: "/review-local",
+      expandedPrompt: "Expanded review command body.",
+      title: "Review staged and unstaged changes.",
+      delegation: {
+        mode: "reviewer",
+        title: "Review staged and unstaged changes.",
+        writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+      },
+    });
+    render(
+      renderFooter({
+        isSessionBusy: true,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+        agentCommands: [
+          {
+            kind: "promptTemplate",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "Expanded review command body.",
+            source: ".claude/commands/review-local.md",
+          },
+        ],
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onSend,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    await user.click(textarea);
+    await user.keyboard("/rev");
+    expect(
+      screen.getByRole("option", { name: /\/review-local/ }),
+    ).toBeInTheDocument();
+    const hint = screen.getByText(/Tab moves focus to Delegate\./);
+    expect(textarea).toHaveAttribute("aria-describedby", hint.id);
+    const stopButton = screen.getByRole("button", { name: "Stop" });
+
+    await user.tab();
+
+    const delegateButton = screen.getByRole("button", { name: "Delegate" });
+    expect(delegateButton).toHaveFocus();
+    expect(stopButton).not.toHaveFocus();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onSpawnDelegation).not.toHaveBeenCalled();
+
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(onSpawnDelegation).toHaveBeenCalledWith(
+        "session-a",
+        "Expanded review command body.",
+        {
+          mode: "reviewer",
+          title: "Review staged and unstaged changes.",
+          writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+        },
+      ),
+    );
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("does not send or delegate when Shift+Tab is pressed on a slash command", async () => {
+    const onSend = vi.fn(() => true);
+    const onSpawnDelegation = vi.fn(async () => true);
+    const fetchMock = stubResolvedAgentCommand({
+      name: "review-local",
+      source: ".claude/commands/review-local.md",
+      kind: "promptTemplate",
+      visiblePrompt: "/review-local",
+      expandedPrompt: "Expanded review command body.",
+      title: "Review staged and unstaged changes.",
+      delegation: {
+        mode: "reviewer",
+        title: "Review staged and unstaged changes.",
+        writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+      },
+    });
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+        agentCommands: [
+          {
+            kind: "promptTemplate",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "Expanded review command body.",
+            source: ".claude/commands/review-local.md",
+          },
+        ],
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onSend,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+    expect(
+      screen.getByRole("option", { name: /\/review-local/ }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Tab", shiftKey: true });
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onSpawnDelegation).not.toHaveBeenCalled();
+  });
+
+  it("keeps Tab as send when delegation is unavailable for active agent slash commands", async () => {
+    const onSend = vi.fn(() => true);
+    const fetchMock = stubResolvedAgentCommand({
+      name: "review-local",
+      source: "Claude project command",
+      kind: "nativeSlash",
+      visiblePrompt: "/review-local",
+      title: "Review staged and unstaged changes.",
+    });
+    render(
+      renderFooter({
+        onSend,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+        agentCommands: [
+          {
+            kind: "nativeSlash",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "/review-local",
+            source: "Claude project command",
+          },
+        ],
+        canSpawnDelegation: false,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+    expect(
+      screen.getByRole("option", { name: /\/review-local/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Tab moves focus to Delegate\./),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Delegate" }),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Tab" });
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith("session-a", "/review-local"),
+    );
+    expect(lastJsonRequestBody(fetchMock)).toEqual({
+      arguments: "",
+      intent: "send",
+    });
+  });
+
+  it("does not tab to Delegate while a delegatable slash command is temporarily disabled", async () => {
+    const onSend = vi.fn(() => true);
+    const onSpawnDelegation = vi.fn(async () => true);
+    const fetchMock = stubResolvedAgentCommand({
+      name: "review-local",
+      source: ".claude/commands/review-local.md",
+      kind: "promptTemplate",
+      visiblePrompt: "/review-local",
+      expandedPrompt: "Expanded review command body.",
+      title: "Review staged and unstaged changes.",
+      delegation: {
+        mode: "reviewer",
+        title: "Review staged and unstaged changes.",
+        writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+      },
+    });
+    render(
+      renderFooter({
+        isUpdating: true,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+        agentCommands: [
+          {
+            kind: "promptTemplate",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "Expanded review command body.",
+            source: ".claude/commands/review-local.md",
+          },
+        ],
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onSend,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+    expect(
+      screen.getByRole("option", { name: /\/review-local/ }),
+    ).toBeInTheDocument();
+    const delegateButton = screen.getByRole("button", { name: "Delegate" });
+    expect(delegateButton).toBeDisabled();
+    expect(
+      screen.queryByText(/Tab moves focus to Delegate\./),
+    ).not.toBeInTheDocument();
+
+    const tabEvent = createEvent.keyDown(textarea, { key: "Tab" });
+    await act(async () => {
+      fireEvent(textarea, tabEvent);
+      await Promise.resolve();
+    });
+
+    expect(tabEvent.defaultPrevented).toBe(false);
+    expect(delegateButton).not.toHaveFocus();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onSpawnDelegation).not.toHaveBeenCalled();
+  });
+
+  it("surfaces resolver validation errors without clearing the composer draft", async () => {
+    const onSend = vi.fn(() => true);
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          error: "Native slash command notes are not supported.",
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      renderFooter({
+        onSend,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+        agentCommands: [
+          {
+            kind: "nativeSlash",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "/review-local",
+            source: "Claude project command",
+          },
+        ],
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, {
+      target: { value: "/review-local -- include staged and unstaged files" },
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Native slash command notes are not supported.",
+    );
+    expect(screen.getByRole("alert").closest(".composer-slash-menu")).not.toBeNull();
+    expect(textarea).toHaveValue(
+      "/review-local -- include staged and unstaged files",
+    );
+    expect(lastJsonRequestBody(fetchMock)).toEqual({
+      arguments: "",
+      intent: "send",
+      note: "include staged and unstaged files",
+    });
+    expect(onSend).not.toHaveBeenCalled();
+
+    fireEvent.change(textarea, { target: { value: "/review-local" } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("redacts resolver validation errors that include local paths", async () => {
+    const onSend = vi.fn(() => true);
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          error:
+            "failed to read config=/workspace/secrets/review-local.md token=secret",
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      renderFooter({
+        onSend,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+        agentCommands: [
+          {
+            kind: "promptTemplate",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "Expanded review command body.",
+            source: ".claude/commands/review-local.md",
+          },
+        ],
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/review-local" } });
+
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Could not resolve the slash command. Check the command file and try again.",
+    );
+    expect(document.body).not.toHaveTextContent("/workspace/secrets");
+    expect(document.body).not.toHaveTextContent("token=secret");
+    expect(document.body).not.toHaveTextContent("review-local.md");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("clears resolver errors after selecting another slash command", async () => {
+    const onSend = vi.fn(() => true);
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          error: "Native slash command notes are not supported.",
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      renderFooter({
+        onSend,
+        session: makeSession("session-a", {
+          agent: "Claude",
+          model: "sonnet",
+        }),
+        agentCommands: [
+          {
+            kind: "nativeSlash",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "/review-local",
+            source: "Claude project command",
+          },
+          {
+            kind: "nativeSlash",
+            name: "review-fix",
+            description: "Review a fix.",
+            content: "/review-fix",
+            source: "Claude project command",
+          },
+        ],
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, {
+      target: { value: "/rev -- include staged and unstaged files" },
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Native slash command notes are not supported.",
+    );
+
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: " ", code: "Space" });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(textarea).toHaveValue("/review-fix ");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("redacts internal resolver failures before displaying them", async () => {
+    const onSend = vi.fn(() => true);
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          error:
+            "failed to read agent command metadata C:\\secret\\project\\.claude\\commands\\review-local.md",
+        }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      renderFooter({
+        onSend,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+        agentCommands: [
+          {
+            kind: "promptTemplate",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "Expanded review command body.",
+            source: ".claude/commands/review-local.md",
+          },
+        ],
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/review-local" } });
+
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Could not resolve the slash command. Check the command file and try again.",
+    );
+    expect(document.body).not.toHaveTextContent("C:\\secret");
+    expect(document.body).not.toHaveTextContent("review-local.md");
+    expect(textarea).toHaveValue("/review-local");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("surfaces backend-unavailable resolver failures without leaking details or spawning", async () => {
+    const onSend = vi.fn(() => true);
+    const onSpawnDelegation = vi.fn(async () => true);
+    const fetchMock = vi.fn(async () => {
+      throw new Error("token=secret C:\\internal\\backend.log");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5",
+        }),
+        agentCommands: [
+          {
+            kind: "promptTemplate",
+            name: "review-local",
+            description: "Review staged and unstaged changes.",
+            content: "Expanded review command body.",
+            source: ".claude/commands/review-local.md",
+          },
+        ],
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onSend,
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/rev" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Could not resolve the slash command. Check the command file and try again.",
+    );
+    expect(alert).not.toHaveTextContent("token=secret");
+    expect(alert).not.toHaveTextContent("backend.log");
+    expect(document.body).not.toHaveTextContent("token=secret");
+    expect(document.body).not.toHaveTextContent("backend.log");
+    expect(textarea).toHaveValue("/rev");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onSpawnDelegation).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("delegates native slash agent commands as slash prompts", async () => {

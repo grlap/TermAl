@@ -612,11 +612,32 @@ impl AppState {
         parent_session_id: &str,
         delegation_id: &str,
     ) -> Result<DelegationStatusResponse, ApiError> {
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        let index = find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
-        let delegation = inner.delegations[index].clone();
+        let (revision, delegation, lifecycle_delta, wait_refresh) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index =
+                find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
+            let lifecycle_delta = refresh_delegation_from_child_locked(&mut inner, index);
+            // Status/result reads are active freshness checks: they may observe
+            // terminal child output and queue a matching wait's resume prompt.
+            // Keep the wait refresh scoped to the requested delegation so
+            // unrelated waits are not consumed by opportunistic polling.
+            let wait_refresh =
+                refresh_delegation_waits_for_delegation_locked(&mut inner, delegation_id);
+            let revision = if lifecycle_delta.is_some() || wait_refresh.did_mutate() {
+                self.commit_locked(&mut inner).map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to persist delegation status refresh: {err:#}"
+                    ))
+                })?
+            } else {
+                inner.revision
+            };
+            let delegation = inner.delegations[index].clone();
+            (revision, delegation, lifecycle_delta, wait_refresh)
+        };
+        self.publish_delegation_refresh_side_effects(revision, lifecycle_delta, wait_refresh);
         Ok(DelegationStatusResponse {
-            revision: inner.revision,
+            revision,
             delegation,
             server_instance_id: self.server_instance_id.clone(),
         })
@@ -627,15 +648,33 @@ impl AppState {
         parent_session_id: &str,
         delegation_id: &str,
     ) -> Result<DelegationResultResponse, ApiError> {
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        let index = find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
-        let delegation = &inner.delegations[index];
-        let result = delegation
-            .result
-            .clone()
-            .ok_or_else(|| ApiError::conflict("delegation result is not available yet"))?;
+        let (revision, result, lifecycle_delta, wait_refresh) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index =
+                find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
+            let lifecycle_delta = refresh_delegation_from_child_locked(&mut inner, index);
+            // Result polling has the same refresh contract as status polling,
+            // even when the result remains unavailable and the endpoint returns
+            // 409 after publishing any observed side effects.
+            let wait_refresh =
+                refresh_delegation_waits_for_delegation_locked(&mut inner, delegation_id);
+            let revision = if lifecycle_delta.is_some() || wait_refresh.did_mutate() {
+                self.commit_locked(&mut inner).map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to persist delegation result refresh: {err:#}"
+                    ))
+                })?
+            } else {
+                inner.revision
+            };
+            let result = inner.delegations[index].result.clone();
+            (revision, result, lifecycle_delta, wait_refresh)
+        };
+        self.publish_delegation_refresh_side_effects(revision, lifecycle_delta, wait_refresh);
+        let result =
+            result.ok_or_else(|| ApiError::conflict("delegation result is not available yet"))?;
         Ok(DelegationResultResponse {
-            revision: inner.revision,
+            revision,
             result,
             server_instance_id: self.server_instance_id.clone(),
         })
@@ -843,6 +882,21 @@ impl AppState {
         }
         self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
         Ok(())
+    }
+
+    fn publish_delegation_refresh_side_effects(
+        &self,
+        revision: u64,
+        lifecycle_delta: Option<DelegationLifecycleDelta>,
+        wait_refresh: DelegationWaitRefresh,
+    ) {
+        if let Some(delta) = lifecycle_delta {
+            self.publish_delegation_lifecycle_delta(revision, delta);
+        }
+        if wait_refresh.did_mutate() {
+            self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
+        }
+        self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
     }
 
     fn ensure_read_only_delegation_allows_write_action(
@@ -1450,6 +1504,25 @@ fn delegation_wait_parent_eligibility_locked(
 //    currently best-effort and logged to stderr; the consumed wait has already
 //    been persisted and announced through `delegationWaitConsumed`.
 fn refresh_delegation_waits_locked(inner: &mut StateInner) -> DelegationWaitRefresh {
+    refresh_delegation_waits_matching_locked(inner, |_| true)
+}
+
+fn refresh_delegation_waits_for_delegation_locked(
+    inner: &mut StateInner,
+    delegation_id: &str,
+) -> DelegationWaitRefresh {
+    // A wait is eligible if it watches the delegation being actively polled.
+    // For `Any` waits, other sibling statuses stay cached until their own
+    // status/result is refreshed or the global wait refresher runs.
+    refresh_delegation_waits_matching_locked(inner, |wait| {
+        wait.delegation_ids.iter().any(|id| id == delegation_id)
+    })
+}
+
+fn refresh_delegation_waits_matching_locked(
+    inner: &mut StateInner,
+    should_refresh: impl Fn(&DelegationWaitRecord) -> bool,
+) -> DelegationWaitRefresh {
     if inner.delegation_waits.is_empty() {
         return DelegationWaitRefresh::default();
     }
@@ -1458,6 +1531,10 @@ fn refresh_delegation_waits_locked(inner: &mut StateInner) -> DelegationWaitRefr
     let mut remaining = Vec::new();
     let mut refresh = DelegationWaitRefresh::default();
     for wait in waits {
+        if !should_refresh(&wait) {
+            remaining.push(wait);
+            continue;
+        }
         match delegation_wait_parent_eligibility_locked(inner, &wait.parent_session_id) {
             DelegationWaitParentEligibility::Eligible => {}
             DelegationWaitParentEligibility::Missing => {

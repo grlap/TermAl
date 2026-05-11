@@ -1,24 +1,21 @@
 ---
 name: review-local
-description: Review staged and unstaged changes using multiple specialized reviewers.
+description: Review staged, unstaged, and untracked changes using multiple specialized reviewers.
 metadata:
   termal:
     title:
       strategy: default
-    delegation:
-      enabled: true
-      mode: reviewer
-      writePolicy:
-        kind: isolatedWorktree
 ---
 
-Review staged and unstaged changes using multiple specialized reviewers.
+Review staged, unstaged, and untracked changes using multiple specialized reviewers.
 
-**IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. All other git commands (diff, status, stash, add, etc.) may be executed freely.**
+**IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) may only be used when the current session write policy allows workspace mutation; read-only delegated reviewers must not run them.**
 
-**IMPORTANT: This command is review-only. Do NOT attempt to fix any bugs, edit source files, edit tests, run formatters that modify files, or otherwise change implementation code. The only allowed file update is `docs/bugs.md` in Step 6. If the review finds anything of any severity, `docs/bugs.md` MUST be updated in the same run to record or reconcile those findings.**
+**IMPORTANT: This command is review-only. Do NOT attempt to fix any bugs, edit source files, edit tests, run formatters that modify files, or otherwise change implementation code. If the current session can edit files, the only allowed file update is `docs/bugs.md` in Step 6. If the current session is a read-only delegated reviewer, do not edit `docs/bugs.md`; instead include the exact bug-ledger updates the parent session should apply.**
 
 ## Step 1: Build check
+
+In read-only delegated reviewer sessions, build/typecheck commands are advisory and may be skipped if they would write build artifacts or are blocked by policy, missing toolchain, or unavailable dependencies. Report the limitation and continue with static review. In writable sessions, treat the checks below as required gates.
 
 Run `cargo check` to ensure the Rust backend compiles.
 If it produces ANY errors — **STOP immediately**.
@@ -31,11 +28,12 @@ Present the full output to the user and do NOT proceed to further steps.
 
 ## Step 2: Get the changes
 
-Run `git diff` and `git diff --cached` to get all staged and unstaged changes.
-If there are no changes, tell the user and stop.
+Run `git status --short`, `git diff`, `git diff --cached`, and `git ls-files --others --exclude-standard` to get all staged, unstaged, and untracked changes.
+If there are no staged, unstaged, or untracked changes, tell the user and stop.
 
-Also run `git diff --name-only` and `git diff --cached --name-only` to get the list of changed files.
-Do NOT read full file contents upfront — subagents will read files on-demand as needed.
+Also run `git diff --name-only` and `git diff --cached --name-only` to get the list of changed tracked files.
+For untracked files, include the `git ls-files --others --exclude-standard` list in the reviewer prompt because untracked files do not appear in `git diff`.
+Do NOT read full file contents upfront — subagents will read files on-demand as needed. For untracked files, subagents must inspect file contents directly on demand.
 
 ## Step 3: Discover reviewers
 
@@ -64,6 +62,9 @@ to record in docs/bugs.md.
 
 ## Changed Files
 [LIST OF CHANGED FILE PATHS — read files on-demand as needed for context, don't rely on diff alone]
+
+## Untracked Files
+[LIST OF UNTRACKED FILE PATHS FROM git ls-files --others --exclude-standard — read files on-demand as needed because they do not appear in the diff]
 
 ## Project Context
 This is TermAl — a WhatsApp-style control room for managing AI coding agents locally.
@@ -141,7 +142,7 @@ Present the consolidated note directly to the user. Do NOT write the review note
 
 ## Step 6: Update `docs/bugs.md`
 
-After presenting the review to the user, update `docs/bugs.md` to reflect the findings. Do not modify any other file. If any reviewer found any issue, observation, test gap, or note of any severity, `docs/bugs.md` MUST be updated before the command is complete. Read the file first to understand the current structure, then apply these three operations:
+After presenting the review to the user, update `docs/bugs.md` to reflect the findings if the current session write policy allows file edits. Do not modify any other file. If the current session is a read-only delegated reviewer, do not edit `docs/bugs.md`; instead include a "Suggested `docs/bugs.md` updates" section with the entries/tasks/removals the parent should apply. If any reviewer found any issue, observation, test gap, or note of any severity in a writable session, `docs/bugs.md` MUST be updated before the command is complete. Read the file first to understand the current structure, then apply these three operations:
 
 ### 6a. Remove resolved bugs
 

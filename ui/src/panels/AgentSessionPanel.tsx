@@ -24,9 +24,11 @@ import {
   type SlashPaletteItem,
 } from "./session-slash-palette";
 import {
+  ApiRequestError,
   resolveAgentCommand,
   type ResolveAgentCommandResponse,
 } from "../api";
+import { formatUserFacingError } from "../error-messages";
 import type { CreateComposerDelegationOptions } from "../delegation-commands";
 import {
   MessageSlot,
@@ -104,6 +106,11 @@ type DraftImageAttachment = ImageAttachment & {
 type PromptHistoryState = {
   index: number;
   draft: string;
+};
+
+type AgentCommandResolverErrorState = {
+  message: string;
+  sessionId: string;
 };
 
 type PendingCreatedConversationMarker = {
@@ -225,6 +232,146 @@ function sendResolvedAgentCommandSubmission(
   return resolution.expandedPrompt == null
     ? onSend(sessionId, resolution.visiblePrompt)
     : onSend(sessionId, resolution.visiblePrompt, resolution.expandedPrompt);
+}
+
+function formatAgentCommandResolverError(error: unknown) {
+  const hasSensitiveDetail = containsLikelySensitiveResolverDetail(error);
+  if (
+    error instanceof ApiRequestError &&
+    error.kind === "request-failed" &&
+    (error.status === null || error.status >= 500 || hasSensitiveDetail)
+  ) {
+    return "Could not resolve the slash command. Check the command file and try again.";
+  }
+
+  if (hasSensitiveDetail) {
+    return "Could not resolve the slash command. Check the command file and try again.";
+  }
+
+  return formatUserFacingError(error);
+}
+
+function containsLikelySensitiveResolverDetail(
+  value: unknown,
+  seen = new Set<object>(),
+): boolean {
+  if (typeof value === "string") {
+    return containsLikelySensitiveResolverText(value);
+  }
+  if (value == null || typeof value !== "object") {
+    return false;
+  }
+  if (seen.has(value)) {
+    return false;
+  }
+  seen.add(value);
+  if (value instanceof Error) {
+    return (
+      containsLikelySensitiveResolverText(value.message) ||
+      containsLikelySensitiveResolverDetail(
+        (value as { cause?: unknown }).cause,
+        seen,
+      )
+    );
+  }
+  const possibleError = value as { cause?: unknown; message?: unknown };
+  return (
+    containsLikelySensitiveResolverDetail(possibleError.message, seen) ||
+    containsLikelySensitiveResolverDetail(possibleError.cause, seen)
+  );
+}
+
+function containsLikelySensitiveResolverText(value: string) {
+  return (
+    /\b[A-Za-z]:[\\/][^\s"'<>]+/u.test(value) ||
+    /\\\\[^\\\s]+\\/u.test(value) ||
+    /(?:^|[\s=:'"([{])~[\\/][^\s"'<>]+/u.test(value) ||
+    /(?:^|[\s=:'"([{])\.{1,2}[\\/][^\s"'<>]+/u.test(value) ||
+    /(?:^|[\s=:'"([{])\/(?:[A-Za-z]\/|Users|home|tmp|var|private|mnt|Volumes|etc|opt|root|srv|usr|proc|sys|run|workspace|workspaces|app|repo|repos|project|projects|build|source|src|code)\b/u.test(
+      value,
+    ) ||
+    /\b(?:sk-[A-Za-z0-9_-]{8,}|sk_(?:live|test)_[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{8,}|glpat-[A-Za-z0-9_-]{8,}|xox[baprs]-[A-Za-z0-9_-]{8,}|AKIA[A-Z0-9]{12,}|AIza[0-9A-Za-z_-]{20,}|Bearer\s+[A-Za-z0-9._~+/=-]+)/u.test(
+      value,
+    ) ||
+    /-----BEGIN [A-Z ]*PRIVATE KEY-----/u.test(value) ||
+    /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/u.test(value) ||
+    /\b(?:token|password|passwd|secret|api[_-]?key)=\S+/iu.test(value)
+  );
+}
+
+function slashPaletteTabAction(
+  canDelegateActiveSlashCommand: boolean,
+  canSpawnDelegation: boolean,
+  hasSpawnDelegationHandler: boolean,
+  composerDelegateDisabled: boolean,
+) {
+  if (!canDelegateActiveSlashCommand) {
+    return "submit";
+  }
+  if (!canSpawnDelegation || !hasSpawnDelegationHandler) {
+    return "submit";
+  }
+  if (composerDelegateDisabled) {
+    return "none";
+  }
+  return "focusDelegate";
+}
+
+function slashPaletteKeyAction(
+  event: React.KeyboardEvent<HTMLTextAreaElement>,
+  canDelegateActiveSlashCommand: boolean,
+  canSpawnDelegation: boolean,
+  hasSpawnDelegationHandler: boolean,
+  composerDelegateDisabled: boolean,
+) {
+  if (event.key === "Enter" && !event.shiftKey) {
+    return "submit";
+  }
+  if (event.key === "Tab" && !event.shiftKey) {
+    return slashPaletteTabAction(
+      canDelegateActiveSlashCommand,
+      canSpawnDelegation,
+      hasSpawnDelegationHandler,
+      composerDelegateDisabled,
+    );
+  }
+  return "none";
+}
+
+function shouldFocusDelegateWithSlashPaletteKey(
+  event: React.KeyboardEvent<HTMLTextAreaElement>,
+  canDelegateActiveSlashCommand: boolean,
+  canSpawnDelegation: boolean,
+  hasSpawnDelegationHandler: boolean,
+  composerDelegateDisabled: boolean,
+) {
+  return (
+    slashPaletteKeyAction(
+      event,
+      canDelegateActiveSlashCommand,
+      canSpawnDelegation,
+      hasSpawnDelegationHandler,
+      composerDelegateDisabled,
+    ) === "focusDelegate"
+  );
+}
+
+function shouldSubmitSlashPaletteKey(
+  event: React.KeyboardEvent<HTMLTextAreaElement>,
+  canDelegateActiveSlashCommand: boolean,
+  canSpawnDelegation: boolean,
+  hasSpawnDelegationHandler: boolean,
+  composerDelegateDisabled: boolean,
+) {
+  return (
+    slashPaletteKeyAction(
+      event,
+      canDelegateActiveSlashCommand,
+      canSpawnDelegation,
+      hasSpawnDelegationHandler,
+      composerDelegateDisabled,
+    ) === "submit"
+  );
 }
 
 function findNewPendingCreatedConversationMarker(
@@ -1870,6 +2017,7 @@ const SessionComposer = memo(function SessionComposer({
   const requestedSlashModelOptionsRef = useRef<string | null>(null);
   const requestedSlashAgentCommandsRef = useRef<string | null>(null);
   const slashOptionsRef = useRef<HTMLDivElement | null>(null);
+  const composerDelegateButtonRef = useRef<HTMLButtonElement | null>(null);
   const session = useComposerSessionSnapshot(sessionId);
   // This state is intentionally narrow: it exists so slash-palette rendering
   // has a reactive draft. Plain prompt text lives in the uncontrolled textarea;
@@ -1900,6 +2048,8 @@ const SessionComposer = memo(function SessionComposer({
   const [isAgentCommandResolving, setIsAgentCommandResolving] = useState(false);
   const isAgentCommandResolvingRef = useRef(false);
   const [isDelegationSpawning, setIsDelegationSpawning] = useState(false);
+  const [agentCommandResolverError, setAgentCommandResolverError] =
+    useState<AgentCommandResolverErrorState | null>(null);
   const isMountedRef = useRef(true);
   const activeSessionIdRef = useRef<string | null>(null);
 
@@ -1909,6 +2059,11 @@ const SessionComposer = memo(function SessionComposer({
   const activeSessionId = session?.id ?? sessionId;
   useLayoutEffect(() => {
     activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+  useEffect(() => {
+    // SessionComposer is memoized; explicitly drop resolver errors when the
+    // active session identity changes even if the component instance is reused.
+    setAgentCommandResolverError(null);
   }, [activeSessionId]);
 
   const committedDraft = session?.committedDraft ?? "";
@@ -2007,6 +2162,7 @@ const SessionComposer = memo(function SessionComposer({
       return false;
     }
     isAgentCommandResolvingRef.current = true;
+    setAgentCommandResolverError(null);
     setIsAgentCommandResolving(true);
     return true;
   }
@@ -2542,6 +2698,7 @@ const SessionComposer = memo(function SessionComposer({
     }
 
     resetPromptHistory(activeSessionId);
+    setAgentCommandResolverError(null);
     updateLocalDraft(activeSessionId, nextValue);
   }
 
@@ -2570,6 +2727,7 @@ const SessionComposer = memo(function SessionComposer({
     if (item.kind === "command") {
       resetPromptHistory(activeSessionId);
       const nextDraft = `${item.command} `;
+      setAgentCommandResolverError(null);
       updateLocalDraft(activeSessionId, nextDraft);
       focusComposerInput(nextDraft.length);
       return;
@@ -2587,6 +2745,7 @@ const SessionComposer = memo(function SessionComposer({
       );
       if (resolution.kind === "expand") {
         resetPromptHistory(activeSessionId);
+        setAgentCommandResolverError(null);
         updateLocalDraft(activeSessionId, resolution.nextDraft);
         focusComposerInput(resolution.nextDraft.length);
         return;
@@ -2607,8 +2766,12 @@ const SessionComposer = memo(function SessionComposer({
             intent: "send",
           },
         );
-      } catch {
+      } catch (error) {
         if (isMountedRef.current && activeSessionIdRef.current === requestSessionId) {
+          setAgentCommandResolverError({
+            message: formatAgentCommandResolverError(error),
+            sessionId: requestSessionId,
+          });
           focusComposerInput();
         }
         return;
@@ -2731,8 +2894,12 @@ const SessionComposer = memo(function SessionComposer({
             intent: "delegate",
           },
         );
-      } catch {
+      } catch (error) {
         if (isMountedRef.current && activeSessionIdRef.current === requestSessionId) {
+          setAgentCommandResolverError({
+            message: formatAgentCommandResolverError(error),
+            sessionId: requestSessionId,
+          });
           focusComposerInput();
         }
         return;
@@ -2797,12 +2964,35 @@ const SessionComposer = memo(function SessionComposer({
       if (event.key === "Escape") {
         event.preventDefault();
         resetPromptHistory(activeSessionId);
+        setAgentCommandResolverError(null);
         updateLocalDraft(activeSessionId, "");
         commitDraft(activeSessionId, "");
         return;
       }
 
-      if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
+      if (
+        shouldFocusDelegateWithSlashPaletteKey(
+          event,
+          canDelegateActiveSlashCommand,
+          canSpawnDelegation,
+          Boolean(onSpawnDelegation),
+          composerDelegateDisabled,
+        )
+      ) {
+        event.preventDefault();
+        composerDelegateButtonRef.current?.focus();
+        return;
+      }
+
+      if (
+        shouldSubmitSlashPaletteKey(
+          event,
+          canDelegateActiveSlashCommand,
+          canSpawnDelegation,
+          Boolean(onSpawnDelegation),
+          composerDelegateDisabled,
+        )
+      ) {
         event.preventDefault();
         void handleComposerSend();
         return;
@@ -2831,6 +3021,7 @@ const SessionComposer = memo(function SessionComposer({
               event.preventDefault();
               resetPromptHistory(activeSessionId);
               const nextDraft = `/${activeSlashItem.name} `;
+              setAgentCommandResolverError(null);
               updateLocalDraft(activeSessionId, nextDraft);
               focusComposerInput(nextDraft.length);
             }
@@ -2935,7 +3126,11 @@ const SessionComposer = memo(function SessionComposer({
   }
 
   const slashPaletteErrorMessage =
-    slashPalette.kind === "none" ? null : (slashPalette.errorMessage ?? null);
+    slashPalette.kind === "none"
+      ? null
+      : (agentCommandResolverError?.sessionId === activeSessionId
+          ? agentCommandResolverError.message
+          : (slashPalette.errorMessage ?? null));
   const slashPaletteIsRefreshing =
     slashPalette.kind === "none" ? false : Boolean(slashPalette.isRefreshing);
   const slashPaletteRefreshActionLabel =
@@ -2948,6 +3143,16 @@ const SessionComposer = memo(function SessionComposer({
         : false;
   const slashPaletteStatusText =
     slashPalette.kind === "command" ? (slashPalette.statusText ?? null) : null;
+  const slashPaletteHintId = `composer-slash-hint-${paneId}`;
+  const keyboardDelegationHint = "Tab moves focus to Delegate.";
+  const slashPaletteHint =
+    slashPalette.kind !== "none" &&
+    canDelegateActiveSlashCommand &&
+    !composerDelegateDisabled
+      ? [slashPalette.hint, keyboardDelegationHint].filter(Boolean).join(" ")
+      : slashPalette.kind !== "none"
+        ? slashPalette.hint
+        : null;
   const showSlashPaletteStatus =
     slashPalette.kind !== "none" &&
     (
@@ -2999,6 +3204,7 @@ const SessionComposer = memo(function SessionComposer({
           className="composer-input"
           {...CONVERSATION_COMPOSER_INPUT_DATA_ATTRIBUTES}
           aria-label={session ? `Message ${session.name}` : "Message session"}
+          aria-describedby={slashPaletteHint ? slashPaletteHintId : undefined}
           defaultValue={initialComposerDraft}
           onChange={(event) => handleComposerChange(event.target.value)}
           onBlur={handleComposerBlur}
@@ -3021,6 +3227,7 @@ const SessionComposer = memo(function SessionComposer({
           ) : null}
           {session && onSpawnDelegation && canSpawnDelegation ? (
             <button
+              ref={composerDelegateButtonRef}
               className="ghost-button composer-delegate-button"
               type="button"
               onMouseDown={(event) => {
@@ -3063,7 +3270,9 @@ const SessionComposer = memo(function SessionComposer({
         <div className="composer-slash-menu" role="listbox" aria-label={slashPalette.title}>
           <div className="composer-slash-header">
             <strong className="composer-slash-title">{slashPalette.title}</strong>
-            <span className="composer-slash-hint">{slashPalette.hint}</span>
+            <span id={slashPaletteHintId} className="composer-slash-hint">
+              {slashPaletteHint}
+            </span>
           </div>
           {showSlashPaletteStatus ? (
             <div className="composer-slash-status">
