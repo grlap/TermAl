@@ -443,8 +443,8 @@ describe("useConversationOverviewController", () => {
     window.cancelAnimationFrame = ((frameId: number) => {
       frameCallbacks.delete(frameId);
     }) as typeof cancelAnimationFrame;
-    delete idleWindow.requestIdleCallback;
-    delete idleWindow.cancelIdleCallback;
+    Reflect.deleteProperty(idleWindow, "requestIdleCallback");
+    Reflect.deleteProperty(idleWindow, "cancelIdleCallback");
     const flushNextFrame = () => {
       const nextFrame = frameCallbacks.entries().next().value as
         | [number, FrameRequestCallback]

@@ -177,7 +177,7 @@ function expectRequestErrorDeferredUpdatesOnly(
   expect(calls.every(([next]) => typeof next === "function")).toBe(true);
   let nextFlags: Record<string, boolean> = { "other-session": true };
   for (const [next] of calls) {
-    const applyDeferredUpdate = next as (
+    const applyDeferredUpdate = next as unknown as (
       previousFlags: Record<string, boolean>,
     ) => Record<string, boolean>;
     nextFlags = applyDeferredUpdate(nextFlags);

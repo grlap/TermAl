@@ -327,7 +327,7 @@ describe("AppDialogs settings agent defaults", () => {
   });
 
   it("renders the Telegram settings tab and fetches initial status", async () => {
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
       const status = {
         configured: true,
         enabled: true,
