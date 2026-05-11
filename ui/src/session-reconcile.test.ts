@@ -1139,6 +1139,41 @@ describe("reconcileSessions", () => {
     expect(merged[0].remoteId).toBe("ssh-lab");
   });
 
+  it("reuses a local-only session when both remote owners are undefined with the same stamp", () => {
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: true,
+        preview: "ready",
+        sessionMutationStamp: 42,
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Ready",
+          },
+        ],
+      }),
+    ];
+
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: true,
+        preview: "ready",
+        sessionMutationStamp: 42,
+        messages: [structuredClone(previous[0].messages[0])],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).toBe(previous);
+    expect(merged[0]).toBe(previous[0]);
+    expect(merged[0].remoteId).toBeUndefined();
+    expect(merged[0].messages).toBe(previous[0].messages);
+  });
+
   it("replaces a full session when only the remote owner changes with the same stamp", () => {
     const previous = [
       makeSession("session-a", {

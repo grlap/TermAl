@@ -170,17 +170,6 @@ A backend refactor (e.g., adding a `failed: bool` field) cannot consult the wire
 - Add a derived `state: "stopped" | "polling" | "linked" | "configured" | "notConfigured"` to the wire response (single source of truth).
 - Or document the derivation rules in the `TelegramStatusResponse` JSDoc.
 
-## `session-reconcile.test.ts` doesn't cover `remoteId === undefined` on both sides
-
-**Severity:** Note - `ui/src/session-reconcile.test.ts:1142-1212`. The two new tests pin the remote-owner reconciliation but assert via reference identity. They do not cover the case where `remoteId === undefined` on both sides (current local-only behavior) — the OLD fast-path retained `previous` exactly. Without a regression test, a refactor that accidentally changed the comparison semantics for `undefined === undefined` could flow through.
-
-**Current behavior:**
-- Two new tests cover changed-remoteId cases.
-- No assertion for the undefined-on-both-sides fast-path.
-
-**Proposal:**
-- Add a sibling test that asserts `reconcileSessions(previous, next)` returns `previous` when `remoteId` is undefined on both sides AND stamps match.
-
 ## `delegation-result-prompt.test.ts` "scans findings, commands, and notes" bundles 3 field types
 
 **Severity:** Note - `ui/src/delegation-result-prompt.test.ts:296-336`. The new "scans findings, commands, and notes for the longest indented tilde fence" test is good but bundles three field types (findings, commandsRun, notes) plus the `~~~~~~` outer fence assertion in one `it()`.
