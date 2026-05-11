@@ -515,6 +515,48 @@ describe("ConversationOverviewRail", () => {
     );
   });
 
+  it("switches from per-segment buttons to compact mode above the segment threshold", () => {
+    const boundaryMessages = commandMessages(160);
+    const { container, unmount } = render(
+      <ConversationOverviewRail
+        messages={boundaryMessages}
+        layoutSnapshot={layoutSnapshot(boundaryMessages)}
+        minMessages={4}
+        maxHeightPx={1024}
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(container.querySelectorAll(".conversation-overview-segment")).toHaveLength(
+      160,
+    );
+    expect(
+      screen.queryByTestId("conversation-overview-visual-track"),
+    ).not.toBeInTheDocument();
+
+    unmount();
+
+    const compactMessages = commandMessages(161);
+    const compactRender = render(
+      <ConversationOverviewRail
+        messages={compactMessages}
+        layoutSnapshot={layoutSnapshot(compactMessages)}
+        minMessages={4}
+        maxHeightPx={1024}
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(
+      compactRender.container.querySelectorAll(".conversation-overview-segment"),
+    ).toHaveLength(0);
+    expect(screen.getByTestId("conversation-overview-visual-track")).toBeInTheDocument();
+    expect(screen.getByLabelText("Conversation overview")).toHaveAttribute(
+      "aria-valuemax",
+      "161",
+    );
+  });
+
   it("supports compact keyboard navigation from the live viewport segment", () => {
     const messages = commandMessages(220);
     const onNavigate = vi.fn();
