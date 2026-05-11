@@ -3663,6 +3663,8 @@ export function MarkdownContent({
   markdown,
   onOpenSourceLink,
   preserveMermaidSource = false,
+  renderBudgetMathExpressionCount,
+  renderBudgetMermaidDiagramCount,
   renderMermaidDiagrams = true,
   searchQuery = "",
   searchHighlightTone = "match",
@@ -3698,6 +3700,12 @@ export function MarkdownContent({
   markdown: string;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
   preserveMermaidSource?: boolean;
+  /**
+   * Optional document-level budget counts for callers that split one
+   * logical Markdown document across multiple MarkdownContent instances.
+   */
+  renderBudgetMathExpressionCount?: number;
+  renderBudgetMermaidDiagramCount?: number;
   renderMermaidDiagrams?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
@@ -3781,8 +3789,14 @@ export function MarkdownContent({
   // `pendingMarkdown` and renders as plain text in the streaming
   // fragment below) does not count against the per-document caps.
   const mermaidDiagramCount = useMemo(
-    () => (renderMermaidDiagrams ? countMermaidFences(settledMarkdown) : 0),
-    [settledMarkdown, renderMermaidDiagrams],
+    () =>
+      renderBudgetMermaidDiagramCount ??
+      (renderMermaidDiagrams ? countMermaidFences(settledMarkdown) : 0),
+    [
+      renderBudgetMermaidDiagramCount,
+      settledMarkdown,
+      renderMermaidDiagrams,
+    ],
   );
   const hasTooManyMermaidDiagrams =
     mermaidDiagramCount > MAX_MERMAID_DIAGRAMS_PER_DOCUMENT;
@@ -3794,8 +3808,9 @@ export function MarkdownContent({
   // renders), but its output is replaced by the source-display
   // fallback in the custom `math`/`inlineMath` renderer below.
   const mathExpressionCount = useMemo(
-    () => countMathExpressions(settledMarkdown),
-    [settledMarkdown],
+    () =>
+      renderBudgetMathExpressionCount ?? countMathExpressions(settledMarkdown),
+    [renderBudgetMathExpressionCount, settledMarkdown],
   );
   const hasTooManyMathExpressions =
     mathExpressionCount > MAX_MATH_EXPRESSIONS_PER_DOCUMENT;

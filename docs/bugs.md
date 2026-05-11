@@ -1910,8 +1910,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   trigger the non-manual reconnect fallback path, adopt a same-instance `/api/state` snapshot with forward progress while SSE remains unopened/unconfirmed, advance timers, and assert fallback polling continues until a data-bearing live event confirms recovery.
 - [ ] P2 watchdog wake-gap stop-after-progress regression:
   trigger watchdog wake-gap recovery, adopt same-instance `/api/state` progress, and assert no additional reconnect polling occurs before a later live event.
-- [ ] P2: Add rendered diff render-budget coverage:
-  create many Mermaid/math rendered regions and assert the preview applies the same document-level caps as a single `MarkdownContent` document.
 - [ ] P2: Add frontend stop/failure delta-before-snapshot terminal-message coverage:
   dispatch cancellation/update deltas before the same-revision snapshot and assert appended stop/failure terminal messages remain rendered without relying on a later unrelated refresh.
 - [ ] P1: Add Telegram-relay unit tests for the pure helpers introduced in `src/telegram.rs`:

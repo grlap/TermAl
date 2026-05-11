@@ -49,11 +49,15 @@
 // disclaimer copy, same **Lines N–M** header + fenced body
 // format.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GitDiffDocumentContent } from "../api";
 import { MarkdownContent } from "../message-cards";
 import type { MonacoAppearance } from "../monaco";
-import type { SourceRenderableRegion } from "../source-renderers";
+import {
+  countMathExpressions,
+  countMermaidFences,
+  type SourceRenderableRegion,
+} from "../source-renderers";
 import type { DiffMessage } from "../types";
 import type { buildDiffPreviewModel } from "../diff-preview";
 import { DiffNavArrow } from "./DiffPanelIcons";
@@ -137,6 +141,22 @@ export function RenderedDiffView({
   workspaceRoot: string | null;
 }) {
   const regionCount = regions.length;
+  const renderedRegionMarkdownDocuments = useMemo(
+    () => regions.map(composeRenderedDiffRegionMarkdown),
+    [regions],
+  );
+  const renderedDiffBudgetMarkdown = useMemo(
+    () => renderedRegionMarkdownDocuments.join("\n\n"),
+    [renderedRegionMarkdownDocuments],
+  );
+  const renderBudgetMermaidDiagramCount = useMemo(
+    () => countMermaidFences(renderedDiffBudgetMarkdown),
+    [renderedDiffBudgetMarkdown],
+  );
+  const renderBudgetMathExpressionCount = useMemo(
+    () => countMathExpressions(renderedDiffBudgetMarkdown),
+    [renderedDiffBudgetMarkdown],
+  );
   const [currentRegionIndex, setCurrentRegionIndex] = useState(0);
   // `navigationTick` advances on every prev/next press so the scroll
   // effect below fires even when `currentRegionIndex` does not change.
@@ -240,7 +260,9 @@ export function RenderedDiffView({
             <MarkdownContent
               appearance={appearance}
               documentPath={documentPath}
-              markdown={composeRenderedDiffRegionMarkdown(region)}
+              markdown={renderedRegionMarkdownDocuments[index] ?? ""}
+              renderBudgetMathExpressionCount={renderBudgetMathExpressionCount}
+              renderBudgetMermaidDiagramCount={renderBudgetMermaidDiagramCount}
               workspaceRoot={workspaceRoot}
             />
           </section>
