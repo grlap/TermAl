@@ -270,23 +270,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Add a sibling test that drives both the Claude task path and the delegation creation path with overlapping ids.
 - Or document the assumption that uuid id spaces don't collide deterministically.
 
-## Conversation overview viewport translation can reuse a stale same-size tail window or cross-session translation
-
-**Severity:** Medium - tail-window viewport translation validates compatibility only by `messageCount` and lacks any session identity guard.
-
-`ui/src/panels/conversation-overview-map.ts:299-333`. During streaming, the visible tail can shift from one 20-message window to another while the viewport snapshot still reports the same count, allowing an old translation offset to project the rail viewport marker onto the wrong transcript region. Additionally, a snapshot from a different session that happens to share the same `messageCount` could trigger the translation branch, projecting one session's viewport against another session's overview.
-
-**Current behavior:**
-- `viewportSnapshotTranslation` carries only `snapshotMessageCount`.
-- `projectConversationOverviewViewport` accepts any later viewport snapshot with the same count.
-- Same-size shifted tail windows can reuse a stale `sourceTopOffsetPx`.
-- No `sessionId` equality guard; cross-session reuse is structurally possible.
-
-**Proposal:**
-- Include a cheap window identity, such as first/last message id or a layout window version, in both the translation and viewport snapshot.
-- Add `sessionId` equality as part of the translation gate (and persist `sessionId` on the translation).
-- Add regressions for a same-size shifted tail window and for cross-session viewport projection.
-
 ## Returning to bottom leaves stale virtualized scroll-kind classification
 
 **Severity:** Medium - bottom re-entry clears the idle-compaction timer but leaves `lastUserScrollKindRef.current` set to `"incremental"`.
