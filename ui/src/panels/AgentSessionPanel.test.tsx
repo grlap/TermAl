@@ -886,6 +886,56 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
+  it("uses mounted marker slots for short non-virtualized conversations", () => {
+    const scrollIntoViewCalls: Array<{
+      itemKey: string | null;
+      options: ScrollIntoViewOptions | boolean | undefined;
+    }> = [];
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function scrollIntoView(options) {
+      scrollIntoViewCalls.push({
+        itemKey: this.getAttribute("data-session-search-item-key"),
+        options,
+      });
+    };
+    const messages = makeTextMessages(5);
+    const activeSession = makeSession("session-1", {
+      messages,
+      markers: [
+        makeConversationMarker({
+          id: "marker-1",
+          messageId: "message-5",
+          name: "Short transcript target",
+          messageIndexHint: 4,
+        }),
+      ],
+    });
+
+    try {
+      const { container } = renderSessionPanelWithDefaults({ activeSession });
+
+      expect(container.querySelector(".virtualized-message-list")).toBeNull();
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Jump to Decision marker Short transcript target",
+        }),
+      );
+
+      expect(scrollIntoViewCalls).toEqual([
+        {
+          itemKey: "message:message-5",
+          options: { block: "center", behavior: "smooth" },
+        },
+      ]);
+    } finally {
+      if (originalScrollIntoView) {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      } else {
+        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      }
+    }
+  });
+
   it("jumps to a virtualized marker target in one click without redundant correction", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const scrollIntoViewTargets: Array<string | null> = [];
