@@ -5892,6 +5892,30 @@ fn telegram_bot_file_write_removes_temp_after_write_failure() {
     fs::remove_dir_all(&root).ok();
 }
 
+#[cfg(windows)]
+#[test]
+fn telegram_bot_file_replace_overwrites_existing_file_on_windows() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-telegram-windows-replace-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir(&root).expect("fixture directory should create");
+    let path = root.join("telegram-bot.json");
+    let temp_path = root.join(".telegram-bot.json.replace-test.tmp");
+    fs::write(&path, b"{\"chatId\":1}").expect("existing file should write");
+    fs::write(&temp_path, b"{\"chatId\":2}").expect("temp file should write");
+
+    replace_telegram_bot_file(&temp_path, &path).expect("replacement should succeed");
+
+    assert_eq!(
+        fs::read(&path).expect("replaced file should read"),
+        b"{\"chatId\":2}"
+    );
+    assert!(!temp_path.exists());
+
+    fs::remove_dir_all(&root).ok();
+}
+
 #[test]
 fn telegram_message_chunks_respect_utf16_limit() {
     let text = "🙂".repeat(TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS + 1);
