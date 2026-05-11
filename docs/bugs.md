@@ -195,21 +195,6 @@ That means `/api/telegram/status` can briefly report `running: true` while `run_
 - Track a distinct `starting`/`ready` state in `TelegramRelayRuntime`.
 - Or have the worker signal readiness only after initialization succeeds, then expose `running: true`.
 
-## Remote delta replay fingerprints include ignored inbound `remote_id`
-
-**Severity:** Low - `src/remote_routes.rs:527-529` fingerprints the full inbound `Session` for replay suppression even though `localize_remote_session` intentionally clears untrusted inbound `remote_id` before applying state.
-
-Two same-revision remote `SessionCreated` events that differ only by attacker-chosen or stale `remoteId` are semantically identical after localization, but they can produce different replay keys and bypass duplicate suppression.
-
-**Current behavior:**
-- Replay key includes inbound `Session.remote_id`.
-- Localization discards inbound `remote_id`.
-- Same-revision duplicates that only differ by `remoteId` can republish duplicate local deltas.
-
-**Proposal:**
-- Fingerprint the normalized/localizable session payload, clearing `remote_id` before hashing.
-- Add a same-revision replay test where only inbound `remoteId` differs.
-
 ## Telegram bot token is persisted as plaintext in `telegram-bot.json`
 
 **Severity:** Medium - `TelegramUiConfig.bot_token` is serialized directly into `~/.termal/telegram-bot.json`.
@@ -2366,8 +2351,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
 - [ ] P2: Cover first-settled active-baseline same-message growth policy:
   pin the current conservative behavior and, if a future turn-boundary signal lands, add the positive forwarding case for same-message reply text already present on first settled poll.
-- [ ] P2: Cover emitted OrchestratorsUpdated localized remote ownership:
-  drive remote delta application end-to-end and assert the emitted localized sessions clear inbound `remote_id` before replay-key normalization/fingerprinting.
 - [ ] P2: Add Telegram settings API/security regressions:
   cover plaintext token-at-rest exposure, corrupt-backup permission hardening, Windows ACL/secret-store fallback behavior, global/concurrent rate limiting that cannot be bypassed by rotating token strings, and bounded rate-limit cache retention.
 - [ ] P2: Cover post-validation Telegram settings sanitization:
