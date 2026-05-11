@@ -1978,8 +1978,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   seed a remote snapshot session with attacker-chosen `remoteId`, localize it, and assert trusted `SessionRecord.remote_id` metadata is preserved while the embedded `record.session.remote_id` is cleared and local wire projections re-emit only trusted ownership.
 - [ ] P2: Cover MessageCard pending-action across all action types:
   the existing pending-action test only covers cancel. Add sibling tests for `Open session` and `Insert result`, asserting duplicate clicks on the same action are suppressed while unrelated action buttons keep their documented per-action pending behavior.
-- [ ] P2: Cover ParallelAgentsCard tool-source no-callback assertion:
-  in addition to the existing "no buttons rendered" assertion, also assert that `onCancelParallelAgent` / `onOpenParallelAgentSession` / `onInsertParallelAgentResult` were NOT called with the tool agent's id (defense in depth).
 - [ ] P2: Add `ParallelAgentsCard` pending-action unmount coverage:
   click an async action, unmount before the promise settles, resolve/reject the promise, and assert the pending-state cleanup cannot update after unmount.
 - [ ] P2: Cover production-path tool/delegation id collision:

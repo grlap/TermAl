@@ -163,6 +163,9 @@ describe("MessageCard", () => {
     expect(onInsertParallelAgentResult).toHaveBeenCalledWith(
       "delegation-error",
     );
+    expect(onOpenParallelAgentSession).not.toHaveBeenCalledWith("toolu-task");
+    expect(onCancelParallelAgent).not.toHaveBeenCalledWith("toolu-task");
+    expect(onInsertParallelAgentResult).not.toHaveBeenCalledWith("toolu-task");
     expect(
       within(rows[0]!).queryByRole("button", { name: "Insert result" }),
     ).toBeNull();
