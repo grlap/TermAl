@@ -332,17 +332,6 @@ The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but
 **Proposal:**
 - Construct a marker with a color produced by `DEFAULT_CONVERSATION_MARKER_COLOR` (the contract value) and assert that color round-trips through normalization.
 
-## `///` doc on `update_parent_delegation_card_locked` lacks cross-link to architecture doc
-
-**Severity:** Note - `src/delegations.rs:1138-1142`. Round 69 spelled the full triple `(parent_session, agent_id, source)` (closes the round-68 finding), but the original proposal also asked for a cross-link to the architecture doc that describes the invariant. That part is not done.
-
-**Current behavior:**
-- Triple invariant documented in `///` doc.
-- No `// see docs/...` cross-link.
-
-**Proposal:**
-- Add `// see docs/features/agent-delegation-sessions.md` (or whichever doc owns the invariant).
-
 ## `aria-busy` on a `<button>` element is unconventional
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:2398-2399`. `aria-busy` is specified for live regions / containers, not buttons. Most ATs do read it, but the load-bearing user-facing signal is the textual flip "Delegate" → "Delegating...". Combined with `disabled` the busy indication is functional, but `aria-busy` may be redundant noise on a button. Some screen readers double-announce as "busy, Delegating, button" which can be verbose.
@@ -622,28 +611,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Add a comment explaining the test pin is the current-but-flagged behavior.
 - Or split `running` into its own test scoped to the bugs.md follow-up.
 
-## `#[non_exhaustive]` removal lacks comment about future re-add
-
-**Severity:** Note - `src/wire_messages.rs:132-139`. Round 66 removed `#[non_exhaustive]` (correctly, since it's a no-op on a private enum). But the rationale isn't documented in the source. If `ParallelAgentSource` ever moves to a public module, the attribute would need to be restored for downstream consumers.
-
-**Current behavior:**
-- Attribute removed.
-- No `///` comment notes the conditional re-add.
-
-**Proposal:**
-- Add a one-line `///` comment: "If this enum becomes pub, restore `#[non_exhaustive]` for downstream consumers."
-
-## `(message_id, agent_id, source)` disambiguating key not documented in architecture
-
-**Severity:** Note - `src/delegations.rs:1154-1156` and the wire contract for `parallelAgentsUpdate` already carry `source`. But `docs/architecture.md` doesn't mention that backend lifecycle updates filter by source. A frontend reconciler implementer might assume `agent.id` is unique within a `parallelAgents` message; the new test explicitly creates a same-id collision, which the docs don't reflect.
-
-**Current behavior:**
-- Backend filters by `(message_id, agent_id, source)`.
-- Architecture doc describes the wire role of `source` but not the disambiguating-key invariant.
-
-**Proposal:**
-- Add a sentence to `docs/architecture.md` or the parallel-agent-source feature brief noting that `(message_id, agent_id, source)` is the disambiguating key, not `(message_id, agent_id)` alone.
-
 ## Bundled telegram redaction tests keep growing despite the explicit anti-pattern flag
 
 **Severity:** Low - the bug-ledger entry "Round-64 added another bundled telegram redaction test" already calls out the bundled-test anti-pattern. Round 65 added two more cases to `..._respects_context_and_thresholds` (`telegram_adjacent_token_key`, `bot_adjacent_token_key`) and three more to `..._handles_escaped_and_telegram_specific_contexts` (`bearer_equals`, `authorization_equals`, `lower_bearer_equals`).
@@ -660,18 +627,6 @@ The new `ambiguous_token_key` case (the `token=` bare-key behavior flip) is pinn
 **Proposal:**
 - Promote each behavior change to its own `#[test]`.
 - Or use a small `(input, expected_redacted, name)` table fixture and one helper.
-
-## `docs/architecture.md` `ParallelAgents` row blurs which agents emit which source
-
-**Severity:** Note - the round-64 architecture doc at `docs/architecture.md:711` documents the contract but the "typical source" cell now reads "Delegation progress … or tool progress". Combined with the surrounding text describing `SubagentResult` as "Codex subagent/task results", a reader may infer that delegation-progress is Codex-only when in practice both Claude and Codex paths write `Tool` and the delegation runtime writes `Delegation` regardless of agent backend.
-
-**Current behavior:**
-- "typical source" cell reads as if delegations are Codex-specific.
-- Both agent backends emit `Tool`-source.
-
-**Proposal:**
-- Add a parenthetical "(any agent backend)".
-- Reword `SubagentResult` as agent subagent/task results, not Codex-only results.
 
 ## `docs/features/telegram-ui-integration.md` 422 disambiguation paragraph depends on human-readable error text
 

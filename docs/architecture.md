@@ -713,12 +713,16 @@ All agent integrations normalize into the same TermAl message model. Some varian
 | `Diff` | file_path, summary, diff, change_type | File edit/create tools |
 | `Markdown` | title, markdown | Structured markdown output |
 | `FileChanges` | title, files[] | Local workspace watcher summary for files changed during or just after an agent turn |
-| `SubagentResult` | title, summary, conversation_id, turn_id | Codex subagent/task results |
-| `ParallelAgents` | agents[] with `id`, `source`, `status`, `title`, `detail` | Delegation progress (`source: "delegation"`, `id` is a delegation id) or tool progress (`source: "tool"`, `id` is an opaque tool-use id) |
+| `SubagentResult` | title, summary, conversation_id, turn_id | Agent subagent/task results |
+| `ParallelAgents` | agents[] with `id`, `source`, `status`, `title`, `detail` | Delegation progress from the TermAl delegation runtime (any agent backend, `source: "delegation"`, `id` is a delegation id) or tool progress (`source: "tool"`, `id` is an opaque tool-use id) |
 | `Approval` | title, command, detail, decision | Permission requests |
 | `UserInputRequest` | title, detail, questions, state | Codex `request_user_input` |
 | `McpElicitationRequest` | title, detail, request, state | Codex MCP elicitation |
 | `CodexAppRequest` | title, detail, method, params, state | Generic Codex app-server requests |
+
+`ParallelAgents` rows are disambiguated by `(message_id, agent.id, agent.source)`.
+`agent.id` alone is not unique because a delegation id and an agent-runtime tool id can
+share the same visible string.
 
 ---
 

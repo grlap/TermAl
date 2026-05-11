@@ -129,6 +129,8 @@ struct ParallelAgentProgress {
 ///
 /// Adding a variant is a wire-contract change: update all UI consumers and
 /// routing gates so only delegation-owned rows expose delegation actions.
+/// If this enum becomes public, restore `#[non_exhaustive]` for downstream
+/// consumers.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum ParallelAgentSource {
