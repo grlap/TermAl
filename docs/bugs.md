@@ -181,17 +181,6 @@ A backend refactor (e.g., adding a `failed: bool` field) cannot consult the wire
 **Proposal:**
 - Add a sibling test that asserts `reconcileSessions(previous, next)` returns `previous` when `remoteId` is undefined on both sides AND stamps match.
 
-## `remotes.test.ts` `it.each` refactor dropped `isLocalSessionRemote` empty-string-session case
-
-**Severity:** Note - `ui/src/remotes.test.ts:60-80`. The `it.each` refactor splits the previous bundle (closes round-73 entry) but drops the `isLocalSessionRemote` empty-string-session case from the bundle. The contract change for `""` semantics is the load-bearing behavior change of round 74; only one of the two helpers is covered.
-
-**Current behavior:**
-- `it.each` covers `resolveSessionRemoteId` empty-string case.
-- `isLocalSessionRemote` empty-string case dropped.
-
-**Proposal:**
-- Add `[{ remoteId: "" }, { remoteId: "ssh-lab" }, false]` to the `isLocalSessionRemote` it.each table.
-
 ## `delegation-result-prompt.test.ts` "scans findings, commands, and notes" bundles 3 field types
 
 **Severity:** Note - `ui/src/delegation-result-prompt.test.ts:296-336`. The new "scans findings, commands, and notes for the longest indented tilde fence" test is good but bundles three field types (findings, commandsRun, notes) plus the `~~~~~~` outer fence assertion in one `it()`.

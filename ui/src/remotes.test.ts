@@ -71,6 +71,7 @@ describe("remotes", () => {
 
   it.each([
     [{ remoteId: "ssh-lab" }, { remoteId: "local" }, false],
+    [{ remoteId: "" }, { remoteId: "ssh-lab" }, false],
     [{}, { remoteId: "local" }, true],
   ] as const)(
     "detects local session remote ownership for case %#",
