@@ -506,6 +506,14 @@ function isTranscriptTopBoundaryDemandKey(event: KeyboardEvent) {
   return command?.kind === "boundary" && command.direction === "up";
 }
 
+function isTranscriptDemandKey(event: KeyboardEvent) {
+  return (
+    event.key === "ArrowUp" ||
+    event.key === "Home" ||
+    event.key === "PageUp"
+  );
+}
+
 function shouldIgnoreTranscriptDemandKeyTarget(event: KeyboardEvent) {
   const target = event.target;
   if (isTranscriptTopBoundaryDemandKey(event)) {
@@ -649,20 +657,17 @@ function useInitialActiveTranscriptMessages({
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isTranscriptDemandKey(event)) {
+        return;
+      }
       if (!isTranscriptDemandKeyEventInScope(event, node)) {
         return;
       }
       if (shouldIgnoreTranscriptDemandKeyTarget(event)) {
         return;
       }
-      if (
-        event.key === "ArrowUp" ||
-        event.key === "Home" ||
-        event.key === "PageUp"
-      ) {
-        hasDemandInteraction = true;
-        requestFullTranscriptRender();
-      }
+      hasDemandInteraction = true;
+      requestFullTranscriptRender();
     };
     const handleTouchStart = (event: TouchEvent) => {
       hasDemandInteraction = true;

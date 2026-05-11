@@ -3830,6 +3830,24 @@ describe("AgentSessionPanel conversation caching", () => {
       const outsideTarget = document.createElement("button");
       document.body.append(outsideTarget);
       try {
+        const nonDemandComposedPath = vi.fn(() => [
+          outsideTarget,
+          document.body,
+          document,
+          window,
+        ]);
+        const nonDemandKey = new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "a",
+        });
+        Object.defineProperty(nonDemandKey, "composedPath", {
+          value: nonDemandComposedPath,
+        });
+        act(() => {
+          outsideTarget.dispatchEvent(nonDemandKey);
+        });
+        expect(nonDemandComposedPath).not.toHaveBeenCalled();
+
         act(() => {
           fireEvent.keyDown(outsideTarget, { key: "Home" });
         });

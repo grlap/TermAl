@@ -465,21 +465,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Either accept (Phase 1 single-user stance).
 - Or restructure as pure validation that does not own a copy of secrets — collect required mutations into a small `Normalization { default_project_id: Option<String>, push_subscriptions: Vec<String> }` value and apply after validation passes.
 
-## `handleKeyDown` listener attached to `document` with `capture: true` fires for every keystroke globally
-
-**Severity:** Note - the `AgentSessionPanel` keyboard demand-hydration listener is now in the capture phase, so it sees keystrokes on every element on the page. The `isTranscriptDemandKeyEventInScope` guard checks `composedPath().includes(scrollNode)` to filter, but the document-level capture listener fires for every keystroke during typing. `composedPath()` allocates an array per event.
-
-`ui/src/panels/AgentSessionPanel.tsx:357-372`. Current scope filter prevents misfires; the cost is observable but probably acceptable.
-
-**Current behavior:**
-- `document.addEventListener("keydown", ..., { capture: true })`.
-- Fires for every global keystroke including unrelated panels and modals.
-- `composedPath()` filtering allocates per event.
-
-**Proposal:**
-- Consider attaching the listener to `node` directly (since composedPath also resolves through bubbles) and dropping `capture: true`.
-- Or short-circuit on key first (only `ArrowUp`/`Home`/`PageUp` trigger expensive scope checks).
-
 ## `useSessionRenderCallbacks` gains three new required props without optional fallbacks
 
 **Severity:** Note - `ui/src/SessionPaneView.render-callbacks.tsx:139-148` added `onOpenConversationFromDiff`, `onInsertReviewIntoPrompt`, `onComposerError` as required props. Any downstream caller of `useSessionRenderCallbacks` (today, only `SessionPaneView.tsx`) must thread these through.
