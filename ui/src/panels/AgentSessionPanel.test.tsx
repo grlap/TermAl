@@ -496,6 +496,183 @@ describe("AgentSessionPanel conversation caching", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("does not carry deferred transcript cards into an empty active session", async () => {
+    const sessionA = makeSession("session-a", {
+      messages: [
+        {
+          author: "assistant",
+          id: "message-a",
+          text: "Session A transcript",
+          timestamp: "10:00",
+          type: "text",
+        },
+      ],
+    });
+    const sessionB = makeSession("session-b", { messages: [] });
+    syncComposerSessionsStore({
+      sessions: [sessionA, sessionB],
+      draftsBySessionId: {},
+      draftAttachmentsBySessionId: {},
+    });
+
+    const renderPanel = (activeSessionId: string) => (
+      <AgentSessionPanel
+        paneId="pane-1"
+        viewMode="session"
+        activeSessionId={activeSessionId}
+        isLoading={false}
+        isUpdating={false}
+        showWaitingIndicator={false}
+        waitingIndicatorPrompt={null}
+        commandMessages={[]}
+        diffMessages={[]}
+        scrollContainerRef={{ current: document.createElement("section") }}
+        onApprovalDecision={() => {}}
+        onUserInputSubmit={() => {}}
+        onMcpElicitationSubmit={() => {}}
+        onCodexAppRequestSubmit={() => {}}
+        onCancelQueuedPrompt={() => {}}
+        onSessionSettingsChange={() => {}}
+        conversationSearchQuery=""
+        conversationSearchMatchedItemKeys={new Set()}
+        conversationSearchActiveItemKey={null}
+        onConversationSearchItemMount={() => {}}
+        renderCommandCard={() => null}
+        renderDiffCard={() => null}
+        renderMessageCard={(message) => (
+          <article className="message-card">
+            {message.type === "text" ? message.text : message.id}
+          </article>
+        )}
+        renderPromptSettings={() => null}
+      />
+    );
+
+    const { rerender } = render(renderPanel(sessionA.id));
+    await waitFor(() => {
+      expect(screen.getByText("Session A transcript")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      rerender(renderPanel(sessionB.id));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("Session A transcript")).not.toBeInTheDocument();
+    expect(screen.getByText("Live session is ready")).toBeInTheDocument();
+  });
+
+  it("refreshes same-id assistant text through the virtualized component path", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const scrollNode = document.createElement("section");
+    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    window.ResizeObserver =
+      ResizeObserverMock as unknown as typeof ResizeObserver;
+
+    try {
+      const messages = makeTextMessages(82);
+      const oldAssistant: Extract<Message, { type: "text" }> = {
+        author: "assistant",
+        id: messages[81].id,
+        timestamp: messages[81].timestamp,
+        type: "text",
+        text: "Old streamed answer",
+      };
+      const initialSession = makeSession("session-a", {
+        messages: [...messages.slice(0, 81), oldAssistant],
+        pendingPrompts: [
+          {
+            id: "message-81",
+            text: "Queued prompt duplicate",
+            timestamp: "11:21",
+          },
+        ],
+      });
+      const currentAssistant: Extract<Message, { type: "text" }> = {
+        ...oldAssistant,
+        text: "Old streamed answer plus the latest chunk",
+      };
+      const updatedSession = makeSession("session-a", {
+        messages: [...messages.slice(0, 81), currentAssistant],
+        pendingPrompts: initialSession.pendingPrompts,
+      });
+      const renderPanel = () => (
+        <AgentSessionPanel
+          paneId="pane-1"
+          viewMode="session"
+          activeSessionId="session-a"
+          isLoading={false}
+          isUpdating={false}
+          showWaitingIndicator={false}
+          waitingIndicatorPrompt={null}
+          commandMessages={[]}
+          diffMessages={[]}
+          scrollContainerRef={{
+            current: scrollNode,
+          } as RefObject<HTMLElement | null>}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+          onMcpElicitationSubmit={() => {}}
+          onCodexAppRequestSubmit={() => {}}
+          onCancelQueuedPrompt={() => {}}
+          onSessionSettingsChange={() => {}}
+          conversationSearchQuery=""
+          conversationSearchMatchedItemKeys={new Set()}
+          conversationSearchActiveItemKey={null}
+          onConversationSearchItemMount={() => {}}
+          renderCommandCard={() => null}
+          renderDiffCard={() => null}
+          renderMessageCard={(message) => (
+            <article className="message-card">
+              <span>{message.id}</span>
+              <span>{message.type === "text" ? message.text : message.id}</span>
+            </article>
+          )}
+          renderPromptSettings={() => null}
+        />
+      );
+
+      syncComposerSessionsStore({
+        sessions: [initialSession],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+      const { container } = render(renderPanel());
+
+      await waitFor(() => {
+        expect(container.querySelector(".virtualized-message-list")).not.toBeNull();
+        expect(screen.getByText("Old streamed answer")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Queued prompt duplicate")).not.toBeInTheDocument();
+
+      act(() => {
+        syncComposerSessionsStore({
+          sessions: [updatedSession],
+          draftsBySessionId: {},
+          draftAttachmentsBySessionId: {},
+        });
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("Old streamed answer plus the latest chunk"),
+        ).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Old streamed answer")).not.toBeInTheDocument();
+      expect(screen.queryByText("Queued prompt duplicate")).not.toBeInTheDocument();
+      expect(container.querySelector(".virtualized-message-list")).not.toBeNull();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      scrollNodeMocks.cleanup();
+    }
+  });
+
   it("renders pending prompts outside the live tail when no live turn is visible", () => {
     renderSessionPanelWithDefaults({
       activeSession: makeSession("session-a", {
