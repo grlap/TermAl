@@ -62,7 +62,10 @@ impl AppState {
 
     fn telegram_status(&self) -> Result<TelegramStatusResponse, ApiError> {
         let _guard = telegram_settings_file_guard();
-        let file = self.load_telegram_bot_file()?;
+        let mut file = self.load_telegram_bot_file()?;
+        if self.sanitize_telegram_config_for_current_state_in_place(&mut file.config) {
+            self.persist_telegram_bot_file(&file)?;
+        }
         Ok(self.telegram_status_from_file(file))
     }
 
@@ -320,20 +323,32 @@ impl AppState {
         &self,
         mut config: TelegramUiConfig,
     ) -> TelegramUiConfig {
+        self.sanitize_telegram_config_for_current_state_in_place(&mut config);
+        config
+    }
+
+    fn sanitize_telegram_config_for_current_state_in_place(
+        &self,
+        config: &mut TelegramUiConfig,
+    ) -> bool {
+        let mut changed = false;
         let inner = self.inner.lock().expect("state mutex poisoned");
         let known_projects = inner
             .projects
             .iter()
             .map(|project| project.id.as_str())
             .collect::<HashSet<_>>();
+        let old_subscription_count = config.subscribed_project_ids.len();
         config
             .subscribed_project_ids
             .retain(|project_id| known_projects.contains(project_id.as_str()));
+        changed |= config.subscribed_project_ids.len() != old_subscription_count;
 
         if config.default_project_id.is_none()
             && config.subscribed_project_ids.len() == 1
         {
             config.default_project_id = config.subscribed_project_ids.first().cloned();
+            changed = true;
         }
 
         if !config
@@ -341,9 +356,10 @@ impl AppState {
             .as_deref()
             .is_some_and(|project_id| known_projects.contains(project_id))
         {
+            changed |= config.default_project_id.is_some() || config.default_session_id.is_some();
             config.default_project_id = None;
             config.default_session_id = None;
-            return config;
+            return changed;
         }
 
         if let Some(session_id) = config.default_session_id.as_deref() {
@@ -354,10 +370,11 @@ impl AppState {
             });
             if !session_matches {
                 config.default_session_id = None;
+                changed = true;
             }
         }
 
-        config
+        changed
     }
 
     #[cfg(not(test))]

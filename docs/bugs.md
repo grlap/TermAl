@@ -465,21 +465,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Either accept (Phase 1 single-user stance).
 - Or restructure as pure validation that does not own a copy of secrets — collect required mutations into a small `Normalization { default_project_id: Option<String>, push_subscriptions: Vec<String> }` value and apply after validation passes.
 
-## Two readers see divergent `telegram-bot.json` view: API status sanitizes, file may have stale refs
-
-**Severity:** Note - `telegram_status` reads the file and runs `sanitize_telegram_config_for_current_state` once, returning sanitized data without persisting it. `update_telegram_config` runs sanitize twice and persists. A client that calls `GET /api/telegram/status` and gets `defaultProjectId: null` (sanitized) but doesn't follow up with `POST /api/telegram/config` will see "phantom" data — the on-disk file still has the stale id.
-
-`src/telegram_settings.rs:103-104`. A subsequent unrelated process reading `telegram-bot.json` directly (e.g., a `cargo run -- telegram` legacy path) gets a different view than the UI.
-
-**Current behavior:**
-- Status endpoint returns sanitized config without persisting.
-- On-disk file may contain stale refs the API hides.
-- Two readers with different views.
-
-**Proposal:**
-- Either auto-persist the sanitized form on read in `telegram_status` so the file matches what the API returns (with appropriate locking).
-- Or document that the on-disk file is allowed to contain stale references that `GET /api/telegram/status` will hide.
-
 ## Delegation result formatting remains coupled to command transport
 
 **Severity:** Low - the hook at `ui/src/SessionPaneView.render-callbacks.tsx:13-20` imports `delegation-commands` and `delegation-result-prompt` directly, and the pure formatter at `ui/src/delegation-result-prompt.ts:11` imports `DelegationResultPacket` from `delegation-commands`.

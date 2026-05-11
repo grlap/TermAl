@@ -5949,6 +5949,59 @@ fn telegram_status_sanitizes_stale_project_and_session_references() {
 }
 
 #[test]
+fn telegram_status_persists_sanitized_stale_project_and_session_references() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-status-sanitize-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
+        .expect("settings dir should create");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "config": {
+                "enabled": false,
+                "botToken": "123456:secret",
+                "subscribedProjectIds": [project_id.clone(), "missing-project"],
+                "defaultProjectId": project_id.clone(),
+                "defaultSessionId": "missing-session"
+            },
+            "chatId": 123
+        }))
+        .expect("fixture should encode"),
+    )
+    .expect("fixture should write");
+
+    let response = state
+        .telegram_status()
+        .expect("status read should sanitize stale persisted references");
+
+    assert_eq!(response.subscribed_project_ids, vec![project_id.clone()]);
+    assert_eq!(
+        response.default_project_id.as_deref(),
+        Some(project_id.as_str())
+    );
+    assert_eq!(response.default_session_id, None);
+    assert_eq!(response.linked_chat_id, Some(123));
+
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert_eq!(
+        value["config"]["subscribedProjectIds"],
+        json!([project_id.clone()])
+    );
+    assert_eq!(value["config"]["defaultProjectId"], json!(project_id));
+    assert!(value["config"].get("defaultSessionId").is_none());
+    assert_eq!(value["chatId"], json!(123));
+}
+
+#[test]
 fn telegram_settings_load_defaults_only_for_missing_file() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let home = std::env::temp_dir().join(format!(
