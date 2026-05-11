@@ -789,6 +789,131 @@ describe("PaneTabs", () => {
     expect(tooltip).toHaveTextContent("SSH Lab (grzeg@lab.internal)");
   });
 
+  it.each([
+    {
+      name: "projectless remote proxy",
+      projectLookup: new Map<string, Project>(),
+      remoteLookup: new Map<string, RemoteConfig>([
+        [
+          "ssh-lab",
+          {
+            id: "ssh-lab",
+            name: "SSH Lab",
+            transport: "ssh",
+            enabled: true,
+            host: "lab.internal",
+            port: 22,
+            user: "grzeg",
+          },
+        ],
+      ]),
+      session: makeSession("session-1", "/remote/repo", "Remote Proxy", {
+        projectId: null,
+        remoteId: "ssh-lab",
+      }),
+      expectedLocation: "SSH Lab (grzeg@lab.internal)",
+    },
+    {
+      name: "missing project with session remote owner",
+      projectLookup: new Map<string, Project>(),
+      remoteLookup: new Map<string, RemoteConfig>([
+        [
+          "ssh-lab",
+          {
+            id: "ssh-lab",
+            name: "SSH Lab",
+            transport: "ssh",
+            enabled: true,
+            host: "lab.internal",
+            port: 22,
+            user: "grzeg",
+          },
+        ],
+      ]),
+      session: makeSession("session-1", "/remote/repo", "Missing Project", {
+        projectId: "project-missing",
+        remoteId: "ssh-lab",
+      }),
+      expectedLocation: "SSH Lab (grzeg@lab.internal)",
+    },
+    {
+      name: "missing session remote owner config",
+      projectLookup: new Map<string, Project>(),
+      remoteLookup: new Map<string, RemoteConfig>(),
+      session: makeSession("session-1", "/remote/repo", "Missing Remote", {
+        projectId: null,
+        remoteId: "ssh-removed",
+      }),
+      expectedLocation: "ssh-removed (missing remote)",
+    },
+    {
+      name: "conflicting session and project remote owners",
+      projectLookup: new Map([
+        [
+          "project-1",
+          makeProject("project-1", "/remote/repo", "Questica", "ssh-lab"),
+        ],
+      ]),
+      remoteLookup: new Map<string, RemoteConfig>([
+        [
+          "ssh-lab",
+          {
+            id: "ssh-lab",
+            name: "SSH Lab",
+            transport: "ssh",
+            enabled: true,
+            host: "lab.internal",
+            port: 22,
+            user: "grzeg",
+          },
+        ],
+        [
+          "ssh-build",
+          {
+            id: "ssh-build",
+            name: "Build Box",
+            transport: "ssh",
+            enabled: true,
+            host: "build.internal",
+            port: 22,
+            user: "builder",
+          },
+        ],
+      ]),
+      session: makeSession("session-1", "/remote/repo", "Conflicting Owner", {
+        projectId: "project-1",
+        remoteId: "ssh-build",
+      }),
+      expectedLocation: "Build Box (builder@build.internal)",
+    },
+  ])("shows session remote ownership for $name", async ({
+    expectedLocation,
+    projectLookup,
+    remoteLookup,
+    session,
+  }) => {
+    renderPaneTabs({
+      projectLookup,
+      remoteLookup,
+      sessionLookup: new Map([["session-1", session]]),
+      tabs: [
+        {
+          id: "tab-session",
+          kind: "session",
+          sessionId: "session-1",
+        },
+      ],
+    });
+
+    fireEvent.mouseEnter(
+      screen.getByRole("tab", { name: new RegExp(session.name, "i") }),
+    );
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Location:");
+    expect(tooltip).toHaveTextContent(expectedLocation);
+  });
+
   it("shows generic status details for non-Codex agents", async () => {
     renderPaneTabs({
       sessionLookup: new Map([

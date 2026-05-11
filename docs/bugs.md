@@ -1848,8 +1848,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add an injectable or testable relay runtime so startup from saved settings, implicit first subscribed-project fallback, invalid/missing config stop, config-save start/stop/restart, deleted-project reconciliation, runtime status `running: true` + `inProcess`, and graceful-shutdown stop are covered despite the production path's `#[cfg(not(test))]` guards.
 - [ ] P2: Cover Telegram relay stop/restart quiescence:
   simulate disable or config retarget while an old relay is in flight and assert stale-generation polling/action handling cannot continue after status reports the replacement or stopped state.
-- [ ] P2: Add component-level session tab tooltip remote-owner coverage:
-  render tab tooltips for projectless, missing-project, missing-remote, and conflicting session/project remote proxy sessions whose summaries carry `remoteId`, complementing formatter-level coverage for session-owner precedence.
 - [ ] P2: Cover remote-sync embedded remote-owner clearing:
   seed a remote snapshot session with attacker-chosen `remoteId`, localize it, and assert trusted `SessionRecord.remote_id` metadata is preserved while the embedded `record.session.remote_id` is cleared and local wire projections re-emit only trusted ownership.
 - [ ] P2: Cover production-path tool/delegation id collision:
