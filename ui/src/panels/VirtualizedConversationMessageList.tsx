@@ -214,7 +214,7 @@ type EstimatedPageHeightEntry = {
   cacheKey: string;
   height: number;
 };
-type MessageWindowSnapshot = {
+export type MessageWindowSnapshot = {
   ids: string[];
   sessionId: string;
 };
@@ -416,7 +416,7 @@ function estimateMessageOffsetWithinPage(
   return offset;
 }
 
-function resolvePrependedMessageCount(
+export function resolvePrependedMessageCount(
   previous: MessageWindowSnapshot,
   currentMessages: readonly Message[],
   sessionId: string,

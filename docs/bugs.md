@@ -1920,8 +1920,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `docs/architecture.md` now documents that session creation advances the main revision, and `ui/src/app-live-state.ts` cross-links that contract. Add a coverage test that (a) sets the client up with a session list missing `session-X`, (b) dispatches a same-revision session delta for `session-X` (where `latestStateRevisionRef.current === delta.revision`) — asserting NO immediate `/api/state` fetch, then (c) dispatches the next authoritative `state` event including `session-X` and asserts it adopts cleanly.
 - [ ] P2: Finish splitting the remaining marker-menu create/remove test:
   the marker-menu coverage now has focused cases for keyboard trigger, portal cleanup, scroll/resize close, explicit trigger contract, and clamp fallback. The original create/remove test still combines add/remove, Escape focus restore, ArrowDown navigation, and rect-based clamp behavior; split the remaining assertions if it grows again.
-- [ ] P2: Cover `resolvePrependedMessageCount` branches directly:
-  export the helper (or a thin shim) and add unit tests for cross-session, empty previous window, no growth, partial overlap, no first-message match, and contiguous match at index 0.
 - [ ] P2: Pin `mountedRangeWillChange` early-return absence of stale-rect scroll write:
   during the prepend integration test, capture `harness.scrollWrites` between the prepend and the followup effect and assert no scroll write lands at the stale `targetScrollTop` value computed from pre-mutation rects.
 - [ ] P2: Cover Telegram relay active-project reconciliation:

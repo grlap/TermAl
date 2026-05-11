@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS,
   VirtualizedConversationMessageList,
+  resolvePrependedMessageCount,
   type VirtualizedConversationMessageListHandleRef,
 } from "./VirtualizedConversationMessageList";
 import {
@@ -281,6 +282,77 @@ async function advanceIdleMountedRangeCompaction() {
 }
 
 describe("VirtualizedConversationMessageList foundation", () => {
+  describe("resolvePrependedMessageCount", () => {
+    it.each([
+      {
+        name: "cross-session window",
+        previousIds: ["message-3", "message-4"],
+        currentMessages: makeTextMessages(5),
+        sessionId: "session-b",
+        expected: null,
+      },
+      {
+        name: "empty previous window",
+        previousIds: [],
+        currentMessages: makeTextMessages(5),
+        sessionId: "session-a",
+        expected: null,
+      },
+      {
+        name: "no growth",
+        previousIds: ["message-1", "message-2"],
+        currentMessages: makeTextMessages(2),
+        sessionId: "session-a",
+        expected: null,
+      },
+      {
+        name: "partial overlap",
+        previousIds: ["message-3", "message-4"],
+        currentMessages: [
+          ...makeTextMessages(3),
+          {
+            ...makeTextMessages(1)[0]!,
+            id: "message-5",
+          },
+        ],
+        sessionId: "session-a",
+        expected: null,
+      },
+      {
+        name: "no first-message match",
+        previousIds: ["message-8", "message-9"],
+        currentMessages: makeTextMessages(5),
+        sessionId: "session-a",
+        expected: null,
+      },
+      {
+        name: "contiguous match at index 0",
+        previousIds: ["message-1", "message-2"],
+        currentMessages: makeTextMessages(5),
+        sessionId: "session-a",
+        expected: null,
+      },
+      {
+        name: "contiguous prepend match",
+        previousIds: ["message-3", "message-4"],
+        currentMessages: makeTextMessages(5),
+        sessionId: "session-a",
+        expected: 2,
+      },
+    ])("$name", ({ previousIds, currentMessages, sessionId, expected }) => {
+      expect(
+        resolvePrependedMessageCount(
+          {
+            ids: previousIds,
+            sessionId: "session-a",
+          },
+          currentMessages,
+          sessionId,
+        ),
+      ).toBe(expected);
+    });
+  });
+
   it("exposes a layout snapshot and explicit jump helpers", async () => {
     const messages = makeTextMessages(48);
     const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
