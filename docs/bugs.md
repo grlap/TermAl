@@ -343,20 +343,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Throttle via rAF.
 - OR only capture when prepend is imminent.
 
-## `status-fetch-failed` priority drops mixed-instance signal silently
-
-**Severity:** Medium - round 60 documents the priority rule, but `applyCurrentInstanceStatusBatchResponses` filters out responses whose `serverInstanceId` differs from the previous baseline. So if a status batch sees one fetch fail AND collected responses come from a NEW instance, the mixed-instance information is silently dropped: no `recoveryGroups` for the new-instance responses.
-
-`ui/src/delegation-commands.ts:594-617` + `docs/features/agent-delegation-sessions.md:245-260`.
-
-**Current behavior:**
-- `status-fetch-failed` masks concurrent server restart.
-- Wrappers receive `status-fetch-failed` packet without instance-change diagnostic.
-- Doc claims status-fetch priority but doesn't note the partial-information loss.
-
-**Proposal:**
-- Document the partial-information loss in `agent-delegation-sessions.md` so wrappers know `status-fetch-failed` may hide a concurrent server restart.
-
 ## Delegation result formatting remains coupled to command transport
 
 **Severity:** Low - the hook at `ui/src/SessionPaneView.render-callbacks.tsx:13-20` imports `delegation-commands` and `delegation-result-prompt` directly, and the pure formatter at `ui/src/delegation-result-prompt.ts:11` imports `DelegationResultPacket` from `delegation-commands`.

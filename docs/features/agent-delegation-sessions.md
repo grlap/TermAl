@@ -414,7 +414,12 @@ added.
 successful or timed-out status batch observes a backend restart between polling
 cycles or within one parallel status batch. Status-fetch failures have priority:
 if any status request rejects, the result is `status-fetch-failed` even when
-collected responses already include another `serverInstanceId`. Its
+collected responses already include another `serverInstanceId`. In that
+priority path, collected responses from a different instance are ignored while
+building the retained partial state, so the error can hide the concurrent
+restart and omit mixed-instance `recoveryGroups`. Wrappers should treat
+`status-fetch-failed` as "poll again or fall back to backend resume wait" rather
+than as evidence that no restart happened. Mixed-instance
 `error.recoveryGroups` are diagnostic only: groups identify which backend
 instance produced each observed delegation/status pair, and a previous-instance
 group is scoped to delegations fetched in the current poll. A single
