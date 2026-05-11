@@ -1962,8 +1962,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   the marker-menu coverage now has focused cases for keyboard trigger, portal cleanup, scroll/resize close, explicit trigger contract, and clamp fallback. The original create/remove test still combines add/remove, Escape focus restore, ArrowDown navigation, and rect-based clamp behavior; split the remaining assertions if it grows again.
 - [ ] P2: Add `isConversationVirtualized` short-conversation gate test in `AgentSessionPanel.test.tsx`:
   round 57's behavioral change has no test for the < 80 message branch. Add a `makeTextMessages(5)` session test that clicks a marker and asserts `findMountedConversationMessageSlot` was used (or assert `virtualizerHandleRef.current` was never accessed because the prop was undefined). Pin the contract.
-- [ ] P2: Add AppDialogs Telegram tab path test:
-  `AppDialogs.test.tsx` contains no `telegram` references. Open the settings dialog with `settingsTab="telegram"` and assert the panel renders with initial fetch.
 - [ ] P2: Cover all 7 demand-driven hydration listeners in `AgentSessionPanel.test.tsx`:
   current test exercises only `wheel` of seven listeners (scroll, wheel, keydown, touchstart, touchmove, touchend, touchcancel). Add scroll-near-top (scrollTop = 50, fire scroll, expect hydration), keydown (ArrowUp/Home/PageUp dispatch), touchstart+touchmove with positive deltaY (pull-down) producing hydration, and a NEGATIVE control: `event.ctrlKey` wheel with `deltaY: -120` should NOT hydrate.
 - [ ] P2: Assert one-shot hydration in demand-driven hydration test:

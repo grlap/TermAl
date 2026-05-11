@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -183,7 +183,14 @@ function renderCreateProjectDialog(overrides: Partial<ComponentProps<typeof AppD
   return onClose;
 }
 
-function renderSettingsDialog(settingsTab: PreferencesTabId) {
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+function renderSettingsDialog(
+  settingsTab: PreferencesTabId,
+  overrides: Partial<ComponentProps<typeof AppDialogs>> = {},
+) {
   const onClose = vi.fn();
   render(
     <AppDialogs
@@ -191,6 +198,7 @@ function renderSettingsDialog(settingsTab: PreferencesTabId) {
         isSettingsOpen: true,
         closeSettingsDialog: onClose,
         settingsTab,
+        ...overrides,
       })}
     />,
   );
@@ -316,5 +324,38 @@ describe("AppDialogs settings agent defaults", () => {
     );
     expect(screen.getByLabelText("Default Gemini approvals")).toBeInTheDocument();
     expect(screen.queryByLabelText("Default Cursor mode")).toBeNull();
+  });
+
+  it("renders the Telegram settings tab and fetches initial status", async () => {
+    const fetchMock = vi.fn(async () => {
+      const status = {
+        configured: true,
+        enabled: true,
+        running: false,
+        lifecycle: "inProcess",
+        linkedChatId: null,
+        botTokenMasked: "saved-token",
+        subscribedProjectIds: [],
+        defaultProjectId: null,
+        defaultSessionId: null,
+      };
+      return new Response(JSON.stringify(status), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsDialog("telegram");
+
+    expect(screen.getByRole("heading", { name: "Telegram" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Bot token")).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/telegram/status");
+    expect(await screen.findByText("Stopped")).toBeInTheDocument();
+    expect(screen.getByLabelText("Bot token")).toHaveAttribute(
+      "placeholder",
+      "saved-token",
+    );
   });
 });
