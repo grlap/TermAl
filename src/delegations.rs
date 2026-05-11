@@ -2536,6 +2536,12 @@ fn prepare_isolated_delegation_worktree(
         &["diff", "--binary"],
         "failed to collect unstaged git diff for isolated worktree",
     )?;
+    let untracked_files = git_repo_output(
+        &source_repo_root,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+        "failed to collect untracked files for isolated worktree",
+    )?;
+    validate_isolated_worktree_no_untracked_files(&untracked_files)?;
     validate_isolated_worktree_patch_size(&staged_patch, &unstaged_patch)?;
 
     create_detached_git_worktree(&source_repo_root, &worktree_root)?;
@@ -2739,6 +2745,27 @@ fn validate_isolated_worktree_patch_size_bytes(
         )));
     }
     Ok(())
+}
+
+fn validate_isolated_worktree_no_untracked_files(untracked_files: &[u8]) -> Result<(), ApiError> {
+    let mut paths = untracked_files
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect::<Vec<_>>();
+    if paths.is_empty() {
+        return Ok(());
+    }
+
+    paths.sort();
+    let mut listed_paths = paths.iter().take(5).cloned().collect::<Vec<_>>();
+    if paths.len() > listed_paths.len() {
+        listed_paths.push(format!("and {} more", paths.len() - listed_paths.len()));
+    }
+    Err(ApiError::bad_request(format!(
+        "isolatedWorktree delegation cannot materialize untracked files yet; stage, stash, or remove untracked file(s): {}",
+        listed_paths.join(", ")
+    )))
 }
 
 enum DelegationChildOutcome {

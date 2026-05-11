@@ -44,21 +44,6 @@ Operators and the UI cannot tell that fan-in resume should have happened but did
 - Emit a structured warning event or retain dispatch error metadata.
 - Or document the best-effort policy and recovery expectations.
 
-## Isolated delegation worktree snapshots omit untracked files
-
-**Severity:** Medium - `src/delegations.rs:1764-1772`. The isolated worktree mirror captures staged and unstaged tracked changes with `git diff --cached --binary` and `git diff --binary`, but it does not include non-ignored untracked files.
-
-A delegated `/review-local` build or review can run against a child worktree missing newly created source files from the parent workspace. That can produce false review findings or false build failures.
-
-**Current behavior:**
-- Staged tracked changes are applied to the child worktree.
-- Unstaged tracked changes are applied to the child worktree.
-- Non-ignored untracked files are silently absent from the child worktree.
-
-**Proposal:**
-- Include `git ls-files --others --exclude-standard` files with path validation and size limits.
-- Or reject isolated-worktree delegation while unsupported untracked files are present and explain the limitation.
-
 ## Delegation action generation guard can drop the first action after a session switch
 
 **Severity:** Low - `ui/src/SessionPaneView.render-callbacks.tsx:194`. `activeSessionGenerationRef` is advanced in a passive `useEffect`, so a delegation action started immediately after mount or session switch can capture the pre-effect generation.

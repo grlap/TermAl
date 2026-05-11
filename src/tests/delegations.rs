@@ -2907,6 +2907,77 @@ fn isolated_worktree_max_fanout_rejection_does_not_leave_worktree() {
 }
 
 #[test]
+fn isolated_worktree_rejects_untracked_files_without_leaving_worktree() {
+    let (state, _input_rx) =
+        test_app_state_with_delegation_codex_runtime("isolated-untracked-rollback-runtime");
+    let unique = Uuid::new_v4();
+    let repo_root = std::env::temp_dir().join(format!("termal-isolated-untracked-source-{unique}"));
+    let worktree_root =
+        std::env::temp_dir().join(format!("termal-isolated-untracked-child-{unique}"));
+    fs::create_dir_all(&repo_root).expect("source repo root should be created");
+    fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+    fs::write(repo_root.join("new-file.txt"), "untracked\n").expect("untracked file should write");
+
+    let parent_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner.create_session(
+            Agent::Codex,
+            Some("Untracked Parent".to_owned()),
+            repo_root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let session_id = record.session.id.clone();
+        state.commit_locked(&mut inner).unwrap();
+        session_id
+    };
+
+    let err = match state.create_read_only_delegation(
+        &parent_session_id,
+        CreateDelegationRequest {
+            prompt: "This isolated reviewer should reject untracked files.".to_owned(),
+            title: Some("Untracked Isolated Reviewer".to_owned()),
+            cwd: None,
+            agent: Some(Agent::Codex),
+            model: None,
+            mode: Some(DelegationMode::Reviewer),
+            write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                owned_paths: vec!["README.md".to_owned()],
+                worktree_path: Some(worktree_root.to_string_lossy().into_owned()),
+            }),
+        },
+    ) {
+        Ok(_) => panic!("untracked files should reject isolated delegation"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(
+        err.message.contains("untracked file"),
+        "unexpected untracked-file error: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains("new-file.txt"),
+        "untracked-file error should list the blocking file: {}",
+        err.message
+    );
+    assert!(
+        !worktree_root.exists(),
+        "untracked-file rejection must not leave a worktree"
+    );
+
+    let _ = fs::remove_dir_all(&repo_root);
+    let _ = fs::remove_dir_all(&worktree_root);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn isolated_worktree_patch_size_limit_rejects_oversized_dirty_state() {
     validate_isolated_worktree_patch_size_bytes(MAX_ISOLATED_WORKTREE_PATCH_BYTES, 0)
         .expect("exact patch limit should be accepted");
