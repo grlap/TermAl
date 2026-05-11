@@ -248,10 +248,9 @@ export function useConversationOverviewController({
         return;
       }
       refreshLayoutSnapshot();
-      refreshViewportSnapshot();
     });
     layoutRefreshFrameIdRef.current = ranSynchronously ? null : frameId;
-  }, [refreshLayoutSnapshot, refreshViewportSnapshot]);
+  }, [refreshLayoutSnapshot]);
 
   const scheduleViewportRefresh = useCallback(() => {
     if (viewportRefreshFrameIdRef.current !== null) {

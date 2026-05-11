@@ -36,13 +36,25 @@ function makeLayoutSnapshot(
   };
 }
 
+type VirtualizerReadCallbacks = {
+  onGetLayoutSnapshot?: () => void;
+  onGetViewportSnapshot?: () => void;
+};
+
 function makeVirtualizerHandle(
   snapshot: VirtualizedConversationLayoutSnapshot,
+  callbacks: VirtualizerReadCallbacks = {},
 ): VirtualizedConversationMessageListHandle {
   const { messages: _messages, ...viewportSnapshot } = snapshot;
   return {
-    getLayoutSnapshot: () => snapshot,
-    getViewportSnapshot: () => viewportSnapshot,
+    getLayoutSnapshot: () => {
+      callbacks.onGetLayoutSnapshot?.();
+      return snapshot;
+    },
+    getViewportSnapshot: () => {
+      callbacks.onGetViewportSnapshot?.();
+      return viewportSnapshot;
+    },
     jumpToMessageId: () => false,
     jumpToMessageIndex: () => false,
   };
@@ -140,7 +152,13 @@ function OverviewNavigateHarness({
   );
 }
 
-function OverviewGrowthHarness({ messageCount }: { messageCount: number }) {
+function OverviewGrowthHarness({
+  messageCount,
+  readCallbacks,
+}: {
+  messageCount: number;
+  readCallbacks?: VirtualizerReadCallbacks;
+}) {
   const scrollContainerRef = useRef<HTMLElement | null>(
     document.createElement("section"),
   );
@@ -156,11 +174,14 @@ function OverviewGrowthHarness({ messageCount }: { messageCount: number }) {
   });
 
   useLayoutEffect(() => {
-    overview.virtualizerHandleRef.current = makeVirtualizerHandle(snapshot);
+    overview.virtualizerHandleRef.current = makeVirtualizerHandle(
+      snapshot,
+      readCallbacks,
+    );
     return () => {
       overview.virtualizerHandleRef.current = null;
     };
-  }, [overview.virtualizerHandleRef, snapshot]);
+  }, [overview.virtualizerHandleRef, readCallbacks, snapshot]);
 
   return (
     <output data-testid="layout-message-count">
@@ -353,7 +374,16 @@ describe("useConversationOverviewController", () => {
     };
 
     try {
-      const { rerender } = render(<OverviewGrowthHarness messageCount={90} />);
+      const readCallbacks = {
+        onGetLayoutSnapshot: vi.fn(),
+        onGetViewportSnapshot: vi.fn(),
+      };
+      const { rerender } = render(
+        <OverviewGrowthHarness
+          messageCount={90}
+          readCallbacks={readCallbacks}
+        />,
+      );
 
       expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
         "none",
@@ -366,31 +396,37 @@ describe("useConversationOverviewController", () => {
       expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
         "90",
       );
+      expect(readCallbacks.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
+      expect(readCallbacks.onGetViewportSnapshot).not.toHaveBeenCalled();
       expect(frameCallbacks.size).toBe(1);
 
-      act(() => {
-        rerender(<OverviewGrowthHarness messageCount={120} />);
-      });
+      for (const messageCount of [
+        120, 140, 160, 180, 200, 220, 240, 260, 280, 300,
+      ]) {
+        act(() => {
+          rerender(
+            <OverviewGrowthHarness
+              messageCount={messageCount}
+              readCallbacks={readCallbacks}
+            />,
+          );
+        });
 
-      expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
-        "90",
-      );
-      expect(frameCallbacks.size).toBe(1);
-
-      act(() => {
-        rerender(<OverviewGrowthHarness messageCount={140} />);
-      });
-
-      expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
-        "90",
-      );
-      expect(frameCallbacks.size).toBe(1);
+        expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
+          "90",
+        );
+        expect(frameCallbacks.size).toBe(1);
+        expect(readCallbacks.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
+        expect(readCallbacks.onGetViewportSnapshot).not.toHaveBeenCalled();
+      }
 
       act(flushNextFrame);
 
       expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
-        "140",
+        "300",
       );
+      expect(readCallbacks.onGetLayoutSnapshot).toHaveBeenCalledTimes(2);
+      expect(readCallbacks.onGetViewportSnapshot).not.toHaveBeenCalled();
       expect(frameCallbacks.size).toBe(0);
     } finally {
       window.requestAnimationFrame = originalRequestAnimationFrame;

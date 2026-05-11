@@ -347,21 +347,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Add a sibling test that drives both the Claude task path and the delegation creation path with overlapping ids.
 - Or document the assumption that uuid id spaces don't collide deterministically.
 
-## `scheduleLayoutRefresh` callback double-refreshes viewport snapshot per flush
-
-**Severity:** Medium - the rAF callback at `ui/src/panels/conversation-overview-controller.ts:241-252` calls `refreshLayoutSnapshot()` (which already updates `viewportSnapshot` via `extractConversationOverviewViewportSnapshot(nextSnapshot)`) AND THEN `refreshViewportSnapshot()` (which makes a separate `getViewportSnapshot()` call and updates the same `viewportSnapshot` again). Two consecutive `setViewportSnapshot` calls per flush.
-
-The two calls produce different values (one derived, one fresh). React 18 batches both within an effect, but `refreshLayoutSnapshot` and `refreshViewportSnapshot` are independent setters — either the second overwrites the first (waste) or vice versa.
-
-**Current behavior:**
-- Both setters called from the same rAF flush.
-- Two `setViewportSnapshot` updates per scheduled refresh.
-- Either is wasted depending on which value wins.
-
-**Proposal:**
-- Decide whether the layout-derived viewport snapshot or the fresh `getViewportSnapshot()` is the source of truth.
-- If both are needed, fold into a single update path.
-
 ## Conversation overview viewport translation can reuse a stale same-size tail window or cross-session translation
 
 **Severity:** Medium - tail-window viewport translation validates compatibility only by `messageCount` and lacks any session identity guard.
@@ -716,21 +701,6 @@ Acceptable today; flagging for future re-use when N grows.
 **Proposal:**
 - Add an explicit unmount-while-pending test that schedules a refresh, unmounts before flushing, and asserts `cancelAnimationFrame` was called with the pending frame id.
 - Same for `sessionId` change mid-pending.
-
-## `coalesces ready layout refreshes` test does not pin rapid-update upper bound
-
-**Severity:** Low - the new test asserts that 2 message-count rerenders coalesce into a single frame. The production behavior is that an unbounded number of rerenders during a single rAF window all coalesce.
-
-`ui/src/panels/conversation-overview-controller.test.tsx:292-401`. A regression that, say, leaked a frame per rerender after the first 2 would not surface — the assertion `frameCallbacks.size === 1` checks only the steady-state after each rerender.
-
-**Current behavior:**
-- 2-rerender coalescing pinned.
-- 10+ rerenders in tight succession not pinned.
-- Per-flush `getLayoutSnapshot` invocation count not verified.
-
-**Proposal:**
-- Loop ten (or twenty) rerenders without flushing, asserting `frameCallbacks.size` remains exactly 1.
-- Spy on `getLayoutSnapshot` calls to assert it runs exactly once per flushed frame, not per rerender.
 
 ## `telegram_settings_load_defaults_only_for_missing_file` relies on platform-specific `io::ErrorKind`
 
@@ -2908,8 +2878,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   extend the controller test harness so a `rerender({ sessionId: "session-b", messageCount: 90 })` between a schedule and the flush asserts the layout snapshot is NOT updated to the stale session-a result, and the new session's later flush wins.
 - [ ] P2: Add unmount-while-pending tests for new rAF schedulers:
   schedule a refresh, unmount before flushing, and assert `cancelAnimationFrame` was called for the pending frame id. Same for a `sessionId` change mid-pending.
-- [ ] P2: Pin rapid-update upper bound for layout-refresh coalescing:
-  loop ten (or twenty) rerenders without flushing, asserting `frameCallbacks.size` remains exactly 1 across the burst. Spy on `getLayoutSnapshot` calls to assert it runs exactly once per flushed frame.
 - [ ] P2: Stabilize `telegram_settings_load_defaults_only_for_missing_file` against platform `io::ErrorKind`:
   switch from a directory fixture (which returns platform-dependent kinds) to malformed JSON or asserts directly on `io::Error::kind()`.
 - [ ] P2: Cover Git literal pathspec handling:
