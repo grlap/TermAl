@@ -6143,6 +6143,31 @@ fn delete_project_prunes_telegram_config_and_disables_relay_without_project_targ
 }
 
 #[test]
+fn delete_project_surfaces_telegram_prune_errors() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-delete-prune-error-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("state path should have a parent"))
+        .expect("settings dir should create");
+    fs::write(&path, b"{ not valid json").expect("malformed settings fixture should write");
+
+    let err = match state.delete_project(&project_id) {
+        Ok(_) => panic!("Telegram prune failure should surface"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(err.message.contains("failed to parse Telegram settings"));
+}
+
+#[test]
 fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_target() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let home = std::env::temp_dir().join(format!(

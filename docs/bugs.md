@@ -528,20 +528,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 - Re-fetch the cursor right before applying, not at the prepare step.
 - Or capture `latest` AFTER the POST returns (since the goal is "baseline as of after this prompt is sent").
 
-## `prune_telegram_config_for_deleted_project` failure is `eprintln!`-only
-
-**Severity:** Medium - if pruning fails, `delete_project` returns success and on-disk Telegram config retains stale references. The on-read sanitize masks them, but `validate_and_normalize_telegram_config` REJECTS unknown subscribed project ids on save — so a future `update_telegram_config` will fail with "unknown Telegram project `<deleted>`" with no obvious recovery path.
-
-`src/session_crud.rs:525-530`. The eprintln logs the failure but the API surface returns success.
-
-**Current behavior:**
-- `prune_telegram_config_for_deleted_project` failure is logged to stderr.
-- `delete_project` returns success regardless.
-- Next `update_telegram_config` fails with confusing error.
-
-**Proposal:**
-- Either persist Telegram config inside `commit_locked` (atomic), or have `validate_and_normalize_telegram_config` strip unknown ids on write rather than reject, or escalate the prune failure to a 5xx instead of swallowing.
-
 ## `src/telegram.rs` past 1500-line architecture rubric threshold
 
 **Severity:** Medium - file now exceeds 1766 lines after round 56. CLAUDE.md asks for smaller modules.
