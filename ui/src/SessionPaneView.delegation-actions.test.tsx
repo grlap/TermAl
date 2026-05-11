@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionPaneView } from "./SessionPaneView";
@@ -86,7 +86,18 @@ vi.mock("./panels/AgentSessionPanel", async () => {
           <button type="button">Open delegation child</button>
         ) : null}
         {typeof cardProps.onInsertParallelAgentResult === "function" ? (
-          <button type="button">Insert delegation result</button>
+          <button
+            type="button"
+            onClick={() => {
+              void (
+                cardProps.onInsertParallelAgentResult as (
+                  delegationId: string,
+                ) => Promise<void>
+              )("delegation-completed");
+            }}
+          >
+            Insert delegation result
+          </button>
         ) : null}
         {typeof cardProps.onCancelParallelAgent === "function" ? (
           <button type="button">Cancel delegation</button>
@@ -194,6 +205,8 @@ function renderSessionPaneView({
   remotes?: RemoteConfig[];
 }) {
   const onOpenConversationFromDiff = vi.fn();
+  const onComposerError = vi.fn();
+  const onInsertReviewIntoPrompt = vi.fn();
   const props: ComponentProps<typeof SessionPaneView> = {
     pane: makePane(session.id),
     codexState: {},
@@ -246,11 +259,11 @@ function renderSessionPaneView({
     onSetCanvasZoom: vi.fn(),
     onPaneSourcePathChange: vi.fn(),
     onOpenConversationFromDiff,
-    onInsertReviewIntoPrompt: vi.fn(),
+    onInsertReviewIntoPrompt,
     onDraftCommit: vi.fn(),
     onDraftAttachmentsAdd: vi.fn(),
     onDraftAttachmentRemove: vi.fn(),
-    onComposerError: vi.fn(),
+    onComposerError,
     onSend: vi.fn(() => true),
     onCancelQueuedPrompt: vi.fn(),
     onApprovalDecision: vi.fn(),
@@ -281,6 +294,8 @@ function renderSessionPaneView({
 
   return {
     ...render(<SessionPaneView {...props} />),
+    onComposerError,
+    onInsertReviewIntoPrompt,
     onOpenConversationFromDiff,
   };
 }
@@ -406,5 +421,73 @@ describe("SessionPaneView delegation action wiring", () => {
         "pane-1",
       );
     });
+  });
+
+  it("inserts completed delegation results without a status warning", async () => {
+    delegationCommandMocks.getDelegationResultCommand.mockResolvedValue({
+      delegationId: "delegation-completed",
+      childSessionId: "child-session-1",
+      status: "completed",
+      summary: "Review passed.",
+      findings: [],
+      changedFiles: [],
+      commandsRun: [],
+      notes: [],
+      revision: 2,
+      serverInstanceId: "server-1",
+    });
+
+    const { onComposerError, onInsertReviewIntoPrompt } = renderSessionPaneView({
+      session: makeSession({ id: "session-1" }),
+      projects: [makeProject({ id: "project-local", remoteId: null })],
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Insert delegation result" }),
+    );
+
+    await waitFor(() => {
+      expect(onInsertReviewIntoPrompt).toHaveBeenCalledWith(
+        "session-1",
+        "pane-1",
+        expect.stringContaining("Delegation result (completed)"),
+      );
+    });
+    expect(onComposerError).not.toHaveBeenCalled();
+  });
+
+  it("warns when inserting failed delegation results", async () => {
+    delegationCommandMocks.getDelegationResultCommand.mockResolvedValue({
+      delegationId: "delegation-completed",
+      childSessionId: "child-session-1",
+      status: "failed",
+      summary: "Review failed.",
+      findings: [],
+      changedFiles: [],
+      commandsRun: [],
+      notes: [],
+      revision: 2,
+      serverInstanceId: "server-1",
+    });
+
+    const { onComposerError, onInsertReviewIntoPrompt } = renderSessionPaneView({
+      session: makeSession({ id: "session-1" }),
+      projects: [makeProject({ id: "project-local", remoteId: null })],
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Insert delegation result" }),
+    );
+
+    await waitFor(() => {
+      expect(onComposerError).toHaveBeenCalledWith(
+        "Delegation result status is failed; inserted output may describe an unsuccessful run.",
+      );
+    });
+    expect(onInsertReviewIntoPrompt).toHaveBeenCalledWith(
+      "session-1",
+      "pane-1",
+      expect.stringContaining("Delegation result (failed)"),
+    );
   });
 });

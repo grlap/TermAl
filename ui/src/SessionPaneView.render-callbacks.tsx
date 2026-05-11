@@ -108,6 +108,16 @@ function delegationChildUnavailableStatusLabel(
   }
 }
 
+function insertedDelegationResultStatusMessage(status: DelegationStatus) {
+  if (status === "completed") {
+    return null;
+  }
+  return [
+    `Delegation result status is ${status};`,
+    "inserted output may describe an unsuccessful run.",
+  ].join(" ");
+}
+
 type UseSessionRenderCallbacksParams = {
   activeSession: Session | null;
   activeSessionSearchMatchItemKey: string | undefined;
@@ -306,6 +316,12 @@ export function useSessionRenderCallbacks({
             )
           ) {
             return;
+          }
+          const statusMessage = insertedDelegationResultStatusMessage(
+            result.status,
+          );
+          if (statusMessage) {
+            onComposerError(statusMessage);
           }
           onInsertReviewIntoPrompt(
             parentSessionId,

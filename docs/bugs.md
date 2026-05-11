@@ -450,21 +450,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 **Proposal:**
 - Document the partial-information loss in `agent-delegation-sessions.md` so wrappers know `status-fetch-failed` may hide a concurrent server restart.
 
-## `handleInsertParallelAgentResult` accepts any status without warning
-
-**Severity:** Low - the handler at `ui/src/SessionPaneView.render-callbacks.tsx:217-250` accepts any `result.status` (including `"failed"`, `"canceled"`) and inserts the formatted prompt without warning. The formatter prefixes `Delegation result (failed) from child-1:` as a status disclaimer in the prompt body, but the user has no UI-level confirmation they're inserting a failed result.
-
-A user clicking "Insert result" on an `error`-status agent gets the failure summary inserted as if it were guidance — fine for an aware user, confusing for an unaware one. Round-62 noted this; round-63 still threads any result.
-
-**Current behavior:**
-- Status disclaimer in prompt body only (no UI prompt).
-- `status === "failed"` inserts failure summary as if it were guidance.
-- Empty/whitespace summary falls back to "No summary provided." with no further hint.
-
-**Proposal:**
-- Confirm with the user via a "do you really want to insert a failed result?" pattern when `result.status !== "completed"`.
-- Or surface a non-blocking notice via `onComposerError`.
-
 ## `~70` lines of `getBoundingClientRect` mock setup duplicated between adjacent `AgentSessionPanel.test.tsx` tests
 
 **Severity:** Low - the new "hydrates a long-session tail after a native-scrollbar mousedown" test duplicates ~70 lines of `Object.defineProperty` and `getBoundingClientRect` boilerplate from the prior sibling test. Future changes to the rect contract need parallel edits in both tests.
