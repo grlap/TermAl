@@ -89,11 +89,14 @@ export type ConversationOverviewProjection = {
 /**
  * Captures the full-document offset for a contiguous windowed layout snapshot.
  * `sourceTopOffsetPx` is `fullDocumentTop - windowedEstimatedTop` for the
- * first snapshot message; `snapshotMessageCount` prevents reusing the
- * translation after the virtualizer snapshot drifts.
+ * first snapshot message. The snapshot identity fields prevent reusing the
+ * translation after the virtualizer drifts to another same-size window.
  */
 export type ConversationOverviewViewportSnapshotTranslation = {
+  snapshotSessionId: string;
   snapshotMessageCount: number;
+  snapshotWindowStartMessageId: string;
+  snapshotWindowEndMessageId: string;
   sourceTopOffsetPx: number;
 };
 
@@ -322,8 +325,10 @@ export function projectConversationOverviewViewport(
   if (
     viewportSnapshot &&
     projection.viewportSnapshotTranslation &&
-    viewportSnapshot.messageCount ===
-      projection.viewportSnapshotTranslation.snapshotMessageCount
+    viewportSnapshotMatchesTranslation(
+      viewportSnapshot,
+      projection.viewportSnapshotTranslation,
+    )
   ) {
     const viewportHeightPx = projectTranslatedViewportHeight(
       viewportSnapshot,
@@ -957,10 +962,58 @@ function resolveViewportSnapshotTranslation(
   }
 
   return {
+    snapshotSessionId: layoutSnapshot.sessionId,
     snapshotMessageCount: layoutSnapshot.messageCount,
+    snapshotWindowStartMessageId: firstLayoutMessage.messageId,
+    snapshotWindowEndMessageId:
+      layoutSnapshot.messages[layoutSnapshot.messages.length - 1]?.messageId ??
+      firstLayoutMessage.messageId,
     sourceTopOffsetPx:
       estimatedRows.rows[firstRowIndex].documentTopPx -
       firstLayoutMessage.estimatedTopPx,
+  };
+}
+
+function viewportSnapshotMatchesTranslation(
+  viewportSnapshot: VirtualizedConversationViewportSnapshot,
+  translation: ConversationOverviewViewportSnapshotTranslation,
+) {
+  const snapshotWindowIdentity = resolveViewportSnapshotWindowIdentity(
+    viewportSnapshot,
+  );
+  return (
+    viewportSnapshot.sessionId === translation.snapshotSessionId &&
+    viewportSnapshot.messageCount === translation.snapshotMessageCount &&
+    snapshotWindowIdentity.windowStartMessageId ===
+      translation.snapshotWindowStartMessageId &&
+    snapshotWindowIdentity.windowEndMessageId ===
+      translation.snapshotWindowEndMessageId
+  );
+}
+
+function resolveViewportSnapshotWindowIdentity(
+  viewportSnapshot: VirtualizedConversationViewportSnapshot,
+) {
+  if (
+    viewportSnapshot.windowStartMessageId !== undefined ||
+    viewportSnapshot.windowEndMessageId !== undefined
+  ) {
+    return {
+      windowStartMessageId: viewportSnapshot.windowStartMessageId ?? null,
+      windowEndMessageId: viewportSnapshot.windowEndMessageId ?? null,
+    };
+  }
+
+  const layoutMessages = (
+    viewportSnapshot as {
+      messages?: readonly VirtualizedConversationLayoutMessage[];
+    }
+  ).messages;
+  const firstMessage = layoutMessages?.[0] ?? null;
+  const lastMessage = layoutMessages?.[layoutMessages.length - 1] ?? null;
+  return {
+    windowStartMessageId: firstMessage?.messageId ?? null,
+    windowEndMessageId: lastMessage?.messageId ?? null,
   };
 }
 

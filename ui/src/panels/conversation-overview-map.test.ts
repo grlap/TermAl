@@ -7,7 +7,10 @@ import {
   getConversationOverviewItemByMessageId,
   projectConversationOverviewViewport,
 } from "./conversation-overview-map";
-import type { VirtualizedConversationLayoutSnapshot } from "./VirtualizedConversationMessageList";
+import type {
+  VirtualizedConversationLayoutSnapshot,
+  VirtualizedConversationViewportSnapshot,
+} from "./VirtualizedConversationMessageList";
 import type { Message } from "../types";
 
 function textMessage(
@@ -81,6 +84,68 @@ function denseAssistantOverviewProjection(messageCount: number) {
     messages,
     minItemHeightPx: 2,
   });
+}
+
+function tailWindowLayoutSnapshot({
+  messages,
+  sessionId = "session-1",
+  startIndex,
+  count,
+}: {
+  messages: Message[];
+  sessionId?: string;
+  startIndex: number;
+  count: number;
+}): VirtualizedConversationLayoutSnapshot {
+  const tailMessages = messages.slice(startIndex, startIndex + count);
+  return {
+    sessionId,
+    messageCount: tailMessages.length,
+    estimatedTotalHeightPx: 2_000,
+    viewportTopPx: 1_500,
+    viewportHeightPx: 500,
+    viewportWidthPx: 800,
+    isActive: true,
+    visiblePageRange: {
+      startIndex: 15,
+      endIndex: 20,
+    },
+    mountedPageRange: {
+      startIndex: 12,
+      endIndex: 20,
+    },
+    messages: tailMessages.map((message, index) => ({
+      messageId: message.id,
+      messageIndex: index,
+      pageIndex: Math.floor(index / 8),
+      type: message.type,
+      author: message.author,
+      estimatedTopPx: index * 100,
+      estimatedHeightPx: 100,
+      measuredPageHeightPx: null,
+    })),
+  };
+}
+
+function viewportSnapshotFromLayout(
+  layoutSnapshot: VirtualizedConversationLayoutSnapshot,
+): VirtualizedConversationViewportSnapshot {
+  const firstMessage = layoutSnapshot.messages[0] ?? null;
+  const lastMessage =
+    layoutSnapshot.messages[layoutSnapshot.messages.length - 1] ?? null;
+  return {
+    sessionId: layoutSnapshot.sessionId,
+    messageCount: layoutSnapshot.messageCount,
+    windowStartMessageId: firstMessage?.messageId ?? null,
+    windowEndMessageId: lastMessage?.messageId ?? null,
+    estimatedTotalHeightPx: layoutSnapshot.estimatedTotalHeightPx,
+    viewportTopPx: layoutSnapshot.viewportTopPx,
+    viewportHeightPx: layoutSnapshot.viewportHeightPx,
+    viewportWidthPx: layoutSnapshot.viewportWidthPx,
+    isActive: layoutSnapshot.isActive,
+    visiblePageRange: layoutSnapshot.visiblePageRange,
+    mountedPageRange: layoutSnapshot.mountedPageRange,
+  };
 }
 
 describe("conversation overview map", () => {
@@ -503,6 +568,86 @@ describe("conversation overview map", () => {
     );
     expect(viewportProjection.viewportHeightPx).toBeCloseTo(
       layoutSnapshot.viewportHeightPx * projection.scale,
+    );
+  });
+
+  it("does not reuse translated viewport math for a different same-size tail window", () => {
+    const messages = Array.from({ length: 100 }, (_, index) =>
+      textMessage(`m${index + 1}`, {
+        text: `message ${index + 1}`,
+      }),
+    );
+    const layoutSnapshot = tailWindowLayoutSnapshot({
+      messages,
+      startIndex: 80,
+      count: 20,
+    });
+    const staleLayoutSnapshot = tailWindowLayoutSnapshot({
+      messages,
+      startIndex: 60,
+      count: 20,
+    });
+    const projection = buildConversationOverviewProjection({
+      layoutSnapshot,
+      maxHeightPx: 1_000,
+      messages,
+    });
+    const staleViewportSnapshot = viewportSnapshotFromLayout(staleLayoutSnapshot);
+
+    const viewportProjection = projectConversationOverviewViewport(
+      projection,
+      staleViewportSnapshot,
+    );
+    const legacyViewportProjection = projectConversationOverviewViewport(
+      {
+        ...projection,
+        viewportSnapshotTranslation: null,
+      },
+      staleViewportSnapshot,
+    );
+    const translatedViewportProjection = projectConversationOverviewViewport(
+      projection,
+      layoutSnapshot,
+    );
+
+    expect(viewportProjection).toEqual(legacyViewportProjection);
+    expect(viewportProjection.viewportTopPx).not.toBeCloseTo(
+      translatedViewportProjection.viewportTopPx,
+    );
+  });
+
+  it("does not reuse translated viewport math across sessions with the same tail size", () => {
+    const messages = Array.from({ length: 100 }, (_, index) =>
+      textMessage(`m${index + 1}`, {
+        text: `message ${index + 1}`,
+      }),
+    );
+    const layoutSnapshot = tailWindowLayoutSnapshot({
+      messages,
+      sessionId: "session-1",
+      startIndex: 80,
+      count: 20,
+    });
+    const staleViewportSnapshot = {
+      ...viewportSnapshotFromLayout(layoutSnapshot),
+      sessionId: "session-2",
+    };
+    const projection = buildConversationOverviewProjection({
+      layoutSnapshot,
+      maxHeightPx: 1_000,
+      messages,
+    });
+
+    expect(
+      projectConversationOverviewViewport(projection, staleViewportSnapshot),
+    ).toEqual(
+      projectConversationOverviewViewport(
+        {
+          ...projection,
+          viewportSnapshotTranslation: null,
+        },
+        staleViewportSnapshot,
+      ),
     );
   });
 

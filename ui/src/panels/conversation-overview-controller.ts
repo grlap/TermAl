@@ -568,9 +568,13 @@ function areConversationOverviewLayoutSnapshotsEqual(
 function extractConversationOverviewViewportSnapshot(
   snapshot: VirtualizedConversationLayoutSnapshot,
 ): VirtualizedConversationViewportSnapshot {
+  const firstMessage = snapshot.messages[0] ?? null;
+  const lastMessage = snapshot.messages[snapshot.messages.length - 1] ?? null;
   return {
     sessionId: snapshot.sessionId,
     messageCount: snapshot.messageCount,
+    windowStartMessageId: firstMessage?.messageId ?? null,
+    windowEndMessageId: lastMessage?.messageId ?? null,
     estimatedTotalHeightPx: snapshot.estimatedTotalHeightPx,
     viewportTopPx: snapshot.viewportTopPx,
     viewportHeightPx: snapshot.viewportHeightPx,
@@ -594,6 +598,8 @@ function areConversationOverviewViewportSnapshotsEqual(
   return (
     left.sessionId === right.sessionId &&
     left.messageCount === right.messageCount &&
+    left.windowStartMessageId === right.windowStartMessageId &&
+    left.windowEndMessageId === right.windowEndMessageId &&
     left.estimatedTotalHeightPx === right.estimatedTotalHeightPx &&
     left.viewportTopPx === right.viewportTopPx &&
     left.viewportHeightPx === right.viewportHeightPx &&

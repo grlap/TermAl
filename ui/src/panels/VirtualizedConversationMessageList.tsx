@@ -132,7 +132,13 @@ export type VirtualizedConversationLayoutSnapshot = {
 export type VirtualizedConversationViewportSnapshot = Omit<
   VirtualizedConversationLayoutSnapshot,
   "messages"
->;
+> & {
+  // Identifies the loaded message window behind a viewport-only snapshot. This
+  // prevents overview projections from reusing tail-window translations after
+  // the virtualizer moves to a different same-size window.
+  windowStartMessageId?: string | null;
+  windowEndMessageId?: string | null;
+};
 
 export type VirtualizedConversationMessageListHandle = {
   // Stable for the lifetime of the mount. Methods read the latest layout
@@ -1848,6 +1854,8 @@ export function VirtualizedConversationMessageList({
       return {
         sessionId,
         messageCount: messages.length,
+        windowStartMessageId: messages[0]?.id ?? null,
+        windowEndMessageId: messages[messages.length - 1]?.id ?? null,
         estimatedTotalHeightPx: snapshotScrollHeight,
         viewportTopPx: snapshotViewportTop,
         viewportHeightPx: snapshotViewportHeight,
