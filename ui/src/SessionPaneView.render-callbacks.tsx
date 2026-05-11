@@ -182,19 +182,20 @@ export function useSessionRenderCallbacks({
   sessionFindQuery,
   sessionSettingNotice,
 }: UseSessionRenderCallbacksParams) {
+  const activeSessionId = activeSession?.id ?? null;
   const mountedRef = useRef(true);
-  const activeSessionIdRef = useRef<string | null>(activeSession?.id ?? null);
+  const activeSessionIdRef = useRef<string | null>(null);
   const activeSessionGenerationRef = useRef(0);
+  if (activeSessionIdRef.current !== activeSessionId) {
+    activeSessionIdRef.current = activeSessionId;
+    activeSessionGenerationRef.current += 1;
+  }
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
   }, []);
-  useEffect(() => {
-    activeSessionIdRef.current = activeSession?.id ?? null;
-    activeSessionGenerationRef.current += 1;
-  }, [activeSession?.id]);
   // Stable by design: deferred delegation actions must read the latest refs
   // when they settle, not close over the session that rendered the card.
   const canApplyDelegationActionResult = useCallback(

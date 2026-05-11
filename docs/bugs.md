@@ -44,21 +44,6 @@ Operators and the UI cannot tell that fan-in resume should have happened but did
 - Emit a structured warning event or retain dispatch error metadata.
 - Or document the best-effort policy and recovery expectations.
 
-## Delegation action generation guard can drop the first action after a session switch
-
-**Severity:** Low - `ui/src/SessionPaneView.render-callbacks.tsx:194`. `activeSessionGenerationRef` is advanced in a passive `useEffect`, so a delegation action started immediately after mount or session switch can capture the pre-effect generation.
-
-When the async action settles after the effect increments the generation, the result is treated as stale and silently dropped even though the user acted in the current session.
-
-**Current behavior:**
-- `activeSessionGenerationRef` increments after paint in `useEffect`.
-- Open/insert/cancel delegation actions capture the current generation at action time.
-- A narrow post-switch timing window can make the first action no-op.
-
-**Proposal:**
-- Update the active-session id/generation ref in `useLayoutEffect` or another pre-interaction path.
-- Add a regression test for an immediate delegation action after session switch.
-
 ## Footer-send failure permanently loses the close marker with no retry
 
 **Severity:** Medium - `src/telegram.rs:2208-2223`. Footer-send failure is converted to `Ok(sent_visible_content: true)` and logged. The footer is for visual closure. If a transient failure swallows the footer once, it is permanently lost for that turn. The footer's stated purpose ("user has no easy way to tell 'is the agent still typing or done?'") is silently undermined.

@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionPaneView } from "./SessionPaneView";
 import type {
@@ -10,6 +10,16 @@ import type {
   Session,
 } from "./types";
 import type { WorkspacePane } from "./workspace";
+
+const delegationActionMockState = vi.hoisted(() => ({
+  autoOpenDelegationOnLayout: false,
+}));
+
+const delegationCommandMocks = vi.hoisted(() => ({
+  cancelDelegationCommand: vi.fn(),
+  getDelegationResultCommand: vi.fn(),
+  getDelegationStatusCommand: vi.fn(),
+}));
 
 vi.mock("./panels/AgentSessionPanel", async () => {
   const React = await import("react");
@@ -56,6 +66,20 @@ vi.mock("./panels/AgentSessionPanel", async () => {
         })
       : {};
 
+    React.useLayoutEffect(() => {
+      if (
+        delegationActionMockState.autoOpenDelegationOnLayout &&
+        typeof cardProps.onOpenParallelAgentSession === "function"
+      ) {
+        delegationActionMockState.autoOpenDelegationOnLayout = false;
+        void (
+          cardProps.onOpenParallelAgentSession as (
+            delegationId: string,
+          ) => Promise<void>
+        )("delegation-running");
+      }
+    }, [cardProps.onOpenParallelAgentSession]);
+
     return (
       <div data-testid="agent-session-panel">
         {typeof cardProps.onOpenParallelAgentSession === "function" ? (
@@ -100,6 +124,8 @@ vi.mock("./panels/AgentSessionPanel", async () => {
     AgentSessionPanelFooter,
   };
 });
+
+vi.mock("./delegation-commands", () => delegationCommandMocks);
 
 vi.mock("./panels/PaneTabs", () => ({
   PaneTabs: () => <div data-testid="pane-tabs" />,
@@ -167,6 +193,7 @@ function renderSessionPaneView({
   projects?: Project[];
   remotes?: RemoteConfig[];
 }) {
+  const onOpenConversationFromDiff = vi.fn();
   const props: ComponentProps<typeof SessionPaneView> = {
     pane: makePane(session.id),
     codexState: {},
@@ -217,7 +244,7 @@ function renderSessionPaneView({
     onRemoveCanvasSessionCard: vi.fn(),
     onSetCanvasZoom: vi.fn(),
     onPaneSourcePathChange: vi.fn(),
-    onOpenConversationFromDiff: vi.fn(),
+    onOpenConversationFromDiff,
     onInsertReviewIntoPrompt: vi.fn(),
     onDraftCommit: vi.fn(),
     onDraftAttachmentsAdd: vi.fn(),
@@ -251,7 +278,10 @@ function renderSessionPaneView({
     backendConnectionState: "connected",
   };
 
-  return render(<SessionPaneView {...props} />);
+  return {
+    ...render(<SessionPaneView {...props} />),
+    onOpenConversationFromDiff,
+  };
 }
 
 function expectDelegationActions(expectedEnabled: boolean) {
@@ -272,6 +302,13 @@ function expectDelegationActions(expectedEnabled: boolean) {
 }
 
 describe("SessionPaneView delegation action wiring", () => {
+  afterEach(() => {
+    delegationActionMockState.autoOpenDelegationOnLayout = false;
+    delegationCommandMocks.cancelDelegationCommand.mockReset();
+    delegationCommandMocks.getDelegationResultCommand.mockReset();
+    delegationCommandMocks.getDelegationStatusCommand.mockReset();
+  });
+
   it.each([
     {
       name: "local project session",
@@ -326,4 +363,47 @@ describe("SessionPaneView delegation action wiring", () => {
       expectDelegationActions(expectedEnabled);
     },
   );
+
+  it("keeps the first delegated action valid before passive session effects run", async () => {
+    let resolveStatus!: (value: {
+      childSessionId: string;
+      delegationId: string;
+      delegation: Record<string, unknown>;
+      revision: number;
+      serverInstanceId: string;
+      status: string;
+    }) => void;
+    delegationCommandMocks.getDelegationStatusCommand.mockReturnValue(
+      new Promise((resolve) => {
+        resolveStatus = resolve;
+      }),
+    );
+    delegationActionMockState.autoOpenDelegationOnLayout = true;
+
+    const { onOpenConversationFromDiff } = renderSessionPaneView({
+      session: makeSession({ id: "session-1" }),
+      projects: [makeProject({ id: "project-local", remoteId: null })],
+    });
+
+    await waitFor(() => {
+      expect(
+        delegationCommandMocks.getDelegationStatusCommand,
+      ).toHaveBeenCalledWith("session-1", "delegation-running");
+    });
+    resolveStatus({
+      childSessionId: "child-session-1",
+      delegationId: "delegation-running",
+      delegation: {},
+      revision: 2,
+      serverInstanceId: "server-1",
+      status: "running",
+    });
+
+    await waitFor(() => {
+      expect(onOpenConversationFromDiff).toHaveBeenCalledWith(
+        "child-session-1",
+        "pane-1",
+      );
+    });
+  });
 });
