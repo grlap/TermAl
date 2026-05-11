@@ -783,20 +783,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Add a reactive signal (e.g., a derived `nearBottomAtSendStart` captured into the effect's deps via a ref-based subscription).
 - Or update the comment to match the actual behavior ("when the user is near bottom AT THE TIME isSending toggled, defer entirely to the post-message-land effect").
 
-## Near-bottom prompt-send early return lacks direct scroll coverage
-
-**Severity:** Medium - the prompt-send stutter fix is not directly pinned by a near-bottom pending-POST test.
-
-`ui/src/SessionPaneView.tsx:2024` returns early when the message stack is already near bottom so the old-bottom smooth scroll does not race the later post-message scroll. Existing scroll coverage pins the far-from-bottom catch-up path, but not this near-bottom skip. A regression could reintroduce the old-target smooth scroll and visible stutter without failing the current suite.
-
-**Current behavior:**
-- Near-bottom sends skip the old-bottom smooth-scroll effect.
-- Far-from-bottom prompt catch-up is covered.
-- No test starts near bottom, keeps the POST pending, grows `scrollHeight`, and asserts no old-target smooth scroll fires before the prompt lands.
-
-**Proposal:**
-- Add an `App.scroll-behavior.test.tsx` case that starts near bottom, sends with a pending POST, grows `scrollHeight`, and asserts no old-target smooth scroll occurs before the prompt lands.
-
 ## Telegram-forwarded text has no per-chat rate cap
 
 **Severity:** Medium - any linked chat can still fan out prompt submissions quickly enough to create a burst of local backend and agent work.
@@ -1761,8 +1747,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
   cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
-- [ ] P2: Add near-bottom prompt-send early-return scroll coverage:
-  start near bottom, send with a pending POST, grow `scrollHeight`, and assert no old-target smooth scroll fires before the prompt lands.
 - [ ] P2: Add waiting-indicator bottom-follow negative coverage:
   cover no duplicate scroll while the live indicator remains visible, far-from-bottom no-op, inactive pane/view not consuming the rising edge, and virtualized-transcript bottom-follow behavior.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:

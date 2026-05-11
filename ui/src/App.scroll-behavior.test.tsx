@@ -935,6 +935,102 @@ describe("App scroll behaviour", () => {
     });
   });
 
+  it("does not smooth-scroll to the old bottom while a near-bottom send is pending", async () => {
+    await withSuppressedActWarnings(async () => {
+      let scrollHeight = 1000;
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: () => scrollHeight,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+      const pendingSend = createDeferred<Response>();
+      const baseState = {
+        revision: 2,
+        projects: [
+          {
+            id: "project-termal",
+            name: "TermAl",
+            rootPath: "/projects/termal",
+          },
+        ],
+        sessions: [
+          makeSession("session-1", {
+            name: "Session 1",
+            projectId: "project-termal",
+            workdir: "/projects/termal",
+            preview: "Latest user prompt.",
+            messages: [
+              {
+                id: "message-user-1",
+                type: "text",
+                timestamp: "10:01",
+                author: "you",
+                text: "Latest user prompt.",
+              },
+            ],
+          }),
+        ],
+      };
+
+      context.fetchMock.mockImplementation(
+        async (input: RequestInfo | URL) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse(baseState);
+          }
+          if (requestUrl.pathname === "/api/sessions/session-1/messages") {
+            return pendingSend.promise;
+          }
+          throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+        },
+      );
+
+      try {
+        await dispatchStateEvent(latestEventSource(), baseState);
+        await settleAsyncUi();
+
+        const messageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+
+        messageStack.scrollTop = 760;
+        act(() => {
+          fireEvent.scroll(messageStack);
+        });
+
+        const composer = await screen.findByLabelText("Message Session 1");
+        if (!(composer instanceof HTMLTextAreaElement)) {
+          throw new Error("Composer textarea not found");
+        }
+
+        await act(async () => {
+          fireEvent.change(composer, {
+            target: { value: "Near-bottom prompt" },
+          });
+        });
+
+        scrollToMock.mockClear();
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: "Send" }));
+          await Promise.resolve();
+        });
+
+        scrollHeight = 1120;
+        await settleAsyncUi();
+
+        expect(filterScrollToCallsAt(scrollToMock, 800, "smooth")).toEqual([]);
+      } finally {
+        context.cleanup();
+        restoreScrollGeometry();
+      }
+    });
+  });
+
   it("scrolls before paint to make room when the live turn appears at the bottom", async () => {
     await withSuppressedActWarnings(async () => {
       let scrollHeight = 1000;
