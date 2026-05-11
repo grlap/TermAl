@@ -4209,6 +4209,27 @@ fn telegram_forwarder_drains_multiple_armed_sessions_in_prompt_order() {
 }
 
 #[test]
+fn telegram_forwarder_clear_ignores_non_matching_armed_session() {
+    let mut state = TelegramBotState {
+        forward_next_assistant_message_session_ids: vec!["session-a".to_owned()],
+        forward_next_assistant_message_session_id: Some("session-a".to_owned()),
+        ..TelegramBotState::default()
+    };
+
+    let changed = clear_forward_next_assistant_message_session_id(&mut state, "session-b");
+
+    assert!(!changed);
+    assert_eq!(
+        state.forward_next_assistant_message_session_ids,
+        vec!["session-a".to_owned()]
+    );
+    assert_eq!(
+        state.forward_next_assistant_message_session_id.as_deref(),
+        Some("session-a")
+    );
+}
+
+#[test]
 fn telegram_assistant_forwarding_cursors_are_scoped_per_session() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramSessionReader {

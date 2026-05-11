@@ -1960,8 +1960,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   mount an overview-controller harness, flush one or two frames so a queued second-rAF or FIFO task is alive, then unmount and flush the remaining frames asserting that `setIsRailReady(true)` was never observed and the FIFO is empty. The current test never unmounts mid-pending so the rAF cancellation paths and FIFO splice-by-task-id are unexercised.
 - [ ] P2: Finish splitting the remaining marker-menu create/remove test:
   the marker-menu coverage now has focused cases for keyboard trigger, portal cleanup, scroll/resize close, explicit trigger contract, and clamp fallback. The original create/remove test still combines add/remove, Escape focus restore, ArrowDown navigation, and rect-based clamp behavior; split the remaining assertions if it grows again.
-- [ ] P2: Cover `forward_new_assistant_message_if_any` armed-clear branch for non-matching session:
-  the helper `clear_forward_next_assistant_message_session_id` checks session_id equality at the implementation but no test exercises a non-match (i.e., armed for session-A, called with session-B).
 - [ ] P2: Add `isConversationVirtualized` short-conversation gate test in `AgentSessionPanel.test.tsx`:
   round 57's behavioral change has no test for the < 80 message branch. Add a `makeTextMessages(5)` session test that clicks a marker and asserts `findMountedConversationMessageSlot` was used (or assert `virtualizerHandleRef.current` was never accessed because the prop was undefined). Pin the contract.
 - [ ] P2: Cover `updateTelegramConfig` PATCH tri-state body shape (omitted vs null vs string):
