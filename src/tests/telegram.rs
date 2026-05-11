@@ -4908,6 +4908,16 @@ fn telegram_standalone_token_redacts_env_var_key_context() {
     assert_eq!(env, "TERMAL_TELEGRAM_BOT_TOKEN=<redacted>");
 }
 
+#[test]
+fn telegram_standalone_token_preserves_non_ascii_adjacent_text() {
+    let token = telegram_redaction_token();
+    let prefix = format!("botToken:{}{token}", '\u{0442}');
+    let suffix = format!("botToken={token}{}", '\u{044f}');
+
+    assert_eq!(sanitize_telegram_log_detail(&prefix), prefix);
+    assert_eq!(sanitize_telegram_log_detail(&suffix), suffix);
+}
+
 fn assert_generic_token_context_is_preserved(context: &str) {
     let token = telegram_redaction_token();
     let detail = format!("{context} token={token}");

@@ -535,21 +535,6 @@ A user clicking "Insert result" on an `error`-status agent gets the failure summ
 
 
 
-## `standalone_telegram_bot_token_end` treats non-ASCII letters as delimiters
-
-**Severity:** Note - `telegram_token_continuation_byte` excludes `:` (fixing the colon-delimited case), but the boundary check remains ASCII-byte based — non-ASCII alphanumeric prefix bytes (e.g., a Cyrillic letter immediately preceding the digit run from a Telegram error or interpolated chat title) are NOT boundary bytes, so a token whose left boundary is a multi-byte UTF-8 letter would still redact.
-
-`src/telegram.rs:866-897`. Mostly defense-in-depth for log shapes that may not exist today; if an upstream library ever interpolates a chat title with a non-ASCII letter, the redactor will treat it as a delimiter.
-
-**Current behavior:**
-- Boundary detection uses the same ASCII token-continuation byte set as candidate scanning.
-- Non-ASCII letters before/after a candidate are treated as delimiters.
-- Tightening only `:` was the targeted fix; not all callers were considered.
-
-**Proposal:**
-- Optionally treat any non-whitespace byte as a "boundary" (i.e. keep the strict-letter rule and additionally exclude `:` from the boundary set).
-- Or document the chosen contract.
-
 ## `validate_and_normalize_telegram_config` clones bot token into snapshot copy
 
 **Severity:** Note - the snapshot+restore fix uses `let mut normalized = config.clone()`, which clones the entire `TelegramUiConfig` including `bot_token: Option<String>`. The token now exists twice on the heap until `normalized` drops at function return. Validation never zeroes it. Consistent with the rest of the codebase but worth noting if you ever introduce a `Zeroizing<String>` wrapper for the bot token elsewhere.

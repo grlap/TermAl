@@ -878,7 +878,7 @@ fn standalone_telegram_bot_token_end(detail: &str, start: usize) -> Option<usize
     }
 
     let bytes = detail.as_bytes();
-    if start > 0 && telegram_token_continuation_byte(bytes[start - 1]) {
+    if start > 0 && !telegram_token_boundary_byte(bytes[start - 1]) {
         return None;
     }
 
@@ -899,7 +899,7 @@ fn standalone_telegram_bot_token_end(detail: &str, start: usize) -> Option<usize
         return None;
     }
 
-    if index < bytes.len() && telegram_token_continuation_byte(bytes[index]) {
+    if index < bytes.len() && !telegram_token_boundary_byte(bytes[index]) {
         return None;
     }
 
@@ -1057,13 +1057,22 @@ fn telegram_token_key_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
 }
 
-/// Returns true for bytes that may continue a Telegram bot token candidate.
-///
-/// The same set must be used for both candidate-body scanning and adjacent-byte
-/// boundary checks; otherwise the redactor can stop before a byte that the
-/// boundary check still considers part of a token-like run.
 fn telegram_token_continuation_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
+}
+
+/// Returns true for ASCII separators that may border a standalone token.
+///
+/// Non-ASCII bytes are deliberately not separators: otherwise token-shaped
+/// substrings attached to non-ASCII words would be redacted as standalone bot
+/// tokens.
+fn telegram_token_boundary_byte(byte: u8) -> bool {
+    byte.is_ascii_whitespace()
+        || telegram_token_quote_byte(byte)
+        || matches!(
+            byte,
+            b'\\' | b'=' | b':' | b',' | b'.' | b';' | b')' | b']' | b'}'
+        )
 }
 
 fn telegram_prompt_exceeds_byte_limit(text: &str) -> bool {
