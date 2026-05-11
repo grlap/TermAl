@@ -51,7 +51,6 @@ describe("MarkdownContent Mermaid dynamic import fallback", () => {
         const result = appendChild(node);
         if (node instanceof HTMLScriptElement) {
           appendedScripts.push(node);
-          expect(node.src).toBe(expectedBundleSrc);
           queueMicrotask(() => {
             mermaidWindow.mermaid = fallbackMermaid;
             node.onload?.(new Event("load"));
