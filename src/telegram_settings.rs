@@ -72,9 +72,8 @@ impl AppState {
     ) -> Result<TelegramStatusResponse, ApiError> {
         let _guard = telegram_settings_file_guard();
         let mut file = self.load_telegram_bot_file()?;
-        // Stale on-disk project/session references are tolerated before
-        // applying the user's patch; user-supplied unknown ids are still
-        // rejected by validation below.
+        // Layering is intentional: first tolerate/scrub stale persisted
+        // project/session references, then validate the user's patch strictly.
         file.config = self.sanitize_telegram_config_for_current_state(file.config);
 
         if let Some(enabled) = request.enabled {

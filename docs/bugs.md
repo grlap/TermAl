@@ -656,20 +656,6 @@ Acceptable for the current N≤10ish parallel-agent count; flagging because the 
 - Extract a shared helper `installLongTranscriptScrollNodeMocks(scrollNode)` returning a cleanup function.
 
 
-## `validate_and_normalize_telegram_config` and `sanitize_telegram_config_for_current_state` have overlapping responsibilities with implicit ordering
-
-**Severity:** Note - `update_telegram_config` runs `validate_and_normalize_telegram_config` followed by `sanitize_telegram_config_for_current_state` on the success path. Both functions filter `subscribed_project_ids` against `known_projects`, but with different semantics — validate rejects unknown projects with `ApiError::bad_request`, sanitize silently drops them. The order matters and the layering contract is implicit.
-
-`src/telegram_settings.rs:68-69`. No comment explains why both run on the write path.
-
-**Current behavior:**
-- `validate_and_normalize_telegram_config` strictly rejects unknown ids.
-- `sanitize_telegram_config_for_current_state` silently drops them.
-- Both run sequentially with no comment explaining the layering.
-
-**Proposal:**
-- Add a short comment explaining the intended layering (e.g., "Validate user input strictly, then sanitize against any state that may have changed since the user clicked save").
-- Or merge the two passes if the use cases have converged.
 
 ## `standalone_telegram_bot_token_end` treats non-ASCII letters as delimiters
 
