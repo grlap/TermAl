@@ -609,6 +609,63 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(liveTail).not.toHaveClass("is-pinned");
   });
 
+  it("removes the live-turn tail when the waiting indicator clears", () => {
+    const activeSession = makeSession("session-a", {
+      status: "active",
+      messages: [
+        {
+          id: "message-user",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Current prompt",
+        },
+      ],
+      pendingPrompts: [
+        {
+          id: "pending-prompt-a",
+          timestamp: "10:02",
+          text: "Queued follow-up after current turn",
+        },
+      ],
+    });
+    const renderPanel = createAgentSessionPanelHarness({
+      activeSession,
+      showWaitingIndicator: true,
+      waitingIndicatorPrompt: "Current prompt",
+    });
+    const { rerender } = render(renderPanel({ liveTailPinned: true }));
+
+    const liveTail = screen
+      .getByText("Live turn")
+      .closest(".conversation-live-tail");
+    const queuedPromptCard = screen
+      .getByText("Queued follow-up after current turn")
+      .closest(".pending-prompt-card");
+    expect(liveTail).not.toBeNull();
+    expect(liveTail).toContainElement(queuedPromptCard as HTMLElement);
+
+    rerender(
+      renderPanel({
+        showWaitingIndicator: false,
+        waitingIndicatorPrompt: null,
+      }),
+    );
+
+    expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
+    expect(
+      document.querySelector(".conversation-live-tail"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Queued follow-up after current turn"),
+    ).toBeInTheDocument();
+    expect(
+      screen
+        .getByText("Queued follow-up after current turn")
+        .closest(".conversation-live-tail"),
+    ).toBeNull();
+  });
+
   it("renders conversation marker chips and navigates between markers", () => {
     const scrollIntoView = vi.fn();
     const originalScrollIntoView = Element.prototype.scrollIntoView;

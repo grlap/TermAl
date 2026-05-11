@@ -121,17 +121,6 @@ This means the effect "consumes" the previous-message-content-signature once per
 - Compute `onlyPendingPromptsChanged` BEFORE writing the next ref value.
 - Or add a test asserting the predicate fires on the second render in a row when only the assistant text grew.
 
-## Live-tail `null` transition not tested
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1291-1298`. When neither `liveTurnCard` nor `pendingPromptCards` is present, `liveTail` is `null`. The `position: sticky` element is removed from the DOM when becoming null. Without a test that asserts no reflow loop, a regression that recreates the wrapper on every render (e.g., changing the `liveTail` ternary to always render the wrapper) is undetectable.
-
-**Current behavior:**
-- Live-tail renders conditionally.
-- Transition out of the live-tail state not pinned by a test.
-
-**Proposal:**
-- Add a test that asserts the live-tail wrapper appears AND disappears as `showWaitingIndicator`/`pendingPrompts` toggle.
-
 ## `start_telegram_relay_runtime` parallel `spawning`/`running` booleans should be a state enum
 
 **Severity:** Note - `src/telegram.rs:222-302`. Round 74 consolidated the relay state into `TelegramRelayRuntime` with parallel `spawning` and `running` booleans. The snapshot rule `running && !spawning` is implicit. A future contributor adding a new flag (e.g., `stopping`) needs to remember to combine all three correctly in the snapshot.
