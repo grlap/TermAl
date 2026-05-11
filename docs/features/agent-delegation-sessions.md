@@ -638,8 +638,9 @@ lifecycle deltas after reconnect.
 type AgentType = "Claude" | "Codex" | "Cursor" | "Gemini";
 type SessionStatus = "active" | "idle" | "approval" | "error";
 // UI recovery category, not a strict HTTP status-class discriminator.
-// Preserved gateway bodies may report 502/503/504 as "request-failed";
-// branch on status/restartRequired when status-class behavior matters.
+// Preserved parseable gateway JSON errors may report 502/503/504 as
+// "request-failed"; branch on status/restartRequired when status-class
+// behavior matters.
 type ApiRequestErrorKind = "backend-unavailable" | "request-failed";
 
 type DelegationMode = "reviewer" | "explorer" | "worker";

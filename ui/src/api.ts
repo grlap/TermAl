@@ -507,8 +507,9 @@ export type DelegationWaitResponse = {
  * High-level request failure category for UI recovery paths.
  *
  * Do not treat `"request-failed"` as a non-5xx guarantee. Routes that opt into
- * `preserveGatewayErrorBody` intentionally keep 502/503/504 bodies as
- * `"request-failed"` so callers can surface actionable upstream diagnostics.
+ * `preserveGatewayErrorBody` intentionally keeps parseable 502/503/504 JSON
+ * error bodies as `"request-failed"` so callers can surface actionable
+ * upstream diagnostics.
  * Branch on `status` and `restartRequired` when status-class behavior matters.
  */
 export type ApiRequestErrorKind = "backend-unavailable" | "request-failed";
@@ -550,10 +551,10 @@ export function isBackendUnavailableError(
 
 type RequestOptions = {
   /**
-   * Keep 502/503/504 response bodies as request-failed details instead of
-   * mapping them to the generic backend-unavailable UI path. Use this only for
-   * routes that deliberately proxy a third-party service and return actionable
-   * JSON errors for upstream failures.
+   * Keep parseable 502/503/504 JSON error bodies as request-failed details
+   * instead of mapping them to the generic backend-unavailable UI path. Use
+   * this only for routes that deliberately proxy a third-party service and
+   * return actionable JSON errors for upstream failures.
    */
   preserveGatewayErrorBody?: boolean;
 };
@@ -1778,9 +1779,12 @@ function createResponseError(
 ) {
   if (status === 502 || status === 503 || status === 504) {
     if (options?.preserveGatewayErrorBody) {
-      return new ApiRequestError("request-failed", extractError(raw, status), {
-        status,
-      });
+      const gatewayError = extractIntentionalGatewayError(raw);
+      if (gatewayError) {
+        return new ApiRequestError("request-failed", gatewayError, {
+          status,
+        });
+      }
     }
     return createBackendUnavailableError(
       "The TermAl backend is unavailable.",
@@ -1791,6 +1795,24 @@ function createResponseError(
   return new ApiRequestError("request-failed", extractError(raw, status), {
     status,
   });
+}
+
+function extractIntentionalGatewayError(raw: string) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as { error?: unknown };
+    if (typeof parsed.error === "string" && parsed.error.trim().length > 0) {
+      return sanitizeUserFacingErrorMessage(parsed.error);
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 function extractError(raw: string, status: number) {

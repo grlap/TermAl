@@ -352,6 +352,42 @@ describe("telegram API helpers", () => {
       );
     }
   });
+
+  it.each([
+    ["empty", ""],
+    ["whitespace", "  \n  "],
+    ["plain text", "Bad gateway"],
+    ["JSON without an error field", JSON.stringify({ message: "Bad gateway" })],
+    ["blank JSON error", JSON.stringify({ error: "  " })],
+  ])(
+    "maps %s Telegram gateway failures to backend unavailable",
+    async (_label, body) => {
+      expect.assertions(4);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(body, {
+            status: 502,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }),
+        ),
+      );
+
+      try {
+        await testTelegramConnection({ botToken: "123456:token" });
+        throw new Error("Expected testTelegramConnection to reject");
+      } catch (error) {
+        expect(isBackendUnavailableError(error)).toBe(true);
+        expect(error).toBeInstanceOf(ApiRequestError);
+        expect((error as ApiRequestError).status).toBe(502);
+        expect((error as Error).message).toBe(
+          "The TermAl backend is unavailable.",
+        );
+      }
+    },
+  );
 });
 
 describe("conversation marker API helpers", () => {

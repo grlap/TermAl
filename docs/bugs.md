@@ -897,21 +897,6 @@ The new design fixes the false-positive Low (verified by `accessToken=` and `csr
 - Add focused coverage for `Some("R")` and `Some("C")`.
 - Prefer a real repo staging scenario that proves both old and new paths are staged together.
 
-## `preserveGatewayErrorBody` masks backend-unavailable responses on empty gateway bodies
-
-**Severity:** Medium - opted-in routes map every 502/503/504 response to `request-failed`, even when the body is empty or not an intentional third-party JSON error.
-
-`ui/src/api.ts:1687-1689`. A real TermAl backend/proxy outage on a preserved route can bypass the established `backend-unavailable` path and lose restart/retry semantics.
-
-**Current behavior:**
-- `preserveGatewayErrorBody` forces 502/503/504 into `request-failed`.
-- Empty or non-actionable bodies still use the preserved path.
-- Callers cannot reliably distinguish intentional upstream errors from backend availability failures.
-
-**Proposal:**
-- Preserve gateway bodies only when the response contains a parseable, intentional JSON error payload.
-- Fall back to `backend-unavailable` for empty, malformed, or otherwise non-actionable 5xx gateway bodies.
-
 ## Tail-window size policy is duplicated across frontend layers
 
 **Severity:** Low - tail-first hydration and active transcript tail rendering both encode the same 20-message policy in separate private constants.
@@ -2833,8 +2818,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   after forcing literal pathspec behavior, add regression coverage for filenames containing `*`, `?`, `[]`, and `:(top)` so single-file Git actions cannot expand to other files.
 - [ ] P2: Cover copy/rename staging pathspecs:
   add focused coverage for `collect_git_stage_pathspecs(..., Some("R"))` and `Some("C")`, preferably through a real repo scenario proving old and new paths are staged together.
-- [ ] P2: Add 5xx empty-body fallback to `extractError` for `preserveGatewayErrorBody` callers:
-  for empty 502 body, `extractError` returns `"Request failed with status 502."` — more confusing than the prior `"The TermAl backend is unavailable."`. Either fall through to backend-unavailable copy when `raw` is empty AND `status >= 502`, or have `extractError` return a sentinel that the caller can detect for a fallback.
 - [ ] P2: Cover production-path tool/delegation id collision:
   add a Rust test that drives both the Claude task path and the delegation creation path with overlapping ids (or document the assumption that uuid id spaces don't collide deterministically). The current test manually inserts the collision.
 - [ ] P2: Clean up AgentSessionPanel `act(...)` warnings:
