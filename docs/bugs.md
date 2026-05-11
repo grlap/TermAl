@@ -921,21 +921,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Ignore foreign-bot commands.
 - Use the bot-aware parser in the unlinked `/start` / `/help` path once the username is known.
 
-## Telegram JSON parsing paths lack sample-shape coverage
-
-**Severity:** Low - error envelope and session-status serde behavior can regress while current tests that construct internal structs still pass.
-
-`src/telegram.rs:567` and related Telegram/TermAl response parsing now include behavior for Telegram error envelopes and `TelegramSessionStatus` values. The tests mostly construct internal Rust structs directly, so sample JSON with `error_code`, unknown status, or missing status can drift from the actual API shapes without being caught.
-
-**Current behavior:**
-- Classifier/status tests mostly use constructed Rust values.
-- Telegram error-envelope JSON parsing is not pinned with sample payloads.
-- TermAl session status parsing for unknown/missing status is not pinned with sample payloads.
-
-**Proposal:**
-- Add sample JSON deserialization tests for Telegram error envelopes.
-- Add TermAl session status sample JSON tests for known, unknown, and missing status values.
-
 ## Telegram-forwarded text has no per-chat rate cap
 
 **Severity:** Medium - any linked chat can still fan out prompt submissions quickly enough to create a burst of local backend and agent work.
