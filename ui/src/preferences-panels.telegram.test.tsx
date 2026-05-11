@@ -151,6 +151,59 @@ describe("TelegramPreferencesPanel", () => {
     expect(await screen.findByText("Stopped")).toBeInTheDocument();
   });
 
+  it.each([
+    [
+      "manual lifecycle",
+      {
+        configured: true,
+        enabled: true,
+        lifecycle: "manual" as const,
+        botTokenMasked: "****oken",
+      },
+      "Configured",
+    ],
+    [
+      "disabled in-process relay",
+      {
+        configured: true,
+        enabled: false,
+        lifecycle: "inProcess" as const,
+        botTokenMasked: "****oken",
+      },
+      "Configured",
+    ],
+    [
+      "not configured in-process relay",
+      {
+        configured: false,
+        enabled: true,
+        lifecycle: "inProcess" as const,
+      },
+      "Not configured",
+    ],
+    [
+      "running in-process relay",
+      {
+        configured: true,
+        enabled: true,
+        running: true,
+        lifecycle: "inProcess" as const,
+        botTokenMasked: "****oken",
+      },
+      "Polling",
+    ],
+  ])("does not label %s as stopped", async (_caseName, status, expectedLabel) => {
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      ...status,
+    });
+
+    render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
+
+    expect(await screen.findByText(expectedLabel)).toBeInTheDocument();
+    expect(screen.queryByText("Stopped")).not.toBeInTheDocument();
+  });
+
   it("does not save an enabled relay without a subscribed project", async () => {
     fetchTelegramStatusMock.mockResolvedValue({
       ...emptyTelegramStatus,

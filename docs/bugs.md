@@ -156,19 +156,6 @@ The protocol contract is unwritten in code — only the comment in `types.ts:290
 **Proposal:**
 - Split into per-case tests (`it.each` over `(file_config, expected_outcome)` pairs).
 
-## "Stopped" preferences test covers only one combination, no negative cases
-
-**Severity:** Low - `ui/src/preferences-panels.telegram.test.tsx:139-151`. The new "Stopped" test only fires for the exact `(inProcess, enabled, configured, !running)` combination. Adjacent paths are not pinned: `lifecycle: "manual"` with same other fields → should NOT show "Stopped"; `enabled: false` with same other fields → should NOT show "Stopped".
-
-A regression that broadens the condition to `lifecycle === "inProcess" && configured` would still pass.
-
-**Current behavior:**
-- Single positive case covered.
-- No negative permutations.
-
-**Proposal:**
-- Add `it.each` rows covering the four negative permutations and assert the label is NOT "Stopped".
-
 ## Wire `TelegramStatusResponse` lacks derived `state` field; "Stopped" derivation lives in UI
 
 **Severity:** Low - `ui/src/api.ts:644-646` and `ui/src/preferences-panels.tsx:1205`. The new comment documents the intent but does not state the relationship: `lifecycle === "inProcess" && enabled && configured && !running` ≡ "Stopped". This protocol-level invariant lives entirely in UI code.
