@@ -1065,6 +1065,41 @@ describe("reconcileSessions", () => {
     );
   });
 
+  it("replaces parallel-agent messages when source changes back to tool", () => {
+    expectChangedMessageReference(
+      {
+        id: "message-1",
+        type: "parallelAgents",
+        timestamp: "10:01",
+        author: "assistant",
+        agents: [
+          {
+            id: "agent-1",
+            source: "delegation",
+            title: "Review backend",
+            status: "running",
+            detail: "Checking Rust changes",
+          },
+        ],
+      },
+      {
+        id: "message-1",
+        type: "parallelAgents",
+        timestamp: "10:01",
+        author: "assistant",
+        agents: [
+          {
+            id: "agent-1",
+            source: "tool",
+            title: "Review backend",
+            status: "running",
+            detail: "Checking Rust changes",
+          },
+        ],
+      },
+    );
+  });
+
   it("replaces a session when the external session id changes", () => {
     const previous = [makeSession("session-a", { externalSessionId: null, preview: "ready" })];
 

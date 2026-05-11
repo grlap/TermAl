@@ -675,18 +675,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Document the O(n×m) bound and the 96-byte cap.
 - Or use `memchr`/`bytes_eq_ignore_ascii_case` patterns if input ever grows.
 
-## `session-reconcile.test.ts` "only source changes" test only exercises one direction
-
-**Severity:** Note - `ui/src/session-reconcile.test.ts:1031-1064`. Exercises a `tool` → `delegation` source flip but not `delegation` → `tool` (the reverse). `reconcileParallelAgentsMessage` is a pure structural compare; both directions should produce a fresh reference. A regression that flipped only one direction is still possible to slip past.
-
-**Current behavior:**
-- One-direction source flip covered.
-- Reverse direction unverified.
-
-**Proposal:**
-- Add the reverse case.
-- Or note the symmetry assumption in the test.
-
 ## `cancelDelegation` `it.each` test pins running/completed/canceled as identical
 
 **Severity:** Note - `ui/src/SessionPaneView.render-callbacks.test.ts:493-527` `it.each(["canceled", "completed", "running"])` lumps three statuses behind a single assertion. The user-visible UX for `running` (cancel acknowledged, child still running) deserves a different message than `completed` or `canceled`, but the test pins them as identical no-error outcomes — locking in the bugs.md-flagged inconsistency.
@@ -3379,8 +3367,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   parse the first event in `state_events_route_streams_parallel_agents_update_sources` instead of consuming via `let _ = ...`, asserting `agents[0].source` and `agents[1].source`. Or add a sibling test scoped to the create path.
 - [ ] P2: Cover production-path tool/delegation id collision:
   add a Rust test that drives both the Claude task path and the delegation creation path with overlapping ids (or document the assumption that uuid id spaces don't collide deterministically). The current test manually inserts the collision.
-- [ ] P2: Cover `reconcileParallelAgentsMessage` source-flip in both directions:
-  add a `delegation` → `tool` source-flip case alongside the existing `tool` → `delegation` case, or note the symmetry assumption in the test.
 - [ ] P2: Split `cancelDelegation` `it.each` running/completed/canceled identical-pin into focused tests:
   add a comment explaining the test pin is the current-but-flagged behavior, or split `running` into its own test scoped to the bugs.md follow-up.
 - [ ] P2: Pin pending-key composite contract in mixed-source MessageCard tests:
