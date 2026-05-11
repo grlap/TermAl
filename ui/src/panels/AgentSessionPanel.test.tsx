@@ -8651,7 +8651,7 @@ describe("AgentSessionPanelFooter", () => {
       name: "Delegating...",
     });
     expect(busyButton).toBeDisabled();
-    await waitFor(() => expect(busyButton).toHaveAttribute("aria-busy", "true"));
+    expect(busyButton).not.toHaveAttribute("aria-busy");
     expect(busyButton).toHaveAttribute(
       "title",
       "Spawn read-only delegation from current draft",

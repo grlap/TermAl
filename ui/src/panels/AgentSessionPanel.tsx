@@ -3242,7 +3242,6 @@ const SessionComposer = memo(function SessionComposer({
               }}
               onClick={() => void handleComposerDelegationSpawn()}
               disabled={composerDelegateDisabled}
-              aria-busy={isDelegationSpawning}
               title="Spawn read-only delegation from current draft"
             >
               {isDelegationSpawning ? "Delegating..." : "Delegate"}

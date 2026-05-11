@@ -332,19 +332,6 @@ The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but
 **Proposal:**
 - Construct a marker with a color produced by `DEFAULT_CONVERSATION_MARKER_COLOR` (the contract value) and assert that color round-trips through normalization.
 
-## `aria-busy` on a `<button>` element is unconventional
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:2398-2399`. `aria-busy` is specified for live regions / containers, not buttons. Most ATs do read it, but the load-bearing user-facing signal is the textual flip "Delegate" → "Delegating...". Combined with `disabled` the busy indication is functional, but `aria-busy` may be redundant noise on a button. Some screen readers double-announce as "busy, Delegating, button" which can be verbose.
-
-**Current behavior:**
-- `aria-busy={isDelegationSpawning}` on button.
-- Text flips to "Delegating...".
-- Some ATs may double-announce.
-
-**Proposal:**
-- Consider dropping `aria-busy` and relying on the text flip + `disabled`.
-- If kept, this is fine.
-
 ## Unmount race test relies on console error suppression for `act` warnings
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7102-7129`. "Ignores delegation completion after the footer unmounts" exercises only the unmount-during-await path. It does NOT verify (a) `setIsDelegationSpawning(false)` is gated by `isMountedRef.current` so the React `act` warning never appears (covered indirectly by lack of console error), or (b) `focusComposerInput()` is not called after unmount (a pending rAF could try to focus a detached node).
