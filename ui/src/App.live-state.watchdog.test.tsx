@@ -625,6 +625,11 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       expect(
         screen.getAllByText("Recovered chunk after silence.").length,
       ).toBeGreaterThan(0);
+      // This recovery snapshot keeps the session active; the live-turn
+      // affordance should remain visible until the turn settles.
+      expect(
+        screen.getByText("Waiting for the next chunk of output..."),
+      ).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "Cancel queued prompt" }),
       ).toBeInTheDocument();
