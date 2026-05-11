@@ -321,18 +321,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 - Assert `console.error` was not called with "act"/"unmounted" warnings during the test.
 - Or stub `setIsDelegationSpawning` via spy and verify it isn't invoked post-unmount.
 
-## Round 67 added 3 more bundled cases to `telegram_generic_token_redaction_requires_telegram_or_bot_word_context`
-
-**Severity:** Note - round 67 added three more bundled cases (`telegram_bot: { token: ... }`, `telegram-bot token=...`, `telegramBot token=...`) into `src/tests/telegram.rs:782-796`. The bundled-test anti-pattern is already an open ledger entry that explicitly called out new bundle additions; the entry "Bundled telegram redaction tests keep growing despite the explicit anti-pattern flag" gets larger again with 8 total bundled assertions in this single test.
-
-**Current behavior:**
-- Round 67 added 3 more bundled assertions.
-- 8 total bundled assertions in this single test.
-
-**Proposal:**
-- Promote each new namespaced-context case to its own `#[test]`.
-- Or convert the bundle to a `(input, expected, name)` table+helper.
-
 ## `enableLocalDelegationActions` flag flips invalidate `MessageCard` memo
 
 **Severity:** Low - three callbacks at `ui/src/SessionPaneView.render-callbacks.tsx:355-371` are passed as `enableLocalDelegationActions ? handler : undefined`. When the flag flips between renders, three new `undefined` slots vs. three stable function refs change the `MessageCard` props and re-render the entire parallel-agents card. `MessageCard` is `memo`-wrapped — passing `undefined` toggles invalidate the memo check on every flag flip.
@@ -358,23 +346,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 **Proposal:**
 - Add a sibling test that drives both the Claude task path and the delegation creation path with overlapping ids.
 - Or document the assumption that uuid id spaces don't collide deterministically.
-
-## Bundled telegram redaction tests keep growing despite the explicit anti-pattern flag
-
-**Severity:** Low - the bug-ledger entry "Round-64 added another bundled telegram redaction test" already calls out the bundled-test anti-pattern. Round 65 added two more cases to `..._respects_context_and_thresholds` (`telegram_adjacent_token_key`, `bot_adjacent_token_key`) and three more to `..._handles_escaped_and_telegram_specific_contexts` (`bearer_equals`, `authorization_equals`, `lower_bearer_equals`).
-
-Each additional bundled case makes the failure message harder to interpret if a future regression touches one path. Three bundled tests now exhibit the pattern; round 65 added 5 more bundled cases on top of the prior round-64 additions.
-
-The new `ambiguous_token_key` case (the `token=` bare-key behavior flip) is pinned only as one assertion deep in a bundle. Round-65 `telegram_adjacent_token_key` / `bot_adjacent_token_key` cases (the substring heuristic) similarly hide load-bearing checks inside the bundles.
-
-**Current behavior:**
-- Three bundled tests now exhibit the pattern.
-- Round 65 added 5 more bundled cases.
-- Failure messages still cluster at one line.
-
-**Proposal:**
-- Promote each behavior change to its own `#[test]`.
-- Or use a small `(input, expected_redacted, name)` table fixture and one helper.
 
 ## `docs/features/telegram-ui-integration.md` 422 disambiguation paragraph depends on human-readable error text
 
@@ -979,20 +950,6 @@ Acceptable for now since there's a single caller; flagging for future re-use of 
 **Proposal:**
 - Either auto-persist the sanitized form on read in `telegram_status` so the file matches what the API returns (with appropriate locking).
 - Or document that the on-disk file is allowed to contain stale references that `GET /api/telegram/status` will hide.
-
-## Single test bundles five Telegram redaction assertions
-
-**Severity:** Note - `telegram_log_sanitizer_redacts_bot_tokens_and_truncates` bundles five independent assertions (URL redaction + truncation, standalone `=`-delimited, colon-delimited, benign three-shape passthrough, malformed `/bot/bot/`). Round-63 added another bundled test, `telegram_standalone_token_redaction_respects_context_and_thresholds`, with 11 disjoint assertions — the same anti-pattern. Same pattern bugs.md previously called out for the connection-test classifier. A failure deep inside makes the line number unhelpful.
-
-`src/tests/telegram.rs:630-660` and `:662-722`. Plus round-63 added `telegram_settings_validation_does_not_partially_mutate_on_other_error_paths` which bundles three independent error paths.
-
-**Current behavior:**
-- Three bundled tests now exhibit the pattern.
-- Failure messages cluster at one location each.
-
-**Proposal:**
-- Split each into per-shape `#[test]` functions.
-- Or use a small `(input, expected_substring_present, expected_substring_absent)` table and one helper.
 
 ## Delegation result formatting remains coupled to command transport
 
@@ -2953,14 +2910,10 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   export the helper (or a thin shim) and add unit tests for cross-session, empty previous window, no growth, partial overlap, no first-message match, and contiguous match at index 0.
 - [ ] P2: Pin `mountedRangeWillChange` early-return absence of stale-rect scroll write:
   during the prepend integration test, capture `harness.scrollWrites` between the prepend and the followup effect and assert no scroll write lands at the stale `targetScrollTop` value computed from pre-mutation rects.
-- [ ] P2: Split bundled Telegram sanitizer assertions:
-  break `telegram_log_sanitizer_redacts_bot_tokens_and_truncates` and `telegram_standalone_token_redaction_respects_context_and_thresholds` into focused per-shape tests so URL redaction, key contexts, bearer contexts, thresholds, and false-positive avoidance fail independently.
 - [ ] P2: Add wheel/scrollTop demand-hydration boundary tests:
   add `deltaY: -7` (below threshold) and `deltaY: -8` (at threshold) cases, plus `scrollTop: 160` vs `161` cases to pin the constants.
 - [ ] P2: Add `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` boundary test:
   add a 100-message session test asserting `fetchSessionTail` is NOT called, and a 101-message session test asserting it IS called.
-- [ ] P2: Replace bundled `..._handles_escaped_and_telegram_specific_contexts` test with per-shape `#[test]`s:
-  promote each of the nine assertions (escaped JSON, Bearer `:`, lowercase bearer-colon, Bearer `=`, `Authorization=Bearer`, lowercase bearer-equals, snake-case key, camel-case key, env-var key) to its own `#[test]`. Same for the prior bundled sanitizer tests and the `ambiguous_token_key` behavior flip.
 - [ ] P2: Cover Telegram relay active-project reconciliation:
   start an in-process relay with subscribed projects but no default and assert startup fails or status exposes the effective `activeProjectId`; delete a project used by a running relay and assert the relay is stopped or restarted without the deleted id.
 - [ ] P2: Cover Telegram relay runtime lifecycle seam:
