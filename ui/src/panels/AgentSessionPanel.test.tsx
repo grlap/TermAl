@@ -1179,7 +1179,7 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
-  it("adds and removes message markers from the assistant response context menu", async () => {
+  function renderAssistantMarkerMenuHarness() {
     const onCreateConversationMarker = vi.fn();
     const onDeleteConversationMarker = vi.fn();
     const activeSession = makeSession("session-1", {
@@ -1213,6 +1213,30 @@ describe("AgentSessionPanel conversation caching", () => {
       ),
     });
 
+    const assistantLabel = () => screen.getByText("Agent message-2");
+    const assistantTrigger = () =>
+      assistantLabel().closest(
+        "[data-conversation-marker-menu-trigger='true']",
+      ) as HTMLElement;
+    const openAssistantMenu = (init?: MouseEventInit) => {
+      fireEvent.contextMenu(assistantLabel(), init);
+      return screen.getByRole("menu", {
+        name: "Conversation marker actions",
+      });
+    };
+
+    return {
+      assistantLabel,
+      assistantTrigger,
+      onCreateConversationMarker,
+      onDeleteConversationMarker,
+      openAssistantMenu,
+    };
+  }
+
+  it("opens marker actions only from the assistant response context trigger", async () => {
+    const { openAssistantMenu } = renderAssistantMarkerMenuHarness();
+
     fireEvent.contextMenu(screen.getByText("You message-1"));
     expect(
       screen.queryByRole("menu", { name: "Conversation marker actions" }),
@@ -1223,17 +1247,24 @@ describe("AgentSessionPanel conversation caching", () => {
       screen.queryByRole("menu", { name: "Conversation marker actions" }),
     ).not.toBeInTheDocument();
 
-    fireEvent.contextMenu(screen.getByText("Agent message-2"), {
+    const addMenu = openAssistantMenu({
       clientX: 123,
       clientY: 234,
     });
-    const assistantTrigger = screen
-      .getByText("Agent message-2")
-      .closest("[data-conversation-marker-menu-trigger='true']") as HTMLElement;
-    const addMenu = screen.getByRole("menu", {
-      name: "Conversation marker actions",
-    });
     expect(addMenu).toHaveStyle({ left: "123px", top: "234px" });
+    const addMenuItem = within(addMenu).getByRole("menuitem", {
+      name: "Add checkpoint marker",
+    });
+    await waitFor(() => {
+      expect(addMenuItem).toHaveFocus();
+    });
+  });
+
+  it("navigates marker actions with ArrowDown and restores trigger focus on Escape", async () => {
+    const { assistantTrigger, openAssistantMenu } =
+      renderAssistantMarkerMenuHarness();
+
+    const addMenu = openAssistantMenu();
     const addMenuItem = within(addMenu).getByRole("menuitem", {
       name: "Add checkpoint marker",
     });
@@ -1252,8 +1283,12 @@ describe("AgentSessionPanel conversation caching", () => {
       screen.queryByRole("menu", { name: "Conversation marker actions" }),
     ).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(assistantTrigger).toHaveFocus();
+      expect(assistantTrigger()).toHaveFocus();
     });
+  });
+
+  it("clamps marker action menu coordinates from measured dimensions", async () => {
+    const { openAssistantMenu } = renderAssistantMarkerMenuHarness();
 
     const originalInnerWidth = window.innerWidth;
     const originalInnerHeight = window.innerHeight;
@@ -1286,7 +1321,7 @@ describe("AgentSessionPanel conversation caching", () => {
       value: 260,
     });
     try {
-      fireEvent.contextMenu(screen.getByText("Agent message-2"), {
+      openAssistantMenu({
         clientX: 500,
         clientY: 500,
       });
@@ -1313,13 +1348,17 @@ describe("AgentSessionPanel conversation caching", () => {
         value: originalInnerHeight,
       });
     }
+  });
 
-    fireEvent.contextMenu(screen.getByText("Agent message-2"));
-    const reopenedAddMenu = screen.getByRole("menu", {
-      name: "Conversation marker actions",
-    });
+  it("creates message markers from the assistant marker action menu", () => {
+    const { onCreateConversationMarker, openAssistantMenu } =
+      renderAssistantMarkerMenuHarness();
+
+    const reopenedAddMenu = openAssistantMenu();
     fireEvent.click(
-      within(reopenedAddMenu).getByRole("menuitem", { name: "Add checkpoint marker" }),
+      within(reopenedAddMenu).getByRole("menuitem", {
+        name: "Add checkpoint marker",
+      }),
     );
     const markerLabelInput = screen.getByLabelText("Marker label");
     expect(markerLabelInput).toHaveValue("Checkpoint");
@@ -1333,11 +1372,13 @@ describe("AgentSessionPanel conversation caching", () => {
       "message-2",
       { name: "Review later" },
     );
+  });
 
-    fireEvent.contextMenu(screen.getByText("Agent message-2"));
-    const removeMenu = screen.getByRole("menu", {
-      name: "Conversation marker actions",
-    });
+  it("removes existing message markers from the assistant marker action menu", () => {
+    const { onDeleteConversationMarker, openAssistantMenu } =
+      renderAssistantMarkerMenuHarness();
+
+    const removeMenu = openAssistantMenu();
     fireEvent.click(
       within(removeMenu).getByRole("menuitem", { name: "Remove Review point" }),
     );
