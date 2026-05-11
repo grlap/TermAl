@@ -387,22 +387,6 @@ The pending-state contract `agent.source:agent.id:cancel` is the load-bearing fi
 - Exercise a flag flip mid-test.
 - Or split into per-action coverage.
 
-## `clears pending parallel-agent actions when an action rejects` test doesn't verify rejection suppression
-
-**Severity:** Low - the test at `ui/src/MessageCard.test.tsx:321-365` asserts the visible UI side-effect (button re-enabled) which is satisfied by the `.finally()` alone. Removing the `.catch(() => undefined)` would still pass this test (the `.finally()` runs and resets the pending state). The test silently observes the finally's side-effect, not the catch's noise-suppression role.
-
-The actual round-65 fix it claims to validate is the `.catch(() => undefined)` that prevents an unhandled rejection.
-
-**Current behavior:**
-- Test asserts cancel button is re-enabled.
-- Both `.finally()` and `.catch()` paths satisfy that assertion.
-- A regression dropping the `.catch(() => undefined)` would still pass.
-
-**Proposal:**
-- Capture unhandled-rejection events via `process.on("unhandledRejection", ...)` (Node) or `window.onunhandledrejection` (jsdom).
-- Assert no console error or no `vi.spyOn(console, "error")` was emitted.
-- Or refactor the test name and assertion to describe what is being pinned.
-
 ## `debug_assert_eq!` for `agent.source` clobber check is no-op in release builds
 
 **Severity:** Low - round-65 swapped the unconditional clobber for `debug_assert_eq!` at `src/claude.rs:581-585`. Production builds (release mode) will silently let a non-`Tool` value persist if a future code path ever drops a `Delegation`-sourced agent into this update branch. The contract is encoded but not enforced for release-mode users.
@@ -3112,8 +3096,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   document `ApiRequestErrorKind` post-round-58: round 58's `preserveGatewayErrorBody` makes `kind: "request-failed"` no longer a strict status-class signal — it can now appear with status 502/503/504 alongside non-5xx status codes. Update `ApiRequestErrorKind` JSDoc and feature-brief contract for wrappers using `error.status` for status-class triage.
 - [ ] P2: Add 5xx empty-body fallback to `extractError` for `preserveGatewayErrorBody` callers:
   for empty 502 body, `extractError` returns `"Request failed with status 502."` — more confusing than the prior `"The TermAl backend is unavailable."`. Either fall through to backend-unavailable copy when `raw` is empty AND `status >= 502`, or have `extractError` return a sentinel that the caller can detect for a fallback.
-- [ ] P2: Capture unhandled-rejection events in the rejected-action MessageCard test:
-  the existing test asserts only the visible button-re-enabled side-effect (which `.finally()` alone satisfies). Add `process.on("unhandledRejection", ...)` capture or `vi.spyOn(console, "error")` to pin the `.catch(() => undefined)` round-65 fix.
 - [ ] P2: Assert SSE-envelope source in the `parallelAgentsUpdate` create event:
   parse the first event in `state_events_route_streams_parallel_agents_update_sources` instead of consuming via `let _ = ...`, asserting `agents[0].source` and `agents[1].source`. Or add a sibling test scoped to the create path.
 - [ ] P2: Cover production-path tool/delegation id collision:

@@ -420,29 +420,43 @@ describe("MessageCard", () => {
       rejectAction = reject;
     });
     const onCancelParallelAgent = vi.fn(() => rejectedAction);
+    const unhandledRejections: unknown[] = [];
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      unhandledRejections.push(event.reason);
+      event.preventDefault();
+    };
 
-    render(
-      <MessageCard
-        message={message}
-        onApprovalDecision={vi.fn()}
-        onUserInputSubmit={vi.fn()}
-        onCancelParallelAgent={onCancelParallelAgent}
-      />,
-    );
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+    try {
+      render(
+        <MessageCard
+          message={message}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+          onCancelParallelAgent={onCancelParallelAgent}
+        />,
+      );
 
-    const cancelButton = screen.getByRole("button", { name: "Cancel" });
-    fireEvent.click(cancelButton);
+      const cancelButton = screen.getByRole("button", { name: "Cancel" });
+      fireEvent.click(cancelButton);
 
-    expect(cancelButton).toBeDisabled();
+      expect(cancelButton).toBeDisabled();
 
-    await act(async () => {
-      rejectAction(new Error("cancel failed"));
-      await rejectedAction.catch(() => undefined);
-      await Promise.resolve();
-    });
+      await act(async () => {
+        rejectAction(new Error("cancel failed"));
+        await rejectedAction.catch(() => undefined);
+        await Promise.resolve();
+      });
 
-    expect(cancelButton).not.toBeDisabled();
-    expect(onCancelParallelAgent).toHaveBeenCalledTimes(1);
+      expect(cancelButton).not.toBeDisabled();
+      expect(onCancelParallelAgent).toHaveBeenCalledTimes(1);
+      expect(unhandledRejections).toEqual([]);
+    } finally {
+      window.removeEventListener(
+        "unhandledrejection",
+        handleUnhandledRejection,
+      );
+    }
   });
 
   it("rerenders parallel-agent callbacks when only action handlers change", () => {
