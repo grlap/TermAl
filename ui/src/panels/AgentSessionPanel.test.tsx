@@ -3987,6 +3987,53 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
+  it("does not hydrate a long-session tail after mousedown inside transcript content", async () => {
+    vi.useFakeTimers();
+    const OriginalResizeObserver = window.ResizeObserver;
+    const scrollNode = document.createElement("section");
+    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
+    const transcriptChild = document.createElement("div");
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+
+    try {
+      const messages = makeTextMessages(600);
+      document.body.append(scrollNode);
+      scrollNode.append(transcriptChild);
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("active-session", {
+          status: "idle",
+          messages,
+        }),
+        scrollContainerRef: { current: scrollNode },
+      });
+
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+
+      act(() => {
+        scrollNodeMocks.setScrollTop(50);
+        fireEvent.mouseDown(transcriptChild);
+        fireEvent.scroll(scrollNode);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      transcriptChild.remove();
+      scrollNodeMocks.cleanup();
+      scrollNode.remove();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps demand-hydration listeners bound across message arrivals while tail-windowed", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const scrollNode = document.createElement("section");

@@ -1976,8 +1976,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   render tab tooltips for projectless, missing-project, missing-remote, and conflicting session/project remote proxy sessions whose summaries carry `remoteId`, complementing formatter-level coverage for session-owner precedence.
 - [ ] P2: Cover remote-sync embedded remote-owner clearing:
   seed a remote snapshot session with attacker-chosen `remoteId`, localize it, and assert trusted `SessionRecord.remote_id` metadata is preserved while the embedded `record.session.remote_id` is cleared and local wire projections re-emit only trusted ownership.
-- [ ] P2: Pin `event.target === node` mousedown guard with negative case:
-  add a sibling test that fires `mouseDown` on a child of `scrollNode` (e.g., a virtualized message slot) and asserts hydration does NOT occur. Round-63's isolated test only fires mouseDown directly on the scrollNode.
 - [ ] P2: Cover MessageCard pending-action across all action types:
   the existing pending-action test only covers cancel. Add sibling tests for `Open session` and `Insert result`, asserting duplicate clicks on the same action are suppressed while unrelated action buttons keep their documented per-action pending behavior.
 - [ ] P2: Cover ParallelAgentsCard tool-source no-callback assertion:
