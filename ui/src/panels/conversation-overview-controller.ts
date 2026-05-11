@@ -450,10 +450,12 @@ export function useConversationOverviewController({
 
   useEffect(() => {
     if (!isActive || !shouldRender || !isRailReady) {
-      return;
+      return undefined;
     }
     scheduleLayoutRefresh();
+    return cancelLayoutRefreshFrame;
   }, [
+    cancelLayoutRefreshFrame,
     isActive,
     isRailReady,
     messageCount,

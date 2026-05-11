@@ -600,20 +600,6 @@ Acceptable today; flagging for future re-use when N grows.
 - If parallel-agent counts grow, memoize `runAgentAction` with `useCallback` and stable deps.
 - Or extract `ParallelAgentRow` per existing tracked entry.
 
-## messageCount-driven effect has no cleanup; pending rAF survives across rerenders
-
-**Severity:** Low - the messageCount effect at `ui/src/panels/conversation-overview-controller.ts:446-457` calls `scheduleLayoutRefresh()` but has no cleanup that calls `cancelLayoutRefreshFrame()`. The schedule helper is idempotent (early-returns if a frame is pending), so this isn't a leak per se. But if the activation effect re-runs and resets `setIsRailReady(false)` while a frame is in-flight, the rAF callback fires after `isRailReady` is already false; the session-id guard catches it but only because the rail-build path bumps `overviewSessionIdRef.current = sessionId`. A rail-rebuild with the SAME sessionId would still flush.
-
-**Current behavior:**
-- messageCount effect schedules without cleanup.
-- Session-id guard catches stale flushes only when sessionId differs.
-- A same-sessionId rail-rebuild flushes the stale frame.
-
-**Proposal:**
-- Add a cleanup to the messageCount effect that calls `cancelLayoutRefreshFrame()`.
-- Document the guard semantics around `overviewSessionIdRef`.
-
-
 ## `update_telegram_config` pre-sanitize means response can drop fields the client never touched
 
 **Severity:** Low - the new sanitize-before-patch step now silently scrubs stale persisted state on any unrelated config update (e.g., toggling `enabled`). The wire response then reflects the sanitized state, which differs from what the client posted.

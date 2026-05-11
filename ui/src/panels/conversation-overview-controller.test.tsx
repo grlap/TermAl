@@ -329,6 +329,7 @@ describe("useConversationOverviewController", () => {
     const originalCancelIdleCallback = idleWindow.cancelIdleCallback;
     const frameCallbacks = new Map<number, FrameRequestCallback>();
     const idleCallbacks = new Map<number, IdleRequestCallback>();
+    const cancelledFrameIds: number[] = [];
     let nextFrameId = 1;
     let nextIdleId = 1;
     window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
@@ -338,6 +339,7 @@ describe("useConversationOverviewController", () => {
       return frameId;
     }) as typeof requestAnimationFrame;
     window.cancelAnimationFrame = ((frameId: number) => {
+      cancelledFrameIds.push(frameId);
       frameCallbacks.delete(frameId);
     }) as typeof cancelAnimationFrame;
     idleWindow.requestIdleCallback = ((callback: IdleRequestCallback) => {
@@ -401,10 +403,15 @@ describe("useConversationOverviewController", () => {
       expect(readCallbacks.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
       expect(readCallbacks.onGetViewportSnapshot).not.toHaveBeenCalled();
       expect(frameCallbacks.size).toBe(1);
+      let pendingFrameId = frameCallbacks.keys().next().value as
+        | number
+        | undefined;
+      expect(pendingFrameId).toBeDefined();
 
       for (const messageCount of [
         120, 140, 160, 180, 200, 220, 240, 260, 280, 300,
       ]) {
+        const previousFrameId = pendingFrameId;
         act(() => {
           rerender(
             <OverviewGrowthHarness
@@ -418,6 +425,12 @@ describe("useConversationOverviewController", () => {
           "session-a:90",
         );
         expect(frameCallbacks.size).toBe(1);
+        expect(cancelledFrameIds).toContain(previousFrameId);
+        pendingFrameId = frameCallbacks.keys().next().value as
+          | number
+          | undefined;
+        expect(pendingFrameId).toBeDefined();
+        expect(pendingFrameId).not.toBe(previousFrameId);
         expect(readCallbacks.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
         expect(readCallbacks.onGetViewportSnapshot).not.toHaveBeenCalled();
       }
