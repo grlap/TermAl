@@ -31,6 +31,30 @@ struct TelegramBotFile {
     state: TelegramBotState,
 }
 
+impl TelegramStatusResponse {
+    fn from_telegram_settings(
+        config: TelegramUiConfig,
+        state: TelegramBotState,
+        relay: TelegramRelayStatusSnapshot,
+    ) -> Self {
+        let configured = config
+            .bot_token
+            .as_deref()
+            .is_some_and(|token| !token.trim().is_empty());
+        Self {
+            configured,
+            enabled: config.enabled,
+            running: relay.running,
+            lifecycle: relay.lifecycle,
+            linked_chat_id: state.chat_id,
+            bot_token_masked: config.bot_token.as_deref().and_then(mask_telegram_bot_token),
+            subscribed_project_ids: config.subscribed_project_ids,
+            default_project_id: config.default_project_id,
+            default_session_id: config.default_session_id,
+        }
+    }
+}
+
 impl AppState {
     fn telegram_bot_file_path(&self) -> PathBuf {
         resolve_termal_data_dir(&self.default_workdir).join("telegram-bot.json")
@@ -109,22 +133,8 @@ impl AppState {
 
     fn telegram_status_from_file(&self, file: TelegramBotFile) -> TelegramStatusResponse {
         let config = self.sanitize_telegram_config_for_current_state(file.config);
-        let configured = config
-            .bot_token
-            .as_deref()
-            .is_some_and(|token| !token.trim().is_empty());
         let relay = telegram_relay_status_snapshot();
-        TelegramStatusResponse {
-            configured,
-            enabled: config.enabled,
-            running: relay.running,
-            lifecycle: relay.lifecycle,
-            linked_chat_id: file.state.chat_id,
-            bot_token_masked: config.bot_token.as_deref().and_then(mask_telegram_bot_token),
-            subscribed_project_ids: config.subscribed_project_ids,
-            default_project_id: config.default_project_id,
-            default_session_id: config.default_session_id,
-        }
+        TelegramStatusResponse::from_telegram_settings(config, file.state, relay)
     }
 
     fn load_telegram_bot_file(&self) -> Result<TelegramBotFile, ApiError> {

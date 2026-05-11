@@ -170,18 +170,6 @@ A backend refactor (e.g., adding a `failed: bool` field) cannot consult the wire
 - Add a derived `state: "stopped" | "polling" | "linked" | "configured" | "notConfigured"` to the wire response (single source of truth).
 - Or document the derivation rules in the `TelegramStatusResponse` JSDoc.
 
-## `TelegramRelayStatusSnapshot` directly maps to wire shape with no transformation layer
-
-**Severity:** Note - `src/telegram.rs:216-220, 318-335`. The new `TelegramRelayStatusSnapshot` is internal but its fields directly populate the wire shape `TelegramStatusResponse { running, lifecycle, ... }`. The struct sits between the runtime accessor and the wire serializer with no transformation layer, so any change to the snapshot fields cascades into the wire contract.
-
-**Current behavior:**
-- Snapshot fields → wire fields, one-to-one.
-- No transformation layer.
-
-**Proposal:**
-- Either rename the struct to a wire-prefixed name.
-- Or add a thin builder method on `TelegramStatusResponse` that takes the snapshot explicitly.
-
 ## Supervised in-process Telegram relay status is untestable in production due to `#[cfg(test)]` fallback
 
 **Severity:** Medium - `src/telegram.rs:220-331`. `telegram_relay_status_snapshot()` has a production implementation backed by the live relay runtime and a test fallback that always returns `running: false` / `lifecycle: Manual`. The wire-shape tests can assert `InProcess` serialization statically, but no integration test exercises the live status endpoint while the in-process relay is running.
