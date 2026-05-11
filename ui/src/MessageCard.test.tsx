@@ -832,6 +832,7 @@ describe("MessageCard", () => {
     expect(screen.getByText("code").tagName).toBe("CODE");
     expect(screen.getByText("bold").tagName).toBe("STRONG");
     expect(container.querySelector(".plain-text-copy")).toBeNull();
+    expect(container.querySelector(".deferred-markdown-placeholder")).toBeNull();
   });
 
   it("keeps incremental streaming bug-count markdown as a list", () => {
@@ -1074,6 +1075,35 @@ describe("MessageCard", () => {
     expect(
       container.querySelector(".deferred-markdown-placeholder"),
     ).toBeInTheDocument();
+  });
+
+  it("bypasses heavy markdown deferral while assistant text is streaming", async () => {
+    const message: TextMessage = {
+      id: "message-heavy-streaming",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: [
+        "# Streaming heading",
+        ...Array.from({ length: 28 }, (_, index) => `Line ${index + 1}`),
+      ].join("\n"),
+    };
+
+    const { container } = render(
+      <DeferredHeavyContentActivationProvider allowActivation={false}>
+        <MessageCard
+          message={message}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+          isStreamingAssistantTextMessage
+        />
+      </DeferredHeavyContentActivationProvider>,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Streaming heading" }),
+    ).toBeInTheDocument();
+    expect(container.querySelector(".deferred-markdown-placeholder")).toBeNull();
   });
 
   it("keeps heavy markdown deferred while the message stack suspends activation", async () => {
