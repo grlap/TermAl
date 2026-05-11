@@ -156,20 +156,6 @@ The protocol contract is unwritten in code — only the comment in `types.ts:290
 **Proposal:**
 - Split into per-case tests (`it.each` over `(file_config, expected_outcome)` pairs).
 
-## Wire `TelegramStatusResponse` lacks derived `state` field; "Stopped" derivation lives in UI
-
-**Severity:** Low - `ui/src/api.ts:644-646` and `ui/src/preferences-panels.tsx:1205`. The new comment documents the intent but does not state the relationship: `lifecycle === "inProcess" && enabled && configured && !running` ≡ "Stopped". This protocol-level invariant lives entirely in UI code.
-
-A backend refactor (e.g., adding a `failed: bool` field) cannot consult the wire contract to know the UI's "Stopped" derivation.
-
-**Current behavior:**
-- "Stopped" derivation lives in UI only.
-- Wire contract has no derived `state` field.
-
-**Proposal:**
-- Add a derived `state: "stopped" | "polling" | "linked" | "configured" | "notConfigured"` to the wire response (single source of truth).
-- Or document the derivation rules in the `TelegramStatusResponse` JSDoc.
-
 ## Supervised in-process Telegram relay status is untestable in production due to `#[cfg(test)]` fallback
 
 **Severity:** Medium - `src/telegram.rs:220-331`. `telegram_relay_status_snapshot()` has a production implementation backed by the live relay runtime and a test fallback that always returns `running: false` / `lifecycle: Manual`. The wire-shape tests can assert `InProcess` serialization statically, but no integration test exercises the live status endpoint while the in-process relay is running.

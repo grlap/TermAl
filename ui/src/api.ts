@@ -697,6 +697,8 @@ export type TelegramStatusResponse = {
   enabled: boolean;
   running: boolean;
   // lifecycle describes who owns relay startup; running is the current poll-loop state.
+  // UI labels derive "Stopped" only when lifecycle is inProcess and
+  // enabled/configured are true while running is false.
   lifecycle: "manual" | "inProcess";
   linkedChatId?: number | null;
   botTokenMasked?: string | null;
