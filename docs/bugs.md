@@ -613,20 +613,6 @@ Acceptable today; flagging for future re-use when N grows.
 - Add a cleanup to the messageCount effect that calls `cancelLayoutRefreshFrame()`.
 - Document the guard semantics around `overviewSessionIdRef`.
 
-## Wheel/scrollTop demand-hydration thresholds lack boundary-exact test coverage
-
-**Severity:** Low - the wheel test fires `deltaY: -4` (below threshold) and asserts no hydration, then `deltaY: -120` with `scrollTop: 20_000` (above scrollTop ceiling) and asserts no hydration. The exact threshold boundary — `deltaY: -8` (should trigger) vs `-7` (should not), and `scrollTop: 160` vs `161` — is not pinned.
-
-`ui/src/panels/AgentSessionPanel.tsx:340-351`, `ui/src/panels/AgentSessionPanel.test.tsx`. A future change to the constants would not surface as a failing test because no boundary-exact case is asserted.
-
-**Current behavior:**
-- `deltaY: -4` and `deltaY: -120` cases pinned.
-- `deltaY: -7` (below threshold) and `-8` (at threshold) untested.
-- `scrollTop: 160`/`161` boundary untested.
-
-**Proposal:**
-- Add `deltaY: -8` (just at threshold) and `deltaY: -7` cases.
-- Add `scrollTop: 160` (at ceiling) vs `161` (above) cases.
 
 ## `update_telegram_config` pre-sanitize means response can drop fields the client never touched
 
@@ -2658,8 +2644,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   export the helper (or a thin shim) and add unit tests for cross-session, empty previous window, no growth, partial overlap, no first-message match, and contiguous match at index 0.
 - [ ] P2: Pin `mountedRangeWillChange` early-return absence of stale-rect scroll write:
   during the prepend integration test, capture `harness.scrollWrites` between the prepend and the followup effect and assert no scroll write lands at the stale `targetScrollTop` value computed from pre-mutation rects.
-- [ ] P2: Add wheel/scrollTop demand-hydration boundary tests:
-  add `deltaY: -7` (below threshold) and `deltaY: -8` (at threshold) cases, plus `scrollTop: 160` vs `161` cases to pin the constants.
 - [ ] P2: Cover Telegram relay active-project reconciliation:
   start an in-process relay with subscribed projects but no default and assert startup fails or status exposes the effective `activeProjectId`; delete a project used by a running relay and assert the relay is stopped or restarted without the deleted id.
 - [ ] P2: Cover Telegram relay runtime lifecycle seam:

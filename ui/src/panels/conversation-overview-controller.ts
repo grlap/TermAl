@@ -273,6 +273,11 @@ export function useConversationOverviewController({
     viewportRefreshFrameIdRef.current = ranSynchronously ? null : frameId;
   }, [refreshViewportSnapshot]);
 
+  const scheduleResizeRefresh = useCallback(() => {
+    scheduleLayoutRefresh();
+    scheduleViewportRefresh();
+  }, [scheduleLayoutRefresh, scheduleViewportRefresh]);
+
   const cancelNavigationFrames = useCallback(() => {
     navigationFrameIdsRef.current.forEach((frameId) => {
       window.cancelAnimationFrame(frameId);
@@ -424,12 +429,12 @@ export function useConversationOverviewController({
     scrollNode?.addEventListener("scroll", scheduleViewportRefresh, {
       passive: true,
     });
-    window.addEventListener("resize", scheduleLayoutRefresh);
+    window.addEventListener("resize", scheduleResizeRefresh);
     return () => {
       cancelLayoutRefreshFrame();
       cancelViewportRefreshFrame();
       scrollNode?.removeEventListener("scroll", scheduleViewportRefresh);
-      window.removeEventListener("resize", scheduleLayoutRefresh);
+      window.removeEventListener("resize", scheduleResizeRefresh);
     };
   }, [
     cancelLayoutRefreshFrame,
@@ -438,6 +443,7 @@ export function useConversationOverviewController({
     isRailReady,
     scrollContainerRef,
     scheduleLayoutRefresh,
+    scheduleResizeRefresh,
     scheduleViewportRefresh,
     shouldRender,
   ]);

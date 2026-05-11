@@ -3753,7 +3753,25 @@ describe("AgentSessionPanel conversation caching", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(500);
       });
-      expect(screen.queryByText("message-193")).not.toBeInTheDocument();
+      expect(screen.queryByText("message-561")).not.toBeInTheDocument();
+
+      act(() => {
+        scrollTop = 160;
+        fireEvent.wheel(scrollNode, { deltaY: -7 });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(screen.queryByText("message-561")).not.toBeInTheDocument();
+
+      act(() => {
+        scrollTop = 161;
+        fireEvent.wheel(scrollNode, { deltaY: -8 });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(screen.queryByText("message-561")).not.toBeInTheDocument();
 
       act(() => {
         scrollTop = 20_000;
@@ -3814,14 +3832,13 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.queryByText("message-193")).not.toBeInTheDocument();
 
       act(() => {
-        fireEvent.mouseDown(scrollNode);
-        scrollTop = 50;
-        fireEvent.scroll(scrollNode);
+        scrollTop = 160;
+        fireEvent.wheel(scrollNode, { deltaY: -8 });
       });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(500);
       });
-      expect(screen.getByText("message-1")).toBeInTheDocument();
+      expect(screen.getByText("message-561")).toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       window.TouchEvent = OriginalTouchEvent;

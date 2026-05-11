@@ -629,7 +629,7 @@ function useInitialActiveTranscriptMessages({
     const handleWheel = (event: WheelEvent) => {
       if (
         event.ctrlKey ||
-        event.deltaY >= -INITIAL_ACTIVE_TRANSCRIPT_WHEEL_DEMAND_THRESHOLD_PX
+        event.deltaY > -INITIAL_ACTIVE_TRANSCRIPT_WHEEL_DEMAND_THRESHOLD_PX
       ) {
         return;
       }
