@@ -450,21 +450,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 **Proposal:**
 - Document the partial-information loss in `agent-delegation-sessions.md` so wrappers know `status-fetch-failed` may hide a concurrent server restart.
 
-## `validate_and_normalize_telegram_config` clones bot token into snapshot copy
-
-**Severity:** Note - the snapshot+restore fix uses `let mut normalized = config.clone()`, which clones the entire `TelegramUiConfig` including `bot_token: Option<String>`. The token now exists twice on the heap until `normalized` drops at function return. Validation never zeroes it. Consistent with the rest of the codebase but worth noting if you ever introduce a `Zeroizing<String>` wrapper for the bot token elsewhere.
-
-`src/telegram_settings.rs:149-232`.
-
-**Current behavior:**
-- `clone()` creates a duplicate of `bot_token` for the duration of validation.
-- No `Zeroizing` wrapper.
-- Phase 1 single-user trust boundary makes this acceptable.
-
-**Proposal:**
-- Either accept (Phase 1 single-user stance).
-- Or restructure as pure validation that does not own a copy of secrets — collect required mutations into a small `Normalization { default_project_id: Option<String>, push_subscriptions: Vec<String> }` value and apply after validation passes.
-
 ## Delegation result formatting remains coupled to command transport
 
 **Severity:** Low - the hook at `ui/src/SessionPaneView.render-callbacks.tsx:13-20` imports `delegation-commands` and `delegation-result-prompt` directly, and the pure formatter at `ui/src/delegation-result-prompt.ts:11` imports `DelegationResultPacket` from `delegation-commands`.

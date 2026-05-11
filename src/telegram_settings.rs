@@ -171,11 +171,12 @@ impl AppState {
         &self,
         config: &mut TelegramUiConfig,
     ) -> Result<(), ApiError> {
-        let mut normalized = config.clone();
-
-        if let Some(token) = normalized.bot_token.as_deref() {
+        if let Some(token) = config.bot_token.as_deref() {
             validate_telegram_bot_token(token)?;
         }
+        let mut subscribed_project_ids = config.subscribed_project_ids.clone();
+        let mut default_project_id = config.default_project_id.clone();
+        let default_session_id = config.default_session_id.clone();
 
         let inner = self.inner.lock().expect("state mutex poisoned");
         let known_projects = inner
@@ -184,7 +185,7 @@ impl AppState {
             .map(|project| project.id.as_str())
             .collect::<HashSet<_>>();
 
-        for project_id in &normalized.subscribed_project_ids {
+        for project_id in &subscribed_project_ids {
             if !known_projects.contains(project_id.as_str()) {
                 return Err(ApiError::bad_request(format!(
                     "unknown Telegram project `{project_id}`"
@@ -192,28 +193,26 @@ impl AppState {
             }
         }
 
-        if normalized.default_project_id.is_none()
-            && normalized.subscribed_project_ids.len() == 1
+        if default_project_id.is_none() && subscribed_project_ids.len() == 1
         {
-            normalized.default_project_id = normalized.subscribed_project_ids.first().cloned();
+            default_project_id = subscribed_project_ids.first().cloned();
         }
 
-        if let Some(project_id) = normalized.default_project_id.clone() {
+        if let Some(project_id) = default_project_id.clone() {
             if !known_projects.contains(project_id.as_str()) {
                 return Err(ApiError::bad_request(format!(
                     "unknown default Telegram project `{project_id}`"
                 )));
             }
-            if !normalized
-                .subscribed_project_ids
+            if !subscribed_project_ids
                 .iter()
                 .any(|candidate| candidate == &project_id)
             {
-                normalized.subscribed_project_ids.push(project_id);
+                subscribed_project_ids.push(project_id);
             }
         }
 
-        if let Some(session_id) = normalized.default_session_id.as_deref() {
+        if let Some(session_id) = default_session_id.as_deref() {
             let session = inner
                 .sessions
                 .iter()
@@ -231,7 +230,7 @@ impl AppState {
                 )));
             }
 
-            match normalized.default_project_id.as_deref() {
+            match default_project_id.as_deref() {
                 Some(project_id) if project_id != session_project_id => {
                     return Err(ApiError::bad_request(
                         "default Telegram session must belong to the default project",
@@ -239,28 +238,33 @@ impl AppState {
                 }
                 Some(_) => {}
                 None => {
-                    normalized.default_project_id = Some(session_project_id.to_owned());
+                    default_project_id = Some(session_project_id.to_owned());
                 }
             }
 
-            if !normalized
-                .subscribed_project_ids
+            if !subscribed_project_ids
                 .iter()
                 .any(|candidate| candidate == session_project_id)
             {
-                normalized
-                    .subscribed_project_ids
-                    .push(session_project_id.to_owned());
+                subscribed_project_ids.push(session_project_id.to_owned());
             }
         }
 
-        if telegram_config_is_enabled_without_project_target(&normalized) {
+        if config.enabled
+            && config
+                .bot_token
+                .as_deref()
+                .is_some_and(|token| !token.trim().is_empty())
+            && subscribed_project_ids.is_empty()
+        {
             return Err(ApiError::bad_request(
                 "choose at least one Telegram project before enabling the relay",
             ));
         }
 
-        *config = normalized;
+        config.subscribed_project_ids = subscribed_project_ids;
+        config.default_project_id = default_project_id;
+        config.default_session_id = default_session_id;
         Ok(())
     }
 
