@@ -186,6 +186,53 @@ describe("RenderedDiffView", () => {
     expect(scrollIntoViewMock).toHaveBeenCalledTimes(2);
   });
 
+  it("clamps the current region index when the region set shrinks", async () => {
+    const scrollIntoViewMock = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    const { rerender } = render(
+      <RenderedDiffView
+        appearance="dark"
+        documentPath={null}
+        isCompleteDocument
+        regions={[
+          makeRegion({ id: "r-1", sourceStartLine: 1, sourceEndLine: 3 }),
+          makeRegion({ id: "r-2", sourceStartLine: 7, sourceEndLine: 9 }),
+          makeRegion({ id: "r-3", sourceStartLine: 12, sourceEndLine: 18 }),
+        ]}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    const nextButton = screen.getByRole("button", { name: "Next region" });
+    await act(async () => {
+      nextButton.click();
+    });
+    await act(async () => {
+      nextButton.click();
+    });
+    expect(screen.getByText("Region 3 of 3")).toBeInTheDocument();
+
+    rerender(
+      <RenderedDiffView
+        appearance="dark"
+        documentPath={null}
+        isCompleteDocument
+        regions={[makeRegion({ id: "r-1", sourceStartLine: 1, sourceEndLine: 3 })]}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    await screen.findByText("Region 1 of 1");
+    scrollIntoViewMock.mockClear();
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Previous region" }).click();
+    });
+    expect(screen.getByText("Region 1 of 1")).toBeInTheDocument();
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: "center" });
+  });
+
   it("reports `No rendered regions` and disables nav buttons when the region set is empty", () => {
     render(
       <RenderedDiffView
