@@ -14,6 +14,8 @@ must release app state before writing to disk.
 */
 
 const TELEGRAM_BOT_TOKEN_MAX_CHARS: usize = 256;
+const TELEGRAM_TARGET_ID_MAX_BYTES: usize = 256;
+const TELEGRAM_SUBSCRIBED_PROJECT_IDS_MAX_COUNT: usize = 100;
 const TELEGRAM_TEST_COOLDOWN: Duration = Duration::from_secs(2);
 const TELEGRAM_TEST_COOLDOWN_RETRY_AFTER: &str = "2";
 const TELEGRAM_TEST_RATE_LIMIT_MESSAGE: &str =
@@ -91,13 +93,15 @@ impl AppState {
             file.config.bot_token = normalize_optional_secret(bot_token);
         }
         if let Some(project_ids) = request.subscribed_project_ids {
-            file.config.subscribed_project_ids = normalize_project_id_list(project_ids);
+            file.config.subscribed_project_ids = normalize_project_id_list(project_ids)?;
         }
         if let Some(project_id) = request.default_project_id {
-            file.config.default_project_id = normalize_optional_id(project_id);
+            file.config.default_project_id =
+                normalize_optional_id(project_id, "default Telegram project id")?;
         }
         if let Some(session_id) = request.default_session_id {
-            file.config.default_session_id = normalize_optional_id(session_id);
+            file.config.default_session_id =
+                normalize_optional_id(session_id, "default Telegram session id")?;
         }
 
         self.validate_and_normalize_telegram_config(&mut file.config)?;
@@ -184,6 +188,11 @@ impl AppState {
         let mut subscribed_project_ids = config.subscribed_project_ids.clone();
         let mut default_project_id = config.default_project_id.clone();
         let default_session_id = config.default_session_id.clone();
+        validate_telegram_target_ids(
+            &subscribed_project_ids,
+            default_project_id.as_deref(),
+            default_session_id.as_deref(),
+        )?;
 
         let inner = self.inner.lock().expect("state mutex poisoned");
         let known_projects = inner
@@ -466,10 +475,16 @@ fn normalize_optional_secret(value: Option<String>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn normalize_optional_id(value: Option<String>) -> Option<String> {
-    value
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
+fn normalize_optional_id(value: Option<String>, label: &str) -> Result<Option<String>, ApiError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim().to_owned();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    validate_telegram_target_id(label, &value)?;
+    Ok(Some(value))
 }
 
 fn validate_telegram_bot_token(token: &str) -> Result<(), ApiError> {
@@ -563,7 +578,12 @@ fn telegram_getme_error_is_token_validation_failure(err: &TelegramApiError) -> b
     }
 }
 
-fn normalize_project_id_list(values: Vec<String>) -> Vec<String> {
+fn normalize_project_id_list(values: Vec<String>) -> Result<Vec<String>, ApiError> {
+    if values.len() > TELEGRAM_SUBSCRIBED_PROJECT_IDS_MAX_COUNT {
+        return Err(ApiError::bad_request(format!(
+            "Telegram subscribed projects must include at most {TELEGRAM_SUBSCRIBED_PROJECT_IDS_MAX_COUNT} projects"
+        )));
+    }
     let mut seen = HashSet::new();
     let mut normalized = Vec::new();
     for value in values {
@@ -571,9 +591,41 @@ fn normalize_project_id_list(values: Vec<String>) -> Vec<String> {
         if value.is_empty() || !seen.insert(value.clone()) {
             continue;
         }
+        validate_telegram_target_id("Telegram subscribed project id", &value)?;
         normalized.push(value);
     }
-    normalized
+    Ok(normalized)
+}
+
+fn validate_telegram_target_ids(
+    subscribed_project_ids: &[String],
+    default_project_id: Option<&str>,
+    default_session_id: Option<&str>,
+) -> Result<(), ApiError> {
+    if subscribed_project_ids.len() > TELEGRAM_SUBSCRIBED_PROJECT_IDS_MAX_COUNT {
+        return Err(ApiError::bad_request(format!(
+            "Telegram subscribed projects must include at most {TELEGRAM_SUBSCRIBED_PROJECT_IDS_MAX_COUNT} projects"
+        )));
+    }
+    for project_id in subscribed_project_ids {
+        validate_telegram_target_id("Telegram subscribed project id", project_id)?;
+    }
+    if let Some(project_id) = default_project_id {
+        validate_telegram_target_id("default Telegram project id", project_id)?;
+    }
+    if let Some(session_id) = default_session_id {
+        validate_telegram_target_id("default Telegram session id", session_id)?;
+    }
+    Ok(())
+}
+
+fn validate_telegram_target_id(label: &str, value: &str) -> Result<(), ApiError> {
+    if value.len() > TELEGRAM_TARGET_ID_MAX_BYTES {
+        return Err(ApiError::bad_request(format!(
+            "{label} must be at most {TELEGRAM_TARGET_ID_MAX_BYTES} bytes"
+        )));
+    }
+    Ok(())
 }
 
 fn telegram_configs_equal(left: &TelegramUiConfig, right: &TelegramUiConfig) -> bool {

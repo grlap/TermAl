@@ -791,20 +791,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 - Combine with the atomic-write fix on the existing two-writer-race entry.
 - Distinguish "file does not exist" (legitimate first-run) from "file exists but unparseable mid-write" (warn + retry).
 
-## No length validation on `default_project_id`, `default_session_id`, or `subscribed_project_ids`
-
-**Severity:** Low - `bot_token` now has a 256-char cap (round 55), but the project/session id fields and the subscribed list count remain uncapped.
-
-`src/telegram_settings.rs:30-56` + `src/wire.rs:1012-1029`. Phase 1 single-user trust boundary makes this practically unexploitable, but the absence of any sanity check on these remaining fields is worth noting for symmetry with the bot-token cap.
-
-**Current behavior:**
-- No `MAX_PROJECT_ID_LEN` or `MAX_SUBSCRIBED_PROJECTS` cap.
-- A multi-MB JSON body in those fields is accepted up to the global 10MB limit.
-
-**Proposal:**
-- Add `MAX_PROJECT_ID_LEN` (256 bytes), `MAX_SUBSCRIBED_PROJECTS` cap.
-- Reject in `update_telegram_config` with `ApiError::bad_request`.
-
 ## `SessionPaneView` `paneScrollPositions` in deps adds no reactivity
 
 **Severity:** Low - the dependency on the dictionary identity is stable across renders for the same `pane.id`; mutations inside the dictionary do not trigger the effect. False reactivity impression for future readers.

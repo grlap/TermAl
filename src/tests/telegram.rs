@@ -5846,6 +5846,110 @@ fn telegram_settings_validation_rejects_enabled_config_without_project_target() 
 }
 
 #[test]
+fn telegram_settings_validation_rejects_overlong_target_ids() {
+    let state = test_app_state();
+    let overlong_id = "x".repeat(TELEGRAM_TARGET_ID_MAX_BYTES + 1);
+
+    let cases = [
+        (
+            "Telegram subscribed project id",
+            TelegramUiConfig {
+                subscribed_project_ids: vec![overlong_id.clone()],
+                ..TelegramUiConfig::default()
+            },
+        ),
+        (
+            "default Telegram project id",
+            TelegramUiConfig {
+                default_project_id: Some(overlong_id.clone()),
+                ..TelegramUiConfig::default()
+            },
+        ),
+        (
+            "default Telegram session id",
+            TelegramUiConfig {
+                default_session_id: Some(overlong_id.clone()),
+                ..TelegramUiConfig::default()
+            },
+        ),
+    ];
+
+    for (label, mut config) in cases {
+        let err = state
+            .validate_and_normalize_telegram_config(&mut config)
+            .expect_err("overlong target id should fail validation");
+
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(
+            err.message.contains(label),
+            "error `{}` should name `{label}`",
+            err.message
+        );
+        assert!(
+            err.message
+                .contains(&format!("at most {TELEGRAM_TARGET_ID_MAX_BYTES} bytes")),
+            "error `{}` should name the byte cap",
+            err.message
+        );
+    }
+}
+
+#[test]
+fn telegram_settings_validation_rejects_too_many_subscribed_projects() {
+    let state = test_app_state();
+    let mut config = TelegramUiConfig {
+        subscribed_project_ids: (0..=TELEGRAM_SUBSCRIBED_PROJECT_IDS_MAX_COUNT)
+            .map(|index| format!("project-{index}"))
+            .collect(),
+        ..TelegramUiConfig::default()
+    };
+
+    let err = state
+        .validate_and_normalize_telegram_config(&mut config)
+        .expect_err("oversized subscribed project list should fail validation");
+
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(err.message.contains("Telegram subscribed projects"));
+    assert!(
+        err.message.contains(&format!(
+            "at most {TELEGRAM_SUBSCRIBED_PROJECT_IDS_MAX_COUNT} projects"
+        )),
+        "error `{}` should name the list cap",
+        err.message
+    );
+}
+
+#[test]
+fn telegram_config_update_rejects_too_many_subscribed_projects() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-too-many-projects-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+
+    let err = state
+        .update_telegram_config(UpdateTelegramConfigRequest {
+            enabled: None,
+            bot_token: None,
+            subscribed_project_ids: Some(
+                (0..=TELEGRAM_SUBSCRIBED_PROJECT_IDS_MAX_COUNT)
+                    .map(|index| format!("project-{index}"))
+                    .collect(),
+            ),
+            default_project_id: None,
+            default_session_id: None,
+        })
+        .expect_err("oversized subscribed project update should fail");
+
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(err.message.contains("Telegram subscribed projects"));
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
 fn telegram_settings_validation_rejects_orphan_session_project() {
     let state = test_app_state();
     let session_id = {
