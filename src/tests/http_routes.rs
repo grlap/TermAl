@@ -188,6 +188,12 @@ async fn get_session_route_can_return_tail_only() {
     assert_eq!(response.session.message_count, 5);
     assert!(!response.session.messages_loaded);
     assert_eq!(response.session.messages.len(), 3);
+    let tail_message_ids: Vec<String> = response
+        .session
+        .messages
+        .iter()
+        .map(|message| message.id().to_owned())
+        .collect();
     assert!(matches!(
         response.session.messages.first(),
         Some(Message::Text { text, .. }) if text == "Tail message 3"
@@ -196,6 +202,137 @@ async fn get_session_route_can_return_tail_only() {
         response.session.messages.last(),
         Some(Message::Text { text, .. }) if text == "Tail message 5"
     ));
+
+    let (full_status, full_response): (StatusCode, SessionResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/sessions/{session_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(full_status, StatusCode::OK);
+    assert_eq!(full_response.session.messages.len(), 5);
+    let full_suffix_ids: Vec<String> = full_response
+        .session
+        .messages
+        .iter()
+        .skip(2)
+        .map(|message| message.id().to_owned())
+        .collect();
+    assert_eq!(tail_message_ids, full_suffix_ids);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[tokio::test]
+async fn get_session_route_tail_limit_covering_transcript_preserves_loaded_flag() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let app = app_router(state.clone());
+    let created = state
+        .create_session(CreateSessionRequest {
+            name: Some("Route Session Full Tail".to_owned()),
+            agent: None,
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("session should be created");
+    let session_id = created.session_id;
+    for index in 1..=2 {
+        let message_id = state.allocate_message_id();
+        state
+            .push_message(
+                &session_id,
+                Message::Text {
+                    attachments: Vec::new(),
+                    id: message_id,
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: format!("Short tail message {index}"),
+                    expanded_text: None,
+                },
+            )
+            .expect("message should append");
+    }
+
+    let (status, response): (StatusCode, SessionResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/sessions/{session_id}?tail=5"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response.session.message_count, 2);
+    assert!(response.session.messages_loaded);
+    assert_eq!(response.session.messages.len(), 2);
+    assert!(matches!(
+        response.session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Short tail message 1"
+    ));
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[tokio::test]
+async fn get_session_route_tail_returns_not_found_for_missing_or_hidden_sessions() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let app = app_router(state.clone());
+    let created = state
+        .create_session(CreateSessionRequest {
+            name: Some("Route Session Hidden Tail".to_owned()),
+            agent: None,
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("session should be created");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&created.session_id)
+            .expect("created session should exist");
+        inner.sessions[index].hidden = true;
+    }
+
+    for session_id in ["missing-session", created.session_id.as_str()] {
+        let (status, response): (StatusCode, Value) = request_json(
+            &app,
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/sessions/{session_id}?tail=3"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND, "{session_id}");
+        assert_eq!(
+            response.get("error").and_then(Value::as_str),
+            Some("session not found"),
+            "{session_id}"
+        );
+    }
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
