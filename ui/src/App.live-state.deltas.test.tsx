@@ -335,7 +335,7 @@ describe("App live state - delta-gap core", () => {
     "9.55 MiB",
   ];
 
-  it("coalesces live session delta renders through one animation frame", async () => {
+  it("coalesces broad live session renders while publishing active session slices eagerly", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
@@ -471,7 +471,8 @@ describe("App live state - delta-gap core", () => {
         });
 
         expect(requestAnimationFrameMock).toHaveBeenCalledTimes(1);
-        expect(screen.queryByText("Live output 4")).not.toBeInTheDocument();
+        expect(pendingFrames.size).toBe(1);
+        expect(screen.getAllByText("Live output 4").length).toBeGreaterThan(0);
 
         await act(async () => {
           const callbacks = [...pendingFrames.values()];
