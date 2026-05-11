@@ -3030,12 +3030,7 @@ fn chunk_telegram_message_text(text: &str) -> Vec<String> {
             end
         };
         let chunk = &text[start..break_at];
-        let trimmed = chunk.trim_end_matches('\n');
-        if !trimmed.is_empty() {
-            chunks.push(trimmed.to_owned());
-        } else if !chunk.is_empty() {
-            // Preserve the chunk if all its content was newlines —
-            // unusual but better than dropping content silently.
+        if !chunk.is_empty() {
             chunks.push(chunk.to_owned());
         }
         start = break_at;

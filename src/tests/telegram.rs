@@ -5938,6 +5938,108 @@ fn telegram_bot_file_replace_overwrites_existing_file_on_windows() {
 }
 
 #[test]
+fn telegram_turn_settled_footer_covers_known_and_fallback_statuses() {
+    assert_eq!(
+        telegram_turn_settled_footer(&TelegramSessionStatus::Idle),
+        "─────────── ✓ turn complete ───────────"
+    );
+    assert_eq!(
+        telegram_turn_settled_footer(&TelegramSessionStatus::Approval),
+        "─────────── ⏸ approval needed ───────────"
+    );
+    assert_eq!(
+        telegram_turn_settled_footer(&TelegramSessionStatus::Error),
+        "─────────── ⚠ stopped on error ───────────"
+    );
+    assert_eq!(
+        telegram_turn_settled_footer(&TelegramSessionStatus::Unknown),
+        "─────────── ✓ turn complete ───────────"
+    );
+}
+
+#[test]
+fn telegram_update_decodes_real_snake_case_bot_api_shape() {
+    let update: TelegramUpdate = serde_json::from_value(json!({
+        "update_id": 42,
+        "callback_query": {
+            "id": "callback-1",
+            "data": "project-1:review",
+            "message": {
+                "message_id": 123,
+                "chat": {
+                    "id": 99,
+                    "type": "private"
+                },
+                "text": "Digest"
+            }
+        },
+        "message": {
+            "message_id": 124,
+            "chat": {
+                "id": 99,
+                "type": "private"
+            },
+            "text": "/status"
+        }
+    }))
+    .expect("Telegram update should decode");
+
+    assert_eq!(update.update_id, 42);
+    let callback = update
+        .callback_query
+        .as_ref()
+        .expect("callback query should decode");
+    assert_eq!(callback.id, "callback-1");
+    assert_eq!(callback.data.as_deref(), Some("project-1:review"));
+    assert_eq!(
+        callback.message.as_ref().map(|message| message.message_id),
+        Some(123)
+    );
+    let message = update.message.as_ref().expect("message should decode");
+    assert_eq!(message.message_id, 124);
+    assert_eq!(message.chat.id, 99);
+    assert_eq!(message.text.as_deref(), Some("/status"));
+}
+
+#[test]
+fn telegram_message_chunks_cover_empty_under_limit_and_soft_breaks() {
+    assert_eq!(chunk_telegram_message_text(""), vec![String::new()]);
+    assert_eq!(
+        chunk_telegram_message_text("short assistant reply"),
+        vec!["short assistant reply".to_owned()]
+    );
+
+    let first_line = "a".repeat(TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS - 1);
+    let text = format!("{first_line}\nsecond line");
+    let chunks = chunk_telegram_message_text(&text);
+
+    assert_eq!(chunks.len(), 2);
+    assert_eq!(chunks.concat(), text);
+    assert!(chunks[0].ends_with('\n'));
+    assert_eq!(chunks[1], "second line");
+    assert!(
+        chunks
+            .iter()
+            .all(|chunk| chunk.encode_utf16().count() <= TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS)
+    );
+}
+
+#[test]
+fn telegram_message_chunks_hard_split_when_no_newline_fits() {
+    let text = format!(
+        "{}{}",
+        "a".repeat(TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS),
+        "b".repeat(8)
+    );
+    let chunks = chunk_telegram_message_text(&text);
+
+    assert_eq!(chunks.len(), 2);
+    assert_eq!(chunks.concat(), text);
+    assert_eq!(chunks[0], "a".repeat(TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS));
+    assert_eq!(chunks[1], "b".repeat(8));
+}
+
+#[test]
 fn telegram_message_chunks_respect_utf16_limit() {
     let text = "🙂".repeat(TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS + 1);
     let chunks = chunk_telegram_message_text(&text);

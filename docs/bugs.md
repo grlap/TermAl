@@ -1817,8 +1817,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   trigger watchdog wake-gap recovery, adopt same-instance `/api/state` progress, and assert no additional reconnect polling occurs before a later live event.
 - [ ] P2: Add frontend stop/failure delta-before-snapshot terminal-message coverage:
   dispatch cancellation/update deltas before the same-revision snapshot and assert appended stop/failure terminal messages remain rendered without relying on a later unrelated refresh.
-- [ ] P1: Add Telegram-relay unit tests for the pure helpers introduced in `src/telegram.rs`:
-  cover `chunk_telegram_message_text` (empty, exact-3500-char, under-limit, no-newline-in-window hard-split, newline-in-window soft-split, multi-byte / emoji char-vs-UTF16-unit, trailing-newline preservation), `telegram_turn_settled_footer` for `idle` / `approval` / `error` / unknown-status arms, `telegram_error_is_message_not_modified` against the Telegram error wording, and a serde-decode round-trip for `TelegramUpdate` / `TelegramChatMessage` against a real-shape `getUpdates` JSON snapshot to pin the snake_case contract.
 - [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:
   refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
 - [ ] P2: Add genuine-divergence reconciliation coverage for same-revision unknown-session deltas:
