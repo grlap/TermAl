@@ -5850,6 +5850,49 @@ fn telegram_bot_file_write_sets_mode_600() {
 }
 
 #[test]
+fn telegram_bot_file_write_removes_temp_after_write_failure() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-telegram-write-cleanup-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir(&root).expect("fixture directory should create");
+    let path = root.join("telegram-bot.json");
+
+    let err = write_telegram_bot_file_with_writer(
+        &path,
+        b"{\"chatId\":123}",
+        |temp_path, _| {
+            fs::write(temp_path, b"{\"chatId\"")
+                .expect("partial temp file should write");
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "forced temp write failure",
+            ))
+        },
+        |_, _| Ok(()),
+    )
+    .expect_err("write failure should propagate");
+
+    assert_eq!(err.kind(), io::ErrorKind::Other);
+    assert!(!path.exists());
+    let leaked_temps: Vec<PathBuf> = fs::read_dir(&root)
+        .expect("fixture directory should read")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|candidate| {
+            candidate
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| {
+                    name.starts_with(".telegram-bot.json.") && name.ends_with(".tmp")
+                })
+        })
+        .collect();
+    assert!(leaked_temps.is_empty());
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
 fn telegram_message_chunks_respect_utf16_limit() {
     let text = "🙂".repeat(TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS + 1);
     let chunks = chunk_telegram_message_text(&text);

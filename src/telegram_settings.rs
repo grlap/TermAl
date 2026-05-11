@@ -676,14 +676,22 @@ fn telegram_settings_file_error(
 }
 
 fn write_telegram_bot_file(path: &FsPath, encoded: &[u8]) -> io::Result<()> {
+    write_telegram_bot_file_with_writer(path, encoded, write_telegram_bot_temp_file, |from, to| {
+        replace_telegram_bot_file(from, to)
+    })
+}
+
+fn write_telegram_bot_file_with_writer(
+    path: &FsPath,
+    encoded: &[u8],
+    write_temp_file: impl FnOnce(&FsPath, &[u8]) -> io::Result<()>,
+    replace_file: impl FnOnce(&FsPath, &FsPath) -> io::Result<()>,
+) -> io::Result<()> {
     let temp_path = telegram_bot_temp_file_path(path);
     let result = (|| {
-        let mut file = open_telegram_bot_temp_file(&temp_path)?;
-        file.write_all(encoded)?;
-        file.sync_all()?;
-        drop(file);
+        write_temp_file(&temp_path, encoded)?;
         harden_telegram_bot_file_permissions(&temp_path)?;
-        replace_telegram_bot_file(&temp_path, path)?;
+        replace_file(&temp_path, path)?;
         Ok(())
     })();
 
@@ -692,6 +700,13 @@ fn write_telegram_bot_file(path: &FsPath, encoded: &[u8]) -> io::Result<()> {
     }
 
     result
+}
+
+fn write_telegram_bot_temp_file(path: &FsPath, encoded: &[u8]) -> io::Result<()> {
+    let mut file = open_telegram_bot_temp_file(path)?;
+    file.write_all(encoded)?;
+    file.sync_all()?;
+    Ok(())
 }
 
 fn telegram_bot_temp_file_path(path: &FsPath) -> PathBuf {
