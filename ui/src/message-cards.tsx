@@ -329,7 +329,7 @@ export const MessageCard = memo(
     onOpenDiffPreview,
     onOpenSourceLink,
     preferImmediateHeavyRender = false,
-    preferStreamingPlainTextRender = false,
+    isStreamingAssistantTextMessage = false,
     onApprovalDecision,
     onUserInputSubmit,
     onMcpElicitationSubmit = NOOP_MCP_ELICITATION_SUBMIT,
@@ -348,7 +348,7 @@ export const MessageCard = memo(
     onOpenDiffPreview?: (message: DiffMessage) => void;
     onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
     preferImmediateHeavyRender?: boolean;
-    preferStreamingPlainTextRender?: boolean;
+    isStreamingAssistantTextMessage?: boolean;
     onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
     onUserInputSubmit: (
       messageId: string,
@@ -383,37 +383,21 @@ export const MessageCard = memo(
           message.author === "you"
             ? promptCommandMetaLabel(message.text, message.expandedText)
             : null;
-        // Three possible render paths for an assistant message text:
-        //
-        // Assistant text always renders through `<DeferredMarkdownContent>`
-        // (which itself always wraps `<MarkdownContent>`), regardless of
-        // whether the message is streaming or settled, has Markdown
-        // structure or is plain prose. Earlier revisions chose between
-        // a bare `<p>` shell (`StreamingAssistantTextShell`), a direct
-        // `<MarkdownContent isStreaming />`, and a wrapped
-        // `<DeferredMarkdownContent />` based on per-message structure
-        // detection (`hasRenderableStreamingMarkdown`) and a host fast-
-        // path flag — but each transition between the three was a React
-        // component-type change at the same JSX position, so React
-        // tore down and re-mounted the rendered subtree. That caused
-        // visible flicker mid-stream (the moment the first `**`, `# `,
-        // `- `, etc. appeared) and again at turn end (full subtree
-        // re-mount with Mermaid/KaTeX/code re-renders).
-        //
-        // The cost of always running the Markdown pipeline (splitter +
-        // react-markdown) for plain-prose streaming chunks is small —
-        // typical chunks are short, the splitter is O(n) over text
-        // already accumulated, and react-markdown is fast for prose
-        // without block constructs. The `isStreaming` flag is still
-        // honored: it gates the partial-block deferral splitter and
-        // forces the heavy-content activation gate off so streaming
-        // content always renders immediately.
+        // Assistant text uses one stable render pipeline:
+        // `<DeferredMarkdownContent>` wraps `<MarkdownContent>` for both
+        // streaming and settled messages, regardless of whether the body is
+        // prose or structured Markdown. Earlier revisions swapped component
+        // types based on per-message structure detection and a host fast-path
+        // flag, which re-mounted the rendered subtree mid-stream and at turn
+        // end. The single pipeline keeps the subtree stable while the
+        // `isStreaming` flag still gates partial-block deferral and immediate
+        // heavy-content activation.
         //
         // Non-assistant messages (user, system) skip this branch
         // entirely and render as plain text (see the `:` arm of the
         // outer ternary further below).
-        const isStreamingAssistantMessage =
-          preferStreamingPlainTextRender &&
+        const shouldRenderStreamingAssistantText =
+          isStreamingAssistantTextMessage &&
           message.author === "assistant" &&
           searchQuery.trim().length === 0;
 
@@ -453,7 +437,7 @@ export const MessageCard = memo(
             {message.author === "assistant" ? (
               <DeferredMarkdownContent
                 appearance={appearance}
-                isStreaming={isStreamingAssistantMessage}
+                isStreaming={shouldRenderStreamingAssistantText}
                 markdown={message.text}
                 onOpenSourceLink={onOpenSourceLink}
                 preferImmediateRender={preferImmediateHeavyRender}
@@ -611,8 +595,8 @@ export const MessageCard = memo(
     previous.onOpenDiffPreview === next.onOpenDiffPreview &&
     previous.onOpenSourceLink === next.onOpenSourceLink &&
     previous.preferImmediateHeavyRender === next.preferImmediateHeavyRender &&
-    previous.preferStreamingPlainTextRender ===
-      next.preferStreamingPlainTextRender &&
+    previous.isStreamingAssistantTextMessage ===
+      next.isStreamingAssistantTextMessage &&
     previous.onApprovalDecision === next.onApprovalDecision &&
     previous.onUserInputSubmit === next.onUserInputSubmit &&
     previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&

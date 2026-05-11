@@ -968,21 +968,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Persist `next_update_id` per update inside the batch loop rather than once at the end.
 - Add a per-iteration backoff after errors so a sustained failure does not tight-loop.
 
-## `preferStreamingPlainTextRender` prop name and "Three render paths" comment are stale after the unified-render refactor
-
-**Severity:** Medium - public-shaped prop semantics drift silently from a removed implementation; future readers see a name describing code that no longer exists.
-
-`ui/src/message-cards.tsx:311, 327, 359-388`. The `StreamingAssistantTextShell` render path was removed; the prop now functionally means "this is the live-streaming assistant message". The leading comment block ("Three possible render paths...") describes the old three-path implementation, contradicted by the next paragraph saying "always renders through `<DeferredMarkdownContent>`". Test names and the prop signature carry the old name.
-
-**Current behavior:**
-- `preferStreamingPlainTextRender` is the only render-path discriminator but its name suggests a removed plain-text shell.
-- The leading comment describes three paths; only one survives.
-
-**Proposal:**
-- Rename to `isStreamingAssistantTextMessage` (matching the local `isStreamingAssistantMessage` variable already used inside `MessageCardImpl`).
-- Replace the "Three possible render paths" sentence with the current single-path explanation.
-- Pure refactor, no behavior change.
-
 ## CSS bubble `width: fit-content` transition causes horizontal layout reflow at turn end
 
 **Severity:** Medium - the "stable component subtree across stream → settle" goal is partially undermined by a CSS-driven layout jump.

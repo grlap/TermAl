@@ -470,7 +470,7 @@ export function useSessionRenderCallbacks({
             ? "active"
             : "match"
         }
-        preferStreamingPlainTextRender={
+        isStreamingAssistantTextMessage={
           shouldPreferStreamingAssistantTextRender(
             message,
             streamingAssistantTextMessageId,

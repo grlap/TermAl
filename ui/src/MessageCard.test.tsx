@@ -646,7 +646,7 @@ describe("MessageCard", () => {
         message={message}
         onApprovalDecision={vi.fn()}
         onUserInputSubmit={vi.fn()}
-        preferStreamingPlainTextRender
+        isStreamingAssistantTextMessage
       />,
     );
 
@@ -675,7 +675,7 @@ describe("MessageCard", () => {
         message={baseMessage}
         onApprovalDecision={vi.fn()}
         onUserInputSubmit={vi.fn()}
-        preferStreamingPlainTextRender
+        isStreamingAssistantTextMessage
       />,
     );
 
@@ -695,7 +695,7 @@ describe("MessageCard", () => {
         }}
         onApprovalDecision={vi.fn()}
         onUserInputSubmit={vi.fn()}
-        preferStreamingPlainTextRender
+        isStreamingAssistantTextMessage
       />,
     );
 
@@ -724,7 +724,7 @@ describe("MessageCard", () => {
         message={message}
         onApprovalDecision={vi.fn()}
         onUserInputSubmit={vi.fn()}
-        preferStreamingPlainTextRender
+        isStreamingAssistantTextMessage
       />,
     );
 
@@ -757,7 +757,7 @@ describe("MessageCard", () => {
         message={message}
         onApprovalDecision={vi.fn()}
         onUserInputSubmit={vi.fn()}
-        preferStreamingPlainTextRender
+        isStreamingAssistantTextMessage
       />,
     );
 
@@ -792,7 +792,7 @@ describe("MessageCard", () => {
         message={message}
         onApprovalDecision={vi.fn()}
         onUserInputSubmit={vi.fn()}
-        preferStreamingPlainTextRender
+        isStreamingAssistantTextMessage
       />,
     );
 
@@ -808,9 +808,9 @@ describe("MessageCard", () => {
   });
 
   it("renders streaming assistant prose without markdown through the unified Markdown pipeline", () => {
-    // Earlier revisions used a bare-`<p>` `StreamingAssistantTextShell`
-    // fast path for streaming assistant text that had not yet accrued
-    // Markdown structure. That fast path has been removed so the
+    // Earlier revisions used a bare-`<p>` fast path for streaming assistant
+    // text that had not yet accrued Markdown structure. That fast path has
+    // been removed so the
     // rendered React subtree stays stable across the moment when the
     // first `**`, `# `, `- `, etc. arrives mid-stream — preventing the
     // visible flicker of unmounting the shell `<p>` and mounting the
@@ -832,7 +832,7 @@ describe("MessageCard", () => {
         message={message}
         onApprovalDecision={vi.fn()}
         onUserInputSubmit={vi.fn()}
-        preferStreamingPlainTextRender
+        isStreamingAssistantTextMessage
       />,
     );
 
