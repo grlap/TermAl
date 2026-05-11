@@ -1569,6 +1569,7 @@ describe("hydration adoption side effects", () => {
         SESSION_TAIL_WINDOW_MESSAGE_COUNT,
       ),
     );
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messageCount).toBe(150);
     expect(params.adoptionRefs.sessionsRef.current[0]?.messages[0]?.id).toBe(
       "message-131",
     );
