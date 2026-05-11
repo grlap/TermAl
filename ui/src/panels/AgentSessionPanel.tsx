@@ -2303,9 +2303,10 @@ const SessionComposer = memo(function SessionComposer({
       (parseFloat(textarea.style.height) ||
         textarea.getBoundingClientRect().height ||
         null);
+    const shrinkProbeHeight = Math.max(sizingState.minHeight, 1);
     if (shouldAllowShrink) {
       textarea.style.transition = "none";
-      textarea.style.height = `${Math.max(sizingState.minHeight, 1)}px`;
+      textarea.style.height = `${shrinkProbeHeight}px`;
       composerLastAppliedHeightRef.current = null;
     }
 
@@ -2319,17 +2320,23 @@ const SessionComposer = memo(function SessionComposer({
       const heightChanged =
         !hasPreviousMeasuredHeight ||
         Math.abs(previousMeasuredHeight - nextHeight) > 0.5;
-      if (hasPreviousMeasuredHeight) {
+      if (hasPreviousMeasuredHeight && heightChanged) {
         textarea.style.height = `${previousMeasuredHeight}px`;
         void textarea.offsetHeight;
-      }
-      if (animateHeight) {
+        if (animateHeight) {
+          restoreComposerInputTransition(textarea, previousInlineTransition);
+        } else {
+          scheduleComposerTransitionRestore(textarea, previousInlineTransition);
+        }
+      } else if (hasPreviousMeasuredHeight && forceRefreshMetrics) {
+        textarea.style.height = `${previousMeasuredHeight}px`;
         restoreComposerInputTransition(textarea, previousInlineTransition);
+        composerLastAppliedHeightRef.current = nextHeight;
+      } else if (Math.abs(shrinkProbeHeight - nextHeight) <= 0.5) {
+        restoreComposerInputTransition(textarea, previousInlineTransition);
+        composerLastAppliedHeightRef.current = nextHeight;
       } else {
         scheduleComposerTransitionRestore(textarea, previousInlineTransition);
-      }
-      if (!heightChanged) {
-        composerLastAppliedHeightRef.current = nextHeight;
       }
     }
 

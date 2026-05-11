@@ -10171,6 +10171,10 @@ describe("AgentSessionPanelFooter", () => {
       HTMLTextAreaElement.prototype,
       "scrollHeight",
     );
+    const originalOffsetHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight",
+    );
     let nextFrameId = 0;
     const queuedFrames = new Map<number, FrameRequestCallback>();
     const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
@@ -10182,6 +10186,7 @@ describe("AgentSessionPanelFooter", () => {
       queuedFrames.delete(id);
     });
     const heightWrites: { value: string; transition: string }[] = [];
+    let offsetHeightReads = 0;
     const drainAnimationFrames = () => {
       while (queuedFrames.size > 0) {
         const callbacks = [...queuedFrames.values()];
@@ -10203,6 +10208,13 @@ describe("AgentSessionPanelFooter", () => {
       get() {
         const textarea = this as HTMLTextAreaElement;
         return 40 + (textarea.value.split("\n").length - 1) * 28;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        offsetHeightReads += 1;
+        return Number.parseFloat((this as HTMLElement).style.height) || 0;
       },
     });
 
@@ -10247,6 +10259,7 @@ describe("AgentSessionPanelFooter", () => {
           transition: "none",
         },
       ]);
+      expect(offsetHeightReads).toBe(0);
     } finally {
       act(() => {
         unmount?.();
@@ -10263,6 +10276,19 @@ describe("AgentSessionPanelFooter", () => {
             scrollHeight?: number;
           }
         ).scrollHeight;
+      }
+      if (originalOffsetHeightDescriptor) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetHeight",
+          originalOffsetHeightDescriptor,
+        );
+      } else {
+        delete (
+          HTMLElement.prototype as unknown as {
+            offsetHeight?: number;
+          }
+        ).offsetHeight;
       }
       restoreHeightWrites?.();
       window.requestAnimationFrame = originalRequestAnimationFrame;

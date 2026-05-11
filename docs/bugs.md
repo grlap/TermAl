@@ -94,19 +94,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 - Hoist `paneMessageContentSignaturesRef` to App.tsx and pass it through alongside `paneContentSignaturesRef`.
 - Or document why the divergence is intentional with a header comment.
 
-## 3 `style.height` writes per resize cause unnecessary layout thrash
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:1726-1729`. `textarea.style.height = previousMeasuredHeight + "px"` reassigns the height immediately after setting it to `Math.max(minHeight, 1)`. The `void textarea.offsetHeight` reflow forces layout twice per resize when only one height is needed.
-
-Each `resizeComposerInput()` call now causes 3 `style.height` writes (1px → previousMeasuredHeight → finalHeight) when shrinking is allowed. Combined with the rAF-coalesced `scheduleComposerResize`, busy typing will show up in DevTools layout-thrash profiles.
-
-**Current behavior:**
-- 3 height writes per resize.
-- 2 forced reflows per resize.
-
-**Proposal:**
-- Skip the snapshot-and-restore intermediate write when `previousMeasuredHeight === nextHeight`.
-
 ## `useEffect` consumes `paneMessageContentSignaturesRef` before predicate fires
 
 **Severity:** Low - `ui/src/SessionPaneView.tsx:1979-2076`. The lookup at line 1986-1989 is ref-based, so it doesn't trigger re-runs. But the assignment back-writes `paneMessageContentSignaturesRef.current[scrollStateKey] = visibleMessageContentSignature` happens BEFORE the early-return check at line 1990. If the early return fires, the back-write happened, but the side-effect logic that reads it is in a later branch.
