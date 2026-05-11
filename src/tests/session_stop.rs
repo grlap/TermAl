@@ -844,6 +844,17 @@ fn stop_session_file_change_created_deltas_are_replayable_and_final_stamped() {
         "all created deltas must advance messageCount before same-revision updates advertise the final count"
     );
 
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert!(record.active_turn_start_message_count.is_none());
+    assert!(record.active_turn_file_changes.is_empty());
+    assert!(record.active_turn_file_change_grace_deadline.is_some());
+    drop(inner);
+
     let _ = process.wait();
     let _ = fs::remove_file(state.persistence_path.as_path());
 }

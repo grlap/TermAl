@@ -945,6 +945,46 @@ fn runtime_exit_clears_active_turn_file_tracking_when_persist_fails() {
     let _ = fs::remove_dir_all(failing_persistence_path);
 }
 
+#[test]
+fn runtime_exit_success_keeps_active_turn_file_grace_window() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, _input_rx) =
+        test_claude_runtime_handle("claude-runtime-exit-active-turn-success");
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+    }
+    seed_runtime_exit_active_turn_file_change(&state, &session_id);
+
+    state
+        .handle_runtime_exit_if_matches(
+            &session_id,
+            &runtime_token,
+            Some("runtime crashed"),
+        )
+        .expect("runtime exit should persist successfully");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert_eq!(record.session.status, SessionStatus::Error);
+    assert!(record.session.preview.contains("runtime crashed"));
+    assert!(record.active_turn_start_message_count.is_none());
+    assert!(record.active_turn_file_changes.is_empty());
+    assert!(record.active_turn_file_change_grace_deadline.is_some());
+}
+
 // pins the suppression side of the stop-in-progress guard for codex thread-
 // state updates: set_codex_thread_state_if_runtime_matches must NOT apply
 // while runtime_stop_in_progress is set — no state mutation, no revision
