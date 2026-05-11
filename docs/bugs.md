@@ -1914,8 +1914,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   re-render the parent with a smaller `regions`/`segments` array while `currentChangeIndex`/`currentRegionIndex` points past the new end and assert the counter snaps to "Change/Region 1 of N" while prev/next still wrap correctly. Today the existing prev/next tests only exercise wrap-around at full length; the `current >= changeCount/regionCount` clamp branch in the `useEffect` is unexercised.
 - [ ] P2: Add rendered diff render-budget coverage:
   create many Mermaid/math rendered regions and assert the preview applies the same document-level caps as a single `MarkdownContent` document.
-- [ ] P2: Add single-target rendered diff navigation coverage:
-  assert prev/next scrolls the only Markdown diff change and the only rendered diff region even though the selected index does not change.
 - [ ] P2: Add frontend stop/failure delta-before-snapshot terminal-message coverage:
   dispatch cancellation/update deltas before the same-revision snapshot and assert appended stop/failure terminal messages remain rendered without relying on a later unrelated refresh.
 - [ ] P1: Add Telegram-relay unit tests for the pure helpers introduced in `src/telegram.rs`:
