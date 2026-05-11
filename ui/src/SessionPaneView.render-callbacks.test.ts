@@ -349,6 +349,26 @@ describe("SessionPaneView render callbacks", () => {
     );
   });
 
+  it("omits local delegation actions when action callbacks are unavailable", () => {
+    const params = makeRenderCallbackParams({
+      onComposerError: undefined,
+      onInsertReviewIntoPrompt: undefined,
+      onOpenConversationFromDiff: undefined,
+    });
+
+    renderDelegationCard(params);
+
+    expect(
+      screen.queryByRole("button", { name: "Open session" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Insert result" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Cancel" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps delegation action results live after StrictMode effect replay", async () => {
     vi.mocked(getDelegationStatusCommand).mockResolvedValueOnce({
       delegationId: "delegation-1",

@@ -465,21 +465,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Either accept (Phase 1 single-user stance).
 - Or restructure as pure validation that does not own a copy of secrets — collect required mutations into a small `Normalization { default_project_id: Option<String>, push_subscriptions: Vec<String> }` value and apply after validation passes.
 
-## `useSessionRenderCallbacks` gains three new required props without optional fallbacks
-
-**Severity:** Note - `ui/src/SessionPaneView.render-callbacks.tsx:139-148` added `onOpenConversationFromDiff`, `onInsertReviewIntoPrompt`, `onComposerError` as required props. Any downstream caller of `useSessionRenderCallbacks` (today, only `SessionPaneView.tsx`) must thread these through.
-
-Acceptable for now since there's a single caller; flagging for future re-use of the hook.
-
-**Current behavior:**
-- Three new required props added.
-- No optional fallbacks.
-- Hook is exported but only one caller.
-
-**Proposal:**
-- Either keep the required props (and document the hook is `SessionPaneView`-private).
-- Or make the parallel-agent action callbacks themselves conditional and fall back to omission if any prop is undefined.
-
 ## Two readers see divergent `telegram-bot.json` view: API status sanitizes, file may have stale refs
 
 **Severity:** Note - `telegram_status` reads the file and runs `sanitize_telegram_config_for_current_state` once, returning sanitized data without persisting it. `update_telegram_config` runs sanitize twice and persists. A client that calls `GET /api/telegram/status` and gets `defaultProjectId: null` (sanitized) but doesn't follow up with `POST /api/telegram/config` will see "phantom" data — the on-disk file still has the stale id.

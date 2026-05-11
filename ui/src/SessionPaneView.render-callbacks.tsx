@@ -151,16 +151,16 @@ type UseSessionRenderCallbacksParams = {
     originProjectId: string | null,
     options?: OpenPathOptions,
   ) => void;
-  onOpenConversationFromDiff: (
+  onOpenConversationFromDiff?: (
     sessionId: string,
     preferredPaneId: string | null,
   ) => void;
-  onInsertReviewIntoPrompt: (
+  onInsertReviewIntoPrompt?: (
     sessionId: string,
     preferredPaneId: string | null,
     prompt: string,
   ) => void;
-  onComposerError: (message: string | null) => void;
+  onComposerError?: (message: string | null) => void;
   onRefreshSessionModelOptions: (sessionId: string) => void;
   onRollbackCodexThread: (sessionId: string, numTurns: number) => void;
   onUnarchiveCodexThread: (sessionId: string) => void;
@@ -246,6 +246,9 @@ export function useSessionRenderCallbacks({
   );
   const handleOpenParallelAgentSession = useCallback(
     (delegationId: string) => {
+      if (!onOpenConversationFromDiff || !onComposerError) {
+        return Promise.resolve();
+      }
       const parentSessionId = activeSession?.id;
       if (!parentSessionId) {
         return Promise.resolve();
@@ -298,6 +301,9 @@ export function useSessionRenderCallbacks({
   );
   const handleInsertParallelAgentResult = useCallback(
     (delegationId: string) => {
+      if (!onInsertReviewIntoPrompt || !onComposerError) {
+        return Promise.resolve();
+      }
       const parentSessionId = activeSession?.id;
       if (!parentSessionId) {
         return Promise.resolve();
@@ -350,6 +356,9 @@ export function useSessionRenderCallbacks({
   );
   const handleCancelParallelAgent = useCallback(
     (delegationId: string) => {
+      if (!onComposerError) {
+        return Promise.resolve();
+      }
       const parentSessionId = activeSession?.id;
       if (!parentSessionId) {
         return Promise.resolve();
@@ -391,6 +400,13 @@ export function useSessionRenderCallbacks({
     },
     [activeSession?.id, canApplyDelegationActionResult, onComposerError],
   );
+  const canExposeLocalDelegationActions =
+    enableLocalDelegationActions &&
+    Boolean(
+      onOpenConversationFromDiff &&
+        onInsertReviewIntoPrompt &&
+        onComposerError,
+    );
   const renderSessionMessageCard = useCallback<RenderMessageCard>(
     (
       message,
@@ -430,17 +446,19 @@ export function useSessionRenderCallbacks({
         onMcpElicitationSubmit={handleMcpElicitation}
         onCodexAppRequestSubmit={handleCodexAppRequest}
         onOpenParallelAgentSession={
-          enableLocalDelegationActions
+          canExposeLocalDelegationActions
             ? handleOpenParallelAgentSession
             : undefined
         }
         onInsertParallelAgentResult={
-          enableLocalDelegationActions
+          canExposeLocalDelegationActions
             ? handleInsertParallelAgentResult
             : undefined
         }
         onCancelParallelAgent={
-          enableLocalDelegationActions ? handleCancelParallelAgent : undefined
+          canExposeLocalDelegationActions
+            ? handleCancelParallelAgent
+            : undefined
         }
         searchQuery={
           activeSessionSearchMatchItemKey === `message:${message.id}`
@@ -469,8 +487,8 @@ export function useSessionRenderCallbacks({
       activeSession?.status,
       activeSession?.workdir,
       activeSessionSearchMatchItemKey,
+      canExposeLocalDelegationActions,
       editorAppearance,
-      enableLocalDelegationActions,
       getConnectionRetryDisplayState,
       handleCancelParallelAgent,
       handleInsertParallelAgentResult,
