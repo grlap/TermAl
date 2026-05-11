@@ -359,9 +359,11 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
 
       expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-      expect(
-        harness.container.querySelectorAll(".virtualized-message-slot").length,
-      ).toBeLessThanOrEqual(16);
+      const mountedSlotCount = harness.container.querySelectorAll(
+        ".virtualized-message-slot",
+      ).length;
+      expect(mountedSlotCount).toBeGreaterThanOrEqual(4);
+      expect(mountedSlotCount).toBeLessThanOrEqual(16);
       expect(harness.scrollTop).toBeGreaterThan(20_000);
     } finally {
       harness.restore();
