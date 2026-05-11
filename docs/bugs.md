@@ -450,20 +450,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 **Proposal:**
 - Document the partial-information loss in `agent-delegation-sessions.md` so wrappers know `status-fetch-failed` may hide a concurrent server restart.
 
-## `previousMessageWindowRef` lazy-init makes early-return unreachable
-
-**Severity:** Low - the new lazy-init at `VirtualizedConversationMessageList.tsx:525-531` unconditionally sets `previousMessageWindowRef.current` to a non-null `MessageWindowSnapshot` during the first render. By the time the `useLayoutEffect` runs at line 1406, the ref is already non-null, so the `if (previousWindow === null) return;` early-return at line 1414 is unreachable.
-
-`ui/src/panels/VirtualizedConversationMessageList.tsx:1414-1416`. Correctness-neutral (the next downstream check `resolvePrependedMessageCount` handles the same-content case naturally), but the dead-code obscures intent.
-
-**Current behavior:**
-- First-render initializer sets ref to non-null.
-- `if (previousWindow === null) return;` never fires.
-- A reader thinks "there's a real first-mount short-circuit" when there isn't.
-
-**Proposal:**
-- Either remove the dead check, OR reset `previousMessageWindowRef.current = null` between session boundaries inside an effect to make the check live.
-
 ## `resolveViewportSnapshotTranslation` does an O(N+M) full-transcript pass per layout snapshot rebuild
 
 **Severity:** Low - the helper uses `Array.prototype.findIndex` to find the first layout-snapshot message in `estimatedRows`, then `.every` to verify a contiguous window. For a 1000-message transcript with a 100-message tail, `findIndex` scans up to 900 entries and `.every` walks up to 100. Acceptable for current sizes, but `buildConversationOverviewProjection` runs on every layout snapshot change.

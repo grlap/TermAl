@@ -524,13 +524,10 @@ export function VirtualizedConversationMessageList({
   const pendingDeferredRenderResumeTimerRef = useRef<number | null>(null);
   const pendingDeferredRenderSuspendedNodeRef = useRef<HTMLElement | null>(null);
   const pendingProgrammaticViewportSyncRef = useRef(false);
-  const previousMessageWindowRef = useRef<MessageWindowSnapshot | null>(null);
-  if (previousMessageWindowRef.current === null) {
-    previousMessageWindowRef.current = {
-      ids: messages.map((message) => message.id),
-      sessionId,
-    };
-  }
+  const previousMessageWindowRef = useRef<MessageWindowSnapshot>({
+    ids: messages.map((message) => message.id),
+    sessionId,
+  });
   const latestVisibleMessageAnchorRef = useRef<VisibleMessageAnchor | null>(null);
   const pendingPrependedMessageAnchorRef =
     useRef<PendingVisibleMessageAnchor | null>(null);
@@ -1422,9 +1419,6 @@ export function VirtualizedConversationMessageList({
     };
     previousMessageWindowRef.current = nextWindow;
 
-    if (previousWindow === null) {
-      return;
-    }
     if (!isActive) {
       return;
     }
