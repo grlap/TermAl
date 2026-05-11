@@ -876,21 +876,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Add a reactive signal (e.g., a derived `nearBottomAtSendStart` captured into the effect's deps via a ref-based subscription).
 - Or update the comment to match the actual behavior ("when the user is near bottom AT THE TIME isSending toggled, defer entirely to the post-message-land effect").
 
-## `messageCreatedDeltaIsNoOp` lacks semantic-change negative coverage
-
-**Severity:** Medium - the identical-replay tests do not prove the no-op predicate still material-applies when the message payload changes while metadata stays equal.
-
-`ui/src/live-updates.ts:320` compares the existing message payload and metadata to decide whether a `messageCreated` replay is no-op. Current tests cover identical duplicate replay behavior, but do not keep id/index/preview/count/stamp the same while changing a semantic message payload field. An over-broad predicate could drop a real `messageCreated` update while the current tests still pass.
-
-**Current behavior:**
-- Duplicate identical `messageCreated` replay coverage exists.
-- Semantic-change negative cases are missing for same id/index/metadata.
-- Same-id pending prompt cleanup interaction is not directly pinned.
-
-**Proposal:**
-- Add negative cases in `live-updates.test.ts` for same id/index/metadata with changed message payload.
-- Add coverage for same-id pending prompt cleanup so no-op detection cannot skip required prompt removal.
-
 ## Near-bottom prompt-send early return lacks direct scroll coverage
 
 **Severity:** Medium - the prompt-send stutter fix is not directly pinned by a near-bottom pending-POST test.
@@ -1885,8 +1870,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
   cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
-- [ ] P2: Add `messageCreatedDeltaIsNoOp` semantic-change negatives:
-  keep id/index/preview/count/stamp equal while changing message payload and assert a material apply; include same-id pending prompt cleanup coverage.
 - [ ] P2: Add near-bottom prompt-send early-return scroll coverage:
   start near bottom, send with a pending POST, grow `scrollHeight`, and assert no old-target smooth scroll fires before the prompt lands.
 - [ ] P2: Add waiting-indicator bottom-follow negative coverage:

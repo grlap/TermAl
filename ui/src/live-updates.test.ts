@@ -2737,42 +2737,102 @@ describe("applyDeltaToSessions", () => {
     );
   });
 
-  it("returns appliedNoOp for an identical messageCreated replay at the same index", () => {
-    const message = {
-      id: "message-1",
-      type: "text",
-      timestamp: "10:00",
-      author: "assistant",
-      text: "Stable answer",
-    } as const;
-    const sessions = [
-      makeSession("session-a", {
+  describe("messageCreated no-op short-circuit", () => {
+    function makeMessageCreatedNoOpFixture() {
+      const message = {
+        id: "message-1",
+        type: "text",
+        timestamp: "10:00",
+        author: "assistant",
+        text: "Stable answer",
+      } as const;
+      const sessions = [
+        makeSession("session-a", {
+          preview: "Stable answer",
+          status: "idle",
+          messageCount: 1,
+          sessionMutationStamp: 41,
+          messages: [message],
+        }),
+      ];
+      const delta: DeltaEvent = {
+        type: "messageCreated",
+        revision: 3,
+        sessionId: "session-a",
+        messageId: "message-1",
+        messageIndex: 0,
+        messageCount: 1,
+        message: { ...message },
         preview: "Stable answer",
         status: "idle",
-        messageCount: 1,
         sessionMutationStamp: 41,
-        messages: [message],
-      }),
-    ];
+      };
+      return { sessions, delta };
+    }
 
-    const result = applyDeltaToSessions(sessions, {
-      type: "messageCreated",
-      revision: 3,
-      sessionId: "session-a",
-      messageId: "message-1",
-      messageIndex: 0,
-      messageCount: 1,
-      message: { ...message },
-      preview: "Stable answer",
-      status: "idle",
-      sessionMutationStamp: 41,
+    it("returns appliedNoOp for an identical replay at the same index", () => {
+      const { sessions, delta } = makeMessageCreatedNoOpFixture();
+
+      const result = applyDeltaToSessions(sessions, delta);
+
+      expect(result.kind).toBe("appliedNoOp");
+      if (result.kind !== "appliedNoOp") {
+        throw new Error("expected identical messageCreated to short-circuit");
+      }
+      expect(result.sessions).toBe(sessions);
     });
 
-    expect(result.kind).toBe("appliedNoOp");
-    if (result.kind !== "appliedNoOp") {
-      throw new Error("expected identical messageCreated to short-circuit");
-    }
-    expect(result.sessions).toBe(sessions);
+    it.each([
+      ["text differs", { text: "Stable answer!" }],
+      ["timestamp differs", { timestamp: "10:01" }],
+      ["author differs", { author: "you" }],
+    ] as const)(
+      "returns a material apply when the message payload %s",
+      (_label, messageOverrides) => {
+        const { sessions, delta } = makeMessageCreatedNoOpFixture();
+
+        const result = applyDeltaToSessions(sessions, {
+          ...delta,
+          message: {
+            ...delta.message,
+            ...messageOverrides,
+          },
+        });
+
+        expect(result.kind).toBe("applied");
+        if (result.kind !== "applied") {
+          throw new Error("expected semantic messageCreated change to apply");
+        }
+        expect(result.sessions).not.toBe(sessions);
+        expect(result.sessions[0].messages[0]).toMatchObject(messageOverrides);
+      },
+    );
+
+    it("applies an otherwise identical replay when it must clear a matching pending prompt", () => {
+      const { sessions, delta } = makeMessageCreatedNoOpFixture();
+      const sessionsWithPendingPrompt = [
+        {
+          ...sessions[0],
+          pendingPrompts: [
+            {
+              id: "message-1",
+              timestamp: "10:00",
+              text: "Stable answer",
+            },
+          ],
+        },
+      ];
+
+      const result = applyDeltaToSessions(sessionsWithPendingPrompt, delta);
+
+      expect(result.kind).toBe("applied");
+      if (result.kind !== "applied") {
+        throw new Error("expected pending-prompt cleanup to apply");
+      }
+      expect(result.sessions).not.toBe(sessionsWithPendingPrompt);
+      expect(result.sessions[0].pendingPrompts).toBeUndefined();
+      expect(result.sessions[0].messages[0]).toEqual(delta.message);
+    });
   });
 
   it("returns appliedNoOp for an identical messageUpdated replay", () => {
