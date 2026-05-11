@@ -1689,8 +1689,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover real composer-to-overview focus detection:
-  render the real composer/overview path or assert the real composer emits `data-conversation-composer-input`, so `ConversationOverviewRail` deferral does not depend only on synthetic test fixtures.
 - [ ] P2: Cover first-chunk Telegram forward failure:
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
 - [ ] P2: Cover first-settled active-baseline same-message growth policy:

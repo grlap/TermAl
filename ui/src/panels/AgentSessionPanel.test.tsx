@@ -8910,6 +8910,15 @@ describe("AgentSessionPanelFooter", () => {
     expect(screen.getByText("Waiting for the next chunk of output...")).toBeInTheDocument();
   });
 
+  it("marks the real composer input for overview focus deferral", () => {
+    render(renderFooter({ session: makeSession("session-a") }));
+
+    expect(screen.getByLabelText("Message session-a")).toHaveAttribute(
+      "data-conversation-composer-input",
+      "true",
+    );
+  });
+
   it("does not commit a draft during unrelated session rerenders", () => {
     const initialCommit = vi.fn();
     const nextCommit = vi.fn();
