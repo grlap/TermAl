@@ -43,7 +43,44 @@ const TEST_CANCEL_DELEGATION_BEFORE_START_PROMPT: &str =
 
 struct PreparedIsolatedWorktree {
     child_cwd: String,
+    source_repo_root: String,
     worktree_root: String,
+}
+
+struct IsolatedWorktreeCleanupGuard {
+    armed: bool,
+    source_repo_root: PathBuf,
+    worktree_root: PathBuf,
+}
+
+impl IsolatedWorktreeCleanupGuard {
+    fn new(source_repo_root: &FsPath, worktree_root: &FsPath) -> Self {
+        Self {
+            armed: true,
+            source_repo_root: source_repo_root.to_path_buf(),
+            worktree_root: worktree_root.to_path_buf(),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for IsolatedWorktreeCleanupGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+
+        let _ = git_command()
+            .arg("-C")
+            .arg(&self.source_repo_root)
+            .args(["worktree", "remove", "--force"])
+            .arg(&self.worktree_root)
+            .output();
+        let _ = fs::remove_dir_all(&self.worktree_root);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -383,6 +420,47 @@ impl AppState {
             }
         }
 
+        let agent = request.agent.unwrap_or(parent_agent);
+        let has_test_runtime_override = {
+            #[cfg(test)]
+            {
+                agent
+                    .acp_runtime()
+                    .is_some_and(|acp_agent| self.has_test_acp_runtime_override(acp_agent))
+            }
+            #[cfg(not(test))]
+            {
+                false
+            }
+        };
+        if !has_test_runtime_override {
+            #[cfg(test)]
+            if let Some(detail) = self.test_agent_setup_failure(agent) {
+                return Err(ApiError::bad_request(detail));
+            }
+            validate_agent_session_setup(agent, &source_cwd).map_err(ApiError::bad_request)?;
+        }
+
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .find_visible_session_index(&parent_session_id)
+                .ok_or_else(ApiError::local_session_missing)?;
+            if active_delegation_count_for_parent(&inner, &parent_session_id)
+                >= MAX_RUNNING_DELEGATIONS_PER_PARENT
+            {
+                return Err(ApiError::conflict(format!(
+                    "parent session already has {MAX_RUNNING_DELEGATIONS_PER_PARENT} active delegations"
+                )));
+            }
+            if delegation_depth_for_parent(&inner, &parent_session_id) >= MAX_DELEGATION_DEPTH {
+                return Err(ApiError::conflict(format!(
+                    "delegation nesting depth is limited to {MAX_DELEGATION_DEPTH}"
+                )));
+            }
+        }
+
+        let mut isolated_worktree_cleanup_guard: Option<IsolatedWorktreeCleanupGuard> = None;
         let (cwd, child_project_id, write_policy) = match requested_write_policy {
             DelegationWritePolicy::ReadOnly => (
                 source_cwd.clone(),
@@ -402,6 +480,10 @@ impl AppState {
                     &self.default_workdir,
                     &delegation_id,
                 )?;
+                isolated_worktree_cleanup_guard = Some(IsolatedWorktreeCleanupGuard::new(
+                    FsPath::new(&prepared.source_repo_root),
+                    FsPath::new(&prepared.worktree_root),
+                ));
                 (
                     prepared.child_cwd,
                     None,
@@ -412,27 +494,6 @@ impl AppState {
                 )
             }
         };
-
-        let agent = request.agent.unwrap_or(parent_agent);
-        let has_test_runtime_override = {
-            #[cfg(test)]
-            {
-                agent
-                    .acp_runtime()
-                    .is_some_and(|acp_agent| self.has_test_acp_runtime_override(acp_agent))
-            }
-            #[cfg(not(test))]
-            {
-                false
-            }
-        };
-        if !has_test_runtime_override {
-            #[cfg(test)]
-            if let Some(detail) = self.test_agent_setup_failure(agent) {
-                return Err(ApiError::bad_request(detail));
-            }
-            validate_agent_session_setup(agent, &cwd).map_err(ApiError::bad_request)?;
-        }
         self.invalidate_agent_readiness_cache();
         let _ = self.agent_readiness_snapshot();
 
@@ -499,6 +560,9 @@ impl AppState {
         let revision = self
             .commit_locked(&mut inner)
             .map_err(|err| ApiError::internal(format!("failed to persist delegation: {err:#}")))?;
+        if let Some(mut guard) = isolated_worktree_cleanup_guard.take() {
+            guard.disarm();
+        }
         drop(inner);
         self.publish_delta(&DeltaEvent::SessionCreated {
             revision,
@@ -2472,6 +2536,7 @@ fn prepare_isolated_delegation_worktree(
     )?;
 
     create_detached_git_worktree(&source_repo_root, &worktree_root)?;
+    let mut cleanup_guard = IsolatedWorktreeCleanupGuard::new(&source_repo_root, &worktree_root);
     if git_patch_has_content(&staged_patch) {
         run_git_repo_command_with_input(
             &worktree_root,
@@ -2489,9 +2554,11 @@ fn prepare_isolated_delegation_worktree(
         )?;
     }
 
+    cleanup_guard.disarm();
     let child_cwd = normalize_user_facing_path(&worktree_root.join(relative_cwd));
     Ok(PreparedIsolatedWorktree {
         child_cwd: child_cwd.to_string_lossy().into_owned(),
+        source_repo_root: source_repo_root.to_string_lossy().into_owned(),
         worktree_root: worktree_root.to_string_lossy().into_owned(),
     })
 }

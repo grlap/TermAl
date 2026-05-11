@@ -44,21 +44,6 @@ Operators and the UI cannot tell that fan-in resume should have happened but did
 - Emit a structured warning event or retain dispatch error metadata.
 - Or document the best-effort policy and recovery expectations.
 
-## Isolated delegation worktree creation is not transactional
-
-**Severity:** Medium - `src/delegations.rs:336` and `src/delegations.rs:1775`. The API creates a detached git worktree before later fallible validation and before patch application is known to succeed.
-
-If agent setup, parent revalidation, delegation fan-out/depth checks, or patch application fails after `git worktree add`, the request returns an error but can leave a registered worktree and directory behind. Retrying with the same requested `worktreePath` can then fail because the target is no longer empty.
-
-**Current behavior:**
-- `prepare_isolated_delegation_worktree` runs before `validate_agent_session_setup` and active delegation admission checks.
-- `create_detached_git_worktree` has no rollback guard for later `git apply` or API rejection failures.
-- Failed requests can leave filesystem and git-worktree side effects with no delegation record to clean them up.
-
-**Proposal:**
-- Move all non-side-effect validation and admission checks before worktree creation.
-- Add a rollback guard after worktree creation that removes the git worktree and created parent directories on any later failure.
-
 ## Isolated delegation worktree snapshots omit untracked files
 
 **Severity:** Medium - `src/delegations.rs:1764-1772`. The isolated worktree mirror captures staged and unstaged tracked changes with `git diff --cached --binary` and `git diff --binary`, but it does not include non-ignored untracked files.

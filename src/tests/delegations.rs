@@ -2745,6 +2745,168 @@ async fn isolated_worktree_delegation_route_generates_termal_owned_path_when_omi
 }
 
 #[test]
+fn isolated_worktree_setup_failure_does_not_leave_worktree() {
+    let state = test_app_state();
+    state
+        .test_agent_setup_failures
+        .lock()
+        .expect("test agent setup failures mutex poisoned")
+        .push((
+            Agent::Cursor,
+            "forced Cursor setup failure before isolated worktree".to_owned(),
+        ));
+    let unique = Uuid::new_v4();
+    let repo_root = std::env::temp_dir().join(format!("termal-isolated-setup-source-{unique}"));
+    let worktree_root = std::env::temp_dir().join(format!("termal-isolated-setup-child-{unique}"));
+    fs::create_dir_all(&repo_root).expect("source repo root should be created");
+    fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    let parent_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner.create_session(
+            Agent::Codex,
+            Some("Setup Failure Parent".to_owned()),
+            repo_root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let session_id = record.session.id.clone();
+        state.commit_locked(&mut inner).unwrap();
+        session_id
+    };
+
+    let err = match state.create_read_only_delegation(
+        &parent_session_id,
+        CreateDelegationRequest {
+            prompt: "This isolated reviewer should be rejected before worktree creation."
+                .to_owned(),
+            title: Some("Setup Failure Isolated Reviewer".to_owned()),
+            cwd: None,
+            agent: Some(Agent::Cursor),
+            model: None,
+            mode: Some(DelegationMode::Reviewer),
+            write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                owned_paths: vec!["README.md".to_owned()],
+                worktree_path: Some(worktree_root.to_string_lossy().into_owned()),
+            }),
+        },
+    ) {
+        Ok(_) => panic!("forced setup failure should reject isolated delegation"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        err.message,
+        "forced Cursor setup failure before isolated worktree"
+    );
+    assert!(
+        !worktree_root.exists(),
+        "setup failure must not leave a worktree"
+    );
+
+    let _ = fs::remove_dir_all(&repo_root);
+    let _ = fs::remove_dir_all(&worktree_root);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn isolated_worktree_max_fanout_rejection_does_not_leave_worktree() {
+    let (state, input_rx) =
+        test_app_state_with_delegation_codex_runtime("isolated-fanout-rollback-runtime");
+    let unique = Uuid::new_v4();
+    let repo_root = std::env::temp_dir().join(format!("termal-isolated-fanout-source-{unique}"));
+    let worktree_root = std::env::temp_dir().join(format!("termal-isolated-fanout-child-{unique}"));
+    fs::create_dir_all(&repo_root).expect("source repo root should be created");
+    fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    let parent_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner.create_session(
+            Agent::Codex,
+            Some("Fanout Parent".to_owned()),
+            repo_root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let session_id = record.session.id.clone();
+        state.commit_locked(&mut inner).unwrap();
+        session_id
+    };
+
+    for index in 0..MAX_RUNNING_DELEGATIONS_PER_PARENT {
+        let created = state
+            .create_read_only_delegation(
+                &parent_session_id,
+                CreateDelegationRequest {
+                    prompt: format!("Read-only reviewer {index}."),
+                    title: Some(format!("Read-only Reviewer {index}")),
+                    cwd: None,
+                    agent: Some(Agent::Codex),
+                    model: None,
+                    mode: Some(DelegationMode::Reviewer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                },
+            )
+            .expect("read-only delegation should be admitted");
+        match input_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("delegation child prompt should be delivered to runtime")
+        {
+            CodexRuntimeCommand::Prompt { session_id, .. } => {
+                assert_eq!(session_id, created.delegation.child_session_id);
+            }
+            _ => panic!("delegation should dispatch a Codex prompt command"),
+        }
+    }
+
+    let err = match state.create_read_only_delegation(
+        &parent_session_id,
+        CreateDelegationRequest {
+            prompt: "This isolated reviewer should be rejected before worktree creation."
+                .to_owned(),
+            title: Some("Rejected Isolated Reviewer".to_owned()),
+            cwd: None,
+            agent: Some(Agent::Codex),
+            model: None,
+            mode: Some(DelegationMode::Reviewer),
+            write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                owned_paths: vec!["README.md".to_owned()],
+                worktree_path: Some(worktree_root.to_string_lossy().into_owned()),
+            }),
+        },
+    ) {
+        Ok(_) => panic!("max fanout should reject the isolated delegation"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::CONFLICT);
+    assert!(
+        err.message.contains("active delegations"),
+        "unexpected max fanout error: {}",
+        err.message
+    );
+    assert!(
+        !worktree_root.exists(),
+        "rejected isolated delegation must not leave a worktree"
+    );
+
+    let _ = fs::remove_dir_all(&repo_root);
+    let _ = fs::remove_dir_all(&worktree_root);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
     let (state, input_rx) =
         test_app_state_with_delegation_codex_runtime("delegation-terminal-dispatch");
