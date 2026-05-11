@@ -450,6 +450,56 @@ describe("MessageCard", () => {
     expect(cancelButton).not.toBeDisabled();
   });
 
+  it("does not update pending parallel-agent actions after unmount", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const message: ParallelAgentsMessage = {
+      id: "message-parallel-agents-unmount-pending",
+      type: "parallelAgents",
+      author: "assistant",
+      timestamp: "10:02",
+      agents: [
+        {
+          id: "delegation-running",
+          source: "delegation",
+          title: "Review backend",
+          status: "running",
+          detail: "Checking Rust changes",
+        },
+      ],
+    };
+    let resolveAction!: () => void;
+    const pendingAction = new Promise<void>((resolve) => {
+      resolveAction = resolve;
+    });
+    const onCancelParallelAgent = vi.fn(() => pendingAction);
+
+    try {
+      const { unmount } = render(
+        <MessageCard
+          message={message}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+          onCancelParallelAgent={onCancelParallelAgent}
+        />,
+      );
+
+      const cancelButton = screen.getByRole("button", { name: "Cancel" });
+      fireEvent.click(cancelButton);
+      expect(cancelButton).toBeDisabled();
+
+      unmount();
+      await act(async () => {
+        resolveAction();
+        await pendingAction;
+        await Promise.resolve();
+      });
+
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("clears pending parallel-agent actions when an action rejects", async () => {
     const message: ParallelAgentsMessage = {
       id: "message-parallel-agents-rejected-action",
