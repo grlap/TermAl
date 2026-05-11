@@ -321,19 +321,6 @@ The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but
 **Proposal:**
 - Add a Rust test that simulates a remote snapshot sending `Session` with `remote_id: Some("OTHER-REMOTE")` and asserts the resulting `record.remote_id` is the trusted connection id while embedded wire metadata is cleared.
 
-## Bundled `delegation-commands.test.ts` `resolveComposerDelegationAvailability` test grew larger
-
-**Severity:** Low - `ui/src/delegation-commands.test.ts:271-306`. The test bundles five separate availability outcomes into one `it()` block. Round 71 added a fifth assertion (the `projectId: null, remoteId: "ssh-lab"` case) extending the bundle. The first failing assertion masks subsequent ones.
-
-This is already on the bug-ledger backlog as a P2 split task. Round 71 made the bundle larger.
-
-**Current behavior:**
-- Five outcomes bundled in one `it()`.
-- Round 71 added the fifth case.
-
-**Proposal:**
-- Split into per-outcome `it()`s as the existing backlog item suggests.
-
 ## New active-color test still pins literal hex `#22c55e` indirectly
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:404-411`. Round 71 changed the test to assert `normalizeConversationMarkerColor("#22c55e")` rather than the literal hex (closes prior brittleness finding). But the test still passes the literal `"#22c55e"` to the normalizer, so the test fails if the normalizer is changed to reject `#22c55e`. The fix moved the brittleness one layer deep.
@@ -344,19 +331,6 @@ This is already on the bug-ledger backlog as a P2 split task. Round 71 made the 
 
 **Proposal:**
 - Construct a marker with a color produced by `DEFAULT_CONVERSATION_MARKER_COLOR` (the contract value) and assert that color round-trips through normalization.
-
-## `resolveComposerDelegationAvailability` round-trips `parentSession` in success outcome
-
-**Severity:** Note - `ui/src/delegation-commands.ts:274-297`. The function accepts `parentSession: Session` and returns it back via the success branch (`{ outcome: "available", parentSession }`). The caller already holds a `Session`. This reads like the helper is producing data, but it's just a type-narrowing convenience. Future callers who already hold a `Session` may shadow it confusingly.
-
-**Current behavior:**
-- Caller passes `parentSession`.
-- Success outcome returns the same `parentSession`.
-- Round-trip is type-narrowing only.
-
-**Proposal:**
-- Drop `parentSession` from the success outcome (caller already has it) and only return `{ outcome: "available" }`.
-- Or document why it is round-tripped (e.g., "narrowed for ergonomic destructure").
 
 ## `///` doc on `update_parent_delegation_card_locked` lacks cross-link to architecture doc
 
@@ -418,17 +392,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 
 **Proposal:**
 - Use `await waitFor(() => expect(busyButton).toHaveAttribute("aria-busy", "true"))` instead of the immediate `expect`.
-
-## `delegationTitleFromPrompt` and `resolveComposerDelegationAvailability` tests bundle multiple cases
-
-**Severity:** Note - `ui/src/delegation-commands.test.ts:230-251` (`delegationTitleFromPrompt` bundles 4 cases) and `:271-293` (`resolveComposerDelegationAvailability` bundles 4 outcomes) each pack multiple cases into one `it`. Same bundled-test anti-pattern previously called out for the Rust telegram tests.
-
-**Current behavior:**
-- Two new test files bundle 4 cases each.
-- Failure messages cluster.
-
-**Proposal:**
-- Split into single-case `it`s, or restructure as `it.each([...])`.
 
 ## `createComposerDelegationRequest` is composer-scoped but generic name
 
@@ -3351,5 +3314,3 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   the session-switch race test should also assert `expect(onDraftCommit).not.toHaveBeenCalledWith("session-b", "")` (negative on new session id). The unmount race test should assert `console.error` was not called with `act`/`unmounted` warnings, or stub `setIsDelegationSpawning` to verify it isn't invoked post-unmount.
 - [ ] P2: Replace immediate `expect` with `waitFor` in busy-state delegation test:
   `await waitFor(() => expect(busyButton).toHaveAttribute("aria-busy", "true"))` instead of the synchronous expect after `Promise.resolve()`. Removes brittleness against future React batching changes.
-- [ ] P2: Split bundled `delegation-commands.test.ts` tests:
-  split `delegationTitleFromPrompt` (4 cases) and `resolveComposerDelegationAvailability` (4 outcomes) into single-case `it`s or restructure as `it.each([...])`.

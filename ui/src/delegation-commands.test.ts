@@ -301,18 +301,21 @@ describe("delegation command surface", () => {
     expect(createDelegationWait).not.toHaveBeenCalled();
   });
 
-  it("builds composer delegation titles from prompt text", () => {
-    expect(delegationTitleFromPrompt("   \n\t  ")).toBe("Delegated review");
-    expect(delegationTitleFromPrompt("  Review\n\nthis\tchange  ")).toBe(
-      "Review this change",
-    );
-
-    const exactTitle = "x".repeat(DELEGATION_COMPOSER_TITLE_MAX_CHARS);
-    expect(delegationTitleFromPrompt(exactTitle)).toBe(exactTitle);
-
-    expect(
-      delegationTitleFromPrompt("x".repeat(DELEGATION_COMPOSER_TITLE_MAX_CHARS + 1)),
-    ).toBe(`${"x".repeat(DELEGATION_COMPOSER_TITLE_MAX_CHARS - 3)}...`);
+  it.each([
+    ["blank prompt", "   \n\t  ", "Delegated review"],
+    ["normalized whitespace", "  Review\n\nthis\tchange  ", "Review this change"],
+    [
+      "exact maximum length",
+      "x".repeat(DELEGATION_COMPOSER_TITLE_MAX_CHARS),
+      "x".repeat(DELEGATION_COMPOSER_TITLE_MAX_CHARS),
+    ],
+    [
+      "truncated overlong prompt",
+      "x".repeat(DELEGATION_COMPOSER_TITLE_MAX_CHARS + 1),
+      `${"x".repeat(DELEGATION_COMPOSER_TITLE_MAX_CHARS - 3)}...`,
+    ],
+  ])("builds composer delegation title for %s", (_label, prompt, expected) => {
+    expect(delegationTitleFromPrompt(prompt)).toBe(expected);
   });
 
   it("does not split surrogate pairs when truncating composer delegation titles", () => {
@@ -380,40 +383,97 @@ describe("delegation command surface", () => {
     });
   });
 
-  it("resolves composer delegation availability before spawning", () => {
+  it.each([
+    [
+      "local project session",
+      makeSession({
+        id: "parent-1",
+        projectId: "project-1",
+      }),
+      { remoteId: "local" },
+      { outcome: "available" },
+    ],
+    [
+      "missing parent session",
+      null,
+      null,
+      {
+        outcome: "error",
+        message: "Session is no longer available.",
+      },
+    ],
+    [
+      "missing loaded project",
+      makeSession({
+        id: "parent-1",
+        projectId: "project-1",
+      }),
+      null,
+      {
+        outcome: "error",
+        message: "Delegations are unavailable until the session project is loaded.",
+      },
+    ],
+    [
+      "remote project session",
+      makeSession({
+        id: "parent-1",
+        projectId: "project-1",
+      }),
+      { remoteId: "ssh-lab" },
+      {
+        outcome: "error",
+        message: "Delegations are available only for local sessions.",
+      },
+    ],
+    [
+      "remote session without project",
+      makeSession({
+        id: "remote-parent",
+        projectId: null,
+        remoteId: "ssh-lab",
+      }),
+      null,
+      {
+        outcome: "error",
+        message: "Delegations are available only for local sessions.",
+      },
+    ],
+  ] satisfies Array<
+    [
+      string,
+      Session | null,
+      { remoteId: string } | null,
+      ReturnType<typeof resolveComposerDelegationAvailability>,
+    ]
+  >)("resolves composer delegation availability for %s", (
+    _label,
+    parentSession,
+    parentProject,
+    expected,
+  ) => {
+    expect(
+      resolveComposerDelegationAvailability(parentSession, parentProject),
+    ).toEqual(expected);
+  });
+
+  it("uses caller-held parent session when composer delegation is available", () => {
     const localSession = makeSession({
       id: "parent-1",
       projectId: "project-1",
+      agent: "Claude",
+      model: "claude-sonnet-4.5",
     });
+    const availability = resolveComposerDelegationAvailability(localSession, {
+      remoteId: "local",
+    });
+
+    expect(availability).toEqual({ outcome: "available" });
     expect(
-      resolveComposerDelegationAvailability(localSession, { remoteId: "local" }),
-    ).toEqual({ outcome: "available", parentSession: localSession });
-    expect(resolveComposerDelegationAvailability(null, null)).toEqual({
-      outcome: "error",
-      message: "Session is no longer available.",
-    });
-    expect(resolveComposerDelegationAvailability(localSession, null)).toEqual({
-      outcome: "error",
-      message: "Delegations are unavailable until the session project is loaded.",
-    });
-    expect(
-      resolveComposerDelegationAvailability(localSession, { remoteId: "ssh-lab" }),
-    ).toEqual({
-      outcome: "error",
-      message: "Delegations are available only for local sessions.",
-    });
-    expect(
-      resolveComposerDelegationAvailability(
-        makeSession({
-          id: "remote-parent",
-          projectId: null,
-          remoteId: "ssh-lab",
-        }),
-        null,
-      ),
-    ).toEqual({
-      outcome: "error",
-      message: "Delegations are available only for local sessions.",
+      createComposerDelegationRequest(localSession, "Review the current diff."),
+    ).toMatchObject({
+      agent: "Claude",
+      model: "claude-sonnet-4.5",
     });
   });
 

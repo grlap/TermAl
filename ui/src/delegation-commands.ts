@@ -316,7 +316,7 @@ export function createComposerDelegationRequest(
 }
 
 export type ComposerDelegationAvailability =
-  | { outcome: "available"; parentSession: Session }
+  | { outcome: "available" }
   | { outcome: "error"; message: string };
 
 export function resolveComposerDelegationAvailability(
@@ -341,7 +341,7 @@ export function resolveComposerDelegationAvailability(
       message: "Delegations are available only for local sessions.",
     };
   }
-  return { outcome: "available", parentSession };
+  return { outcome: "available" };
 }
 
 export async function spawnDelegationCommand(

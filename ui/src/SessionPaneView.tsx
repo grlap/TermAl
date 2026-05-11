@@ -1158,8 +1158,12 @@ export function SessionPaneView({
       options?: CreateComposerDelegationOptions,
     ) => {
       const parentSession = sessionLookup.get(sessionId);
+      if (!parentSession) {
+        onComposerError("Session is no longer available.");
+        return false;
+      }
       const parentProject =
-        parentSession?.projectId != null
+        parentSession.projectId != null
           ? (projectLookup.get(parentSession.projectId) ?? null)
           : null;
       const availability = resolveComposerDelegationAvailability(
@@ -1173,11 +1177,7 @@ export function SessionPaneView({
 
       const result = await spawnDelegationCommand(
         sessionId,
-        createComposerDelegationRequest(
-          availability.parentSession,
-          prompt,
-          options,
-        ),
+        createComposerDelegationRequest(parentSession, prompt, options),
       );
       if (result.outcome === "error") {
         // Command wrappers already sanitize validation and transport failures;
