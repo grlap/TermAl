@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   LOCAL_REMOTE_ID,
@@ -12,6 +12,10 @@ import {
 } from "./remotes";
 
 describe("remotes", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("normalizes missing or duplicate remote config entries", () => {
     expect(
       normalizeRemoteConfigs([
@@ -59,7 +63,6 @@ describe("remotes", () => {
 
   it.each([
     [{ remoteId: "ssh-lab" }, { remoteId: "local" }, "ssh-lab"],
-    [{ remoteId: "" }, { remoteId: "ssh-lab" }, "ssh-lab"],
     [{}, { remoteId: "ssh-project" }, "ssh-project"],
     [undefined, undefined, LOCAL_REMOTE_ID],
   ] as const)(
@@ -71,7 +74,6 @@ describe("remotes", () => {
 
   it.each([
     [{ remoteId: "ssh-lab" }, { remoteId: "local" }, false],
-    [{ remoteId: "" }, { remoteId: "ssh-lab" }, false],
     [{}, { remoteId: "local" }, true],
   ] as const)(
     "detects local session remote ownership for case %#",
@@ -79,6 +81,16 @@ describe("remotes", () => {
       expect(isLocalSessionRemote(session, project)).toBe(expected);
     },
   );
+
+  it("warns in dev when session remote ownership is an empty string", () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(resolveSessionRemoteId({ remoteId: " " }, { remoteId: "ssh-lab" })).toBe("ssh-lab");
+
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "TermAl protocol warning: Session.remoteId must be omitted for local sessions; empty strings are invalid.",
+    );
+  });
 
   it("describes local and ssh connection labels", () => {
     expect(remoteConnectionLabel(createBuiltinLocalRemote())).toBe("This machine");

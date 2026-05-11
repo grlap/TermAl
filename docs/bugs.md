@@ -107,20 +107,6 @@ The new "Stopped" UI label is broad. If the user thinks they enabled the relay b
 **Proposal:**
 - Return a `Result<Self, RelayDisabledReason>` and route the reason through to status / preferences UI.
 
-## `||` change in `resolveSessionRemoteId` flips behavior for `session.remoteId === ""`
-
-**Severity:** Note - `ui/src/remotes.ts:32`. The contract change from `??` to `||` (closes round-73 ledger entry) is correct per the protocol, but it changes observable behavior for `session.remoteId === ""`. If any backend path or test fixture ever produces an empty string, routing flips from "session declares local" (pre-round-74) to "fall through to project" (round-74).
-
-The protocol contract is unwritten in code — only the comment in `types.ts:290` references it. Backend regressions that emit `""` would now route remote-owned where they previously routed local.
-
-**Current behavior:**
-- `||` treats `""` as falsy.
-- Behavior change is silent.
-- Only the helper-level test catches it.
-
-**Proposal:**
-- Add a runtime assert (in dev) or a wire-decode validation that rejects `Session.remoteId === ""` so the contract is enforced at the boundary.
-
 ## SHA-256 fingerprint JSON intermediate held in memory until end-of-function
 
 **Severity:** Note - `src/telegram.rs:338-352`. The SHA-256 fingerprint includes `bot_token` in its JSON-encoded input. The hash is one-way, but the JSON intermediate (`encoded`) is held in `Vec<u8>` until the `hasher.update(encoded)` call returns. A heap dump or coredump could expose the token in JSON form briefly.

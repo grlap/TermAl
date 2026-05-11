@@ -29,6 +29,17 @@ export function resolveSessionRemoteId(
   session?: Pick<Session, "remoteId"> | null,
   project?: Pick<Project, "remoteId"> | null,
 ): string {
+  if (
+    import.meta.env.DEV &&
+    session?.remoteId !== undefined &&
+    session.remoteId !== null &&
+    session.remoteId.trim().length === 0
+  ) {
+    console.warn(
+      "TermAl protocol warning: Session.remoteId must be omitted for local sessions; empty strings are invalid.",
+    );
+  }
+
   const normalized = session?.remoteId?.trim() || project?.remoteId?.trim();
   return isLocalRemoteId(normalized) ? LOCAL_REMOTE_ID : normalized!;
 }
