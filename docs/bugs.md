@@ -672,19 +672,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 **Proposal:**
 - Either (a) extract a small `markFullyHydrated(sessionId)` helper that wraps the add + clearHydrationRetry pair (already paired at all three sites), OR (b) compute "is this session fully hydrated" from session state at use sites and stop tracking it in a separate ref.
 
-## `get_session_tail` JSON serialization runs on tokio worker, not `spawn_blocking`
-
-**Severity:** Medium - the `get_state` handler at `src/api.rs:107-122` documents why it serializes inside `spawn_blocking`. The new tail path reintroduces the anti-pattern.
-
-`src/api.rs:131-143`. With a 500-message ceiling, a single tail response can serialize multiple MB on the worker. A script repeatedly hitting `?tail=500` against a session containing large messages can pin a worker for noticeable durations. Realistic impact under Phase 1 single-user trust is low, but the precedent contradicts the deliberate `get_state` rewrite.
-
-**Current behavior:**
-- `get_session_tail` runs inside `run_blocking_api`, but `Json(response)` serialization happens on the tokio worker thread.
-- For 500 large messages, the tokio worker can stall for noticeable durations.
-
-**Proposal:**
-- Mirror the `get_state` pattern: serialize the response inside `spawn_blocking` and return `Vec<u8>` with an explicit `application/json` header.
-
 ## `?tail=N` query parameter is not documented in `docs/architecture.md`
 
 **Severity:** Medium - the new parameter, the `messages_loaded` invariant, the silent cap at 500, and the local-only scope are nowhere documented.

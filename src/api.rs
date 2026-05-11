@@ -133,18 +133,29 @@ async fn get_session(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<String>,
     query: Result<Query<GetSessionQuery>, QueryRejection>,
-) -> Result<Json<SessionResponse>, ApiError> {
+) -> Result<Response, ApiError> {
     let Query(query) = query.map_err(|rejection| api_query_rejection("session query", rejection))?;
     if matches!(query.tail, Some(0)) {
         return Err(ApiError::bad_request("session tail must be at least 1"));
     }
 
-    let response = run_blocking_api(move || match query.tail {
-        Some(message_limit) => state.get_session_tail(&session_id, message_limit),
-        None => state.get_session(&session_id),
+    let body = run_blocking_api(move || {
+        let response = match query.tail {
+            Some(message_limit) => state.get_session_tail(&session_id, message_limit),
+            None => state.get_session(&session_id),
+        }?;
+        serde_json::to_vec(&response)
+            .map_err(|err| ApiError::internal(format!("failed to serialize session: {err}")))
     })
     .await?;
-    Ok(Json(response))
+    Ok((
+        [(
+            axum::http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        )],
+        body,
+    )
+        .into_response())
 }
 
 /// Lists workspace layouts.
